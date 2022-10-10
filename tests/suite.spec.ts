@@ -1,4 +1,4 @@
-import S3db from ".";
+import S3db from "../src";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -31,7 +31,7 @@ describe("start", function () {
   let client = ClientFactory();
 
   it("setup", async function () {
-    await client.setup()
+    await client.connect()
 
     expect(client.metadata).toBeDefined();
     expect(client.metadata?.version).toBeDefined();
@@ -43,7 +43,7 @@ describe("resources", function () {
   let client = ClientFactory();
 
   beforeAll(async function () {
-    await client.setup();
+    await client.connect();
   });
 
   it("create resourceList leads", async function () {

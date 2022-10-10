@@ -51,7 +51,7 @@ export default class S3db {
   /**
    * Remotely setups s3db file.
    */
-  async setup(): Promise<void> {
+  async connect(): Promise<void> {
     try {
       const metadata = await this.getMetadata();
       this.setMetadata(metadata);
