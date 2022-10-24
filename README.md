@@ -240,4 +240,4 @@ s3db.on('error', (error, resourceName, originalData) =>
 ## Examples
 
 Check the `examples` dir:
-- [Bulk insert with progress bar](https://github.com/filipeforattini/s3db.js/blob/main/examples/progress-write.js)
+- [Bulk insert with progress bar](https://github.com/filipeforattini/s3db.js/blob/main/examples/progress-bulk-insert.js)
