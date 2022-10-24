@@ -17,7 +17,7 @@ async function main() {
     passphrase: "super-secret",
   });
 
-  const bar = new ProgressBar("  uploading [:bar] :rate/bps :percent :etas", {
+  const bar = new ProgressBar("  uploading [:bar]  :rate/bps  :percent  :etas", {
     complete: "=",
     incomplete: " ",
     width: 20,
