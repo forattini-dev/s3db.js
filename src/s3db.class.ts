@@ -1,19 +1,21 @@
 import * as path from "path";
 import { URL } from "node:url";
+import { Mixin } from 'ts-mixer'
+import { Duplex } from 'stream'
 import { v4 as uuid } from "uuid";
+import EventEmitter from "events";
 import { S3, Credentials } from "aws-sdk";
 import { flatten, unflatten } from "flat";
-import Validator from "fastest-validator";
-import { isArray, isEmpty, isObject, merge, sortBy } from "lodash";
-import fs from 'fs'
+import { PromisePool } from "@supercharge/promise-pool";
+import { isArray, isEmpty, isObject, merge, sortBy, omit } from "lodash";
 
-import { version } from "../package.json";
+import { ValidatorFactory } from "./validator";
 import ConfigInterface from "./config.interface";
 import LoggerInterface from "./logger.interface";
 import MetadataInterface from "./metadata.interface";
 import { MissingMetadata, NoSuchKey, InvalidResource } from "./errors";
 
-export default class S3db {
+export default class S3db extends EventEmitter {
   options: ConfigInterface;
   client: S3;
   keyPrefix: string = "";
@@ -22,15 +24,23 @@ export default class S3db {
   logger: LoggerInterface;
   metadata: MetadataInterface;
   validatorInstance: any;
+  parallelism: number;
 
   /**
    * Constructor
    */
   constructor(options: ConfigInterface) {
+    super();
+
     this.options = options;
-    this.version = version;
+    this.version = '1';
     this.logger = options.logger || console;
+    this.parallelism = parseInt(options.parallelism + '') || 5;
     this.metadata = this.blankMetadataStructure();
+
+    this.validatorInstance = ValidatorFactory({
+      passphrase: options?.passphrase,
+    });
 
     const uri = new URL(options.uri);
     this.bucket = uri.hostname;
@@ -44,8 +54,6 @@ export default class S3db {
         secretAccessKey: uri.password,
       }),
     });
-
-    this.validatorInstance = new Validator();
   }
 
   /**
@@ -65,7 +73,10 @@ export default class S3db {
             `Client version ${this.version} is different than ${metadata.version}`
           );
         }
+
+        this.emit("connected", this);
       } else {
+        this.emit("error", error);
         throw error;
       }
     }
@@ -104,18 +115,19 @@ export default class S3db {
   private setMetadata(metadata: MetadataInterface) {
     this.metadata = metadata;
 
-    Object.entries(metadata.resources)
-      .forEach(([resourceName, resourceDefinition]: [string, any]) => {
-        let resource = this.metadata.resources[resourceName]
+    Object.entries(metadata.resources).forEach(
+      ([resourceName, resourceDefinition]: [string, any]) => {
+        let resource = this.metadata.resources[resourceName];
 
         resource = {
           ...resource,
           validator: this.validatorInstance.compile(resourceDefinition.schema),
           reversed: this.reverseMapper(resourceDefinition.mapper),
-        }
+        };
 
-        this.metadata.resources[resourceName] = resource
-      });
+        this.metadata.resources[resourceName] = resource;
+      }
+    );
   }
 
   /**
@@ -124,7 +136,7 @@ export default class S3db {
    */
   private blankMetadataStructure(): MetadataInterface {
     return {
-      version,
+      version: `1`,
       resources: {},
     };
   }
@@ -144,7 +156,7 @@ export default class S3db {
   /**
    * Proxy to AWS S3's getObject
    * @param param0 key
-   * @returns 
+   * @returns
    */
   private async _s3GetObject({ key }: { key: string }) {
     try {
@@ -174,7 +186,7 @@ export default class S3db {
    * @param {string} param.key
    * @param {string} param.body
    * @param {string} param.metadata
-   * @returns 
+   * @returns
    */
   private async _s3PutObject({
     key,
@@ -208,7 +220,7 @@ export default class S3db {
    * Proxy to AWS S3's headObject
    * @param {Object} param
    * @param {string} param.key
-   * @returns 
+   * @returns
    */
   private async _s3HeadObject({ key }: { key: string }) {
     try {
@@ -235,12 +247,12 @@ export default class S3db {
   /**
    * Reverses a object to have the oter way to translate from
    * @param {Object} mapper
-   * @returns 
+   * @returns
    */
   reverseMapper(mapper: any) {
     return Object.entries(mapper).reduce((acc: any, [key, value]) => {
       acc[String(value)] = key;
-      return acc
+      return acc;
     }, {});
   }
 
@@ -285,54 +297,64 @@ export default class S3db {
       body: metadata,
       key: `s3db.json`,
     });
+
+    return this.resource(resourceName);
   }
 
-  translateObjectWithMapper (resourceName: string, obj: any, mapper: any) {
-    if (isEmpty(mapper)) throw new Error('invalid mapper')
+  translateObjectWithMapper(resourceName: string, obj: any, mapper: any) {
+    if (isEmpty(mapper)) throw new Error("invalid mapper");
 
-    return Object.entries(obj)
-      .reduce((acc: any, [key, value]) => {
-        acc[mapper[key]] = value
-        return acc
-      }, {})
+    return Object.entries(obj).reduce((acc: any, [key, value]) => {
+      acc[mapper[key]] = value;
+      return acc;
+    }, {});
   }
 
   /**
    * Inserts a new object into the resource list.
    * @param {Object} param
-   * @returns 
+   * @returns
    */
   async insert({
-    id,
     attributes,
     resourceName,
   }: {
-    id?: string | number;
     attributes: any;
     resourceName: string;
   }) {
-    const attributesFlat: any = flatten(attributes)
-    
+    const attributesFlat: any = flatten(attributes);
+
     // validate
-    const errors = this.metadata.resources[resourceName].validator(attributesFlat)
+    if (!this.metadata.resources[resourceName]) throw new Error("Resource does not exist");
+
+    const errors = this.metadata.resources[resourceName].validator(attributesFlat);
 
     if (isArray(errors)) {
-      throw new InvalidResource({ 
-        bucket: this.bucket, 
-        resourceName, 
-        attributes, 
-        validation: errors
-      })
+      throw new InvalidResource({
+        bucket: this.bucket,
+        resourceName,
+        attributes,
+        validation: errors,
+      });
     }
-  
+
     // save
-    if (isEmpty(id)) id = uuid();
-    const mapper: any = this.metadata.resources[resourceName].mapper
+    const id = (attributes.id || attributes.id === 0) ? attributes.id : uuid();
+    const mapper: any = this.metadata.resources[resourceName].mapper;
 
     await this._s3PutObject({
       key: path.join(`resource=${resourceName}`, `id=${id}`),
       body: "",
-      metadata: this.translateObjectWithMapper(resourceName, attributesFlat, mapper),
+      metadata: this.translateObjectWithMapper(
+        resourceName,
+        omit(attributesFlat, 'id'),
+        mapper
+      ),
+    });
+
+    this.emit("data", {
+      ...attributes,
+      id,
     });
 
     return {
@@ -344,7 +366,7 @@ export default class S3db {
   /**
    * Get a resource by id
    * @param {Object} param
-   * @returns 
+   * @returns
    */
   async getById({
     id,
@@ -353,36 +375,57 @@ export default class S3db {
     id: string | number;
     resourceName: string;
   }) {
-    const mapper: any = this.metadata.resources[resourceName].reversed
+    const mapper: any = this.metadata.resources[resourceName].reversed;
 
     const request = await this._s3HeadObject({
       key: path.join(`resource=${resourceName}`, `id=${id}`),
     });
 
-    const data: any = this.translateObjectWithMapper(resourceName, request.Metadata, mapper)
-    data.id = id
+    const data: any = this.translateObjectWithMapper(
+      resourceName,
+      request.Metadata,
+      mapper
+    );
+    data.id = id;
 
-    return merge(unflatten(data))
+    return merge(unflatten(data));
+  }
+
+  /**
+   *
+   */
+  async bulkInsert(resourceName: string, objects: any) {
+    const { results } = await PromisePool.for(objects)
+      .withConcurrency(this.parallelism)
+      .handleError(async (error, content) => {
+        this.emit("error", error, content);
+      })
+      .process(async (attributes: any) => {
+        const result = await this.insert({
+          resourceName,
+          attributes,
+        });
+
+        return result
+      });
+
+    return results;
   }
 
   /**
    * Looper
-   * @param {string} resourceName 
-   * @returns 
+   * @param {string} resourceName
+   * @returns
    */
   resource(resourceName: string) {
     const looper = {
-      define:
-        (attributes: any, options = {}) =>
-        async () => {
-          await this.newResource({
-            resourceName,
-            attributes,
-            options,
-          });
+      define: (attributes: any, options = {}) => this.newResource({
+        resourceName,
+        attributes,
+        options,
+      }),
 
-          return looper;
-        },
+      definition: () => this.metadata.resources[resourceName],
 
       get: (id: any) =>
         this.getById({
@@ -390,24 +433,18 @@ export default class S3db {
           id,
         }),
 
-      insert: (attributes: any) =>
-        this.insert({
-          resourceName,
-          attributes,
-        }),
-      
-      bulkInsert: async (attributes: any[]) => {
-        for (const attr in attributes) {
-          await this.insert({
-            resourceName,
-            attributes: attr,
-          })
-        }
+      insert: (attributes: any) => this.insert({
+        resourceName,
+        attributes,
+      }),
 
-        return looper
-      }
+      bulkInsert: async (objects: any[]) => {
+        return this.bulkInsert(resourceName, objects);
+      },
     };
 
     return looper;
   }
+
+
 }

@@ -38,23 +38,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
 const node_url_1 = require("node:url");
 const uuid_1 = require("uuid");
+const events_1 = __importDefault(require("events"));
 const aws_sdk_1 = require("aws-sdk");
 const flat_1 = require("flat");
-const fastest_validator_1 = __importDefault(require("fastest-validator"));
+const promise_pool_1 = require("@supercharge/promise-pool");
 const lodash_1 = require("lodash");
-const package_json_1 = require("../package.json");
+const validator_1 = require("./validator");
 const errors_1 = require("./errors");
-class S3db {
+class S3db extends events_1.default {
     /**
      * Constructor
      */
     constructor(options) {
+        super();
         this.keyPrefix = "";
         this.bucket = "s3db";
         this.options = options;
-        this.version = package_json_1.version;
+        this.version = '1';
         this.logger = options.logger || console;
+        this.parallelism = parseInt(options.parallelism + '') || 5;
         this.metadata = this.blankMetadataStructure();
+        this.validatorInstance = (0, validator_1.ValidatorFactory)({
+            passphrase: options === null || options === void 0 ? void 0 : options.passphrase,
+        });
         const uri = new node_url_1.URL(options.uri);
         this.bucket = uri.hostname;
         let [, ...subpath] = uri.pathname.split("/");
@@ -65,12 +71,11 @@ class S3db {
                 secretAccessKey: uri.password,
             }),
         });
-        this.validatorInstance = new fastest_validator_1.default();
     }
     /**
      * Remotely setups s3db file.
      */
-    setup() {
+    connect() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const metadata = yield this.getMetadata();
@@ -83,8 +88,10 @@ class S3db {
                     if (this.version !== metadata.version) {
                         this.logger.warn(`Client version ${this.version} is different than ${metadata.version}`);
                     }
+                    this.emit("connected", this);
                 }
                 else {
+                    this.emit("error", error);
                     throw error;
                 }
             }
@@ -120,8 +127,7 @@ class S3db {
      */
     setMetadata(metadata) {
         this.metadata = metadata;
-        Object.entries(metadata.resources)
-            .forEach(([resourceName, resourceDefinition]) => {
+        Object.entries(metadata.resources).forEach(([resourceName, resourceDefinition]) => {
             let resource = this.metadata.resources[resourceName];
             resource = Object.assign(Object.assign({}, resource), { validator: this.validatorInstance.compile(resourceDefinition.schema), reversed: this.reverseMapper(resourceDefinition.mapper) });
             this.metadata.resources[resourceName] = resource;
@@ -133,7 +139,7 @@ class S3db {
      */
     blankMetadataStructure() {
         return {
-            version: package_json_1.version,
+            version: `1`,
             resources: {},
         };
     }
@@ -270,13 +276,13 @@ class S3db {
                 body: metadata,
                 key: `s3db.json`,
             });
+            return this.resource(resourceName);
         });
     }
     translateObjectWithMapper(resourceName, obj, mapper) {
         if ((0, lodash_1.isEmpty)(mapper))
-            throw new Error('invalid mapper');
-        return Object.entries(obj)
-            .reduce((acc, [key, value]) => {
+            throw new Error("invalid mapper");
+        return Object.entries(obj).reduce((acc, [key, value]) => {
             acc[mapper[key]] = value;
             return acc;
         }, {});
@@ -286,28 +292,30 @@ class S3db {
      * @param {Object} param
      * @returns
      */
-    insert({ id, attributes, resourceName, }) {
+    insert({ attributes, resourceName, }) {
         return __awaiter(this, void 0, void 0, function* () {
             const attributesFlat = (0, flat_1.flatten)(attributes);
             // validate
+            if (!this.metadata.resources[resourceName])
+                throw new Error("Resource does not exist");
             const errors = this.metadata.resources[resourceName].validator(attributesFlat);
             if ((0, lodash_1.isArray)(errors)) {
                 throw new errors_1.InvalidResource({
                     bucket: this.bucket,
                     resourceName,
                     attributes,
-                    validation: errors
+                    validation: errors,
                 });
             }
             // save
-            if ((0, lodash_1.isEmpty)(id))
-                id = (0, uuid_1.v4)();
+            const id = (attributes.id || attributes.id === 0) ? attributes.id : (0, uuid_1.v4)();
             const mapper = this.metadata.resources[resourceName].mapper;
             yield this._s3PutObject({
                 key: path.join(`resource=${resourceName}`, `id=${id}`),
                 body: "",
-                metadata: this.translateObjectWithMapper(resourceName, attributesFlat, mapper),
+                metadata: this.translateObjectWithMapper(resourceName, (0, lodash_1.omit)(attributesFlat, 'id'), mapper),
             });
+            this.emit("data", Object.assign(Object.assign({}, attributes), { id }));
             return Object.assign(Object.assign({}, attributes), { id });
         });
     }
@@ -328,20 +336,38 @@ class S3db {
         });
     }
     /**
+     *
+     */
+    bulkInsert(resourceName, objects) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { results } = yield promise_pool_1.PromisePool.for(objects)
+                .withConcurrency(this.parallelism)
+                .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("error", error, content);
+            }))
+                .process((attributes) => __awaiter(this, void 0, void 0, function* () {
+                const result = yield this.insert({
+                    resourceName,
+                    attributes,
+                });
+                return result;
+            }));
+            return results;
+        });
+    }
+    /**
      * Looper
      * @param {string} resourceName
      * @returns
      */
     resource(resourceName) {
         const looper = {
-            define: (attributes, options = {}) => () => __awaiter(this, void 0, void 0, function* () {
-                yield this.newResource({
-                    resourceName,
-                    attributes,
-                    options,
-                });
-                return looper;
+            define: (attributes, options = {}) => this.newResource({
+                resourceName,
+                attributes,
+                options,
             }),
+            definition: () => this.metadata.resources[resourceName],
             get: (id) => this.getById({
                 resourceName,
                 id,
@@ -350,15 +376,9 @@ class S3db {
                 resourceName,
                 attributes,
             }),
-            bulkInsert: (attributes) => __awaiter(this, void 0, void 0, function* () {
-                for (const attr in attributes) {
-                    yield this.insert({
-                        resourceName,
-                        attributes: attr,
-                    });
-                }
-                return looper;
-            })
+            bulkInsert: (objects) => __awaiter(this, void 0, void 0, function* () {
+                return this.bulkInsert(resourceName, objects);
+            }),
         };
         return looper;
     }
