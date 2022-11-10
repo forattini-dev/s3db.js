@@ -7,25 +7,27 @@ const { S3db } = require("../build");
 
 const { bucket, accessKeyId, secretAccessKey } = process.env;
 
-const TOTAL = 10000;
-const PARALLELISM = 50;
+const TOTAL = 1000;
+const PARALLELISM = 100;
 
 async function main() {
   const client = new S3db({
-    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
-      .toISOString()
-      .substring(0, 10)}`,
     parallelism: PARALLELISM,
     passphrase: "super-secret",
+    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
+    .toISOString()
+    .substring(0, 10)}`,
   });
+  
+  console.log(`creating ${TOTAL} leads.`)
+  console.log(`parallelism of ${PARALLELISM} requests.\n`)
 
   const bar = new ProgressBar(
-    "bulk-writing  :current/:total (:percent)  [:bar]  :rate/bps  :etas",
+    "bulk-writing  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds)",
     {
-      complete: "=",
-      incomplete: " ",
       width: 30,
       total: TOTAL,
+      incomplete: " ",
     }
   );
 
@@ -54,6 +56,7 @@ async function main() {
   );
 
   console.timeEnd('bulk-writing')
+  process.stdout.write('\n\n')
 }
 
 main();

@@ -89,7 +89,7 @@ export class ReadResourceStream extends Readable {
       ""
     );
 
-    this.emit('id', this.resourceName, id)
+    this.emit("id", this.resourceName, id);
 
     const data = await this.s3db.getById({
       resourceName: this.resourceName,
