@@ -1,31 +1,43 @@
 require("dotenv").config({ path: `${__dirname}/../.env` });
 
 const fs = require('fs')
-const ProgressBar = require("progress");
+const Multiprogress = require('multi-progress')
 
 const { S3db } = require("../build");
 
 const { bucket, accessKeyId, secretAccessKey } = process.env;
-const PRARALLELISM = 25;
+const PARALLELISM = 50;
 
 async function main() {
   const client = new S3db({
     uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
     .toISOString()
     .substring(0, 10)}`,
-    parallelism: PRARALLELISM,
+    parallelism: PARALLELISM,
   });
 
   await client.connect();
-  const count = await client.resource("leads").count();
+  const total = await client.resource("leads").count();
   
-  const bar = new ProgressBar(
-    "reading  :current/:total (:percent)  [:bar]  :rate/bps  :etas",
+  const multi = new Multiprogress(process.stdout)
+
+  const barIds = multi.newBar(
+    "reading ids   :current/:total (:percent)  [:bar]  :rate/bps  :etas",
     {
       complete: "=",
       incomplete: " ",
       width: 20,
-      total: count,
+      total,
+    }
+  );
+
+  const barData = multi.newBar(
+    "reading data  :current/:total (:percent)  [:bar]  :rate/bps  :etas",
+    {
+      complete: "=",
+      incomplete: " ",
+      width: 20,
+      total,
     }
   );
   
@@ -33,7 +45,8 @@ async function main() {
   const streamWrite = fs.createWriteStream(__dirname+'/out'+Date.now()+'.txt')
 
   console.time('reading')
-  stream.on("data", () => bar.tick());
+  stream.on("id", () => barIds.tick());
+  stream.on("data", () => barData.tick());
   stream.on("data", (data) => streamWrite.write(`${JSON.stringify(data)}\n`));
   stream.on("end", () => console.timeEnd('reading'))
 }

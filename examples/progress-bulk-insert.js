@@ -7,15 +7,15 @@ const { S3db } = require("../build");
 
 const { bucket, accessKeyId, secretAccessKey } = process.env;
 
-const TOTAL = 1000;
-const PRARALLELISM = 25;
+const TOTAL = 10000;
+const PARALLELISM = 50;
 
 async function main() {
   const client = new S3db({
     uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
       .toISOString()
       .substring(0, 10)}`,
-    parallelism: PRARALLELISM,
+    parallelism: PARALLELISM,
     passphrase: "super-secret",
   });
 

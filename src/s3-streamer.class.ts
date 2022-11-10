@@ -4,6 +4,7 @@ import { PromisePool } from "@supercharge/promise-pool";
 
 import S3db from "./s3db.class";
 import S3Client from "./s3-client.class";
+import { S3 } from "aws-sdk";
 
 export class ReadResourceStream extends Readable {
   s3db: S3db;
@@ -57,18 +58,20 @@ export class ReadResourceStream extends Readable {
   }
 
   async getItems() {
-    const res = await this.client.listObjects({
+    const res: S3.ListObjectsV2Output = await this.client.listObjects({
       prefix: `resource=${this.resourceName}`,
       continuationToken: this.continuationToken,
       maxKeys: (this.parallelism * 4) % 1000,
     });
 
-    await PromisePool.for(res.Contents)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, content) => {
-        this.emit("error", error, content);
-      })
-      .process((x: any) => this.addItem(x));
+    if (res.Contents) {
+      await PromisePool.for(res.Contents)
+        .withConcurrency(this.parallelism)
+        .handleError(async (error, content) => {
+          this.emit("error", error, content);
+        })
+        .process((x: any) => this.addItem(x));
+    }
 
     this.finishedReadingBucked = !res.IsTruncated;
 
@@ -85,6 +88,8 @@ export class ReadResourceStream extends Readable {
       path.join(this.client.keyPrefix, `resource=${this.resourceName}`, "id="),
       ""
     );
+
+    this.emit('id', this.resourceName, id)
 
     const data = await this.s3db.getById({
       resourceName: this.resourceName,

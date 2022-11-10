@@ -33,8 +33,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
-const aws_sdk_1 = require("aws-sdk");
 const lodash_1 = require("lodash");
+const aws_sdk_1 = require("aws-sdk");
 const errors_1 = require("./errors");
 class S3Client {
     constructor({ connectionString }) {
