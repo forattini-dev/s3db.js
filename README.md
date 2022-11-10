@@ -331,22 +331,23 @@ stream.on("data", (object) => console.log("id = ", object.id));
 
 Check the `./examples` dir.
 
-[Bulk insert with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-bulk-insert.js)
+[Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/bulk-insert.js)
+
 ```bash
 npm run ex-1
 
 > s3db.js@1.0.0 ex-1
-> cd examples; node progress-bulk-insert.js
+> cd examples; node bulk-insert.js
 
 creating 10000 leads.
 parallelism of 100 requests.
 
-bulk-writing  10000/10000 (100%)  [==============================]  297/bps  0.0s (33.6s)
-bulk-writing: 34.391s
+bulk-writing  10000/10000 (100%)  [==============================]  294/bps  0.0s (34.0s)
+bulk-writing: 34.731s
 ```
 
+[Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
 
-[Resource read stream with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-read-stream.js)
 ```bash
 $ npm run ex-2
 
@@ -359,5 +360,20 @@ parallelism of 100 requests.
 reading-ids   10000/10000 (100%)  [==============================]  121/bps  0.0s (82.6s)
 reading-data  10000/10000 (100%)  [==============================]  124/bps  0.0s (80.9s)
 reading: 1:24.008 (m:ss.mmm)
+```
+
+[Resource read stream writing into file](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
+
+```bash
+$ npm run ex-3
+
+> s3db.js@1.0.0 ex-3
+> cd examples; node read-stream-to-file.js
+
+reading 10000 leads.
+parallelism of 100 requests.
+
+reading data  10000/10000 (100%)  [==============================]  129/bps  0.0s
+reading: 1:20.765 (m:ss.mmm)
 ```
 
