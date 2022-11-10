@@ -68,7 +68,6 @@ Your `S3db` client can be initiated with options:
 
 |   option    | optional |            description             |       type        |   default   |
 | :---------: | :------: | :--------------------------------: | :---------------: | :---------: |
-|   logger    |   true   |           Log interface            | `LoggerInterface` |  `Console`  |
 | parallelism |  false   |    Number of simultaneous tasks    |     `number`      |     10      |
 | passphrase  |  false   |       Your encryption secret       |     `string`      | `undefined` |
 |     uri     |  false   | A url as your S3 connection string |     `string`      | `undefined` |
@@ -110,7 +109,7 @@ Interacts with the bucket to check:
 
 It has this structure:
 
-```json
+```javascript
 {
   // file version
   "version": "1",
@@ -330,10 +329,35 @@ stream.on("data", (object) => console.log("id = ", object.id));
 
 ## Examples
 
-Check the `./examples` dir:
+Check the `./examples` dir.
 
-- [Bulk insert with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-bulk-insert.js)
-![screenshot](https://github.com/forattini-dev/s3db.js/blob/main/examples/screenshot-writing.png)
+[Bulk insert with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-bulk-insert.js)
+```bash
+npm run ex-1
 
-- [Resource read stream with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-read-stream.js)
-![screenshot](https://github.com/forattini-dev/s3db.js/blob/main/examples/screenshot-reading.png)
+> s3db.js@1.0.0 ex-1
+> cd examples; node progress-bulk-insert.js
+
+creating 10000 leads.
+parallelism of 100 requests.
+
+bulk-writing  10000/10000 (100%)  [==============================]  297/bps  0.0s (33.6s)
+bulk-writing: 34.391s
+```
+
+
+[Resource read stream with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-read-stream.js)
+```bash
+$ npm run ex-2
+
+> s3db.js@1.0.0 ex-2
+> cd examples; node read-stream.js
+
+reading 10000 leads.
+parallelism of 100 requests.
+
+reading-ids   10000/10000 (100%)  [==============================]  121/bps  0.0s (82.6s)
+reading-data  10000/10000 (100%)  [==============================]  124/bps  0.0s (80.9s)
+reading: 1:24.008 (m:ss.mmm)
+```
+

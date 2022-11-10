@@ -10,7 +10,6 @@ import S3Client from "./s3-client.class";
 import S3Streamer from "./s3-streamer.class";
 import { ValidatorFactory } from "./validator";
 import ConfigInterface from "./config.interface";
-import LoggerInterface from "./logger.interface";
 import MetadataInterface from "./metadata.interface";
 import { MissingMetadata, NoSuchKey, InvalidResource } from "./errors";
 
@@ -20,7 +19,6 @@ export default class S3db extends EventEmitter {
   keyPrefix: string = "";
   bucket: string = "s3db";
   version: string;
-  logger: LoggerInterface;
   metadata: MetadataInterface;
   validatorInstance: any;
   parallelism: number;
@@ -32,9 +30,8 @@ export default class S3db extends EventEmitter {
   constructor(options: ConfigInterface) {
     super();
 
-    this.options = options;
     this.version = "1";
-    this.logger = options.logger || console;
+    this.options = options;
     this.parallelism = parseInt(options.parallelism + "") || 5;
     this.metadata = this.blankMetadataStructure();
 
@@ -52,7 +49,7 @@ export default class S3db extends EventEmitter {
     this.streamer = new S3Streamer({
       s3db: this,
       client: this.client,
-      parallelism: this.parallelism
+      parallelism: this.parallelism,
     });
   }
 
@@ -69,9 +66,7 @@ export default class S3db extends EventEmitter {
         this.setMetadata(metadata);
 
         if (this.version !== metadata.version) {
-          this.logger.warn(
-            `Client version ${this.version} is different than ${metadata.version}`
-          );
+          this.emit('warn', `Client version ${this.version} is different than ${metadata.version}`);
         }
 
         this.emit("connected", this);
@@ -380,7 +375,7 @@ export default class S3db extends EventEmitter {
     resourceName: string;
     limit: number;
   }) {
-    return this.streamer.resourceRead({ resourceName })
+    return this.streamer.resourceRead({ resourceName });
   }
 
   /**
