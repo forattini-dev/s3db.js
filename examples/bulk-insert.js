@@ -7,7 +7,7 @@ const { S3db } = require("../build");
 
 const { bucket, accessKeyId, secretAccessKey } = process.env;
 
-const TOTAL = 1000;
+const TOTAL = 10000;
 const PARALLELISM = 100;
 
 async function main() {
