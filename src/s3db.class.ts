@@ -1,14 +1,13 @@
 import * as path from "path";
-import { URL } from "node:url";
-import { Mixin } from 'ts-mixer'
-import { Duplex } from 'stream'
+import { S3 } from "aws-sdk";
 import { v4 as uuid } from "uuid";
 import EventEmitter from "events";
-import { S3, Credentials } from "aws-sdk";
 import { flatten, unflatten } from "flat";
 import { PromisePool } from "@supercharge/promise-pool";
-import { isArray, isEmpty, isObject, merge, sortBy, omit } from "lodash";
+import { isArray, isEmpty, merge, sortBy, omit } from "lodash";
 
+import S3Client from "./s3-client.class";
+import S3Streamer from "./s3-streamer.class";
 import { ValidatorFactory } from "./validator";
 import ConfigInterface from "./config.interface";
 import LoggerInterface from "./logger.interface";
@@ -17,7 +16,7 @@ import { MissingMetadata, NoSuchKey, InvalidResource } from "./errors";
 
 export default class S3db extends EventEmitter {
   options: ConfigInterface;
-  client: S3;
+  client: S3Client;
   keyPrefix: string = "";
   bucket: string = "s3db";
   version: string;
@@ -25,6 +24,7 @@ export default class S3db extends EventEmitter {
   metadata: MetadataInterface;
   validatorInstance: any;
   parallelism: number;
+  streamer: S3Streamer;
 
   /**
    * Constructor
@@ -33,26 +33,26 @@ export default class S3db extends EventEmitter {
     super();
 
     this.options = options;
-    this.version = '1';
+    this.version = "1";
     this.logger = options.logger || console;
-    this.parallelism = parseInt(options.parallelism + '') || 5;
+    this.parallelism = parseInt(options.parallelism + "") || 5;
     this.metadata = this.blankMetadataStructure();
 
     this.validatorInstance = ValidatorFactory({
       passphrase: options?.passphrase,
     });
 
-    const uri = new URL(options.uri);
-    this.bucket = uri.hostname;
+    this.client = new S3Client({
+      connectionString: options.uri,
+    });
 
-    let [, ...subpath] = uri.pathname.split("/");
-    this.keyPrefix = [...(subpath || [])].join("/");
+    this.bucket = this.client.bucket;
+    this.keyPrefix = this.client.keyPrefix;
 
-    this.client = new S3({
-      credentials: new Credentials({
-        accessKeyId: uri.username,
-        secretAccessKey: uri.password,
-      }),
+    this.streamer = new S3Streamer({
+      s3db: this,
+      client: this.client,
+      parallelism: this.parallelism
     });
   }
 
@@ -89,7 +89,7 @@ export default class S3db extends EventEmitter {
    */
   private async getMetadata() {
     try {
-      const request = await this._s3GetObject({
+      const request = await this.client.getObject({
         key: `s3db.json`,
       });
 
@@ -148,100 +148,9 @@ export default class S3db extends EventEmitter {
   private async generateAndUploadMetadata(): Promise<MetadataInterface> {
     const body = this.blankMetadataStructure();
 
-    await this._s3PutObject({ body, key: `s3db.json` });
+    await this.client.putObject({ body, key: `s3db.json` });
 
     return body;
-  }
-
-  /**
-   * Proxy to AWS S3's getObject
-   * @param param0 key
-   * @returns
-   */
-  private async _s3GetObject({ key }: { key: string }) {
-    try {
-      const request = await this.client
-        ?.getObject({
-          Bucket: this.bucket,
-          Key: path.join(this.keyPrefix, key),
-        })
-        .promise();
-
-      return request;
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        if (error.name === "NoSuchKey") {
-          throw new NoSuchKey({ bucket: this.bucket, key });
-        } else {
-          return Promise.reject(new Error(error.name));
-        }
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Proxy to AWS S3's putObject
-   * @param {Object} param
-   * @param {string} param.key
-   * @param {string} param.body
-   * @param {string} param.metadata
-   * @returns
-   */
-  private async _s3PutObject({
-    key,
-    body,
-    metadata,
-  }: {
-    key: string;
-    body: string | object;
-    metadata?: object;
-  }) {
-    try {
-      const request = await this.client
-        .putObject({
-          Bucket: this.bucket,
-          Key: path.join(this.keyPrefix, key),
-          Body: Buffer.from(
-            isObject(body) ? JSON.stringify(body, null, 2) : body
-          ),
-          Metadata: { ...metadata },
-        })
-        .promise();
-
-      return request;
-    } catch (error) {
-      this.logger.error(error);
-      throw error;
-    }
-  }
-
-  /**
-   * Proxy to AWS S3's headObject
-   * @param {Object} param
-   * @param {string} param.key
-   * @returns
-   */
-  private async _s3HeadObject({ key }: { key: string }) {
-    try {
-      const request = await this.client
-        ?.headObject({
-          Bucket: this.bucket,
-          Key: path.join(this.keyPrefix, key),
-        })
-        .promise();
-
-      return request;
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        if (error.name === "NoSuchKey") {
-          throw new NoSuchKey({ bucket: this.bucket, key });
-        } else {
-          return Promise.reject(new Error(error.name));
-        }
-      }
-      throw error;
-    }
   }
 
   /**
@@ -293,7 +202,7 @@ export default class S3db extends EventEmitter {
 
     this.setMetadata(metadata);
 
-    await this._s3PutObject({
+    await this.client.putObject({
       body: metadata,
       key: `s3db.json`,
     });
@@ -325,9 +234,11 @@ export default class S3db extends EventEmitter {
     const attributesFlat: any = flatten(attributes);
 
     // validate
-    if (!this.metadata.resources[resourceName]) throw new Error("Resource does not exist");
+    if (!this.metadata.resources[resourceName])
+      throw new Error("Resource does not exist");
 
-    const errors = this.metadata.resources[resourceName].validator(attributesFlat);
+    const errors =
+      this.metadata.resources[resourceName].validator(attributesFlat);
 
     if (isArray(errors)) {
       throw new InvalidResource({
@@ -339,28 +250,21 @@ export default class S3db extends EventEmitter {
     }
 
     // save
-    const id = (attributes.id || attributes.id === 0) ? attributes.id : uuid();
+    if (!attributes.id && attributes.id !== 0) attributes.id = uuid();
     const mapper: any = this.metadata.resources[resourceName].mapper;
 
-    await this._s3PutObject({
-      key: path.join(`resource=${resourceName}`, `id=${id}`),
+    await this.client.putObject({
+      key: path.join(`resource=${resourceName}`, `id=${attributes.id}`),
       body: "",
       metadata: this.translateObjectWithMapper(
         resourceName,
-        omit(attributesFlat, 'id'),
+        omit(attributesFlat, "id"),
         mapper
       ),
     });
 
-    this.emit("data", {
-      ...attributes,
-      id,
-    });
-
-    return {
-      ...attributes,
-      id,
-    };
+    this.emit("inserted", attributes);
+    return attributes;
   }
 
   /**
@@ -377,7 +281,7 @@ export default class S3db extends EventEmitter {
   }) {
     const mapper: any = this.metadata.resources[resourceName].reversed;
 
-    const request = await this._s3HeadObject({
+    const request = await this.client.headObject({
       key: path.join(`resource=${resourceName}`, `id=${id}`),
     });
 
@@ -386,6 +290,7 @@ export default class S3db extends EventEmitter {
       request.Metadata,
       mapper
     );
+
     data.id = id;
 
     return merge(unflatten(data));
@@ -394,7 +299,13 @@ export default class S3db extends EventEmitter {
   /**
    *
    */
-  async bulkInsert(resourceName: string, objects: any) {
+  async bulkInsert({
+    resourceName,
+    objects,
+  }: {
+    resourceName: string;
+    objects: any[];
+  }) {
     const { results } = await PromisePool.for(objects)
       .withConcurrency(this.parallelism)
       .handleError(async (error, content) => {
@@ -406,10 +317,70 @@ export default class S3db extends EventEmitter {
           attributes,
         });
 
-        return result
+        return result;
       });
 
     return results;
+  }
+
+  async count({ resourceName }: { resourceName: string }) {
+    let count = 0;
+    let truncated = true;
+    let continuationToken;
+
+    while (truncated) {
+      const res: S3.ListObjectsV2Output = await this.client.listObjects({
+        prefix: `resource=${resourceName}`,
+        continuationToken,
+      });
+
+      count += res.KeyCount || 0;
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+    }
+
+    return count;
+  }
+
+  async listIds({
+    resourceName,
+    limit = 1000,
+  }: {
+    resourceName: string;
+    limit: number;
+  }) {
+    let ids: any[] = [];
+    let truncated = true;
+    let continuationToken;
+
+    while (truncated && ids.length < limit) {
+      const res: S3.ListObjectsV2Output = await this.client.listObjects({
+        prefix: `resource=${resourceName}`,
+        continuationToken,
+      });
+
+      ids = ids.concat(res.Contents?.map((x) => x.Key));
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+    }
+
+    ids = ids.map((x) =>
+      x.replace(
+        path.join(this.keyPrefix, `resource=${resourceName}`, "id="),
+        ""
+      )
+    );
+    return ids;
+  }
+
+  async stream({
+    resourceName,
+    limit = 1000,
+  }: {
+    resourceName: string;
+    limit: number;
+  }) {
+    return this.streamer.resourceRead({ resourceName })
   }
 
   /**
@@ -419,11 +390,12 @@ export default class S3db extends EventEmitter {
    */
   resource(resourceName: string) {
     const looper = {
-      define: (attributes: any, options = {}) => this.newResource({
-        resourceName,
-        attributes,
-        options,
-      }),
+      define: (attributes: any, options = {}) =>
+        this.newResource({
+          resourceName,
+          attributes,
+          options,
+        }),
 
       definition: () => this.metadata.resources[resourceName],
 
@@ -433,18 +405,29 @@ export default class S3db extends EventEmitter {
           id,
         }),
 
-      insert: (attributes: any) => this.insert({
-        resourceName,
-        attributes,
-      }),
+      insert: (attributes: any) =>
+        this.insert({
+          resourceName,
+          attributes,
+        }),
 
       bulkInsert: async (objects: any[]) => {
-        return this.bulkInsert(resourceName, objects);
+        return this.bulkInsert({ resourceName, objects });
+      },
+
+      count: async () => this.count({ resourceName }),
+
+      listIds: async (options = {}) => {
+        const { limit = 1000 }: { limit?: number } = options;
+        return this.listIds({ resourceName, limit });
+      },
+
+      stream: async (options = {}) => {
+        const { limit = 1000 }: { limit?: number } = options;
+        return this.stream({ resourceName, limit });
       },
     };
 
     return looper;
   }
-
-
 }

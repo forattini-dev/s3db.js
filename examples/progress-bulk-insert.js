@@ -5,46 +5,55 @@ const ProgressBar = require("progress");
 
 const { S3db } = require("../build");
 
-const { 
-  bucket, 
-  accessKeyId,
-  secretAccessKey
-} = process.env;
+const { bucket, accessKeyId, secretAccessKey } = process.env;
+
+const TOTAL = 1000;
+const PRARALLELISM = 25;
 
 async function main() {
   const client = new S3db({
-    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex1-${Date.now()}`,
+    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
+      .toISOString()
+      .substring(0, 10)}`,
+    parallelism: PRARALLELISM,
     passphrase: "super-secret",
   });
 
-  const bar = new ProgressBar("  uploading [:bar]  :rate/bps  :percent  :etas", {
-    complete: "=",
-    incomplete: " ",
-    width: 20,
-    total: 100,
-  });
+  const bar = new ProgressBar(
+    "bulk-writing  :current/:total (:percent)  [:bar]  :rate/bps  :etas",
+    {
+      complete: "=",
+      incomplete: " ",
+      width: 30,
+      total: TOTAL,
+    }
+  );
 
-  client.connect();
+  await client.connect();
 
-  client.on("data", () => bar.tick());
-
-  client.on("connected", async () => {
+  if (!client.metadata.resources.leads) {
     await client.newResource({
       resourceName: `leads`,
       attributes: {
         name: "string",
-        token: "secret"
+        token: "secret",
       },
     });
+  }
 
-    await client.resource("leads").bulkInsert(
-      new Array(100).fill(0).map((v, k) => ({
-        id: k,
-        name: `Lead #${k}`,
-        token: uuid(),
-      }))
-    );
-  });
+  client.on("inserted", () => bar.tick());
+
+  console.time('bulk-writing')
+
+  await client.resource("leads").bulkInsert(
+    new Array(TOTAL).fill(0).map((v, k) => ({
+      id: k,
+      name: `Lead #${k}`,
+      token: uuid(),
+    }))
+  );
+
+  console.timeEnd('bulk-writing')
 }
 
 main();
