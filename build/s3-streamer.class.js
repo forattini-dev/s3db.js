@@ -72,12 +72,14 @@ class ReadResourceStream extends node_stream_1.Readable {
                 continuationToken: this.continuationToken,
                 maxKeys: (this.parallelism * 4) % 1000,
             });
-            yield promise_pool_1.PromisePool.for(res.Contents)
-                .withConcurrency(this.parallelism)
-                .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
-                this.emit("error", error, content);
-            }))
-                .process((x) => this.addItem(x));
+            if (res.Contents) {
+                yield promise_pool_1.PromisePool.for(res.Contents)
+                    .withConcurrency(this.parallelism)
+                    .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
+                    this.emit("error", error, content);
+                }))
+                    .process((x) => this.addItem(x));
+            }
             this.finishedReadingBucked = !res.IsTruncated;
             if (res.NextContinuationToken) {
                 this.continuationToken = res.NextContinuationToken;
@@ -91,6 +93,7 @@ class ReadResourceStream extends node_stream_1.Readable {
     addItem(obj) {
         return __awaiter(this, void 0, void 0, function* () {
             let id = (obj.Key || "").replace(path.join(this.client.keyPrefix, `resource=${this.resourceName}`, "id="), "");
+            this.emit('id', this.resourceName, id);
             const data = yield this.s3db.getById({
                 resourceName: this.resourceName,
                 id,

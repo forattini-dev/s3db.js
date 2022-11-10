@@ -333,4 +333,7 @@ stream.on("data", (object) => console.log("id = ", object.id));
 Check the `./examples` dir:
 
 - [Bulk insert with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-bulk-insert.js)
+![screenshot](https://github.com/forattini-dev/s3db.js/blob/main/examples/screenshot-writing.png)
+
 - [Resource read stream with progress bar](https://github.com/forattini-dev/s3db.js/blob/main/examples/progress-read-stream.js)
+![screenshot](https://github.com/forattini-dev/s3db.js/blob/main/examples/screenshot-reading.png)
