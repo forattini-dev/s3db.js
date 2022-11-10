@@ -20,11 +20,11 @@ function ClientFactory() {
 }
 
 describe("static config", function () {
-  let client = ClientFactory();
+  let s3db = ClientFactory();
 
   it("constructor definitions", async function () {
-    expect(client.bucket).toBe(bucket);
-    expect(client.keyPrefix).toBe(bucketPrefix);
+    expect(s3db.client.bucket).toBe(bucket);
+    expect(s3db.client.keyPrefix).toBe(bucketPrefix);
   });
 });
 

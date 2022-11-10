@@ -7,7 +7,8 @@
     "build": "rimraf ./build && tsc",
     "test": "ts-node node_modules/jasmine/bin/jasmine --config=jasmine.json",
     "tests": "npm run test",
-    "ex-1": "cd examples; node progress-write.js"
+    "ex-1": "cd examples; node progress-bulk-insert.js",
+    "ex-2": "cd examples; node progress-read-stream.js"
   },
   "author": "filipeforattini",
   "license": "ISC",
