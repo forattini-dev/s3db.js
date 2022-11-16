@@ -1,6 +1,6 @@
 import * as path from "path";
 import { S3 } from "aws-sdk";
-import { v4 as uuid } from "uuid";
+import shortid from "shortid";
 import EventEmitter from "events";
 import { flatten, unflatten } from "flat";
 import { PromisePool } from "@supercharge/promise-pool";
@@ -32,7 +32,7 @@ export default class S3db extends EventEmitter {
 
     this.version = "1";
     this.options = options;
-    this.parallelism = parseInt(options.parallelism + "") || 5;
+    this.parallelism = parseInt(options.parallelism + "") || 10;
     this.metadata = this.blankMetadataStructure();
 
     this.validatorInstance = ValidatorFactory({
@@ -66,7 +66,10 @@ export default class S3db extends EventEmitter {
         this.setMetadata(metadata);
 
         if (this.version !== metadata.version) {
-          this.emit('warn', `Client version ${this.version} is different than ${metadata.version}`);
+          this.emit(
+            "warn",
+            `Client version ${this.version} is different than ${metadata.version}`
+          );
         }
 
         this.emit("connected", this);
@@ -142,8 +145,11 @@ export default class S3db extends EventEmitter {
    */
   private async generateAndUploadMetadata(): Promise<MetadataInterface> {
     const body = this.blankMetadataStructure();
-
-    await this.client.putObject({ body, key: `s3db.json` });
+    
+    await this.client.putObject({ 
+      key: `s3db.json`,
+      body: JSON.stringify(body, null, 2),
+    });
 
     return body;
   }
@@ -198,8 +204,8 @@ export default class S3db extends EventEmitter {
     this.setMetadata(metadata);
 
     await this.client.putObject({
-      body: metadata,
       key: `s3db.json`,
+      body: JSON.stringify(metadata, null, 2),
     });
 
     return this.resource(resourceName);
@@ -245,7 +251,8 @@ export default class S3db extends EventEmitter {
     }
 
     // save
-    if (!attributes.id && attributes.id !== 0) attributes.id = uuid();
+    if (!attributes.id && attributes.id !== 0)
+      attributes.id = shortid.generate();
     const mapper: any = this.metadata.resources[resourceName].mapper;
 
     await this.client.putObject({

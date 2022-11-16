@@ -7,7 +7,7 @@ import S3db from "../src";
 
 const { bucket = "", accessKeyId = "", secretAccessKey = "" } = process.env;
 
-const bucketPrefix = "databases/marketing-" + Date.now();
+const bucketPrefix = "databases/test-ex-marketing-" + Date.now();
 const resourceName = `leads`;
 
 const attributes = {
@@ -69,7 +69,7 @@ describe("resource [leads]", function () {
   });
 
   it("bulk create leads", async function () {
-    const leads = new Array(25).fill(0).map((v, k) => ({
+    const leads = new Array(10).fill(0).map((v, k) => ({
       id: `bulk-${k}@mymail.com`,
       lead: {
         fullName: "My Test Name",

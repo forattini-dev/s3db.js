@@ -11,7 +11,7 @@ const {
   secretAccessKey = "",
 } = process.env;
 
-const bucketPrefix =  "databases/test-" + Date.now()
+const bucketPrefix =  "databases/test-config-" + Date.now()
 
 function ClientFactory() {
   return new S3db({
