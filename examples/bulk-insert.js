@@ -1,6 +1,6 @@
 require("dotenv").config({ path: `${__dirname}/../.env` });
 
-const { v4: uuid } = require("uuid");
+const Fakerator = require("fakerator");
 const ProgressBar = require("progress");
 
 const { S3db } = require("../build");
@@ -10,17 +10,21 @@ const { bucket, accessKeyId, secretAccessKey } = process.env;
 const TOTAL = 10000;
 const PARALLELISM = 100;
 
+const CONNECTION_STRING =
+  `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/examples-` +
+  new Date().toISOString().substring(0, 10);
+
 async function main() {
+  const fake = Fakerator();
+
   const client = new S3db({
+    uri: CONNECTION_STRING,
     parallelism: PARALLELISM,
     passphrase: "super-secret",
-    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/ex-${new Date()
-    .toISOString()
-    .substring(0, 10)}`,
   });
-  
-  console.log(`creating ${TOTAL} leads.`)
-  console.log(`parallelism of ${PARALLELISM} requests.\n`)
+
+  console.log(`creating ${TOTAL} leads.`);
+  console.log(`parallelism of ${PARALLELISM} requests.\n`);
 
   const bar = new ProgressBar(
     "bulk-writing  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds)",
@@ -38,6 +42,7 @@ async function main() {
       resourceName: `leads`,
       attributes: {
         name: "string",
+        email: "string",
         token: "secret",
       },
     });
@@ -45,18 +50,21 @@ async function main() {
 
   client.on("inserted", () => bar.tick());
 
-  console.time('bulk-writing')
+  console.time("bulk-writing");
 
   await client.resource("leads").bulkInsert(
-    new Array(TOTAL).fill(0).map((v, k) => ({
-      id: k,
-      name: `Lead #${k}`,
-      token: uuid(),
-    }))
+    new Array(TOTAL)
+      .fill(0)
+      .map((v, k) => ({
+        id: k,
+        name: fake.names.name(),
+        email: fake.internet.email(),
+        token: fake.misc.uuid(),
+      }))
   );
 
-  console.timeEnd('bulk-writing')
-  process.stdout.write('\n\n')
+  console.timeEnd("bulk-writing");
+  process.stdout.write("\n\n");
 }
 
 main();
