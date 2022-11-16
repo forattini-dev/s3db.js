@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
-const uuid_1 = require("uuid");
+const shortid_1 = __importDefault(require("shortid"));
 const events_1 = __importDefault(require("events"));
 const flat_1 = require("flat");
 const promise_pool_1 = require("@supercharge/promise-pool");
@@ -53,10 +53,9 @@ class S3db extends events_1.default {
         super();
         this.keyPrefix = "";
         this.bucket = "s3db";
-        this.options = options;
         this.version = "1";
-        this.logger = options.logger || console;
-        this.parallelism = parseInt(options.parallelism + "") || 5;
+        this.options = options;
+        this.parallelism = parseInt(options.parallelism + "") || 10;
         this.metadata = this.blankMetadataStructure();
         this.validatorInstance = (0, validator_1.ValidatorFactory)({
             passphrase: options === null || options === void 0 ? void 0 : options.passphrase,
@@ -69,7 +68,7 @@ class S3db extends events_1.default {
         this.streamer = new s3_streamer_class_1.default({
             s3db: this,
             client: this.client,
-            parallelism: this.parallelism
+            parallelism: this.parallelism,
         });
     }
     /**
@@ -86,7 +85,7 @@ class S3db extends events_1.default {
                     const metadata = yield this.generateAndUploadMetadata();
                     this.setMetadata(metadata);
                     if (this.version !== metadata.version) {
-                        this.logger.warn(`Client version ${this.version} is different than ${metadata.version}`);
+                        this.emit("warn", `Client version ${this.version} is different than ${metadata.version}`);
                     }
                     this.emit("connected", this);
                 }
@@ -150,7 +149,10 @@ class S3db extends events_1.default {
     generateAndUploadMetadata() {
         return __awaiter(this, void 0, void 0, function* () {
             const body = this.blankMetadataStructure();
-            yield this.client.putObject({ body, key: `s3db.json` });
+            yield this.client.putObject({
+                key: `s3db.json`,
+                body: JSON.stringify(body, null, 2),
+            });
             return body;
         });
     }
@@ -189,8 +191,8 @@ class S3db extends events_1.default {
             };
             this.setMetadata(metadata);
             yield this.client.putObject({
-                body: metadata,
                 key: `s3db.json`,
+                body: JSON.stringify(metadata, null, 2),
             });
             return this.resource(resourceName);
         });
@@ -225,7 +227,7 @@ class S3db extends events_1.default {
             }
             // save
             if (!attributes.id && attributes.id !== 0)
-                attributes.id = (0, uuid_1.v4)();
+                attributes.id = shortid_1.default.generate();
             const mapper = this.metadata.resources[resourceName].mapper;
             yield this.client.putObject({
                 key: path.join(`resource=${resourceName}`, `id=${attributes.id}`),
