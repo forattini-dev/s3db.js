@@ -9,7 +9,8 @@
     "tests": "npm run test",
     "ex-1": "cd examples; node bulk-insert.js",
     "ex-2": "cd examples; node read-stream.js",
-    "ex-3": "cd examples; node read-stream-to-file.js"
+    "ex-3": "cd examples; node read-stream-to-csv.js",
+    "ex-4": "cd examples; node read-stream-to-zip.js"
   },
   "author": "filipeforattini",
   "license": "ISC",
@@ -21,10 +22,12 @@
     "@types/node": "^18.8.2",
     "@types/pako": "^2.0.0",
     "@types/progress": "^2.0.5",
-    "@types/uuid": "^8.3.4",
+    "@types/shortid": "^0.0.29",
     "dotenv": "^16.0.3",
     "esm": "^3.2.25",
+    "fakerator": "^0.3.6",
     "jasmine": "^4.4.0",
+    "multi-progress": "^4.0.0",
     "progress": "^2.0.3",
     "rimraf": "^3.0.2",
     "ts-node": "^10.9.1",
@@ -32,13 +35,13 @@
   },
   "dependencies": {
     "@supercharge/promise-pool": "^2.3.2",
+    "avsc": "^5.7.7",
     "aws-sdk": "^2.1229.0",
     "crypto-js": "^4.1.1",
     "fastest-validator": "^1.15.0",
     "flat": "^5.0.2",
     "lodash": "^4.17.21",
-    "pako": "^2.0.4",
-    "ts-mixer": "^6.0.1",
-    "uuid": "^9.0.0"
+    "shortid": "^2.2.16",
+    "ts-mixer": "^6.0.1"
   }
 }

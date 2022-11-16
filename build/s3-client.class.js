@@ -31,13 +31,17 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
-const lodash_1 = require("lodash");
+const shortid_1 = __importDefault(require("shortid"));
 const aws_sdk_1 = require("aws-sdk");
 const errors_1 = require("./errors");
 class S3Client {
     constructor({ connectionString }) {
+        this.id = shortid_1.default.generate();
         const uri = new URL(connectionString);
         this.bucket = uri.hostname;
         let [, ...subpath] = uri.pathname.split("/");
@@ -82,21 +86,21 @@ class S3Client {
      * @param param0
      * @returns
      */
-    putObject({ key, body, metadata, }) {
+    putObject({ key, metadata, contentType, body, contentEncoding, }) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const request = yield this.client
-                    .putObject({
+                const params = {
                     Bucket: this.bucket,
                     Key: path.join(this.keyPrefix, key),
-                    Body: Buffer.from((0, lodash_1.isObject)(body) ? JSON.stringify(body, null, 2) : body),
                     Metadata: Object.assign({}, metadata),
-                })
-                    .promise();
-                return request;
+                    Body: body,
+                    ContentType: contentType,
+                    ContentEncoding: contentEncoding,
+                };
+                return this.client.putObject(params).promise();
             }
             catch (error) {
-                throw error;
+                throw Promise.reject(error);
             }
         });
     }
