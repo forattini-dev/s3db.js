@@ -4,6 +4,23 @@ Hey guys, there is an another way to create the cheapest database possible with 
 
 _Please, do not use in production._
 
+1. <a href="#motivation">Motivation</a>
+1. <a href="#install">Install</a>
+1. <a href="#usage">Usage</a>
+   1. <a href="#quick-setup">Quick Setup</a>
+   1. <a href="#client">Client</a>
+   1. <a href="#operations">Operations</a>
+      1. <a href="#creating-resources">Creating resources</a>
+      1. <a href="#inserting-data">Inserting data</a>
+      1. <a href="#bulk-inserting-data">Bulk inserting data</a>
+      1. <a href="#get-data">Get data</a>
+      1. <a href="#resource-read-stream">Resource read stream</a>
+      1. List data (coming soon)
+      1. Write stream (coming soon)
+   1. <a href="#events">Events</a>
+1. <a href="#examples">Examples</a>
+1. <a href="#cost-simulation">Cost Simulation</a>
+
 ## Motivation
 
 You might know AWS's S3 product for its high availability and its cheap pricing rules. I'll show you another clever and funny way to use S3.
@@ -12,13 +29,23 @@ First of all, you need to know that AWS allows you define `metadata` to every si
 
 There is another management subset of data called `tags` that is used globally as [key, value] params. You can assign 10 tags with the conditions of: the key must be at most 128 unicode chars lengthy and the value up to 256 chars. With those key-values we can use more `2.5kb` of data, unicode will allow you to use up to 2500 more chars. Follow the official docs at [AWS User Guide: Object Tagging](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html).
 
-Investigating S3's pricing, it relates to the total volume of storage used and requests volume. In this implementation we just upload 0 bytes files so all your costs might be a funcion over the number of GET and POST/PUT requests. Check by yourself the pricing page details at https://aws.amazon.com/s3/pricing/
-
 With all this set you may store objects that should be able to store up to `4.5kb` of free space **per object**.
 
-This implementation of Database ORM is focused on `key=value`, access like a document implementation, due to the fact that we are using S3 apis that work like that for files.
+S3's pricing deep dive:
+
+- Data volume [1 GB x 0.023 USD]: it relates to the total volume of storage used and requests volume but, in this implementation, we just upload `0 bytes` files.
+- GET Requests [1,000 GET requests in a month x 0.0000004 USD per request = 0.0004 USD]: every read requests
+- PUT Requests [1,000 PUT requests for S3 Standard Storage x 0.000005 USD per request = 0.005 USD]: every write request
+- Data transfer [Internet: 1 GB x 0.09 USD per GB = 0.09 USD]:
+
+Check by yourself the pricing page details at https://aws.amazon.com/s3/pricing/ and https://calculator.aws/#/addService/S3.
 
 Lets git it a try! :)
+
+### Insights
+
+- This implementation of Database ORM is focused on `key=value`, access like a document implementation, due to the fact that we are using S3 apis that work like that for files.
+- For better use of the <a href="#cache">`cache`</a>, the best is to use sequential ids with leading zeros (eq: 000001, 000002, 000003) due to s3 sorting keys method.
 
 ## Install
 
@@ -30,7 +57,7 @@ yarn add https://github.com/forattini-dev/s3db.js
 
 ## Usage
 
-You may check the snippets bellow or go straight to the <a href="#Examples">Examples</a> section!
+You may check the snippets bellow or go straight to the <a href="#examples">Examples</a> section!
 
 ### Quick setup
 
@@ -66,13 +93,15 @@ import S3db from "s3db.js";
 
 Your `S3db` client can be initiated with options:
 
-|   option    | optional |            description             |       type        |   default   |
-| :---------: | :------: | :--------------------------------: | :---------------: | :---------: |
-| parallelism |  false   |    Number of simultaneous tasks    |     `number`      |     10      |
-| passphrase  |  false   |       Your encryption secret       |     `string`      | `undefined` |
-|     uri     |  false   | A url as your S3 connection string |     `string`      | `undefined` |
+|   option    | optional |                     description                     |   type    |   default   |
+| :---------: | :------: | :-------------------------------------------------: | :-------: | :---------: |
+|    cache    |   true   |  (Coming soon) If your read methods can be proxied  | `boolean` | `undefined` |
+| parallelism |   true   |            Number of simultaneous tasks             | `number`  |     10      |
+| passphrase  |   true   |               Your encryption secret                | `string`  | `undefined` |
+|     ttl     |   true   | (Coming soon) TTL to your cache duration in seconds | `number`  |    86400    |
+|     uri     |  false   |         A url as your S3 connection string          | `string`  | `undefined` |
 
-#### Uri
+URI as a connection string:
 
 ```javascript
 const {
@@ -85,7 +114,7 @@ const {
 const uri = `s3://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@${AWS_BUCKET}/${AWS_BUCKET_PREFIX}`;
 ```
 
-#### Config example
+Config example:
 
 ```javascript
 const options = {
@@ -143,27 +172,11 @@ It has this structure:
 }
 ```
 
-### Creating resources
+### Operations
 
-We use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource.
+#### Creating resources
 
-As we need to store the resource definition within a JSON file, today you must use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) to define your resource.
-
-By default, we start the validator with the params below to clean missing attributes definition.
-
-```javascript
-// fastest-validator params
-{
-  useNewCustomCheckerFunction: true,
-  defaults: {
-    object: {
-      strict: "remove",
-    },
-  },
-}
-```
-
-Create a new resource:
+Your "tables" will be resources:
 
 ```javascript
 // resource
@@ -190,7 +203,26 @@ await s3db.newResource({
 await s3db.resource("leads").define(attributes);
 ```
 
-### Inserting data
+We use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource.
+
+As we need to store the resource definition within a JSON file, today you must use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) to define your resource.
+
+By default, we start the validator with the params below to clean missing attributes definition.
+
+```javascript
+// fastest-validator params
+{
+  useNewCustomCheckerFunction: true,
+  defaults: {
+    object: {
+      strict: "remove",
+    },
+  },
+}
+```
+
+
+#### Inserting data
 
 ```javascript
 // data
@@ -216,7 +248,7 @@ const insertedData = await s3db.insert({
 const insertedData = await s3db.resource("leads").insert(attributes);
 ```
 
-### Bulk inserting data
+#### Bulk inserting data
 
 You may bulk insert data with a friendly method.
 
@@ -247,7 +279,7 @@ await s3db.bulkInsert(resourceName, objects);
 await s3db.resource(resourceName).bulkInsert(objects);
 ```
 
-### Get data
+#### Get data
 
 ```javascript
 // data
@@ -259,7 +291,7 @@ const obj = await s3db.getById({ resourceName, id });
 const obj = await s3db.resource(resourceName).get(id);
 ```
 
-### Resource read stream
+#### Resource read stream
 
 ```javascript
 const readStream = await s3db.stream({ resourceName });
@@ -271,7 +303,7 @@ readStream.on("data", (data) => console.log("id =", data.id));
 readStream.on("end", console.log("end"));
 ```
 
-### List data (coming soon)
+#### List data (coming soon)
 
 ```javascript
 await s3db.list({ resourceName, id });
@@ -280,7 +312,7 @@ await s3db.list({ resourceName, id });
 await s3db.resource(resourceName).list();
 ```
 
-### Write stream (coming soon)
+#### Write stream (coming soon)
 
 ```javascript
 // code
@@ -329,9 +361,11 @@ stream.on("data", (object) => console.log("id = ", object.id));
 
 ## Examples
 
-Check the `./examples` dir.
+The processing power here was not the priority, just used my little nodebook Dell XPS. Check the `./examples` directory to get some ideas on how to use this package and the code of the examples below.
 
-[Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/bulk-insert.js)
+Examples' random data uses [`fakerator`](https://github.com/icebob/fakerator), git it a try!
+
+#### [Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/bulk-insert.js)
 
 ```bash
 npm run ex-1
@@ -342,11 +376,11 @@ npm run ex-1
 creating 10000 leads.
 parallelism of 100 requests.
 
-bulk-writing  10000/10000 (100%)  [==============================]  294/bps  0.0s (34.0s)
-bulk-writing: 34.731s
+bulk-writing  10000/10000 (100%)  [==============================]  235/bps  0.0s (42.6s)
+bulk-writing: 43.602s
 ```
 
-[Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
+#### [Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
 
 ```bash
 $ npm run ex-2
@@ -357,23 +391,90 @@ $ npm run ex-2
 reading 10000 leads.
 parallelism of 100 requests.
 
-reading-ids   10000/10000 (100%)  [==============================]  121/bps  0.0s (82.6s)
-reading-data  10000/10000 (100%)  [==============================]  124/bps  0.0s (80.9s)
-reading: 1:24.008 (m:ss.mmm)
+reading-ids   10000/10000 (100%)  [==============================]  42/bps  0.0s (235.8s)
+reading-data  10000/10000 (100%)  [==============================]  40/bps  0.0s (250.0s)
+reading: 4:15.908 (m:ss.mmm)
 ```
 
-[Resource read stream writing into file](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
+#### [Resource read stream writing into a csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-csv.js)
 
 ```bash
 $ npm run ex-3
 
 > s3db.js@1.0.0 ex-3
-> cd examples; node read-stream-to-file.js
+> cd examples; node read-stream-to-csv.js
 
-reading 10000 leads.
 parallelism of 100 requests.
 
-reading data  10000/10000 (100%)  [==============================]  129/bps  0.0s
-reading: 1:20.765 (m:ss.mmm)
+reading-data  10000/10000 (100%)  [==============================]  44/bps  0.0s (225.9s)
+reading-data: 3:49.192 (m:ss.mmm)
+
+resource leads total size: 1.29 Mb
 ```
 
+#### [Resource read stream writing into a zipped csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-zip.js)
+
+```bash
+$ npm run ex-4
+
+> s3db.js@1.0.0 ex-4
+> cd examples; node read-stream-to-zip.js
+
+parallelism of 100 requests.
+
+reading-data  10000/10000 (100%)  [==============================]  58/bps  0.0s (172.7s)
+reading-data: 3:04.934 (m:ss.mmm)
+
+resource leads zip size: 0.68 Mb
+```
+
+## Cost simulation
+
+You have a database with few tables:
+
+- pageviews: 100,000,000 lines of 100 bytes each
+- leads: 1,000,000 lines of 200 bytes each
+
+```javascript
+const Fakerator = require("fakerator");
+const fake = Fakerator("pt-BR");
+
+const pageview = {
+  ip: this.faker.internet.ip(),
+  domain: this.faker.internet.url(),
+  path: this.faker.internet.url(),
+  query: `?q=${this.faker.lorem.word()}`,
+};
+
+const lead = {
+  name: fake.names.name(),
+  mobile: fake.phone.number(),
+  email: fake.internet.email(),
+  country: "Brazil",
+  city: fake.address.city(),
+  state: fake.address.countryCode(),
+  address: fake.address.street(),
+};
+```
+
+If you write the whole database of:
+
+- pageviews:
+  - 100,000,000 PUT requests for S3 Standard Storage x 0.000005 USD per request = 500.00 USD (S3 Standard PUT requests cost)
+- leads:
+  - 1,000,000 PUT requests for S3 Standard Storage x 0.000005 USD per request = 5.00 USD (S3 Standard PUT requests cost)
+
+It will cost 505.00 USD, once.
+
+If you want to read the whole database:
+
+- pageviews:
+  - 100,000,000 GET requests in a month x 0.0000004 USD per request = 40.00 USD (S3 Standard GET requests cost)
+  - (100,000,000 × 100 bytes)÷(1024×1000×1000) ≅ 10 Gb
+    Internet: 10 GB x 0.09 USD per GB = 0.90 USD
+- leads:
+  - 1,000,000 GET requests in a month x 0.0000004 USD per request = 0.40 USD (S3 Standard GET requests cost)
+  - (1,000,000 × 200 bytes)÷(1024×1000×1000) ≅ 0.19 Gb
+    Internet: 1 GB x 0.09 USD per GB = 0.09 USD
+
+It will cost 41.39 USD, once.
