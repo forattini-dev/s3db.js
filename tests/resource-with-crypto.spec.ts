@@ -7,7 +7,7 @@ import S3db from "../src";
 
 const { bucket = "", accessKeyId = "", secretAccessKey = "" } = process.env;
 
-const bucketPrefix = "databases/auth-" + Date.now();
+const bucketPrefix = "databases/test-ex-auth-" + Date.now();
 const resourceName = `users`;
 
 const attributes = {
@@ -61,7 +61,6 @@ describe("resource [users]", function () {
 
   it("simple create single user", async function () {
     const createdResource = await client.resource("users").insert({
-      id: "mypersonal2@email.com",
       name: "My Complex Name",
       email: "mypersonal2@email.com",
       password: "my-strong-password",
@@ -73,6 +72,7 @@ describe("resource [users]", function () {
       resourceName,
       id: createdResource.id,
     });
+
     await client.resource(resourceName).get(createdResource.id);
 
     expect(createdResource.id).toEqual(request.id);
@@ -80,18 +80,29 @@ describe("resource [users]", function () {
   });
 
   it("verbose bulk-create users", async function () {
+    const data = new Array(10).fill(0).map((v,k) => ({
+      name: "My Complex Name",
+      email: `bk-mypersonal+${k}@email.com`,
+      password: "my-strong-password",
+      mobileNumber: "+5511234567890",
+      invalidAttr: "this will disappear",
+    }))
+
     await client.bulkInsert({
       resourceName,
-      objects: [
-        {
-          id: `bk-mypersonal${Math.round(Math.random() * 1000)}@email.com`,
-          name: "My Complex Name",
-          email: "mypersona1l@email.com",
-          password: "my-strong-password",
-          mobileNumber: "+5511234567890",
-          invalidAttr: "this will disappear",
-        },
-      ],
+      objects: data,
     });
+  });
+
+  it("simple bulk-create users", async function () {
+    const data = new Array(10).fill(0).map((v,k) => ({
+      name: "My Complex Name",
+      email: `bk-mypersonal+${k}@email.com`,
+      password: "my-strong-password",
+      mobileNumber: "+5511234567890",
+      invalidAttr: "this will disappear",
+    }))
+
+    await client.resource(resourceName).bulkInsert(data);
   });
 });

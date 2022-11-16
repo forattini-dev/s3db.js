@@ -1,15 +1,20 @@
 import * as path from "path";
+import shortid from "shortid";
+import { Stream } from "stream";
 import { isObject } from "lodash";
 import { S3, Credentials } from "aws-sdk";
 
 import { NoSuchKey } from "./errors";
 
 export default class S3Client {
+  id: string;
+  client: any;
   bucket: string;
   keyPrefix: string;
-  client: any;
 
   constructor({ connectionString }: { connectionString: string }) {
+    this.id = shortid.generate();
+
     const uri = new URL(connectionString);
     this.bucket = uri.hostname;
 
@@ -58,28 +63,30 @@ export default class S3Client {
    */
   async putObject({
     key,
-    body,
     metadata,
+    contentType,
+    body,
+    contentEncoding,
   }: {
     key: string;
-    body: string | object;
     metadata?: object;
+    contentType?: string;
+    body: string | Stream | Uint8Array;
+    contentEncoding?: string | null | undefined;
   }) {
     try {
-      const request = await this.client
-        .putObject({
-          Bucket: this.bucket,
-          Key: path.join(this.keyPrefix, key),
-          Body: Buffer.from(
-            isObject(body) ? JSON.stringify(body, null, 2) : body
-          ),
-          Metadata: { ...metadata },
-        })
-        .promise();
+      const params: any = {
+        Bucket: this.bucket,
+        Key: path.join(this.keyPrefix, key),
+        Metadata: { ...metadata },
+        Body: body,
+        ContentType: contentType,
+        ContentEncoding: contentEncoding,
+      };
 
-      return request;
+      return this.client.putObject(params).promise();
     } catch (error) {
-      throw error;
+      throw Promise.reject(error);
     }
   }
 
@@ -124,7 +131,7 @@ export default class S3Client {
     prefix: string;
     maxKeys?: number;
     continuationToken: any;
-  }) : Promise<S3.ListObjectsV2Output> {
+  }): Promise<S3.ListObjectsV2Output> {
     try {
       const request = await this.client
         ?.listObjectsV2({
