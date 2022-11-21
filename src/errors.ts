@@ -62,6 +62,7 @@ export class InvalidResource extends BaseS3dbError {
   resourceName: any;
   attributes: any;
   validation: any;
+
   constructor({
     bucket,
     resourceName,
@@ -75,8 +76,9 @@ export class InvalidResource extends BaseS3dbError {
   }) {
     super({
       bucket,
-      message: `Resource not valid. Name=${resourceName} [s3://${bucket}]`,
+      message: `Resource is not valid. Name=${resourceName} [s3://${bucket}]. ${JSON.stringify(validation)}`,
     });
+
     this.resourceName = resourceName;
     this.attributes = attributes;
     this.validation = validation;

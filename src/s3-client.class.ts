@@ -1,22 +1,31 @@
 import * as path from "path";
-import shortid from "shortid";
+import { nanoid } from "nanoid";
 import { Stream } from "stream";
-import { isObject } from "lodash";
+import { chunk, isObject } from "lodash";
 import { S3, Credentials } from "aws-sdk";
 
 import { NoSuchKey } from "./errors";
+import PromisePool from "@supercharge/promise-pool";
 
 export default class S3Client {
   id: string;
   client: any;
   bucket: string;
   keyPrefix: string;
+  parallelism: number;
 
-  constructor({ connectionString }: { connectionString: string }) {
-    this.id = shortid.generate();
+  constructor({
+    connectionString,
+    parallelism = 10,
+  }: {
+    connectionString: string;
+    parallelism?: number;
+  }) {
+    this.id = nanoid(7);
 
     const uri = new URL(connectionString);
     this.bucket = uri.hostname;
+    this.parallelism = parallelism;
 
     let [, ...subpath] = uri.pathname.split("/");
     this.keyPrefix = [...(subpath || [])].join("/");
@@ -47,12 +56,12 @@ export default class S3Client {
     } catch (error: unknown) {
       if (error instanceof Error) {
         if (error.name === "NoSuchKey") {
-          throw new NoSuchKey({ bucket: this.bucket, key });
+          return Promise.reject(new NoSuchKey({ bucket: this.bucket, key }));
         } else {
           return Promise.reject(new Error(error.name));
         }
       }
-      throw error;
+      return Promise.reject(error);
     }
   }
 
@@ -86,7 +95,7 @@ export default class S3Client {
 
       return this.client.putObject(params).promise();
     } catch (error) {
-      throw Promise.reject(error);
+      return Promise.reject(error);
     }
   }
 
@@ -108,14 +117,81 @@ export default class S3Client {
       return request;
     } catch (error: unknown) {
       if (error instanceof Error) {
-        if (error.name === "NoSuchKey") {
-          throw new NoSuchKey({ bucket: this.bucket, key });
+        if (error.name === "NoSuchKey" || error.name === "NotFound") {
+          return Promise.reject(new NoSuchKey({ bucket: this.bucket, key }));
         } else {
           return Promise.reject(new Error(error.name));
         }
       }
-      throw error;
+      return Promise.reject(error);
     }
+  }
+
+  /**
+   * Proxy to AWS S3's deleteObject
+   * @param {Object} param
+   * @param {string} param.key
+   * @returns
+   */
+  async deleteObject(key: string) {
+    try {
+      const request = await this.client
+        ?.deleteObject({
+          Bucket: this.bucket,
+          Key: path.join(this.keyPrefix, key),
+        })
+        .promise();
+
+      return request;
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        if (error.name === "NoSuchKey") {
+          return Promise.reject(new NoSuchKey({ bucket: this.bucket, key }));
+        } else {
+          return Promise.reject(new Error(error.name));
+        }
+      }
+      return Promise.reject(error);
+    }
+  }
+
+  /**
+   * Proxy to AWS S3's deleteObjects
+   * @param {Object} param
+   * @param {string} param.keys
+   * @returns
+   */
+  async deleteObjects(keys: string[]) {
+    const packages = chunk(keys, 1000);
+
+    const { results, errors } = await PromisePool.for(packages)
+      .withConcurrency(this.parallelism)
+      .process(async (keys: string[]) => {
+        try {
+          const request = await this.client
+            ?.deleteObjects({
+              Bucket: this.bucket,
+              Delete: {
+                Objects: keys.map((key) => ({
+                  Key: path.join(this.keyPrefix, key),
+                })),
+              },
+            })
+            .promise();
+
+          return request;
+        } catch (error: unknown) {
+          if (error instanceof Error) {
+            return Promise.reject(new Error(error.name));
+          }
+          return Promise.reject(error);
+        }
+      });
+
+    return {
+      deleted: results,
+      notFound: errors,
+    };
   }
 
   /**
@@ -148,7 +224,7 @@ export default class S3Client {
       if (error instanceof Error) {
         return Promise.reject(new Error(error.name));
       }
-      throw error;
+      return Promise.reject(error);
     }
   }
 }
