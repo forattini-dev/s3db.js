@@ -36,14 +36,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
-const shortid_1 = __importDefault(require("shortid"));
+const nanoid_1 = require("nanoid");
+const lodash_1 = require("lodash");
 const aws_sdk_1 = require("aws-sdk");
 const errors_1 = require("./errors");
+const promise_pool_1 = __importDefault(require("@supercharge/promise-pool"));
 class S3Client {
-    constructor({ connectionString }) {
-        this.id = shortid_1.default.generate();
+    constructor({ connectionString, parallelism = 10, }) {
+        this.id = (0, nanoid_1.nanoid)();
         const uri = new URL(connectionString);
         this.bucket = uri.hostname;
+        this.parallelism = parallelism;
         let [, ...subpath] = uri.pathname.split("/");
         this.keyPrefix = [...(subpath || [])].join("/");
         this.client = new aws_sdk_1.S3({
@@ -71,13 +74,13 @@ class S3Client {
             catch (error) {
                 if (error instanceof Error) {
                     if (error.name === "NoSuchKey") {
-                        throw new errors_1.NoSuchKey({ bucket: this.bucket, key });
+                        return Promise.reject(new errors_1.NoSuchKey({ bucket: this.bucket, key }));
                     }
                     else {
                         return Promise.reject(new Error(error.name));
                     }
                 }
-                throw error;
+                return Promise.reject(error);
             }
         });
     }
@@ -100,7 +103,7 @@ class S3Client {
                 return this.client.putObject(params).promise();
             }
             catch (error) {
-                throw Promise.reject(error);
+                return Promise.reject(error);
             }
         });
     }
@@ -122,15 +125,81 @@ class S3Client {
             }
             catch (error) {
                 if (error instanceof Error) {
-                    if (error.name === "NoSuchKey") {
-                        throw new errors_1.NoSuchKey({ bucket: this.bucket, key });
+                    if (error.name === "NoSuchKey" || error.name === "NotFound") {
+                        return Promise.reject(new errors_1.NoSuchKey({ bucket: this.bucket, key }));
                     }
                     else {
                         return Promise.reject(new Error(error.name));
                     }
                 }
-                throw error;
+                return Promise.reject(error);
             }
+        });
+    }
+    /**
+     * Proxy to AWS S3's deleteObject
+     * @param {Object} param
+     * @param {string} param.key
+     * @returns
+     */
+    deleteObject(key) {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const request = yield ((_a = this.client) === null || _a === void 0 ? void 0 : _a.deleteObject({
+                    Bucket: this.bucket,
+                    Key: path.join(this.keyPrefix, key),
+                }).promise());
+                return request;
+            }
+            catch (error) {
+                if (error instanceof Error) {
+                    if (error.name === "NoSuchKey") {
+                        return Promise.reject(new errors_1.NoSuchKey({ bucket: this.bucket, key }));
+                    }
+                    else {
+                        return Promise.reject(new Error(error.name));
+                    }
+                }
+                return Promise.reject(error);
+            }
+        });
+    }
+    /**
+     * Proxy to AWS S3's deleteObjects
+     * @param {Object} param
+     * @param {string} param.keys
+     * @returns
+     */
+    deleteObjects(keys) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const packages = (0, lodash_1.chunk)(keys, 1000);
+            const { results, errors } = yield promise_pool_1.default.for(packages)
+                .withConcurrency(this.parallelism)
+                .process((keys) => __awaiter(this, void 0, void 0, function* () {
+                var _a;
+                try {
+                    const request = yield ((_a = this.client) === null || _a === void 0 ? void 0 : _a.deleteObjects({
+                        Bucket: this.bucket,
+                        Delete: {
+                            Objects: keys.map((key) => ({
+                                Key: path.join(this.keyPrefix, key),
+                            })),
+                        },
+                    }).promise());
+                    return request;
+                }
+                catch (error) {
+                    if (error instanceof Error) {
+                        return Promise.reject(new Error(error.name));
+                    }
+                    return Promise.reject(error);
+                }
+            }));
+            return {
+                deleted: results,
+                notFound: errors,
+            };
         });
     }
     /**
@@ -155,7 +224,7 @@ class S3Client {
                 if (error instanceof Error) {
                     return Promise.reject(new Error(error.name));
                 }
-                throw error;
+                return Promise.reject(error);
             }
         });
     }

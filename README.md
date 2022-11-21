@@ -1,31 +1,40 @@
 # s3db.js
 
-Hey guys, there is an another way to create the cheapest database possible with an easy ORM to handle your dataset!
-
-_Please, do not use in production._
+Hey guys, there is an another way to create a cheap database with an easy ORM to handle your dataset!
 
 1. <a href="#motivation">Motivation</a>
 1. <a href="#install">Install</a>
 1. <a href="#usage">Usage</a>
    1. <a href="#quick-setup">Quick Setup</a>
+   1. <a href="#insights">Insights</a>
    1. <a href="#client">Client</a>
-   1. <a href="#operations">Operations</a>
-      1. <a href="#creating-resources">Creating resources</a>
-      1. <a href="#inserting-data">Inserting data</a>
-      1. <a href="#bulk-inserting-data">Bulk inserting data</a>
+   1. <a href="#resources">Resources</a>
+      1. <a href="#create-resources">Create resources</a>
+      1. <a href="#insert-data">Insert data</a>
+      1. <a href="#bulk-insert-data">Bulk insert data</a>
       1. <a href="#get-data">Get data</a>
+      1. <a href="#delete-data">Delete data</a>
       1. <a href="#resource-read-stream">Resource read stream</a>
       1. List data (coming soon)
       1. Write stream (coming soon)
    1. <a href="#events">Events</a>
+   1. <a href="#s3-client">S3 Client</a>
 1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
 
 ## Motivation
 
+First of all:
+
+1. Nothing is for free, but it can be cheaper.
+2. I'm not responsible for your AWS Costs strategy, use `s3db.js` at your own risk.
+3. Please, do not use in production!
+
+**Let's go!**
+
 You might know AWS's S3 product for its high availability and its cheap pricing rules. I'll show you another clever and funny way to use S3.
 
-First of all, you need to know that AWS allows you define `metadata` to every single file you upload into your bucket. This attribute must be defined within a `2kb` limit using in `UTF-8` encoding. As this encoding [may vary the bytes width for each symbol](https://en.wikipedia.org/wiki/UTF-8) you may use [500 to 2000] chars of metadata storage. Follow the docs at [AWS S3 User Guide: Using metadata](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html#object-metadata).
+AWS allows you define `metadata` to every single file you upload into your bucket. This attribute must be defined within a `2kb` limit using in `UTF-8` encoding. As this encoding [may vary the bytes width for each symbol](https://en.wikipedia.org/wiki/UTF-8) you may use [500 to 2000] chars of metadata storage. Follow the docs at [AWS S3 User Guide: Using metadata](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html#object-metadata).
 
 There is another management subset of data called `tags` that is used globally as [key, value] params. You can assign 10 tags with the conditions of: the key must be at most 128 unicode chars lengthy and the value up to 256 chars. With those key-values we can use more `2.5kb` of data, unicode will allow you to use up to 2500 more chars. Follow the official docs at [AWS User Guide: Object Tagging](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html).
 
@@ -40,12 +49,7 @@ S3's pricing deep dive:
 
 Check by yourself the pricing page details at https://aws.amazon.com/s3/pricing/ and https://calculator.aws/#/addService/S3.
 
-Lets git it a try! :)
-
-### Insights
-
-- This implementation of Database ORM is focused on `key=value`, access like a document implementation, due to the fact that we are using S3 apis that work like that for files.
-- For better use of the <a href="#cache">`cache`</a>, the best is to use sequential ids with leading zeros (eq: 000001, 000002, 000003) due to s3 sorting keys method.
+Lets give it a try! :)
 
 ## Install
 
@@ -76,7 +80,8 @@ const s3db = new S3db({
   uri: `s3://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@${AWS_BUCKET}/databases/mydatabase`
 });
 
-s3db.connect()
+s3db
+  .connect()
   .then(() => console.log('connected!')))
 ```
 
@@ -88,6 +93,11 @@ dotenv.config();
 
 import S3db from "s3db.js";
 ```
+
+### Insights
+
+- This implementation of Database ORM is focused on `key=value`, access like a document implementation, due to the fact that we are using S3 apis that work like that for files.
+- For better use of the <a href="#cache">`cache`</a>, the best is to use sequential ids with leading zeros (eq: 000001, 000002, 000003) due to s3 sorting keys method.
 
 ### Client
 
@@ -119,12 +129,12 @@ Config example:
 ```javascript
 const options = {
   uri,
-  parallelism: 5,
+  parallelism: 25,
   passphrase: fs.readFileSync("./cert.pem"),
 };
 ```
 
-#### s3db.connect()
+##### s3db.connect()
 
 Interacts with the bucket to check:
 
@@ -163,20 +173,16 @@ It has this structure:
         "name": "0",
         "token": "1"
       },
-      "reversed": {
-        "0": "name",
-        "1": "token"
-      }
     }
   }
 }
 ```
 
-### Operations
+### Resources
 
-#### Creating resources
+#### Create resource
 
-Your "tables" will be resources:
+Resources are definitions of data collections.
 
 ```javascript
 // resource
@@ -194,16 +200,18 @@ const attributes = {
   },
 };
 
-await s3db.newResource({
+await s3db.createResource({
   resourceName: "leads",
   attributes,
 });
 
-// or chained method
+// or
 await s3db.resource("leads").define(attributes);
 ```
 
-We use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource.
+##### Attributes
+
+`s3db.js` use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource.
 
 As we need to store the resource definition within a JSON file, today you must use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) to define your resource.
 
@@ -221,13 +229,39 @@ By default, we start the validator with the params below to clean missing attrib
 }
 ```
 
+Some few examples:
 
-#### Inserting data
+```javascript
+const attributes = {
+  // few simple examples
+  name: "string|min:4|max:64|trim",
+  email: "email|nullable",
+  mobile: "string|optional",
+  count: "number|integer|positive",
+  corrency: "corrency|symbol:R$",
+  createdAt: "date",
+  website: "url",
+  id: "uuid",
+  ids: "array|items:uuid|unique",
+
+  // s3db defines a custom type "secret" that is encrypted
+  token: "secret",
+
+  // nested data works aswell
+  geo: {
+    lat: "number",
+    long: "number",
+    city: "string",
+  },
+};
+```
+
+#### Insert data
 
 ```javascript
 // data
 const attributes = {
-  id: "mypersonal@email.com",
+  id: "mypersonal@email.com", // if not defined a id will be generated!
   utm: {
     source: "abc",
   },
@@ -239,16 +273,12 @@ const attributes = {
   invalidAttr: "this attribute will disappear",
 };
 
-const insertedData = await s3db.insert({
-  resourceName,
-  attributes,
-});
-
-// or chained method
 const insertedData = await s3db.resource("leads").insert(attributes);
 ```
 
-#### Bulk inserting data
+If not defined an id attribute, `s3db` will use [`nanoid`](https://github.com/ai/nanoid) to generate a random unique id.
+
+#### Bulk insert data
 
 You may bulk insert data with a friendly method.
 
@@ -273,10 +303,7 @@ const objects = new Array(100).fill(0).map((v, k) => ({
   },
 }));
 
-await s3db.bulkInsert(resourceName, objects);
-
-// or chained method
-await s3db.resource(resourceName).bulkInsert(objects);
+await s3db.resource("leads").bulkInsert(objects);
 ```
 
 #### Get data
@@ -285,31 +312,30 @@ await s3db.resource(resourceName).bulkInsert(objects);
 // data
 const id = "1234567890";
 
-const obj = await s3db.getById({ resourceName, id });
-
-// or chained method
-const obj = await s3db.resource(resourceName).get(id);
+const obj = await s3db.resource("leads").get(id);
 ```
 
 #### Resource read stream
 
 ```javascript
-const readStream = await s3db.stream({ resourceName });
-
 // or chained method
-const readStream = await s3db.resource(resourceName).stream();
+const readStream = await s3db.resource("leads").stream();
 
-readStream.on("data", (data) => console.log("id =", data.id));
+readStream.on("id", (id) => console.log("id =", id));
+readStream.on("data", (lead) => console.log("lead.id =", lead.id));
 readStream.on("end", console.log("end"));
+```
+
+#### Delete data (coming soon)
+
+```javascript
+await s3db.resource("leads").delete(id);
 ```
 
 #### List data (coming soon)
 
 ```javascript
-await s3db.list({ resourceName, id });
-
-// or chained method
-await s3db.resource(resourceName).list();
+await s3db.resource("leads").list();
 ```
 
 #### Write stream (coming soon)
@@ -351,12 +377,81 @@ s3db.on("error", (error, resourceName, originalData) =>
 // s3db.resource("leads").bulkInsert(objects);
 ```
 
+#### on: id
+
+```javascript
+const stream = s3db.resource("leads").stream();
+
+stream.on("data", (id) => console.log("id = ", id));
+```
+
 #### on: data
 
 ```javascript
 const stream = s3db.resource("leads").stream();
 
-stream.on("data", (object) => console.log("id = ", object.id));
+stream.on("data", (obj) => console.log("id = ", obj.id));
+```
+
+### S3 Client
+
+`s3db` uses a proxied s3client that brings few handy and less verbose functions.
+
+```javascript
+import { S3Client } from "s3db.js/src/client";
+
+const client = new S3Client({ connectionString });
+```
+
+##### s3client.getObject()
+
+```javascript
+const { Body, Metadata } = await client.getObject({
+  key: `my-prefixed-file.csv`,
+});
+```
+
+##### s3client.putObject()
+
+```javascript
+const response = await client.putObject({
+  key: `my-prefixed-file.csv`,
+  contentType: "text/csv",
+  metadata: { a: "1", b: "2", c: "3" },
+  body: "a;b;c\n1;2;3\n4;5;6",
+});
+```
+
+##### s3client.headObject()
+
+```javascript
+const { Metadata } = await client.headObject({
+  key: `my-prefixed-file.csv`,
+});
+```
+
+##### s3client.deleteObject()
+
+```javascript
+const response = await client.deleteObject({
+  key: `my-prefixed-file.csv`,
+});
+```
+
+##### s3client.deleteObjects()
+
+```javascript
+const response = await client.deleteObject({
+  keys: [`my-prefixed-file.csv`, `my-other-prefixed-file.csv`],
+});
+```
+
+##### s3client.listObjects()
+
+```javascript
+const response = await client.listObjects({
+  prefix: `my-subdir.csv`,
+});
 ```
 
 ## Examples
@@ -430,7 +525,7 @@ resource leads zip size: 0.68 Mb
 
 ## Cost simulation
 
-You have a database with few tables:
+Lets try to simulate a big project where you have a database with a few tables:
 
 - pageviews: 100,000,000 lines of 100 bytes each
 - leads: 1,000,000 lines of 200 bytes each

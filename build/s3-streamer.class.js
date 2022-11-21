@@ -94,10 +94,7 @@ class ReadResourceStream extends node_stream_1.Readable {
         return __awaiter(this, void 0, void 0, function* () {
             let id = (obj.Key || "").replace(path.join(this.client.keyPrefix, `resource=${this.resourceName}`, "id="), "");
             this.emit("id", this.resourceName, id);
-            const data = yield this.s3db.getById({
-                resourceName: this.resourceName,
-                id,
-            });
+            const data = yield this.s3db.resource(this.resourceName).getById({ id });
             this.content.push(data);
         });
     }

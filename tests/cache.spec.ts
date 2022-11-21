@@ -36,8 +36,13 @@ describe("s3Cache", function () {
     expect(key).toContain("c:3");
   });
 
+  const serializers = [
+    Serializers.json, 
+    // Serializers.avro 
+  ]
+
   for (const compressData of [false, true]) {
-    for (const serializer of [Serializers.json, Serializers.avro]) {
+    for (const serializer of serializers) {
       const testName = `${compressData ? '[zipped] ' : ''}with [${serializer}] serializer`
 
       describe(testName, async function () {

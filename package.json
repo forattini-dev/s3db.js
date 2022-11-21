@@ -7,6 +7,9 @@
     "build": "rimraf ./build && tsc",
     "test": "ts-node node_modules/jasmine/bin/jasmine --config=jasmine.json",
     "tests": "npm run test",
+    "test:cache": "ts-node node_modules/jasmine/bin/jasmine --config=jasmine.json ./tests/cache.spec.ts",
+    "test:config": "ts-node node_modules/jasmine/bin/jasmine --config=jasmine.json ./tests/config.spec.ts",
+    "test:resources": "ts-node node_modules/jasmine/bin/jasmine --config=jasmine.json ./tests/resources.spec.ts",
     "ex-1": "cd examples; node bulk-insert.js",
     "ex-2": "cd examples; node read-stream.js",
     "ex-3": "cd examples; node read-stream-to-csv.js",
@@ -22,7 +25,6 @@
     "@types/node": "^18.8.2",
     "@types/pako": "^2.0.0",
     "@types/progress": "^2.0.5",
-    "@types/shortid": "^0.0.29",
     "dotenv": "^16.0.3",
     "esm": "^3.2.25",
     "fakerator": "^0.3.6",
@@ -41,7 +43,7 @@
     "fastest-validator": "^1.15.0",
     "flat": "^5.0.2",
     "lodash": "^4.17.21",
-    "shortid": "^2.2.16",
+    "nanoid": "3.3.4",
     "ts-mixer": "^6.0.1"
   }
 }
