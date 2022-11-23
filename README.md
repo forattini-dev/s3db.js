@@ -511,7 +511,7 @@ The processing power here was not the priority, just used my little nodebook Del
 
 Examples' random data uses [`fakerator`](https://github.com/icebob/fakerator), git it a try!
 
-#### [Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/bulk-insert.js)
+#### [Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/1-bulk-insert.js)
 
 ```bash
 $ npm run example:1
@@ -528,7 +528,7 @@ bulk-writing: 40.404s
 Total cost: 0.0500 USD
 ```
 
-#### [Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
+#### [Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/2-read-stream.js)
 
 ```bash
 $ npm run example:2
@@ -547,7 +547,7 @@ reading: 1:07.246 (m:ss.mmm)
 Total cost: 0.0041 USD
 ```
 
-#### [Resource read stream writing into a csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-csv.js)
+#### [Resource read stream writing into a csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/3-read-stream-to-csv.js)
 
 ```bash
 $ npm run example:3
@@ -564,7 +564,7 @@ reading-data: 1:23.852 (m:ss.mmm)
 Total size: 1.31 Mb
 ```
 
-#### [Resource read stream writing into a zipped csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-zip.js)
+#### [Resource read stream writing into a zipped csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/4-read-stream-to-zip.js)
 
 ```bash
 $ npm run example:4
@@ -581,7 +581,7 @@ reading-data: 1:13.078 (m:ss.mmm)
 Total zip size: 0.68 Mb
 ```
 
-#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/jwt-tokens.js)
+#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/5-jwt-tokens.js)
 
 ```bash
 $ npm run example:5
