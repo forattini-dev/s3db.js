@@ -9,7 +9,7 @@ Hey guys, there is an another way to create a cheap database with an easy ORM to
    1. <a href="#insights">Insights</a>
    1. <a href="#client">Client</a>
    1. <a href="#resources">Resources</a>
-      1. <a href="#create-resources">Create resources</a>
+      1. <a href="#create-a-resource">Create a resource</a>
       1. <a href="#insert-data">Insert data</a>
       1. <a href="#bulk-insert-data">Bulk insert data</a>
       1. <a href="#get-data">Get data</a>
@@ -21,6 +21,8 @@ Hey guys, there is an another way to create a cheap database with an easy ORM to
    1. <a href="#s3-client">S3 Client</a>
 1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
+   1. <a href="#big-example">Big Example</a>
+   1. <a href="#small-example">Small example</a>
 
 ## Motivation
 
@@ -34,20 +36,13 @@ First of all:
 
 You might know AWS's S3 product for its high availability and its cheap pricing rules. I'll show you another clever and funny way to use S3.
 
-AWS allows you define `metadata` to every single file you upload into your bucket. This attribute must be defined within a `2kb` limit using in `UTF-8` encoding. As this encoding [may vary the bytes width for each symbol](https://en.wikipedia.org/wiki/UTF-8) you may use [500 to 2000] chars of metadata storage. Follow the docs at [AWS S3 User Guide: Using metadata](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html#object-metadata).
+AWS allows you define `Metadata` to every single file you upload into your bucket. This attribute must be defined within a **2kb** limit using in `UTF-8` encoding. As this encoding [may vary the bytes width for each symbol](https://en.wikipedia.org/wiki/UTF-8) you may use [500 to 2000] chars of metadata storage. Follow the docs at [AWS S3 User Guide: Using metadata](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html#object-metadata).
 
 There is another management subset of data called `tags` that is used globally as [key, value] params. You can assign 10 tags with the conditions of: the key must be at most 128 unicode chars lengthy and the value up to 256 chars. With those key-values we can use more `2.5kb` of data, unicode will allow you to use up to 2500 more chars. Follow the official docs at [AWS User Guide: Object Tagging](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-tagging.html).
 
 With all this set you may store objects that should be able to store up to `4.5kb` of free space **per object**.
 
-S3's pricing deep dive:
-
-- Data volume [1 GB x 0.023 USD]: it relates to the total volume of storage used and requests volume but, in this implementation, we just upload `0 bytes` files.
-- GET Requests [1,000 GET requests in a month x 0.0000004 USD per request = 0.0004 USD]: every read requests
-- PUT Requests [1,000 PUT requests for S3 Standard Storage x 0.000005 USD per request = 0.005 USD]: every write request
-- Data transfer [Internet: 1 GB x 0.09 USD per GB = 0.09 USD]:
-
-Check by yourself the pricing page details at https://aws.amazon.com/s3/pricing/ and https://calculator.aws/#/addService/S3.
+Check the <a href="#cost-simulation">cost simulation</a> section below for a deep cost dive!
 
 Lets give it a try! :)
 
@@ -96,12 +91,13 @@ import S3db from "s3db.js";
 
 ### Insights
 
-- This implementation of Database ORM is focused on `key=value`, access like a document implementation, due to the fact that we are using S3 apis that work like that for files.
-- For better use of the <a href="#cache">`cache`</a>, the best is to use sequential ids with leading zeros (eq: 000001, 000002, 000003) due to s3 sorting keys method.
+- This implementation of ORM simulates a document repository. Due to the fact that `s3db.js` uses `aws-sdk`'s' S3 api; all requests are GET/PUT as `key=value` resources. So the best case scenario is to access like a document implementation.
+
+- For better use of the <a href="#cache">`cache`</a> (and listing), the best ID format is to use sequential ids with leading zeros (eq: 00001, 00002, 00003) due to S3 internal keys sorting method.
 
 ### Client
 
-Your `S3db` client can be initiated with options:
+Your `s3db.js` client can be initiated with options:
 
 |   option    | optional |                     description                     |   type    |   default   |
 | :---------: | :------: | :-------------------------------------------------: | :-------: | :---------: |
@@ -144,7 +140,7 @@ Interacts with the bucket to check:
 
 #### Metadata file
 
-`S3db` will generate a file `s3db.json` at the defined prefix.
+`s3db.js` will generate a file `s3db.json` at the defined prefix.
 
 It has this structure:
 
@@ -180,7 +176,7 @@ It has this structure:
 
 ### Resources
 
-#### Create resource
+#### Create a resource
 
 Resources are definitions of data collections.
 
@@ -211,25 +207,7 @@ await s3db.resource("leads").define(attributes);
 
 ##### Attributes
 
-`s3db.js` use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource.
-
-As we need to store the resource definition within a JSON file, today you must use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) to define your resource.
-
-By default, we start the validator with the params below to clean missing attributes definition.
-
-```javascript
-// fastest-validator params
-{
-  useNewCustomCheckerFunction: true,
-  defaults: {
-    object: {
-      strict: "remove",
-    },
-  },
-}
-```
-
-Some few examples:
+`s3db.js` use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource. Some few examples:
 
 ```javascript
 const attributes = {
@@ -256,6 +234,28 @@ const attributes = {
 };
 ```
 
+As we need to store the resource definition within a JSON file, to keep your definitions intact the best way is to use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) in your resource definition.
+
+##### Limitations:
+
+Defining the resource attributes:
+
+- `s3db.js` **will not handle functions** on your attributes like default value generators, etc.
+
+By default, we start the validator with the params below to clean missing attributes definition.
+
+```javascript
+// fastest-validator params
+{
+  useNewCustomCheckerFunction: true,
+  defaults: {
+    object: {
+      strict: "remove",
+    },
+  },
+}
+```
+
 #### Insert data
 
 ```javascript
@@ -276,7 +276,7 @@ const attributes = {
 const insertedData = await s3db.resource("leads").insert(attributes);
 ```
 
-If not defined an id attribute, `s3db` will use [`nanoid`](https://github.com/ai/nanoid) to generate a random unique id.
+If not defined an id attribute, `s3db.js` will use [`nanoid`](https://github.com/ai/nanoid) to generate a random unique id!
 
 #### Bulk insert data
 
@@ -293,7 +293,6 @@ const s3db = new S3db({
 Bulk insert:
 
 ```javascript
-// data
 const objects = new Array(100).fill(0).map((v, k) => ({
   id: `bulk-${k}@mymail.com`,
   lead: {
@@ -309,16 +308,24 @@ await s3db.resource("leads").bulkInsert(objects);
 #### Get data
 
 ```javascript
-// data
-const id = "1234567890";
+const obj = await s3db.resource("leads").get("mypersonal@email.com");
 
-const obj = await s3db.resource("leads").get(id);
+// {
+//   id: "mypersonal@email.com",
+//   utm: {
+//     source: "abc",
+//   },
+//   lead: {
+//     fullName: "My Complex Name",
+//     personalEmail: "mypersonal@email.com",
+//     mobileNumber: "+5511234567890",
+//   },
+// }
 ```
 
 #### Resource read stream
 
 ```javascript
-// or chained method
 const readStream = await s3db.resource("leads").stream();
 
 readStream.on("id", (id) => console.log("id =", id));
@@ -326,10 +333,10 @@ readStream.on("data", (lead) => console.log("lead.id =", lead.id));
 readStream.on("end", console.log("end"));
 ```
 
-#### Delete data (coming soon)
+#### Delete data
 
 ```javascript
-await s3db.resource("leads").delete(id);
+await s3db.resource("leads").deleteById(id);
 ```
 
 #### List data (coming soon)
@@ -346,36 +353,80 @@ await s3db.resource("leads").list();
 
 ### Events
 
-#### on: connected
+1. s3db
+   - connected
+   - resource.created
+   - resource.inserted
+   - resource.deleted
+   - error
+1. client
+   - action
+   - error
+1. resource
+   - id
+   - inserted
+   - deleted
+   - error
+1. stream
+   - resource.id
+   - resource.data
+   - error
+
+#### s3db
+
+##### connected
 
 ```javascript
-s3db.on("connected", () => console.log("connected"));
-
-// from
-// s3db.connect();
+s3db.on("connected", () => console.log("s3db connected"));
 ```
 
-#### on: inserted
+##### resource.created
 
 ```javascript
-s3db.on("inserted", (data) => console.log("created: ", data));
-
-// from
-// s3db.resource("leads").insert(attributes);
-// s3db.resource("leads").bulkInsert(objects);
-```
-
-#### on: error
-
-```javascript
-s3db.on("error", (error, resourceName, originalData) =>
-  console.error(error, resourceName, originalData)
+s3db.on("resource.created", (resourceName) =>
+  console.log(`resource ${resourceName} created`)
 );
-
-// from
-// s3db.resource("leads").insert(attributes);
-// s3db.resource("leads").bulkInsert(objects);
 ```
+
+##### resource.inserted
+
+```javascript
+s3db.on("resource.inserted", (resourceName, data) =>
+  console.log(`inserted ${resourceName}.id=${data.id}`)
+);
+```
+
+##### resource.deleted
+
+```javascript
+s3db.on("resource.deleted", (resourceName, data) =>
+  console.log(`deleted ${resourceName}.id=${data.id}`)
+);
+```
+
+##### error
+
+```javascript
+s3db.on("error", (error) => console.error(error));
+```
+
+#### s3Client
+##### action
+
+```javascript
+s3db.client.on("action", (action) =>
+  console.log(`resource ${resourceName} created`)
+);
+```
+
+##### error
+
+```javascript
+s3db.client.on("error", (error) => console.error(error));
+```
+
+#### resource
+
 
 #### on: id
 
@@ -395,7 +446,7 @@ stream.on("data", (obj) => console.log("id = ", obj.id));
 
 ### S3 Client
 
-`s3db` uses a proxied s3client that brings few handy and less verbose functions.
+`s3db.js` uses a proxied s3client that brings few handy and less verbose functions.
 
 ```javascript
 import { S3Client } from "s3db.js/src/client";
@@ -463,67 +514,97 @@ Examples' random data uses [`fakerator`](https://github.com/icebob/fakerator), g
 #### [Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/bulk-insert.js)
 
 ```bash
-npm run ex-1
+$ npm run example:1
 
-> s3db.js@1.0.0 ex-1
-> cd examples; node bulk-insert.js
+> s3db.js@1.0.0 example:1
+> cd examples; node 1-bulk-insert.js
 
 creating 10000 leads.
-parallelism of 100 requests.
+parallelism of 250 requests.
 
-bulk-writing  10000/10000 (100%)  [==============================]  235/bps  0.0s (42.6s)
-bulk-writing: 43.602s
+bulk-writing  10000/10000 (100%)  [==============================]  255/bps  0.0s (39.2s) [10001 requests]
+bulk-writing: 40.404s
+
+Total cost: 0.0500 USD
 ```
 
 #### [Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream.js)
 
 ```bash
-$ npm run ex-2
+$ npm run example:2
 
-> s3db.js@1.0.0 ex-2
-> cd examples; node read-stream.js
+> s3db.js@1.0.0 example:2
+> cd examples; node 2-read-stream.js
 
 reading 10000 leads.
-parallelism of 100 requests.
+parallelism of 250 requests.
 
-reading-ids   10000/10000 (100%)  [==============================]  42/bps  0.0s (235.8s)
-reading-data  10000/10000 (100%)  [==============================]  40/bps  0.0s (250.0s)
-reading: 4:15.908 (m:ss.mmm)
+reading-pages   40/1 (100%)  [==============================]  1/bps  0.0s (64.4s)
+reading-ids     10000/10000 (100%)  [==============================]  155/bps  0.0s (64.5s)
+reading-data    10000/10000 (100%)  [==============================]  153/bps  0.0s (65.3s)
+reading: 1:07.246 (m:ss.mmm)
+
+Total cost: 0.0041 USD
 ```
 
 #### [Resource read stream writing into a csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-csv.js)
 
 ```bash
-$ npm run ex-3
+$ npm run example:3
 
-> s3db.js@1.0.0 ex-3
-> cd examples; node read-stream-to-csv.js
+> s3db.js@1.0.0 example:3
+> cd examples; node 3-read-stream-to-csv.js
 
-parallelism of 100 requests.
+reading 10000 leads.
+parallelism of 250 requests.
 
-reading-data  10000/10000 (100%)  [==============================]  44/bps  0.0s (225.9s)
-reading-data: 3:49.192 (m:ss.mmm)
+reading-data  10000/10000 (100%)  [==============================]  123/bps  0.0s (81.3s)
+reading-data: 1:23.852 (m:ss.mmm)
 
-resource leads total size: 1.29 Mb
+Total size: 1.31 Mb
 ```
 
 #### [Resource read stream writing into a zipped csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/read-stream-to-zip.js)
 
 ```bash
-$ npm run ex-4
+$ npm run example:4
 
-> s3db.js@1.0.0 ex-4
-> cd examples; node read-stream-to-zip.js
+> s3db.js@1.0.0 example:4
+> cd examples; node 4-read-stream-to-zip.js
 
-parallelism of 100 requests.
+reading 10000 leads.
+parallelism of 250 requests.
 
-reading-data  10000/10000 (100%)  [==============================]  58/bps  0.0s (172.7s)
-reading-data: 3:04.934 (m:ss.mmm)
+reading-data  10000/10000 (100%)  [==============================]  141/bps  0.0s (71.0s)
+reading-data: 1:13.078 (m:ss.mmm)
 
-resource leads zip size: 0.68 Mb
+Total zip size: 0.68 Mb
+```
+
+#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/jwt-tokens.js)
+
+```bash
+$ npm run example:5
+
+> s3db.js@1.0.0 example:5
+> cd examples; node jwt-tokens.js
+
+Created tokens: .....
+Validated tokens: .....
 ```
 
 ## Cost simulation
+
+S3's pricing deep dive:
+
+- Data volume [1 GB x 0.023 USD]: it relates to the total volume of storage used and requests volume but, in this implementation, we just upload `0 bytes` files.
+- GET Requests [1,000 GET requests in a month x 0.0000004 USD per request = 0.0004 USD]: every read requests
+- PUT Requests [1,000 PUT requests for S3 Standard Storage x 0.000005 USD per request = 0.005 USD]: every write request
+- Data transfer [Internet: 1 GB x 0.09 USD per GB = 0.09 USD]:
+
+Check by yourself the pricing page details at https://aws.amazon.com/s3/pricing/ and https://calculator.aws/#/addService/S3.
+
+### Big example
 
 Lets try to simulate a big project where you have a database with a few tables:
 
@@ -573,3 +654,44 @@ If you want to read the whole database:
     Internet: 1 GB x 0.09 USD per GB = 0.09 USD
 
 It will cost 41.39 USD, once.
+
+### Small example
+
+Lets save some JWT tokens using the [RFC:7519](https://www.rfc-editor.org/rfc/rfc7519.html).
+
+```javascript
+const resource = await s3db
+  .resource('tokens')
+  .define({
+    iss: 'url|max:256',
+    sub: 'string',
+    aud: 'string',
+    exp: 'number',
+    email: 'email',
+    name: 'string',
+    scope: 'string',
+    email_verified: 'boolean',
+  })
+
+function generateToken () {
+  const token = createTokenLib(...)
+
+  await resource.insert({
+    id: token.jti || md5(token)
+    ...token,
+  })
+
+  return token
+}
+
+function validateToken (token) {
+  const id = token.jti || md5(token)
+
+  if (!validateTokenSignature(token, ...)) {
+    await resource.deleteById(id)
+    throw new Error('invalid-token')
+  }
+
+  return resource.getById(id)
+}
+```

@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 
 dotenv.config();
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 15 * 1000;
+jest.setTimeout(30 * 1000);
 
 import Fakerator from "fakerator";
 
@@ -45,7 +45,7 @@ describe("s3Cache", function () {
     for (const serializer of serializers) {
       const testName = `${compressData ? '[zipped] ' : ''}with [${serializer}] serializer`
 
-      describe(testName, async function () {
+      describe(testName, function () {
         const s3Cache = new S3Cache({
           compressData,
           serializer: Serializers[serializer],

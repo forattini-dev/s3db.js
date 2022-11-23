@@ -1,12 +1,33 @@
-// Global base error class
-export abstract class BaseError extends Error {
+// Errors interfaces
+export interface S3Error {
+  name: string;
+  message: string;
+  cause?: Error;
+}
+
+export interface S3dbError {
+  name: string;
+  message: string;
+  cause?: Error;
+}
+
+export class BaseError extends Error {
   bucket: any;
   thrownAt: Date;
-  constructor({ bucket, message }: { bucket: string; message: string }) {
-    super();
+  cause: Error | undefined;
+
+  constructor({ bucket, message, cause }: { bucket: string; message: string, cause?: Error }) {
+    super(message);
+
+    if (typeof Error.captureStackTrace === 'function') {
+      Error.captureStackTrace(this, this.constructor);
+    } else { 
+      this.stack = (new Error(message)).stack; 
+    }
+
     super.name = this.constructor.name;
-    super.message = message;
-    this.stack = this.stack;
+    this.name = this.constructor.name;
+    this.cause = cause
     this.thrownAt = new Date();
   }
 
@@ -19,17 +40,6 @@ export abstract class BaseError extends Error {
   }
 }
 
-// Errors interfaces
-export interface S3Error {
-  name: string;
-  message: string;
-}
-
-export interface S3dbError {
-  name: string;
-  message: string;
-}
-
 // AWS S3 errors
 export abstract class BaseS3Error extends BaseError implements S3Error {
   constructor({ bucket, message }: { bucket: string; message: string }) {
@@ -37,7 +47,7 @@ export abstract class BaseS3Error extends BaseError implements S3Error {
   }
 }
 
-export class NoSuchKey extends BaseS3Error {
+export class ClientNoSuchKey extends BaseS3Error {
   key: string;
   constructor({ bucket, key }: { bucket: string; key: string }) {
     super({ bucket, message: `Key does not exists [s3://${bucket}/${key}]` });
@@ -47,18 +57,18 @@ export class NoSuchKey extends BaseS3Error {
 
 // Our errors
 export abstract class BaseS3dbError extends BaseError implements S3dbError {
-  constructor({ bucket, message }: { bucket: string; message: string }) {
-    super({ bucket, message });
+  constructor({ bucket, message, cause }: { bucket: string; message: string, cause?: Error }) {
+    super({ bucket, message, cause });
   }
 }
 
-export class MissingMetadata extends BaseS3dbError {
-  constructor({ bucket }: { bucket: string }) {
-    super({ bucket, message: `Missing metadata for bucket [s3://${bucket}]` });
+export class S3dbMissingMetadata extends BaseS3dbError {
+  constructor({ bucket, cause }: { bucket: string, cause?: Error }) {
+    super({ bucket, cause, message: `Missing metadata for bucket [s3://${bucket}]` });
   }
 }
 
-export class InvalidResource extends BaseS3dbError {
+export class S3dbInvalidResource extends BaseS3dbError {
   resourceName: any;
   attributes: any;
   validation: any;
@@ -76,7 +86,7 @@ export class InvalidResource extends BaseS3dbError {
   }) {
     super({
       bucket,
-      message: `Resource is not valid. Name=${resourceName} [s3://${bucket}]. ${JSON.stringify(validation)}`,
+      message: `Resource is not valid. Name=${resourceName} [s3://${bucket}].\n${JSON.stringify(validation, null, 2)}`,
     });
 
     this.resourceName = resourceName;

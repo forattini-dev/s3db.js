@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 
 dotenv.config();
-jasmine.DEFAULT_TIMEOUT_INTERVAL = 15 * 1000;
+jest.setTimeout(30 * 1000);
 
 import S3db from "../src";
 

@@ -1,13 +1,15 @@
+import { flatten } from "flat";
+import { isEmpty } from "lodash";
 import EventEmitter from "events";
-import { flatten, } from "flat";
 
 import Resource from "./resource.class";
 import S3Client from "./s3-client.class";
-import S3Streamer from "./s3-streamer.class";
 import { ValidatorFactory } from "./validator";
 import ConfigInterface from "./config.interface";
 import MetadataInterface from "./metadata.interface";
-import { MissingMetadata, NoSuchKey } from "./errors";
+import { S3dbMissingMetadata, ClientNoSuchKey } from "./errors";
+import { MetadataResourceInterface } from "./resource.interface";
+import PluginInterface from "./plugin.interface";
 
 export default class S3db extends EventEmitter {
   options: ConfigInterface;
@@ -18,8 +20,9 @@ export default class S3db extends EventEmitter {
   metadata: MetadataInterface;
   validatorInstance: any;
   parallelism: number;
-  streamer: S3Streamer;
   resources: any;
+  passphrase: string | undefined;
+  plugins: PluginInterface[];
 
   /**
    * Constructor
@@ -27,10 +30,13 @@ export default class S3db extends EventEmitter {
   constructor(options: ConfigInterface) {
     super();
 
+    this.resources = {};
     this.version = "1";
     this.options = options;
     this.parallelism = parseInt(options.parallelism + "") || 10;
     this.metadata = this.blankMetadataStructure();
+    this.passphrase = options?.passphrase;
+    this.plugins = options.plugins || [];
 
     this.validatorInstance = ValidatorFactory({
       passphrase: options?.passphrase,
@@ -38,18 +44,13 @@ export default class S3db extends EventEmitter {
 
     this.client = new S3Client({
       connectionString: options.uri,
+      parallelism: this.parallelism,
     });
 
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
 
-    this.streamer = new S3Streamer({
-      s3db: this,
-      client: this.client,
-      parallelism: this.parallelism,
-    });
-
-    this.resources = {};
+    this.startPlugins();
   }
 
   /**
@@ -59,9 +60,9 @@ export default class S3db extends EventEmitter {
     try {
       this.metadata = await this.getMetadataFile();
     } catch (error) {
-      if (error instanceof MissingMetadata) {
+      if (error instanceof S3dbMissingMetadata) {
         this.metadata = this.blankMetadataStructure();
-        await this.setMetadataFile();
+        await this.uploadMetadataFile();
       } else {
         this.emit("error", error);
         throw error;
@@ -69,18 +70,27 @@ export default class S3db extends EventEmitter {
     }
 
     Object.entries(this.metadata.resources).forEach(
-      ([name, schema]: [string, any]) => {
+      ([name, resource]: [string, any]) => {
         this.resources[name] = new Resource({
           name,
-          schema,
-          s3Client: this.client,
           s3db: this,
+          s3Client: this.client,
+          schema: resource.schema,
+          options: resource.options,
           validatorInstance: this.validatorInstance,
         });
       }
     );
 
-    this.emit("connected", this);
+    this.emit("connected", new Date());
+  }
+
+  async startPlugins() {
+    if (this.plugins && !isEmpty(this.plugins)) {
+      const startProms = this.plugins.map((plugin) => plugin.setup(this));
+      await Promise.all(startProms);
+      this.plugins.map((plugin) => plugin.start());
+    }
   }
 
   /**
@@ -91,17 +101,35 @@ export default class S3db extends EventEmitter {
   private async getMetadataFile() {
     try {
       const request = await this.client.getObject({ key: `s3db.json` });
-      return JSON.parse(String(request?.Body));
+      const metadata = JSON.parse(String(request?.Body));
+      return this.unserializeMetadata(metadata);
     } catch (error: unknown) {
-      if (error instanceof NoSuchKey) {
-        throw new MissingMetadata({ bucket: this.bucket });
+      if (error instanceof ClientNoSuchKey) {
+        return Promise.reject(
+          new S3dbMissingMetadata({ bucket: this.bucket, cause: error })
+        );
       } else {
-        throw error;
+        return Promise.reject(error);
       }
     }
   }
 
-  async setMetadataFile() {
+  private unserializeMetadata(metadata: any) {
+    const file = { ...metadata };
+    if (isEmpty(file.resources)) return file;
+
+    for (const [name, structure] of Object.entries(
+      file.resources as MetadataResourceInterface[]
+    )) {
+      for (const [attr, value] of Object.entries(structure.schema)) {
+        file.resources[name].schema[attr] = JSON.parse(value as any);
+      }
+    }
+
+    return file;
+  }
+
+  async uploadMetadataFile() {
     await this.client.putObject({
       key: `s3db.json`,
       body: JSON.stringify(this.metadata, null, 2),
@@ -135,21 +163,26 @@ export default class S3db extends EventEmitter {
     attributes: any;
     options?: any;
   }) {
-    const schema: any = flatten(attributes);
+    const schema: any = flatten(attributes, { safe: true });
 
     const resource = new Resource({
-      s3db: this,
-      s3Client: this.client,
-      name: resourceName,
       schema,
+      options: {
+        autoDecrypt: true,
+        ...options,
+      },
+      s3db: this,
+      name: resourceName,
+      s3Client: this.client,
       validatorInstance: this.validatorInstance,
     });
 
     this.resources[resourceName] = resource;
     this.metadata.resources[resourceName] = resource.export();
 
-    await this.setMetadataFile();
-    return this.resource(resourceName);
+    await this.uploadMetadataFile();
+
+    return resource;
   }
 
   /**
