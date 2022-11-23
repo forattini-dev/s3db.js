@@ -47,27 +47,31 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
+const crypto_js_1 = __importDefault(require("crypto-js"));
 const nanoid_1 = require("nanoid");
 const events_1 = __importDefault(require("events"));
 const lodash_1 = require("lodash");
 const flat_1 = require("flat");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const errors_1 = require("./errors");
+const resource_ids_read_stream_class_1 = __importDefault(require("./stream/resource-ids-read-stream.class"));
+const resource_ids_transformer_class_1 = __importDefault(require("./stream/resource-ids-transformer.class"));
 class Resource extends events_1.default {
     /**
      * Constructor
      */
-    constructor(options) {
+    constructor(params) {
         super();
-        this.options = options;
-        this.name = options.name;
-        this.schema = options.schema;
-        this.s3db = options.s3db;
-        this.client = options.s3Client;
-        this.validator = options.validatorInstance.compile(this.schema);
+        this.s3db = params.s3db;
+        this.name = params.name;
+        this.schema = params.schema;
+        this.options = params.options;
+        this.client = params.s3Client;
+        this.validator = params.validatorInstance.compile(this.schema);
         const { mapObj, reversedMapObj } = this.getMappersFromSchema(this.schema);
         this.mapObj = mapObj;
         this.reversedMapObj = reversedMapObj;
+        this.studyOptions();
     }
     getMappersFromSchema(schema) {
         let i = 0;
@@ -85,12 +89,42 @@ class Resource extends events_1.default {
         };
     }
     export() {
-        return {
+        const data = {
             name: this.name,
-            options: {},
             schema: this.schema,
             mapper: this.mapObj,
+            options: this.options,
         };
+        for (const [name, definition] of Object.entries(this.schema)) {
+            data.schema[name] = JSON.stringify(definition);
+        }
+        return data;
+    }
+    studyOptions() {
+        if (!this.options.afterUnmap)
+            this.options.beforeMap = [];
+        if (!this.options.afterUnmap)
+            this.options.afterUnmap = [];
+        const schema = (0, flat_1.flatten)(this.schema, { safe: true });
+        for (const [name, definition] of Object.entries(schema)) {
+            if (definition.includes("secret")) {
+                if (this.options.autoDecrypt === true) {
+                    this.options.afterUnmap.push({ attribute: name, action: "decrypt" });
+                }
+            }
+            if (definition.includes("array")) {
+                this.options.beforeMap.push({ attribute: name, action: "fromArray" });
+                this.options.afterUnmap.push({ attribute: name, action: "toArray" });
+            }
+            if (definition.includes("number")) {
+                this.options.beforeMap.push({ attribute: name, action: "toString" });
+                this.options.afterUnmap.push({ attribute: name, action: "toNumber" });
+            }
+            if (definition.includes("boolean")) {
+                this.options.beforeMap.push({ attribute: name, action: "toJson" });
+                this.options.afterUnmap.push({ attribute: name, action: "fromJson" });
+            }
+        }
     }
     check(data) {
         const result = {
@@ -108,19 +142,48 @@ class Resource extends events_1.default {
         return Object.assign(Object.assign({}, result), { data });
     }
     validate(data) {
-        return this.check((0, flat_1.flatten)(data));
+        return this.check((0, flat_1.flatten)(data, { safe: true }));
     }
     map(data) {
-        return Object.entries(data).reduce((acc, [key, value]) => {
-            acc[this.mapObj[key]] = value;
+        let obj = Object.assign({}, data);
+        for (const rule of this.options.beforeMap) {
+            if (rule.action === "fromArray") {
+                obj[rule.attribute] = (obj[rule.attribute] || []).join("|");
+            }
+            else if (rule.action === "toString") {
+                obj[rule.attribute] = String(obj[rule.attribute]);
+            }
+            else if (rule.action === "toJson") {
+                obj[rule.attribute] = JSON.stringify(obj[rule.attribute]);
+            }
+        }
+        obj = Object.entries(obj).reduce((acc, [key, value]) => {
+            acc[this.mapObj[key]] = (0, lodash_1.isArray)(value) ? value.join("|") : value;
             return acc;
         }, {});
+        return obj;
     }
     unmap(data) {
-        return Object.entries(data).reduce((acc, [key, value]) => {
+        const obj = Object.entries(data).reduce((acc, [key, value]) => {
             acc[this.reversedMapObj[key]] = value;
             return acc;
         }, {});
+        for (const rule of this.options.afterUnmap) {
+            if (rule.action === "decrypt") {
+                const decrypted = crypto_js_1.default.AES.decrypt(obj[rule.attribute], String(this.s3db.passphrase));
+                obj[rule.attribute] = decrypted.toString(crypto_js_1.default.enc.Utf8);
+            }
+            else if (rule.action === "toArray") {
+                obj[rule.attribute] = (obj[rule.attribute] || "").split("|");
+            }
+            else if (rule.action === "toNumber") {
+                obj[rule.attribute] = Number(obj[rule.attribute] || "");
+            }
+            else if (rule.action === "fromJson") {
+                obj[rule.attribute] = JSON.parse(obj[rule.attribute]);
+            }
+        }
+        return obj;
     }
     /**
      * Inserts a new object into the resource list.
@@ -129,11 +192,13 @@ class Resource extends events_1.default {
      */
     insert(attributes) {
         return __awaiter(this, void 0, void 0, function* () {
-            let _a = (0, flat_1.flatten)(attributes), { id } = _a, attrs = __rest(_a, ["id"]);
+            let _a = (0, flat_1.flatten)(attributes, {
+                safe: true,
+            }), { id } = _a, attrs = __rest(_a, ["id"]);
             // validate
             const { isValid, errors, data: validated } = this.check(attrs);
             if (!isValid) {
-                return Promise.reject(new errors_1.InvalidResource({
+                return Promise.reject(new errors_1.S3dbInvalidResource({
                     bucket: this.client.bucket,
                     resourceName: this.name,
                     attributes,
@@ -166,8 +231,13 @@ class Resource extends events_1.default {
                 key: path.join(`resource=${this.name}`, `id=${id}`),
             });
             let data = this.unmap(request.Metadata);
-            data.id = id;
             data = (0, flat_1.unflatten)(data);
+            data.id = id;
+            data._length = request.ContentLength;
+            data._createdAt = request.LastModified;
+            data._checksum = request.ChecksumSHA256;
+            if (request.Expiration)
+                data._expiresAt = request.Expiration;
             this.emit("got", data);
             this.s3db.emit("got", this.name, data);
             return data;
@@ -205,20 +275,15 @@ class Resource extends events_1.default {
             return results;
         });
     }
+    /**
+     *
+     * @returns number
+     */
     count() {
         return __awaiter(this, void 0, void 0, function* () {
-            let count = 0;
-            let truncated = true;
-            let continuationToken;
-            while (truncated) {
-                const res = yield this.client.listObjects({
-                    prefix: `resource=${this.name}`,
-                    continuationToken,
-                });
-                count += res.KeyCount || 0;
-                truncated = res.IsTruncated || false;
-                continuationToken = res.NextContinuationToken;
-            }
+            const count = yield this.client.count({
+                prefix: `resource=${this.name}`,
+            });
             return count;
         });
     }
@@ -248,29 +313,19 @@ class Resource extends events_1.default {
             return results;
         });
     }
-    listIds({ limit = 1000 } = {}) {
-        var _a;
+    getAllIds() {
         return __awaiter(this, void 0, void 0, function* () {
-            let ids = [];
-            let truncated = true;
-            let continuationToken;
-            while (truncated && ids.length < limit) {
-                const res = yield this.client.listObjects({
-                    prefix: `resource=${this.name}`,
-                    continuationToken,
-                });
-                ids = ids.concat((_a = res.Contents) === null || _a === void 0 ? void 0 : _a.map((x) => x.Key));
-                truncated = res.IsTruncated || false;
-                continuationToken = res.NextContinuationToken;
-            }
-            ids = ids.map((x) => x.replace(path.join(this.s3db.keyPrefix, `resource=${this.name}`, "id="), ""));
+            const keys = yield this.client.getAllKeys({
+                prefix: `resource=${this.name}`,
+            });
+            const ids = keys.map((x) => x.replace(path.join(`resource=${this.name}`, "id="), ""));
             return ids;
         });
     }
-    stream({ limit = 1000 }) {
-        return __awaiter(this, void 0, void 0, function* () {
-            return this.s3db.streamer.resourceRead({ resourceName: this.name });
-        });
+    stream() {
+        const stream = new resource_ids_read_stream_class_1.default({ resource: this });
+        const transformer = new resource_ids_transformer_class_1.default({ resource: this });
+        return stream.pipe(transformer);
     }
 }
 exports.default = Resource;

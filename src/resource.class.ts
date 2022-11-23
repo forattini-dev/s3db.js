@@ -1,19 +1,22 @@
 import * as path from "path";
 import { S3 } from "aws-sdk";
+import Crypto from "crypto-js";
 import { nanoid } from "nanoid";
 import EventEmitter from "events";
-import { sortBy, chunk } from "lodash";
+import { sortBy, chunk, isArray } from "lodash";
 import { flatten, unflatten } from "flat";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import S3db from "./s3db.class";
 import S3Client from "./s3-client.class";
-import { InvalidResource } from "./errors";
+import { S3dbInvalidResource } from "./errors";
+import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class";
 
 import {
   ResourceInterface,
   ResourceConfigInterface,
 } from "./resource.interface";
+import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class";
 
 export default class Resource
   extends EventEmitter
@@ -31,19 +34,22 @@ export default class Resource
   /**
    * Constructor
    */
-  constructor(options: ResourceConfigInterface) {
+  constructor(params: ResourceConfigInterface) {
     super();
 
-    this.options = options;
-    this.name = options.name;
-    this.schema = options.schema;
-    this.s3db = options.s3db;
-    this.client = options.s3Client;
-    this.validator = options.validatorInstance.compile(this.schema);
+    this.s3db = params.s3db;
+    this.name = params.name;
+    this.schema = params.schema;
+    this.options = params.options;
+    this.client = params.s3Client;
+
+    this.validator = params.validatorInstance.compile(this.schema);
 
     const { mapObj, reversedMapObj } = this.getMappersFromSchema(this.schema);
     this.mapObj = mapObj;
     this.reversedMapObj = reversedMapObj;
+
+    this.studyOptions();
   }
 
   getMappersFromSchema(schema: any) {
@@ -72,12 +78,45 @@ export default class Resource
   }
 
   export() {
-    return {
+    const data = {
       name: this.name,
-      options: {},
       schema: this.schema,
       mapper: this.mapObj,
+      options: this.options,
     };
+
+    for (const [name, definition] of Object.entries(this.schema)) {
+      data.schema[name] = JSON.stringify(definition as any);
+    }
+
+    return data;
+  }
+
+  studyOptions() {
+    if (!this.options.afterUnmap) this.options.beforeMap = [];
+    if (!this.options.afterUnmap) this.options.afterUnmap = [];
+
+    const schema: any = flatten(this.schema, { safe: true });
+
+    for (const [name, definition] of Object.entries(schema)) {
+      if ((definition as string).includes("secret")) {
+        if (this.options.autoDecrypt === true) {
+          this.options.afterUnmap.push({ attribute: name, action: "decrypt" });
+        }
+      }
+      if ((definition as string).includes("array")) {
+        this.options.beforeMap.push({ attribute: name, action: "fromArray" });
+        this.options.afterUnmap.push({ attribute: name, action: "toArray" });
+      }
+      if ((definition as string).includes("number")) {
+        this.options.beforeMap.push({ attribute: name, action: "toString" });
+        this.options.afterUnmap.push({ attribute: name, action: "toNumber" });
+      }
+      if ((definition as string).includes("boolean")) {
+        this.options.beforeMap.push({ attribute: name, action: "toJson" });
+        this.options.afterUnmap.push({ attribute: name, action: "fromJson" });
+      }
+    }
   }
 
   private check(data: any) {
@@ -102,21 +141,54 @@ export default class Resource
   }
 
   validate(data: any) {
-    return this.check(flatten(data));
+    return this.check(flatten(data, { safe: true }));
   }
 
   map(data: any) {
-    return Object.entries(data).reduce((acc: any, [key, value]) => {
-      acc[this.mapObj[key]] = value;
+    let obj: any = { ...data };
+
+    for (const rule of this.options.beforeMap) {
+      if (rule.action === "fromArray") {
+        obj[rule.attribute] = (obj[rule.attribute] || []).join("|");
+      } else if (rule.action === "toString") {
+        obj[rule.attribute] = String(obj[rule.attribute]);
+      } else if (rule.action === "toJson") {
+        obj[rule.attribute] = JSON.stringify(obj[rule.attribute]);
+      }
+    }
+
+    obj = Object.entries(obj).reduce((acc: any, [key, value]) => {
+      acc[this.mapObj[key]] = isArray(value) ? value.join("|") : value;
       return acc;
     }, {});
+
+    return obj;
   }
 
   unmap(data: any) {
-    return Object.entries(data).reduce((acc: any, [key, value]) => {
+    const obj = Object.entries(data).reduce((acc: any, [key, value]) => {
       acc[this.reversedMapObj[key]] = value;
       return acc;
     }, {});
+
+    for (const rule of this.options.afterUnmap) {
+      if (rule.action === "decrypt") {
+        const decrypted = Crypto.AES.decrypt(
+          obj[rule.attribute],
+          String(this.s3db.passphrase)
+        );
+
+        obj[rule.attribute] = decrypted.toString(Crypto.enc.Utf8);
+      } else if (rule.action === "toArray") {
+        obj[rule.attribute] = (obj[rule.attribute] || "").split("|");
+      } else if (rule.action === "toNumber") {
+        obj[rule.attribute] = Number(obj[rule.attribute] || "");
+      } else if (rule.action === "fromJson") {
+        obj[rule.attribute] = JSON.parse(obj[rule.attribute]);
+      }
+    }
+
+    return obj;
   }
 
   /**
@@ -125,14 +197,16 @@ export default class Resource
    * @returns
    */
   async insert(attributes: any) {
-    let { id, ...attrs }: { id: any; attrs: any } = flatten(attributes);
+    let { id, ...attrs }: { id: any; attrs: any } = flatten(attributes, {
+      safe: true,
+    });
 
     // validate
     const { isValid, errors, data: validated } = this.check(attrs);
 
     if (!isValid) {
       return Promise.reject(
-        new InvalidResource({
+        new S3dbInvalidResource({
           bucket: this.client.bucket,
           resourceName: this.name,
           attributes,
@@ -174,8 +248,14 @@ export default class Resource
     });
 
     let data: any = this.unmap(request.Metadata);
-    data.id = id;
     data = unflatten(data);
+
+    data.id = id;
+    data._length = request.ContentLength;
+    data._createdAt = request.LastModified;
+    data._checksum = request.ChecksumSHA256;
+
+    if (request.Expiration) data._expiresAt = request.Expiration;
 
     this.emit("got", data);
     this.s3db.emit("got", this.name, data);
@@ -216,21 +296,14 @@ export default class Resource
     return results;
   }
 
+  /**
+   * 
+   * @returns number
+   */
   async count() {
-    let count = 0;
-    let truncated = true;
-    let continuationToken;
-
-    while (truncated) {
-      const res: S3.ListObjectsV2Output = await this.client.listObjects({
-        prefix: `resource=${this.name}`,
-        continuationToken,
-      });
-
-      count += res.KeyCount || 0;
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
-    }
+    const count = await this.client.count({
+      prefix: `resource=${this.name}`,
+    });
 
     return count;
   }
@@ -267,32 +340,22 @@ export default class Resource
     return results;
   }
 
-  async listIds({ limit = 1000 }: { limit?: number } = {}) {
-    let ids: any[] = [];
-    let truncated = true;
-    let continuationToken;
+  async getAllIds() {
+    const keys = await this.client.getAllKeys({
+      prefix: `resource=${this.name}`,
+    });
 
-    while (truncated && ids.length < limit) {
-      const res: S3.ListObjectsV2Output = await this.client.listObjects({
-        prefix: `resource=${this.name}`,
-        continuationToken,
-      });
-
-      ids = ids.concat(res.Contents?.map((x) => x.Key));
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
-    }
-
-    ids = ids.map((x) =>
-      x.replace(
-        path.join(this.s3db.keyPrefix, `resource=${this.name}`, "id="),
-        ""
-      )
+    const ids = keys.map((x) =>
+      x.replace(path.join(`resource=${this.name}`, "id="), "")
     );
+
     return ids;
   }
 
-  async stream({ limit = 1000 }: { limit?: number }) {
-    return this.s3db.streamer.resourceRead({ resourceName: this.name });
+  stream() {
+    const stream = new ResourceIdsReadStream({ resource: this });
+    const transformer = new ResourceIdsToDataTransformer({ resource: this });
+
+    return stream.pipe(transformer);
   }
 }

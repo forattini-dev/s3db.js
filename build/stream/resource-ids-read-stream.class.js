@@ -32,22 +32,20 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ReadResourceStream = void 0;
 const path = __importStar(require("path"));
 const node_stream_1 = require("node:stream");
 const promise_pool_1 = require("@supercharge/promise-pool");
-class ReadResourceStream extends node_stream_1.Readable {
-    constructor({ s3db, client, resourceName, parallelism = 10, }) {
+const lodash_1 = require("lodash");
+class ResourceIdsReadStream extends node_stream_1.Readable {
+    constructor({ resource }) {
         super({
             objectMode: true,
+            highWaterMark: resource.client.parallelism,
         });
-        this.s3db = s3db;
-        this.client = client;
-        this.resourceName = resourceName;
-        this.continuationToken = null;
-        this.finishedReadingBucked = false;
+        this.resource = resource;
+        this.pagesCount = 0;
         this.content = [];
-        this.parallelism = parallelism;
+        this.finishedReadingResource = false;
         this.loading = this.getItems();
     }
     _read(size) {
@@ -56,7 +54,7 @@ class ReadResourceStream extends node_stream_1.Readable {
                 if (this.loading) {
                     yield this.loading;
                 }
-                else if (this.finishedReadingBucked) {
+                else if (this.finishedReadingResource) {
                     this.push(null);
                     return;
                 }
@@ -65,57 +63,38 @@ class ReadResourceStream extends node_stream_1.Readable {
             this.push(data);
         });
     }
-    getItems() {
+    getItems({ continuationToken = null, } = {}) {
         return __awaiter(this, void 0, void 0, function* () {
-            const res = yield this.client.listObjects({
-                prefix: `resource=${this.resourceName}`,
-                continuationToken: this.continuationToken,
-                maxKeys: (this.parallelism * 4) % 1000,
+            this.emit("page", this.pagesCount++);
+            const res = yield this.resource.client.listObjects({
+                prefix: `resource=${this.resource.name}`,
+                continuationToken,
             });
             if (res.Contents) {
-                yield promise_pool_1.PromisePool.for(res.Contents)
-                    .withConcurrency(this.parallelism)
+                const contents = (0, lodash_1.chunk)(res.Contents, this.resource.client.parallelism);
+                yield promise_pool_1.PromisePool.for(contents)
+                    .withConcurrency(5)
                     .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
                     this.emit("error", error, content);
                 }))
-                    .process((x) => this.addItem(x));
+                    .process((pkg) => {
+                    const ids = pkg.map((obj) => {
+                        return (obj.Key || "").replace(path.join(this.resource.client.keyPrefix, `resource=${this.resource.name}`, "id="), "");
+                    });
+                    this.content.push(ids);
+                    ids.forEach((id) => this.emit("id", this.resource.name, id));
+                });
             }
-            this.finishedReadingBucked = !res.IsTruncated;
+            this.finishedReadingResource = !res.IsTruncated;
             if (res.NextContinuationToken) {
-                this.continuationToken = res.NextContinuationToken;
-                this.loading = this.getItems();
+                this.loading = this.getItems({
+                    continuationToken: res.NextContinuationToken,
+                });
             }
             else {
                 this.loading = null;
             }
         });
     }
-    addItem(obj) {
-        return __awaiter(this, void 0, void 0, function* () {
-            let id = (obj.Key || "").replace(path.join(this.client.keyPrefix, `resource=${this.resourceName}`, "id="), "");
-            this.emit("id", this.resourceName, id);
-            const data = yield this.s3db.resource(this.resourceName).getById({ id });
-            this.content.push(data);
-        });
-    }
 }
-exports.ReadResourceStream = ReadResourceStream;
-class S3Streamer {
-    constructor({ s3db, client, parallelism, }) {
-        this.s3db = s3db;
-        this.client = client;
-        this.parallelism = parallelism;
-    }
-    resourceRead({ resourceName }) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const input = new ReadResourceStream({
-                s3db: this.s3db,
-                client: this.client,
-                resourceName,
-                parallelism: this.parallelism,
-            });
-            return input;
-        });
-    }
-}
-exports.default = S3Streamer;
+exports.default = ResourceIdsReadStream;

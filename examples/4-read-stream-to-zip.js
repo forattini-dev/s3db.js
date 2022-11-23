@@ -1,4 +1,4 @@
-require("dotenv").config({ path: `${__dirname}/../.env` });
+const { ENV, S3db } = require("./concerns");
 
 const fs = require("fs");
 const zlib = require("node:zlib");
@@ -6,25 +6,19 @@ const ProgressBar = require("progress");
 const { Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 
-const { S3db } = require("../build");
-
-const { bucket, accessKeyId, secretAccessKey } = process.env;
-
-const PARALLELISM = 100;
-const CONNECTION_STRING =
-  `s3://${accessKeyId}:${secretAccessKey}@${bucket}/databases/examples-` +
-  new Date().toISOString().substring(0, 10);
-
 async function main() {
-  const client = new S3db({
-    uri: CONNECTION_STRING,
-    parallelism: PARALLELISM,
+  const s3db = new S3db({
+    uri: ENV.CONNECTION_STRING,
+    parallelism: ENV.PARALLELISM,
+    passphrase: "super-secret",
   });
 
-  await client.connect();
-  const total = await client.resource("leads").count();
+  await s3db.connect();
+  const total = await s3db.resource("leads").count();
 
-  console.log(`parallelism of ${PARALLELISM} requests.\n`);
+  console.log(`reading ${total} leads.`);
+  console.log(`parallelism of ${ENV.PARALLELISM} requests.\n`);
+
   const barData = new ProgressBar(
     "reading-data  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds)",
     {
@@ -35,7 +29,7 @@ async function main() {
   );
 
   const filename = __dirname + "/tmp/leads." + Date.now() + ".csv.gzip";
-  const stream = await client.resource("leads").stream();
+  const stream = await s3db.resource("leads").stream();
   const streamWrite = fs.createWriteStream(filename);
 
   const transformer = new Transform({
@@ -51,11 +45,9 @@ async function main() {
   stream.on("data", () => barData.tick());
   stream.on("end", () => {
     console.timeEnd("reading-data");
+    process.stdout.write("\n");
     const { size } = fs.statSync(filename);
-    console.log(
-      `\nresource leads zip size: ${(size / (1024 * 1000)).toFixed(2)} Mb`
-    );
-    process.stdout.write("\n\n");
+    console.log(`\nTotal zip size: ${(size / (1024 * 1000)).toFixed(2)} Mb`);
   });
 
   pipeline(stream, transformer, zlib.createGzip(), streamWrite);

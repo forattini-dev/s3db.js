@@ -1,8 +1,0 @@
-{
-  "testExplorer.useNativeTesting": true,
-  "jasmineExplorer.config": "jasmine.json",
-  "jasmineExplorer.nodeArgv": [
-      "-r",
-      "ts-node/register",
-  ]
-}
