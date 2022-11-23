@@ -411,6 +411,7 @@ s3db.on("error", (error) => console.error(error));
 ```
 
 #### s3Client
+
 ##### action
 
 ```javascript
@@ -426,7 +427,6 @@ s3db.client.on("error", (error) => console.error(error));
 ```
 
 #### resource
-
 
 #### on: id
 
@@ -446,7 +446,7 @@ stream.on("data", (obj) => console.log("id = ", obj.id));
 
 ### S3 Client
 
-`s3db.js` uses a proxied s3client that brings few handy and less verbose functions.
+`s3db.js` has a S3 proxied client named [`S3Client`](https://github.com/forattini-dev/s3db.js/blob/main/src/s3-client.class.ts). It brings a few handy and less verbose functions to deal with AWS S3's api.
 
 ```javascript
 import { S3Client } from "s3db.js/src/client";
@@ -492,7 +492,7 @@ const response = await client.deleteObject({
 ##### s3client.deleteObjects()
 
 ```javascript
-const response = await client.deleteObject({
+const response = await client.deleteObjects({
   keys: [`my-prefixed-file.csv`, `my-other-prefixed-file.csv`],
 });
 ```
@@ -501,7 +501,25 @@ const response = await client.deleteObject({
 
 ```javascript
 const response = await client.listObjects({
-  prefix: `my-subdir.csv`,
+  prefix: `my-subdir`,
+});
+```
+
+##### s3client.count()
+
+```javascript
+const count = await client.count({
+  prefix: `my-subdir`,
+});
+```
+
+##### s3client.getAllKeys()
+
+All keys have the fullpath replaced into the current "scope" path.
+
+```javascript
+const keys = await client.getAllKeys({
+  prefix: `my-subdir`,
 });
 ```
 
