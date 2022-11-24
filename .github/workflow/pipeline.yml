@@ -1,0 +1,16 @@
+name: pipeline
+
+on:
+  push:
+  deployment:
+  release:
+    types: [created]
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  PKG:
+    uses: filipeforattini/ff-iac-github-actions/.github/workflows/pkg.yml@main
+    secrets: inherit
+    with:
+      mainBranch: main
