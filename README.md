@@ -234,15 +234,13 @@ const attributes = {
 };
 ```
 
-As we need to store the resource definition within a JSON file, to keep your definitions intact the best way is to use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) in your resource definition.
-
 ##### Limitations:
 
-Defining the resource attributes:
+As we need to store the resource definition within a JSON file, to keep your definitions intact the best way is to use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) in your resource definition.
 
-- `s3db.js` **will not handle functions** on your attributes like default value generators, etc.
+By design, in your resource definition, `s3db.js` **will not handle functions** on your attributes like default value generators, etc.
 
-By default, we start the validator with the params below to clean missing attributes definition.
+The `fastest-validator` starts with the params below:
 
 ```javascript
 // fastest-validator params
@@ -254,6 +252,14 @@ By default, we start the validator with the params below to clean missing attrib
     },
   },
 }
+```
+
+##### Reference:
+
+You may just use the reference:
+
+```javascript
+const Leads = s3db.resource("leads");
 ```
 
 #### Insert data
