@@ -10,7 +10,7 @@ import { ClientNoSuchKey } from "./errors";
 
 export default class S3Client extends EventEmitter {
   id: string;
-  client: any;
+  client: S3;
   bucket: string;
   keyPrefix: string;
   parallelism: number;
@@ -18,9 +18,11 @@ export default class S3Client extends EventEmitter {
   constructor({
     connectionString,
     parallelism = 10,
+    AwsS3,
   }: {
     connectionString: string;
     parallelism?: number;
+    AwsS3?: S3;
   }) {
     super();
     this.id = nanoid(7);
@@ -32,12 +34,14 @@ export default class S3Client extends EventEmitter {
     let [, ...subpath] = uri.pathname.split("/");
     this.keyPrefix = [...(subpath || [])].join("/");
 
-    this.client = new S3({
-      credentials: new Credentials({
-        accessKeyId: uri.username,
-        secretAccessKey: uri.password,
-      }),
-    });
+    this.client =
+      AwsS3 ||
+      new S3({
+        credentials: new Credentials({
+          accessKeyId: uri.username,
+          secretAccessKey: uri.password,
+        }),
+      });
   }
 
   /**
@@ -227,7 +231,7 @@ export default class S3Client extends EventEmitter {
         Bucket: this.bucket,
         MaxKeys: maxKeys,
         ContinuationToken: continuationToken,
-        Prefix: prefix ? path.join(this.keyPrefix, prefix) : this.keyPrefix,
+        Prefix: path.join(this.keyPrefix, prefix || ""),
       };
 
       const response = await this.client.listObjectsV2(options).promise();

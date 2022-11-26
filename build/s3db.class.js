@@ -50,29 +50,31 @@ class S3db extends events_1.default {
      */
     connect() {
         return __awaiter(this, void 0, void 0, function* () {
+            let metadata = null;
             try {
-                this.metadata = yield this.getMetadataFile();
+                metadata = yield this.getMetadataFile();
             }
             catch (error) {
                 if (error instanceof errors_1.S3dbMissingMetadata) {
-                    this.metadata = this.blankMetadataStructure();
+                    metadata = this.blankMetadataStructure();
                     yield this.uploadMetadataFile();
                 }
                 else {
                     this.emit("error", error);
-                    throw error;
+                    return Promise.reject(error);
                 }
             }
-            Object.entries(this.metadata.resources).forEach(([name, resource]) => {
+            for (const resource of Object.entries(metadata.resources)) {
+                const [name, definition] = resource;
                 this.resources[name] = new resource_class_1.default({
                     name,
                     s3db: this,
                     s3Client: this.client,
-                    schema: resource.schema,
-                    options: resource.options,
+                    schema: definition.schema,
+                    options: definition.options,
                     validatorInstance: this.validatorInstance,
                 });
-            });
+            }
             this.emit("connected", new Date());
         });
     }
@@ -120,9 +122,17 @@ class S3db extends events_1.default {
     }
     uploadMetadataFile() {
         return __awaiter(this, void 0, void 0, function* () {
+            const file = {
+                version: this.version,
+                resources: Object.entries(this.resources).reduce((acc, definition) => {
+                    const [name, resource] = definition;
+                    acc[name] = resource.export();
+                    return acc;
+                }, {})
+            };
             yield this.client.putObject({
                 key: `s3db.json`,
-                body: JSON.stringify(this.metadata, null, 2),
+                body: JSON.stringify(file, null, 2),
             });
         });
     }
@@ -155,7 +165,6 @@ class S3db extends events_1.default {
                 validatorInstance: this.validatorInstance,
             });
             this.resources[resourceName] = resource;
-            this.metadata.resources[resourceName] = resource.export();
             yield this.uploadMetadataFile();
             return resource;
         });

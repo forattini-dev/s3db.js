@@ -5,8 +5,8 @@ const Multiprogress = require("multi-progress");
 async function main() {
   const s3db = new S3db({
     uri: ENV.CONNECTION_STRING,
+    passphrase: ENV.PASSPRHASE,
     parallelism: ENV.PARALLELISM,
-    passphrase: "super-secret",
     plugins: [CostsPlugin],
   });
   
@@ -41,7 +41,7 @@ async function main() {
     options
   );
 
-  const stream = s3db.resource("leads").stream();
+  const stream = s3db.resource("leads").read();
 
   console.time("reading");
 

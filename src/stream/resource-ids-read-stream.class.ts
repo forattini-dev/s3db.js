@@ -1,11 +1,10 @@
 import * as path from "path";
 import { S3 } from "aws-sdk";
+import { chunk } from "lodash";
 import { Readable } from "node:stream";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import Resource from "../resource.class";
-import S3Client from "../s3-client.class";
-import { chunk } from "lodash";
 
 export default class ResourceIdsReadStream extends Readable {
   resource: Resource;
@@ -17,7 +16,7 @@ export default class ResourceIdsReadStream extends Readable {
   constructor({ resource }: { resource: Resource }) {
     super({
       objectMode: true,
-      highWaterMark: resource.client.parallelism,
+      highWaterMark: resource.client.parallelism * 3,
     });
 
     this.resource = resource;

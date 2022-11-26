@@ -83,7 +83,7 @@ describe("resources", function () {
 
     for (const resourceName of resources) {
       it(`[${resourceName}] should be defined`, async function () {
-        expect(s3db.metadata.resources[resourceName]).toBeDefined();
+        expect(s3db.resources[resourceName]).toBeDefined();
         expect(s3db.resource(resourceName)).toBeDefined();
         
         const functions = [

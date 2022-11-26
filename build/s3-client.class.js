@@ -43,7 +43,7 @@ const aws_sdk_1 = require("aws-sdk");
 const promise_pool_1 = __importDefault(require("@supercharge/promise-pool"));
 const errors_1 = require("./errors");
 class S3Client extends events_1.default {
-    constructor({ connectionString, parallelism = 10, }) {
+    constructor({ connectionString, parallelism = 10, AwsS3, }) {
         super();
         this.id = (0, nanoid_1.nanoid)(7);
         const uri = new URL(connectionString);
@@ -51,12 +51,14 @@ class S3Client extends events_1.default {
         this.parallelism = parallelism;
         let [, ...subpath] = uri.pathname.split("/");
         this.keyPrefix = [...(subpath || [])].join("/");
-        this.client = new aws_sdk_1.S3({
-            credentials: new aws_sdk_1.Credentials({
-                accessKeyId: uri.username,
-                secretAccessKey: uri.password,
-            }),
-        });
+        this.client =
+            AwsS3 ||
+                new aws_sdk_1.S3({
+                    credentials: new aws_sdk_1.Credentials({
+                        accessKeyId: uri.username,
+                        secretAccessKey: uri.password,
+                    }),
+                });
     }
     /**
      *
@@ -214,7 +216,7 @@ class S3Client extends events_1.default {
                     Bucket: this.bucket,
                     MaxKeys: maxKeys,
                     ContinuationToken: continuationToken,
-                    Prefix: prefix ? path.join(this.keyPrefix, prefix) : this.keyPrefix,
+                    Prefix: path.join(this.keyPrefix, prefix || ""),
                 };
                 const response = yield this.client.listObjectsV2(options).promise();
                 this.emit("request", "listObjectsV2", options);

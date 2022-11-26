@@ -1,5 +1,4 @@
 import * as path from "path";
-import { S3 } from "aws-sdk";
 import Crypto from "crypto-js";
 import { nanoid } from "nanoid";
 import EventEmitter from "events";
@@ -10,13 +9,14 @@ import { PromisePool } from "@supercharge/promise-pool";
 import S3db from "./s3db.class";
 import S3Client from "./s3-client.class";
 import { S3dbInvalidResource } from "./errors";
+import ResourceWriteStream from "./stream/resource-write-stream.class";
 import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class";
+import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class";
 
 import {
   ResourceInterface,
   ResourceConfigInterface,
 } from "./resource.interface";
-import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class";
 
 export default class Resource
   extends EventEmitter
@@ -80,7 +80,7 @@ export default class Resource
   export() {
     const data = {
       name: this.name,
-      schema: this.schema,
+      schema: { ...this.schema },
       mapper: this.mapObj,
       options: this.options,
     };
@@ -98,23 +98,32 @@ export default class Resource
 
     const schema: any = flatten(this.schema, { safe: true });
 
+    const addRule = (arr: any[], attribute: string, action: string) => {
+      if (
+        arr.filter((a) => a.attribute === attribute && a.action === action)
+          .length > 0
+      ) {
+        arr.push({ attribute, action });
+      }
+    };
+
     for (const [name, definition] of Object.entries(schema)) {
       if ((definition as string).includes("secret")) {
         if (this.options.autoDecrypt === true) {
-          this.options.afterUnmap.push({ attribute: name, action: "decrypt" });
+          addRule(this.options.afterUnmap, name, "decrypt");
         }
       }
       if ((definition as string).includes("array")) {
-        this.options.beforeMap.push({ attribute: name, action: "fromArray" });
-        this.options.afterUnmap.push({ attribute: name, action: "toArray" });
+        addRule(this.options.beforeMap, name, "fromArray");
+        addRule(this.options.afterUnmap, name, "toArray");
       }
       if ((definition as string).includes("number")) {
-        this.options.beforeMap.push({ attribute: name, action: "toString" });
-        this.options.afterUnmap.push({ attribute: name, action: "toNumber" });
+        addRule(this.options.beforeMap, name, "toString");
+        addRule(this.options.afterUnmap, name, "toNumber");
       }
       if ((definition as string).includes("boolean")) {
-        this.options.beforeMap.push({ attribute: name, action: "toJson" });
-        this.options.afterUnmap.push({ attribute: name, action: "fromJson" });
+        addRule(this.options.beforeMap, name, "toJson");
+        addRule(this.options.afterUnmap, name, "fromJson");
       }
     }
   }
@@ -297,7 +306,7 @@ export default class Resource
   }
 
   /**
-   * 
+   *
    * @returns number
    */
   async count() {
@@ -352,10 +361,15 @@ export default class Resource
     return ids;
   }
 
-  stream() {
+  read() {
     const stream = new ResourceIdsReadStream({ resource: this });
     const transformer = new ResourceIdsToDataTransformer({ resource: this });
 
     return stream.pipe(transformer);
+  }
+
+  write() {
+    const stream = new ResourceWriteStream({ resource: this });
+    return stream;
   }
 }

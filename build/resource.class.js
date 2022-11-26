@@ -54,6 +54,7 @@ const lodash_1 = require("lodash");
 const flat_1 = require("flat");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const errors_1 = require("./errors");
+const resource_write_stream_class_1 = __importDefault(require("./stream/resource-write-stream.class"));
 const resource_ids_read_stream_class_1 = __importDefault(require("./stream/resource-ids-read-stream.class"));
 const resource_ids_transformer_class_1 = __importDefault(require("./stream/resource-ids-transformer.class"));
 class Resource extends events_1.default {
@@ -91,7 +92,7 @@ class Resource extends events_1.default {
     export() {
         const data = {
             name: this.name,
-            schema: this.schema,
+            schema: Object.assign({}, this.schema),
             mapper: this.mapObj,
             options: this.options,
         };
@@ -106,23 +107,29 @@ class Resource extends events_1.default {
         if (!this.options.afterUnmap)
             this.options.afterUnmap = [];
         const schema = (0, flat_1.flatten)(this.schema, { safe: true });
+        const addRule = (arr, attribute, action) => {
+            if (arr.filter((a) => a.attribute === attribute && a.action === action)
+                .length > 0) {
+                arr.push({ attribute, action });
+            }
+        };
         for (const [name, definition] of Object.entries(schema)) {
             if (definition.includes("secret")) {
                 if (this.options.autoDecrypt === true) {
-                    this.options.afterUnmap.push({ attribute: name, action: "decrypt" });
+                    addRule(this.options.afterUnmap, name, "decrypt");
                 }
             }
             if (definition.includes("array")) {
-                this.options.beforeMap.push({ attribute: name, action: "fromArray" });
-                this.options.afterUnmap.push({ attribute: name, action: "toArray" });
+                addRule(this.options.beforeMap, name, "fromArray");
+                addRule(this.options.afterUnmap, name, "toArray");
             }
             if (definition.includes("number")) {
-                this.options.beforeMap.push({ attribute: name, action: "toString" });
-                this.options.afterUnmap.push({ attribute: name, action: "toNumber" });
+                addRule(this.options.beforeMap, name, "toString");
+                addRule(this.options.afterUnmap, name, "toNumber");
             }
             if (definition.includes("boolean")) {
-                this.options.beforeMap.push({ attribute: name, action: "toJson" });
-                this.options.afterUnmap.push({ attribute: name, action: "fromJson" });
+                addRule(this.options.beforeMap, name, "toJson");
+                addRule(this.options.afterUnmap, name, "fromJson");
             }
         }
     }
@@ -322,10 +329,14 @@ class Resource extends events_1.default {
             return ids;
         });
     }
-    stream() {
+    read() {
         const stream = new resource_ids_read_stream_class_1.default({ resource: this });
         const transformer = new resource_ids_transformer_class_1.default({ resource: this });
         return stream.pipe(transformer);
+    }
+    write() {
+        const stream = new resource_write_stream_class_1.default({ resource: this });
+        return stream;
     }
 }
 exports.default = Resource;

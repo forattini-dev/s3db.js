@@ -10,7 +10,8 @@
     "example:2": "cd examples; node 2-read-stream.js",
     "example:3": "cd examples; node 3-read-stream-to-csv.js",
     "example:4": "cd examples; node 4-read-stream-to-zip.js",
-    "example:5": "cd examples; node 5-jwt-tokens.js"
+    "example:5": "cd examples; node 5-jwt-tokens.js",
+    "example:6": "cd examples; node 6-write-stream.js"
   },
   "author": "filipeforattini",
   "license": "ISC",
@@ -19,7 +20,7 @@
     "@types/flat": "^5.0.2",
     "@types/jasmine": "^4.3.0",
     "@types/jest": "^29.2.3",
-    "@types/lodash": "^4.14.189",
+    "@types/lodash": "^4.14.190",
     "@types/node": "^18.11.9",
     "@types/pako": "^2.0.0",
     "@types/progress": "^2.0.5",
@@ -39,7 +40,7 @@
   "dependencies": {
     "@supercharge/promise-pool": "^2.3.2",
     "avsc": "^5.7.7",
-    "aws-sdk": "^2.1259.0",
+    "aws-sdk": "^2.1261.0",
     "crypto-js": "^4.1.1",
     "fastest-validator": "^1.15.0",
     "flat": "^5.0.2",

@@ -10,8 +10,8 @@ async function main() {
 
   const s3db = new S3db({
     uri: ENV.CONNECTION_STRING,
+    passphrase: ENV.PASSPRHASE,
     parallelism: ENV.PARALLELISM,
-    passphrase: "super-secret",
     plugins: [CostsPlugin],
   });
 
