@@ -9,8 +9,8 @@ const { pipeline } = require("node:stream/promises");
 async function main() {
   const s3db = new S3db({
     uri: ENV.CONNECTION_STRING,
+    passphrase: ENV.PASSPRHASE,
     parallelism: ENV.PARALLELISM,
-    passphrase: "super-secret",
   });
 
   await s3db.connect();
@@ -29,7 +29,7 @@ async function main() {
   );
 
   const filename = __dirname + "/tmp/leads." + Date.now() + ".csv.gzip";
-  const stream = await s3db.resource("leads").stream();
+  const stream = await s3db.resource("leads").read();
   const streamWrite = fs.createWriteStream(filename);
 
   const transformer = new Transform({

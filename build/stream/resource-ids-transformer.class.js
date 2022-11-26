@@ -10,24 +10,29 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const lodash_1 = require("lodash");
+const promise_pool_1 = require("@supercharge/promise-pool");
 const node_stream_1 = require("node:stream");
 class ResourceIdsToDataTransformer extends node_stream_1.Transform {
     constructor({ resource }) {
-        super({ objectMode: true, highWaterMark: resource.client.parallelism });
+        super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
         this.resource = resource;
     }
     _transform(chunk, encoding, callback) {
         return __awaiter(this, void 0, void 0, function* () {
             if (!(0, lodash_1.isArray)(chunk))
                 this.push(null);
-            this.emit("page", this.resource.name, chunk);
-            const proms = chunk.map((id) => __awaiter(this, void 0, void 0, function* () {
-                this.emit("id", this.resource.name, id);
+            this.emit("page", chunk);
+            yield promise_pool_1.PromisePool.for(chunk)
+                .withConcurrency(this.resource.client.parallelism)
+                .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("error", error, content);
+            }))
+                .process((id) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("id", id);
                 const data = yield this.resource.getById(id);
                 this.push(data);
                 return data;
             }));
-            yield Promise.all(proms);
             callback(null);
         });
     }

@@ -62,7 +62,9 @@ export default class S3Cache {
     keys.unshift(`action:${action}`);
     keys.unshift(`resource:${resourceName}`);
 
-    const filename = `${keys.join("|")}.${this.serializer}${this.compressData ? '.zip' : ''}`
+    const filename = `${keys.join("|")}.${this.serializer}${
+      this.compressData ? ".zip" : ""
+    }`;
 
     return path.join("cache", filename);
   }
@@ -105,7 +107,9 @@ export default class S3Cache {
       body,
       metadata,
       contentEncoding: this.compressData ? "gzip" : null,
-      contentType: this.compressData ? "application/gzip" : `application/${this.serializer}`,
+      contentType: this.compressData
+        ? "application/gzip"
+        : `application/${this.serializer}`,
     });
   }
 
@@ -121,18 +125,16 @@ export default class S3Cache {
     const key = this.key({ resourceName, action, params });
     const res = await this.client.getObject({ key });
 
-    let data = res.Body;
+    if (!res.Body) return "";
 
+    let data = res.Body;
     if (res.Metadata) {
-      if (
-        res.Metadata.compressed &&
-        ["true", true].includes(res.Metadata.compressed)
-      ) {
-        data = zlib.unzipSync(data);
+      if (["true", true].includes(res.Metadata.compressed)) {
+        console.log({ data: data.toString() });
+        data = zlib.unzipSync(data.toString());
       }
     }
 
-    // console.log({ data });
     return this.unserialize(data);
   }
 

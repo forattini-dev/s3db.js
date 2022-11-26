@@ -57,30 +57,32 @@ export default class S3db extends EventEmitter {
    * Remotely setups s3db file.
    */
   async connect(): Promise<void> {
+    let metadata = null;
+
     try {
-      this.metadata = await this.getMetadataFile();
+      metadata = await this.getMetadataFile();
     } catch (error) {
       if (error instanceof S3dbMissingMetadata) {
-        this.metadata = this.blankMetadataStructure();
+        metadata = this.blankMetadataStructure();
         await this.uploadMetadataFile();
       } else {
         this.emit("error", error);
-        throw error;
+        return Promise.reject(error);
       }
     }
 
-    Object.entries(this.metadata.resources).forEach(
-      ([name, resource]: [string, any]) => {
-        this.resources[name] = new Resource({
-          name,
-          s3db: this,
-          s3Client: this.client,
-          schema: resource.schema,
-          options: resource.options,
-          validatorInstance: this.validatorInstance,
-        });
-      }
-    );
+    for (const resource of Object.entries(metadata.resources)) {
+      const [name, definition]: [string, any] = resource
+
+      this.resources[name] = new Resource({
+        name,
+        s3db: this,
+        s3Client: this.client,
+        schema: definition.schema,
+        options: definition.options,
+        validatorInstance: this.validatorInstance,
+      });
+    }
 
     this.emit("connected", new Date());
   }
@@ -130,9 +132,18 @@ export default class S3db extends EventEmitter {
   }
 
   async uploadMetadataFile() {
+    const file = {
+      version: this.version,
+      resources: Object.entries(this.resources).reduce((acc: any, definition) => {
+        const [name, resource] = definition
+        acc[name] = (resource as Resource).export()
+        return acc
+      }, {})
+    }
+
     await this.client.putObject({
       key: `s3db.json`,
-      body: JSON.stringify(this.metadata, null, 2),
+      body: JSON.stringify(file, null, 2),
     });
   }
 
@@ -178,7 +189,6 @@ export default class S3db extends EventEmitter {
     });
 
     this.resources[resourceName] = resource;
-    this.metadata.resources[resourceName] = resource.export();
 
     await this.uploadMetadataFile();
 

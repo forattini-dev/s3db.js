@@ -1,4 +1,5 @@
 import { isArray } from "lodash";
+import { PromisePool } from "@supercharge/promise-pool";
 import { Transform, TransformCallback } from "node:stream";
 
 import Resource from "../resource.class";
@@ -7,7 +8,8 @@ export default class ResourceIdsToDataTransformer extends Transform {
   resource: Resource;
 
   constructor({ resource }: { resource: Resource }) {
-    super({ objectMode: true, highWaterMark: resource.client.parallelism });
+    super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
+    
     this.resource = resource;
   }
 
@@ -17,16 +19,20 @@ export default class ResourceIdsToDataTransformer extends Transform {
     callback: TransformCallback
   ): Promise<void> {
     if (!isArray(chunk)) this.push(null);
-    this.emit("page", this.resource.name, chunk);
+    this.emit("page", chunk);
 
-    const proms = chunk.map(async (id: string) => {
-      this.emit("id", this.resource.name, id);
-      const data = await this.resource.getById(id);
-      this.push(data);
-      return data
-    });
+    await PromisePool.for(chunk)
+      .withConcurrency(this.resource.client.parallelism)
+      .handleError(async (error, content) => {
+        this.emit("error", error, content);
+      })
+      .process(async (id: any) => {
+        this.emit("id",  id);
+        const data = await this.resource.getById(id);
+        this.push(data);
+        return data;
+      });
 
-    await Promise.all(proms);
     callback(null);
   }
 }

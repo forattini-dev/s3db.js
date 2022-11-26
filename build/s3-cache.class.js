@@ -70,7 +70,7 @@ class S3Cache {
             .map((x) => `${x}:${params[x]}`);
         keys.unshift(`action:${action}`);
         keys.unshift(`resource:${resourceName}`);
-        const filename = `${keys.join("|")}.${this.serializer}${this.compressData ? '.zip' : ''}`;
+        const filename = `${keys.join("|")}.${this.serializer}${this.compressData ? ".zip" : ""}`;
         return path.join("cache", filename);
     }
     put({ resourceName, action = "list", params, data, }) {
@@ -98,7 +98,9 @@ class S3Cache {
                 body,
                 metadata,
                 contentEncoding: this.compressData ? "gzip" : null,
-                contentType: this.compressData ? "application/gzip" : `application/${this.serializer}`,
+                contentType: this.compressData
+                    ? "application/gzip"
+                    : `application/${this.serializer}`,
             });
         });
     }
@@ -106,14 +108,15 @@ class S3Cache {
         return __awaiter(this, void 0, void 0, function* () {
             const key = this.key({ resourceName, action, params });
             const res = yield this.client.getObject({ key });
+            if (!res.Body)
+                return "";
             let data = res.Body;
             if (res.Metadata) {
-                if (res.Metadata.compressed &&
-                    ["true", true].includes(res.Metadata.compressed)) {
-                    data = node_zlib_1.default.unzipSync(data);
+                if (["true", true].includes(res.Metadata.compressed)) {
+                    console.log({ data: data.toString() });
+                    data = node_zlib_1.default.unzipSync(data.toString());
                 }
             }
-            // console.log({ data });
             return this.unserialize(data);
         });
     }

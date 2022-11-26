@@ -90,8 +90,8 @@ const Token = {
 async function main() {
   const s3db = new S3db({
     uri: ENV.CONNECTION_STRING + Date.now(),
-    parallelism: ENV.PARALLELISM,
     passphrase: ENV.PASSPRHASE,
+    parallelism: ENV.PARALLELISM,
   });
 
   await s3db.connect();

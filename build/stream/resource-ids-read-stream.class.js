@@ -33,14 +33,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
+const lodash_1 = require("lodash");
 const node_stream_1 = require("node:stream");
 const promise_pool_1 = require("@supercharge/promise-pool");
-const lodash_1 = require("lodash");
 class ResourceIdsReadStream extends node_stream_1.Readable {
     constructor({ resource }) {
         super({
             objectMode: true,
-            highWaterMark: resource.client.parallelism,
+            highWaterMark: resource.client.parallelism * 3,
         });
         this.resource = resource;
         this.pagesCount = 0;

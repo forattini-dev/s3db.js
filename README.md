@@ -205,6 +205,8 @@ await s3db.createResource({
 await s3db.resource("leads").define(attributes);
 ```
 
+Resources' names **cannot** prefix each other, like: `leads` and `leads-copy`! S3's api will consider both one single resource.
+
 ##### Attributes
 
 `s3db.js` use the [fastest-validator](https://www.npmjs.com/package/fastest-validator) package to define and validate your resource. Some few examples:
@@ -615,6 +617,29 @@ $ npm run example:5
 
 Created tokens: .....
 Validated tokens: .....
+```
+
+
+#### [Write Stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/6-write-stream.js)
+
+```bash
+$ npm run example:6
+
+> s3db.js@1.0.0 example:6
+> cd examples; node 6-write-stream.js
+
+reading 10000 leads.
+parallelism of 250 requests.
+
+requests        20010/1 (100%)  [==============================]  49/bps  0.0s (410.0s)
+reading-pages   40/1 (100%)  [==============================]  0/bps  0.0s (395.6s)
+reading-ids     10000/10000 (100%)  [==============================]  25/bps  0.0s (395.6s)
+reading-data    10000/10000 (100%)  [==============================]  25/bps  0.0s (401.5s)
+writing-ids     10000/10000 (100%)  [==============================]  25/bps  0.0s (395.7s)
+writing-data    10000/10000 (100%)  [==============================]  25/bps  0.0s (395.7s)
+copying-data: 6:51.352 (m:ss.mmm)
+
+Total cost: 0.0541 USD
 ```
 
 ## Cost simulation
