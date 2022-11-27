@@ -1,34 +1,15 @@
-import avro from "avsc";
-import zlib from "node:zlib";
+import zlib from "zlib";
 import * as path from "path";
 import { isString } from "lodash";
 
-import S3Client from "./s3-client.class";
+import { JsonSerializer } from "./json.serializer";
+import { AvroSerializer } from "./avro.serializer";
+import S3Client from "../s3-client.class";
 import Serializers from "./serializers.type";
-
-export const CacheAvroSchema = avro.Type.forSchema({
-  name: "Cache",
-  type: "record",
-  fields: [{ name: "data", type: ["string"] }],
-});
-
-const serializers = (name: Serializers) => {
-  return {
-    [Serializers.json]: (data: any) => JSON.stringify(data),
-    [Serializers.avro]: (data: any) => String(CacheAvroSchema.toBuffer(data)),
-  }[name];
-};
-
-const unserializers = (name: Serializers) => {
-  return {
-    [Serializers.json]: (data: any) => JSON.parse(data),
-    [Serializers.avro]: (data: any) =>
-      CacheAvroSchema.fromBuffer(Buffer.from(data)),
-  }[name];
-};
 
 export default class S3Cache {
   client: S3Client;
+  serializers: any;
   compressData: boolean;
   serializer: Serializers;
 
@@ -44,6 +25,11 @@ export default class S3Cache {
     this.client = s3Client;
     this.serializer = serializer;
     this.compressData = compressData;
+
+    this.serializers = {
+      [Serializers.json]: JsonSerializer,
+      [Serializers.avro]: AvroSerializer,
+    };
   }
 
   key({
@@ -62,9 +48,8 @@ export default class S3Cache {
     keys.unshift(`action:${action}`);
     keys.unshift(`resource:${resourceName}`);
 
-    const filename = `${keys.join("|")}.${this.serializer}${
-      this.compressData ? ".zip" : ""
-    }`;
+    let filename = keys.join("|") + "." + this.serializer;
+    if (this.compressData) filename += ".gz";
 
     return path.join("cache", filename);
   }
@@ -126,23 +111,28 @@ export default class S3Cache {
     const res = await this.client.getObject({ key });
 
     if (!res.Body) return "";
-
     let data = res.Body;
+
     if (res.Metadata) {
-      if (["true", true].includes(res.Metadata.compressed)) {
-        console.log({ data: data.toString() });
-        data = zlib.unzipSync(data.toString());
+      const { serializer, compressor, compressed } = res.Metadata;
+
+      if (["true", true].includes(compressed)) {
+        if (compressor === `zlib`) {
+          data = zlib.unzipSync(data as Buffer);
+        }
       }
+
+      return this.serializers[serializer].unserialize(data);
     }
 
     return this.unserialize(data);
   }
 
   serialize(data: any) {
-    return serializers(this.serializer)(data);
+    return this.serializers[this.serializer].serialize(data);
   }
 
   unserialize(data: any) {
-    return unserializers(this.serializer)(data);
+    return this.serializers[this.serializer].unserialize(data);
   }
 }

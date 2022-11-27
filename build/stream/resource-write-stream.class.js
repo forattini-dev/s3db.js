@@ -16,23 +16,27 @@ class ResourceWriteStream extends node_stream_1.Writable {
         super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
         this.resource = resource;
         this.contents = [];
+        this.running = null;
         this.receivedFinalMessage = false;
-        this.resource.client.on("inserted", (data) => this.emit("inserted", data));
     }
     _write(chunk, encoding, callback) {
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.running)
+                yield this.running;
             if (!(0, lodash_1.isEmpty)(chunk)) {
                 this.contents.push(chunk);
             }
             else {
                 this.receivedFinalMessage = true;
             }
-            yield this.writeOrWait();
+            this.running = this.writeOrWait();
             return callback(null);
         });
     }
     _writev(chunks, callback) {
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.running)
+                yield this.running;
             if (!(0, lodash_1.isEmpty)(chunks)) {
                 for (const obj of chunks.map((c) => c.chunk)) {
                     this.contents.push(obj);
@@ -41,7 +45,7 @@ class ResourceWriteStream extends node_stream_1.Writable {
             else {
                 this.receivedFinalMessage = true;
             }
-            yield this.writeOrWait();
+            this.running = this.writeOrWait();
             return callback(null);
         });
     }

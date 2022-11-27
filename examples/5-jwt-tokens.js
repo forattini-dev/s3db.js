@@ -45,7 +45,7 @@ const Token = {
     const user = await client.resource("users").getById(email);
 
     if (user.password !== password) {
-      console.log({ user, email, password })
+      console.log({ user, email, password });
       throw new Error("invalid-user");
     }
 
@@ -98,7 +98,10 @@ async function main() {
 
   for (const [name, attributes] of Object.entries(resources)) {
     if (!s3db.resources[name]) {
-      await s3db.resource(name).define(attributes);
+      await s3db.createResource({
+        resourceName: name,
+        attributes,
+      });
     }
   }
 

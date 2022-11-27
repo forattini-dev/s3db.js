@@ -5,14 +5,14 @@ import EventEmitter from "events";
 import Resource from "./resource.class";
 import S3Client from "./s3-client.class";
 import { ValidatorFactory } from "./validator";
-import ConfigInterface from "./config.interface";
+import S3dbConfigInterface from "./s3db-config.interface";
 import MetadataInterface from "./metadata.interface";
 import { S3dbMissingMetadata, ClientNoSuchKey } from "./errors";
 import { MetadataResourceInterface } from "./resource.interface";
 import PluginInterface from "./plugin.interface";
 
 export default class S3db extends EventEmitter {
-  options: ConfigInterface;
+  options: S3dbConfigInterface;
   client: S3Client;
   keyPrefix: string = "";
   bucket: string = "s3db";
@@ -27,11 +27,11 @@ export default class S3db extends EventEmitter {
   /**
    * Constructor
    */
-  constructor(options: ConfigInterface) {
+  constructor(options: S3dbConfigInterface) {
     super();
 
-    this.resources = {};
     this.version = "1";
+    this.resources = {};
     this.options = options;
     this.parallelism = parseInt(options.parallelism + "") || 10;
     this.metadata = this.blankMetadataStructure();
@@ -43,6 +43,7 @@ export default class S3db extends EventEmitter {
     });
 
     this.client = new S3Client({
+      cache: options.cache || false,
       connectionString: options.uri,
       parallelism: this.parallelism,
     });
@@ -72,7 +73,7 @@ export default class S3db extends EventEmitter {
     }
 
     for (const resource of Object.entries(metadata.resources)) {
-      const [name, definition]: [string, any] = resource
+      const [name, definition]: [string, any] = resource;
 
       this.resources[name] = new Resource({
         name,
@@ -134,12 +135,15 @@ export default class S3db extends EventEmitter {
   async uploadMetadataFile() {
     const file = {
       version: this.version,
-      resources: Object.entries(this.resources).reduce((acc: any, definition) => {
-        const [name, resource] = definition
-        acc[name] = (resource as Resource).export()
-        return acc
-      }, {})
-    }
+      resources: Object.entries(this.resources).reduce(
+        (acc: any, definition) => {
+          const [name, resource] = definition;
+          acc[name] = (resource as Resource).export();
+          return acc;
+        },
+        {}
+      ),
+    };
 
     await this.client.putObject({
       key: `s3db.json`,
@@ -178,14 +182,15 @@ export default class S3db extends EventEmitter {
 
     const resource = new Resource({
       schema,
-      options: {
-        autoDecrypt: true,
-        ...options,
-      },
       s3db: this,
       name: resourceName,
       s3Client: this.client,
       validatorInstance: this.validatorInstance,
+
+      options: {
+        autoDecrypt: true,
+        ...options,
+      },
     });
 
     this.resources[resourceName] = resource;
@@ -201,16 +206,10 @@ export default class S3db extends EventEmitter {
    * @returns
    */
   resource(resourceName: string): Resource | any {
-    const resource = this.resources[resourceName];
-    if (resource) return resource;
+    if (!this.resources[resourceName]) {
+      return Promise.reject(`resource ${resourceName} does not exist`);
+    }
 
-    return {
-      define: (attributes: any, options = {}) =>
-        this.createResource({
-          resourceName,
-          attributes,
-          options,
-        }),
-    };
+    return this.resources[resourceName];
   }
 }

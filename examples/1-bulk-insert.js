@@ -3,7 +3,7 @@ const { ENV, CostsPlugin, S3db } = require("./concerns");
 const Fakerator = require("fakerator");
 const ProgressBar = require("progress");
 
-const TOTAL = 10000;
+const TOTAL = 1000;
 
 async function main() {
   const fake = Fakerator();
@@ -30,10 +30,13 @@ async function main() {
   );
 
   if (!s3db.resources.leads) {
-    await s3db.resource(`leads`).define({
-      name: "string",
-      email: "string",
-      token: "secret",
+    await s3db.createResource({
+      resourceName: "leads",
+      attributes: {
+        name: "string",
+        email: "string",
+        token: "secret",
+      },
     });
   }
 
