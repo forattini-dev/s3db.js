@@ -1,30 +1,19 @@
-import * as dotenv from "dotenv";
-
-dotenv.config();
-jest.setTimeout(30 * 1000);
+import { ENV } from "./concerns";
 
 import S3db from "../src";
 
-const {
-  bucket = "",
-  accessKeyId = "",
-  secretAccessKey = "",
-} = process.env;
-
-const bucketPrefix =  "databases/test-config-" + Date.now()
-
 function ClientFactory() {
   return new S3db({
-    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/${bucketPrefix}`,
+    uri: ENV.CONNECTION_STRING('config'),
   });
 }
 
 describe("static config", function () {
-  let s3db = ClientFactory();
-
   it("constructor definitions", async function () {
-    expect(s3db.client.bucket).toBe(bucket);
-    expect(s3db.client.keyPrefix).toBe(bucketPrefix);
+    const s3db = ClientFactory();
+    const uri = new URL(ENV.CONNECTION_STRING('config'));
+
+    expect(s3db.client.bucket).toBe(uri.hostname);
   });
 });
 

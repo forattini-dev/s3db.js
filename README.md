@@ -200,9 +200,6 @@ await s3db.createResource({
   resourceName: "leads",
   attributes,
 });
-
-// or
-await s3db.resource("leads").define(attributes);
 ```
 
 Resources' names **cannot** prefix each other, like: `leads` and `leads-copy`! S3's api will consider both one single resource.
@@ -709,9 +706,9 @@ It will cost 41.39 USD, once.
 Lets save some JWT tokens using the [RFC:7519](https://www.rfc-editor.org/rfc/rfc7519.html).
 
 ```javascript
-const resource = await s3db
-  .resource('tokens')
-  .define({
+await s3db.createResource({
+  resourceName: "tokens",
+  attributes: {
     iss: 'url|max:256',
     sub: 'string',
     aud: 'string',

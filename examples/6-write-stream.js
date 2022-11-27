@@ -14,10 +14,13 @@ async function main() {
   await s3db.connect();
 
   if (!s3db.resources.copyLeads) {
-    await s3db.resource(`copyLeads`).define({
-      name: "string",
-      email: "string",
-      token: "secret",
+    await s3db.createResource({
+      resourceName: "copy-leads",
+      attributes: {
+        name: "string",
+        email: "string",
+        token: "secret",
+      },
     });
   }
 

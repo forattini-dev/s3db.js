@@ -7,15 +7,15 @@ export default class ResourceWriteStream extends Writable {
   resource: Resource;
   contents: any[];
   receivedFinalMessage: boolean;
+  running: null | Promise<void>;
 
   constructor({ resource }: { resource: Resource }) {
     super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
 
     this.resource = resource;
     this.contents = [];
+    this.running = null
     this.receivedFinalMessage = false;
-
-    this.resource.client.on("inserted", (data) => this.emit("inserted", data));
   }
 
   async _write(
@@ -23,13 +23,15 @@ export default class ResourceWriteStream extends Writable {
     encoding: BufferEncoding,
     callback: (error?: Error | null | undefined) => void
   ): Promise<void> {
+    if (this.running) await this.running
+    
     if (!isEmpty(chunk)) {
       this.contents.push(chunk);
     } else {
       this.receivedFinalMessage = true;
     }
 
-    await this.writeOrWait();
+    this.running = this.writeOrWait();
     return callback(null);
   }
 
@@ -37,6 +39,8 @@ export default class ResourceWriteStream extends Writable {
     chunks: { chunk: any; encoding: BufferEncoding }[],
     callback: (error?: Error | null | undefined) => void
   ): Promise<void> {
+    if (this.running) await this.running
+
     if (!isEmpty(chunks)) {
       for (const obj of chunks.map((c) => c.chunk)) {
         this.contents.push(obj);
@@ -45,7 +49,7 @@ export default class ResourceWriteStream extends Writable {
       this.receivedFinalMessage = true;
     }
 
-    await this.writeOrWait();
+    this.running = this.writeOrWait();
     return callback(null);
   }
 
