@@ -10,7 +10,7 @@ export default class ResourceWriteStream extends Writable {
   running: null | Promise<void>;
 
   constructor({ resource }: { resource: Resource }) {
-    super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
+    super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
 
     this.resource = resource;
     this.contents = [];
@@ -61,9 +61,9 @@ export default class ResourceWriteStream extends Writable {
       return;
     }
 
-    if (this.contents.length < this.resource.client.parallelism) return;
+    if (this.contents.length < this.resource.s3Client.parallelism) return;
 
-    const objs = this.contents.splice(0, this.resource.client.parallelism);
+    const objs = this.contents.splice(0, this.resource.s3Client.parallelism);
     objs.forEach((obj) => this.emit("id", obj.id));
 
     await this.resource.bulkInsert(objs);

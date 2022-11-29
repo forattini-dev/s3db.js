@@ -13,7 +13,7 @@ const lodash_1 = require("lodash");
 const node_stream_1 = require("node:stream");
 class ResourceWriteStream extends node_stream_1.Writable {
     constructor({ resource }) {
-        super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
+        super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
         this.resource = resource;
         this.contents = [];
         this.running = null;
@@ -57,9 +57,9 @@ class ResourceWriteStream extends node_stream_1.Writable {
                 this.emit("end");
                 return;
             }
-            if (this.contents.length < this.resource.client.parallelism)
+            if (this.contents.length < this.resource.s3Client.parallelism)
                 return;
-            const objs = this.contents.splice(0, this.resource.client.parallelism);
+            const objs = this.contents.splice(0, this.resource.s3Client.parallelism);
             objs.forEach((obj) => this.emit("id", obj.id));
             yield this.resource.bulkInsert(objs);
             objs.forEach((obj) => this.emit("data", obj));

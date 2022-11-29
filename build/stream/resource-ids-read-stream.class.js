@@ -40,7 +40,7 @@ class ResourceIdsReadStream extends node_stream_1.Readable {
     constructor({ resource }) {
         super({
             objectMode: true,
-            highWaterMark: resource.client.parallelism * 3,
+            highWaterMark: resource.s3Client.parallelism * 3,
         });
         this.resource = resource;
         this.pagesCount = 0;
@@ -66,12 +66,12 @@ class ResourceIdsReadStream extends node_stream_1.Readable {
     getItems({ continuationToken = null, } = {}) {
         return __awaiter(this, void 0, void 0, function* () {
             this.emit("page", this.pagesCount++);
-            const res = yield this.resource.client.listObjects({
+            const res = yield this.resource.s3Client.listObjects({
                 prefix: `resource=${this.resource.name}`,
                 continuationToken,
             });
             if (res.Contents) {
-                const contents = (0, lodash_1.chunk)(res.Contents, this.resource.client.parallelism);
+                const contents = (0, lodash_1.chunk)(res.Contents, this.resource.s3Client.parallelism);
                 yield promise_pool_1.PromisePool.for(contents)
                     .withConcurrency(5)
                     .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
@@ -79,7 +79,7 @@ class ResourceIdsReadStream extends node_stream_1.Readable {
                 }))
                     .process((pkg) => {
                     const ids = pkg.map((obj) => {
-                        return (obj.Key || "").replace(path.join(this.resource.client.keyPrefix, `resource=${this.resource.name}`, "id="), "");
+                        return (obj.Key || "").replace(path.join(this.resource.s3Client.keyPrefix, `resource=${this.resource.name}`, "id="), "");
                     });
                     this.content.push(ids);
                     ids.forEach((id) => this.emit("id", this.resource.name, id));

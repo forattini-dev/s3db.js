@@ -57,6 +57,7 @@ const errors_1 = require("./errors");
 const resource_write_stream_class_1 = __importDefault(require("./stream/resource-write-stream.class"));
 const resource_ids_read_stream_class_1 = __importDefault(require("./stream/resource-ids-read-stream.class"));
 const resource_ids_transformer_class_1 = __importDefault(require("./stream/resource-ids-transformer.class"));
+const s3_resource_cache_class_1 = __importDefault(require("./cache/s3-resource-cache.class"));
 class Resource extends events_1.default {
     /**
      * Constructor
@@ -67,12 +68,19 @@ class Resource extends events_1.default {
         this.name = params.name;
         this.schema = params.schema;
         this.options = params.options;
-        this.client = params.s3Client;
+        this.s3Client = params.s3Client;
         this.validator = params.validatorInstance.compile(this.schema);
         const { mapObj, reversedMapObj } = this.getMappersFromSchema(this.schema);
         this.mapObj = mapObj;
         this.reversedMapObj = reversedMapObj;
         this.studyOptions();
+        if (this.options.cache === true) {
+            this.s3Cache = new s3_resource_cache_class_1.default({
+                resource: this,
+                compressData: false,
+                serializer: "json",
+            });
+        }
     }
     getMappersFromSchema(schema) {
         let i = 0;
@@ -206,7 +214,7 @@ class Resource extends events_1.default {
             const { isValid, errors, data: validated } = this.check(attrs);
             if (!isValid) {
                 return Promise.reject(new errors_1.S3dbInvalidResource({
-                    bucket: this.client.bucket,
+                    bucket: this.s3Client.bucket,
                     resourceName: this.name,
                     attributes,
                     validation: errors,
@@ -216,7 +224,7 @@ class Resource extends events_1.default {
                 id = (0, nanoid_1.nanoid)();
             }
             // save
-            yield this.client.putObject({
+            yield this.s3Client.putObject({
                 key: path.join(`resource=${this.name}`, `id=${id}`),
                 body: "",
                 metadata: this.map(validated),
@@ -234,7 +242,7 @@ class Resource extends events_1.default {
      */
     getById(id) {
         return __awaiter(this, void 0, void 0, function* () {
-            const request = yield this.client.headObject({
+            const request = yield this.s3Client.headObject({
                 key: path.join(`resource=${this.name}`, `id=${id}`),
             });
             let data = this.unmap(request.Metadata);
@@ -242,7 +250,6 @@ class Resource extends events_1.default {
             data.id = id;
             data._length = request.ContentLength;
             data._createdAt = request.LastModified;
-            data._checksum = request.ChecksumSHA256;
             if (request.Expiration)
                 data._expiresAt = request.Expiration;
             this.emit("got", data);
@@ -258,7 +265,7 @@ class Resource extends events_1.default {
     deleteById(id) {
         return __awaiter(this, void 0, void 0, function* () {
             const key = path.join(`resource=${this.name}`, `id=${id}`);
-            const response = yield this.client.deleteObject(key);
+            const response = yield this.s3Client.deleteObject(key);
             this.emit("deleted", id);
             this.s3db.emit("deleted", this.name, id);
             return response;
@@ -288,7 +295,7 @@ class Resource extends events_1.default {
      */
     count() {
         return __awaiter(this, void 0, void 0, function* () {
-            const count = yield this.client.count({
+            const count = yield this.s3Client.count({
                 prefix: `resource=${this.name}`,
             });
             return count;
@@ -309,7 +316,7 @@ class Resource extends events_1.default {
                 this.s3db.emit("error", this.name, error, content);
             }))
                 .process((keys) => __awaiter(this, void 0, void 0, function* () {
-                const response = yield this.client.deleteObjects(keys);
+                const response = yield this.s3Client.deleteObjects(keys);
                 keys.forEach((key) => {
                     const id = key.split("=").pop();
                     this.emit("deleted", id);
@@ -322,11 +329,77 @@ class Resource extends events_1.default {
     }
     getAllIds() {
         return __awaiter(this, void 0, void 0, function* () {
-            const keys = yield this.client.getAllKeys({
+            if (this.s3Cache) {
+                const cached = yield this.s3Cache.get({ action: "getAllIds" });
+                if (cached)
+                    return cached;
+            }
+            const keys = yield this.s3Client.getAllKeys({
                 prefix: `resource=${this.name}`,
             });
-            const ids = keys.map((x) => x.replace(path.join(`resource=${this.name}`, "id="), ""));
+            const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`), "");
+            if (this.s3Cache) {
+                yield this.s3Cache.put({ action: "getAllIds", data: ids });
+            }
             return ids;
+        });
+    }
+    deleteAll() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const ids = yield this.getAllIds();
+            if (ids.length)
+                return this.bulkDelete(ids);
+        });
+    }
+    getByIdList(ids) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (this.s3Cache) {
+                const cached = yield this.s3Cache.get({ action: "getAll" });
+                if (cached)
+                    return cached;
+            }
+            const { results } = yield promise_pool_1.PromisePool.for(ids)
+                .withConcurrency(this.s3Client.parallelism)
+                .process((id) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("id", id);
+                const data = yield this.getById(id);
+                this.emit("data", data);
+                return data;
+            }));
+            if (this.s3Cache) {
+                yield this.s3Cache.put({ action: "getAll", data: results });
+            }
+            return results;
+        });
+    }
+    getAll() {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (this.s3Cache) {
+                const cached = yield this.s3Cache.get({ action: "getAll" });
+                if (cached)
+                    return cached;
+            }
+            let ids = [];
+            if (this.s3Cache) {
+                const cached = yield this.s3Cache.get({ action: "getAllIds" });
+                if (cached)
+                    ids = cached;
+            }
+            else {
+                ids = yield this.getAllIds();
+            }
+            const { results } = yield promise_pool_1.PromisePool.for(ids)
+                .withConcurrency(this.s3Client.parallelism)
+                .process((id) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("id", id);
+                const data = yield this.getById(id);
+                this.emit("data", data);
+                return data;
+            }));
+            if (this.s3Cache) {
+                yield this.s3Cache.put({ action: "getAll", data: results });
+            }
+            return results;
         });
     }
     read() {

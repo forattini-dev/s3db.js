@@ -16,7 +16,7 @@ export default class ResourceIdsReadStream extends Readable {
   constructor({ resource }: { resource: Resource }) {
     super({
       objectMode: true,
-      highWaterMark: resource.client.parallelism * 3,
+      highWaterMark: resource.s3Client.parallelism * 3,
     });
 
     this.resource = resource;
@@ -47,13 +47,13 @@ export default class ResourceIdsReadStream extends Readable {
   } = {}) {
     this.emit("page", this.pagesCount++);
 
-    const res: S3.ListObjectsV2Output = await this.resource.client.listObjects({
+    const res: S3.ListObjectsV2Output = await this.resource.s3Client.listObjects({
       prefix: `resource=${this.resource.name}`,
       continuationToken,
     });
 
     if (res.Contents) {
-      const contents = chunk(res.Contents, this.resource.client.parallelism);
+      const contents = chunk(res.Contents, this.resource.s3Client.parallelism);
 
       await PromisePool.for(contents)
         .withConcurrency(5)
@@ -64,7 +64,7 @@ export default class ResourceIdsReadStream extends Readable {
           const ids = pkg.map((obj) => {
             return (obj.Key || "").replace(
               path.join(
-                this.resource.client.keyPrefix,
+                this.resource.s3Client.keyPrefix,
                 `resource=${this.resource.name}`,
                 "id="
               ),

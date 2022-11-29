@@ -35,65 +35,53 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CacheAvroSchema = void 0;
-const avsc_1 = __importDefault(require("avsc"));
-const node_zlib_1 = __importDefault(require("node:zlib"));
+const zlib_1 = __importDefault(require("zlib"));
 const path = __importStar(require("path"));
 const lodash_1 = require("lodash");
 const serializers_type_1 = __importDefault(require("./serializers.type"));
-exports.CacheAvroSchema = avsc_1.default.Type.forSchema({
-    name: "Cache",
-    type: "record",
-    fields: [{ name: "data", type: ["string"] }],
-});
-const serializers = (name) => {
-    return {
-        [serializers_type_1.default.json]: (data) => JSON.stringify(data),
-        [serializers_type_1.default.avro]: (data) => String(exports.CacheAvroSchema.toBuffer(data)),
-    }[name];
-};
-const unserializers = (name) => {
-    return {
-        [serializers_type_1.default.json]: (data) => JSON.parse(data),
-        [serializers_type_1.default.avro]: (data) => exports.CacheAvroSchema.fromBuffer(Buffer.from(data)),
-    }[name];
-};
+const json_serializer_1 = require("./json.serializer");
+const avro_serializer_1 = require("./avro.serializer");
 class S3Cache {
     constructor({ s3Client, compressData = true, serializer = serializers_type_1.default.json, }) {
-        this.client = s3Client;
+        this.s3Client = s3Client;
         this.serializer = serializer;
         this.compressData = compressData;
+        this.serializers = {
+            [serializers_type_1.default.json]: json_serializer_1.JsonSerializer,
+            [serializers_type_1.default.avro]: avro_serializer_1.AvroSerializer,
+        };
     }
-    key({ resourceName, action = "list", params, }) {
-        const keys = Object.keys(params)
+    getKey({ params, additionalPrefix = "", }) {
+        let filename = Object.keys(params || {})
             .sort()
-            .map((x) => `${x}:${params[x]}`);
-        keys.unshift(`action:${action}`);
-        keys.unshift(`resource:${resourceName}`);
-        const filename = `${keys.join("|")}.${this.serializer}${this.compressData ? ".zip" : ""}`;
-        return path.join("cache", filename);
+            .map((x) => `${x}:${params[x]}`)
+            .join("|");
+        filename = Buffer.from(filename).toString("hex");
+        filename = filename + "." + this.serializer;
+        if (this.compressData)
+            filename += ".gz";
+        return path.join("cache", additionalPrefix + filename);
     }
-    put({ resourceName, action = "list", params, data, }) {
+    _put({ key, data }) {
         return __awaiter(this, void 0, void 0, function* () {
-            const key = this.key({ resourceName, action, params });
             const lengthRaw = (0, lodash_1.isString)(data)
                 ? data.length
                 : JSON.stringify(data).length;
             let body = this.serialize({ data });
             const lengthSerialized = body.length;
             if (this.compressData) {
-                body = node_zlib_1.default.gzipSync(body);
+                body = zlib_1.default.gzipSync(body);
             }
             const metadata = {
                 compressor: "zlib",
-                "client-id": this.client.id,
+                "client-id": this.s3Client.id,
                 serializer: String(this.serializer),
                 compressed: String(this.compressData),
                 "length-raw": String(lengthRaw),
                 "length-serialized": String(lengthSerialized),
                 "length-compressed": String(body.length),
             };
-            return this.client.putObject({
+            return this.s3Client.putObject({
                 key,
                 body,
                 metadata,
@@ -104,27 +92,55 @@ class S3Cache {
             });
         });
     }
-    get({ resourceName, action = "list", params, }) {
+    _get({ key }) {
         return __awaiter(this, void 0, void 0, function* () {
-            const key = this.key({ resourceName, action, params });
-            const res = yield this.client.getObject({ key });
-            if (!res.Body)
-                return "";
-            let data = res.Body;
-            if (res.Metadata) {
-                if (["true", true].includes(res.Metadata.compressed)) {
-                    console.log({ data: data.toString() });
-                    data = node_zlib_1.default.unzipSync(data.toString());
+            try {
+                const res = yield this.s3Client.getObject({ key });
+                if (!res.Body)
+                    return "";
+                let content = res.Body;
+                if (res.Metadata) {
+                    const { serializer, compressor, compressed } = res.Metadata;
+                    if (["true", true].includes(compressed)) {
+                        if (compressor === `zlib`) {
+                            content = zlib_1.default.unzipSync(content);
+                        }
+                    }
+                    const { data } = this.serializers[serializer].unserialize(content);
+                    return data;
+                }
+                return this.unserialize(content);
+            }
+            catch (error) {
+                if (error instanceof Error) {
+                    if (error.name !== "ClientNoSuchKey") {
+                        return Promise.reject(error);
+                    }
                 }
             }
-            return this.unserialize(data);
+            return null;
+        });
+    }
+    _delete({ key }) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                yield this.s3Client.deleteObject(key);
+            }
+            catch (error) {
+                if (error instanceof Error) {
+                    if (error.name !== "ClientNoSuchKey") {
+                        return Promise.reject(error);
+                    }
+                }
+            }
+            return true;
         });
     }
     serialize(data) {
-        return serializers(this.serializer)(data);
+        return this.serializers[this.serializer].serialize(data);
     }
     unserialize(data) {
-        return unserializers(this.serializer)(data);
+        return this.serializers[this.serializer].unserialize(data);
     }
 }
 exports.default = S3Cache;

@@ -17,19 +17,22 @@ import {
   ResourceInterface,
   ResourceConfigInterface,
 } from "./resource.interface";
+import S3ResourceCache from "./cache/s3-resource-cache.class";
 
 export default class Resource
   extends EventEmitter
   implements ResourceInterface
 {
-  s3db: S3db;
-  client: S3Client;
-  options: any;
-  schema: any;
-  validator: any;
-  mapObj: any;
-  reversedMapObj: any;
   name: any;
+  schema: any;
+  mapObj: any;
+  options: any;
+  validator: any;
+  reversedMapObj: any;
+
+  s3db: S3db;
+  s3Client: S3Client;
+  s3Cache: S3ResourceCache | undefined;
 
   /**
    * Constructor
@@ -41,7 +44,7 @@ export default class Resource
     this.name = params.name;
     this.schema = params.schema;
     this.options = params.options;
-    this.client = params.s3Client;
+    this.s3Client = params.s3Client;
 
     this.validator = params.validatorInstance.compile(this.schema);
 
@@ -50,6 +53,14 @@ export default class Resource
     this.reversedMapObj = reversedMapObj;
 
     this.studyOptions();
+
+    if (this.options.cache === true) {
+      this.s3Cache = new S3ResourceCache({
+        resource: this,
+        compressData: true,
+        serializer: "json",
+      });
+    }
   }
 
   getMappersFromSchema(schema: any) {
@@ -216,7 +227,7 @@ export default class Resource
     if (!isValid) {
       return Promise.reject(
         new S3dbInvalidResource({
-          bucket: this.client.bucket,
+          bucket: this.s3Client.bucket,
           resourceName: this.name,
           attributes,
           validation: errors,
@@ -229,7 +240,7 @@ export default class Resource
     }
 
     // save
-    await this.client.putObject({
+    await this.s3Client.putObject({
       key: path.join(`resource=${this.name}`, `id=${id}`),
       body: "",
       metadata: this.map(validated),
@@ -243,6 +254,10 @@ export default class Resource
     this.emit("inserted", final);
     this.s3db.emit("inserted", this.name, final);
 
+    if (this.s3Cache) {
+      await this.s3Cache?.purge();
+    }
+
     return final;
   }
 
@@ -252,7 +267,7 @@ export default class Resource
    * @returns
    */
   async getById(id: any) {
-    const request = await this.client.headObject({
+    const request = await this.s3Client.headObject({
       key: path.join(`resource=${this.name}`, `id=${id}`),
     });
 
@@ -262,7 +277,6 @@ export default class Resource
     data.id = id;
     data._length = request.ContentLength;
     data._createdAt = request.LastModified;
-    data._checksum = request.ChecksumSHA256;
 
     if (request.Expiration) data._expiresAt = request.Expiration;
 
@@ -279,10 +293,14 @@ export default class Resource
    */
   async deleteById(id: any) {
     const key = path.join(`resource=${this.name}`, `id=${id}`);
-    const response = await this.client.deleteObject(key);
+    const response = await this.s3Client.deleteObject(key);
 
     this.emit("deleted", id);
     this.s3db.emit("deleted", this.name, id);
+
+    if (this.s3Cache) {
+      await this.s3Cache?.purge();
+    }
 
     return response;
   }
@@ -310,9 +328,18 @@ export default class Resource
    * @returns number
    */
   async count() {
-    const count = await this.client.count({
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({ action: "count" });
+      if (cached) return cached;
+    }
+
+    const count = await this.s3Client.count({
       prefix: `resource=${this.name}`,
     });
+    
+    if (this.s3Cache) {
+      await this.s3Cache.put({ action: "count", data: count });
+    }
 
     return count;
   }
@@ -335,7 +362,7 @@ export default class Resource
         this.s3db.emit("error", this.name, error, content);
       })
       .process(async (keys: string[]) => {
-        const response = await this.client.deleteObjects(keys);
+        const response = await this.s3Client.deleteObjects(keys);
 
         keys.forEach((key) => {
           const id = key.split("=").pop();
@@ -346,19 +373,99 @@ export default class Resource
         return response;
       });
 
+    if (this.s3Cache) {
+      await this.s3Cache?.purge();
+    }
+
     return results;
   }
 
   async getAllIds() {
-    const keys = await this.client.getAllKeys({
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({ action: "getAllIds" });
+      if (cached) return cached;
+    }
+
+    const keys = await this.s3Client.getAllKeys({
       prefix: `resource=${this.name}`,
     });
 
-    const ids = keys.map((x) =>
-      x.replace(path.join(`resource=${this.name}`, "id="), "")
-    );
+    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+
+    if (this.s3Cache) {
+      await this.s3Cache.put({ action: "getAllIds", data: ids });
+      const x = await this.s3Cache.get({ action: "getAllIds" });
+    }
 
     return ids;
+  }
+
+  async deleteAll() {
+    const ids = await this.getAllIds();
+    await this.bulkDelete(ids);
+  }
+
+  async getByIdList(ids: string[]) {
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({ action: "getAll" });
+      if (cached) return cached;
+    }
+
+    const { results } = await PromisePool.for(ids)
+      .withConcurrency(this.s3Client.parallelism)
+      .process(async (id: string) => {
+        this.emit("id", id);
+        const data = await this.getById(id);
+        this.emit("data", data);
+        return data;
+      });
+
+    if (this.s3Cache) {
+      await this.s3Cache.put({ action: "getAll", data: results });
+    }
+
+    return results;
+  }
+
+  async getAll() {
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({ action: "getAll" });
+      if (cached) return cached;
+    }
+
+    let ids: string[] = [];
+    let gotFromCache = false
+
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({ action: "getAllIds" });
+      if (cached) {
+        ids = cached;
+        gotFromCache = true
+      }
+    }
+
+    if (!gotFromCache) {
+      ids = await this.getAllIds();
+    }
+
+    if (ids.length === 0) return []
+
+    const { results } = await PromisePool.for(ids)
+      .withConcurrency(this.s3Client.parallelism)
+      .process(async (id: string) => {
+        this.emit("id", id);
+        const data = await this.getById(id);
+        this.emit("data", data);
+        return data;
+      });
+
+      
+    if (this.s3Cache && results.length > 0) {
+      await this.s3Cache.put({ action: "getAll", data: results });
+      const x = await this.s3Cache.get({ action: "getAll" });
+    }
+
+    return results;
   }
 
   read() {
