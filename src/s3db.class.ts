@@ -5,11 +5,11 @@ import EventEmitter from "events";
 import Resource from "./resource.class";
 import S3Client from "./s3-client.class";
 import { ValidatorFactory } from "./validator";
+import PluginInterface from "./plugin.interface";
 import S3dbConfigInterface from "./s3db-config.interface";
 import MetadataInterface from "./metadata.interface";
 import { S3dbMissingMetadata, ClientNoSuchKey } from "./errors";
 import { MetadataResourceInterface } from "./resource.interface";
-import PluginInterface from "./plugin.interface";
 
 export default class S3db extends EventEmitter {
   options: S3dbConfigInterface;
@@ -17,12 +17,12 @@ export default class S3db extends EventEmitter {
   keyPrefix: string = "";
   bucket: string = "s3db";
   version: string;
-  metadata: MetadataInterface;
   validatorInstance: any;
   parallelism: number;
   resources: any;
   passphrase: string | undefined;
   plugins: PluginInterface[];
+  cache: boolean | undefined = false;
 
   /**
    * Constructor
@@ -34,16 +34,15 @@ export default class S3db extends EventEmitter {
     this.resources = {};
     this.options = options;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.metadata = this.blankMetadataStructure();
     this.passphrase = options?.passphrase;
     this.plugins = options.plugins || [];
+    this.cache = options.cache;
 
     this.validatorInstance = ValidatorFactory({
       passphrase: options?.passphrase,
     });
 
     this.client = new S3Client({
-      cache: options.cache || false,
       connectionString: options.uri,
       parallelism: this.parallelism,
     });
@@ -189,6 +188,7 @@ export default class S3db extends EventEmitter {
 
       options: {
         autoDecrypt: true,
+        cache: this.cache,
         ...options,
       },
     });

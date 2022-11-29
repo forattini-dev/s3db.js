@@ -15,6 +15,7 @@ export interface ResourceConfigInterface {
   name: string;
   schema: any;
   options?: any;
+  cache?: boolean
   s3Client: S3Client;
   validatorInstance: any;
 }

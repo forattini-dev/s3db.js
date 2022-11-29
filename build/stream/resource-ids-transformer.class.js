@@ -14,7 +14,7 @@ const promise_pool_1 = require("@supercharge/promise-pool");
 const node_stream_1 = require("node:stream");
 class ResourceIdsToDataTransformer extends node_stream_1.Transform {
     constructor({ resource }) {
-        super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
+        super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
         this.resource = resource;
     }
     _transform(chunk, encoding, callback) {
@@ -23,7 +23,7 @@ class ResourceIdsToDataTransformer extends node_stream_1.Transform {
                 this.push(null);
             this.emit("page", chunk);
             yield promise_pool_1.PromisePool.for(chunk)
-                .withConcurrency(this.resource.client.parallelism)
+                .withConcurrency(this.resource.s3Client.parallelism)
                 .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
                 this.emit("error", error, content);
             }))

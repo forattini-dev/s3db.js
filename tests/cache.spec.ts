@@ -2,9 +2,13 @@ import { ENV } from "./concerns";
 
 import Fakerator from "fakerator";
 
+import S3Db from "../src/s3db.class";
+import Resource from "../src/resource.class";
 import S3Client from "../src/s3-client.class";
 import S3Cache from "../src/cache/s3-cache.class";
+import S3ResourceCache from "../src/cache/s3-resource-cache.class";
 import Serializers from "../src/cache/serializers.type";
+import { Serializer } from "v8";
 
 const fake = Fakerator();
 
@@ -31,16 +35,21 @@ const SIZES_OPTIONS = {
       .join(" "),
 };
 
+const mapIds = (res: any[]) => res.map((r) => r.id).sort();
+
 describe("s3Cache", function () {
   const s3Client = new S3Client({
     connectionString: ENV.CONNECTION_STRING("cache"),
   });
 
   it("constructor definitions", async function () {
-    const s3Cache = new S3Cache({ s3Client });
+    const s3Cache = new S3Cache({
+      s3Client,
+      compressData: true,
+      serializer: Serializers.json,
+    });
 
-    const key = s3Cache.key({
-      resourceName: "users",
+    const key = s3Cache.getKey({
       params: {
         a: 1,
         b: 2,
@@ -48,9 +57,9 @@ describe("s3Cache", function () {
       },
     });
 
-    expect(key).toContain("a:1");
-    expect(key).toContain("b:2");
-    expect(key).toContain("c:3");
+    expect(key).toContain("cache/");
+    expect(key).toContain(Serializers.json);
+    expect(key).toContain(".gz");
   });
 
   for (const serializer of SERIALIZERS_OPTIONS) {
@@ -59,29 +68,122 @@ describe("s3Cache", function () {
         describe(`${serializer} serializer`, () => {
           describe(compressData ? "compressed" : `not compressed`, () => {
             const [sizeName, sizeFn] = sizeDefinition;
-
             const data = sizeFn();
-            const params = { limit: 100, page: 1 };
-            const resourceName = `${sizeName}-users`;
 
             const s3Cache = new S3Cache({
               compressData,
               serializer: Serializers[serializer],
-              s3Client: new S3Client({
-                connectionString: ENV.CONNECTION_STRING("cache"),
-              }),
+              s3Client,
             });
 
             it(`put ${sizeName} cache`, async function () {
-              await s3Cache.put({ resourceName, params, data });
+              await s3Cache._put({
+                data,
+                key: s3Cache.getKey({
+                  params: { sizeName, serializer, compressData },
+                }),
+              });
 
-              const res = await s3Cache.get({ resourceName, params });
+              const resData = await s3Cache._get({
+                key: s3Cache.getKey({
+                  params: { sizeName, serializer, compressData },
+                }),
+              });
 
-              expect(data).toBe(res.data);
+              expect(resData).toBe(data);
+              expect(resData.length).toBe(data.length);
+
+              const isDeleted = await s3Cache._delete({
+                key: s3Cache.getKey({
+                  params: { sizeName, serializer, compressData },
+                }),
+              });
+
+              expect(isDeleted).toBe(true);
             });
           });
         });
       }
     }
   }
+
+  describe("s3db with cache", () => {
+    const s3db = new S3Db({
+      uri: ENV.CONNECTION_STRING("db-cached"),
+      cache: true,
+    });
+
+    beforeAll(async () => {
+      await s3db.connect();
+
+      const resources = ["CachedLeads1", "CachedLeads2"];
+
+      for (const res of resources) {
+        if (!s3db.resources[res]) {
+          await s3db.createResource({
+            resourceName: res,
+            attributes: {
+              name: "string",
+              email: "email",
+            },
+          });
+        }
+      }
+
+      await Promise.all(resources.map((r) => s3db.resource(r).deleteAll()));
+    });
+
+    it("should instantiate s3cache", () => {
+      const resource = s3db.resource("CachedLeads1");
+
+      expect(s3db.cache).toEqual(true);
+      expect(resource.options.cache).toEqual(true);
+      expect(resource.s3Cache).toBeDefined();
+    });
+
+    it("cached getAllIds", async () => {
+      const resource: Resource = s3db.resource("CachedLeads1");
+      const dataToInsert = new Array(10).fill(0).map((v, k) => ({
+        id: `${k}`,
+        name: fake.names.name(),
+        email: fake.internet.email(),
+      }));
+
+      await resource.bulkInsert(dataToInsert);
+      const ids1 = await resource.getAllIds();
+
+      if (resource.s3Cache) {
+        const resData = await resource.s3Cache.get({ action: "getAllIds" });
+        expect(ids1).toEqual(resData);
+      }
+
+      const ids2 = await resource.getAllIds();
+      expect(ids2).toEqual(ids1);
+    });
+
+    it("cached getAll", async () => {
+      const resource = s3db.resource("CachedLeads2");
+      const dataToInsert = new Array(10).fill(0).map((v, k) => ({
+        id: `${k}`,
+        name: fake.names.name(),
+        email: fake.internet.email(),
+      }));
+      
+      await resource.bulkInsert(dataToInsert);
+      const datas1 = await resource.getAll();
+
+      expect(datas1.length).toEqual(dataToInsert.length);
+      expect(mapIds(datas1)).toEqual(mapIds(dataToInsert));
+      
+      if (resource.s3Cache) {
+        const resData = await resource.s3Cache.get({ action: "getAll" });
+        expect(datas1.length).toEqual(resData.length);
+        expect(mapIds(datas1)).toEqual(mapIds(resData));
+      }
+      
+      const datas2 = await resource.getAll();
+      expect(datas2.length).toEqual(dataToInsert.length);
+      expect(mapIds(datas2)).toEqual(mapIds(datas1));
+    });
+  });
 });

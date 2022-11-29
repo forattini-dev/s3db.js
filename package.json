@@ -6,12 +6,14 @@
   "scripts": {
     "build": "rimraf ./build && tsc",
     "test": "jest --coverage",
+    "test:cache": "jest --coverage ./tests/cache.spec.ts",
     "example:1": "cd examples; node 1-bulk-insert.js",
     "example:2": "cd examples; node 2-read-stream.js",
     "example:3": "cd examples; node 3-read-stream-to-csv.js",
     "example:4": "cd examples; node 4-read-stream-to-zip.js",
     "example:5": "cd examples; node 5-jwt-tokens.js",
-    "example:6": "cd examples; node 6-write-stream.js"
+    "example:6": "cd examples; node 6-write-stream.js",
+    "coverage": "npx http-server ./coverage/lcov-report"
   },
   "author": "filipeforattini",
   "license": "ISC",

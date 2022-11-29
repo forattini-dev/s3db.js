@@ -8,8 +8,8 @@ export default class ResourceIdsToDataTransformer extends Transform {
   resource: Resource;
 
   constructor({ resource }: { resource: Resource }) {
-    super({ objectMode: true, highWaterMark: resource.client.parallelism * 2 });
-    
+    super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
+
     this.resource = resource;
   }
 
@@ -22,7 +22,7 @@ export default class ResourceIdsToDataTransformer extends Transform {
     this.emit("page", chunk);
 
     await PromisePool.for(chunk)
-      .withConcurrency(this.resource.client.parallelism)
+      .withConcurrency(this.resource.s3Client.parallelism)
       .handleError(async (error, content) => {
         this.emit("error", error, content);
       })

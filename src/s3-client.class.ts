@@ -6,7 +6,6 @@ import EventEmitter from "events";
 import { S3, Credentials } from "aws-sdk";
 import PromisePool from "@supercharge/promise-pool";
 
-import S3Cache from "./cache/s3-cache.class";
 import { ClientNoSuchKey } from "./errors";
 
 export default class S3Client extends EventEmitter {
@@ -15,29 +14,18 @@ export default class S3Client extends EventEmitter {
   bucket: string;
   keyPrefix: string;
   parallelism: number;
-  s3Cache: S3Cache | undefined;
 
   constructor({
-    cache = false,
     connectionString,
     parallelism = 10,
     AwsS3,
   }: {
-    cache?: boolean;
     connectionString: string;
     parallelism?: number;
     AwsS3?: S3;
   }) {
     super();
     this.id = nanoid(7);
-
-    if (cache) {
-      this.s3Cache = new S3Cache({
-        s3Client: this,
-        compressData: true,
-        serializer: 'json',
-      })
-    }
 
     const uri = new URL(connectionString);
     this.bucket = uri.hostname;

@@ -27,13 +27,15 @@ class S3db extends events_1.default {
         super();
         this.keyPrefix = "";
         this.bucket = "s3db";
-        this.resources = {};
+        this.cache = false;
         this.version = "1";
+        this.resources = {};
         this.options = options;
         this.parallelism = parseInt(options.parallelism + "") || 10;
         this.metadata = this.blankMetadataStructure();
         this.passphrase = options === null || options === void 0 ? void 0 : options.passphrase;
         this.plugins = options.plugins || [];
+        this.cache = options.cache;
         this.validatorInstance = (0, validator_1.ValidatorFactory)({
             passphrase: options === null || options === void 0 ? void 0 : options.passphrase,
         });
@@ -128,7 +130,7 @@ class S3db extends events_1.default {
                     const [name, resource] = definition;
                     acc[name] = resource.export();
                     return acc;
-                }, {})
+                }, {}),
             };
             yield this.client.putObject({
                 key: `s3db.json`,
@@ -158,11 +160,11 @@ class S3db extends events_1.default {
             const schema = (0, flat_1.flatten)(attributes, { safe: true });
             const resource = new resource_class_1.default({
                 schema,
-                options: Object.assign({ autoDecrypt: true }, options),
                 s3db: this,
                 name: resourceName,
                 s3Client: this.client,
                 validatorInstance: this.validatorInstance,
+                options: Object.assign({ autoDecrypt: true, cache: this.cache }, options),
             });
             this.resources[resourceName] = resource;
             yield this.uploadMetadataFile();
@@ -175,16 +177,10 @@ class S3db extends events_1.default {
      * @returns
      */
     resource(resourceName) {
-        const resource = this.resources[resourceName];
-        if (resource)
-            return resource;
-        return {
-            define: (attributes, options = {}) => this.createResource({
-                resourceName,
-                attributes,
-                options,
-            }),
-        };
+        if (!this.resources[resourceName]) {
+            return Promise.reject(`resource ${resourceName} does not exist`);
+        }
+        return this.resources[resourceName];
     }
 }
 exports.default = S3db;
