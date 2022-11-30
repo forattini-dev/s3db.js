@@ -50,8 +50,8 @@ const path = __importStar(require("path"));
 const crypto_js_1 = __importDefault(require("crypto-js"));
 const nanoid_1 = require("nanoid");
 const events_1 = __importDefault(require("events"));
-const lodash_1 = require("lodash");
 const flat_1 = require("flat");
+const lodash_1 = require("lodash");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const errors_1 = require("./errors");
 const resource_write_stream_class_1 = __importDefault(require("./stream/resource-write-stream.class"));
@@ -218,9 +218,8 @@ class Resource extends events_1.default {
                     validation: errors,
                 }));
             }
-            if (!id && id !== 0) {
+            if (!id && id !== 0)
                 id = (0, nanoid_1.nanoid)();
-            }
             // save
             yield this.s3Client.putObject({
                 key: path.join(`resource=${this.name}`, `id=${id}`),
@@ -256,6 +255,45 @@ class Resource extends events_1.default {
             this.emit("got", data);
             this.s3db.emit("got", this.name, data);
             return data;
+        });
+    }
+    /**
+     * Update a resource by id
+     * @param {Object} param
+     * @returns
+     */
+    updateById(id, attributes) {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            const obj = yield this.getById(id);
+            const newObj = (0, lodash_1.merge)(obj, attributes);
+            let _b = (0, flat_1.flatten)(newObj, {
+                safe: true,
+            }), { id: newId } = _b, attrs = __rest(_b, ["id"]);
+            const { isValid, errors, data: validated } = this.check(attrs);
+            if (!isValid) {
+                return Promise.reject(new errors_1.S3dbInvalidResource({
+                    bucket: this.s3Client.bucket,
+                    resourceName: this.name,
+                    attributes,
+                    validation: errors,
+                }));
+            }
+            if (!id && id !== 0)
+                id = (0, nanoid_1.nanoid)();
+            // save
+            yield this.s3Client.putObject({
+                key: path.join(`resource=${this.name}`, `id=${id}`),
+                body: "",
+                metadata: this.map(validated),
+            });
+            const final = Object.assign({ id }, (0, flat_1.unflatten)(validated));
+            this.emit("updated", final);
+            this.s3db.emit("updated", this.name, final);
+            if (this.s3Cache) {
+                yield ((_a = this.s3Cache) === null || _a === void 0 ? void 0 : _a.purge());
+            }
+            return final;
         });
     }
     /**
