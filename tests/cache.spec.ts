@@ -6,9 +6,7 @@ import S3Db from "../src/s3db.class";
 import Resource from "../src/resource.class";
 import S3Client from "../src/s3-client.class";
 import S3Cache from "../src/cache/s3-cache.class";
-import S3ResourceCache from "../src/cache/s3-resource-cache.class";
 import Serializers from "../src/cache/serializers.type";
-import { Serializer } from "v8";
 
 const fake = Fakerator();
 

@@ -2,7 +2,7 @@ import { ENV } from "./concerns";
 
 import S3db from "../src";
 
-function ClientFactory() {
+function S3dbFactory() {
   return new S3db({
     uri: ENV.CONNECTION_STRING("config"),
   });
@@ -10,7 +10,7 @@ function ClientFactory() {
 
 describe("static config", function () {
   it("constructor definitions", async function () {
-    const s3db = ClientFactory();
+    const s3db = S3dbFactory();
     const uri = new URL(ENV.CONNECTION_STRING("config"));
 
     expect(s3db.client.bucket).toBe(uri.hostname);
@@ -18,12 +18,12 @@ describe("static config", function () {
 });
 
 describe("start", function () {
-  let client = ClientFactory();
+  let s3db = S3dbFactory();
 
   it("setup", async function () {
-    await client.connect();
+    await s3db.connect();
 
-    expect(client.version).toBeDefined();
-    expect(client.resources).toBeDefined();
+    expect(s3db.version).toBeDefined();
+    expect(s3db.resources).toBeDefined();
   });
 });

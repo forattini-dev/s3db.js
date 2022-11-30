@@ -336,7 +336,7 @@ export default class Resource
     const count = await this.s3Client.count({
       prefix: `resource=${this.name}`,
     });
-    
+
     if (this.s3Cache) {
       await this.s3Cache.put({ action: "count", data: count });
     }
@@ -434,21 +434,19 @@ export default class Resource
     }
 
     let ids: string[] = [];
-    let gotFromCache = false
+    let gotFromCache = false;
 
     if (this.s3Cache) {
       const cached = await this.s3Cache.get({ action: "getAllIds" });
       if (cached) {
         ids = cached;
-        gotFromCache = true
+        gotFromCache = true;
       }
     }
 
-    if (!gotFromCache) {
-      ids = await this.getAllIds();
-    }
+    if (!gotFromCache) ids = await this.getAllIds();
 
-    if (ids.length === 0) return []
+    if (ids.length === 0) return [];
 
     const { results } = await PromisePool.for(ids)
       .withConcurrency(this.s3Client.parallelism)
@@ -459,7 +457,6 @@ export default class Resource
         return data;
       });
 
-      
     if (this.s3Cache && results.length > 0) {
       await this.s3Cache.put({ action: "getAll", data: results });
       const x = await this.s3Cache.get({ action: "getAll" });

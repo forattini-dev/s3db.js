@@ -1,7 +1,4 @@
-import * as dotenv from "dotenv";
-
-dotenv.config();
-jest.setTimeout(30 * 1000);
+import { ENV } from "./concerns";
 
 import { nanoid } from "nanoid";
 import Fakerator from "fakerator";
@@ -9,10 +6,14 @@ import Fakerator from "fakerator";
 import S3db from "../src";
 import { ClientNoSuchKey } from "../src/errors";
 
-const { bucket = "", accessKeyId = "", secretAccessKey = "" } = process.env;
+function S3dbFactory() {
+  return new S3db({
+    uri: ENV.CONNECTION_STRING("resources"),
+    passphrase: 'super-secret-leaked-fluffy-passphrase',
+  });
+}
 
 const fake = Fakerator();
-const bucketPrefix = "databases/test-resources-" + Date.now();
 
 const attributes = {
   token: "secret",
@@ -51,24 +52,15 @@ function resourceFactory(overwrite = {}) {
 
 const resources = new Array(2).fill(0).map((v, k) => `leads${k + 1}`);
 
-function S3dbFactory() {
-  return new S3db({
-    uri: `s3://${accessKeyId}:${secretAccessKey}@${bucket}/${bucketPrefix}`,
-    passphrase: "super-secret-leaked-passphrase",
-  });
-}
+const defaultBeforeAll = (s3db: S3db) => async () => {
+  await s3db.connect();
 
-const defaultBeforeAll = (s3db: S3db) => {
-  return async function () {
-    await s3db.connect();
-
-    for (const resourceName of resources) {
-      if (!s3db.resources[resourceName]) {
-        await s3db.createResource({
-          resourceName,
-          attributes,
-        });
-      }
+  for (const resourceName of resources) {
+    if (!s3db.resources[resourceName]) {
+      await s3db.createResource({
+        resourceName,
+        attributes,
+      });
     }
   }
 }
@@ -87,12 +79,15 @@ describe("resources", function () {
         expect(s3db.resource(resourceName)).toBeDefined();
         
         const functions = [
-          "count",
           "insert",
           "getById",
           "deleteById",
           "bulkInsert",
+          "count",
           "bulkDelete",
+          "getAllIds",
+          "deleteAll",
+          "getAll",
         ];
         
         functions.forEach(f => expect(s3db.resource(resourceName)[f]).toBeDefined())
