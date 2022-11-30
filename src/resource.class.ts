@@ -2,8 +2,8 @@ import * as path from "path";
 import Crypto from "crypto-js";
 import { nanoid } from "nanoid";
 import EventEmitter from "events";
-import { sortBy, chunk, isArray } from "lodash";
 import { flatten, unflatten } from "flat";
+import { sortBy, chunk, isArray, merge } from "lodash";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import S3db from "./s3db.class";
@@ -230,9 +230,7 @@ export default class Resource
       );
     }
 
-    if (!id && id !== 0) {
-      id = nanoid();
-    }
+    if (!id && id !== 0) id = nanoid();
 
     // save
     await this.s3Client.putObject({
@@ -279,6 +277,57 @@ export default class Resource
     this.s3db.emit("got", this.name, data);
 
     return data;
+  }
+
+  /**
+   * Update a resource by id
+   * @param {Object} param
+   * @returns
+   */
+  async updateById(id: any, attributes: any) {
+    const obj = await this.getById(id)
+
+    const newObj = merge(obj, attributes)
+
+    let { id: newId, ...attrs }: { id: any; attrs: any } = flatten(newObj, {
+      safe: true,
+    });
+
+    const { isValid, errors, data: validated } = this.check(attrs);
+
+    if (!isValid) {
+      return Promise.reject(
+        new S3dbInvalidResource({
+          bucket: this.s3Client.bucket,
+          resourceName: this.name,
+          attributes,
+          validation: errors,
+        })
+      );
+    }
+
+    if (!id && id !== 0) id = nanoid();
+
+    // save
+    await this.s3Client.putObject({
+      key: path.join(`resource=${this.name}`, `id=${id}`),
+      body: "",
+      metadata: this.map(validated),
+    });
+
+    const final = {
+      id,
+      ...(unflatten(validated) as object),
+    };
+
+    this.emit("updated", final);
+    this.s3db.emit("updated", this.name, final);
+
+    if (this.s3Cache) {
+      await this.s3Cache?.purge();
+    }
+
+    return final;
   }
 
   /**

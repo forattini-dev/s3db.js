@@ -91,6 +91,7 @@ describe("resources", function () {
         const functions = [
           "insert",
           "getById",
+          "updateById",
           "deleteById",
           "bulkInsert",
           "count",
@@ -118,6 +119,27 @@ describe("resources", function () {
       let { isValid, errors } = resource.validate(data);
       expect(errors).toEqual([]);
       expect(isValid).toBeTruthy();
+    });
+
+    it("should insert and update", async function () {
+      const resource = s3db.resource(`leads1`);
+
+      const data = resourceFactory({
+        invalidAttr: "this will disappear",
+      });
+
+      const createdResource = await resource.insert(data);
+      expect(createdResource.id).toEqual(data.id);
+
+      await resource.updateById(data.id, {
+        personalData: {
+          fullName: "My New Name!"
+        }
+      });
+      
+      const foundResource = await resource.getById(data.id);
+      expect(foundResource.id).toEqual(data.id);
+      expect(foundResource.personalData.fullName).toEqual("My New Name!");
     });
 
     it("should insert and delete", async function () {
