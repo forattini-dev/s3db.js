@@ -26,7 +26,7 @@ class S3ResourceCache extends s3_cache_class_1.default {
     getKey({ action = "list", params }) {
         return super.getKey({
             params,
-            additionalPrefix: `resource:${this.resource.name}|action:${action}|`,
+            additionalPrefix: `${this.resource.name}|${action}`,
         });
     }
     put({ action = "list", params, data, }) {
@@ -61,10 +61,15 @@ class S3ResourceCache extends s3_cache_class_1.default {
             });
         });
     }
-    purge({ resourceName }) {
+    purge() {
         return __awaiter(this, void 0, void 0, function* () {
             let keys = yield this.s3Client.getAllKeys({ prefix: "cache" });
-            keys = keys.filter((k) => k.includes(`resource:${resourceName}|`));
+            const key = Buffer.from(this.resource.name)
+                .toString("base64")
+                .split("")
+                .reverse()
+                .join("");
+            keys = keys.filter((k) => k.includes(key));
             yield this.s3Client.deleteObjects(keys);
         });
     }

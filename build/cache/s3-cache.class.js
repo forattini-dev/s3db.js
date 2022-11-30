@@ -51,16 +51,27 @@ class S3Cache {
             [serializers_type_1.default.avro]: avro_serializer_1.AvroSerializer,
         };
     }
-    getKey({ params, additionalPrefix = "", }) {
+    getKey({ params, hashed = true, additionalPrefix = "", }) {
         let filename = Object.keys(params || {})
             .sort()
             .map((x) => `${x}:${params[x]}`)
             .join("|");
-        filename = Buffer.from(filename).toString("hex");
+        if (filename.length === 0)
+            filename = `empty`;
+        if (additionalPrefix.length > 0) {
+            filename = additionalPrefix + `|` + filename;
+        }
+        if (hashed) {
+            filename = Buffer.from(filename)
+                .toString("base64")
+                .split("")
+                .reverse()
+                .join("");
+        }
         filename = filename + "." + this.serializer;
         if (this.compressData)
             filename += ".gz";
-        return path.join("cache", additionalPrefix + filename);
+        return path.join("cache", filename);
     }
     _put({ key, data }) {
         return __awaiter(this, void 0, void 0, function* () {

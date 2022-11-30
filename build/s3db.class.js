@@ -32,7 +32,6 @@ class S3db extends events_1.default {
         this.resources = {};
         this.options = options;
         this.parallelism = parseInt(options.parallelism + "") || 10;
-        this.metadata = this.blankMetadataStructure();
         this.passphrase = options === null || options === void 0 ? void 0 : options.passphrase;
         this.plugins = options.plugins || [];
         this.cache = options.cache;
