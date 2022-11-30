@@ -116,28 +116,25 @@ class Resource extends events_1.default {
             this.options.afterUnmap = [];
         const schema = (0, flat_1.flatten)(this.schema, { safe: true });
         const addRule = (arr, attribute, action) => {
-            if (arr.filter((a) => a.attribute === attribute && a.action === action)
-                .length > 0) {
-                arr.push({ attribute, action });
-            }
+            this.options[arr].push({ attribute, action });
         };
         for (const [name, definition] of Object.entries(schema)) {
             if (definition.includes("secret")) {
                 if (this.options.autoDecrypt === true) {
-                    addRule(this.options.afterUnmap, name, "decrypt");
+                    addRule('afterUnmap', name, "decrypt");
                 }
             }
             if (definition.includes("array")) {
-                addRule(this.options.beforeMap, name, "fromArray");
-                addRule(this.options.afterUnmap, name, "toArray");
+                addRule('beforeMap', name, "fromArray");
+                addRule('afterUnmap', name, "toArray");
             }
             if (definition.includes("number")) {
-                addRule(this.options.beforeMap, name, "toString");
-                addRule(this.options.afterUnmap, name, "toNumber");
+                addRule('beforeMap', name, "toString");
+                addRule('afterUnmap', name, "toNumber");
             }
             if (definition.includes("boolean")) {
-                addRule(this.options.beforeMap, name, "toJson");
-                addRule(this.options.afterUnmap, name, "fromJson");
+                addRule('beforeMap', name, "toJson");
+                addRule('afterUnmap', name, "fromJson");
             }
         }
     }
