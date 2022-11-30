@@ -266,10 +266,10 @@ class Resource extends events_1.default {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const obj = yield this.getById(id);
-            const newObj = (0, lodash_1.merge)(obj, attributes);
-            let _b = (0, flat_1.flatten)(newObj, {
-                safe: true,
-            }), { id: newId } = _b, attrs = __rest(_b, ["id"]);
+            let attrs1 = (0, flat_1.flatten)(attributes, { safe: true });
+            let attrs2 = (0, flat_1.flatten)(obj, { safe: true });
+            const attrs = (0, lodash_1.merge)(attrs2, attrs1);
+            delete attrs.id;
             const { isValid, errors, data: validated } = this.check(attrs);
             if (!isValid) {
                 return Promise.reject(new errors_1.S3dbInvalidResource({

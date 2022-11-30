@@ -286,12 +286,12 @@ export default class Resource
    */
   async updateById(id: any, attributes: any) {
     const obj = await this.getById(id)
+    
+    let attrs1 = flatten(attributes, { safe: true });
+    let attrs2 = flatten(obj, { safe: true });
 
-    const newObj = merge(obj, attributes)
-
-    let { id: newId, ...attrs }: { id: any; attrs: any } = flatten(newObj, {
-      safe: true,
-    });
+    const attrs = merge(attrs2, attrs1) as any
+    delete attrs.id
 
     const { isValid, errors, data: validated } = this.check(attrs);
 
