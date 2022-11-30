@@ -61,6 +61,8 @@ export default class Resource
         serializer: "json",
       });
     }
+
+    console.log(this.options)
   }
 
   getMappersFromSchema(schema: any) {
@@ -109,32 +111,27 @@ export default class Resource
 
     const schema: any = flatten(this.schema, { safe: true });
 
-    const addRule = (arr: any[], attribute: string, action: string) => {
-      if (
-        arr.filter((a) => a.attribute === attribute && a.action === action)
-          .length > 0
-      ) {
-        arr.push({ attribute, action });
-      }
+    const addRule = (arr: string, attribute: string, action: string) => {
+      this.options[arr].push({ attribute, action });
     };
 
     for (const [name, definition] of Object.entries(schema)) {
       if ((definition as string).includes("secret")) {
         if (this.options.autoDecrypt === true) {
-          addRule(this.options.afterUnmap, name, "decrypt");
+          addRule('afterUnmap', name, "decrypt");
         }
       }
       if ((definition as string).includes("array")) {
-        addRule(this.options.beforeMap, name, "fromArray");
-        addRule(this.options.afterUnmap, name, "toArray");
+        addRule('beforeMap', name, "fromArray");
+        addRule('afterUnmap', name, "toArray");
       }
       if ((definition as string).includes("number")) {
-        addRule(this.options.beforeMap, name, "toString");
-        addRule(this.options.afterUnmap, name, "toNumber");
+        addRule('beforeMap', name, "toString");
+        addRule('afterUnmap', name, "toNumber");
       }
       if ((definition as string).includes("boolean")) {
-        addRule(this.options.beforeMap, name, "toJson");
-        addRule(this.options.afterUnmap, name, "fromJson");
+        addRule('beforeMap', name, "toJson");
+        addRule('afterUnmap', name, "fromJson");
       }
     }
   }
@@ -181,6 +178,8 @@ export default class Resource
       acc[this.mapObj[key]] = isArray(value) ? value.join("|") : value;
       return acc;
     }, {});
+
+    // console.log({ obj })
 
     return obj;
   }
