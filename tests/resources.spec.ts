@@ -28,6 +28,11 @@ const attributes = {
     mobileNumber: "string",
     personalEmail: "email",
   },
+  additional: {
+    number: "number",
+    string: "string",
+    boolean: "boolean",
+  },
 };
 
 function resourceFactory(overwrite = {}) {
@@ -45,6 +50,11 @@ function resourceFactory(overwrite = {}) {
       fullName: fake.names.name(),
       mobileNumber: fake.phone.number(),
       personalEmail: fake.internet.email(),
+    },
+    additional: {
+      number: fake.random.number(100),
+      string: fake.random.string(),
+      boolean: fake.random.boolean(),
     },
     ...overwrite,
   };
