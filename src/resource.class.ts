@@ -61,8 +61,6 @@ export default class Resource
         serializer: "json",
       });
     }
-
-    console.log(this.options)
   }
 
   getMappersFromSchema(schema: any) {
@@ -178,8 +176,6 @@ export default class Resource
       acc[this.mapObj[key]] = isArray(value) ? value.join("|") : value;
       return acc;
     }, {});
-
-    // console.log({ obj })
 
     return obj;
   }
