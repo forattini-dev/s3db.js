@@ -29,9 +29,7 @@ function ValidatorFactory({ passphrase }) {
             if (!validator.passphrase)
                 throw new Error("No passphrase defined.");
             const ciphertext = crypto_js_1.default.AES.encrypt(String(v), validator.passphrase);
-            let content = ciphertext.toString();
-            content = JSON.stringify(content);
-            return content;
+            return ciphertext.toString();
         },
     });
     return validator;

@@ -190,7 +190,6 @@ class Resource extends events_1.default {
             for (const action of actions) {
                 if (action === "decrypt") {
                     let content = obj[attribute];
-                    content = JSON.parse(content);
                     content = crypto_js_1.default.AES.decrypt(content, this.s3db.passphrase);
                     content = content.toString(crypto_js_1.default.enc.Utf8);
                     obj[attribute] = content;
