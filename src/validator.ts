@@ -1,14 +1,12 @@
-import Crypto from "crypto-js";
+import CryptoJS from "crypto-js";
 import Validator from "fastest-validator";
 
 export class CustomValidator extends Validator {
-  crypto: typeof Crypto;
+  crypto: any;
   passphrase: string | any;
 
   constructor(options: any, passphrase?: string) {
     super(options);
-
-    this.crypto = Crypto;
     this.passphrase = passphrase;
   }
 }
@@ -16,7 +14,7 @@ export class CustomValidator extends Validator {
 export function ValidatorFactory({ passphrase }: { passphrase?: string }) {
   let options = {
     useNewCustomCheckerFunction: true,
-    
+
     defaults: {
       object: {
         strict: "remove",
@@ -27,11 +25,17 @@ export function ValidatorFactory({ passphrase }: { passphrase?: string }) {
   const validator = new CustomValidator(options, passphrase);
 
   validator.alias("secret", {
-    type: 'string',
+    type: "string",
     custom: (v: any) => {
-      if (!validator.passphrase) throw new Error('No passphrase defined.')
-      return validator.crypto.AES.encrypt(v, validator.passphrase).toString()
-    }
+      if (!validator.passphrase) throw new Error("No passphrase defined.");
+
+      const ciphertext = CryptoJS.AES.encrypt(String(v), validator.passphrase);
+
+      let content = ciphertext.toString();
+      content = JSON.stringify(content)
+
+      return content
+    },
   });
 
   return validator;

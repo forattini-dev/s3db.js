@@ -11,8 +11,8 @@
     "example:2": "cd examples; node 2-read-stream.js",
     "example:3": "cd examples; node 3-read-stream-to-csv.js",
     "example:4": "cd examples; node 4-read-stream-to-zip.js",
-    "example:5": "cd examples; node 5-jwt-tokens.js",
-    "example:6": "cd examples; node 6-write-stream.js",
+    "example:5": "cd examples; node 5-write-stream.js",
+    "example:6": "cd examples; node 6-jwt-tokens.js",
     "coverage": "npx http-server ./coverage/lcov-report"
   },
   "author": "filipeforattini",

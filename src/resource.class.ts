@@ -1,6 +1,6 @@
 import * as path from "path";
-import Crypto from "crypto-js";
 import { nanoid } from "nanoid";
+import CryptoJS from "crypto-js";
 import EventEmitter from "events";
 import { flatten, unflatten } from "flat";
 import { sortBy, chunk, isArray, merge } from "lodash";
@@ -9,6 +9,7 @@ import { PromisePool } from "@supercharge/promise-pool";
 import S3db from "./s3db.class";
 import S3Client from "./s3-client.class";
 import { S3dbInvalidResource } from "./errors";
+import S3ResourceCache from "./cache/s3-resource-cache.class";
 import ResourceWriteStream from "./stream/resource-write-stream.class";
 import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class";
 import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class";
@@ -17,7 +18,6 @@ import {
   ResourceInterface,
   ResourceConfigInterface,
 } from "./resource.interface";
-import S3ResourceCache from "./cache/s3-resource-cache.class";
 
 export default class Resource
   extends EventEmitter
@@ -104,32 +104,36 @@ export default class Resource
   }
 
   studyOptions() {
-    if (!this.options.afterUnmap) this.options.beforeMap = [];
-    if (!this.options.afterUnmap) this.options.afterUnmap = [];
+    if (!this.options.afterUnmap) this.options.beforeMap = {};
+    if (!this.options.afterUnmap) this.options.afterUnmap = {};
 
     const schema: any = flatten(this.schema, { safe: true });
 
     const addRule = (arr: string, attribute: string, action: string) => {
-      this.options[arr].push({ attribute, action });
+      if (!this.options[arr][attribute]) this.options[arr][attribute] = [];
+
+      this.options[arr][attribute] = [
+        ...new Set([...this.options[arr][attribute], action]),
+      ];
     };
 
     for (const [name, definition] of Object.entries(schema)) {
       if ((definition as string).includes("secret")) {
         if (this.options.autoDecrypt === true) {
-          addRule('afterUnmap', name, "decrypt");
+          addRule("afterUnmap", name, "decrypt");
         }
       }
       if ((definition as string).includes("array")) {
-        addRule('beforeMap', name, "fromArray");
-        addRule('afterUnmap', name, "toArray");
+        addRule("beforeMap", name, "fromArray");
+        addRule("afterUnmap", name, "toArray");
       }
       if ((definition as string).includes("number")) {
-        addRule('beforeMap', name, "toString");
-        addRule('afterUnmap', name, "toNumber");
+        addRule("beforeMap", name, "toString");
+        addRule("afterUnmap", name, "toNumber");
       }
       if ((definition as string).includes("boolean")) {
-        addRule('beforeMap', name, "toJson");
-        addRule('afterUnmap', name, "fromJson");
+        addRule("beforeMap", name, "toJson");
+        addRule("afterUnmap", name, "fromJson");
       }
     }
   }
@@ -162,13 +166,15 @@ export default class Resource
   map(data: any) {
     let obj: any = { ...data };
 
-    for (const rule of this.options.beforeMap) {
-      if (rule.action === "fromArray") {
-        obj[rule.attribute] = (obj[rule.attribute] || []).join("|");
-      } else if (rule.action === "toString") {
-        obj[rule.attribute] = String(obj[rule.attribute]);
-      } else if (rule.action === "toJson") {
-        obj[rule.attribute] = JSON.stringify(obj[rule.attribute]);
+    for (const [attribute, actions] of Object.entries(this.options.beforeMap)) {
+      for (const action of actions as string[]) {
+        if (action === "fromArray") {
+          obj[attribute] = (obj[attribute] || []).join("|");
+        } else if (action === "toString") {
+          obj[attribute] = String(obj[attribute]);
+        } else if (action === "toJson") {
+          obj[attribute] = JSON.stringify(obj[attribute]);
+        }
       }
     }
 
@@ -186,20 +192,23 @@ export default class Resource
       return acc;
     }, {});
 
-    for (const rule of this.options.afterUnmap) {
-      if (rule.action === "decrypt") {
-        const decrypted = Crypto.AES.decrypt(
-          obj[rule.attribute],
-          String(this.s3db.passphrase)
-        );
-
-        obj[rule.attribute] = decrypted.toString(Crypto.enc.Utf8);
-      } else if (rule.action === "toArray") {
-        obj[rule.attribute] = (obj[rule.attribute] || "").split("|");
-      } else if (rule.action === "toNumber") {
-        obj[rule.attribute] = Number(obj[rule.attribute] || "");
-      } else if (rule.action === "fromJson") {
-        obj[rule.attribute] = JSON.parse(obj[rule.attribute]);
+    for (const [attribute, actions] of Object.entries(
+      this.options.afterUnmap
+    )) {
+      for (const action of actions as string[]) {
+        if (action === "decrypt") {
+          let content = obj[attribute];
+          content = JSON.parse(content)
+          content = CryptoJS.AES.decrypt(content, this.s3db.passphrase);
+          content = content.toString(CryptoJS.enc.Utf8);
+          obj[attribute] = content;
+        } else if (action === "toArray") {
+          obj[attribute] = (obj[attribute] || "").split("|");
+        } else if (action === "toNumber") {
+          obj[attribute] = Number(obj[attribute] || "");
+        } else if (action === "fromJson") {
+          obj[attribute] = JSON.parse(obj[attribute]);
+        }
       }
     }
 
@@ -285,13 +294,13 @@ export default class Resource
    * @returns
    */
   async updateById(id: any, attributes: any) {
-    const obj = await this.getById(id)
-    
+    const obj = await this.getById(id);
+
     let attrs1 = flatten(attributes, { safe: true });
     let attrs2 = flatten(obj, { safe: true });
 
-    const attrs = merge(attrs2, attrs1) as any
-    delete attrs.id
+    const attrs = merge(attrs2, attrs1) as any;
+    delete attrs.id;
 
     const { isValid, errors, data: validated } = this.check(attrs);
 
@@ -509,14 +518,14 @@ export default class Resource
     return results;
   }
 
-  read() {
+  readable() {
     const stream = new ResourceIdsReadStream({ resource: this });
     const transformer = new ResourceIdsToDataTransformer({ resource: this });
 
     return stream.pipe(transformer);
   }
 
-  write() {
+  writable() {
     const stream = new ResourceWriteStream({ resource: this });
     return stream;
   }

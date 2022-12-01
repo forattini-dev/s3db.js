@@ -47,17 +47,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const path = __importStar(require("path"));
-const crypto_js_1 = __importDefault(require("crypto-js"));
 const nanoid_1 = require("nanoid");
+const crypto_js_1 = __importDefault(require("crypto-js"));
 const events_1 = __importDefault(require("events"));
 const flat_1 = require("flat");
 const lodash_1 = require("lodash");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const errors_1 = require("./errors");
+const s3_resource_cache_class_1 = __importDefault(require("./cache/s3-resource-cache.class"));
 const resource_write_stream_class_1 = __importDefault(require("./stream/resource-write-stream.class"));
 const resource_ids_read_stream_class_1 = __importDefault(require("./stream/resource-ids-read-stream.class"));
 const resource_ids_transformer_class_1 = __importDefault(require("./stream/resource-ids-transformer.class"));
-const s3_resource_cache_class_1 = __importDefault(require("./cache/s3-resource-cache.class"));
 class Resource extends events_1.default {
     /**
      * Constructor
@@ -111,30 +111,34 @@ class Resource extends events_1.default {
     }
     studyOptions() {
         if (!this.options.afterUnmap)
-            this.options.beforeMap = [];
+            this.options.beforeMap = {};
         if (!this.options.afterUnmap)
-            this.options.afterUnmap = [];
+            this.options.afterUnmap = {};
         const schema = (0, flat_1.flatten)(this.schema, { safe: true });
         const addRule = (arr, attribute, action) => {
-            this.options[arr].push({ attribute, action });
+            if (!this.options[arr][attribute])
+                this.options[arr][attribute] = [];
+            this.options[arr][attribute] = [
+                ...new Set([...this.options[arr][attribute], action]),
+            ];
         };
         for (const [name, definition] of Object.entries(schema)) {
             if (definition.includes("secret")) {
                 if (this.options.autoDecrypt === true) {
-                    addRule('afterUnmap', name, "decrypt");
+                    addRule("afterUnmap", name, "decrypt");
                 }
             }
             if (definition.includes("array")) {
-                addRule('beforeMap', name, "fromArray");
-                addRule('afterUnmap', name, "toArray");
+                addRule("beforeMap", name, "fromArray");
+                addRule("afterUnmap", name, "toArray");
             }
             if (definition.includes("number")) {
-                addRule('beforeMap', name, "toString");
-                addRule('afterUnmap', name, "toNumber");
+                addRule("beforeMap", name, "toString");
+                addRule("afterUnmap", name, "toNumber");
             }
             if (definition.includes("boolean")) {
-                addRule('beforeMap', name, "toJson");
-                addRule('afterUnmap', name, "fromJson");
+                addRule("beforeMap", name, "toJson");
+                addRule("afterUnmap", name, "fromJson");
             }
         }
     }
@@ -158,15 +162,17 @@ class Resource extends events_1.default {
     }
     map(data) {
         let obj = Object.assign({}, data);
-        for (const rule of this.options.beforeMap) {
-            if (rule.action === "fromArray") {
-                obj[rule.attribute] = (obj[rule.attribute] || []).join("|");
-            }
-            else if (rule.action === "toString") {
-                obj[rule.attribute] = String(obj[rule.attribute]);
-            }
-            else if (rule.action === "toJson") {
-                obj[rule.attribute] = JSON.stringify(obj[rule.attribute]);
+        for (const [attribute, actions] of Object.entries(this.options.beforeMap)) {
+            for (const action of actions) {
+                if (action === "fromArray") {
+                    obj[attribute] = (obj[attribute] || []).join("|");
+                }
+                else if (action === "toString") {
+                    obj[attribute] = String(obj[attribute]);
+                }
+                else if (action === "toJson") {
+                    obj[attribute] = JSON.stringify(obj[attribute]);
+                }
             }
         }
         obj = Object.entries(obj).reduce((acc, [key, value]) => {
@@ -180,19 +186,24 @@ class Resource extends events_1.default {
             acc[this.reversedMapObj[key]] = value;
             return acc;
         }, {});
-        for (const rule of this.options.afterUnmap) {
-            if (rule.action === "decrypt") {
-                const decrypted = crypto_js_1.default.AES.decrypt(obj[rule.attribute], String(this.s3db.passphrase));
-                obj[rule.attribute] = decrypted.toString(crypto_js_1.default.enc.Utf8);
-            }
-            else if (rule.action === "toArray") {
-                obj[rule.attribute] = (obj[rule.attribute] || "").split("|");
-            }
-            else if (rule.action === "toNumber") {
-                obj[rule.attribute] = Number(obj[rule.attribute] || "");
-            }
-            else if (rule.action === "fromJson") {
-                obj[rule.attribute] = JSON.parse(obj[rule.attribute]);
+        for (const [attribute, actions] of Object.entries(this.options.afterUnmap)) {
+            for (const action of actions) {
+                if (action === "decrypt") {
+                    let content = obj[attribute];
+                    content = JSON.parse(content);
+                    content = crypto_js_1.default.AES.decrypt(content, this.s3db.passphrase);
+                    content = content.toString(crypto_js_1.default.enc.Utf8);
+                    obj[attribute] = content;
+                }
+                else if (action === "toArray") {
+                    obj[attribute] = (obj[attribute] || "").split("|");
+                }
+                else if (action === "toNumber") {
+                    obj[attribute] = Number(obj[attribute] || "");
+                }
+                else if (action === "fromJson") {
+                    obj[attribute] = JSON.parse(obj[attribute]);
+                }
             }
         }
         return obj;
@@ -462,12 +473,12 @@ class Resource extends events_1.default {
             return results;
         });
     }
-    read() {
+    readable() {
         const stream = new resource_ids_read_stream_class_1.default({ resource: this });
         const transformer = new resource_ids_transformer_class_1.default({ resource: this });
         return stream.pipe(transformer);
     }
-    write() {
+    writable() {
         const stream = new resource_write_stream_class_1.default({ resource: this });
         return stream;
     }
