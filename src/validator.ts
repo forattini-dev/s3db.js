@@ -31,10 +31,7 @@ export function ValidatorFactory({ passphrase }: { passphrase?: string }) {
 
       const ciphertext = CryptoJS.AES.encrypt(String(v), validator.passphrase);
 
-      let content = ciphertext.toString();
-      content = JSON.stringify(content)
-
-      return content
+      return ciphertext.toString();
     },
   });
 

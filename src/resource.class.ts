@@ -198,7 +198,6 @@ export default class Resource
       for (const action of actions as string[]) {
         if (action === "decrypt") {
           let content = obj[attribute];
-          content = JSON.parse(content)
           content = CryptoJS.AES.decrypt(content, this.s3db.passphrase);
           content = content.toString(CryptoJS.enc.Utf8);
           obj[attribute] = content;
