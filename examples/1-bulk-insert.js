@@ -1,9 +1,10 @@
 const { ENV, CostsPlugin, S3db } = require("./concerns");
 
+const { nanoid } = require("nanoid");
 const Fakerator = require("fakerator");
 const ProgressBar = require("progress");
 
-const TOTAL = 1000;
+const TOTAL = 10
 
 async function main() {
   const fake = Fakerator();
@@ -51,7 +52,7 @@ async function main() {
       id: k,
       name: fake.names.name(),
       email: fake.internet.email(),
-      token: fake.misc.uuid(),
+      token: nanoid(),
     }))
   );
 

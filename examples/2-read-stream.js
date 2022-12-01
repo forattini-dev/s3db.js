@@ -41,13 +41,14 @@ async function main() {
     options
   );
 
-  const stream = s3db.resource("leads").read();
+  const stream = s3db.resource("leads").readable();
 
   console.time("reading");
 
   stream.on("page", () => barPages.tick());
   stream.on("id", () => barIds.tick());
   stream.on("data", () => barData.tick());
+  stream.on("error", (err) => console.error(err));
 
   stream.on("end", () => {
     process.stdout.write("\n");

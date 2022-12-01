@@ -72,8 +72,8 @@ async function main() {
     options
   );
 
-  const readStream = s3db.resource("leads").read();
-  const writeStream = s3db.resource("copyLeads").write();
+  const readStream = s3db.resource("leads").readable();
+  const writeStream = s3db.resource("copy-leads").writable();
 
   console.time("copying-data");
   s3db.client.on("request", () => requestsBar.tick());

@@ -604,26 +604,13 @@ reading-data: 1:13.078 (m:ss.mmm)
 Total zip size: 0.68 Mb
 ```
 
-#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/5-jwt-tokens.js)
+#### [Write Stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/5-write-stream.js)
 
 ```bash
 $ npm run example:5
 
-> s3db.js@1.0.0 example:5
-> cd examples; node jwt-tokens.js
-
-Created tokens: .....
-Validated tokens: .....
-```
-
-
-#### [Write Stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/6-write-stream.js)
-
-```bash
-$ npm run example:6
-
 > s3db.js@1.0.0 example:6
-> cd examples; node 6-write-stream.js
+> cd examples; node 5-write-stream.js
 
 reading 10000 leads.
 parallelism of 250 requests.
@@ -637,6 +624,18 @@ writing-data    10000/10000 (100%)  [==============================]  25/bps  0.
 copying-data: 6:51.352 (m:ss.mmm)
 
 Total cost: 0.0541 USD
+```
+
+#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/6-jwt-tokens.js)
+
+```bash
+$ npm run example:6
+
+> s3db.js@1.0.0 example:6
+> cd examples; node jwt-tokens.js
+
+Created tokens: .....
+Validated tokens: .....
 ```
 
 ## Cost simulation

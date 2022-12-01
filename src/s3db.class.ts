@@ -20,7 +20,7 @@ export default class S3db extends EventEmitter {
   validatorInstance: any;
   parallelism: number;
   resources: any;
-  passphrase: string | undefined;
+  passphrase: string;
   plugins: PluginInterface[];
   cache: boolean | undefined = false;
 
@@ -34,9 +34,9 @@ export default class S3db extends EventEmitter {
     this.resources = {};
     this.options = options;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.passphrase = options?.passphrase;
     this.plugins = options.plugins || [];
     this.cache = options.cache;
+    this.passphrase = options.passphrase || ""
 
     this.validatorInstance = ValidatorFactory({
       passphrase: options?.passphrase,

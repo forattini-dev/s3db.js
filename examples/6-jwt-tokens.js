@@ -8,25 +8,6 @@ const { take, shuffle } = require("lodash");
 
 const fake = Fakerator();
 
-const resources = {
-  users: {
-    name: "string",
-    email: "string",
-    password: "secret",
-    scopes: "array|items:string",
-  },
-  tokens: {
-    iss: ["string", "url"],
-    sub: "string",
-    aud: "string",
-    exp: "number",
-    email: "email",
-    name: "string",
-    email_verified: "boolean",
-    scopes: "array|items:string",
-  },
-};
-
 const userFactory = () => {
   const scopes = ["admin", "guest", "users:read", "tokens:read"];
   const email = fake.internet.email();
@@ -41,8 +22,8 @@ const userFactory = () => {
 };
 
 const Token = {
-  createToken: async (client, email, password) => {
-    const user = await client.resource("users").getById(email);
+  createToken: async (s3db, email, password) => {
+    const user = await s3db.resource("users").getById(email);
 
     if (user.password !== password) {
       console.log({ user, email, password });
@@ -65,7 +46,7 @@ const Token = {
 
     const decoded = jwt.decode(token, ENV.PASSPRHASE);
 
-    await client.resource("tokens").insert({
+    await s3db.resource("tokens").insert({
       id: sha256(token).toString(),
       ...decoded,
     });
@@ -96,14 +77,29 @@ async function main() {
 
   await s3db.connect();
 
-  for (const [name, attributes] of Object.entries(resources)) {
-    if (!s3db.resources[name]) {
-      await s3db.createResource({
-        resourceName: name,
-        attributes,
-      });
-    }
-  }
+  await s3db.createResource({
+    resourceName: "users",
+    attributes: {
+      name: "string",
+      email: "string",
+      password: "secret",
+      scopes: "array|items:string",
+    },
+  });
+
+  await s3db.createResource({
+    resourceName: "tokens",
+    attributes: {
+      iss: ["string", "url"],
+      sub: "string",
+      aud: "string",
+      exp: "number",
+      email: "email",
+      name: "string",
+      email_verified: "boolean",
+      scopes: "array|items:string",
+    },
+  });
 
   const users = new Array(5).fill(0).map(userFactory);
   await s3db.resource("users").bulkInsert(users);

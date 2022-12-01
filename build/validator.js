@@ -9,7 +9,6 @@ const fastest_validator_1 = __importDefault(require("fastest-validator"));
 class CustomValidator extends fastest_validator_1.default {
     constructor(options, passphrase) {
         super(options);
-        this.crypto = crypto_js_1.default;
         this.passphrase = passphrase;
     }
 }
@@ -25,12 +24,15 @@ function ValidatorFactory({ passphrase }) {
     };
     const validator = new CustomValidator(options, passphrase);
     validator.alias("secret", {
-        type: 'string',
+        type: "string",
         custom: (v) => {
             if (!validator.passphrase)
-                throw new Error('No passphrase defined.');
-            return validator.crypto.AES.encrypt(v, validator.passphrase).toString();
-        }
+                throw new Error("No passphrase defined.");
+            const ciphertext = crypto_js_1.default.AES.encrypt(String(v), validator.passphrase);
+            let content = ciphertext.toString();
+            content = JSON.stringify(content);
+            return content;
+        },
     });
     return validator;
 }

@@ -28,7 +28,7 @@ async function main() {
 
   const filename = __dirname + "/tmp/leads." + Date.now() + ".csv";
 
-  const stream = await s3db.resource("leads").read();
+  const stream = await s3db.resource("leads").readable();
   const streamWrite = fs.createWriteStream(filename);
 
   const transformer = new Transform({
