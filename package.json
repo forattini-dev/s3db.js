@@ -3,16 +3,16 @@
   "version": "1.0.4",
   "description": "Use AWS S3 as a cheap document database.",
   "main": "build/index.js",
-  "author": "filipeforattini",
+  "author": "forattini-dev",
   "license": "UNLICENSE",
+  "homepage": "https://github.com/forattini-dev/s3db.js#readme",
+  "bugs": {
+    "url": "https://github.com/forattini-dev/s3db.js/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/filipeforattini/s3db.js.git"
+    "url": "git+https://github.com/forattini-dev/s3db.js.git"
   },
-  "bugs": {
-    "url": "https://github.com/filipeforattini/s3db.js/issues"
-  },
-  "homepage": "https://github.com/filipeforattini/s3db.js#readme",
   "directories": {
     "example": "examples",
     "test": "tests"
