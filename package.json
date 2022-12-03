@@ -5,6 +5,23 @@
   "main": "build/index.js",
   "author": "filipeforattini",
   "license": "UNLICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/filipeforattini/s3db.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/filipeforattini/s3db.js/issues"
+  },
+  "homepage": "https://github.com/filipeforattini/s3db.js#readme",
+  "directories": {
+    "example": "examples",
+    "test": "tests"
+  },
+  "keywords": [
+    "s3",
+    "aws",
+    "database"
+  ],
   "scripts": {
     "build": "rimraf ./build && tsc",
     "test": "jest --coverage",
@@ -17,6 +34,17 @@
     "example:4": "cd examples; node 4-read-stream-to-zip.js",
     "example:5": "cd examples; node 5-write-stream.js",
     "example:6": "cd examples; node 6-jwt-tokens.js"
+  },
+  "dependencies": {
+    "@supercharge/promise-pool": "^2.3.2",
+    "avsc": "^5.7.7",
+    "aws-sdk": "^2.1261.0",
+    "crypto-js": "^4.1.1",
+    "fastest-validator": "^1.15.0",
+    "flat": "^5.0.2",
+    "lodash": "^4.17.21",
+    "nanoid": "3.3.4",
+    "ts-mixer": "^6.0.2"
   },
   "devDependencies": {
     "@types/crypto-js": "^4.1.1",
@@ -38,33 +66,5 @@
     "ts-jest": "^29.0.3",
     "ts-node": "^10.9.1",
     "typescript": "^4.9.3"
-  },
-  "dependencies": {
-    "@supercharge/promise-pool": "^2.3.2",
-    "avsc": "^5.7.7",
-    "aws-sdk": "^2.1261.0",
-    "crypto-js": "^4.1.1",
-    "fastest-validator": "^1.15.0",
-    "flat": "^5.0.2",
-    "lodash": "^4.17.21",
-    "nanoid": "3.3.4",
-    "ts-mixer": "^6.0.2"
-  },
-  "directories": {
-    "example": "examples",
-    "test": "tests"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/forattini-dev/s3db.js.git"
-  },
-  "keywords": [
-    "s3",
-    "aws",
-    "database"
-  ],
-  "bugs": {
-    "url": "https://github.com/forattini-dev/s3db.js/issues"
-  },
-  "homepage": "https://github.com/forattini-dev/s3db.js#readme"
+  }
 }
