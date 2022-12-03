@@ -55,9 +55,9 @@ Lets give it a try! :)
 ## Install
 
 ```bash
-npm i https://github.com/forattini-dev/s3db.js
+npm i s3db.js
 # or
-yarn add https://github.com/forattini-dev/s3db.js
+yarn add s3db.js
 ```
 
 ## Usage
