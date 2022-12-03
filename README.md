@@ -1,24 +1,30 @@
 # s3db.js
 
-Hey guys, there is an another way to create a cheap database with an easy ORM to handle your dataset!
+Another way to create a cheap document-base database with an easy ORM to handle your dataset!
 
 1. <a href="#motivation">Motivation</a>
 1. <a href="#install">Install</a>
 1. <a href="#usage">Usage</a>
    1. <a href="#quick-setup">Quick Setup</a>
    1. <a href="#insights">Insights</a>
-   1. <a href="#client">Client</a>
-   1. <a href="#resources">Resources</a>
-      1. <a href="#create-a-resource">Create a resource</a>
-      1. <a href="#insert-data">Insert data</a>
-      1. <a href="#bulk-insert-data">Bulk insert data</a>
-      1. <a href="#get-data">Get data</a>
-      1. <a href="#delete-data">Delete data</a>
-      1. <a href="#resource-read-stream">Resource read stream</a>
-      1. List data (coming soon)
-      1. Write stream (coming soon)
-   1. <a href="#events">Events</a>
-   1. <a href="#s3-client">S3 Client</a>
+   1. <a href="#database">Database</a>
+   1. <a href="#create-a-resource">Create a resource</a>
+1. <a href="#resource-methods">Resource methods</a>
+   1. <a href="#insert">Insert</a>
+   1. <a href="#bulk-insert">Bulk insert</a>
+   1. <a href="#get">Get</a>
+   1. <a href="#update">Update</a>
+   1. <a href="#delete">Delete</a>
+   1. <a href="#count">Count</a>
+   1. <a href="#bulk-delete">Bulk delete</a>
+   1. <a href="#get-all-ids">Get all ids</a>
+   1. <a href="#delete-all">Delete all</a>
+   1. <a href="#get-all">Get all</a>
+1. <a href="#resource-streams">Resource streams</a>
+   1. <a href="#readable-stream">Readable stream</a>
+   1. <a href="#writable-stream">Writable stream</a>
+1. <a href="#events">Events</a>
+1. <a href="#s3-client">S3 Client</a>
 1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
    1. <a href="#big-example">Big Example</a>
@@ -95,13 +101,13 @@ import S3db from "s3db.js";
 
 - For better use of the <a href="#cache">`cache`</a> (and listing), the best ID format is to use sequential ids with leading zeros (eq: 00001, 00002, 00003) due to S3 internal keys sorting method.
 
-### Client
+### Database
 
 Your `s3db.js` client can be initiated with options:
 
 |   option    | optional |                     description                     |   type    |   default   |
 | :---------: | :------: | :-------------------------------------------------: | :-------: | :---------: |
-|    cache    |   true   |  (Coming soon) If your read methods can be proxied  | `boolean` | `undefined` |
+|    cache    |   true   |  Persist searched data to reduce repeated requests  | `boolean` | `undefined` |
 | parallelism |   true   |            Number of simultaneous tasks             | `number`  |     10      |
 | passphrase  |   true   |               Your encryption secret                | `string`  | `undefined` |
 |     ttl     |   true   | (Coming soon) TTL to your cache duration in seconds | `number`  |    86400    |
@@ -174,8 +180,6 @@ It has this structure:
 }
 ```
 
-### Resources
-
 #### Create a resource
 
 Resources are definitions of data collections.
@@ -230,6 +234,9 @@ const attributes = {
     long: "number",
     city: "string",
   },
+
+  // may have multiple definitions.
+  address_number: ["string", "number"],
 };
 ```
 
@@ -261,11 +268,19 @@ You may just use the reference:
 const Leads = s3db.resource("leads");
 ```
 
-#### Insert data
+### Resources methods
+
+Consider `resource` as:
+
+```javascript
+const resource = s3db.resource("leads");
+```
+
+#### Insert
 
 ```javascript
 // data
-const attributes = {
+const data = {
   id: "mypersonal@email.com", // if not defined a id will be generated!
   utm: {
     source: "abc",
@@ -278,12 +293,12 @@ const attributes = {
   invalidAttr: "this attribute will disappear",
 };
 
-const insertedData = await s3db.resource("leads").insert(attributes);
+const insertedData = await resource.insert(data);
 ```
 
 If not defined an id attribute, `s3db.js` will use [`nanoid`](https://github.com/ai/nanoid) to generate a random unique id!
 
-#### Bulk insert data
+#### Bulk insert
 
 You may bulk insert data with a friendly method.
 
@@ -291,7 +306,7 @@ This method uses [`supercharge/promise-pool`](https://github.com/supercharge/pro
 
 ```javascript
 const s3db = new S3db({
-  parallelism: 10,
+  parallelism: 10, // default
 });
 ```
 
@@ -303,17 +318,17 @@ const objects = new Array(100).fill(0).map((v, k) => ({
   lead: {
     fullName: "My Test Name",
     personalEmail: `bulk-${k}@mymail.com`,
-    mobileNumber: "+55 34 234567890",
+    mobileNumber: "+55 11 1234567890",
   },
 }));
 
-await s3db.resource("leads").bulkInsert(objects);
+await resource.bulkInsert(objects);
 ```
 
-#### Get data
+#### Get
 
 ```javascript
-const obj = await s3db.resource("leads").get("mypersonal@email.com");
+const obj = await resource.getById("mypersonal@email.com");
 
 // {
 //   id: "mypersonal@email.com",
@@ -328,32 +343,95 @@ const obj = await s3db.resource("leads").get("mypersonal@email.com");
 // }
 ```
 
-#### Resource read stream
+#### Update
 
 ```javascript
-const readStream = await s3db.resource("leads").stream();
+const obj = await resource.updateById("mypersonal@email.com", {
+  lead: {
+    mobileNumber: "+5511999999999",
+  },
+});
 
-readStream.on("id", (id) => console.log("id =", id));
-readStream.on("data", (lead) => console.log("lead.id =", lead.id));
-readStream.on("end", console.log("end"));
+// {
+//   id: "mypersonal@email.com",
+//   utm: {
+//     source: "abc",
+//   },
+//   lead: {
+//     fullName: "My Complex Name",
+//     personalEmail: "mypersonal@email.com",
+//     mobileNumber: "+5511999999999",
+//   },
+// }
 ```
 
-#### Delete data
+#### Delete
 
 ```javascript
-await s3db.resource("leads").deleteById(id);
+await resource.deleteById(id);
 ```
 
-#### List data (coming soon)
+#### Count
 
 ```javascript
-await s3db.resource("leads").list();
+await resource.count();
+
+// 101
 ```
 
-#### Write stream (coming soon)
+#### Bulk Delete
 
 ```javascript
-// code
+await resource.bulkDelete(["id1", "id2", "id3 "]);
+```
+
+#### Get all Ids
+
+```javascript
+const ids = await resource.getAllIds();
+// [
+//   'id1',
+//   'id2',
+//   'id3',
+// ]
+```
+
+#### Delete all
+
+```javascript
+await resource.deleteAll();
+```
+
+#### Get all
+
+```javascript
+const data = await resource.getAll();
+```
+
+### Resource streams
+
+#### Readable stream
+
+```javascript
+const readableStream = await resource.readable();
+
+readableStream.on("id", (id) => console.log("id =", id));
+readableStream.on("data", (lead) => console.log("lead.id =", lead.id));
+readableStream.on("end", console.log("end"));
+```
+
+#### Writable stream
+
+```javascript
+const writableStream = await resource.writable();
+
+writableStream.write({
+  lead: {
+    fullName: "My Test Name",
+    personalEmail: `bulk-${k}@mymail.com`,
+    mobileNumber: "+55 11 1234567890",
+  },
+});
 ```
 
 ### Events
