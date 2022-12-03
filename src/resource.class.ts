@@ -225,7 +225,7 @@ export default class Resource
     });
 
     // validate
-    const { isValid, errors, data: validated } = this.check(attrs);
+    let { isValid, errors, data: validated } = this.check(attrs);
 
     if (!isValid) {
       return Promise.reject(
@@ -239,18 +239,16 @@ export default class Resource
     }
 
     if (!id && id !== 0) id = nanoid();
+    validated = this.map(validated);
 
     // save
     await this.s3Client.putObject({
       key: path.join(`resource=${this.name}`, `id=${id}`),
       body: "",
-      metadata: this.map(validated),
+      metadata: validated,
     });
 
-    const final = {
-      id,
-      ...(unflatten(validated) as object),
-    };
+    const final = { id, ...(unflatten(this.unmap(validated)) as object) };
 
     this.emit("inserted", final);
     this.s3db.emit("inserted", this.name, final);

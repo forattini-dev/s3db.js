@@ -3,20 +3,21 @@
   "version": "1.0.0",
   "description": "Use AWS S3 as a database",
   "main": "build/index.js",
+  "author": "filipeforattini",
+  "license": "ISC",
   "scripts": {
     "build": "rimraf ./build && tsc",
     "test": "jest --coverage",
+    "coverage": "coveralls < coverage/lcov.info",
+    "coverage:serve": "npx http-server ./coverage/lcov-report",
     "test:cache": "jest --coverage ./tests/cache.spec.ts",
     "example:1": "cd examples; node 1-bulk-insert.js",
     "example:2": "cd examples; node 2-read-stream.js",
     "example:3": "cd examples; node 3-read-stream-to-csv.js",
     "example:4": "cd examples; node 4-read-stream-to-zip.js",
     "example:5": "cd examples; node 5-write-stream.js",
-    "example:6": "cd examples; node 6-jwt-tokens.js",
-    "coverage": "npx http-server ./coverage/lcov-report"
+    "example:6": "cd examples; node 6-jwt-tokens.js"
   },
-  "author": "filipeforattini",
-  "license": "ISC",
   "devDependencies": {
     "@types/crypto-js": "^4.1.1",
     "@types/flat": "^5.0.2",
@@ -25,6 +26,7 @@
     "@types/node": "^18.11.9",
     "@types/pako": "^2.0.0",
     "@types/progress": "^2.0.5",
+    "coveralls": "^3.1.1",
     "dotenv": "^16.0.3",
     "esm": "^3.2.25",
     "fakerator": "^0.3.6",
