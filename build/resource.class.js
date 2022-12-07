@@ -219,7 +219,7 @@ class Resource extends events_1.default {
                 safe: true,
             }), { id } = _b, attrs = __rest(_b, ["id"]);
             // validate
-            const { isValid, errors, data: validated } = this.check(attrs);
+            let { isValid, errors, data: validated } = this.check(attrs);
             if (!isValid) {
                 return Promise.reject(new errors_1.S3dbInvalidResource({
                     bucket: this.s3Client.bucket,
@@ -230,13 +230,14 @@ class Resource extends events_1.default {
             }
             if (!id && id !== 0)
                 id = (0, nanoid_1.nanoid)();
+            validated = this.map(validated);
             // save
             yield this.s3Client.putObject({
                 key: path.join(`resource=${this.name}`, `id=${id}`),
                 body: "",
-                metadata: this.map(validated),
+                metadata: validated,
             });
-            const final = Object.assign({ id }, (0, flat_1.unflatten)(validated));
+            const final = Object.assign({ id }, (0, flat_1.unflatten)(this.unmap(validated)));
             this.emit("inserted", final);
             this.s3db.emit("inserted", this.name, final);
             if (this.s3Cache) {
