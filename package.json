@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Use AWS S3 as a cheap document database.",
   "main": "build/index.js",
   "author": "forattini-dev",
