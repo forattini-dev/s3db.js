@@ -206,7 +206,7 @@ await s3db.createResource({
 });
 ```
 
-Resources' names **cannot** prefix each other, like: `leads` and `leads-copy`! S3's api will consider both one single resource.
+Resources' names **cannot** prefix each other, like: `leads` and `leads-copy`! S3's api lists keys using prefix notation, so every time you list `leads`, all keys of `leads-copy` will appear as well.
 
 ##### Attributes
 
@@ -389,6 +389,7 @@ await resource.bulkDelete(["id1", "id2", "id3 "]);
 
 ```javascript
 const ids = await resource.getAllIds();
+
 // [
 //   'id1',
 //   'id2',
@@ -406,6 +407,12 @@ await resource.deleteAll();
 
 ```javascript
 const data = await resource.getAll();
+
+// [
+//   obj1,
+//   obj2,
+//   ...
+// ]
 ```
 
 ### Resource streams
@@ -436,16 +443,18 @@ writableStream.write({
 
 ### Events
 
-1. s3db
+The 3 main classes `S3db`, `Resource` and `S3Client` are extensions of Javascript's `EventEmitter`.
+
+1. S3db
    - connected
    - resource.created
    - resource.inserted
    - resource.deleted
    - error
-1. client
+1. S3Client
    - action
    - error
-1. resource
+1. Resource
    - id
    - inserted
    - deleted
