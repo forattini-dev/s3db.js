@@ -55,18 +55,18 @@ class S3Cache {
         let filename = Object.keys(params || {})
             .sort()
             .map((x) => `${x}:${params[x]}`)
-            .join("|");
+            .join("|") || "";
         if (filename.length === 0)
             filename = `empty`;
-        if (additionalPrefix.length > 0) {
-            filename = additionalPrefix + `|` + filename;
-        }
         if (hashed) {
             filename = Buffer.from(filename)
                 .toString("base64")
                 .split("")
                 .reverse()
                 .join("");
+        }
+        if (additionalPrefix.length > 0) {
+            filename = additionalPrefix + filename;
         }
         filename = filename + "." + this.serializer;
         if (this.compressData)
