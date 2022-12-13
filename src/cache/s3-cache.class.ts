@@ -41,16 +41,13 @@ export default class S3Cache {
     hashed?: boolean;
     additionalPrefix?: string;
   }) {
-    let filename: any = Object.keys(params || {})
-      .sort()
-      .map((x) => `${x}:${params[x]}`)
-      .join("|");
+    let filename: any =
+      Object.keys(params || {})
+        .sort()
+        .map((x) => `${x}:${params[x]}`)
+        .join("|") || "";
 
     if (filename.length === 0) filename = `empty`;
-
-    if (additionalPrefix.length > 0) {
-      filename = additionalPrefix + `|` + filename;
-    }
 
     if (hashed) {
       filename = Buffer.from(filename)
@@ -60,7 +57,12 @@ export default class S3Cache {
         .join("");
     }
 
+    if (additionalPrefix.length > 0) {
+      filename = additionalPrefix + filename;
+    }
+
     filename = filename + "." + this.serializer;
+
     if (this.compressData) filename += ".gz";
 
     return path.join("cache", filename);

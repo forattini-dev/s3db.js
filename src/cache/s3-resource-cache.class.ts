@@ -26,7 +26,7 @@ export default class S3ResourceCache extends S3Cache {
   getKey({ action = "list", params }: { action?: string; params?: any }) {
     return super.getKey({
       params,
-      additionalPrefix: `${this.resource.name}|${action}`,
+      additionalPrefix: `resource=${this.resource.name}/action=${action}|`,
     });
   }
 
@@ -60,15 +60,9 @@ export default class S3ResourceCache extends S3Cache {
   }
 
   async purge() {
-    let keys = await this.s3Client.getAllKeys({ prefix: "cache" });
-
-    const key = Buffer.from(this.resource.name)
-      .toString("base64")
-      .split("")
-      .reverse()
-      .join("");
-
-    keys = keys.filter((k) => k.includes(key));
+    const keys = await this.s3Client.getAllKeys({
+      prefix: `cache/resource=${this.resource.name}`,
+    });
 
     await this.s3Client.deleteObjects(keys);
   }
