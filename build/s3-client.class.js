@@ -48,10 +48,18 @@ class S3Client extends events_1.default {
         super();
         this.id = (0, nanoid_1.nanoid)(7);
         const uri = new URL(connectionString);
+        const params = uri.searchParams;
         this.bucket = uri.hostname;
-        this.parallelism = parallelism;
-        let [, ...subpath] = uri.pathname.split("/");
-        this.keyPrefix = [...(subpath || [])].join("/");
+        this.parallelism = params.has("parallelism")
+            ? parseInt(params.get("parallelism"))
+            : parallelism;
+        if (["/", "", null].includes(uri.pathname)) {
+            this.keyPrefix = "";
+        }
+        else {
+            let [, ...subpath] = uri.pathname.split("/");
+            this.keyPrefix = [...(subpath || [])].join("/");
+        }
         this.client =
             AwsS3 ||
                 new aws_sdk_1.S3({
@@ -73,8 +81,10 @@ class S3Client extends events_1.default {
                     Bucket: this.bucket,
                     Key: path.join(this.keyPrefix, key),
                 };
-                const response = yield this.client.getObject(options).promise();
                 this.emit("request", "getObject", options);
+                const response = yield this.client.getObject(options).promise();
+                this.emit("response", "getObject", options, response);
+                this.emit("getObject", options, response);
                 return response;
             }
             catch (error) {
@@ -97,14 +107,16 @@ class S3Client extends events_1.default {
             try {
                 const options = {
                     Bucket: this.bucket,
-                    Key: path.join(this.keyPrefix, key),
+                    Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
                     Metadata: Object.assign({}, metadata),
                     Body: body,
                     ContentType: contentType,
                     ContentEncoding: contentEncoding,
                 };
-                const response = yield this.client.putObject(options).promise();
                 this.emit("request", "putObject", options);
+                const response = yield this.client.putObject(options).promise();
+                this.emit("response", "putObject", options, response);
+                this.emit("putObject", options, response);
                 return response;
             }
             catch (error) {
@@ -124,10 +136,12 @@ class S3Client extends events_1.default {
             try {
                 const options = {
                     Bucket: this.bucket,
-                    Key: path.join(this.keyPrefix, key),
+                    Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
                 };
-                const response = yield this.client.headObject(options).promise();
                 this.emit("request", "headObject", options);
+                const response = yield this.client.headObject(options).promise();
+                this.emit("response", "headObject", options, response);
+                this.emit("headObject", options, response);
                 return response;
             }
             catch (error) {
@@ -152,10 +166,12 @@ class S3Client extends events_1.default {
             try {
                 const options = {
                     Bucket: this.bucket,
-                    Key: path.join(this.keyPrefix, key),
+                    Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
                 };
-                const response = yield this.client.deleteObject(options).promise();
                 this.emit("request", "deleteObject", options);
+                const response = yield this.client.deleteObject(options).promise();
+                this.emit("response", "deleteObject", options, response);
+                this.emit("deleteObject", options, response);
                 return response;
             }
             catch (error) {
@@ -186,12 +202,14 @@ class S3Client extends events_1.default {
                         Bucket: this.bucket,
                         Delete: {
                             Objects: keys.map((key) => ({
-                                Key: path.join(this.keyPrefix, key),
+                                Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
                             })),
                         },
                     };
-                    const response = yield this.client.deleteObjects(options).promise();
                     this.emit("request", "deleteObjects", options);
+                    const response = yield this.client.deleteObjects(options).promise();
+                    this.emit("response", "deleteObjects", options, response);
+                    this.emit("deleteObjects", options, response);
                     return response;
                 }
                 catch (error) {
@@ -217,10 +235,14 @@ class S3Client extends events_1.default {
                     Bucket: this.bucket,
                     MaxKeys: maxKeys,
                     ContinuationToken: continuationToken,
-                    Prefix: path.join(this.keyPrefix, prefix || ""),
+                    Prefix: this.keyPrefix
+                        ? path.join(this.keyPrefix, prefix || "")
+                        : prefix || "",
                 };
-                const response = yield this.client.listObjectsV2(options).promise();
                 this.emit("request", "listObjectsV2", options);
+                const response = yield this.client.listObjectsV2(options).promise();
+                this.emit("response", "listObjectsV2", options, response);
+                this.emit("listObjectsV2", options, response);
                 return response;
             }
             catch (error) {
@@ -245,6 +267,8 @@ class S3Client extends events_1.default {
                 truncated = res.IsTruncated || false;
                 continuationToken = res.NextContinuationToken;
             }
+            this.emit("response", "count", { prefix }, count);
+            this.emit("count", { prefix }, count);
             return count;
         });
     }
@@ -266,9 +290,14 @@ class S3Client extends events_1.default {
                 truncated = res.IsTruncated || false;
                 continuationToken = res.NextContinuationToken;
             }
-            return keys
-                .map((x) => x.replace(this.keyPrefix, ""))
-                .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+            if (this.keyPrefix) {
+                keys = keys
+                    .map((x) => x.replace(this.keyPrefix, ""))
+                    .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+            }
+            this.emit("response", "getAllKeys", { prefix }, keys);
+            this.emit("getAllKeys", { prefix }, keys);
+            return keys;
         });
     }
 }

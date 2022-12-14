@@ -30,7 +30,7 @@ class ResourceIdsToDataTransformer extends node_stream_1.Transform {
             }))
                 .process((id) => __awaiter(this, void 0, void 0, function* () {
                 this.emit("id", id);
-                const data = yield this.resource.getById(id);
+                const data = yield this.resource.get(id);
                 this.push(data);
                 return data;
             }));

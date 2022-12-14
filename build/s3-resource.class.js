@@ -239,11 +239,10 @@ class S3Resource extends events_1.default {
                 metadata: validated,
             });
             const final = Object.assign({ id }, (0, flat_1.unflatten)(this.unmap(validated)));
-            this.emit("inserted", final);
-            this.s3db.emit("inserted", this.name, final);
             if (this.s3Cache) {
                 yield ((_a = this.s3Cache) === null || _a === void 0 ? void 0 : _a.purge());
             }
+            this.emit("insert", final);
             return final;
         });
     }
@@ -252,7 +251,7 @@ class S3Resource extends events_1.default {
      * @param {Object} param
      * @returns
      */
-    getById(id) {
+    get(id) {
         return __awaiter(this, void 0, void 0, function* () {
             const request = yield this.s3Client.headObject({
                 key: path.join(`resource=${this.name}`, `id=${id}`),
@@ -264,8 +263,7 @@ class S3Resource extends events_1.default {
             data._createdAt = request.LastModified;
             if (request.Expiration)
                 data._expiresAt = request.Expiration;
-            this.emit("got", data);
-            this.s3db.emit("got", this.name, data);
+            this.emit("get", data);
             return data;
         });
     }
@@ -274,10 +272,10 @@ class S3Resource extends events_1.default {
      * @param {Object} param
      * @returns
      */
-    updateById(id, attributes) {
+    update(id, attributes) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
-            const obj = yield this.getById(id);
+            const obj = yield this.get(id);
             let attrs1 = (0, flat_1.flatten)(attributes, { safe: true });
             let attrs2 = (0, flat_1.flatten)(obj, { safe: true });
             const attrs = (0, lodash_1.merge)(attrs2, attrs1);
@@ -300,11 +298,9 @@ class S3Resource extends events_1.default {
                 metadata: this.map(validated),
             });
             const final = Object.assign({ id }, (0, flat_1.unflatten)(validated));
-            this.emit("updated", final);
-            this.s3db.emit("updated", this.name, final);
-            if (this.s3Cache) {
+            if (this.s3Cache)
                 yield ((_a = this.s3Cache) === null || _a === void 0 ? void 0 : _a.purge());
-            }
+            this.emit("update", attributes, final);
             return final;
         });
     }
@@ -313,35 +309,15 @@ class S3Resource extends events_1.default {
      * @param {Object} param
      * @returns
      */
-    deleteById(id) {
+    delete(id) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const key = path.join(`resource=${this.name}`, `id=${id}`);
             const response = yield this.s3Client.deleteObject(key);
-            this.emit("deleted", id);
-            this.s3db.emit("deleted", this.name, id);
-            if (this.s3Cache) {
+            if (this.s3Cache)
                 yield ((_a = this.s3Cache) === null || _a === void 0 ? void 0 : _a.purge());
-            }
+            this.emit("delete", id);
             return response;
-        });
-    }
-    /**
-     *
-     */
-    bulkInsert(objects) {
-        return __awaiter(this, void 0, void 0, function* () {
-            const { results } = yield promise_pool_1.PromisePool.for(objects)
-                .withConcurrency(this.s3db.parallelism)
-                .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
-                this.emit("error", error, content);
-                this.s3db.emit("error", this.name, error, content);
-            }))
-                .process((attributes) => __awaiter(this, void 0, void 0, function* () {
-                const result = yield this.insert(attributes);
-                return result;
-            }));
-            return results;
         });
     }
     /**
@@ -358,10 +334,29 @@ class S3Resource extends events_1.default {
             const count = yield this.s3Client.count({
                 prefix: `resource=${this.name}`,
             });
-            if (this.s3Cache) {
+            if (this.s3Cache)
                 yield this.s3Cache.put({ action: "count", data: count });
-            }
+            this.emit("count", count);
             return count;
+        });
+    }
+    /**
+     *
+     */
+    insertMany(objects) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const { results } = yield promise_pool_1.PromisePool.for(objects)
+                .withConcurrency(this.s3db.parallelism)
+                .handleError((error, content) => __awaiter(this, void 0, void 0, function* () {
+                this.emit("error", error, content);
+                this.s3db.emit("error", this.name, error, content);
+            }))
+                .process((attributes) => __awaiter(this, void 0, void 0, function* () {
+                const result = yield this.insert(attributes);
+                return result;
+            }));
+            this.emit("insertMany", objects.length);
+            return results;
         });
     }
     /**
@@ -369,7 +364,7 @@ class S3Resource extends events_1.default {
      * @param {Object} param
      * @returns
      */
-    bulkDelete(ids) {
+    deleteMany(ids) {
         var _a;
         return __awaiter(this, void 0, void 0, function* () {
             let packages = (0, lodash_1.chunk)(ids.map((x) => path.join(`resource=${this.name}`, `id=${x}`)), 1000);
@@ -388,16 +383,23 @@ class S3Resource extends events_1.default {
                 });
                 return response;
             }));
-            if (this.s3Cache) {
+            if (this.s3Cache)
                 yield ((_a = this.s3Cache) === null || _a === void 0 ? void 0 : _a.purge());
-            }
+            this.emit("insertMany", ids.length);
             return results;
         });
     }
-    getAllIds() {
+    deleteAll() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const ids = yield this.listIds();
+            this.emit("deleteAll", ids.length);
+            yield this.deleteMany(ids);
+        });
+    }
+    listIds() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.s3Cache) {
-                const cached = yield this.s3Cache.get({ action: "getAllIds" });
+                const cached = yield this.s3Cache.get({ action: "listIds" });
                 if (cached)
                     return cached;
             }
@@ -406,22 +408,17 @@ class S3Resource extends events_1.default {
             });
             const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
             if (this.s3Cache) {
-                yield this.s3Cache.put({ action: "getAllIds", data: ids });
-                const x = yield this.s3Cache.get({ action: "getAllIds" });
+                yield this.s3Cache.put({ action: "listIds", data: ids });
+                const x = yield this.s3Cache.get({ action: "listIds" });
             }
+            this.emit("listIds", ids.length);
             return ids;
         });
     }
-    deleteAll() {
-        return __awaiter(this, void 0, void 0, function* () {
-            const ids = yield this.getAllIds();
-            yield this.bulkDelete(ids);
-        });
-    }
-    getByIdList(ids) {
+    getMany(ids) {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.s3Cache) {
-                const cached = yield this.s3Cache.get({ action: "getAll" });
+                const cached = yield this.s3Cache.get({ action: "getMany" });
                 if (cached)
                     return cached;
             }
@@ -429,13 +426,13 @@ class S3Resource extends events_1.default {
                 .withConcurrency(this.s3Client.parallelism)
                 .process((id) => __awaiter(this, void 0, void 0, function* () {
                 this.emit("id", id);
-                const data = yield this.getById(id);
+                const data = yield this.get(id);
                 this.emit("data", data);
                 return data;
             }));
-            if (this.s3Cache) {
-                yield this.s3Cache.put({ action: "getAll", data: results });
-            }
+            if (this.s3Cache)
+                yield this.s3Cache.put({ action: "getMany", data: results });
+            this.emit("getMany", ids.length);
             return results;
         });
     }
@@ -449,28 +446,26 @@ class S3Resource extends events_1.default {
             let ids = [];
             let gotFromCache = false;
             if (this.s3Cache) {
-                const cached = yield this.s3Cache.get({ action: "getAllIds" });
+                const cached = yield this.s3Cache.get({ action: "listIds" });
                 if (cached) {
                     ids = cached;
                     gotFromCache = true;
                 }
             }
             if (!gotFromCache)
-                ids = yield this.getAllIds();
+                ids = yield this.listIds();
             if (ids.length === 0)
                 return [];
             const { results } = yield promise_pool_1.PromisePool.for(ids)
                 .withConcurrency(this.s3Client.parallelism)
                 .process((id) => __awaiter(this, void 0, void 0, function* () {
-                this.emit("id", id);
-                const data = yield this.getById(id);
-                this.emit("data", data);
+                const data = yield this.get(id);
                 return data;
             }));
             if (this.s3Cache && results.length > 0) {
                 yield this.s3Cache.put({ action: "getAll", data: results });
-                const x = yield this.s3Cache.get({ action: "getAll" });
             }
+            this.emit("getAll", results.length);
             return results;
         });
     }

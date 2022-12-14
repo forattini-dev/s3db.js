@@ -23,7 +23,7 @@ const userFactory = () => {
 
 const Token = {
   createToken: async (s3db, email, password) => {
-    const user = await s3db.resource("users").getById(email);
+    const user = await s3db.resource("users").get(email);
 
     if (user.password !== password) {
       console.log({ user, email, password });
@@ -59,7 +59,7 @@ const Token = {
 
     try {
       const decoded = jwt.decode(token, ENV.PASSPRHASE);
-      const savedToken = await client.resource("tokens").getById(tokenId);
+      const savedToken = await client.resource("tokens").get(tokenId);
 
       return [null, { decoded, savedToken }];
     } catch (error) {
@@ -102,7 +102,7 @@ async function main() {
   });
 
   const users = new Array(5).fill(0).map(userFactory);
-  await s3db.resource("users").bulkInsert(users);
+  await s3db.resource("users").insertMany(users);
 
   let tokens = [];
   process.stdout.write("Created tokens: ");

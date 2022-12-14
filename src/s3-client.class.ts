@@ -28,11 +28,19 @@ export class S3Client extends EventEmitter {
     this.id = nanoid(7);
 
     const uri = new URL(connectionString);
-    this.bucket = uri.hostname;
-    this.parallelism = parallelism;
+    const params = uri.searchParams;
 
-    let [, ...subpath] = uri.pathname.split("/");
-    this.keyPrefix = [...(subpath || [])].join("/");
+    this.bucket = uri.hostname;
+    this.parallelism = params.has("parallelism")
+      ? parseInt(params.get("parallelism") as string)
+      : parallelism;
+
+    if (["/", "", null].includes(uri.pathname)) {
+      this.keyPrefix = "";
+    } else {
+      let [, ...subpath] = uri.pathname.split("/");
+      this.keyPrefix = [...(subpath || [])].join("/");
+    }
 
     this.client =
       AwsS3 ||
@@ -56,8 +64,11 @@ export class S3Client extends EventEmitter {
         Key: path.join(this.keyPrefix, key),
       };
 
-      const response = await this.client.getObject(options).promise();
       this.emit("request", "getObject", options);
+      const response = await this.client.getObject(options).promise();
+
+      this.emit("response", "getObject", options, response);
+      this.emit("getObject", options, response);
 
       return response;
     } catch (error: unknown) {
@@ -94,15 +105,18 @@ export class S3Client extends EventEmitter {
     try {
       const options: any = {
         Bucket: this.bucket,
-        Key: path.join(this.keyPrefix, key),
+        Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
         Metadata: { ...metadata },
         Body: body,
         ContentType: contentType,
         ContentEncoding: contentEncoding,
       };
 
-      const response = await this.client.putObject(options).promise();
       this.emit("request", "putObject", options);
+      const response = await this.client.putObject(options).promise();
+
+      this.emit("response", "putObject", options, response);
+      this.emit("putObject", options, response);
 
       return response;
     } catch (error) {
@@ -121,11 +135,14 @@ export class S3Client extends EventEmitter {
     try {
       const options: any = {
         Bucket: this.bucket,
-        Key: path.join(this.keyPrefix, key),
+        Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
       };
 
-      const response = await this.client.headObject(options).promise();
       this.emit("request", "headObject", options);
+      const response = await this.client.headObject(options).promise();
+
+      this.emit("response", "headObject", options, response);
+      this.emit("headObject", options, response);
 
       return response;
     } catch (error: unknown) {
@@ -152,11 +169,14 @@ export class S3Client extends EventEmitter {
     try {
       const options: any = {
         Bucket: this.bucket,
-        Key: path.join(this.keyPrefix, key),
+        Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
       };
 
-      const response = await this.client.deleteObject(options).promise();
       this.emit("request", "deleteObject", options);
+      const response = await this.client.deleteObject(options).promise();
+
+      this.emit("response", "deleteObject", options, response);
+      this.emit("deleteObject", options, response);
 
       return response;
     } catch (error: unknown) {
@@ -191,13 +211,16 @@ export class S3Client extends EventEmitter {
             Bucket: this.bucket,
             Delete: {
               Objects: keys.map((key) => ({
-                Key: path.join(this.keyPrefix, key),
+                Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
               })),
             },
           };
 
-          const response = await this.client.deleteObjects(options).promise();
           this.emit("request", "deleteObjects", options);
+          const response = await this.client.deleteObjects(options).promise();
+
+          this.emit("response", "deleteObjects", options, response);
+          this.emit("deleteObjects", options, response);
 
           return response;
         } catch (error: unknown) {
@@ -231,11 +254,16 @@ export class S3Client extends EventEmitter {
         Bucket: this.bucket,
         MaxKeys: maxKeys,
         ContinuationToken: continuationToken,
-        Prefix: path.join(this.keyPrefix, prefix || ""),
+        Prefix: this.keyPrefix
+          ? path.join(this.keyPrefix, prefix || "")
+          : prefix || "",
       };
 
-      const response = await this.client.listObjectsV2(options).promise();
       this.emit("request", "listObjectsV2", options);
+      const response = await this.client.listObjectsV2(options).promise();
+
+      this.emit("response", "listObjectsV2", options, response);
+      this.emit("listObjectsV2", options, response);
 
       return response;
     } catch (error: unknown) {
@@ -264,6 +292,9 @@ export class S3Client extends EventEmitter {
       continuationToken = res.NextContinuationToken;
     }
 
+    this.emit("response", "count", { prefix }, count);
+    this.emit("count", { prefix }, count);
+
     return count;
   }
 
@@ -290,9 +321,16 @@ export class S3Client extends EventEmitter {
       continuationToken = res.NextContinuationToken;
     }
 
-    return keys
-      .map((x) => x.replace(this.keyPrefix, ""))
-      .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+    if (this.keyPrefix) {
+      keys = keys
+        .map((x) => x.replace(this.keyPrefix, ""))
+        .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+    }
+
+    this.emit("response", "getAllKeys", { prefix }, keys);
+    this.emit("getAllKeys", { prefix }, keys);
+
+    return keys;
   }
 }
 

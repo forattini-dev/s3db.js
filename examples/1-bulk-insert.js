@@ -47,7 +47,7 @@ async function main() {
 
   console.time("bulk-writing");
 
-  await s3db.resource("leads").bulkInsert(
+  await s3db.resource("leads").insertMany(
     new Array(TOTAL).fill(0).map((v, k) => ({
       id: k,
       name: fake.names.name(),

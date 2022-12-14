@@ -54,7 +54,7 @@ class ResourceWriteStream extends node_stream_1.Writable {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.receivedFinalMessage) {
                 const data = this.contents.splice(0, this.contents.length - 1);
-                yield this.resource.bulkInsert(data);
+                yield this.resource.insertMany(data);
                 this.emit("end");
                 return;
             }
@@ -62,7 +62,7 @@ class ResourceWriteStream extends node_stream_1.Writable {
                 return;
             const objs = this.contents.splice(0, this.resource.s3Client.parallelism);
             objs.forEach((obj) => this.emit("id", obj.id));
-            yield this.resource.bulkInsert(objs);
+            yield this.resource.insertMany(objs);
             objs.forEach((obj) => this.emit("data", obj));
         });
     }
