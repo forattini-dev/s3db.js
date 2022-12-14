@@ -12,14 +12,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.S3db = exports.S3Database = void 0;
 const flat_1 = require("flat");
 const lodash_1 = require("lodash");
 const events_1 = __importDefault(require("events"));
-const resource_class_1 = __importDefault(require("./resource.class"));
+const s3_resource_class_1 = __importDefault(require("./s3-resource.class"));
 const s3_client_class_1 = __importDefault(require("./s3-client.class"));
 const validator_1 = require("./validator");
 const errors_1 = require("./errors");
-class S3db extends events_1.default {
+class S3Database extends events_1.default {
     /**
      * Constructor
      */
@@ -67,7 +68,7 @@ class S3db extends events_1.default {
             }
             for (const resource of Object.entries(metadata.resources)) {
                 const [name, definition] = resource;
-                this.resources[name] = new resource_class_1.default({
+                this.resources[name] = new s3_resource_class_1.default({
                     name,
                     s3db: this,
                     s3Client: this.client,
@@ -150,36 +151,40 @@ class S3db extends events_1.default {
     /**
      * Generates a new resorce with its translators and validatos.
      * @param {Object} param
-     * @param {string} param.resourceName
+     * @param {string} param.name
      * @param {Object} param.attributes
      * @param {Object} param.options
      */
-    createResource({ resourceName, attributes, options = {}, }) {
+    createResource({ name, attributes, options = {}, }) {
         return __awaiter(this, void 0, void 0, function* () {
             const schema = (0, flat_1.flatten)(attributes, { safe: true });
-            const resource = new resource_class_1.default({
+            const resource = new s3_resource_class_1.default({
+                name,
                 schema,
                 s3db: this,
-                name: resourceName,
                 s3Client: this.client,
                 validatorInstance: this.validatorInstance,
                 options: Object.assign({ autoDecrypt: true, cache: this.cache }, options),
             });
-            this.resources[resourceName] = resource;
+            this.resources[name] = resource;
             yield this.uploadMetadataFile();
             return resource;
         });
     }
     /**
      * Looper
-     * @param {string} resourceName
+     * @param {string} name
      * @returns
      */
-    resource(resourceName) {
-        if (!this.resources[resourceName]) {
-            return Promise.reject(`resource ${resourceName} does not exist`);
+    resource(name) {
+        if (!this.resources[name]) {
+            return Promise.reject(`resource ${name} does not exist`);
         }
-        return this.resources[resourceName];
+        return this.resources[name];
     }
 }
-exports.default = S3db;
+exports.S3Database = S3Database;
+exports.default = S3Database;
+class S3db extends S3Database {
+}
+exports.S3db = S3db;

@@ -78,7 +78,7 @@ async function main() {
   await s3db.connect();
 
   await s3db.createResource({
-    resourceName: "users",
+    name: "users",
     attributes: {
       name: "string",
       email: "string",
@@ -88,7 +88,7 @@ async function main() {
   });
 
   await s3db.createResource({
-    resourceName: "tokens",
+    name: "tokens",
     attributes: {
       iss: ["string", "url"],
       sub: "string",

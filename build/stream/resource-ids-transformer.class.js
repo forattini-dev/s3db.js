@@ -9,6 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ResourceIdsToDataTransformer = void 0;
 const lodash_1 = require("lodash");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const node_stream_1 = require("node:stream");
@@ -37,4 +38,5 @@ class ResourceIdsToDataTransformer extends node_stream_1.Transform {
         });
     }
 }
+exports.ResourceIdsToDataTransformer = ResourceIdsToDataTransformer;
 exports.default = ResourceIdsToDataTransformer;

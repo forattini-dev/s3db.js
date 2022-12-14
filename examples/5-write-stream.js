@@ -15,7 +15,7 @@ async function main() {
 
   if (!s3db.resources.copyLeads) {
     await s3db.createResource({
-      resourceName: "copy-leads",
+      name: "copy-leads",
       attributes: {
         name: "string",
         email: "string",

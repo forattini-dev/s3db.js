@@ -1,6 +1,6 @@
 import { ENV } from "./concerns";
 
-import S3db from "../src";
+import { S3db } from "../src";
 
 function S3dbFactory() {
   return new S3db({

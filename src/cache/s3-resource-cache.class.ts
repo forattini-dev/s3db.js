@@ -1,16 +1,16 @@
 import S3Cache from "./s3-cache.class";
-import Resource from "../resource.class";
+import S3Resource from "../s3-resource.class";
 import Serializers from "./serializers.type";
 
-export default class S3ResourceCache extends S3Cache {
-  resource: Resource;
+export class S3ResourceCache extends S3Cache {
+  resource: S3Resource;
 
   constructor({
     resource,
     compressData = true,
     serializer = Serializers.json,
   }: {
-    resource: Resource;
+    resource: S3Resource;
     compressData?: boolean;
     serializer?: Serializers;
   }) {
@@ -67,3 +67,5 @@ export default class S3ResourceCache extends S3Cache {
     await this.s3Client.deleteObjects(keys);
   }
 }
+
+export default S3ResourceCache

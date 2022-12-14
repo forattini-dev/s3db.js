@@ -2,11 +2,11 @@ import { ENV } from "./concerns";
 
 import Fakerator from "fakerator";
 
-import S3Db from "../src/s3db.class";
-import Resource from "../src/resource.class";
-import S3Client from "../src/s3-client.class";
-import S3Cache from "../src/cache/s3-cache.class";
-import Serializers from "../src/cache/serializers.type";
+import { S3Database } from "../src/s3-database.class";
+import { S3Resource } from "../src/s3-resource.class";
+import { S3Client } from "../src/s3-client.class";
+import { S3Cache } from "../src/cache/s3-cache.class";
+import { Serializers } from "../src/cache/serializers.type";
 
 const fake = Fakerator();
 
@@ -21,13 +21,13 @@ const SIZES_OPTIONS = {
   small: () => fake.lorem.sentence(),
 
   medium: () =>
-    new Array(25)
+    new Array(2 ** 5)
       .fill(0)
       .map(() => fake.lorem.paragraph())
       .join(" "),
 
   large: () =>
-    new Array(500)
+    new Array(2 ** 10)
       .fill(0)
       .map(() => fake.lorem.paragraph())
       .join(" "),
@@ -106,7 +106,7 @@ describe("s3Cache", function () {
   }
 
   describe("s3db with cache", () => {
-    const s3db = new S3Db({
+    const s3db = new S3Database({
       uri: ENV.CONNECTION_STRING("db-cached"),
       cache: true,
     });
@@ -119,7 +119,7 @@ describe("s3Cache", function () {
       for (const res of resources) {
         if (!s3db.resources[res]) {
           await s3db.createResource({
-            resourceName: res,
+            name: res,
             attributes: {
               name: "string",
               email: "email",
@@ -140,7 +140,7 @@ describe("s3Cache", function () {
     });
 
     it("cached getAllIds", async () => {
-      const resource: Resource = s3db.resource("CachedLeads1");
+      const resource: S3Resource = s3db.resource("CachedLeads1");
       const dataToInsert = new Array(10).fill(0).map((v, k) => ({
         id: `${k}`,
         name: fake.names.name(),
@@ -166,19 +166,19 @@ describe("s3Cache", function () {
         name: fake.names.name(),
         email: fake.internet.email(),
       }));
-      
+
       await resource.bulkInsert(dataToInsert);
       const datas1 = await resource.getAll();
 
       expect(datas1.length).toEqual(dataToInsert.length);
       expect(mapIds(datas1)).toEqual(mapIds(dataToInsert));
-      
+
       if (resource.s3Cache) {
         const resData = await resource.s3Cache.get({ action: "getAll" });
         expect(datas1.length).toEqual(resData.length);
         expect(mapIds(datas1)).toEqual(mapIds(resData));
       }
-      
+
       const datas2 = await resource.getAll();
       expect(datas2.length).toEqual(dataToInsert.length);
       expect(mapIds(datas2)).toEqual(mapIds(datas1));

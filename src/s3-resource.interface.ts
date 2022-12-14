@@ -1,4 +1,4 @@
-import S3db from "./s3db.class";
+import S3Database from "./s3-database.class";
 import S3Client from "./s3-client.class";
 
 export interface MetadataResourceInterface {
@@ -11,7 +11,7 @@ export interface ResourceInterface {
 }
 
 export interface ResourceConfigInterface {
-  s3db: S3db;
+  s3db: S3Database;
   name: string;
   schema: any;
   options?: any;

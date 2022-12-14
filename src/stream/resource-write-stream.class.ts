@@ -1,15 +1,15 @@
 import { isEmpty } from "lodash";
 import { Writable } from "node:stream";
 
-import Resource from "../resource.class";
+import {S3Resource} from "../s3-resource.class";
 
-export default class ResourceWriteStream extends Writable {
-  resource: Resource;
+export class ResourceWriteStream extends Writable {
+  resource: S3Resource;
   contents: any[];
   receivedFinalMessage: boolean;
   running: null | Promise<void>;
 
-  constructor({ resource }: { resource: Resource }) {
+  constructor({ resource }: { resource: S3Resource }) {
     super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
 
     this.resource = resource;
@@ -76,3 +76,5 @@ export default class ResourceWriteStream extends Writable {
     callback(null);
   }
 }
+
+export default ResourceWriteStream

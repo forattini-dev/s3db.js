@@ -35,6 +35,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.S3Cache = void 0;
 const zlib_1 = __importDefault(require("zlib"));
 const path = __importStar(require("path"));
 const lodash_1 = require("lodash");
@@ -154,4 +155,5 @@ class S3Cache {
         return this.serializers[this.serializer].unserialize(data);
     }
 }
+exports.S3Cache = S3Cache;
 exports.default = S3Cache;

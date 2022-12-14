@@ -3,13 +3,13 @@ import { ENV } from "./concerns";
 import { nanoid } from "nanoid";
 import Fakerator from "fakerator";
 
-import S3db from "../src";
+import { S3db } from "../src";
 import { ClientNoSuchKey } from "../src/errors";
 
 function S3dbFactory() {
   return new S3db({
     uri: ENV.CONNECTION_STRING("resources"),
-    passphrase: 'super-secret-leaked-fluffy-passphrase',
+    passphrase: "super-secret-leaked-fluffy-passphrase",
   });
 }
 
@@ -65,15 +65,15 @@ const resources = new Array(2).fill(0).map((v, k) => `leads${k + 1}`);
 const defaultBeforeAll = (s3db: S3db) => async () => {
   await s3db.connect();
 
-  for (const resourceName of resources) {
-    if (!s3db.resources[resourceName]) {
+  for (const name of resources) {
+    if (!s3db.resources[name]) {
       await s3db.createResource({
-        resourceName,
+        name,
         attributes,
       });
     }
   }
-}
+};
 
 describe("resources", function () {
   const s3db = S3dbFactory();
@@ -83,11 +83,11 @@ describe("resources", function () {
     const s3db = S3dbFactory();
     beforeAll(defaultBeforeAll(s3db));
 
-    for (const resourceName of resources) {
-      it(`[${resourceName}] should be defined`, async function () {
-        expect(s3db.resources[resourceName]).toBeDefined();
-        expect(s3db.resource(resourceName)).toBeDefined();
-        
+    for (const name of resources) {
+      it(`[${name}] should be defined`, async function () {
+        expect(s3db.resources[name]).toBeDefined();
+        expect(s3db.resource(name)).toBeDefined();
+
         const functions = [
           "insert",
           "getById",
@@ -100,8 +100,8 @@ describe("resources", function () {
           "deleteAll",
           "getAll",
         ];
-        
-        functions.forEach(f => expect(s3db.resource(resourceName)[f]).toBeDefined())
+
+        functions.forEach((f) => expect(s3db.resource(name)[f]).toBeDefined());
       });
     }
   });
@@ -109,7 +109,7 @@ describe("resources", function () {
   describe("working single", function () {
     const s3db = S3dbFactory();
     beforeAll(defaultBeforeAll(s3db));
-    
+
     it("should be valid", async function () {
       const resource = s3db.resource(`leads1`);
       const data = resourceFactory({
@@ -133,10 +133,10 @@ describe("resources", function () {
 
       await resource.updateById(data.id, {
         personalData: {
-          fullName: "My New Name!"
-        }
+          fullName: "My New Name!",
+        },
       });
-      
+
       const foundResource = await resource.getById(data.id);
       expect(foundResource.id).toEqual(data.id);
       expect(foundResource.personalData.fullName).toEqual("My New Name!");
