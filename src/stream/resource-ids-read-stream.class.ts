@@ -4,16 +4,16 @@ import { chunk } from "lodash";
 import { Readable } from "node:stream";
 import { PromisePool } from "@supercharge/promise-pool";
 
-import Resource from "../resource.class";
+import {S3Resource} from "../s3-resource.class";
 
-export default class ResourceIdsReadStream extends Readable {
-  resource: Resource;
+export class ResourceIdsReadStream extends Readable {
+  resource: S3Resource;
   finishedReadingResource: boolean;
   content: any[];
   loading: Promise<void> | null;
   pagesCount: number;
 
-  constructor({ resource }: { resource: Resource }) {
+  constructor({ resource }: { resource: S3Resource }) {
     super({
       objectMode: true,
       highWaterMark: resource.s3Client.parallelism * 3,
@@ -88,3 +88,5 @@ export default class ResourceIdsReadStream extends Readable {
     }
   }
 }
+
+export default ResourceIdsReadStream

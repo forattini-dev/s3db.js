@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.S3ResourceCache = void 0;
 const s3_cache_class_1 = __importDefault(require("./s3-cache.class"));
 const serializers_type_1 = __importDefault(require("./serializers.type"));
 class S3ResourceCache extends s3_cache_class_1.default {
@@ -70,4 +71,5 @@ class S3ResourceCache extends s3_cache_class_1.default {
         });
     }
 }
+exports.S3ResourceCache = S3ResourceCache;
 exports.default = S3ResourceCache;

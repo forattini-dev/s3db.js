@@ -46,6 +46,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.S3Resource = void 0;
 const path = __importStar(require("path"));
 const nanoid_1 = require("nanoid");
 const crypto_js_1 = __importDefault(require("crypto-js"));
@@ -54,11 +55,11 @@ const flat_1 = require("flat");
 const lodash_1 = require("lodash");
 const promise_pool_1 = require("@supercharge/promise-pool");
 const errors_1 = require("./errors");
-const s3_resource_cache_class_1 = __importDefault(require("./cache/s3-resource-cache.class"));
-const resource_write_stream_class_1 = __importDefault(require("./stream/resource-write-stream.class"));
-const resource_ids_read_stream_class_1 = __importDefault(require("./stream/resource-ids-read-stream.class"));
-const resource_ids_transformer_class_1 = __importDefault(require("./stream/resource-ids-transformer.class"));
-class Resource extends events_1.default {
+const s3_resource_cache_class_1 = require("./cache/s3-resource-cache.class");
+const resource_write_stream_class_1 = require("./stream/resource-write-stream.class");
+const resource_ids_read_stream_class_1 = require("./stream/resource-ids-read-stream.class");
+const resource_ids_transformer_class_1 = require("./stream/resource-ids-transformer.class");
+class S3Resource extends events_1.default {
     /**
      * Constructor
      */
@@ -75,7 +76,7 @@ class Resource extends events_1.default {
         this.reversedMapObj = reversedMapObj;
         this.studyOptions();
         if (this.options.cache === true) {
-            this.s3Cache = new s3_resource_cache_class_1.default({
+            this.s3Cache = new s3_resource_cache_class_1.S3ResourceCache({
                 resource: this,
                 compressData: true,
                 serializer: "json",
@@ -474,13 +475,14 @@ class Resource extends events_1.default {
         });
     }
     readable() {
-        const stream = new resource_ids_read_stream_class_1.default({ resource: this });
-        const transformer = new resource_ids_transformer_class_1.default({ resource: this });
+        const stream = new resource_ids_read_stream_class_1.ResourceIdsReadStream({ resource: this });
+        const transformer = new resource_ids_transformer_class_1.ResourceIdsToDataTransformer({ resource: this });
         return stream.pipe(transformer);
     }
     writable() {
-        const stream = new resource_write_stream_class_1.default({ resource: this });
+        const stream = new resource_write_stream_class_1.ResourceWriteStream({ resource: this });
         return stream;
     }
 }
-exports.default = Resource;
+exports.S3Resource = S3Resource;
+exports.default = S3Resource;

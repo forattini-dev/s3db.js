@@ -8,7 +8,7 @@ import PromisePool from "@supercharge/promise-pool";
 
 import { ClientNoSuchKey } from "./errors";
 
-export default class S3Client extends EventEmitter {
+export class S3Client extends EventEmitter {
   id: string;
   client: S3;
   bucket: string;
@@ -30,7 +30,7 @@ export default class S3Client extends EventEmitter {
     const uri = new URL(connectionString);
     this.bucket = uri.hostname;
     this.parallelism = parallelism;
-    
+
     let [, ...subpath] = uri.pathname.split("/");
     this.keyPrefix = [...(subpath || [])].join("/");
 
@@ -295,3 +295,5 @@ export default class S3Client extends EventEmitter {
       .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
   }
 }
+
+export default S3Client;

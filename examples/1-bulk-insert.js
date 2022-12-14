@@ -4,7 +4,7 @@ const { nanoid } = require("nanoid");
 const Fakerator = require("fakerator");
 const ProgressBar = require("progress");
 
-const TOTAL = 10
+const TOTAL = 100
 
 async function main() {
   const fake = Fakerator();
@@ -32,7 +32,7 @@ async function main() {
 
   if (!s3db.resources.leads) {
     await s3db.createResource({
-      resourceName: "leads",
+      name: "leads",
       attributes: {
         name: "string",
         email: "string",

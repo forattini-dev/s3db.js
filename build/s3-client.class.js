@@ -35,6 +35,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.S3Client = void 0;
 const path = __importStar(require("path"));
 const lodash_1 = require("lodash");
 const nanoid_1 = require("nanoid");
@@ -271,4 +272,5 @@ class S3Client extends events_1.default {
         });
     }
 }
+exports.S3Client = S3Client;
 exports.default = S3Client;

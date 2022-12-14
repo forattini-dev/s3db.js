@@ -9,6 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ResourceWriteStream = void 0;
 const lodash_1 = require("lodash");
 const node_stream_1 = require("node:stream");
 class ResourceWriteStream extends node_stream_1.Writable {
@@ -73,4 +74,5 @@ class ResourceWriteStream extends node_stream_1.Writable {
         });
     }
 }
+exports.ResourceWriteStream = ResourceWriteStream;
 exports.default = ResourceWriteStream;

@@ -7,7 +7,7 @@ import Serializers from "./serializers.type";
 import { JsonSerializer } from "./json.serializer";
 import { AvroSerializer } from "./avro.serializer";
 
-export default class S3Cache {
+export class S3Cache {
   serializers: any;
   s3Client: S3Client;
   compressData: boolean;
@@ -155,3 +155,5 @@ export default class S3Cache {
     return this.serializers[this.serializer].unserialize(data);
   }
 }
+
+export default S3Cache

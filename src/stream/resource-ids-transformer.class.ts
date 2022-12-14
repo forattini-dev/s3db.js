@@ -2,12 +2,12 @@ import { isArray } from "lodash";
 import { PromisePool } from "@supercharge/promise-pool";
 import { Transform, TransformCallback } from "node:stream";
 
-import Resource from "../resource.class";
+import {S3Resource} from "../s3-resource.class";
 
-export default class ResourceIdsToDataTransformer extends Transform {
-  resource: Resource;
+export class ResourceIdsToDataTransformer extends Transform {
+  resource: S3Resource;
 
-  constructor({ resource }: { resource: Resource }) {
+  constructor({ resource }: { resource: S3Resource }) {
     super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
 
     this.resource = resource;
@@ -36,3 +36,5 @@ export default class ResourceIdsToDataTransformer extends Transform {
     callback(null);
   }
 }
+
+export default ResourceIdsToDataTransformer

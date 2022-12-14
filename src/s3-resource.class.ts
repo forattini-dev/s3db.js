@@ -6,23 +6,20 @@ import { flatten, unflatten } from "flat";
 import { sortBy, chunk, isArray, merge } from "lodash";
 import { PromisePool } from "@supercharge/promise-pool";
 
-import S3db from "./s3db.class";
-import S3Client from "./s3-client.class";
+import { S3Database } from "./s3-database.class";
+import { S3Client } from "./s3-client.class";
 import { S3dbInvalidResource } from "./errors";
-import S3ResourceCache from "./cache/s3-resource-cache.class";
-import ResourceWriteStream from "./stream/resource-write-stream.class";
-import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class";
-import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class";
+import { S3ResourceCache } from "./cache/s3-resource-cache.class";
+import { ResourceWriteStream } from "./stream/resource-write-stream.class";
+import { ResourceIdsReadStream } from "./stream/resource-ids-read-stream.class";
+import { ResourceIdsToDataTransformer } from "./stream/resource-ids-transformer.class";
 
 import {
   ResourceInterface,
   ResourceConfigInterface,
-} from "./resource.interface";
+} from "./s3-resource.interface";
 
-export default class Resource
-  extends EventEmitter
-  implements ResourceInterface
-{
+export class S3Resource extends EventEmitter implements ResourceInterface {
   name: any;
   schema: any;
   mapObj: any;
@@ -30,7 +27,7 @@ export default class Resource
   validator: any;
   reversedMapObj: any;
 
-  s3db: S3db;
+  s3db: S3Database;
   s3Client: S3Client;
   s3Cache: S3ResourceCache | undefined;
 
@@ -527,3 +524,5 @@ export default class Resource
     return stream;
   }
 }
+
+export default S3Resource;
