@@ -56,7 +56,7 @@ export class ResourceWriteStream extends Writable {
   private async writeOrWait() {
     if (this.receivedFinalMessage) {
       const data = this.contents.splice(0, this.contents.length - 1);
-      await this.resource.bulkInsert(data);
+      await this.resource.insertMany(data);
       this.emit("end");
       return;
     }
@@ -66,7 +66,7 @@ export class ResourceWriteStream extends Writable {
     const objs = this.contents.splice(0, this.resource.s3Client.parallelism);
     objs.forEach((obj) => this.emit("id", obj.id));
 
-    await this.resource.bulkInsert(objs);
+    await this.resource.insertMany(objs);
     objs.forEach((obj) => this.emit("data", obj));
   }
 

@@ -247,12 +247,11 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
 
     const final = { id, ...(unflatten(this.unmap(validated)) as object) };
 
-    this.emit("inserted", final);
-    this.s3db.emit("inserted", this.name, final);
-
     if (this.s3Cache) {
       await this.s3Cache?.purge();
     }
+
+    this.emit("insert", final);
 
     return final;
   }
@@ -262,7 +261,7 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @param {Object} param
    * @returns
    */
-  async getById(id: any) {
+  async get(id: any) {
     const request = await this.s3Client.headObject({
       key: path.join(`resource=${this.name}`, `id=${id}`),
     });
@@ -276,8 +275,7 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
 
     if (request.Expiration) data._expiresAt = request.Expiration;
 
-    this.emit("got", data);
-    this.s3db.emit("got", this.name, data);
+    this.emit("get", data);
 
     return data;
   }
@@ -287,8 +285,8 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @param {Object} param
    * @returns
    */
-  async updateById(id: any, attributes: any) {
-    const obj = await this.getById(id);
+  async update(id: any, attributes: any) {
+    const obj = await this.get(id);
 
     let attrs1 = flatten(attributes, { safe: true });
     let attrs2 = flatten(obj, { safe: true });
@@ -323,12 +321,9 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
       ...(unflatten(validated) as object),
     };
 
-    this.emit("updated", final);
-    this.s3db.emit("updated", this.name, final);
+    if (this.s3Cache) await this.s3Cache?.purge();
 
-    if (this.s3Cache) {
-      await this.s3Cache?.purge();
-    }
+    this.emit("update", attributes, final);
 
     return final;
   }
@@ -338,36 +333,15 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @param {Object} param
    * @returns
    */
-  async deleteById(id: any) {
+  async delete(id: any) {
     const key = path.join(`resource=${this.name}`, `id=${id}`);
     const response = await this.s3Client.deleteObject(key);
 
-    this.emit("deleted", id);
-    this.s3db.emit("deleted", this.name, id);
+    if (this.s3Cache) await this.s3Cache?.purge();
 
-    if (this.s3Cache) {
-      await this.s3Cache?.purge();
-    }
+    this.emit("delete", id);
 
     return response;
-  }
-
-  /**
-   *
-   */
-  async bulkInsert(objects: any[]) {
-    const { results } = await PromisePool.for(objects)
-      .withConcurrency(this.s3db.parallelism)
-      .handleError(async (error, content) => {
-        this.emit("error", error, content);
-        this.s3db.emit("error", this.name, error, content);
-      })
-      .process(async (attributes: any) => {
-        const result = await this.insert(attributes);
-        return result;
-      });
-
-    return results;
   }
 
   /**
@@ -384,11 +358,31 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
       prefix: `resource=${this.name}`,
     });
 
-    if (this.s3Cache) {
-      await this.s3Cache.put({ action: "count", data: count });
-    }
+    if (this.s3Cache) await this.s3Cache.put({ action: "count", data: count });
+
+    this.emit("count", count);
 
     return count;
+  }
+
+  /**
+   *
+   */
+  async insertMany(objects: any[]) {
+    const { results } = await PromisePool.for(objects)
+      .withConcurrency(this.s3db.parallelism)
+      .handleError(async (error, content) => {
+        this.emit("error", error, content);
+        this.s3db.emit("error", this.name, error, content);
+      })
+      .process(async (attributes: any) => {
+        const result = await this.insert(attributes);
+        return result;
+      });
+    
+    this.emit("insertMany", objects.length);
+
+    return results;
   }
 
   /**
@@ -396,7 +390,7 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @param {Object} param
    * @returns
    */
-  async bulkDelete(ids: any[]): Promise<any[]> {
+  async deleteMany(ids: any[]): Promise<any[]> {
     let packages = chunk(
       ids.map((x) => path.join(`resource=${this.name}`, `id=${x}`)),
       1000
@@ -420,16 +414,22 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
         return response;
       });
 
-    if (this.s3Cache) {
-      await this.s3Cache?.purge();
-    }
+    if (this.s3Cache) await this.s3Cache?.purge();
+
+    this.emit("insertMany", ids.length);
 
     return results;
   }
 
-  async getAllIds() {
+  async deleteAll() {
+    const ids = await this.listIds();
+    this.emit("deleteAll", ids.length);
+    await this.deleteMany(ids);
+  }
+
+  async listIds() {
     if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getAllIds" });
+      const cached = await this.s3Cache.get({ action: "listIds" });
       if (cached) return cached;
     }
 
@@ -440,21 +440,17 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
     const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
 
     if (this.s3Cache) {
-      await this.s3Cache.put({ action: "getAllIds", data: ids });
-      const x = await this.s3Cache.get({ action: "getAllIds" });
+      await this.s3Cache.put({ action: "listIds", data: ids });
+      const x = await this.s3Cache.get({ action: "listIds" });
     }
 
+    this.emit("listIds", ids.length);
     return ids;
   }
 
-  async deleteAll() {
-    const ids = await this.getAllIds();
-    await this.bulkDelete(ids);
-  }
-
-  async getByIdList(ids: string[]) {
+  async getMany(ids: string[]) {
     if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getAll" });
+      const cached = await this.s3Cache.get({ action: "getMany" });
       if (cached) return cached;
     }
 
@@ -462,14 +458,14 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
       .withConcurrency(this.s3Client.parallelism)
       .process(async (id: string) => {
         this.emit("id", id);
-        const data = await this.getById(id);
+        const data = await this.get(id);
         this.emit("data", data);
         return data;
       });
 
-    if (this.s3Cache) {
-      await this.s3Cache.put({ action: "getAll", data: results });
-    }
+    if (this.s3Cache) await this.s3Cache.put({ action: "getMany", data: results });
+
+    this.emit("getMany", ids.length);
 
     return results;
   }
@@ -484,30 +480,29 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
     let gotFromCache = false;
 
     if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getAllIds" });
+      const cached = await this.s3Cache.get({ action: "listIds" });
       if (cached) {
         ids = cached;
         gotFromCache = true;
       }
     }
 
-    if (!gotFromCache) ids = await this.getAllIds();
+    if (!gotFromCache) ids = await this.listIds();
 
     if (ids.length === 0) return [];
 
     const { results } = await PromisePool.for(ids)
       .withConcurrency(this.s3Client.parallelism)
       .process(async (id: string) => {
-        this.emit("id", id);
-        const data = await this.getById(id);
-        this.emit("data", data);
+        const data = await this.get(id);
         return data;
       });
 
     if (this.s3Cache && results.length > 0) {
       await this.s3Cache.put({ action: "getAll", data: results });
-      const x = await this.s3Cache.get({ action: "getAll" });
     }
+
+    this.emit("getAll", results.length);
 
     return results;
   }

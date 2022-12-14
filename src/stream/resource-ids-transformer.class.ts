@@ -28,7 +28,7 @@ export class ResourceIdsToDataTransformer extends Transform {
       })
       .process(async (id: any) => {
         this.emit("id",  id);
-        const data = await this.resource.getById(id);
+        const data = await this.resource.get(id);
         this.push(data);
         return data;
       });

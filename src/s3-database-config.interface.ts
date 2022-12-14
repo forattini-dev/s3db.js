@@ -1,4 +1,4 @@
-import PluginInterface from "./plugin.interface";
+import PluginInterface from "./plugins/plugin.interface";
 
 export interface S3dbConfigInterface {
   uri: string;

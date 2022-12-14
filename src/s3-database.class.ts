@@ -5,7 +5,7 @@ import EventEmitter from "events";
 import S3Resource from "./s3-resource.class";
 import S3Client from "./s3-client.class";
 import { ValidatorFactory } from "./validator";
-import PluginInterface from "./plugin.interface";
+import PluginInterface from "./plugins/plugin.interface";
 import S3dbConfigInterface from "./s3-database-config.interface";
 import MetadataInterface from "./metadata.interface";
 import { S3dbMissingMetadata, ClientNoSuchKey } from "./errors";

@@ -1,4 +1,4 @@
-import { ENV } from "./concerns";
+import { ENV, ConnectionString } from "./concerns";
 
 import { nanoid } from "nanoid";
 import Fakerator from "fakerator";
@@ -8,8 +8,8 @@ import { ClientNoSuchKey } from "../src/errors";
 
 function S3dbFactory() {
   return new S3db({
-    uri: ENV.CONNECTION_STRING("resources"),
-    passphrase: "super-secret-leaked-fluffy-passphrase",
+    uri: ConnectionString("s3-resource"),
+    passphrase: ENV.PASSPRHASE,
   });
 }
 
@@ -88,20 +88,23 @@ describe("resources", function () {
         expect(s3db.resources[name]).toBeDefined();
         expect(s3db.resource(name)).toBeDefined();
 
+        const resource = s3db.resource(name)
+
         const functions = [
           "insert",
-          "getById",
-          "updateById",
-          "deleteById",
-          "bulkInsert",
+          "get",
+          "update",
+          "delete",
           "count",
-          "bulkDelete",
-          "getAllIds",
-          "deleteAll",
+          "insertMany",
+          "getMany",
           "getAll",
+          "deleteMany",
+          "deleteAll",
+          "listIds",
         ];
 
-        functions.forEach((f) => expect(s3db.resource(name)[f]).toBeDefined());
+        functions.forEach((f) => expect(resource[f]).toBeDefined());
       });
     }
   });
@@ -131,13 +134,13 @@ describe("resources", function () {
       const createdResource = await resource.insert(data);
       expect(createdResource.id).toEqual(data.id);
 
-      await resource.updateById(data.id, {
+      await resource.update(data.id, {
         personalData: {
           fullName: "My New Name!",
         },
       });
 
-      const foundResource = await resource.getById(data.id);
+      const foundResource = await resource.get(data.id);
       expect(foundResource.id).toEqual(data.id);
       expect(foundResource.personalData.fullName).toEqual("My New Name!");
     });
@@ -153,15 +156,15 @@ describe("resources", function () {
       expect(createdResource.id).toEqual(data.id);
       expect(createdResource.invalidAttr).toBeUndefined();
 
-      const resourceFromS3 = await resource.getById(createdResource.id);
+      const resourceFromS3 = await resource.get(createdResource.id);
       expect(resourceFromS3.id).toEqual(data.id);
       expect(resourceFromS3.id).toEqual(createdResource.id);
       expect(resourceFromS3.invalidAttr).toBeUndefined();
 
-      await resource.deleteById(resourceFromS3.id);
+      await resource.delete(resourceFromS3.id);
 
       try {
-        await resource.getById(resourceFromS3.id);
+        await resource.get(resourceFromS3.id);
       } catch (error: unknown) {
         expect(error instanceof ClientNoSuchKey).toEqual(true);
       }
@@ -173,9 +176,9 @@ describe("resources", function () {
 
     it("should bulk create and bulk delete", async function () {
       const resource = s3db.resource(`leads2`);
-      const leads = new Array(amount).fill(0).map((v, k) => resourceFactory());
+      const leads = new Array(amount).fill(0).map(() => resourceFactory());
 
-      const results = await resource.bulkInsert(leads);
+      const results = await resource.insertMany(leads);
       const leadsIds = leads.map((x: any) => x.id).sort();
       const createdIds = results.map((x: any) => x.id).sort();
 
@@ -186,9 +189,9 @@ describe("resources", function () {
       const liveCount = await resource.count();
       expect(liveCount).toEqual(amount);
 
-      const idsList = await resource.getAllIds();
+      const idsList = await resource.listIds();
       leads.forEach((l) => expect(idsList).toContain(l.id));
-      await resource.bulkDelete(idsList);
+      await resource.deleteMany(idsList);
 
       const resourceCount = await resource.count();
       expect(resourceCount).toEqual(0);
