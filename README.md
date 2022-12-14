@@ -1,34 +1,48 @@
 # s3db.js
 
+[![license: unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/) [![npm version](https://img.shields.io/npm/v/s3db.js.svg?style=flat)](https://www.npmjs.com/package/s3db.js) [![Maintainability](https://api.codeclimate.com/v1/badges/26e3dc46c42367d44f18/maintainability)](https://codeclimate.com/github/forattini-dev/s3db.js/maintainability) [![Coverage Status](https://coveralls.io/repos/github/forattini-dev/s3db.js/badge.svg?branch=main)](https://coveralls.io/github/forattini-dev/s3db.js?branch=main)
+
 Another way to create a cheap document-base database with an easy ORM to handle your dataset!
 
+<table width="100%">
+<tr>
+<td>
+
 1. <a href="#motivation">Motivation</a>
-1. <a href="#install">Install</a>
 1. <a href="#usage">Usage</a>
+   1. <a href="#install">Install</a>
    1. <a href="#quick-setup">Quick Setup</a>
    1. <a href="#insights">Insights</a>
    1. <a href="#database">Database</a>
    1. <a href="#create-a-resource">Create a resource</a>
 1. <a href="#resource-methods">Resource methods</a>
-   1. <a href="#insert">Insert</a>
-   1. <a href="#bulk-insert">Bulk insert</a>
-   1. <a href="#get">Get</a>
-   1. <a href="#update">Update</a>
-   1. <a href="#delete">Delete</a>
+   1. <a href="#insert-one">Insert one</a>
+   1. <a href="#get-one">Get one</a>
+   1. <a href="#update-one">Update one</a>
+   1. <a href="#delete-one">Delete one</a>
    1. <a href="#count">Count</a>
-   1. <a href="#bulk-delete">Bulk delete</a>
-   1. <a href="#get-all-ids">Get all ids</a>
-   1. <a href="#delete-all">Delete all</a>
+   1. <a href="#insert-many">Insert many</a>
+   1. <a href="#get-many">Get many</a>
    1. <a href="#get-all">Get all</a>
+   1. <a href="#delete-many">Delete many</a>
+   1. <a href="#delete-all">Delete all</a>
+   1. <a href="#list-ids">List ids</a>
 1. <a href="#resource-streams">Resource streams</a>
    1. <a href="#readable-stream">Readable stream</a>
    1. <a href="#writable-stream">Writable stream</a>
-1. <a href="#events">Events</a>
 1. <a href="#s3-client">S3 Client</a>
+1. <a href="#events">Events</a>
 1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
    1. <a href="#big-example">Big Example</a>
    1. <a href="#small-example">Small example</a>
+1. <a href="#roadmap">Roadmap</a>
+
+</td>
+</tr>
+</table>
+
+---
 
 ## Motivation
 
@@ -52,24 +66,28 @@ Check the <a href="#cost-simulation">cost simulation</a> section below for a dee
 
 Lets give it a try! :)
 
-## Install
-
-```bash
-npm i s3db.js
-# or
-yarn add s3db.js
-```
+---
 
 ## Usage
 
 You may check the snippets bellow or go straight to the <a href="#examples">Examples</a> section!
+
+### Install
+
+```bash
+npm i s3db.js
+
+# or
+
+yarn add s3db.js
+```
 
 ### Quick setup
 
 Our S3db client use connection string params.
 
 ```javascript
-import S3db from "s3db.js";
+import { S3db } from "s3db.js";
 
 const {
   AWS_BUCKET,
@@ -92,14 +110,14 @@ If you do use `dotenv` package:
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import S3db from "s3db.js";
+import { S3db } from "s3db.js";
 ```
 
 ### Insights
 
 - This implementation of ORM simulates a document repository. Due to the fact that `s3db.js` uses `aws-sdk`'s' S3 api; all requests are GET/PUT as `key=value` resources. So the best case scenario is to access like a document implementation.
 
-- For better use of the <a href="#cache">`cache`</a> (and listing), the best ID format is to use sequential ids with leading zeros (eq: 00001, 00002, 00003) due to S3 internal keys sorting method.
+- For better use of the <a href="#cache">cache</a> and listing, the best ID format is to use sequential ids with leading zeros (eq: 00001, 00002, 00003) due to S3 internal keys sorting method. But you will need to manage this incremental ID by your own.
 
 ### Database
 
@@ -113,7 +131,7 @@ Your `s3db.js` client can be initiated with options:
 |     ttl     |   true   | (Coming soon) TTL to your cache duration in seconds | `number`  |    86400    |
 |     uri     |  false   |         A url as your S3 connection string          | `string`  | `undefined` |
 
-URI as a connection string:
+Config example:
 
 ```javascript
 const {
@@ -124,11 +142,7 @@ const {
 } = process.env;
 
 const uri = `s3://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}@${AWS_BUCKET}/${AWS_BUCKET_PREFIX}`;
-```
 
-Config example:
-
-```javascript
 const options = {
   uri,
   parallelism: 25,
@@ -136,19 +150,21 @@ const options = {
 };
 ```
 
-##### s3db.connect()
+#### s3db.connect()
 
-Interacts with the bucket to check:
+This method must always be invoked before any operation take place. This will interact with AWS' S3 api and check the itens below:
 
-1. If the client has access to the S3 bucket with current keys
-1. If there is already a defined database at this prefix. If there is, it downloads the medatada and loads each Resource definition.
-1. If there isnt any database defined in this prefix, it will generate an empty metadata file into this prefix.
+1. With current credentials:
+   - Check if client has access to the S3 bucket.
+   - Check if client has access to bucket life-cycle policies.
+1. With defined database:
+   - Check if there is already a database in this connection string.
+     - If any database is found, downloads it's medatada and loads each `Resource` definition.
+     - Else, it will generate an empty <a href="#metadata-file">`metadata`</a> file into this prefix and mark that this is a new database from scratch.
 
 #### Metadata file
 
-`s3db.js` will generate a file `s3db.json` at the defined prefix.
-
-It has this structure:
+`s3db.js` will generate a file `/s3db.json` at the pre-defined prefix with this structure:
 
 ```javascript
 {
@@ -180,7 +196,7 @@ It has this structure:
 }
 ```
 
-#### Create a resource
+### Create a resource
 
 Resources are definitions of data collections.
 
@@ -200,8 +216,8 @@ const attributes = {
   },
 };
 
-await s3db.createResource({
-  resourceName: "leads",
+const resource = await s3db.createResource({
+  name: "leads",
   attributes,
 });
 ```
@@ -239,12 +255,19 @@ const attributes = {
   address_number: ["string", "number"],
 };
 ```
+##### Reference:
+
+You may just use the reference:
+
+```javascript
+const Leads = s3db.resource("leads");
+```
 
 ##### Limitations:
 
 As we need to store the resource definition within a JSON file, to keep your definitions intact the best way is to use the [string-based shorthand definitions](https://github.com/icebob/fastest-validator#shorthand-definitions) in your resource definition.
 
-By design, in your resource definition, `s3db.js` **will not handle functions** on your attributes like default value generators, etc.
+By design, the resource definition **will will strip all functions** in attributes to avoid `eval()` calls.
 
 The `fastest-validator` starts with the params below:
 
@@ -260,15 +283,10 @@ The `fastest-validator` starts with the params below:
 }
 ```
 
-##### Reference:
 
-You may just use the reference:
+---
 
-```javascript
-const Leads = s3db.resource("leads");
-```
-
-### Resources methods
+## Resources methods
 
 Consider `resource` as:
 
@@ -276,11 +294,11 @@ Consider `resource` as:
 const resource = s3db.resource("leads");
 ```
 
-#### Insert
+### Insert one
 
 ```javascript
 // data
-const data = {
+const insertedData = await resource.insert({
   id: "mypersonal@email.com", // if not defined a id will be generated!
   utm: {
     source: "abc",
@@ -291,44 +309,28 @@ const data = {
     mobileNumber: "+5511234567890",
   },
   invalidAttr: "this attribute will disappear",
-};
+});
 
-const insertedData = await resource.insert(data);
+// {
+//   id: "mypersonal@email.com",
+//   utm: {
+//     source: "abc",
+//   },
+//   lead: {
+//     fullName: "My Complex Name",
+//     personalEmail: "mypersonal@email.com",
+//     mobileNumber: "+5511234567890",
+//   },
+//   invalidAttr: "this attribute will disappear",
+// }
 ```
 
 If not defined an id attribute, `s3db.js` will use [`nanoid`](https://github.com/ai/nanoid) to generate a random unique id!
 
-#### Bulk insert
-
-You may bulk insert data with a friendly method.
-
-This method uses [`supercharge/promise-pool`](https://github.com/supercharge/promise-pool) to organize the parallelism of your promises.
+### Get one
 
 ```javascript
-const s3db = new S3db({
-  parallelism: 10, // default
-});
-```
-
-Bulk insert:
-
-```javascript
-const objects = new Array(100).fill(0).map((v, k) => ({
-  id: `bulk-${k}@mymail.com`,
-  lead: {
-    fullName: "My Test Name",
-    personalEmail: `bulk-${k}@mymail.com`,
-    mobileNumber: "+55 11 1234567890",
-  },
-}));
-
-await resource.bulkInsert(objects);
-```
-
-#### Get
-
-```javascript
-const obj = await resource.getById("mypersonal@email.com");
+const obj = await resource.get("mypersonal@email.com");
 
 // {
 //   id: "mypersonal@email.com",
@@ -343,11 +345,12 @@ const obj = await resource.getById("mypersonal@email.com");
 // }
 ```
 
-#### Update
+### Update one
 
 ```javascript
-const obj = await resource.updateById("mypersonal@email.com", {
+const obj = await resource.update("mypersonal@email.com", {
   lead: {
+    fullName: "My New Name",
     mobileNumber: "+5511999999999",
   },
 });
@@ -358,20 +361,20 @@ const obj = await resource.updateById("mypersonal@email.com", {
 //     source: "abc",
 //   },
 //   lead: {
-//     fullName: "My Complex Name",
+//     fullName: "My New Name",
 //     personalEmail: "mypersonal@email.com",
 //     mobileNumber: "+5511999999999",
 //   },
 // }
 ```
 
-#### Delete
+### Delete one
 
 ```javascript
-await resource.deleteById(id);
+await resource.delete(id);
 ```
 
-#### Count
+### Count
 
 ```javascript
 await resource.count();
@@ -379,31 +382,46 @@ await resource.count();
 // 101
 ```
 
-#### Bulk Delete
+### Insert many
+
+You may bulk insert data with a friendly method that receives a list of objects.
 
 ```javascript
-await resource.bulkDelete(["id1", "id2", "id3 "]);
+const objects = new Array(100).fill(0).map((v, k) => ({
+  id: `bulk-${k}@mymail.com`,
+  lead: {
+    fullName: "My Test Name",
+    personalEmail: `bulk-${k}@mymail.com`,
+    mobileNumber: "+55 11 1234567890",
+  },
+}));
+
+await resource.insertMany(objects);
 ```
 
-#### Get all Ids
+Keep in mind that we need to send a request to each object to be created. There is an option to change the amount of simultaneos connections that your client will handle.
 
 ```javascript
-const ids = await resource.getAllIds();
+const s3db = new S3db({
+  parallelism: 100, // default = 10
+});
+```
+
+This method uses [`supercharge/promise-pool`](https://github.com/supercharge/promise-pool) to organize the parallel promises.
+
+### Get many
+
+```javascript
+await resource.getMany(["id1", "id2", "id3 "]);
 
 // [
-//   'id1',
-//   'id2',
-//   'id3',
+//   obj1,
+//   obj2,
+//   obj3,
 // ]
 ```
 
-#### Delete all
-
-```javascript
-await resource.deleteAll();
-```
-
-#### Get all
+### Get all
 
 ```javascript
 const data = await resource.getAll();
@@ -415,9 +433,37 @@ const data = await resource.getAll();
 // ]
 ```
 
-### Resource streams
+### Delete many
 
-#### Readable stream
+```javascript
+await resource.deleteMany(["id1", "id2", "id3 "]);
+```
+
+### Delete all
+
+```javascript
+await resource.deleteAll();
+```
+
+### List ids
+
+```javascript
+const ids = await resource.listIds();
+
+// [
+//   'id1',
+//   'id2',
+//   'id3',
+// ]
+```
+
+---
+
+## Resource streams
+
+As we need to request the metadata for each id to return it's attributes, a better way to handle a huge amount off data might be using streams.
+
+### Readable stream
 
 ```javascript
 const readableStream = await resource.readable();
@@ -427,7 +473,7 @@ readableStream.on("data", (lead) => console.log("lead.id =", lead.id));
 readableStream.on("end", console.log("end"));
 ```
 
-#### Writable stream
+### Writable stream
 
 ```javascript
 const writableStream = await resource.writable();
@@ -441,120 +487,33 @@ writableStream.write({
 });
 ```
 
-### Events
+---
 
-The 3 main classes `S3db`, `Resource` and `S3Client` are extensions of Javascript's `EventEmitter`.
-
-1. S3db
-   - connected
-   - resource.created
-   - resource.inserted
-   - resource.deleted
-   - error
-1. S3Client
-   - action
-   - error
-1. Resource
-   - id
-   - inserted
-   - deleted
-   - error
-1. stream
-   - resource.id
-   - resource.data
-   - error
-
-#### s3db
-
-##### connected
-
-```javascript
-s3db.on("connected", () => console.log("s3db connected"));
-```
-
-##### resource.created
-
-```javascript
-s3db.on("resource.created", (resourceName) =>
-  console.log(`resource ${resourceName} created`)
-);
-```
-
-##### resource.inserted
-
-```javascript
-s3db.on("resource.inserted", (resourceName, data) =>
-  console.log(`inserted ${resourceName}.id=${data.id}`)
-);
-```
-
-##### resource.deleted
-
-```javascript
-s3db.on("resource.deleted", (resourceName, data) =>
-  console.log(`deleted ${resourceName}.id=${data.id}`)
-);
-```
-
-##### error
-
-```javascript
-s3db.on("error", (error) => console.error(error));
-```
-
-#### s3Client
-
-##### action
-
-```javascript
-s3db.client.on("action", (action) =>
-  console.log(`resource ${resourceName} created`)
-);
-```
-
-##### error
-
-```javascript
-s3db.client.on("error", (error) => console.error(error));
-```
-
-#### resource
-
-#### on: id
-
-```javascript
-const stream = s3db.resource("leads").stream();
-
-stream.on("data", (id) => console.log("id = ", id));
-```
-
-#### on: data
-
-```javascript
-const stream = s3db.resource("leads").stream();
-
-stream.on("data", (obj) => console.log("id = ", obj.id));
-```
-
-### S3 Client
+## S3 Client
 
 `s3db.js` has a S3 proxied client named [`S3Client`](https://github.com/forattini-dev/s3db.js/blob/main/src/s3-client.class.ts). It brings a few handy and less verbose functions to deal with AWS S3's api.
 
 ```javascript
-import { S3Client } from "s3db.js/src/client";
+import { S3Client } from "s3db.js";
 
 const client = new S3Client({ connectionString });
 ```
 
-##### s3client.getObject()
+Each method has a **[:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html) link** to the official `aws-sdk` docs.
+
+
+
+##### getObject [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#getObject-property)
 
 ```javascript
 const { Body, Metadata } = await client.getObject({
   key: `my-prefixed-file.csv`,
 });
+
+// AWS.Response
 ```
 
-##### s3client.putObject()
+##### putObject [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#putObject-property)
 
 ```javascript
 const response = await client.putObject({
@@ -563,57 +522,268 @@ const response = await client.putObject({
   metadata: { a: "1", b: "2", c: "3" },
   body: "a;b;c\n1;2;3\n4;5;6",
 });
+
+// AWS.Response
 ```
 
-##### s3client.headObject()
+##### headObject [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#headObject-property)
 
 ```javascript
 const { Metadata } = await client.headObject({
   key: `my-prefixed-file.csv`,
 });
+
+// AWS.Response
 ```
 
-##### s3client.deleteObject()
+##### deleteObject [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#deleteObject-property)
 
 ```javascript
 const response = await client.deleteObject({
   key: `my-prefixed-file.csv`,
 });
+
+// AWS.Response
 ```
 
-##### s3client.deleteObjects()
+##### deleteObjects [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#deleteObjects-property)
 
 ```javascript
 const response = await client.deleteObjects({
   keys: [`my-prefixed-file.csv`, `my-other-prefixed-file.csv`],
 });
+
+// AWS.Response
 ```
 
-##### s3client.listObjects()
+##### listObjects [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#listObjects-property)
 
 ```javascript
 const response = await client.listObjects({
   prefix: `my-subdir`,
 });
+
+// AWS.Response
 ```
 
-##### s3client.count()
+##### count
+
+Custom made method to make it easier to count keys within a listObjects loop.
 
 ```javascript
 const count = await client.count({
   prefix: `my-subdir`,
 });
+
+// 10
 ```
 
-##### s3client.getAllKeys()
+##### getAllKeys
 
-All keys have the fullpath replaced into the current "scope" path.
+Custom made method to make it easier to return all keys in a subpath within a listObjects loop.
+
+All returned keys will have the it's fullpath replaced with the current "scope" path.
 
 ```javascript
 const keys = await client.getAllKeys({
   prefix: `my-subdir`,
 });
+
+// [
+//   key1,
+//   key2,
+//   ...
+// ]
 ```
+
+---
+
+## Events
+
+The 3 main classes `S3db`, `Resource` and `S3Client` are extensions of Javascript's `EventEmitter`.
+
+| S3Database | S3Client      | S3Resource | S3Resource Readable Stream |
+| ---------- | ------------- | ---------- | -------------------------- |
+| error      | error         | error      | error                      |
+| connected  | request       | insert     | id                         |
+|            | response      | get        | data                       |
+|            | response      | update     |                            |
+|            | getObject     | delete     |                            |
+|            | putObject     | count      |                            |
+|            | headObject    | insertMany |                            |
+|            | deleteObject  | deleteAll  |                            |
+|            | deleteObjects | listIds    |                            |
+|            | listObjects   | getMany    |                            |
+|            | count         | getAll     |                            |
+|            | getAllKeys    |            |                            |
+
+### S3Database
+
+#### error
+
+```javascript
+s3db.on("error", (error) => console.error(error));
+```
+
+#### connected
+
+```javascript
+s3db.on("connected", () => {});
+```
+
+### S3Client
+
+Using this reference for the events:
+
+```javascript
+const client = s3db.client;
+```
+
+#### error
+
+```javascript
+client.on("error", (error) => console.error(error));
+```
+
+#### request
+
+Emitted when a request is generated to AWS.
+
+```javascript
+client.on("request", (action, params) => {});
+```
+
+#### response
+
+Emitted when a response is received from AWS.
+
+```javascript
+client.on("response", (action, params, response) => {});
+```
+
+#### getObject
+
+```javascript
+client.on("getObject", (options, response) => {});
+```
+
+#### putObject
+
+```javascript
+client.on("putObject", (options, response) => {});
+```
+
+#### headObject
+
+```javascript
+client.on("headObject", (options, response) => {});
+```
+
+#### deleteObject
+
+```javascript
+client.on("deleteObject", (options, response) => {});
+```
+
+#### deleteObjects
+
+```javascript
+client.on("deleteObjects", (options, response) => {});
+```
+
+#### listObjects
+
+```javascript
+client.on("listObjects", (options, response) => {});
+```
+
+#### count
+
+```javascript
+client.on("count", (options, response) => {});
+```
+
+#### getAllKeys
+
+```javascript
+client.on("getAllKeys", (options, response) => {});
+```
+
+### S3Resource
+
+Using this reference for the events:
+
+```javascript
+const resource = s3db.resource("leads");
+```
+
+#### error
+
+```javascript
+resource.on("error", (err) => console.error(err));
+```
+
+#### insert
+
+```javascript
+resource.on("insert", (data) => {});
+```
+
+#### get
+
+```javascript
+resource.on("get", (data) => {});
+```
+
+#### update
+
+```javascript
+resource.on("update", (attrs, data) => {});
+```
+
+#### delete
+
+```javascript
+resource.on("delete", (id) => {});
+```
+
+#### count
+
+```javascript
+resource.on("count", (count) => {});
+```
+
+#### insertMany
+
+```javascript
+resource.on("insertMany", (count) => {});
+```
+
+#### getMany
+
+```javascript
+resource.on("getMany", (count) => {});
+```
+
+#### getAll
+
+```javascript
+resource.on("getAll", (count) => {});
+```
+
+#### deleteAll
+
+```javascript
+resource.on("deleteAll", (count) => {});
+```
+
+#### listIds
+
+```javascript
+resource.on("listIds", (count) => {});
+```
+
+---
 
 ## Examples
 
@@ -793,7 +963,7 @@ Lets save some JWT tokens using the [RFC:7519](https://www.rfc-editor.org/rfc/rf
 
 ```javascript
 await s3db.createResource({
-  resourceName: "tokens",
+  name: "tokens",
   attributes: {
     iss: 'url|max:256',
     sub: 'string',
@@ -827,3 +997,9 @@ function validateToken (token) {
   return resource.getById(id)
 }
 ```
+
+## Roadmap
+
+Tasks board can be found at [this link](https://github.com/orgs/forattini-dev/projects/5/views/1)!
+
+Feel free to interact and PRs are welcome! :)
