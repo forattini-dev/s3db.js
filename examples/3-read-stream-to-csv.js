@@ -35,7 +35,7 @@ async function main() {
     objectMode: true,
     transform(chunk, encoding, callback) {
       this.push(
-        [chunk.id, chunk.email, chunk.name, chunk.token].join(";") + "\n"
+        [chunk.id, chunk._createdAt, chunk.email, chunk.name, chunk.token].join(";") + "\n"
       );
       callback();
     },
