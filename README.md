@@ -32,6 +32,7 @@ Another way to create a cheap document-base database with an easy ORM to handle 
    1. <a href="#writable-stream">Writable stream</a>
 1. <a href="#s3-client">S3 Client</a>
 1. <a href="#events">Events</a>
+1. <a href="#plugins">Plugins</a>
 1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
    1. <a href="#big-example">Big Example</a>
@@ -255,6 +256,7 @@ const attributes = {
   address_number: ["string", "number"],
 };
 ```
+
 ##### Reference:
 
 You may just use the reference:
@@ -282,7 +284,6 @@ The `fastest-validator` starts with the params below:
   },
 }
 ```
-
 
 ---
 
@@ -500,8 +501,6 @@ const client = new S3Client({ connectionString });
 ```
 
 Each method has a **[:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html) link** to the official `aws-sdk` docs.
-
-
 
 ##### getObject [:link:](https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/S3.html#getObject-property)
 
@@ -782,6 +781,21 @@ resource.on("deleteAll", (count) => {});
 ```javascript
 resource.on("listIds", (count) => {});
 ```
+
+---
+
+## Plugins
+
+Anatomy of a plugin:
+
+```javascript
+const MyPlugin = {
+  setup(s3db: S3db) {},
+  start() {},
+};
+```
+
+We have an example of a _costs simulator plugin_ [here!](https://github.com/forattini-dev/s3db.js/blob/main/src/plugins/costs.plugin.js)
 
 ---
 
