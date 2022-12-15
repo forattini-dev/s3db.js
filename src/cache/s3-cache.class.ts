@@ -103,7 +103,7 @@ export class S3Cache {
 
   async _get({ key }: { key: string }) {
     try {
-      const res = await this.s3Client.getObject({ key });
+      const res = await this.s3Client.getObject(key);
 
       if (!res.Body) return "";
       let content = res.Body;

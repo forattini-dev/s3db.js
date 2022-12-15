@@ -1,3 +1,5 @@
+/* istanbul ignore file */
+
 export const Serializers = {
   json: "json",
   avro: "avro",
