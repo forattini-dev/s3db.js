@@ -1,6 +1,9 @@
+/* istanbul ignore file */
+
 module.exports = {
   async setup (s3db) {
     this.client = s3db.client
+    this.started = false
 
     this.client.costs = {
       total: 0,
@@ -44,5 +47,7 @@ module.exports = {
       else if (name === "deleteObjects") addRequest("delete");
       else if (name === "listObjectsV2") addRequest("list");
     });
+
+    this.started = true
   }
 }
