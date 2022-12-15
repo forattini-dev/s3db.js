@@ -97,7 +97,7 @@ class S3Database extends events_1.default {
     getMetadataFile() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const request = yield this.client.getObject({ key: `s3db.json` });
+                const request = yield this.client.getObject(`s3db.json`);
                 const metadata = JSON.parse(String(request === null || request === void 0 ? void 0 : request.Body));
                 return this.unserializeMetadata(metadata);
             }

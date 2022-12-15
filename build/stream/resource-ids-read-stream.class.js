@@ -83,7 +83,7 @@ class ResourceIdsReadStream extends node_stream_1.Readable {
                         return (obj.Key || "").replace(path.join(this.resource.s3Client.keyPrefix, `resource=${this.resource.name}`, "id="), "");
                     });
                     this.content.push(ids);
-                    ids.forEach((id) => this.emit("id", this.resource.name, id));
+                    ids.forEach((id) => this.emit("id", id));
                 });
             }
             this.finishedReadingResource = !res.IsTruncated;

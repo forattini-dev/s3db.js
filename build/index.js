@@ -23,3 +23,4 @@ Object.defineProperty(exports, "S3Cache", { enumerable: true, get: function () {
 var s3_client_class_1 = require("./s3-client.class");
 Object.defineProperty(exports, "S3Client", { enumerable: true, get: function () { return s3_client_class_1.S3Client; } });
 __exportStar(require("./plugins"), exports);
+__exportStar(require("./stream"), exports);

@@ -74,7 +74,7 @@ class S3Client extends events_1.default {
      * @param param0
      * @returns
      */
-    getObject({ key }) {
+    getObject(key) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const options = {
@@ -109,7 +109,7 @@ class S3Client extends events_1.default {
                     Bucket: this.bucket,
                     Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
                     Metadata: Object.assign({}, metadata),
-                    Body: body,
+                    Body: body || "",
                     ContentType: contentType,
                     ContentEncoding: contentEncoding,
                 };
@@ -131,7 +131,7 @@ class S3Client extends events_1.default {
      * @param {string} param.key
      * @returns
      */
-    headObject({ key }) {
+    headObject(key) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const options = {
@@ -228,7 +228,7 @@ class S3Client extends events_1.default {
      * @param param0
      * @returns
      */
-    listObjects({ prefix, maxKeys = 1000, continuationToken, }) {
+    listObjects({ prefix, maxKeys = 1000, continuationToken, } = {}) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const options = {
