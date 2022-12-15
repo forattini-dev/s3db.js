@@ -57,7 +57,7 @@ export class S3Client extends EventEmitter {
    * @param param0
    * @returns
    */
-  async getObject({ key }: { key: string }) {
+  async getObject(key: string) {
     try {
       const options = {
         Bucket: this.bucket,
@@ -99,7 +99,7 @@ export class S3Client extends EventEmitter {
     key: string;
     metadata?: object;
     contentType?: string;
-    body: string | Stream | Uint8Array;
+    body?: string | Stream | Uint8Array;
     contentEncoding?: string | null | undefined;
   }) {
     try {
@@ -107,7 +107,7 @@ export class S3Client extends EventEmitter {
         Bucket: this.bucket,
         Key: this.keyPrefix ? path.join(this.keyPrefix, key) : key,
         Metadata: { ...metadata },
-        Body: body,
+        Body: body || "",
         ContentType: contentType,
         ContentEncoding: contentEncoding,
       };
@@ -131,7 +131,7 @@ export class S3Client extends EventEmitter {
    * @param {string} param.key
    * @returns
    */
-  async headObject({ key }: { key: string }) {
+  async headObject(key: string) {
     try {
       const options: any = {
         Bucket: this.bucket,
@@ -247,8 +247,8 @@ export class S3Client extends EventEmitter {
   }: {
     prefix?: string;
     maxKeys?: number;
-    continuationToken: any;
-  }): Promise<S3.ListObjectsV2Output> {
+    continuationToken?: any;
+  } = {}): Promise<S3.ListObjectsV2Output> {
     try {
       const options = {
         Bucket: this.bucket,

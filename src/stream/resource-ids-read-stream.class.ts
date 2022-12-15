@@ -4,7 +4,7 @@ import { chunk } from "lodash";
 import { Readable } from "node:stream";
 import { PromisePool } from "@supercharge/promise-pool";
 
-import {S3Resource} from "../s3-resource.class";
+import { S3Resource } from "../s3-resource.class";
 
 export class ResourceIdsReadStream extends Readable {
   resource: S3Resource;
@@ -47,10 +47,11 @@ export class ResourceIdsReadStream extends Readable {
   } = {}) {
     this.emit("page", this.pagesCount++);
 
-    const res: S3.ListObjectsV2Output = await this.resource.s3Client.listObjects({
-      prefix: `resource=${this.resource.name}`,
-      continuationToken,
-    });
+    const res: S3.ListObjectsV2Output =
+      await this.resource.s3Client.listObjects({
+        prefix: `resource=${this.resource.name}`,
+        continuationToken,
+      });
 
     if (res.Contents) {
       const contents = chunk(res.Contents, this.resource.s3Client.parallelism);
@@ -73,7 +74,7 @@ export class ResourceIdsReadStream extends Readable {
           });
 
           this.content.push(ids);
-          ids.forEach((id: string) => this.emit("id", this.resource.name, id));
+          ids.forEach((id: string) => this.emit("id", id));
         });
     }
 
@@ -89,4 +90,4 @@ export class ResourceIdsReadStream extends Readable {
   }
 }
 
-export default ResourceIdsReadStream
+export default ResourceIdsReadStream;

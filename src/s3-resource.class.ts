@@ -262,9 +262,7 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @returns
    */
   async get(id: any) {
-    const request = await this.s3Client.headObject({
-      key: path.join(`resource=${this.name}`, `id=${id}`),
-    });
+    const request = await this.s3Client.headObject(path.join(`resource=${this.name}`, `id=${id}`));
 
     let data: any = this.unmap(request.Metadata);
     data = unflatten(data);

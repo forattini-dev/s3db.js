@@ -102,7 +102,7 @@ export class S3Database extends EventEmitter {
    */
   private async getMetadataFile() {
     try {
-      const request = await this.client.getObject({ key: `s3db.json` });
+      const request = await this.client.getObject(`s3db.json`);
       const metadata = JSON.parse(String(request?.Body));
       return this.unserializeMetadata(metadata);
     } catch (error: unknown) {
