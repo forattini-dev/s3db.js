@@ -107,7 +107,7 @@ class S3Cache {
     _get({ key }) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const res = yield this.s3Client.getObject({ key });
+                const res = yield this.s3Client.getObject(key);
                 if (!res.Body)
                     return "";
                 let content = res.Body;

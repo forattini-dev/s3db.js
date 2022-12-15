@@ -253,9 +253,7 @@ class S3Resource extends events_1.default {
      */
     get(id) {
         return __awaiter(this, void 0, void 0, function* () {
-            const request = yield this.s3Client.headObject({
-                key: path.join(`resource=${this.name}`, `id=${id}`),
-            });
+            const request = yield this.s3Client.headObject(path.join(`resource=${this.name}`, `id=${id}`));
             let data = this.unmap(request.Metadata);
             data = (0, flat_1.unflatten)(data);
             data.id = id;

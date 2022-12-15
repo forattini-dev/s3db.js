@@ -1,4 +1,5 @@
 "use strict";
+/* istanbul ignore file */
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -12,6 +13,7 @@ module.exports = {
     setup(s3db) {
         return __awaiter(this, void 0, void 0, function* () {
             this.client = s3db.client;
+            this.started = false;
             this.client.costs = {
                 total: 0,
                 prices: {
@@ -57,6 +59,7 @@ module.exports = {
                 else if (name === "listObjectsV2")
                     addRequest("list");
             });
+            this.started = true;
         });
     }
 };
