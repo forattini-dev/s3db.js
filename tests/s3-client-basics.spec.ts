@@ -1,9 +1,9 @@
 import { ConnectionString } from "./concerns";
 import { S3Client } from "../src";
 
-describe("client", function () {
+describe("client basics", function () {
   it("default config", async function () {
-    const connectionString = ConnectionString("s3-database");
+    const connectionString = ConnectionString("s3-client");
     const client = new S3Client({ connectionString });
     const uri = new URL(connectionString);
 
@@ -12,13 +12,13 @@ describe("client", function () {
   });
   
   it("set parallelism with query", async function () {
-    const connectionString = ConnectionString("s3-database") + '?parallelism=123';
+    const connectionString = ConnectionString("s3-client") + '?parallelism=123';
     const client = new S3Client({ connectionString });
     expect(client.parallelism).toBe(123);
   });
   
   it("set parallelism with constructor", async function () {
-    const connectionString = ConnectionString("s3-database");
+    const connectionString = ConnectionString("s3-client");
     const client = new S3Client({ 
       connectionString,
       parallelism: 234,
