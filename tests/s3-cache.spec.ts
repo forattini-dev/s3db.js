@@ -21,13 +21,13 @@ const SIZES_OPTIONS = {
   small: () => fake.lorem.sentence(),
 
   medium: () =>
-    new Array(2 ** 5)
+    new Array(2 ** 4)
       .fill(0)
       .map(() => fake.lorem.paragraph())
       .join(" "),
 
   large: () =>
-    new Array(2 ** 10)
+    new Array(2 ** 8)
       .fill(0)
       .map(() => fake.lorem.paragraph())
       .join(" "),
