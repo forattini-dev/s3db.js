@@ -24,10 +24,12 @@ export class S3ResourceCache extends S3Cache {
   }
 
   getKey({ action = "list", params }: { action?: string; params?: any }) {
-    return super.getKey({
+    const key = super.getKey({
       params,
       additionalPrefix: `resource=${this.resource.name}/action=${action}|`,
     });
+
+    return key
   }
 
   async put({

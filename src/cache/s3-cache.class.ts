@@ -1,6 +1,7 @@
 import zlib from "zlib";
 import * as path from "path";
 import { isString } from "lodash";
+import sha256 from "crypto-js/sha256";
 
 import S3Client from "../s3-client.class";
 import Serializers from "./serializers.type";
@@ -50,11 +51,8 @@ export class S3Cache {
     if (filename.length === 0) filename = `empty`;
 
     if (hashed) {
-      filename = Buffer.from(filename)
-        .toString("base64")
-        .split("")
-        .reverse()
-        .join("");
+      filename = sha256(filename);
+      // filename = Buffer.from(filename).toString("base64").split("").reverse().join("");
     }
 
     if (additionalPrefix.length > 0) {
@@ -156,4 +154,4 @@ export class S3Cache {
   }
 }
 
-export default S3Cache
+export default S3Cache;

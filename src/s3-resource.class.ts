@@ -262,7 +262,9 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
    * @returns
    */
   async get(id: any) {
-    const request = await this.s3Client.headObject(path.join(`resource=${this.name}`, `id=${id}`));
+    const request = await this.s3Client.headObject(
+      path.join(`resource=${this.name}`, `id=${id}`)
+    );
 
     let data: any = this.unmap(request.Metadata);
     data = unflatten(data);
@@ -377,7 +379,7 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
         const result = await this.insert(attributes);
         return result;
       });
-    
+
     this.emit("insertMany", objects.length);
 
     return results;
@@ -448,7 +450,10 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
 
   async getMany(ids: string[]) {
     if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getMany" });
+      const cached = await this.s3Cache.get({
+        action: "getMany",
+        params: { ids: ids.sort() },
+      });
       if (cached) return cached;
     }
 
@@ -461,7 +466,12 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
         return data;
       });
 
-    if (this.s3Cache) await this.s3Cache.put({ action: "getMany", data: results });
+    if (this.s3Cache)
+      await this.s3Cache.put({
+        action: "getMany",
+        params: { ids: ids.sort() },
+        data: results,
+      });
 
     this.emit("getMany", ids.length);
 
@@ -503,6 +513,35 @@ export class S3Resource extends EventEmitter implements ResourceInterface {
     this.emit("getAll", results.length);
 
     return results;
+  }
+
+  async page({ offset = 0, size = 100 }) {
+    if (this.s3Cache) {
+      const cached = await this.s3Cache.get({
+        action: "page",
+        params: { offset, size },
+      });
+      if (cached) return cached;
+    }
+
+    const keys = await this.s3Client.getKeysPage({
+      amount: size,
+      offset: offset,
+      prefix: `resource=${this.name}`,
+    });
+
+    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+
+    const data = await this.getMany(ids);
+
+    if (this.s3Cache)
+      await this.s3Cache.put({
+        action: "page",
+        params: { offset, size },
+        data,
+      });
+
+    return data;
   }
 
   readable() {
