@@ -10,6 +10,7 @@ function S3dbFactory() {
   return new S3db({
     uri: ConnectionString("s3-resource"),
     passphrase: ENV.PASSPRHASE,
+    cache: true,
   });
 }
 
@@ -35,7 +36,7 @@ const attributes = {
   },
 };
 
-function resourceFactory(overwrite = {}) {
+function leadFactory(overwrite = {}) {
   return {
     id: nanoid(),
     token: fake.misc.uuid(),
@@ -60,7 +61,7 @@ function resourceFactory(overwrite = {}) {
   };
 }
 
-const resources = new Array(2).fill(0).map((v, k) => `leads${k + 1}`);
+const resources = new Array(3).fill(0).map((v, k) => `leads${k + 1}`);
 
 const defaultBeforeAll = (s3db: S3db) => async () => {
   await s3db.connect();
@@ -88,7 +89,7 @@ describe("resources", function () {
         expect(s3db.resources[name]).toBeDefined();
         expect(s3db.resource(name)).toBeDefined();
 
-        const resource = s3db.resource(name)
+        const resource = s3db.resource(name);
 
         const functions = [
           "insert",
@@ -115,7 +116,7 @@ describe("resources", function () {
 
     it("should be valid", async function () {
       const resource = s3db.resource(`leads1`);
-      const data = resourceFactory({
+      const data = leadFactory({
         invalidAttr: "this will disappear",
       });
 
@@ -127,7 +128,7 @@ describe("resources", function () {
     it("should insert and update", async function () {
       const resource = s3db.resource(`leads1`);
 
-      const data = resourceFactory({
+      const data = leadFactory({
         invalidAttr: "this will disappear",
       });
 
@@ -148,7 +149,7 @@ describe("resources", function () {
     it("should insert and delete", async function () {
       const resource = s3db.resource(`leads1`);
 
-      const data = resourceFactory({
+      const data = leadFactory({
         invalidAttr: "this will disappear",
       });
 
@@ -176,7 +177,7 @@ describe("resources", function () {
 
     it("should bulk create and bulk delete", async function () {
       const resource = s3db.resource(`leads2`);
-      const leads = new Array(amount).fill(0).map(() => resourceFactory());
+      const leads = new Array(amount).fill(0).map(() => leadFactory());
 
       const results = await resource.insertMany(leads);
       const leadsIds = leads.map((x: any) => x.id).sort();
@@ -195,6 +196,39 @@ describe("resources", function () {
 
       const resourceCount = await resource.count();
       expect(resourceCount).toEqual(0);
+    });
+  });
+
+  describe("pages", function () {
+    const amount = 30;
+    const s3db = S3dbFactory();
+    beforeAll(defaultBeforeAll(s3db));
+
+    it("should paginate", async function () {
+      const resource = s3db.resource(`leads3`);
+      const leads = new Array(amount).fill(0).map(() => leadFactory());
+      await resource.insertMany(leads);
+
+      const [p1, p2, p3] = await Promise.all([
+        resource.page({ 
+          offset: 0, 
+          size: Math.floor(amount / 3),
+        }),
+        resource.page({
+          offset: Math.floor(amount / 3),
+          size: Math.floor(amount / 3),
+        }),
+        resource.page({
+          offset: 2 * Math.floor(amount / 3),
+          size: Math.floor(amount / 3),
+        }),
+      ]);
+
+      expect(p1.length).toEqual(Math.floor(amount / 3))
+      expect(p2.length).toEqual(Math.floor(amount / 3))
+      expect(p3.length).toEqual(Math.floor(amount / 3))
+
+      // await resource.deleteAll();
     });
   });
 });

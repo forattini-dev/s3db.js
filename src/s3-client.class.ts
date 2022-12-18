@@ -332,6 +332,100 @@ export class S3Client extends EventEmitter {
 
     return keys;
   }
+
+  async getContinuationTokenAfterOffset({
+    prefix,
+    offset = 1000,
+  }: {
+    prefix?: string;
+    offset: number;
+  }) {
+    if (offset === 0) return null;
+
+    let truncated = true;
+    let continuationToken;
+    let skipped = 0;
+
+    while (truncated) {
+      let maxKeys =
+        offset < 1000
+          ? offset
+          : offset - skipped > 1000
+          ? 1000
+          : offset - skipped;
+
+      const options: any = {
+        prefix,
+        maxKeys,
+        continuationToken,
+      };
+
+      const res = await this.listObjects(options);
+
+      if (res.Contents) {
+        skipped += res.Contents.length;
+      }
+
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+
+      if (skipped >= offset) {
+        break;
+      }
+    }
+
+    return continuationToken;
+  }
+
+  async getKeysPage({
+    prefix,
+    offset = 0,
+    amount = 100,
+  }: {
+    prefix?: string;
+    offset?: number;
+    amount?: number;
+  } = {}) {
+    let keys: any[] = [];
+    let truncated = true;
+    let continuationToken;
+
+    if (offset > 0) {
+      continuationToken = await this.getContinuationTokenAfterOffset({
+        prefix,
+        offset,
+      });
+    }
+
+    while (truncated) {
+      const options: any = {
+        prefix,
+        continuationToken,
+      };
+
+      const res = await this.listObjects(options);
+
+      if (res.Contents) {
+        keys = keys.concat(res.Contents.map((x) => x.Key));
+      }
+
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+
+      if (keys.length > amount) {
+        keys = keys.splice(0, amount);
+        break;
+      }
+    }
+
+    if (this.keyPrefix) {
+      keys = keys
+        .map((x) => x.replace(this.keyPrefix, ""))
+        .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+    }
+
+    return keys;
+  }
 }
 
 export default S3Client;
