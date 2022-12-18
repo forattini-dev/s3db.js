@@ -416,7 +416,10 @@ class S3Resource extends events_1.default {
     getMany(ids) {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.s3Cache) {
-                const cached = yield this.s3Cache.get({ action: "getMany" });
+                const cached = yield this.s3Cache.get({
+                    action: "getMany",
+                    params: { ids: ids.sort() },
+                });
                 if (cached)
                     return cached;
             }
@@ -429,7 +432,11 @@ class S3Resource extends events_1.default {
                 return data;
             }));
             if (this.s3Cache)
-                yield this.s3Cache.put({ action: "getMany", data: results });
+                yield this.s3Cache.put({
+                    action: "getMany",
+                    params: { ids: ids.sort() },
+                    data: results,
+                });
             this.emit("getMany", ids.length);
             return results;
         });
@@ -465,6 +472,32 @@ class S3Resource extends events_1.default {
             }
             this.emit("getAll", results.length);
             return results;
+        });
+    }
+    page({ offset = 0, size = 100 }) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (this.s3Cache) {
+                const cached = yield this.s3Cache.get({
+                    action: "page",
+                    params: { offset, size },
+                });
+                if (cached)
+                    return cached;
+            }
+            const keys = yield this.s3Client.getKeysPage({
+                amount: size,
+                offset: offset,
+                prefix: `resource=${this.name}`,
+            });
+            const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+            const data = yield this.getMany(ids);
+            if (this.s3Cache)
+                yield this.s3Cache.put({
+                    action: "page",
+                    params: { offset, size },
+                    data,
+                });
+            return data;
         });
     }
     readable() {

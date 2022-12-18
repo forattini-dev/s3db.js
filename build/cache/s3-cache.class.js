@@ -39,6 +39,7 @@ exports.S3Cache = void 0;
 const zlib_1 = __importDefault(require("zlib"));
 const path = __importStar(require("path"));
 const lodash_1 = require("lodash");
+const sha256_1 = __importDefault(require("crypto-js/sha256"));
 const serializers_type_1 = __importDefault(require("./serializers.type"));
 const json_serializer_1 = require("./json.serializer");
 const avro_serializer_1 = require("./avro.serializer");
@@ -60,11 +61,8 @@ class S3Cache {
         if (filename.length === 0)
             filename = `empty`;
         if (hashed) {
-            filename = Buffer.from(filename)
-                .toString("base64")
-                .split("")
-                .reverse()
-                .join("");
+            filename = (0, sha256_1.default)(filename);
+            // filename = Buffer.from(filename).toString("base64").split("").reverse().join("");
         }
         if (additionalPrefix.length > 0) {
             filename = additionalPrefix + filename;

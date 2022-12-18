@@ -25,10 +25,11 @@ class S3ResourceCache extends s3_cache_class_1.default {
         this.resource = resource;
     }
     getKey({ action = "list", params }) {
-        return super.getKey({
+        const key = super.getKey({
             params,
             additionalPrefix: `resource=${this.resource.name}/action=${action}|`,
         });
+        return key;
     }
     put({ action = "list", params, data, }) {
         const _super = Object.create(null, {

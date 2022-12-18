@@ -300,6 +300,72 @@ class S3Client extends events_1.default {
             return keys;
         });
     }
+    getContinuationTokenAfterOffset({ prefix, offset = 1000, }) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (offset === 0)
+                return null;
+            let truncated = true;
+            let continuationToken;
+            let skipped = 0;
+            while (truncated) {
+                let maxKeys = offset < 1000
+                    ? offset
+                    : offset - skipped > 1000
+                        ? 1000
+                        : offset - skipped;
+                const options = {
+                    prefix,
+                    maxKeys,
+                    continuationToken,
+                };
+                const res = yield this.listObjects(options);
+                if (res.Contents) {
+                    skipped += res.Contents.length;
+                }
+                truncated = res.IsTruncated || false;
+                continuationToken = res.NextContinuationToken;
+                if (skipped >= offset) {
+                    break;
+                }
+            }
+            return continuationToken;
+        });
+    }
+    getKeysPage({ prefix, offset = 0, amount = 100, } = {}) {
+        return __awaiter(this, void 0, void 0, function* () {
+            let keys = [];
+            let truncated = true;
+            let continuationToken;
+            if (offset > 0) {
+                continuationToken = yield this.getContinuationTokenAfterOffset({
+                    prefix,
+                    offset,
+                });
+            }
+            while (truncated) {
+                const options = {
+                    prefix,
+                    continuationToken,
+                };
+                const res = yield this.listObjects(options);
+                if (res.Contents) {
+                    keys = keys.concat(res.Contents.map((x) => x.Key));
+                }
+                truncated = res.IsTruncated || false;
+                continuationToken = res.NextContinuationToken;
+                if (keys.length > amount) {
+                    keys = keys.splice(0, amount);
+                    break;
+                }
+            }
+            if (this.keyPrefix) {
+                keys = keys
+                    .map((x) => x.replace(this.keyPrefix, ""))
+                    .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
+            }
+            return keys;
+        });
+    }
 }
 exports.S3Client = S3Client;
 exports.default = S3Client;
