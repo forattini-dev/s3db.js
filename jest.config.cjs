@@ -1,4 +1,4 @@
-const {defaults} = require('jest-config');
+const { defaults } = require('jest-config');
 
 /** @type {import('jest').Config} */
 module.exports = {
@@ -14,8 +14,8 @@ module.exports = {
   },
 
   moduleFileExtensions: [
-    ...defaults.moduleFileExtensions, 
-    'mts', 
+    ...defaults.moduleFileExtensions,
+    'mts',
     'cts'
   ],
 };
