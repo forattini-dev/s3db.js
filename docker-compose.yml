@@ -1,0 +1,18 @@
+services:
+
+  minio:
+    image: bitnami/minio:latest
+    volumes:
+      - minio_data:/bitnami/minio/data 
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_FORCE_NEW_KEYS: yes
+      MINIO_SCHEME: http
+      MINIO_DEFAULT_BUCKETS: s3db
+      MINIO_ROOT_USER: s3db
+      MINIO_ROOT_PASSWORD: thisissecret
+
+volumes:
+  minio_data: {}

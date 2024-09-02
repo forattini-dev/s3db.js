@@ -33,7 +33,6 @@ Another way to create a cheap document-base database with an easy ORM to handle 
 1. <a href="#s3-client">S3 Client</a>
 1. <a href="#events">Events</a>
 1. <a href="#plugins">Plugins</a>
-1. <a href="#examples">Examples</a>
 1. <a href="#cost-simulation">Cost Simulation</a>
    1. <a href="#big-example">Big Example</a>
    1. <a href="#small-example">Small example</a>
@@ -798,116 +797,6 @@ const MyPlugin = {
 We have an example of a _costs simulator plugin_ [here!](https://github.com/forattini-dev/s3db.js/blob/main/src/plugins/costs.plugin.js)
 
 ---
-
-## Examples
-
-The processing power here was not the priority, just used my little nodebook Dell XPS. Check the `./examples` directory to get some ideas on how to use this package and the code of the examples below.
-
-Examples' random data uses [`fakerator`](https://github.com/icebob/fakerator), git it a try!
-
-#### [Bulk insert](https://github.com/forattini-dev/s3db.js/blob/main/examples/1-bulk-insert.js)
-
-```bash
-$ npm run example:1
-
-> s3db.js@1.0.0 example:1
-> cd examples; node 1-bulk-insert.js
-
-creating 10000 leads.
-parallelism of 250 requests.
-
-bulk-writing  10000/10000 (100%)  [==============================]  255/bps  0.0s (39.2s) [10001 requests]
-bulk-writing: 40.404s
-
-Total cost: 0.0500 USD
-```
-
-#### [Resource read stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/2-read-stream.js)
-
-```bash
-$ npm run example:2
-
-> s3db.js@1.0.0 example:2
-> cd examples; node 2-read-stream.js
-
-reading 10000 leads.
-parallelism of 250 requests.
-
-reading-pages   40/1 (100%)  [==============================]  1/bps  0.0s (64.4s)
-reading-ids     10000/10000 (100%)  [==============================]  155/bps  0.0s (64.5s)
-reading-data    10000/10000 (100%)  [==============================]  153/bps  0.0s (65.3s)
-reading: 1:07.246 (m:ss.mmm)
-
-Total cost: 0.0041 USD
-```
-
-#### [Resource read stream writing into a csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/3-read-stream-to-csv.js)
-
-```bash
-$ npm run example:3
-
-> s3db.js@1.0.0 example:3
-> cd examples; node 3-read-stream-to-csv.js
-
-reading 10000 leads.
-parallelism of 250 requests.
-
-reading-data  10000/10000 (100%)  [==============================]  123/bps  0.0s (81.3s)
-reading-data: 1:23.852 (m:ss.mmm)
-
-Total size: 1.31 Mb
-```
-
-#### [Resource read stream writing into a zipped csv](https://github.com/forattini-dev/s3db.js/blob/main/examples/4-read-stream-to-zip.js)
-
-```bash
-$ npm run example:4
-
-> s3db.js@1.0.0 example:4
-> cd examples; node 4-read-stream-to-zip.js
-
-reading 10000 leads.
-parallelism of 250 requests.
-
-reading-data  10000/10000 (100%)  [==============================]  141/bps  0.0s (71.0s)
-reading-data: 1:13.078 (m:ss.mmm)
-
-Total zip size: 0.68 Mb
-```
-
-#### [Write Stream](https://github.com/forattini-dev/s3db.js/blob/main/examples/5-write-stream.js)
-
-```bash
-$ npm run example:5
-
-> s3db.js@1.0.0 example:6
-> cd examples; node 5-write-stream.js
-
-reading 10000 leads.
-parallelism of 250 requests.
-
-requests        20010/1 (100%)  [==============================]  49/bps  0.0s (410.0s)
-reading-pages   40/1 (100%)  [==============================]  0/bps  0.0s (395.6s)
-reading-ids     10000/10000 (100%)  [==============================]  25/bps  0.0s (395.6s)
-reading-data    10000/10000 (100%)  [==============================]  25/bps  0.0s (401.5s)
-writing-ids     10000/10000 (100%)  [==============================]  25/bps  0.0s (395.7s)
-writing-data    10000/10000 (100%)  [==============================]  25/bps  0.0s (395.7s)
-copying-data: 6:51.352 (m:ss.mmm)
-
-Total cost: 0.0541 USD
-```
-
-#### [JWT Token validator](https://github.com/forattini-dev/s3db.js/blob/main/examples/6-jwt-tokens.js)
-
-```bash
-$ npm run example:6
-
-> s3db.js@1.0.0 example:6
-> cd examples; node jwt-tokens.js
-
-Created tokens: .....
-Validated tokens: .....
-```
 
 ## Cost simulation
 
