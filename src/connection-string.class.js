@@ -11,7 +11,10 @@ export class ConnectionString {
       throw new Error("Invalid connection string: " + connectionString)
     }
     
+    // defaults:
     this.region = S3_DEFAULT_REGION;
+    
+    // config:
     if (uri.protocol === "s3:") this.defineS3(uri);
     else this.defineMinio(uri);
     
@@ -36,7 +39,7 @@ export class ConnectionString {
 
   defineMinio(uri) {
     this.forcePathStyle = true;
-
+    
     this.endpoint = uri.origin;
     this.accessKeyId = uri.username;
     this.secretAccessKey = uri.password;

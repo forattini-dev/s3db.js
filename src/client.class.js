@@ -1,7 +1,7 @@
 import path from "path";
 import { nanoid } from "nanoid";
-import { chunk } from "lodash-es";
 import EventEmitter from "events";
+import { chunk } from "lodash-es";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import {
@@ -52,8 +52,31 @@ export class Client extends EventEmitter {
   }
 
   async sendCommand(command) {
-    this.emit("command", command.constructor.name, command.input);
+    this.emit("command.request", command.constructor.name, command.input);
+
+    // supress warning for unknown stream length
+    const originalWarn = console.warn;
+
+    try {
+      console.warn = (message) => {
+        if (!message.includes('Stream of unknown length')) {
+          originalWarn(message);
+        }
+      };
+    } catch (error) {
+      console.error(error);
+    }
+
     const response = await this.client.send(command);
+    this.emit("command.response", command.constructor.name, response, command.input);
+
+    // return original console.warn
+    try {
+      console.warn = originalWarn;
+    } catch (error) {
+      console.error(error);
+    }
+
     return response;
   }
 
@@ -77,18 +100,14 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
       Metadata: { ...metadata },
-      Body: body || "@",
+      Body: body || "",
       ContentType: contentType,
       ContentEncoding: contentEncoding,
     };
 
     try {
-      this.emit("request", "putObject", options);
       const response = await this.sendCommand(new PutObjectCommand(options));
-
-      this.emit("response", "putObject", options, response);
-      this.emit("putObject", options, response);
-
+      this.emit("putObject", response, options);
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
@@ -105,12 +124,8 @@ export class Client extends EventEmitter {
     };
 
     try {
-      this.emit("request", "getObject", options);
       const response = await this.sendCommand(new GetObjectCommand(options));
-
-      this.emit("response", "getObject", options, response);
-      this.emit("getObject", options, response);
-
+      this.emit("getObject", response, options);
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
@@ -127,13 +142,8 @@ export class Client extends EventEmitter {
     };
 
     try {
-      this.emit("request", "headObject", options);
       const response = await this.client.send(new HeadObjectCommand(options));
-      // const response = await this.sendCommand(new HeadObjectCommand(options));
-
-      this.emit("response", "headObject", options, response);
-      this.emit("headObject", options, response);
-
+      this.emit("headObject", response, options);
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
@@ -148,12 +158,12 @@ export class Client extends EventEmitter {
     try {
       await this.headObject(key);
       return true
-    } catch (errorExists) {
-      if (errorExists.name === "NoSuchKey") return false;
-      if (errorExists.name === "NotFound") return false;
-      throw errorExists
+    } catch (err) {
+      if (err.name === "NoSuchKey") return false;
+      else if (err.name === "NotFound") return false;
+      
+      throw err
     }
-    return false;
   }
 
   async deleteObject(key) {
@@ -163,12 +173,8 @@ export class Client extends EventEmitter {
     };
 
     try {
-      this.emit("request", "deleteObject", options);
       const response = await this.sendCommand(new DeleteObjectCommand(options));
-
-      this.emit("response", "deleteObject", options, response);
-      this.emit("deleteObject", options, response);
-
+      this.emit("deleteObject", response, options);
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
@@ -196,12 +202,7 @@ export class Client extends EventEmitter {
         };
 
         try {
-          this.emit("request", "deleteObjects", options);
           const response = await this.sendCommand(new DeleteObjectsCommand(options));
-
-          this.emit("response", "deleteObjects", options, response);
-          this.emit("deleteObjects", options, response);
-
           return response;
         } catch (error) {
           throw this.errorProxy(error, {
@@ -211,10 +212,13 @@ export class Client extends EventEmitter {
         }
       });
 
-    return {
+    const report = {
       deleted: results,
       notFound: errors,
-    };
+    }
+
+    this.emit("deleteObjects", report, keys);
+    return report;
   }
 
   async listObjects({
@@ -232,12 +236,8 @@ export class Client extends EventEmitter {
     };
 
     try {
-      this.emit("request", "listObjectsV2", options);
       const response = await this.sendCommand(new ListObjectsV2Command(options));
-
-      this.emit("response", "listObjectsV2", options, response);
-      this.emit("listObjectsV2", options, response);
-
+      this.emit("listObjects", response, options);
       return response;
     } catch (error) {
       throw this.errorProxy(error, { command: options });
@@ -245,8 +245,6 @@ export class Client extends EventEmitter {
   }
 
   async count({ prefix } = {}) {
-    this.emit("request", "count", { prefix });
-
     let count = 0;
     let truncated = true;
     let continuationToken;
@@ -257,22 +255,18 @@ export class Client extends EventEmitter {
         continuationToken,
       };
 
-      const res = await this.listObjects(options);
-
-      count += res.KeyCount || 0;
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
+      const response = await this.listObjects(options);
+      
+      count += response.KeyCount || 0;
+      truncated = response.IsTruncated || false;
+      continuationToken = response.NextContinuationToken;
     }
-
-    this.emit("response", "count", { prefix }, count);
-    this.emit("count", { prefix }, count);
-
+    
+    this.emit("count", count, { prefix });
     return count;
   }
 
   async getAllKeys({ prefix } = {}) {
-    this.emit("request", "getAllKeys", { prefix });
-
     let keys = [];
     let truncated = true;
     let continuationToken;
@@ -283,14 +277,14 @@ export class Client extends EventEmitter {
         continuationToken,
       };
 
-      const res = await this.listObjects(options);
+      const response = await this.listObjects(options);
 
-      if (res.Contents) {
-        keys = keys.concat(res.Contents.map((x) => x.Key));
+      if (response.Contents) {
+        keys = keys.concat(response.Contents.map((x) => x.Key));
       }
 
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
+      truncated = response.IsTruncated || false;
+      continuationToken = response.NextContinuationToken;
     }
 
     if (this.config.keyPrefix) {
@@ -299,16 +293,16 @@ export class Client extends EventEmitter {
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
 
-    this.emit("response", "getAllKeys", { prefix }, keys);
-    this.emit("getAllKeys", { prefix }, keys);
-
+    this.emit("getAllKeys", keys, { prefix });
     return keys;
   }
 
-  async getContinuationTokenAfterOffset({
-    prefix,
-    offset = 1000,
-  }) {
+  async getContinuationTokenAfterOffset(params = {}) {
+    const {
+      prefix,
+      offset = 1000,
+    } = params
+
     if (offset === 0) return null;
 
     let truncated = true;
@@ -343,14 +337,17 @@ export class Client extends EventEmitter {
       }
     }
 
+    this.emit("getContinuationTokenAfterOffset", continuationToken, params);
     return continuationToken;
   }
 
-  async getKeysPage({
-    prefix,
-    offset = 0,
-    amount = 100,
-  } = {}) {
+  async getKeysPage(params = {}) {
+    const {
+      prefix,
+      offset = 0,
+      amount = 100,
+    } = params
+
     let keys = [];
     let truncated = true;
     let continuationToken;
@@ -389,6 +386,7 @@ export class Client extends EventEmitter {
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
 
+    this.emit("getKeysPage", keys, params);
     return keys;
   }
 }

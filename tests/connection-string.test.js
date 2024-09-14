@@ -17,8 +17,8 @@ const cases = {
   minioComplete: 'http://user:password@localhost:9000/my-bucket/path/to/folder?A=1&B=2',
 }
 
-describe('ConnectionString', () => {
-  test('s3 basic setup', () => {
+describe('AWS S3', () => {
+  test('basic setup', () => {
     const connection = new ConnectionString(cases.s3);
     expect(connection.endpoint).toBe(S3_DEFAULT_ENDPOINT);
     expect(connection.bucket).toBe('my-bucket');
@@ -27,7 +27,7 @@ describe('ConnectionString', () => {
     expect(connection.secretAccessKey).toBe('secretKey');
   })
 
-  test('s3 with path', () => {
+  test('with path', () => {
     const connection = new ConnectionString(cases.s3WithPath);
     expect(connection.endpoint).toBe(S3_DEFAULT_ENDPOINT);
     expect(connection.bucket).toBe('my-bucket');
@@ -36,7 +36,7 @@ describe('ConnectionString', () => {
     expect(connection.secretAccessKey).toBe('secretKey');
   })
 
-  test('s3 with params', () => {
+  test('with params', () => {
     const connection = new ConnectionString(cases.s3WithParams);
     expect(connection.endpoint).toBe(S3_DEFAULT_ENDPOINT);
     expect(connection.bucket).toBe('my-bucket');
@@ -45,7 +45,7 @@ describe('ConnectionString', () => {
     expect(connection.B).toBe('2');
   })
 
-  test('s3 with credentials', () => {
+  test('with credentials', () => {
     const connection = new ConnectionString(cases.s3WithCredentials);
     expect(connection.endpoint).toBe(S3_DEFAULT_ENDPOINT);
     expect(connection.bucket).toBe('my-bucket');
@@ -54,7 +54,7 @@ describe('ConnectionString', () => {
     expect(connection.secretAccessKey).toBe('accessSecret');
   })
 
-  test('s3 complete setup', () => {
+  test('complete setup', () => {
     const connection = new ConnectionString(cases.s3Complete);
     expect(connection.endpoint).toBe(S3_DEFAULT_ENDPOINT);
     expect(connection.bucket).toBe('my-bucket');
@@ -64,29 +64,31 @@ describe('ConnectionString', () => {
     expect(connection.A).toBe('1');
     expect(connection.B).toBe('2');
   })
+})
 
-  test('minio basic setup', () => {
+describe('Minio', () => {
+  test('basic setup', () => {
     const connection = new ConnectionString(cases.minio);
     expect(connection.endpoint).toBe('http://localhost:9000');
     expect(connection.bucket).toBe('s3db');
     expect(connection.keyPrefix).toBe('');
   })
 
-  test('minio with bucket', () => {
+  test('with bucket', () => {
     const connection = new ConnectionString(cases.minioWithBucket);
     expect(connection.endpoint).toBe('http://localhost:9000');
     expect(connection.bucket).toBe('my-bucket');
     expect(connection.keyPrefix).toBe('');
   })
 
-  test('minio with bucket and path', () => {
+  test('with bucket and path', () => {
     const connection = new ConnectionString(cases.minioWithBucketAndPath);
     expect(connection.endpoint).toBe('http://localhost:9000');
     expect(connection.bucket).toBe('my-bucket');
     expect(connection.keyPrefix).toBe('path/to/folder');
   })
 
-  test('minio with credentials', () => {
+  test('with credentials', () => {
     const connection = new ConnectionString(cases.miniowithCredentials);
     expect(connection.endpoint).toBe('http://localhost:9000');
     expect(connection.bucket).toBe('my-bucket');
@@ -95,7 +97,7 @@ describe('ConnectionString', () => {
     expect(connection.secretAccessKey).toBe('password');
   })
 
-  test('minio complete setup', () => {
+  test('complete setup', () => {
     const connection = new ConnectionString(cases.minioComplete);
     expect(connection.endpoint).toBe('http://localhost:9000');
     expect(connection.bucket).toBe('my-bucket');

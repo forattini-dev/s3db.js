@@ -1,14 +1,12 @@
-import { flatten } from "flat";
 import { isEmpty } from "lodash-es";
 import EventEmitter from "events";
 
 import Client from "./client.class.js";
 import Resource from "./resource.class.js";
-import { ValidatorFactory } from "./validator.js";
+import { Validator } from "./validator.class.js";
 import { streamToString } from "./stream/index.js";
-import { MissingMetadata, NoSuchKey } from "./errors.js";
 
-class Database extends EventEmitter {
+export class Database extends EventEmitter {
   constructor(options) {
     super();
 
@@ -21,9 +19,7 @@ class Database extends EventEmitter {
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
 
-    this.validatorInstance = ValidatorFactory({
-      passphrase: this.passphrase,
-    });
+    this.validatorInstance = new Validator({ passphrase: this.passphrase });
 
     this.client = options.client || new Client({
       verbose: this.verbose,
@@ -67,9 +63,21 @@ class Database extends EventEmitter {
 
   async startPlugins() {
     if (this.plugins && !isEmpty(this.plugins)) {
-      const startProms = this.plugins.map((plugin) => plugin.setup(this));
+      const setupProms = this.plugins.map(async (plugin) => {
+        if (plugin.beforeSetup) await plugin.beforeSetup()
+        await plugin.setup(this)
+        if (plugin.afterSetup) await plugin.afterSetup()
+      });
+
+      await Promise.all(setupProms);
+
+      const startProms = this.plugins.map(async (plugin) => {
+        if (plugin.beforeStart) await plugin.beforeStart()
+        await plugin.start()
+        if (plugin.afterStart) await plugin.afterStart()
+      });
+
       await Promise.all(startProms);
-      this.plugins.forEach((plugin) => plugin.start());
     }
   }
 
@@ -128,6 +136,8 @@ class Database extends EventEmitter {
     this.resources[name] = resource;
 
     await this.uploadMetadataFile();
+
+    this.emit("s3db.resourceCreated", name);
     return resource;
   }
 
@@ -140,5 +150,5 @@ class Database extends EventEmitter {
   }
 }
 
-export default Database;
 export class S3db extends Database {}
+export default S3db;

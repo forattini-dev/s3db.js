@@ -1,23 +1,27 @@
-/* istanbul ignore file */
+export default {
+  async setup (db) {
+    this.client = db.client
 
-module.exports = {
-  async setup (s3db) {
-    this.client = s3db.client
-    this.started = false
+    this.map = {
+      PutObjectCommand: 'put',
+      GetObjectCommand: 'get',
+      HeadObjectCommand: 'get',
+      DeleteObjectCommand: 'delete',
+      DeleteObjectsCommand: 'delete',
+      ListObjectsV2Command: 'list',
+    }
 
-    this.client.costs = {
+    this.costs = {
       total: 0,
-      
       prices: {
-        put: 0.000005,
-        post: 0.000005,
-        copy: 0.000005,
-        list: 0.000005,
-        get: 0.0000004,
-        select: 0.0000004,
-        delete: 0.0000004,
+        put: 0.005 / 1000,
+        copy: 0.005 / 1000,
+        list: 0.005 / 1000,
+        post: 0.005 / 1000,
+        get: 0.0004 / 1000,
+        select: 0.0004 / 1000,
+        delete: 0.0004 / 1000,
       },
-
       requests: {
         total: 0,
         put: 0,
@@ -28,26 +32,35 @@ module.exports = {
         select: 0,
         delete: 0,
       },
+      events: {
+        total: 0,
+        PutObjectCommand: 0,
+        GetObjectCommand: 0,
+        HeadObjectCommand: 0,
+        DeleteObjectCommand: 0,
+        DeleteObjectsCommand: 0,
+        ListObjectsV2Command: 0,
+      }
     }
+
+    this.client.costs = JSON.parse(JSON.stringify(this.costs));
+  },
+  
+  async start () {
+    this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
   },
 
-  async start () {
-    const addRequest = (req) => {
-      this.client.costs.requests[req]++;
-      this.client.costs.total += this.client.costs.prices[req];
-    };
+  addRequest (name, method) {
+    this.costs.events[name]++;
+    this.costs.events.total++;
+    this.costs.requests.total++;
+    this.costs.requests[method]++;
+    this.costs.total += this.costs.prices[method];
 
-    this.client.on("request", (name) => {
-      this.client.costs.requests.total++;
-
-      if (name === "getObject") addRequest("get");
-      else if (name === "putObject") addRequest("put");
-      else if (name === "headObject") addRequest("get");
-      else if (name === "deleteObject") addRequest("delete");
-      else if (name === "deleteObjects") addRequest("delete");
-      else if (name === "listObjectsV2") addRequest("list");
-    });
-
-    this.started = true
-  }
+    this.client.costs.events[name]++;
+    this.client.costs.events.total++;
+    this.client.costs.requests.total++;
+    this.client.costs.requests[method]++;      
+    this.client.costs.total += this.client.costs.prices[method];
+  },
 }

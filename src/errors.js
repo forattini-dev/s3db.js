@@ -1,6 +1,6 @@
 export class BaseError extends Error {
   constructor({ verbose, bucket, message, ...rest }) {
-    if (verbose) message = message + `\n${JSON.stringify(rest, null, 2)}`;
+    if (verbose) message = message + `\n\nVerbose:\n\n${JSON.stringify(rest, null, 2)}`;
     super(message);
 
     if (typeof Error.captureStackTrace === 'function') {
@@ -45,7 +45,7 @@ export class MissingMetadata extends BaseError {
   }
 }
 
-export class InvalidResource extends BaseError {
+export class InvalidResourceItem extends BaseError {
   constructor({
     bucket,
     resourceName,
@@ -54,7 +54,7 @@ export class InvalidResource extends BaseError {
   }) {
     super({
       bucket,
-      message: `Resource is not valid. Name=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`,
+      message: `This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`,
     });
 
     this.resourceName = resourceName;
@@ -63,18 +63,13 @@ export class InvalidResource extends BaseError {
   }
 }
 
-export class UnknownError extends BaseError {
-  constructor(...args) {
-    super({...args });
-  }
-}
-
+export class UnknownError extends BaseError {}
 
 export const ErrorMap = {
   'NotFound': NotFound,
   'NoSuchKey': NoSuchKey,
   'UnknownError': UnknownError,
   'NoSuchBucket': NoSuchBucket,
-  'InvalidResource': InvalidResource,
   'MissingMetadata': MissingMetadata,
+  'InvalidResourceItem': InvalidResourceItem,
 };

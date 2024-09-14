@@ -1,8 +1,8 @@
 {
   "name": "s3db.js",
   "version": "2.1.1",
-  "description": "Use AWS S3 as a cheap document database.",
-  "main": "build/index.js",
+  "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
+  "main": "dist/s3db.es.js",
   "type": "module",
   "author": "forattini-dev",
   "license": "UNLICENSED",
@@ -20,27 +20,16 @@
     "database"
   ],
   "scripts": {
-    "build": "rimraf ./build && tsc",
+    "build": "rollup -c",
+    "postbuild": "node scripts/prefix-files-istanbul-ignore.js",
     "coverage": "coveralls < coverage/lcov.info",
     "coverage:serve": "npx http-server ./coverage/lcov-report",
-    "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
-    "test:stream": "jest --coverage ./tests/stream.spec.ts",
-    "test:cache": "jest --coverage ./tests/s3-cache.spec.ts",
-    "test:plugins": "jest --coverage ./tests/plugins.spec.ts",
-    "test:client": "jest --coverage ./tests/s3-client-basics.spec.ts",
-    "test:client2": "jest --coverage ./tests/s3-client-methods.spec.ts",
-    "test:resource": "jest --coverage ./tests/s3-resource.spec.ts",
-    "test:watch": "jest --watch",
-    "example:1": "cd examples; node 1-bulk-insert.js",
-    "example:2": "cd examples; node 2-read-stream.js",
-    "example:3": "cd examples; node 3-read-stream-to-csv.js",
-    "example:4": "cd examples; node 4-read-stream-to-zip.js",
-    "example:5": "cd examples; node 5-write-stream.js",
-    "example:6": "cd examples; node 6-jwt-tokens.js",
-    "example:7": "cd examples; node 7-duplicate-database.js"
+    "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
+    "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watch --detectOpenHandles",
+    "test:dist": "node --no-warnings --experimental-vm-modules ./tests/dist.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.637.0",
+    "@aws-sdk/client-s3": "^3.649.0",
     "@supercharge/promise-pool": "^3.2.0",
     "avsc": "^5.7.7",
     "crypto-js": "^4.2.0",
@@ -51,15 +40,23 @@
   },
   "devDependencies": {
     "@babel/preset-env": "^7.25.4",
+    "@jest/globals": "^29.7.0",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-commonjs": "^26.0.1",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
     "babel-jest": "^29.7.0",
+    "cliui": "5",
     "coveralls": "^3.1.1",
     "dotenv": "^16.4.5",
-    "esm": "^3.2.25",
+    "esbuild": "^0.23.1",
     "fakerator": "^0.3.6",
     "jest": "^29.7.0",
-    "jsonwebtoken": "^9.0.2",
     "multi-progress": "^4.0.0",
     "progress": "^2.0.3",
-    "rimraf": "^6.0.1"
+    "rollup": "^4.21.2",
+    "rollup-plugin-esbuild": "^6.1.1",
+    "rollup-plugin-polyfill-node": "^0.13.0"
   }
 }

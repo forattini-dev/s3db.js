@@ -1,13 +1,15 @@
 import Client from '../src/client.class';
 import Resource from '../src/resource.class';
 
+const currentDate = new Date().toISOString().substring(0, 10)
+
 describe('Resource', () => {
   const client = new Client({
     verbose: true,
     connectionString: process.env.BUCKET_CONNECTION_STRING
       .replace('USER', process.env.MINIO_USER)
       .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + '/s3db/tests/res-' + new Date().toISOString().substring(0, 10)
+      + `/s3db/tests/${currentDate}/resource`
   })
 
   const resource = new Resource({
@@ -16,6 +18,7 @@ describe('Resource', () => {
     attributes: {
       animal: 'string',
       name: 'string',
+      // token: 'secret',
     }
   })
 
@@ -27,12 +30,14 @@ describe('Resource', () => {
     const in1 = await resource.insert({
       animal: 'dog',
       name: 'beagle',
+      token: '$ecret',
     })
 
     expect(in1).toBeDefined()
     expect(in1.id).toBeDefined()
     expect(in1.animal).toBe('dog')
     expect(in1.name).toBe('beagle')
+    // expect(in1.token).toBe('secret')
 
     const up1 = await resource.update(in1.id, {
       name: 'bulldog',
@@ -52,18 +57,9 @@ describe('Resource', () => {
 
   test('multiple elements complete example', async () => {
     const [in1, in2, in3] = await resource.insertMany([
-      {
-        animal: 'dog',
-        name: 'beagle',
-      },
-      {
-        animal: 'dog',
-        name: 'bulldog',
-      },
-      {
-        animal: 'dog',
-        name: 'poodle',
-      }
+      { animal: 'dog', name: 'beagle', token: '$ecret1' },
+      { animal: 'dog', name: 'poodle', token: '$ecret3' },
+      { animal: 'dog', name: 'bulldog', token: '$ecret2' },
     ])
 
     const count = await resource.count()
@@ -73,11 +69,7 @@ describe('Resource', () => {
     expect(list).toBeDefined()
     expect(list.length).toBe(3)
 
-    const del1 = await resource.deleteMany([
-      in1.id,
-      in2.id,
-      in3.id,
-    ])
+    const del1 = await resource.deleteMany([ in1.id, in2.id, in3.id ])
     expect(del1).toBeDefined()
 
     const count2 = await resource.count()
