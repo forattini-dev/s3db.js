@@ -1,8 +1,15 @@
-export { Database as S3Database, S3db } from './database.class'
-export { S3Cache } from './cache/s3-cache.class'
-export { S3Client } from './client.class'
-
+// single
+export * from './client.class'
+export * from './connection-string.class'
+export * from './crypto'
+export * from './database.class'
 export * from './errors'
+export * from './validator.class'
 
+// directories
 export * from './plugins'
-export * from './stream'
+// export * from './cache/s3-cache.class'
+// export * from './stream'
+
+// default
+export { default as S3db } from './database.class'

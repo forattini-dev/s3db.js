@@ -1,19 +1,19 @@
 import path from "path";
 import { nanoid } from "nanoid";
-import CryptoJS from "crypto-js";
 import EventEmitter from "events";
 import { flatten, unflatten } from "flat";
-import { ValidatorFactory } from "./validator.js";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import { 
   chunk, 
   merge,
-  isArray, 
   sortBy, 
+  isArray, 
 } from "lodash-es";
 
-import { InvalidResource } from "./errors.js";
+import { decrypt } from "./crypto.js"
+import { Validator } from "./validator.class.js";
+import { InvalidResourceItem } from "./errors.js";
 import S3ResourceCache from "./cache/s3-resource-cache.class.js";
 import ResourceWriteStream from "./stream/resource-write-stream.class.js";
 import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class.js";
@@ -38,10 +38,13 @@ class Resource extends EventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 10;
 
-    this.schema = flatten(attributes, { safe: true });
+    this.schema = merge(
+      { $$async: true }, 
+      flatten(attributes, { safe: true }),
+    )
 
     if (!validatorInstance) {
-      validatorInstance = ValidatorFactory({ passphrase: this.passphrase ?? 'secret' });
+      validatorInstance = new Validator({ passphrase: this.passphrase ?? 'secret' });
     }
 
     this.validator = validatorInstance.compile(this.schema);
@@ -130,14 +133,14 @@ class Resource extends EventEmitter {
     }
   }
 
-  check(data) {
+  async check(data) {
     const result = {
       original: { ...data },
       isValid: false,
       errors: [],
     };
 
-    const check = this.validator(data);
+    const check = await this.validator(data);
 
     if (check === true) {
       result.isValid = true;
@@ -188,8 +191,7 @@ class Resource extends EventEmitter {
       for (const action of actions) {
         if (action === "decrypt") {
           let content = obj[attribute];
-          content = CryptoJS.AES.decrypt(content, this.passphrase);
-          content = content.toString(CryptoJS.enc.Utf8);
+          content = decrypt(content, this.passphrase);
           obj[attribute] = content;
         } else if (action === "toArray") {
           obj[attribute] = (obj[attribute] || "").split("|");
@@ -209,12 +211,12 @@ class Resource extends EventEmitter {
       safe: true,
     });
 
-    const { isValid, errors, data: validated } = this.check(attrs);
+    const { isValid, errors, data: validated } = await this.check(attrs);
 
     if (!isValid) {
       return Promise.reject(
-        new InvalidResource({
-          bucket: this.client.bucket,
+        new InvalidResourceItem({
+          bucket: this.client.config.bucket,
           resourceName: this.name,
           attributes,
           validation: errors,
@@ -269,7 +271,7 @@ class Resource extends EventEmitter {
     const attrs = merge(attrs2, attrs1);
     delete attrs.id;
 
-    const { isValid, errors, data: validated } = this.check(attrs);
+    const { isValid, errors, data: validated } = await this.check(attrs);
 
     if (!isValid) {
       return Promise.reject(
@@ -326,7 +328,6 @@ class Resource extends EventEmitter {
     if (this.s3Cache) await this.s3Cache.put({ action: "count", data: count });
 
     this.emit("count", count);
-
     return count;
   }
 
