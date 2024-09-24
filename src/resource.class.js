@@ -8,14 +8,16 @@ import {
   chunk, 
   merge,
   sortBy, 
-  isArray, 
+  isArray,
+  cloneDeep, 
 } from "lodash-es";
 
 import { decrypt } from "./crypto"
+import Schema from "./schema.class";
 import { Validator } from "./validator.class";
 import { InvalidResourceItem } from "./errors";
-import { ResourceReader, ResourceWriter } from "./stream/index"
 import S3ResourceCache from "./cache/s3-resource-cache.class";
+import { ResourceReader, ResourceWriter } from "./stream/index"
 
 class Resource extends EventEmitter {
   constructor({
@@ -25,7 +27,6 @@ class Resource extends EventEmitter {
     attributes = {},
     parallelism = 10,
     passphrase = 'secret',
-    validatorInstance = null,
     observers = [],
   }) {
     super();
@@ -35,24 +36,13 @@ class Resource extends EventEmitter {
     this.options = options;
     this.observers = observers;
     this.parallelism = parallelism;
-    this.passphrase = passphrase ?? 10;
+    this.passphrase = passphrase ?? 'secret';
 
-    this.schema = merge(
-      { $$async: true }, 
-      flatten(attributes, { safe: true }),
-    )
-
-    if (!validatorInstance) {
-      validatorInstance = new Validator({ passphrase: this.passphrase ?? 'secret' });
-    }
-
-    this.validator = validatorInstance.compile(this.schema);
-
-    const { mapObj, reversedMapObj } = this.getMappersFromSchema(this.schema);
-    this.mapObj = mapObj;
-    this.reversedMapObj = reversedMapObj;
-
-    this.parseSchema();
+    this.schema = new Schema({
+      name,
+      attributes,
+      passphrase,
+    })
 
     if (this.options.cache === true) {
       this.s3Cache = new S3ResourceCache({
@@ -63,83 +53,18 @@ class Resource extends EventEmitter {
     }
   }
 
-  getMappersFromSchema(schema) {
-    let i = 0;
-
-    const mapObj = sortBy(Object.entries(schema), ["0"]).reduce((acc, [key]) => {
-      acc[key] = String(i++);
-      return acc;
-    }, {});
-
-    const reversedMapObj = Object.entries(mapObj).reduce((acc, [key, value]) => {
-      acc[String(value)] = key;
-      return acc;
-    }, {});
-
-    return {
-      mapObj,
-      reversedMapObj,
-    };
-  }
-
   export() {
-    const data = {
-      name: this.name,
-      schema: { ...this.schema },
-      mapper: this.mapObj,
-      options: this.options,
-    };
-
-    for (const [name, definition] of Object.entries(this.schema)) {
-      data.schema[name] = JSON.stringify(definition);
-    }
-
-    return data;
+    return this.schema.export();
   }
 
-  parseSchema() {
-    if (!this.options.afterUnmap) this.options.beforeMap = {};
-    if (!this.options.afterUnmap) this.options.afterUnmap = {};
-
-    const schema = flatten(this.schema, { safe: true });
-
-    const addRule = (arr, attribute, action) => {
-      if (!this.options[arr][attribute]) this.options[arr][attribute] = [];
-
-      this.options[arr][attribute] = [
-        ...new Set([...this.options[arr][attribute], action]),
-      ];
-    };
-
-    for (const [name, definition] of Object.entries(schema)) {
-      if (definition.includes("secret")) {
-        if (this.options.autoDecrypt === true) {
-          addRule("afterUnmap", name, "decrypt");
-        }
-      }
-      if (definition.includes("array")) {
-        addRule("beforeMap", name, "fromArray");
-        addRule("afterUnmap", name, "toArray");
-      }
-      if (definition.includes("number")) {
-        addRule("beforeMap", name, "toString");
-        addRule("afterUnmap", name, "toNumber");
-      }
-      if (definition.includes("boolean")) {
-        addRule("beforeMap", name, "toJson");
-        addRule("afterUnmap", name, "fromJson");
-      }
-    }
-  }
-
-  async check(data) {
+  async validate(data) {
     const result = {
-      original: { ...data },
+      original: cloneDeep(data),
       isValid: false,
       errors: [],
     };
 
-    const check = await this.validator(data);
+    const check = await this.schema.validate(data, { mutateOriginal: true });
 
     if (check === true) {
       result.isValid = true;
@@ -147,70 +72,15 @@ class Resource extends EventEmitter {
       result.errors = check;
     }
 
-    return {
-      ...result,
-      data,
-    };
+    return merge({}, result, { data });
   }
 
-  validate(data) {
-    return this.check(flatten(data, { safe: true }));
-  }
-
-  map(data) {
-    let obj = { ...data };
-
-    for (const [attribute, actions] of Object.entries(this.options.beforeMap)) {
-      for (const action of actions) {
-        if (action === "fromArray") {
-          obj[attribute] = (obj[attribute] || []).join("|");
-        } else if (action === "toString") {
-          obj[attribute] = String(obj[attribute]);
-        } else if (action === "toJson") {
-          obj[attribute] = JSON.stringify(obj[attribute]);
-        }
-      }
-    }
-
-    obj = Object.entries(obj).reduce((acc, [key, value]) => {
-      acc[this.mapObj[key]] = isArray(value) ? value.join("|") : value;
-      return acc;
-    }, {});
-
-    return obj;
-  }
-
-  unmap(data) {
-    const obj = Object.entries(data).reduce((acc, [key, value]) => {
-      acc[this.reversedMapObj[key]] = value;
-      return acc;
-    }, {});
-
-    for (const [attribute, actions] of Object.entries(this.options.afterUnmap)) {
-      for (const action of actions) {
-        if (action === "decrypt") {
-          let content = obj[attribute];
-          content = decrypt(content, this.passphrase);
-          obj[attribute] = content;
-        } else if (action === "toArray") {
-          obj[attribute] = (obj[attribute] || "").split("|");
-        } else if (action === "toNumber") {
-          obj[attribute] = Number(obj[attribute] || "");
-        } else if (action === "fromJson") {
-          obj[attribute] = JSON.parse(obj[attribute]);
-        }
-      }
-    }
-
-    return obj;
-  }
-
-  async insert(attributes) {
-    let { id, ...attrs } = flatten(attributes, {
-      safe: true,
-    });
-
-    const { isValid, errors, data: validated } = await this.check(attrs);
+  async insert({ id, ...attributes }) {
+    const { 
+      errors,
+      isValid, 
+      data: validated,
+    } = await this.validate(attributes);
 
     if (!isValid) {
       throw new InvalidResourceItem({
@@ -222,21 +92,20 @@ class Resource extends EventEmitter {
     }
 
     if (!id && id !== 0) id = nanoid();
-    const mappedData = this.map(validated);
+    const metadata = await this.schema.mapper(validated);
 
     await this.client.putObject({
+      metadata,
       key: path.join(`resource=${this.name}`, `id=${id}`),
-      metadata: mappedData,
     });
 
-    const final = { id, ...(unflatten(this.unmap(mappedData))) };
+    const final = merge({ id }, validated);
 
     if (this.s3Cache) {
       await this.s3Cache.purge();
     }
 
     this.emit("insert", final);
-
     return final;
   }
 
@@ -245,9 +114,7 @@ class Resource extends EventEmitter {
       path.join(`resource=${this.name}`, `id=${id}`)
     );
 
-    let data = this.unmap(request.Metadata);
-    data = unflatten(data);
-
+    let data = await this.schema.unmapper(request.Metadata);
     data.id = id;
     data._length = request.ContentLength;
     data._createdAt = request.LastModified;
@@ -255,20 +122,15 @@ class Resource extends EventEmitter {
     if (request.Expiration) data._expiresAt = request.Expiration;
 
     this.emit("get", data);
-
     return data;
   }
 
   async update(id, attributes) {
-    const obj = await this.get(id);
-
-    const attrs1 = flatten(attributes, { safe: true });
-    const attrs2 = flatten(obj, { safe: true });
-
-    const attrs = merge(attrs2, attrs1);
+    const live = await this.get(id);
+    const attrs = merge(live, attributes);
     delete attrs.id;
 
-    const { isValid, errors, data: validated } = await this.check(attrs);
+    const { isValid, errors, data: validated } = await this.validate(attrs);
 
     if (!isValid) {
       throw new InvalidResourceItem({
@@ -279,12 +141,10 @@ class Resource extends EventEmitter {
       })
     }
 
-    if (!id && id !== 0) id = nanoid();
-
     await this.client.putObject({
       key: path.join(`resource=${this.name}`, `id=${id}`),
       body: "",
-      metadata: this.map(validated),
+      metadata: this.schema.mapper(validated),
     });
 
     const final = {
@@ -295,7 +155,6 @@ class Resource extends EventEmitter {
     if (this.s3Cache) await this.s3Cache.purge();
 
     this.emit("update", attributes, final);
-
     return final;
   }
 
@@ -306,7 +165,6 @@ class Resource extends EventEmitter {
     if (this.s3Cache) await this.s3Cache.purge();
 
     this.emit("delete", id);
-
     return response;
   }
 
@@ -339,7 +197,6 @@ class Resource extends EventEmitter {
       });
 
     this.emit("insertMany", objects.length);
-
     return results;
   }
 
@@ -370,7 +227,6 @@ class Resource extends EventEmitter {
     if (this.s3Cache) await this.s3Cache.purge();
 
     this.emit("deleteMany", ids.length);
-
     return results;
   }
 
