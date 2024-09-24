@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-(function (exports, nanoid, lodashEs, promisePool, clientS3, flat, FastestValidator, avro, node_stream) {
+(function (exports, nanoid, lodashEs, promisePool, clientS3, flat, FastestValidator, web, avro) {
   'use strict';
 
   // Copyright Joyent, Inc. and other Node contributors.
@@ -836,9 +836,9 @@ ${JSON.stringify(validation, null, 2)}`
       this.id = id ?? nanoid.nanoid(7);
       this.parallelism = parallelism;
       this.config = new ConnectionString(connectionString);
-      this.client = AwsS3Client || this.createS3Client();
+      this.client = AwsS3Client || this.createClient();
     }
-    createS3Client() {
+    createClient() {
       let options = {
         region: this.config.region,
         endpoint: this.config.endpoint
@@ -1208,7 +1208,7 @@ ${JSON.stringify(validation, null, 2)}`
     return actual;
   }
   class Validator extends FastestValidator {
-    constructor({ options, passphrase } = {}) {
+    constructor({ options, passphrase, autoEncrypt = true } = {}) {
       super(lodashEs.merge({}, {
         useNewCustomCheckerFunction: true,
         messages: {
@@ -1216,23 +1216,157 @@ ${JSON.stringify(validation, null, 2)}`
           encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}"
         },
         defaults: {
+          string: {
+            trim: true
+          },
           object: {
             strict: "remove"
           }
         }
       }, options));
       this.passphrase = passphrase;
+      this.autoEncrypt = autoEncrypt;
       this.alias("secret", {
-        custom,
         type: "string",
+        custom: this.autoEncrypt ? custom : void 0,
         messages: {
           string: "The '{field}' field must be a string.",
           stringMin: "This secret '{field}' field length must be at least {expected} long."
         }
       });
-      this.alias("secretAny", { custom, type: "any" });
-      this.alias("secretNumber", { custom, type: "number" });
+      this.alias("secretAny", {
+        type: "any",
+        custom: this.autoEncrypt ? custom : void 0
+      });
+      this.alias("secretNumber", {
+        type: "number",
+        custom: this.autoEncrypt ? custom : void 0
+      });
     }
+  }
+  const ValidatorManager = new Proxy(Validator, {
+    instance: null,
+    construct(target, args) {
+      if (!this.instance) this.instance = new target(...args);
+      return this.instance;
+    }
+  });
+
+  class ResourceIdsReader extends EventEmitter {
+    constructor({ resource }) {
+      super();
+      this.resource = resource;
+      this.client = resource.client;
+      this.stream = new web.ReadableStream({
+        highWaterMark: this.client.parallelism * 3,
+        start: this._start.bind(this),
+        pull: this._pull.bind(this),
+        cancel: this._cancel.bind(this)
+      });
+    }
+    build() {
+      return this.stream.getReader();
+    }
+    async _start(controller) {
+      this.controller = controller;
+      this.continuationToken = null;
+      this.closeNextIteration = false;
+    }
+    async _pull(controller) {
+      if (this.closeNextIteration) {
+        controller.close();
+        return;
+      }
+      const response = await this.client.listObjects({
+        prefix: `resource=${this.resource.name}`,
+        continuationToken: this.continuationToken
+      });
+      const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
+      this.continuationToken = response.NextContinuationToken;
+      this.enqueue(keys);
+      if (!response.IsTruncated) this.closeNextIteration = true;
+    }
+    enqueue(ids) {
+      ids.forEach((key) => {
+        this.controller.enqueue(key);
+        this.emit("id", key);
+      });
+    }
+    _cancel(reason) {
+      console.warn("Stream cancelled", reason);
+    }
+  }
+
+  class ResourceIdsPageReader extends ResourceIdsReader {
+    enqueue(ids) {
+      this.controller.enqueue(ids);
+      this.emit("page", ids);
+    }
+  }
+
+  class ResourceReader extends EventEmitter {
+    constructor({ resource }) {
+      super();
+      this.resource = resource;
+      this.client = resource.client;
+      this.input = new ResourceIdsPageReader({ resource: this.resource });
+      this.output = new web.TransformStream(
+        { transform: this._transform.bind(this) },
+        { highWaterMark: this.client.parallelism * 2 },
+        { highWaterMark: 1 }
+      );
+      this.stream = this.input.stream.pipeThrough(this.output);
+    }
+    build() {
+      return this.stream.getReader();
+    }
+    async _transform(chunk, controller) {
+      await promisePool.PromisePool.for(chunk).withConcurrency(this.client.parallelism).process(async (id) => {
+        const data = await this.resource.get(id);
+        controller.enqueue(data);
+        return data;
+      });
+    }
+  }
+
+  class ResourceWriter extends EventEmitter {
+    constructor({ resource }) {
+      super();
+      this.resource = resource;
+      this.client = resource.client;
+      this.stream = new web.WritableStream({
+        start: this._start.bind(this),
+        write: this._write.bind(this),
+        close: this._close.bind(this),
+        abort: this._abort.bind(this)
+      });
+    }
+    build() {
+      return this.stream.getWriter();
+    }
+    async _start(controller) {
+      this.controller = controller;
+    }
+    async _write(chunk, controller) {
+      const resource = this.resource;
+      await promisePool.PromisePool.for([].concat(chunk)).withConcurrency(this.client.parallelism).process(async (item) => {
+        await resource.insert(item);
+      });
+    }
+    async _close(controller) {
+    }
+    async _abort(reason) {
+      console.error("Stream aborted:", reason);
+    }
+  }
+
+  function streamToString(stream) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.on("error", reject);
+      stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    });
   }
 
   var global$1 = (typeof global !== "undefined" ? global :
@@ -13350,136 +13484,6 @@ ${JSON.stringify(validation, null, 2)}`
     }
   }
 
-  class ResourceWriteStream extends node_stream.Writable {
-    constructor({ resource }) {
-      super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
-      this.resource = resource;
-      this.contents = [];
-      this.running = null;
-      this.receivedFinalMessage = false;
-    }
-    async _write(chunk, encoding, callback) {
-      if (this.running) await this.running;
-      if (!lodashEs.isEmpty(chunk)) {
-        this.contents.push(chunk);
-      } else {
-        this.receivedFinalMessage = true;
-      }
-      this.running = this.writeOrWait();
-      return callback(null);
-    }
-    async _writev(chunks, callback) {
-      if (this.running) await this.running;
-      if (!lodashEs.isEmpty(chunks)) {
-        for (const obj of chunks.map((c) => c.chunk)) {
-          this.contents.push(obj);
-        }
-      } else {
-        this.receivedFinalMessage = true;
-      }
-      this.running = this.writeOrWait();
-      return callback(null);
-    }
-    async writeOrWait() {
-      if (this.receivedFinalMessage) {
-        const data = this.contents.splice(0, this.contents.length - 1);
-        await this.resource.insertMany(data);
-        this.emit("end");
-        return;
-      }
-      if (this.contents.length < this.resource.s3Client.parallelism) return;
-      const objs = this.contents.splice(0, this.resource.s3Client.parallelism);
-      objs.forEach((obj) => this.emit("id", obj.id));
-      await this.resource.insertMany(objs);
-      objs.forEach((obj) => this.emit("data", obj));
-    }
-    async _final(callback) {
-      this.receivedFinalMessage = true;
-      await this.writeOrWait();
-      callback(null);
-    }
-  }
-
-  class ResourceIdsReadStream extends node_stream.Readable {
-    constructor({ resource }) {
-      super({
-        objectMode: true,
-        highWaterMark: resource.s3Client.parallelism * 3
-      });
-      this.resource = resource;
-      this.pagesCount = 0;
-      this.content = [];
-      this.finishedReadingResource = false;
-      this.loading = this.getItems();
-    }
-    async _read(size) {
-      if (this.content.length === 0) {
-        if (this.loading) {
-          await this.loading;
-        } else if (this.finishedReadingResource) {
-          this.push(null);
-          return;
-        }
-      }
-      const data = this.content.shift();
-      this.push(data);
-    }
-    async getItems({ continuationToken = null } = {}) {
-      this.emit("page", this.pagesCount++);
-      const res = await this.resource.s3Client.listObjects({
-        prefix: `resource=${this.resource.name}`,
-        continuationToken
-      });
-      if (res.Contents) {
-        const contents = lodashEs.chunk(res.Contents, this.resource.s3Client.parallelism);
-        await promisePool.PromisePool.for(contents).withConcurrency(5).handleError(async (error, content) => {
-          this.emit("error", error, content);
-        }).process((pkg) => {
-          const ids = pkg.map((obj) => {
-            return (obj.Key || "").replace(
-              path.join(
-                this.resource.s3Client.keyPrefix,
-                `resource=${this.resource.name}`,
-                "id="
-              ),
-              ""
-            );
-          });
-          this.content.push(ids);
-          ids.forEach((id) => this.emit("id", id));
-        });
-      }
-      this.finishedReadingResource = !res.IsTruncated;
-      if (res.NextContinuationToken) {
-        this.loading = this.getItems({
-          continuationToken: res.NextContinuationToken
-        });
-      } else {
-        this.loading = null;
-      }
-    }
-  }
-
-  class ResourceIdsToDataTransformer extends node_stream.Transform {
-    constructor({ resource }) {
-      super({ objectMode: true, highWaterMark: resource.s3Client.parallelism * 2 });
-      this.resource = resource;
-    }
-    async _transform(chunk, encoding, callback) {
-      if (!lodashEs.isArray(chunk)) this.push(null);
-      this.emit("page", chunk);
-      await promisePool.PromisePool.for(chunk).withConcurrency(this.resource.s3Client.parallelism).handleError(async (error, content) => {
-        this.emit("error", error, content);
-      }).process(async (id) => {
-        this.emit("id", id);
-        const data = await this.resource.get(id);
-        this.push(data);
-        return data;
-      });
-      callback(null);
-    }
-  }
-
   class Resource extends EventEmitter {
     constructor({
       name,
@@ -13642,14 +13646,12 @@ ${JSON.stringify(validation, null, 2)}`
       });
       const { isValid, errors, data: validated } = await this.check(attrs);
       if (!isValid) {
-        return Promise.reject(
-          new InvalidResourceItem({
-            bucket: this.client.config.bucket,
-            resourceName: this.name,
-            attributes,
-            validation: errors
-          })
-        );
+        throw new InvalidResourceItem({
+          bucket: this.client.config.bucket,
+          resourceName: this.name,
+          attributes,
+          validation: errors
+        });
       }
       if (!id && id !== 0) id = nanoid.nanoid();
       const mappedData = this.map(validated);
@@ -13685,14 +13687,12 @@ ${JSON.stringify(validation, null, 2)}`
       delete attrs.id;
       const { isValid, errors, data: validated } = await this.check(attrs);
       if (!isValid) {
-        return Promise.reject(
-          new S3dbInvalidResource({
-            bucket: this.client.bucket,
-            resourceName: this.name,
-            attributes,
-            validation: errors
-          })
-        );
+        throw new InvalidResourceItem({
+          bucket: this.client.bucket,
+          resourceName: this.name,
+          attributes,
+          validation: errors
+        });
       }
       if (!id && id !== 0) id = nanoid.nanoid();
       await this.client.putObject({
@@ -13852,23 +13852,13 @@ ${JSON.stringify(validation, null, 2)}`
       return data;
     }
     readable() {
-      const stream = new ResourceIdsReadStream({ resource: this });
-      const transformer = new ResourceIdsToDataTransformer({ resource: this });
-      return stream.pipe(transformer);
+      const stream = new ResourceReader({ resource: this });
+      return stream.build();
     }
     writable() {
-      const stream = new ResourceWriteStream({ resource: this });
-      return stream;
+      const stream = new ResourceWriter({ resource: this });
+      return stream.build();
     }
-  }
-
-  function streamToString(stream) {
-    return new Promise((resolve, reject) => {
-      const chunks = [];
-      stream.on("data", (chunk) => chunks.push(chunk));
-      stream.on("error", reject);
-      stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    });
   }
 
   class Database extends EventEmitter {
@@ -13906,11 +13896,13 @@ ${JSON.stringify(validation, null, 2)}`
         const [name, definition] = resource;
         this.resources[name] = new Resource({
           name,
-          s3db: this,
-          s3Client: this.client,
-          schema: definition.schema,
+          client: this.client,
           options: definition.options,
-          validatorInstance: this.validatorInstance
+          attributes: definition.schema,
+          parallelism: this.parallelism,
+          passphrase: this.passphrase,
+          validatorInstance: this.validatorInstance,
+          observers: [this]
         });
       }
       this.emit("connected", /* @__PURE__ */ new Date());
@@ -14038,14 +14030,20 @@ ${JSON.stringify(validation, null, 2)}`
   exports.NotFound = NotFound;
   exports.Plugin = Plugin;
   exports.PluginObject = PluginObject;
+  exports.ResourceIdsPageReader = ResourceIdsPageReader;
+  exports.ResourceIdsReader = ResourceIdsReader;
+  exports.ResourceReader = ResourceReader;
+  exports.ResourceWriter = ResourceWriter;
   exports.S3_DEFAULT_ENDPOINT = S3_DEFAULT_ENDPOINT;
   exports.S3_DEFAULT_REGION = S3_DEFAULT_REGION;
   exports.S3db = S3db;
   exports.UnknownError = UnknownError;
   exports.Validator = Validator;
+  exports.ValidatorManager = ValidatorManager;
   exports.decrypt = decrypt;
   exports.encrypt = encrypt;
+  exports.streamToString = streamToString;
 
   return exports;
 
-})({}, nanoid, lodashEs, promisePool, clientS3, flat, FastestValidator, avro, node_stream);
+})({}, nanoid, lodashEs, promisePool, clientS3, flat, FastestValidator, web, avro);

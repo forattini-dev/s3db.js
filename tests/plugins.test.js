@@ -1,7 +1,10 @@
+import { join } from 'path';
 import { nanoid } from 'nanoid';
 
 import Database from '../src/database.class';
 import CostsPlugin from '../src/plugins/costs.plugin';
+
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'plugins-' + Date.now())
 
 describe('Plugins', () => {
   let clicks
@@ -13,11 +16,12 @@ describe('Plugins', () => {
     connectionString: process.env.BUCKET_CONNECTION_STRING
       .replace('USER', process.env.MINIO_USER)
       .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + '/s3db/tests/plugins-' + new Date().toISOString().substring(0, 10),
+      + `/${testPrefix}`
   })
 
   beforeAll(async () => {
     await s3db.connect()
+
     clicks = await s3db.createResource({
       name: "clicks",
       attributes: {
@@ -27,7 +31,7 @@ describe('Plugins', () => {
     })
   })
 
-  test('create resource', async () => {
+  test('analyze costs', async () => {
     const amount = 50
 
     await clicks.insertMany(new Array(amount).fill({
@@ -44,5 +48,5 @@ describe('Plugins', () => {
     expect(costs.events.total).toBeGreaterThan(amount)
     expect(costs.events.PutObjectCommand).toBeGreaterThan(1)
     expect(costs.events.DeleteObjectsCommand).toBe(1)
-  }, 60000)
+  }, 60 * 1000)
 });

@@ -9,7 +9,7 @@ export * from './validator.class'
 // directories
 export * from './plugins'
 // export * from './cache/s3-cache.class'
-// export * from './stream'
+export * from './stream'
 
 // default
 export { default as S3db } from './database.class'
