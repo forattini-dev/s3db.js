@@ -1,6 +1,7 @@
+import { join } from 'path';
 import Database from '../src/database.class';
 
-const currentDate = new Date().toISOString().substring(0, 10)
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-' + Date.now())
 
 describe('Database', () => {
   const s3db = new Database({
@@ -8,7 +9,7 @@ describe('Database', () => {
     connectionString: process.env.BUCKET_CONNECTION_STRING
       .replace('USER', process.env.MINIO_USER)
       .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/s3db/tests/${currentDate}/database`
+      + `/${testPrefix}`
   })
 
   beforeAll(async () => {

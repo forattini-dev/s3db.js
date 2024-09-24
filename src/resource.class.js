@@ -11,13 +11,11 @@ import {
   isArray, 
 } from "lodash-es";
 
-import { decrypt } from "./crypto.js"
-import { Validator } from "./validator.class.js";
-import { InvalidResourceItem } from "./errors.js";
-import S3ResourceCache from "./cache/s3-resource-cache.class.js";
-import ResourceWriteStream from "./stream/resource-write-stream.class.js";
-import ResourceIdsReadStream from "./stream/resource-ids-read-stream.class.js";
-import ResourceIdsToDataTransformer from "./stream/resource-ids-transformer.class.js";
+import { decrypt } from "./crypto"
+import { Validator } from "./validator.class";
+import { InvalidResourceItem } from "./errors";
+import { ResourceReader, ResourceWriter } from "./stream/index"
+import S3ResourceCache from "./cache/s3-resource-cache.class";
 
 class Resource extends EventEmitter {
   constructor({
@@ -31,6 +29,7 @@ class Resource extends EventEmitter {
     observers = [],
   }) {
     super();
+    
     this.name = name;
     this.client = client;
     this.options = options;
@@ -214,14 +213,12 @@ class Resource extends EventEmitter {
     const { isValid, errors, data: validated } = await this.check(attrs);
 
     if (!isValid) {
-      return Promise.reject(
-        new InvalidResourceItem({
-          bucket: this.client.config.bucket,
-          resourceName: this.name,
-          attributes,
-          validation: errors,
-        })
-      );
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes,
+        validation: errors,
+      })
     }
 
     if (!id && id !== 0) id = nanoid();
@@ -274,14 +271,12 @@ class Resource extends EventEmitter {
     const { isValid, errors, data: validated } = await this.check(attrs);
 
     if (!isValid) {
-      return Promise.reject(
-        new S3dbInvalidResource({
-          bucket: this.client.bucket,
-          resourceName: this.name,
-          attributes,
-          validation: errors,
-        })
-      );
+      throw new InvalidResourceItem({
+        bucket: this.client.bucket,
+        resourceName: this.name,
+        attributes,
+        validation: errors,
+      })
     }
 
     if (!id && id !== 0) id = nanoid();
@@ -502,15 +497,13 @@ class Resource extends EventEmitter {
   }
 
   readable() {
-    const stream = new ResourceIdsReadStream({ resource: this });
-    const transformer = new ResourceIdsToDataTransformer({ resource: this });
-
-    return stream.pipe(transformer);
+    const stream = new ResourceReader({ resource: this });
+    return stream.build()
   }
 
   writable() {
-    const stream = new ResourceWriteStream({ resource: this });
-    return stream;
+    const stream = new ResourceWriter({ resource: this });
+    return stream.build()
   }
 }
 

@@ -50,11 +50,13 @@ export class Database extends EventEmitter {
 
       this.resources[name] = new Resource({
         name,
-        s3db: this,
-        s3Client: this.client,
-        schema: definition.schema,
+        client: this.client,
         options: definition.options,
+        attributes: definition.schema,
+        parallelism: this.parallelism,
+        passphrase: this.passphrase,
         validatorInstance: this.validatorInstance,
+        observers: [this],
       });
     }
 

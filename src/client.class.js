@@ -30,10 +30,10 @@ export class Client extends EventEmitter {
     this.id = id ?? nanoid(7);
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
-    this.client = AwsS3Client || this.createS3Client()
+    this.client = AwsS3Client || this.createClient()
   }
 
-  createS3Client() {
+  createClient() {
     let options = {
       region: this.config.region,
       endpoint: this.config.endpoint,

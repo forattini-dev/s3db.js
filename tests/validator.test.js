@@ -1,5 +1,9 @@
 import { expect } from '@jest/globals';
-import Validator from '../src/validator.class';
+
+import {
+  Validator,
+  ValidatorManager,
+} from '../src/validator.class';
 
 const DEFAULT_PASSPHRASE = '$ecret';
 
@@ -14,7 +18,7 @@ describe('Pre-conditions', () => {
     expect(results.length).toBe(1)
     expect(results[0].type).toBe('encryptionKeyMissing')
   })
-  
+
   it('needs to be async', async () => {
     const check1 = new Validator({ passphrase: DEFAULT_PASSPHRASE })
       .compile({ password: 'secret' })
@@ -26,11 +30,11 @@ describe('Pre-conditions', () => {
     expect(data1.password).toBeInstanceOf(Promise)
 
     const check2 = new Validator({ passphrase: DEFAULT_PASSPHRASE })
-      .compile({ 
+      .compile({
         $$async: true,
         password: 'secret'
       })
-    
+
     const data2 = JSON.parse(JSON.stringify(original))
     await check2(data2)
     expect(data2.password).not.toBeInstanceOf(Promise)
@@ -39,7 +43,7 @@ describe('Pre-conditions', () => {
 
 describe('Examples', () => {
   const validator = new Validator({ passphrase: DEFAULT_PASSPHRASE })
-  
+
   it('simple', async () => {
     const check = validator.compile({
       $$async: true,
@@ -73,4 +77,35 @@ describe('Examples', () => {
     expect(res.length).toBe(1)
     expect(res[0].type).toBe('stringMin')
   })
-});
+
+  it('nested', async () => {
+    const check = validator.compile({
+      $$async: true,
+      user: {
+        type: "object", 
+        props: {
+          email: 'string',
+          password: 'secret',
+        }
+      }
+    })
+
+    const data = {
+      user: {
+        email: 'filipe@forattini.com.br',
+        password: 'secret',
+      }
+    }
+
+    const res = await check(data)
+    expect(res).toBe(true)
+  })
+})
+
+describe('ValidatorManager', () => {
+  it('should return the same instance', () => {
+    const v1 = new ValidatorManager()
+    const v2 = new ValidatorManager()
+    expect(v1).toBe(v2)
+  })
+})

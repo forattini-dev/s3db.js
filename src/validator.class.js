@@ -20,7 +20,7 @@ async function custom (actual, errors, schema) {
 }
 
 export class Validator extends FastestValidator {
-  constructor({ options, passphrase } = {}) {
+  constructor({ options, passphrase, autoEncrypt = true } = {}) {
     super(merge({}, {
       useNewCustomCheckerFunction: true,
 
@@ -30,6 +30,9 @@ export class Validator extends FastestValidator {
       },
 
       defaults: {
+        string: {
+          trim: true,
+        },
         object: {
           strict: "remove",
         },
@@ -37,20 +40,36 @@ export class Validator extends FastestValidator {
     }, options))
 
     this.passphrase = passphrase;
+    this.autoEncrypt = autoEncrypt;
 
     this.alias('secret', {
-      custom,
       type: "string",
-
+      custom: this.autoEncrypt ? custom : undefined,
       messages: {
         string: "The '{field}' field must be a string.",
         stringMin: "This secret '{field}' field length must be at least {expected} long.",
       },
     })
 
-    this.alias('secretAny', { custom, type: "any" })
-    this.alias('secretNumber', { custom, type: "number" })
+    this.alias('secretAny', { 
+      type: "any" ,
+      custom: this.autoEncrypt ? custom : undefined,
+    })
+
+    this.alias('secretNumber', { 
+      type: "number",
+      custom: this.autoEncrypt ? custom : undefined,
+    })
   }
 }
+
+export const ValidatorManager = new Proxy(Validator, {
+  instance: null,
+
+  construct(target, args) {
+    if (!this.instance) this.instance = new target(...args);
+    return this.instance;
+  }
+})
 
 export default Validator;

@@ -9,7 +9,7 @@ describe('Resource', () => {
     connectionString: process.env.BUCKET_CONNECTION_STRING
       .replace('USER', process.env.MINIO_USER)
       .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/s3db/tests/${currentDate}/resource`
+      + `/s3db/tests/${currentDate}/resources`
   })
 
   const resource = new Resource({
@@ -18,7 +18,6 @@ describe('Resource', () => {
     attributes: {
       animal: 'string',
       name: 'string',
-      // token: 'secret',
     }
   })
 
@@ -30,18 +29,14 @@ describe('Resource', () => {
     const in1 = await resource.insert({
       animal: 'dog',
       name: 'beagle',
-      token: '$ecret',
     })
 
     expect(in1).toBeDefined()
     expect(in1.id).toBeDefined()
     expect(in1.animal).toBe('dog')
     expect(in1.name).toBe('beagle')
-    // expect(in1.token).toBe('secret')
 
-    const up1 = await resource.update(in1.id, {
-      name: 'bulldog',
-    })
+    const up1 = await resource.update(in1.id, { name: 'bulldog' })
 
     expect(up1).toBeDefined()
     expect(up1.id).toBe(in1.id)
