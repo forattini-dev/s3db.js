@@ -1,12 +1,11 @@
 /* istanbul ignore file */
 import { nanoid } from 'nanoid';
-import { chunk, isObject as isObject$1, merge, isString as isString$1, sortBy, isArray as isArray$2, isEmpty } from 'lodash-es';
+import { chunk, isObject as isObject$1, merge, cloneDeep, isEmpty, invert, uniq, isString as isString$1, get, set, isFunction as isFunction$1 } from 'lodash-es';
 import { PromisePool } from '@supercharge/promise-pool';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { flatten, unflatten } from 'flat';
 import FastestValidator from 'fastest-validator';
 import { ReadableStream, TransformStream, WritableStream } from 'node:stream/web';
-import avro from 'avsc';
 
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -1124,10 +1123,19 @@ class Client extends EventEmitter {
 
 async function dynamicCrypto() {
   if (isObject$1(process)) {
-    return (await Promise.resolve().then(function () { return _polyfillNode_crypto$1; })).webcrypto;
+    return (await Promise.resolve().then(function () { return _polyfillNode_crypto; })).webcrypto;
   } else {
     return window.crypto;
   }
+}
+async function sha256(message) {
+  const cryptoLib = await dynamicCrypto();
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await cryptoLib.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hashHex;
 }
 async function encrypt(content, passphrase) {
   const cryptoLib = await dynamicCrypto();
@@ -1258,6 +1266,161 @@ const ValidatorManager = new Proxy(Validator, {
   }
 });
 
+const SchemaActions = {
+  trim: (value) => value.trim(),
+  encrypt: (value, { passphrase }) => encrypt(value, passphrase),
+  decrypt: (value, { passphrase }) => decrypt(value, passphrase),
+  toString: (value) => String(value),
+  fromArray: (value, { separator }) => (value || []).join(separator),
+  toArray: (value, { separator }) => (value || "").split(separator),
+  toNumber: (value) => isString$1(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
+  toJSON: (value) => JSON.stringify(value),
+  fromJSON: (value) => JSON.parse(value)
+};
+class Schema {
+  constructor(args) {
+    const {
+      map,
+      name,
+      attributes,
+      passphrase,
+      version = 1,
+      options = {}
+    } = args;
+    this.name = name;
+    this.version = version;
+    this.attributes = attributes;
+    this.passphrase = passphrase ?? "secret";
+    this.options = merge({}, this.defaultOptions(), options);
+    this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+      { $$async: true },
+      cloneDeep(this.attributes)
+    ));
+    if (this.options.generateAutoHooks) this.generateAutoHooks();
+    if (!isEmpty(map)) {
+      this.map = map;
+      this.reversedMap = invert(map);
+    } else {
+      const flatAttrs = flatten(this.attributes, { safe: true });
+      this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.includes("$$type")) };
+      this.map = invert(this.reversedMap);
+    }
+  }
+  defaultOptions() {
+    return {
+      autoEncrypt: true,
+      autoDecrypt: true,
+      arraySeparator: "|",
+      generateAutoHooks: true,
+      hooks: {
+        beforeMap: {},
+        afterMap: {},
+        beforeUnmap: {},
+        afterUnmap: {}
+      }
+    };
+  }
+  addHook(hook, attribute, action) {
+    if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
+    this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action]);
+  }
+  generateAutoHooks() {
+    const schema = flatten(cloneDeep(this.attributes), { safe: true });
+    for (const [name, definition] of Object.entries(schema)) {
+      if (definition.includes("array")) {
+        this.addHook("beforeMap", name, "fromArray");
+        this.addHook("afterUnmap", name, "toArray");
+      } else {
+        if (definition.includes("secret")) {
+          if (this.options.autoEncrypt) {
+            this.addHook("beforeMap", name, "encrypt");
+          }
+          if (this.options.autoDecrypt) {
+            this.addHook("afterUnmap", name, "decrypt");
+          }
+        }
+        if (definition.includes("number")) {
+          this.addHook("beforeMap", name, "toString");
+          this.addHook("afterUnmap", name, "toNumber");
+        }
+        if (definition.includes("boolean")) {
+          this.addHook("beforeMap", name, "toJson");
+          this.addHook("afterUnmap", name, "fromJson");
+        }
+      }
+    }
+  }
+  static import(data) {
+    let {
+      map,
+      name,
+      options,
+      version,
+      attributes
+    } = isString$1(data) ? JSON.parse(data) : data;
+    const schema = new Schema({
+      map,
+      name,
+      options,
+      version,
+      attributes
+    });
+    return schema;
+  }
+  export() {
+    const data = {
+      version: this.version,
+      name: this.name,
+      options: this.options,
+      attributes: cloneDeep(this.attributes),
+      map: this.map
+    };
+    for (const [name, definition] of Object.entries(this.attributes)) {
+      data.attributes[name] = JSON.stringify(definition);
+    }
+    return data;
+  }
+  async applyHooksActions(resourceItem, hook) {
+    for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
+      for (const action of actions) {
+        const value = get(resourceItem, attribute);
+        if (value) {
+          set(resourceItem, attribute, await SchemaActions[action](value, {
+            passphrase: this.passphrase,
+            separator: this.options.arraySeparator
+          }));
+        }
+      }
+    }
+  }
+  async validate(resourceItem, { mutateOriginal = false } = {}) {
+    let data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);
+    const result = await this.validator(data);
+    return result;
+  }
+  async mapper(resourceItem) {
+    const obj = flatten(cloneDeep(resourceItem), { safe: true });
+    await this.applyHooksActions(obj, "beforeMap");
+    const rest = { "_v": this.version + "" };
+    for (const [key, value] of Object.entries(obj)) {
+      rest[this.map[key]] = value;
+    }
+    await this.applyHooksActions(rest, "afterMap");
+    return rest;
+  }
+  async unmapper(mappedResourceItem) {
+    const obj = cloneDeep(mappedResourceItem);
+    delete obj._v;
+    await this.applyHooksActions(obj, "beforeUnmap");
+    const rest = {};
+    for (const [key, value] of Object.entries(obj)) {
+      rest[this.reversedMap[key]] = value;
+    }
+    await this.applyHooksActions(rest, "afterUnmap");
+    return unflatten(rest);
+  }
+}
+
 class ResourceIdsReader extends EventEmitter {
   constructor({ resource }) {
     super();
@@ -1373,6 +1536,377 @@ function streamToString(stream) {
     stream.on("error", reject);
     stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
   });
+}
+
+class Resource extends EventEmitter {
+  constructor({
+    name,
+    client,
+    options = {},
+    attributes = {},
+    parallelism = 10,
+    passphrase = "secret",
+    observers = []
+  }) {
+    super();
+    this.name = name;
+    this.client = client;
+    this.options = options;
+    this.observers = observers;
+    this.parallelism = parallelism;
+    this.passphrase = passphrase ?? "secret";
+    this.schema = new Schema({
+      name,
+      attributes,
+      passphrase
+    });
+  }
+  export() {
+    return this.schema.export();
+  }
+  async validate(data) {
+    const result = {
+      original: cloneDeep(data),
+      isValid: false,
+      errors: []
+    };
+    const check = await this.schema.validate(data, { mutateOriginal: true });
+    if (check === true) {
+      result.isValid = true;
+    } else {
+      result.errors = check;
+    }
+    result.data = data;
+    return result;
+  }
+  async insert({ id, ...attributes }) {
+    const {
+      errors,
+      isValid,
+      data: validated
+    } = await this.validate(attributes);
+    if (!isValid) {
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes,
+        validation: errors
+      });
+    }
+    if (!id && id !== 0) id = nanoid();
+    const metadata = await this.schema.mapper(validated);
+    await this.client.putObject({
+      metadata,
+      key: join(`resource=${this.name}`, `id=${id}`)
+    });
+    const final = merge({ id }, validated);
+    this.emit("insert", final);
+    return final;
+  }
+  async get(id) {
+    const request = await this.client.headObject(
+      join(`resource=${this.name}`, `id=${id}`)
+    );
+    let data = await this.schema.unmapper(request.Metadata);
+    data.id = id;
+    data._length = request.ContentLength;
+    data._createdAt = request.LastModified;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+    this.emit("get", data);
+    return data;
+  }
+  async update(id, attributes) {
+    const live = await this.get(id);
+    const attrs = merge(live, attributes);
+    delete attrs.id;
+    const { isValid, errors, data: validated } = await this.validate(attrs);
+    if (!isValid) {
+      throw new InvalidResourceItem({
+        bucket: this.client.bucket,
+        resourceName: this.name,
+        attributes,
+        validation: errors
+      });
+    }
+    await this.client.putObject({
+      key: join(`resource=${this.name}`, `id=${id}`),
+      body: "",
+      metadata: await this.schema.mapper(validated)
+    });
+    validated.id = id;
+    this.emit("update", attributes, validated);
+    return validated;
+  }
+  async delete(id) {
+    const key = join(`resource=${this.name}`, `id=${id}`);
+    const response = await this.client.deleteObject(key);
+    this.emit("delete", id);
+    return response;
+  }
+  async count() {
+    const count = await this.client.count({
+      prefix: `resource=${this.name}`
+    });
+    this.emit("count", count);
+    return count;
+  }
+  async insertMany(objects) {
+    const { results } = await PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
+    }).process(async (attributes) => {
+      const result = await this.insert(attributes);
+      return result;
+    });
+    this.emit("insertMany", objects.length);
+    return results;
+  }
+  async deleteMany(ids) {
+    const packages = chunk(
+      ids.map((x) => join(`resource=${this.name}`, `id=${x}`)),
+      1e3
+    );
+    const { results } = await PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
+    }).process(async (keys) => {
+      const response = await this.client.deleteObjects(keys);
+      keys.forEach((key) => {
+        const id = key.split("=").pop();
+        this.emit("deleted", id);
+        this.observers.map((x) => x.emit("deleted", this.name, id));
+      });
+      return response;
+    });
+    this.emit("deleteMany", ids.length);
+    return results;
+  }
+  async deleteAll() {
+    const ids = await this.listIds();
+    this.emit("deleteAll", ids.length);
+    await this.deleteMany(ids);
+  }
+  async listIds() {
+    const keys = await this.client.getAllKeys({
+      prefix: `resource=${this.name}`
+    });
+    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+    this.emit("listIds", ids.length);
+    return ids;
+  }
+  async getMany(ids) {
+    const { results } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
+      this.emit("id", id);
+      const data = await this.get(id);
+      this.emit("data", data);
+      return data;
+    });
+    this.emit("getMany", ids.length);
+    return results;
+  }
+  async getAll() {
+    let ids = await this.listIds();
+    if (ids.length === 0) return [];
+    const { results } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
+      const data = await this.get(id);
+      return data;
+    });
+    this.emit("getAll", results.length);
+    return results;
+  }
+  async page({ offset = 0, size = 100 }) {
+    const keys = await this.client.getKeysPage({
+      offset,
+      amount: size,
+      prefix: `resource=${this.name}`
+    });
+    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+    const data = await this.getMany(ids);
+    return data;
+  }
+  readable() {
+    const stream = new ResourceReader({ resource: this });
+    return stream.build();
+  }
+  writable() {
+    const stream = new ResourceWriter({ resource: this });
+    return stream.build();
+  }
+}
+
+class Database extends EventEmitter {
+  constructor(options) {
+    super();
+    this.version = "1";
+    this.resources = {};
+    this.options = options;
+    this.verbose = options.verbose || false;
+    this.parallelism = parseInt(options.parallelism + "") || 10;
+    this.plugins = options.plugins || [];
+    this.cache = options.cache;
+    this.passphrase = options.passphrase || "secret";
+    this.client = options.client || new Client({
+      verbose: this.verbose,
+      parallelism: this.parallelism,
+      connectionString: options.connectionString
+    });
+    this.bucket = this.client.bucket;
+    this.keyPrefix = this.client.keyPrefix;
+  }
+  async connect() {
+    await this.startPlugins();
+    let metadata = null;
+    if (await this.client.exists(`s3db.json`)) {
+      const request = await this.client.getObject(`s3db.json`);
+      metadata = JSON.parse(await streamToString(request?.Body));
+      metadata = this.unserializeMetadata(metadata);
+    } else {
+      metadata = this.blankMetadataStructure();
+      await this.uploadMetadataFile();
+    }
+    for (const resource of Object.entries(metadata.resources)) {
+      const [name, definition] = resource;
+      this.resources[name] = new Resource({
+        name,
+        client: this.client,
+        options: definition.options,
+        attributes: definition.schema,
+        parallelism: this.parallelism,
+        passphrase: this.passphrase,
+        observers: [this]
+      });
+    }
+    this.emit("connected", /* @__PURE__ */ new Date());
+  }
+  async startPlugins() {
+    const db = this;
+    if (!isEmpty(this.plugins)) {
+      const plugins = this.plugins.map((p) => isFunction$1(p) ? new p(this) : p);
+      const setupProms = plugins.map(async (plugin) => {
+        if (plugin.beforeSetup) await plugin.beforeSetup();
+        await plugin.setup(db);
+        if (plugin.afterSetup) await plugin.afterSetup();
+      });
+      await Promise.all(setupProms);
+      const startProms = plugins.map(async (plugin) => {
+        if (plugin.beforeStart) await plugin.beforeStart();
+        await plugin.start();
+        if (plugin.afterStart) await plugin.afterStart();
+      });
+      await Promise.all(startProms);
+    }
+  }
+  unserializeMetadata(metadata) {
+    const file = { ...metadata };
+    if (isEmpty(file.resources)) return file;
+    for (const [name, structure] of Object.entries(file.resources)) {
+      for (const [attr, value] of Object.entries(structure.schema)) {
+        file.resources[name].schema[attr] = JSON.parse(value);
+      }
+    }
+    return file;
+  }
+  async uploadMetadataFile() {
+    const file = {
+      version: this.version,
+      resources: Object.entries(this.resources).reduce((acc, definition) => {
+        const [name, resource] = definition;
+        acc[name] = resource.export();
+        return acc;
+      }, {})
+    };
+    await this.client.putObject({
+      key: `s3db.json`,
+      contentType: "application/json",
+      body: JSON.stringify(file, null, 2)
+    });
+  }
+  blankMetadataStructure() {
+    return {
+      version: `1`,
+      resources: {}
+    };
+  }
+  async createResource({ name, attributes, options = {} }) {
+    const resource = new Resource({
+      name,
+      attributes,
+      observers: [this],
+      client: this.client,
+      options: {
+        autoDecrypt: true,
+        cache: this.cache,
+        ...options
+      }
+    });
+    this.resources[name] = resource;
+    await this.uploadMetadataFile();
+    this.emit("s3db.resourceCreated", name);
+    return resource;
+  }
+  resource(name) {
+    if (!this.resources[name]) {
+      return Promise.reject(`resource ${name} does not exist`);
+    }
+    return this.resources[name];
+  }
+}
+class S3db extends Database {
+}
+
+class Cache extends EventEmitter {
+  // to implement:
+  async _set(key, data) {
+  }
+  async _get(key) {
+  }
+  async _del(key) {
+  }
+  async _clear(key) {
+  }
+  // generic class methods
+  async set(key, data) {
+    await this._set(key, data);
+    this.emit("set", data);
+    return data;
+  }
+  async get(key) {
+    const data = await this._get(key);
+    this.emit("get", data);
+    return data;
+  }
+  async del(key) {
+    const data = await this._del(key);
+    this.emit("delete", data);
+    return data;
+  }
+  async clear() {
+    const data = await this._clear();
+    this.emit("clear", data);
+    return data;
+  }
+}
+
+class MemoryCache extends Cache {
+  constructor() {
+    super();
+    this.cache = {};
+  }
+  async _set(key, data) {
+    this.cache[key] = data;
+    return data;
+  }
+  async _get(key) {
+    return this.cache[key];
+  }
+  async _del(key) {
+    delete this.cache[key];
+    return true;
+  }
+  async _clear() {
+    this.cache = {};
+    return true;
+  }
 }
 
 var global$1 = (typeof global !== "undefined" ? global :
@@ -12287,1705 +12821,52 @@ var zlib = {
   Zlib: Zlib
 };
 
-var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
-
-function getDefaultExportFromCjs (x) {
-	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
-}
-
-function getAugmentedNamespace(n) {
-  if (n.__esModule) return n;
-  var f = n.default;
-	if (typeof f == "function") {
-		var a = function a () {
-			if (this instanceof a) {
-        return Reflect.construct(f, arguments, this.constructor);
-			}
-			return f.apply(this, arguments);
-		};
-		a.prototype = f.prototype;
-  } else a = {};
-  Object.defineProperty(a, '__esModule', {value: true});
-	Object.keys(n).forEach(function (k) {
-		var d = Object.getOwnPropertyDescriptor(n, k);
-		Object.defineProperty(a, k, d.get ? d : {
-			enumerable: true,
-			get: function () {
-				return n[k];
-			}
-		});
-	});
-	return a;
-}
-
-var sha256$1 = {exports: {}};
-
-function commonjsRequire(path) {
-	throw new Error('Could not dynamically require "' + path + '". Please configure the dynamicRequireTargets or/and ignoreDynamicRequires option of @rollup/plugin-commonjs appropriately for this require call to work.');
-}
-
-var core = {exports: {}};
-
-var _polyfillNode_crypto = {};
-
-var _polyfillNode_crypto$1 = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  default: _polyfillNode_crypto
-});
-
-var require$$0 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_crypto$1);
-
-var hasRequiredCore;
-
-function requireCore () {
-	if (hasRequiredCore) return core.exports;
-	hasRequiredCore = 1;
-	(function (module, exports) {
-(function (root, factory) {
-			{
-				// CommonJS
-				module.exports = factory();
-			}
-		}(commonjsGlobal, function () {
-
-			/*globals window, global, require*/
-
-			/**
-			 * CryptoJS core components.
-			 */
-			var CryptoJS = CryptoJS || (function (Math, undefined$1) {
-
-			    var crypto;
-
-			    // Native crypto from window (Browser)
-			    if (typeof window !== 'undefined' && window.crypto) {
-			        crypto = window.crypto;
-			    }
-
-			    // Native crypto in web worker (Browser)
-			    if (typeof self !== 'undefined' && self.crypto) {
-			        crypto = self.crypto;
-			    }
-
-			    // Native crypto from worker
-			    if (typeof globalThis !== 'undefined' && globalThis.crypto) {
-			        crypto = globalThis.crypto;
-			    }
-
-			    // Native (experimental IE 11) crypto from window (Browser)
-			    if (!crypto && typeof window !== 'undefined' && window.msCrypto) {
-			        crypto = window.msCrypto;
-			    }
-
-			    // Native crypto from global (NodeJS)
-			    if (!crypto && typeof commonjsGlobal !== 'undefined' && commonjsGlobal.crypto) {
-			        crypto = commonjsGlobal.crypto;
-			    }
-
-			    // Native crypto import via require (NodeJS)
-			    if (!crypto && typeof commonjsRequire === 'function') {
-			        try {
-			            crypto = require$$0;
-			        } catch (err) {}
-			    }
-
-			    /*
-			     * Cryptographically secure pseudorandom number generator
-			     *
-			     * As Math.random() is cryptographically not safe to use
-			     */
-			    var cryptoSecureRandomInt = function () {
-			        if (crypto) {
-			            // Use getRandomValues method (Browser)
-			            if (typeof crypto.getRandomValues === 'function') {
-			                try {
-			                    return crypto.getRandomValues(new Uint32Array(1))[0];
-			                } catch (err) {}
-			            }
-
-			            // Use randomBytes method (NodeJS)
-			            if (typeof crypto.randomBytes === 'function') {
-			                try {
-			                    return crypto.randomBytes(4).readInt32LE();
-			                } catch (err) {}
-			            }
-			        }
-
-			        throw new Error('Native crypto module could not be used to get secure random number.');
-			    };
-
-			    /*
-			     * Local polyfill of Object.create
-
-			     */
-			    var create = Object.create || (function () {
-			        function F() {}
-
-			        return function (obj) {
-			            var subtype;
-
-			            F.prototype = obj;
-
-			            subtype = new F();
-
-			            F.prototype = null;
-
-			            return subtype;
-			        };
-			    }());
-
-			    /**
-			     * CryptoJS namespace.
-			     */
-			    var C = {};
-
-			    /**
-			     * Library namespace.
-			     */
-			    var C_lib = C.lib = {};
-
-			    /**
-			     * Base object for prototypal inheritance.
-			     */
-			    var Base = C_lib.Base = (function () {
-
-
-			        return {
-			            /**
-			             * Creates a new object that inherits from this object.
-			             *
-			             * @param {Object} overrides Properties to copy into the new object.
-			             *
-			             * @return {Object} The new object.
-			             *
-			             * @static
-			             *
-			             * @example
-			             *
-			             *     var MyType = CryptoJS.lib.Base.extend({
-			             *         field: 'value',
-			             *
-			             *         method: function () {
-			             *         }
-			             *     });
-			             */
-			            extend: function (overrides) {
-			                // Spawn
-			                var subtype = create(this);
-
-			                // Augment
-			                if (overrides) {
-			                    subtype.mixIn(overrides);
-			                }
-
-			                // Create default initializer
-			                if (!subtype.hasOwnProperty('init') || this.init === subtype.init) {
-			                    subtype.init = function () {
-			                        subtype.$super.init.apply(this, arguments);
-			                    };
-			                }
-
-			                // Initializer's prototype is the subtype object
-			                subtype.init.prototype = subtype;
-
-			                // Reference supertype
-			                subtype.$super = this;
-
-			                return subtype;
-			            },
-
-			            /**
-			             * Extends this object and runs the init method.
-			             * Arguments to create() will be passed to init().
-			             *
-			             * @return {Object} The new object.
-			             *
-			             * @static
-			             *
-			             * @example
-			             *
-			             *     var instance = MyType.create();
-			             */
-			            create: function () {
-			                var instance = this.extend();
-			                instance.init.apply(instance, arguments);
-
-			                return instance;
-			            },
-
-			            /**
-			             * Initializes a newly created object.
-			             * Override this method to add some logic when your objects are created.
-			             *
-			             * @example
-			             *
-			             *     var MyType = CryptoJS.lib.Base.extend({
-			             *         init: function () {
-			             *             // ...
-			             *         }
-			             *     });
-			             */
-			            init: function () {
-			            },
-
-			            /**
-			             * Copies properties into this object.
-			             *
-			             * @param {Object} properties The properties to mix in.
-			             *
-			             * @example
-			             *
-			             *     MyType.mixIn({
-			             *         field: 'value'
-			             *     });
-			             */
-			            mixIn: function (properties) {
-			                for (var propertyName in properties) {
-			                    if (properties.hasOwnProperty(propertyName)) {
-			                        this[propertyName] = properties[propertyName];
-			                    }
-			                }
-
-			                // IE won't copy toString using the loop above
-			                if (properties.hasOwnProperty('toString')) {
-			                    this.toString = properties.toString;
-			                }
-			            },
-
-			            /**
-			             * Creates a copy of this object.
-			             *
-			             * @return {Object} The clone.
-			             *
-			             * @example
-			             *
-			             *     var clone = instance.clone();
-			             */
-			            clone: function () {
-			                return this.init.prototype.extend(this);
-			            }
-			        };
-			    }());
-
-			    /**
-			     * An array of 32-bit words.
-			     *
-			     * @property {Array} words The array of 32-bit words.
-			     * @property {number} sigBytes The number of significant bytes in this word array.
-			     */
-			    var WordArray = C_lib.WordArray = Base.extend({
-			        /**
-			         * Initializes a newly created word array.
-			         *
-			         * @param {Array} words (Optional) An array of 32-bit words.
-			         * @param {number} sigBytes (Optional) The number of significant bytes in the words.
-			         *
-			         * @example
-			         *
-			         *     var wordArray = CryptoJS.lib.WordArray.create();
-			         *     var wordArray = CryptoJS.lib.WordArray.create([0x00010203, 0x04050607]);
-			         *     var wordArray = CryptoJS.lib.WordArray.create([0x00010203, 0x04050607], 6);
-			         */
-			        init: function (words, sigBytes) {
-			            words = this.words = words || [];
-
-			            if (sigBytes != undefined$1) {
-			                this.sigBytes = sigBytes;
-			            } else {
-			                this.sigBytes = words.length * 4;
-			            }
-			        },
-
-			        /**
-			         * Converts this word array to a string.
-			         *
-			         * @param {Encoder} encoder (Optional) The encoding strategy to use. Default: CryptoJS.enc.Hex
-			         *
-			         * @return {string} The stringified word array.
-			         *
-			         * @example
-			         *
-			         *     var string = wordArray + '';
-			         *     var string = wordArray.toString();
-			         *     var string = wordArray.toString(CryptoJS.enc.Utf8);
-			         */
-			        toString: function (encoder) {
-			            return (encoder || Hex).stringify(this);
-			        },
-
-			        /**
-			         * Concatenates a word array to this word array.
-			         *
-			         * @param {WordArray} wordArray The word array to append.
-			         *
-			         * @return {WordArray} This word array.
-			         *
-			         * @example
-			         *
-			         *     wordArray1.concat(wordArray2);
-			         */
-			        concat: function (wordArray) {
-			            // Shortcuts
-			            var thisWords = this.words;
-			            var thatWords = wordArray.words;
-			            var thisSigBytes = this.sigBytes;
-			            var thatSigBytes = wordArray.sigBytes;
-
-			            // Clamp excess bits
-			            this.clamp();
-
-			            // Concat
-			            if (thisSigBytes % 4) {
-			                // Copy one byte at a time
-			                for (var i = 0; i < thatSigBytes; i++) {
-			                    var thatByte = (thatWords[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-			                    thisWords[(thisSigBytes + i) >>> 2] |= thatByte << (24 - ((thisSigBytes + i) % 4) * 8);
-			                }
-			            } else {
-			                // Copy one word at a time
-			                for (var j = 0; j < thatSigBytes; j += 4) {
-			                    thisWords[(thisSigBytes + j) >>> 2] = thatWords[j >>> 2];
-			                }
-			            }
-			            this.sigBytes += thatSigBytes;
-
-			            // Chainable
-			            return this;
-			        },
-
-			        /**
-			         * Removes insignificant bits.
-			         *
-			         * @example
-			         *
-			         *     wordArray.clamp();
-			         */
-			        clamp: function () {
-			            // Shortcuts
-			            var words = this.words;
-			            var sigBytes = this.sigBytes;
-
-			            // Clamp
-			            words[sigBytes >>> 2] &= 0xffffffff << (32 - (sigBytes % 4) * 8);
-			            words.length = Math.ceil(sigBytes / 4);
-			        },
-
-			        /**
-			         * Creates a copy of this word array.
-			         *
-			         * @return {WordArray} The clone.
-			         *
-			         * @example
-			         *
-			         *     var clone = wordArray.clone();
-			         */
-			        clone: function () {
-			            var clone = Base.clone.call(this);
-			            clone.words = this.words.slice(0);
-
-			            return clone;
-			        },
-
-			        /**
-			         * Creates a word array filled with random bytes.
-			         *
-			         * @param {number} nBytes The number of random bytes to generate.
-			         *
-			         * @return {WordArray} The random word array.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var wordArray = CryptoJS.lib.WordArray.random(16);
-			         */
-			        random: function (nBytes) {
-			            var words = [];
-
-			            for (var i = 0; i < nBytes; i += 4) {
-			                words.push(cryptoSecureRandomInt());
-			            }
-
-			            return new WordArray.init(words, nBytes);
-			        }
-			    });
-
-			    /**
-			     * Encoder namespace.
-			     */
-			    var C_enc = C.enc = {};
-
-			    /**
-			     * Hex encoding strategy.
-			     */
-			    var Hex = C_enc.Hex = {
-			        /**
-			         * Converts a word array to a hex string.
-			         *
-			         * @param {WordArray} wordArray The word array.
-			         *
-			         * @return {string} The hex string.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var hexString = CryptoJS.enc.Hex.stringify(wordArray);
-			         */
-			        stringify: function (wordArray) {
-			            // Shortcuts
-			            var words = wordArray.words;
-			            var sigBytes = wordArray.sigBytes;
-
-			            // Convert
-			            var hexChars = [];
-			            for (var i = 0; i < sigBytes; i++) {
-			                var bite = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-			                hexChars.push((bite >>> 4).toString(16));
-			                hexChars.push((bite & 0x0f).toString(16));
-			            }
-
-			            return hexChars.join('');
-			        },
-
-			        /**
-			         * Converts a hex string to a word array.
-			         *
-			         * @param {string} hexStr The hex string.
-			         *
-			         * @return {WordArray} The word array.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var wordArray = CryptoJS.enc.Hex.parse(hexString);
-			         */
-			        parse: function (hexStr) {
-			            // Shortcut
-			            var hexStrLength = hexStr.length;
-
-			            // Convert
-			            var words = [];
-			            for (var i = 0; i < hexStrLength; i += 2) {
-			                words[i >>> 3] |= parseInt(hexStr.substr(i, 2), 16) << (24 - (i % 8) * 4);
-			            }
-
-			            return new WordArray.init(words, hexStrLength / 2);
-			        }
-			    };
-
-			    /**
-			     * Latin1 encoding strategy.
-			     */
-			    var Latin1 = C_enc.Latin1 = {
-			        /**
-			         * Converts a word array to a Latin1 string.
-			         *
-			         * @param {WordArray} wordArray The word array.
-			         *
-			         * @return {string} The Latin1 string.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var latin1String = CryptoJS.enc.Latin1.stringify(wordArray);
-			         */
-			        stringify: function (wordArray) {
-			            // Shortcuts
-			            var words = wordArray.words;
-			            var sigBytes = wordArray.sigBytes;
-
-			            // Convert
-			            var latin1Chars = [];
-			            for (var i = 0; i < sigBytes; i++) {
-			                var bite = (words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
-			                latin1Chars.push(String.fromCharCode(bite));
-			            }
-
-			            return latin1Chars.join('');
-			        },
-
-			        /**
-			         * Converts a Latin1 string to a word array.
-			         *
-			         * @param {string} latin1Str The Latin1 string.
-			         *
-			         * @return {WordArray} The word array.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var wordArray = CryptoJS.enc.Latin1.parse(latin1String);
-			         */
-			        parse: function (latin1Str) {
-			            // Shortcut
-			            var latin1StrLength = latin1Str.length;
-
-			            // Convert
-			            var words = [];
-			            for (var i = 0; i < latin1StrLength; i++) {
-			                words[i >>> 2] |= (latin1Str.charCodeAt(i) & 0xff) << (24 - (i % 4) * 8);
-			            }
-
-			            return new WordArray.init(words, latin1StrLength);
-			        }
-			    };
-
-			    /**
-			     * UTF-8 encoding strategy.
-			     */
-			    var Utf8 = C_enc.Utf8 = {
-			        /**
-			         * Converts a word array to a UTF-8 string.
-			         *
-			         * @param {WordArray} wordArray The word array.
-			         *
-			         * @return {string} The UTF-8 string.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var utf8String = CryptoJS.enc.Utf8.stringify(wordArray);
-			         */
-			        stringify: function (wordArray) {
-			            try {
-			                return decodeURIComponent(escape(Latin1.stringify(wordArray)));
-			            } catch (e) {
-			                throw new Error('Malformed UTF-8 data');
-			            }
-			        },
-
-			        /**
-			         * Converts a UTF-8 string to a word array.
-			         *
-			         * @param {string} utf8Str The UTF-8 string.
-			         *
-			         * @return {WordArray} The word array.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var wordArray = CryptoJS.enc.Utf8.parse(utf8String);
-			         */
-			        parse: function (utf8Str) {
-			            return Latin1.parse(unescape(encodeURIComponent(utf8Str)));
-			        }
-			    };
-
-			    /**
-			     * Abstract buffered block algorithm template.
-			     *
-			     * The property blockSize must be implemented in a concrete subtype.
-			     *
-			     * @property {number} _minBufferSize The number of blocks that should be kept unprocessed in the buffer. Default: 0
-			     */
-			    var BufferedBlockAlgorithm = C_lib.BufferedBlockAlgorithm = Base.extend({
-			        /**
-			         * Resets this block algorithm's data buffer to its initial state.
-			         *
-			         * @example
-			         *
-			         *     bufferedBlockAlgorithm.reset();
-			         */
-			        reset: function () {
-			            // Initial values
-			            this._data = new WordArray.init();
-			            this._nDataBytes = 0;
-			        },
-
-			        /**
-			         * Adds new data to this block algorithm's buffer.
-			         *
-			         * @param {WordArray|string} data The data to append. Strings are converted to a WordArray using UTF-8.
-			         *
-			         * @example
-			         *
-			         *     bufferedBlockAlgorithm._append('data');
-			         *     bufferedBlockAlgorithm._append(wordArray);
-			         */
-			        _append: function (data) {
-			            // Convert string to WordArray, else assume WordArray already
-			            if (typeof data == 'string') {
-			                data = Utf8.parse(data);
-			            }
-
-			            // Append
-			            this._data.concat(data);
-			            this._nDataBytes += data.sigBytes;
-			        },
-
-			        /**
-			         * Processes available data blocks.
-			         *
-			         * This method invokes _doProcessBlock(offset), which must be implemented by a concrete subtype.
-			         *
-			         * @param {boolean} doFlush Whether all blocks and partial blocks should be processed.
-			         *
-			         * @return {WordArray} The processed data.
-			         *
-			         * @example
-			         *
-			         *     var processedData = bufferedBlockAlgorithm._process();
-			         *     var processedData = bufferedBlockAlgorithm._process(!!'flush');
-			         */
-			        _process: function (doFlush) {
-			            var processedWords;
-
-			            // Shortcuts
-			            var data = this._data;
-			            var dataWords = data.words;
-			            var dataSigBytes = data.sigBytes;
-			            var blockSize = this.blockSize;
-			            var blockSizeBytes = blockSize * 4;
-
-			            // Count blocks ready
-			            var nBlocksReady = dataSigBytes / blockSizeBytes;
-			            if (doFlush) {
-			                // Round up to include partial blocks
-			                nBlocksReady = Math.ceil(nBlocksReady);
-			            } else {
-			                // Round down to include only full blocks,
-			                // less the number of blocks that must remain in the buffer
-			                nBlocksReady = Math.max((nBlocksReady | 0) - this._minBufferSize, 0);
-			            }
-
-			            // Count words ready
-			            var nWordsReady = nBlocksReady * blockSize;
-
-			            // Count bytes ready
-			            var nBytesReady = Math.min(nWordsReady * 4, dataSigBytes);
-
-			            // Process blocks
-			            if (nWordsReady) {
-			                for (var offset = 0; offset < nWordsReady; offset += blockSize) {
-			                    // Perform concrete-algorithm logic
-			                    this._doProcessBlock(dataWords, offset);
-			                }
-
-			                // Remove processed words
-			                processedWords = dataWords.splice(0, nWordsReady);
-			                data.sigBytes -= nBytesReady;
-			            }
-
-			            // Return processed words
-			            return new WordArray.init(processedWords, nBytesReady);
-			        },
-
-			        /**
-			         * Creates a copy of this object.
-			         *
-			         * @return {Object} The clone.
-			         *
-			         * @example
-			         *
-			         *     var clone = bufferedBlockAlgorithm.clone();
-			         */
-			        clone: function () {
-			            var clone = Base.clone.call(this);
-			            clone._data = this._data.clone();
-
-			            return clone;
-			        },
-
-			        _minBufferSize: 0
-			    });
-
-			    /**
-			     * Abstract hasher template.
-			     *
-			     * @property {number} blockSize The number of 32-bit words this hasher operates on. Default: 16 (512 bits)
-			     */
-			    C_lib.Hasher = BufferedBlockAlgorithm.extend({
-			        /**
-			         * Configuration options.
-			         */
-			        cfg: Base.extend(),
-
-			        /**
-			         * Initializes a newly created hasher.
-			         *
-			         * @param {Object} cfg (Optional) The configuration options to use for this hash computation.
-			         *
-			         * @example
-			         *
-			         *     var hasher = CryptoJS.algo.SHA256.create();
-			         */
-			        init: function (cfg) {
-			            // Apply config defaults
-			            this.cfg = this.cfg.extend(cfg);
-
-			            // Set initial values
-			            this.reset();
-			        },
-
-			        /**
-			         * Resets this hasher to its initial state.
-			         *
-			         * @example
-			         *
-			         *     hasher.reset();
-			         */
-			        reset: function () {
-			            // Reset data buffer
-			            BufferedBlockAlgorithm.reset.call(this);
-
-			            // Perform concrete-hasher logic
-			            this._doReset();
-			        },
-
-			        /**
-			         * Updates this hasher with a message.
-			         *
-			         * @param {WordArray|string} messageUpdate The message to append.
-			         *
-			         * @return {Hasher} This hasher.
-			         *
-			         * @example
-			         *
-			         *     hasher.update('message');
-			         *     hasher.update(wordArray);
-			         */
-			        update: function (messageUpdate) {
-			            // Append
-			            this._append(messageUpdate);
-
-			            // Update the hash
-			            this._process();
-
-			            // Chainable
-			            return this;
-			        },
-
-			        /**
-			         * Finalizes the hash computation.
-			         * Note that the finalize operation is effectively a destructive, read-once operation.
-			         *
-			         * @param {WordArray|string} messageUpdate (Optional) A final message update.
-			         *
-			         * @return {WordArray} The hash.
-			         *
-			         * @example
-			         *
-			         *     var hash = hasher.finalize();
-			         *     var hash = hasher.finalize('message');
-			         *     var hash = hasher.finalize(wordArray);
-			         */
-			        finalize: function (messageUpdate) {
-			            // Final message update
-			            if (messageUpdate) {
-			                this._append(messageUpdate);
-			            }
-
-			            // Perform concrete-hasher logic
-			            var hash = this._doFinalize();
-
-			            return hash;
-			        },
-
-			        blockSize: 512/32,
-
-			        /**
-			         * Creates a shortcut function to a hasher's object interface.
-			         *
-			         * @param {Hasher} hasher The hasher to create a helper for.
-			         *
-			         * @return {Function} The shortcut function.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var SHA256 = CryptoJS.lib.Hasher._createHelper(CryptoJS.algo.SHA256);
-			         */
-			        _createHelper: function (hasher) {
-			            return function (message, cfg) {
-			                return new hasher.init(cfg).finalize(message);
-			            };
-			        },
-
-			        /**
-			         * Creates a shortcut function to the HMAC's object interface.
-			         *
-			         * @param {Hasher} hasher The hasher to use in this HMAC helper.
-			         *
-			         * @return {Function} The shortcut function.
-			         *
-			         * @static
-			         *
-			         * @example
-			         *
-			         *     var HmacSHA256 = CryptoJS.lib.Hasher._createHmacHelper(CryptoJS.algo.SHA256);
-			         */
-			        _createHmacHelper: function (hasher) {
-			            return function (message, key) {
-			                return new C_algo.HMAC.init(hasher, key).finalize(message);
-			            };
-			        }
-			    });
-
-			    /**
-			     * Algorithm namespace.
-			     */
-			    var C_algo = C.algo = {};
-
-			    return C;
-			}(Math));
-
-
-			return CryptoJS;
-
-		})); 
-	} (core));
-	return core.exports;
-}
-
-(function (module, exports) {
-(function (root, factory) {
-		{
-			// CommonJS
-			module.exports = factory(requireCore());
-		}
-	}(commonjsGlobal, function (CryptoJS) {
-
-		(function (Math) {
-		    // Shortcuts
-		    var C = CryptoJS;
-		    var C_lib = C.lib;
-		    var WordArray = C_lib.WordArray;
-		    var Hasher = C_lib.Hasher;
-		    var C_algo = C.algo;
-
-		    // Initialization and round constants tables
-		    var H = [];
-		    var K = [];
-
-		    // Compute constants
-		    (function () {
-		        function isPrime(n) {
-		            var sqrtN = Math.sqrt(n);
-		            for (var factor = 2; factor <= sqrtN; factor++) {
-		                if (!(n % factor)) {
-		                    return false;
-		                }
-		            }
-
-		            return true;
-		        }
-
-		        function getFractionalBits(n) {
-		            return ((n - (n | 0)) * 0x100000000) | 0;
-		        }
-
-		        var n = 2;
-		        var nPrime = 0;
-		        while (nPrime < 64) {
-		            if (isPrime(n)) {
-		                if (nPrime < 8) {
-		                    H[nPrime] = getFractionalBits(Math.pow(n, 1 / 2));
-		                }
-		                K[nPrime] = getFractionalBits(Math.pow(n, 1 / 3));
-
-		                nPrime++;
-		            }
-
-		            n++;
-		        }
-		    }());
-
-		    // Reusable object
-		    var W = [];
-
-		    /**
-		     * SHA-256 hash algorithm.
-		     */
-		    var SHA256 = C_algo.SHA256 = Hasher.extend({
-		        _doReset: function () {
-		            this._hash = new WordArray.init(H.slice(0));
-		        },
-
-		        _doProcessBlock: function (M, offset) {
-		            // Shortcut
-		            var H = this._hash.words;
-
-		            // Working variables
-		            var a = H[0];
-		            var b = H[1];
-		            var c = H[2];
-		            var d = H[3];
-		            var e = H[4];
-		            var f = H[5];
-		            var g = H[6];
-		            var h = H[7];
-
-		            // Computation
-		            for (var i = 0; i < 64; i++) {
-		                if (i < 16) {
-		                    W[i] = M[offset + i] | 0;
-		                } else {
-		                    var gamma0x = W[i - 15];
-		                    var gamma0  = ((gamma0x << 25) | (gamma0x >>> 7))  ^
-		                                  ((gamma0x << 14) | (gamma0x >>> 18)) ^
-		                                   (gamma0x >>> 3);
-
-		                    var gamma1x = W[i - 2];
-		                    var gamma1  = ((gamma1x << 15) | (gamma1x >>> 17)) ^
-		                                  ((gamma1x << 13) | (gamma1x >>> 19)) ^
-		                                   (gamma1x >>> 10);
-
-		                    W[i] = gamma0 + W[i - 7] + gamma1 + W[i - 16];
-		                }
-
-		                var ch  = (e & f) ^ (~e & g);
-		                var maj = (a & b) ^ (a & c) ^ (b & c);
-
-		                var sigma0 = ((a << 30) | (a >>> 2)) ^ ((a << 19) | (a >>> 13)) ^ ((a << 10) | (a >>> 22));
-		                var sigma1 = ((e << 26) | (e >>> 6)) ^ ((e << 21) | (e >>> 11)) ^ ((e << 7)  | (e >>> 25));
-
-		                var t1 = h + sigma1 + ch + K[i] + W[i];
-		                var t2 = sigma0 + maj;
-
-		                h = g;
-		                g = f;
-		                f = e;
-		                e = (d + t1) | 0;
-		                d = c;
-		                c = b;
-		                b = a;
-		                a = (t1 + t2) | 0;
-		            }
-
-		            // Intermediate hash value
-		            H[0] = (H[0] + a) | 0;
-		            H[1] = (H[1] + b) | 0;
-		            H[2] = (H[2] + c) | 0;
-		            H[3] = (H[3] + d) | 0;
-		            H[4] = (H[4] + e) | 0;
-		            H[5] = (H[5] + f) | 0;
-		            H[6] = (H[6] + g) | 0;
-		            H[7] = (H[7] + h) | 0;
-		        },
-
-		        _doFinalize: function () {
-		            // Shortcuts
-		            var data = this._data;
-		            var dataWords = data.words;
-
-		            var nBitsTotal = this._nDataBytes * 8;
-		            var nBitsLeft = data.sigBytes * 8;
-
-		            // Add padding
-		            dataWords[nBitsLeft >>> 5] |= 0x80 << (24 - nBitsLeft % 32);
-		            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 14] = Math.floor(nBitsTotal / 0x100000000);
-		            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 15] = nBitsTotal;
-		            data.sigBytes = dataWords.length * 4;
-
-		            // Hash final blocks
-		            this._process();
-
-		            // Return final computed hash
-		            return this._hash;
-		        },
-
-		        clone: function () {
-		            var clone = Hasher.clone.call(this);
-		            clone._hash = this._hash.clone();
-
-		            return clone;
-		        }
-		    });
-
-		    /**
-		     * Shortcut function to the hasher's object interface.
-		     *
-		     * @param {WordArray|string} message The message to hash.
-		     *
-		     * @return {WordArray} The hash.
-		     *
-		     * @static
-		     *
-		     * @example
-		     *
-		     *     var hash = CryptoJS.SHA256('message');
-		     *     var hash = CryptoJS.SHA256(wordArray);
-		     */
-		    C.SHA256 = Hasher._createHelper(SHA256);
-
-		    /**
-		     * Shortcut function to the HMAC's object interface.
-		     *
-		     * @param {WordArray|string} message The message to hash.
-		     * @param {WordArray|string} key The secret key.
-		     *
-		     * @return {WordArray} The HMAC.
-		     *
-		     * @static
-		     *
-		     * @example
-		     *
-		     *     var hmac = CryptoJS.HmacSHA256(message, key);
-		     */
-		    C.HmacSHA256 = Hasher._createHmacHelper(SHA256);
-		}(Math));
-
-
-		return CryptoJS.SHA256;
-
-	})); 
-} (sha256$1));
-
-var sha256Exports = sha256$1.exports;
-var sha256 = /*@__PURE__*/getDefaultExportFromCjs(sha256Exports);
-
-const Serializers = {
-  json: "json",
-  avro: "avro"
-};
-
-const JsonSerializer = {
-  serialize: (data) => JSON.stringify(data),
-  unserialize: (data) => JSON.parse(data)
-};
-
-const CacheAvroSchema = avro.Type.forSchema({
-  name: "Cache",
-  type: "record",
-  fields: [{ name: "data", type: ["string"] }]
-});
-const AvroSerializer = {
-  serialize: (data) => String(CacheAvroSchema.toBuffer(data)),
-  unserialize: (data) => CacheAvroSchema.fromBuffer(Buffer.from(data))
-};
-
-class S3Cache {
-  constructor({ s3Client, compressData = true, serializer = Serializers.json }) {
-    this.s3Client = s3Client;
-    this.serializer = serializer;
-    this.compressData = compressData;
-    this.serializers = {
-      [Serializers.json]: JsonSerializer,
-      [Serializers.avro]: AvroSerializer
-    };
-  }
-  getKey({ params, hashed = true, additionalPrefix = "" }) {
-    let filename = Object.keys(params || {}).sort().map((x) => `${x}:${params[x]}`).join("|") || "";
-    if (filename.length === 0) filename = `empty`;
-    if (hashed) {
-      filename = sha256(filename);
-    }
-    if (additionalPrefix.length > 0) {
-      filename = additionalPrefix + filename;
-    }
-    filename = filename + "." + this.serializer;
-    if (this.compressData) filename += ".gz";
-    return path.join("cache", filename);
-  }
-  async _put({ key, data }) {
-    const lengthRaw = isString$1(data) ? data.length : JSON.stringify(data).length;
-    let body = this.serialize({ data });
-    const lengthSerialized = body.length;
-    if (this.compressData) {
-      body = zlib.gzipSync(body);
-    }
-    const metadata = {
-      compressor: "zlib",
-      "client-id": this.s3Client.id,
-      serializer: String(this.serializer),
-      compressed: String(this.compressData),
-      "length-raw": String(lengthRaw),
-      "length-serialized": String(lengthSerialized),
-      "length-compressed": String(body.length)
-    };
-    return this.s3Client.putObject({
-      key,
-      body,
-      metadata,
-      contentEncoding: this.compressData ? "gzip" : null,
-      contentType: this.compressData ? "application/gzip" : `application/${this.serializer}`
-    });
-  }
-  async _get({ key }) {
-    try {
-      const res = await this.s3Client.getObject(key);
-      if (!res.Body) return "";
-      let content = res.Body;
-      if (res.Metadata) {
-        const { serializer, compressor, compressed } = res.Metadata;
-        if (["true", true].includes(compressed)) {
-          if (compressor === `zlib`) {
-            content = zlib.unzipSync(content);
-          }
-        }
-        const { data } = this.serializers[serializer].unserialize(content);
-        return data;
-      }
-      return this.unserialize(content);
-    } catch (error) {
-      if (error.name !== "ClientNoSuchKey") {
-        return Promise.reject(error);
-      }
-    }
-    return null;
-  }
-  async _delete({ key }) {
-    try {
-      await this.s3Client.deleteObject(key);
-    } catch (error) {
-      if (error.name !== "ClientNoSuchKey") {
-        return Promise.reject(error);
-      }
-    }
-    return true;
-  }
-  serialize(data) {
-    return this.serializers[this.serializer].serialize(data);
-  }
-  unserialize(data) {
-    return this.serializers[this.serializer].unserialize(data);
-  }
-}
-
-class S3ResourceCache extends S3Cache {
-  constructor({ resource, compressData = true, serializer = Serializers.json }) {
-    super({
-      s3Client: resource.s3Client,
-      compressData,
-      serializer
-    });
-    this.resource = resource;
-  }
-  getKey({ action = "list", params }) {
-    const key = super.getKey({
-      params,
-      additionalPrefix: `resource=${this.resource.name}/action=${action}|`
-    });
-    return key;
-  }
-  async put({ action = "list", params, data }) {
-    return super._put({
-      data,
-      key: this.getKey({ action, params })
-    });
-  }
-  async get({ action = "list", params }) {
-    return super._get({
-      key: this.getKey({ action, params })
-    });
-  }
-  async delete({ action = "list", params }) {
-    const key = this.getKey({ action, params });
-    return super._delete({
-      key
-    });
-  }
-  async purge() {
-    const keys = await this.s3Client.getAllKeys({
-      prefix: `cache/resource=${this.resource.name}`
-    });
-    await this.s3Client.deleteObjects(keys);
-  }
-}
-
-class Resource extends EventEmitter {
+class S3Cache extends Cache {
   constructor({
-    name,
     client,
-    options = {},
-    attributes = {},
-    parallelism = 10,
-    passphrase = "secret",
-    validatorInstance = null,
-    observers = []
+    keyPrefix = "cache"
   }) {
     super();
-    this.name = name;
     this.client = client;
-    this.options = options;
-    this.observers = observers;
-    this.parallelism = parallelism;
-    this.passphrase = passphrase ?? 10;
-    this.schema = merge(
-      { $$async: true },
-      flatten(attributes, { safe: true })
-    );
-    if (!validatorInstance) {
-      validatorInstance = new Validator({ passphrase: this.passphrase ?? "secret" });
-    }
-    this.validator = validatorInstance.compile(this.schema);
-    const { mapObj, reversedMapObj } = this.getMappersFromSchema(this.schema);
-    this.mapObj = mapObj;
-    this.reversedMapObj = reversedMapObj;
-    this.parseSchema();
-    if (this.options.cache === true) {
-      this.s3Cache = new S3ResourceCache({
-        resource: this,
-        compressData: true,
-        serializer: "json"
-      });
-    }
+    this.keyPrefix = keyPrefix;
   }
-  getMappersFromSchema(schema) {
-    let i = 0;
-    const mapObj = sortBy(Object.entries(schema), ["0"]).reduce((acc, [key]) => {
-      acc[key] = String(i++);
-      return acc;
-    }, {});
-    const reversedMapObj = Object.entries(mapObj).reduce((acc, [key, value]) => {
-      acc[String(value)] = key;
-      return acc;
-    }, {});
-    return {
-      mapObj,
-      reversedMapObj
-    };
-  }
-  export() {
-    const data = {
-      name: this.name,
-      schema: { ...this.schema },
-      mapper: this.mapObj,
-      options: this.options
-    };
-    for (const [name, definition] of Object.entries(this.schema)) {
-      data.schema[name] = JSON.stringify(definition);
-    }
-    return data;
-  }
-  parseSchema() {
-    if (!this.options.afterUnmap) this.options.beforeMap = {};
-    if (!this.options.afterUnmap) this.options.afterUnmap = {};
-    const schema = flatten(this.schema, { safe: true });
-    const addRule = (arr, attribute, action) => {
-      if (!this.options[arr][attribute]) this.options[arr][attribute] = [];
-      this.options[arr][attribute] = [
-        .../* @__PURE__ */ new Set([...this.options[arr][attribute], action])
-      ];
-    };
-    for (const [name, definition] of Object.entries(schema)) {
-      if (definition.includes("secret")) {
-        if (this.options.autoDecrypt === true) {
-          addRule("afterUnmap", name, "decrypt");
-        }
+  async _set(key, data) {
+    let body = JSON.stringify(data);
+    const lengthSerialized = body.length;
+    body = zlib.gzipSync(body).toString("base64");
+    return this.client.putObject({
+      key: join(this.keyPrefix, key),
+      body,
+      contentEncoding: "gzip",
+      contentType: "application/gzip",
+      metadata: {
+        compressor: "zlib",
+        compressed: "true",
+        "client-id": this.client.id,
+        "length-serialized": String(lengthSerialized),
+        "length-compressed": String(body.length),
+        "compression-gain": (body.length / lengthSerialized).toFixed(2)
       }
-      if (definition.includes("array")) {
-        addRule("beforeMap", name, "fromArray");
-        addRule("afterUnmap", name, "toArray");
-      }
-      if (definition.includes("number")) {
-        addRule("beforeMap", name, "toString");
-        addRule("afterUnmap", name, "toNumber");
-      }
-      if (definition.includes("boolean")) {
-        addRule("beforeMap", name, "toJson");
-        addRule("afterUnmap", name, "fromJson");
-      }
-    }
-  }
-  async check(data) {
-    const result = {
-      original: { ...data },
-      isValid: false,
-      errors: []
-    };
-    const check = await this.validator(data);
-    if (check === true) {
-      result.isValid = true;
-    } else {
-      result.errors = check;
-    }
-    return {
-      ...result,
-      data
-    };
-  }
-  validate(data) {
-    return this.check(flatten(data, { safe: true }));
-  }
-  map(data) {
-    let obj = { ...data };
-    for (const [attribute, actions] of Object.entries(this.options.beforeMap)) {
-      for (const action of actions) {
-        if (action === "fromArray") {
-          obj[attribute] = (obj[attribute] || []).join("|");
-        } else if (action === "toString") {
-          obj[attribute] = String(obj[attribute]);
-        } else if (action === "toJson") {
-          obj[attribute] = JSON.stringify(obj[attribute]);
-        }
-      }
-    }
-    obj = Object.entries(obj).reduce((acc, [key, value]) => {
-      acc[this.mapObj[key]] = isArray$2(value) ? value.join("|") : value;
-      return acc;
-    }, {});
-    return obj;
-  }
-  unmap(data) {
-    const obj = Object.entries(data).reduce((acc, [key, value]) => {
-      acc[this.reversedMapObj[key]] = value;
-      return acc;
-    }, {});
-    for (const [attribute, actions] of Object.entries(this.options.afterUnmap)) {
-      for (const action of actions) {
-        if (action === "decrypt") {
-          let content = obj[attribute];
-          content = decrypt(content, this.passphrase);
-          obj[attribute] = content;
-        } else if (action === "toArray") {
-          obj[attribute] = (obj[attribute] || "").split("|");
-        } else if (action === "toNumber") {
-          obj[attribute] = Number(obj[attribute] || "");
-        } else if (action === "fromJson") {
-          obj[attribute] = JSON.parse(obj[attribute]);
-        }
-      }
-    }
-    return obj;
-  }
-  async insert(attributes) {
-    let { id, ...attrs } = flatten(attributes, {
-      safe: true
     });
-    const { isValid, errors, data: validated } = await this.check(attrs);
-    if (!isValid) {
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes,
-        validation: errors
-      });
-    }
-    if (!id && id !== 0) id = nanoid();
-    const mappedData = this.map(validated);
-    await this.client.putObject({
-      key: path.join(`resource=${this.name}`, `id=${id}`),
-      metadata: mappedData
-    });
-    const final = { id, ...unflatten(this.unmap(mappedData)) };
-    if (this.s3Cache) {
-      await this.s3Cache.purge();
-    }
-    this.emit("insert", final);
-    return final;
   }
-  async get(id) {
-    const request = await this.client.headObject(
-      path.join(`resource=${this.name}`, `id=${id}`)
-    );
-    let data = this.unmap(request.Metadata);
-    data = unflatten(data);
-    data.id = id;
-    data._length = request.ContentLength;
-    data._createdAt = request.LastModified;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-    this.emit("get", data);
-    return data;
+  async _get(key) {
+    const { Body } = await this.client.getObject(join(this.keyPrefix, key));
+    let content = await streamToString(Body);
+    content = Buffer.from(content, "base64");
+    content = zlib.unzipSync(content).toString();
+    return JSON.parse(content);
   }
-  async update(id, attributes) {
-    const obj = await this.get(id);
-    const attrs1 = flatten(attributes, { safe: true });
-    const attrs2 = flatten(obj, { safe: true });
-    const attrs = merge(attrs2, attrs1);
-    delete attrs.id;
-    const { isValid, errors, data: validated } = await this.check(attrs);
-    if (!isValid) {
-      throw new InvalidResourceItem({
-        bucket: this.client.bucket,
-        resourceName: this.name,
-        attributes,
-        validation: errors
-      });
-    }
-    if (!id && id !== 0) id = nanoid();
-    await this.client.putObject({
-      key: path.join(`resource=${this.name}`, `id=${id}`),
-      body: "",
-      metadata: this.map(validated)
-    });
-    const final = {
-      id,
-      ...unflatten(validated)
-    };
-    if (this.s3Cache) await this.s3Cache.purge();
-    this.emit("update", attributes, final);
-    return final;
+  async _del(key) {
+    await this.client.deleteObject(join(this.keyPrefix, key));
+    return true;
   }
-  async delete(id) {
-    const key = path.join(`resource=${this.name}`, `id=${id}`);
-    const response = await this.client.deleteObject(key);
-    if (this.s3Cache) await this.s3Cache.purge();
-    this.emit("delete", id);
-    return response;
-  }
-  async count() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "count" });
-      if (cached) return cached;
-    }
-    const count = await this.client.count({
-      prefix: `resource=${this.name}`
-    });
-    if (this.s3Cache) await this.s3Cache.put({ action: "count", data: count });
-    this.emit("count", count);
-    return count;
-  }
-  async insertMany(objects) {
-    const { results } = await PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
-    }).process(async (attributes) => {
-      const result = await this.insert(attributes);
-      return result;
-    });
-    this.emit("insertMany", objects.length);
-    return results;
-  }
-  async deleteMany(ids) {
-    const packages = chunk(
-      ids.map((x) => path.join(`resource=${this.name}`, `id=${x}`)),
-      1e3
-    );
-    const { results } = await PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
-    }).process(async (keys) => {
-      const response = await this.client.deleteObjects(keys);
-      keys.forEach((key) => {
-        const id = key.split("=").pop();
-        this.emit("deleted", id);
-        this.observers.map((x) => x.emit("deleted", this.name, id));
-      });
-      return response;
-    });
-    if (this.s3Cache) await this.s3Cache.purge();
-    this.emit("deleteMany", ids.length);
-    return results;
-  }
-  async deleteAll() {
-    const ids = await this.listIds();
-    this.emit("deleteAll", ids.length);
-    await this.deleteMany(ids);
-  }
-  async listIds() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "listIds" });
-      if (cached) return cached;
-    }
+  async _clear(dir = "") {
     const keys = await this.client.getAllKeys({
-      prefix: `resource=${this.name}`
+      prefix: join(this.keyPrefix, dir)
     });
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
-    if (this.s3Cache) {
-      await this.s3Cache.put({ action: "listIds", data: ids });
-    }
-    this.emit("listIds", ids.length);
-    return ids;
+    console.log({ keys });
+    await this.client.deleteObjects(keys);
   }
-  async getMany(ids) {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({
-        action: "getMany",
-        params: { ids: ids.sort() }
-      });
-      if (cached) return cached;
-    }
-    const { results } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
-      this.emit("id", id);
-      const data = await this.get(id);
-      this.emit("data", data);
-      return data;
-    });
-    if (this.s3Cache)
-      await this.s3Cache.put({
-        action: "getMany",
-        params: { ids: ids.sort() },
-        data: results
-      });
-    this.emit("getMany", ids.length);
-    return results;
-  }
-  async getAll() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getAll" });
-      if (cached) return cached;
-    }
-    let ids = [];
-    let gotFromCache = false;
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "listIds" });
-      if (cached) {
-        ids = cached;
-        gotFromCache = true;
-      }
-    }
-    if (!gotFromCache) ids = await this.listIds();
-    if (ids.length === 0) return [];
-    const { results } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
-      const data = await this.get(id);
-      return data;
-    });
-    if (this.s3Cache && results.length > 0) {
-      await this.s3Cache.put({ action: "getAll", data: results });
-    }
-    this.emit("getAll", results.length);
-    return results;
-  }
-  async page({ offset = 0, size = 100 }) {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({
-        action: "page",
-        params: { offset, size }
-      });
-      if (cached) return cached;
-    }
-    const keys = await this.client.getKeysPage({
-      amount: size,
-      offset,
-      prefix: `resource=${this.name}`
-    });
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
-    const data = await this.getMany(ids);
-    if (this.s3Cache)
-      await this.s3Cache.put({
-        action: "page",
-        params: { offset, size },
-        data
-      });
-    return data;
-  }
-  readable() {
-    const stream = new ResourceReader({ resource: this });
-    return stream.build();
-  }
-  writable() {
-    const stream = new ResourceWriter({ resource: this });
-    return stream.build();
-  }
-}
-
-class Database extends EventEmitter {
-  constructor(options) {
-    super();
-    this.version = "1";
-    this.resources = {};
-    this.options = options;
-    this.verbose = options.verbose || false;
-    this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
-    this.cache = options.cache;
-    this.passphrase = options.passphrase || "secret";
-    this.validatorInstance = new Validator({ passphrase: this.passphrase });
-    this.client = options.client || new Client({
-      verbose: this.verbose,
-      parallelism: this.parallelism,
-      connectionString: options.connectionString
-    });
-    this.bucket = this.client.bucket;
-    this.keyPrefix = this.client.keyPrefix;
-    this.startPlugins();
-  }
-  async connect() {
-    let metadata = null;
-    if (await this.client.exists(`s3db.json`)) {
-      const request = await this.client.getObject(`s3db.json`);
-      metadata = JSON.parse(await streamToString(request?.Body));
-      metadata = this.unserializeMetadata(metadata);
-    } else {
-      metadata = this.blankMetadataStructure();
-      await this.uploadMetadataFile();
-    }
-    for (const resource of Object.entries(metadata.resources)) {
-      const [name, definition] = resource;
-      this.resources[name] = new Resource({
-        name,
-        client: this.client,
-        options: definition.options,
-        attributes: definition.schema,
-        parallelism: this.parallelism,
-        passphrase: this.passphrase,
-        validatorInstance: this.validatorInstance,
-        observers: [this]
-      });
-    }
-    this.emit("connected", /* @__PURE__ */ new Date());
-  }
-  async startPlugins() {
-    if (this.plugins && !isEmpty(this.plugins)) {
-      const setupProms = this.plugins.map(async (plugin) => {
-        if (plugin.beforeSetup) await plugin.beforeSetup();
-        await plugin.setup(this);
-        if (plugin.afterSetup) await plugin.afterSetup();
-      });
-      await Promise.all(setupProms);
-      const startProms = this.plugins.map(async (plugin) => {
-        if (plugin.beforeStart) await plugin.beforeStart();
-        await plugin.start();
-        if (plugin.afterStart) await plugin.afterStart();
-      });
-      await Promise.all(startProms);
-    }
-  }
-  unserializeMetadata(metadata) {
-    const file = { ...metadata };
-    if (isEmpty(file.resources)) return file;
-    for (const [name, structure] of Object.entries(file.resources)) {
-      for (const [attr, value] of Object.entries(structure.schema)) {
-        file.resources[name].schema[attr] = JSON.parse(value);
-      }
-    }
-    return file;
-  }
-  async uploadMetadataFile() {
-    const file = {
-      version: this.version,
-      resources: Object.entries(this.resources).reduce((acc, definition) => {
-        const [name, resource] = definition;
-        acc[name] = resource.export();
-        return acc;
-      }, {})
-    };
-    await this.client.putObject({
-      key: `s3db.json`,
-      contentType: "application/json",
-      body: JSON.stringify(file, null, 2)
-    });
-  }
-  blankMetadataStructure() {
-    return {
-      version: `1`,
-      resources: {}
-    };
-  }
-  async createResource({ name, attributes, options = {} }) {
-    const resource = new Resource({
-      name,
-      attributes,
-      observers: [this],
-      client: this.client,
-      validatorInstance: this.validatorInstance,
-      options: {
-        autoDecrypt: true,
-        cache: this.cache,
-        ...options
-      }
-    });
-    this.resources[name] = resource;
-    await this.uploadMetadataFile();
-    this.emit("s3db.resourceCreated", name);
-    return resource;
-  }
-  resource(name) {
-    if (!this.resources[name]) {
-      return Promise.reject(`resource ${name} does not exist`);
-    }
-    return this.resources[name];
-  }
-}
-class S3db extends Database {
 }
 
 class Plugin extends EventEmitter {
@@ -14024,4 +12905,211 @@ const PluginObject = {
   }
 };
 
-export { BaseError, Client, ConnectionString, Database, ErrorMap, InvalidResourceItem, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, Plugin, PluginObject, ResourceIdsPageReader, ResourceIdsReader, ResourceReader, ResourceWriter, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, UnknownError, Validator, ValidatorManager, decrypt, encrypt, streamToString };
+const CostsPlugin = {
+  async setup(db) {
+    this.client = db.client;
+    this.map = {
+      PutObjectCommand: "put",
+      GetObjectCommand: "get",
+      HeadObjectCommand: "get",
+      DeleteObjectCommand: "delete",
+      DeleteObjectsCommand: "delete",
+      ListObjectsV2Command: "list"
+    };
+    this.costs = {
+      total: 0,
+      prices: {
+        put: 5e-3 / 1e3,
+        copy: 5e-3 / 1e3,
+        list: 5e-3 / 1e3,
+        post: 5e-3 / 1e3,
+        get: 4e-4 / 1e3,
+        select: 4e-4 / 1e3,
+        delete: 4e-4 / 1e3
+      },
+      requests: {
+        total: 0,
+        put: 0,
+        post: 0,
+        copy: 0,
+        list: 0,
+        get: 0,
+        select: 0,
+        delete: 0
+      },
+      events: {
+        total: 0,
+        PutObjectCommand: 0,
+        GetObjectCommand: 0,
+        HeadObjectCommand: 0,
+        DeleteObjectCommand: 0,
+        DeleteObjectsCommand: 0,
+        ListObjectsV2Command: 0
+      }
+    };
+    this.client.costs = JSON.parse(JSON.stringify(this.costs));
+  },
+  async start() {
+    this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+  },
+  addRequest(name, method) {
+    this.costs.events[name]++;
+    this.costs.events.total++;
+    this.costs.requests.total++;
+    this.costs.requests[method]++;
+    this.costs.total += this.costs.prices[method];
+    this.client.costs.events[name]++;
+    this.client.costs.events.total++;
+    this.client.costs.requests.total++;
+    this.client.costs.requests[method]++;
+    this.client.costs.total += this.client.costs.prices[method];
+  }
+};
+
+class CachePlugin extends Plugin {
+  constructor(options = {}) {
+    super();
+    this.driver = options.driver;
+  }
+  async setup(database) {
+    this.database = database;
+    if (!this.driver) this.driver = new S3Cache({
+      keyPrefix: "cache",
+      client: database.client
+    });
+    this.installDatabaseProxy();
+    for (const resource of Object.values(database.resources)) {
+      this.installResourcesProxies(resource);
+    }
+  }
+  async start() {
+  }
+  async stop() {
+  }
+  installDatabaseProxy() {
+    const db = this;
+    const installResourcesProxies = this.installResourcesProxies.bind(this);
+    this.database._createResource = this.database.createResource;
+    this.database.createResource = async function(...args) {
+      const resource = await this._createResource(...args);
+      console.log(db.driver);
+      installResourcesProxies(resource);
+      return resource;
+    };
+  }
+  installResourcesProxies(resource) {
+    resource.cache = this.driver;
+    let keyPrefix = `resource=${resource.name}`;
+    if (this.driver.keyPrefix) this.driver.keyPrefix = join(this.driver.keyPrefix, keyPrefix);
+    resource.cacheKeyFor = async function({
+      params = {},
+      action = "list"
+    }) {
+      let key = Object.keys(params).sort().map((x) => `${x}:${params[x]}`).join("|") || "empty";
+      key = await sha256(key);
+      key = join(keyPrefix, `action=${action}`, `${key}.json.gz`);
+      return key;
+    };
+    resource._count = resource.count;
+    resource._listIds = resource.listIds;
+    resource._getMany = resource.getMany;
+    resource._getAll = resource.getAll;
+    resource._page = resource.page;
+    resource.count = async function() {
+      const key = await this.cacheKeyFor({ action: "count" });
+      try {
+        const cached = await this.cache.get(key);
+        if (cached) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const data = await resource._count();
+      await this.cache.set(key, data);
+      return data;
+    };
+    resource.listIds = async function() {
+      const key = await this.cacheKeyFor({ action: "listIds" });
+      try {
+        const cached = await this.cache.get(key);
+        if (cached) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const data = await resource._listIds();
+      await this.cache.set(key, data);
+      return data;
+    };
+    resource.getMany = async function(ids) {
+      const key = await this.cacheKeyFor({
+        action: "getMany",
+        params: { ids }
+      });
+      try {
+        const cached = await this.cache.get(key);
+        if (cached) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const data = await resource._getMany(ids);
+      await this.cache.set(key, data);
+      return data;
+    };
+    resource.getAll = async function() {
+      const key = await this.cacheKeyFor({ action: "getAll" });
+      try {
+        const cached = await this.cache.get(key);
+        if (cached) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const data = await resource._getAll();
+      await this.cache.set(key, data);
+      return data;
+    };
+    resource.page = async function({ offset, size }) {
+      const key = await this.cacheKeyFor({
+        action: "page",
+        params: { offset, size }
+      });
+      try {
+        const cached = await this.cache.get(key);
+        if (cached) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const data = await resource._page({ offset, size });
+      await this.cache.set(key, data);
+      return data;
+    };
+    resource._insert = resource.insert;
+    resource._update = resource.update;
+    resource._delete = resource.delete;
+    resource._deleteMany = resource.deleteMany;
+    resource.insert = async function(...args) {
+      const data = await resource._insert(...args);
+      await this.cache.clear(keyPrefix);
+      return data;
+    };
+    resource.update = async function(...args) {
+      const data = await resource._update(...args);
+      await this.cache.clear(keyPrefix);
+      return data;
+    };
+    resource.delete = async function(...args) {
+      const data = await resource._delete(...args);
+      await this.cache.clear(keyPrefix);
+      return data;
+    };
+    resource.deleteMany = async function(...args) {
+      const data = await resource._deleteMany(...args);
+      await this.cache.clear(keyPrefix);
+      return data;
+    };
+  }
+}
+
+var _polyfillNode_crypto = /*#__PURE__*/Object.freeze({
+  __proto__: null
+});
+
+export { BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, Database, ErrorMap, InvalidResourceItem, MemoryCache, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, Plugin, PluginObject, ResourceIdsPageReader, ResourceIdsReader, ResourceReader, ResourceWriter, S3Cache, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, UnknownError, Validator, ValidatorManager, decrypt, encrypt, sha256, streamToString };
