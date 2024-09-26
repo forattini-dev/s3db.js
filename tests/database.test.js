@@ -1,4 +1,5 @@
 import { join } from 'path';
+
 import Database from '../src/database.class';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-' + Date.now())
@@ -14,7 +15,6 @@ describe('Database', () => {
 
   beforeAll(async () => {
     await s3db.connect()
-    // console.log(s3db)
   })
 
   test('create resource', async () => {

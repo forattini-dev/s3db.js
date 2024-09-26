@@ -1,22 +1,16 @@
-import path from "path";
+import { join } from "path";
 import { nanoid } from "nanoid";
 import EventEmitter from "events";
-import { flatten, unflatten } from "flat";
 import { PromisePool } from "@supercharge/promise-pool";
 
-import { 
-  chunk, 
+import {
+  chunk,
   merge,
-  sortBy, 
-  isArray,
-  cloneDeep, 
+  cloneDeep,
 } from "lodash-es";
 
-import { decrypt } from "./crypto"
 import Schema from "./schema.class";
-import { Validator } from "./validator.class";
 import { InvalidResourceItem } from "./errors";
-import S3ResourceCache from "./cache/s3-resource-cache.class";
 import { ResourceReader, ResourceWriter } from "./stream/index"
 
 class Resource extends EventEmitter {
@@ -30,7 +24,7 @@ class Resource extends EventEmitter {
     observers = [],
   }) {
     super();
-    
+
     this.name = name;
     this.client = client;
     this.options = options;
@@ -43,14 +37,6 @@ class Resource extends EventEmitter {
       attributes,
       passphrase,
     })
-
-    if (this.options.cache === true) {
-      this.s3Cache = new S3ResourceCache({
-        resource: this,
-        compressData: true,
-        serializer: "json",
-      });
-    }
   }
 
   export() {
@@ -72,13 +58,14 @@ class Resource extends EventEmitter {
       result.errors = check;
     }
 
-    return merge({}, result, { data });
+    result.data = data;
+    return result
   }
 
   async insert({ id, ...attributes }) {
-    const { 
+    const {
       errors,
-      isValid, 
+      isValid,
       data: validated,
     } = await this.validate(attributes);
 
@@ -96,14 +83,10 @@ class Resource extends EventEmitter {
 
     await this.client.putObject({
       metadata,
-      key: path.join(`resource=${this.name}`, `id=${id}`),
+      key: join(`resource=${this.name}`, `id=${id}`),
     });
 
     const final = merge({ id }, validated);
-
-    if (this.s3Cache) {
-      await this.s3Cache.purge();
-    }
 
     this.emit("insert", final);
     return final;
@@ -111,7 +94,7 @@ class Resource extends EventEmitter {
 
   async get(id) {
     const request = await this.client.headObject(
-      path.join(`resource=${this.name}`, `id=${id}`)
+      join(`resource=${this.name}`, `id=${id}`)
     );
 
     let data = await this.schema.unmapper(request.Metadata);
@@ -142,43 +125,29 @@ class Resource extends EventEmitter {
     }
 
     await this.client.putObject({
-      key: path.join(`resource=${this.name}`, `id=${id}`),
+      key: join(`resource=${this.name}`, `id=${id}`),
       body: "",
-      metadata: this.schema.mapper(validated),
+      metadata: await this.schema.mapper(validated),
     });
 
-    const final = {
-      id,
-      ...(unflatten(validated)),
-    };
+    validated.id = id;
 
-    if (this.s3Cache) await this.s3Cache.purge();
-
-    this.emit("update", attributes, final);
-    return final;
+    this.emit("update", attributes, validated);
+    return validated;
   }
 
   async delete(id) {
-    const key = path.join(`resource=${this.name}`, `id=${id}`);
+    const key = join(`resource=${this.name}`, `id=${id}`);
     const response = await this.client.deleteObject(key);
-
-    if (this.s3Cache) await this.s3Cache.purge();
 
     this.emit("delete", id);
     return response;
   }
 
   async count() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "count" });
-      if (cached) return cached;
-    }
-
     const count = await this.client.count({
       prefix: `resource=${this.name}`,
     });
-
-    if (this.s3Cache) await this.s3Cache.put({ action: "count", data: count });
 
     this.emit("count", count);
     return count;
@@ -202,7 +171,7 @@ class Resource extends EventEmitter {
 
   async deleteMany(ids) {
     const packages = chunk(
-      ids.map((x) => path.join(`resource=${this.name}`, `id=${x}`)),
+      ids.map((x) => join(`resource=${this.name}`, `id=${x}`)),
       1000
     );
 
@@ -224,8 +193,6 @@ class Resource extends EventEmitter {
         return response;
       });
 
-    if (this.s3Cache) await this.s3Cache.purge();
-
     this.emit("deleteMany", ids.length);
     return results;
   }
@@ -237,34 +204,17 @@ class Resource extends EventEmitter {
   }
 
   async listIds() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "listIds" });
-      if (cached) return cached;
-    }
-
     const keys = await this.client.getAllKeys({
       prefix: `resource=${this.name}`,
     });
 
     const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
 
-    if (this.s3Cache) {
-      await this.s3Cache.put({ action: "listIds", data: ids });
-    }
-
     this.emit("listIds", ids.length);
     return ids;
   }
 
   async getMany(ids) {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({
-        action: "getMany",
-        params: { ids: ids.sort() },
-      });
-      if (cached) return cached;
-    }
-
     const { results } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
       .process(async (id) => {
@@ -274,37 +224,13 @@ class Resource extends EventEmitter {
         return data;
       });
 
-    if (this.s3Cache)
-      await this.s3Cache.put({
-        action: "getMany",
-        params: { ids: ids.sort() },
-        data: results,
-      });
-
     this.emit("getMany", ids.length);
 
     return results;
   }
 
   async getAll() {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "getAll" });
-      if (cached) return cached;
-    }
-
-    let ids = [];
-    let gotFromCache = false;
-
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({ action: "listIds" });
-      if (cached) {
-        ids = cached;
-        gotFromCache = true;
-      }
-    }
-
-    if (!gotFromCache) ids = await this.listIds();
-
+    let ids = await this.listIds();
     if (ids.length === 0) return [];
 
     const { results } = await PromisePool.for(ids)
@@ -314,40 +240,19 @@ class Resource extends EventEmitter {
         return data;
       });
 
-    if (this.s3Cache && results.length > 0) {
-      await this.s3Cache.put({ action: "getAll", data: results });
-    }
-
     this.emit("getAll", results.length);
-
     return results;
   }
 
   async page({ offset = 0, size = 100 }) {
-    if (this.s3Cache) {
-      const cached = await this.s3Cache.get({
-        action: "page",
-        params: { offset, size },
-      });
-      if (cached) return cached;
-    }
-
     const keys = await this.client.getKeysPage({
+      offset,
       amount: size,
-      offset: offset,
       prefix: `resource=${this.name}`,
     });
 
     const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
-
     const data = await this.getMany(ids);
-
-    if (this.s3Cache)
-      await this.s3Cache.put({
-        action: "page",
-        params: { offset, size },
-        data,
-      });
 
     return data;
   }

@@ -1,9 +1,8 @@
-import { isEmpty } from "lodash-es";
+import { isEmpty, isFunction } from "lodash-es";
 import EventEmitter from "events";
 
 import Client from "./client.class.js";
 import Resource from "./resource.class.js";
-import { Validator } from "./validator.class.js";
 import { streamToString } from "./stream/index.js";
 
 export class Database extends EventEmitter {
@@ -19,8 +18,6 @@ export class Database extends EventEmitter {
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
 
-    this.validatorInstance = new Validator({ passphrase: this.passphrase });
-
     this.client = options.client || new Client({
       verbose: this.verbose,
       parallelism: this.parallelism,
@@ -29,11 +26,11 @@ export class Database extends EventEmitter {
 
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
-
-    this.startPlugins();
   }
-
+  
   async connect() {
+    await this.startPlugins();
+
     let metadata = null;
 
     if (await this.client.exists(`s3db.json`)) {
@@ -55,7 +52,6 @@ export class Database extends EventEmitter {
         attributes: definition.schema,
         parallelism: this.parallelism,
         passphrase: this.passphrase,
-        validatorInstance: this.validatorInstance,
         observers: [this],
       });
     }
@@ -64,16 +60,20 @@ export class Database extends EventEmitter {
   }
 
   async startPlugins() {
-    if (this.plugins && !isEmpty(this.plugins)) {
-      const setupProms = this.plugins.map(async (plugin) => {
-        if (plugin.beforeSetup) await plugin.beforeSetup()
-        await plugin.setup(this)
-        if (plugin.afterSetup) await plugin.afterSetup()
-      });
+    const db = this
 
+    if (!isEmpty(this.plugins)) {
+      const plugins = this.plugins.map(p => isFunction(p) ? new p(this) : p)
+
+      const setupProms = plugins.map(async (plugin) => {
+        if (plugin.beforeSetup) await plugin.beforeSetup()
+          await plugin.setup(db)
+        if (plugin.afterSetup) await plugin.afterSetup()
+        });
+      
       await Promise.all(setupProms);
 
-      const startProms = this.plugins.map(async (plugin) => {
+      const startProms = plugins.map(async (plugin) => {
         if (plugin.beforeStart) await plugin.beforeStart()
         await plugin.start()
         if (plugin.afterStart) await plugin.afterStart()
@@ -126,7 +126,6 @@ export class Database extends EventEmitter {
       attributes,
       observers: [this],
       client: this.client,
-      validatorInstance: this.validatorInstance,
 
       options: {
         autoDecrypt: true,
@@ -152,5 +151,5 @@ export class Database extends EventEmitter {
   }
 }
 
-export class S3db extends Database {}
+export class S3db extends Database { }
 export default S3db;
