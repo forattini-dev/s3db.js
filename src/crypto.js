@@ -8,6 +8,20 @@ async function dynamicCrypto() {
   }
 }
 
+export async function sha256(message) {
+  const cryptoLib = await dynamicCrypto();
+  
+  const encoder = new TextEncoder();
+  const data = encoder.encode(message);
+  const hashBuffer = await cryptoLib.subtle.digest('SHA-256', data);
+  
+  // Convert buffer to hex string
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  return hashHex;
+}
+
 export async function encrypt(content, passphrase) {
   const cryptoLib = await dynamicCrypto();
 

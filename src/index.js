@@ -7,8 +7,8 @@ export * from './errors'
 export * from './validator.class'
 
 // directories
+export * from './cache'
 export * from './plugins'
-// export * from './cache/s3-cache.class'
 export * from './stream'
 
 // default

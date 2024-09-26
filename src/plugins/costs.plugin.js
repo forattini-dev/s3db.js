@@ -1,4 +1,4 @@
-export default {
+export const CostsPlugin = {
   async setup (db) {
     this.client = db.client
 
@@ -64,3 +64,5 @@ export default {
     this.client.costs.total += this.client.costs.prices[method];
   },
 }
+
+export default CostsPlugin

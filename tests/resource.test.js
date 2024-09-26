@@ -1,7 +1,9 @@
+import { join } from 'path';
+
 import Client from '../src/client.class';
 import Resource from '../src/resource.class';
 
-const currentDate = new Date().toISOString().substring(0, 10)
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-' + Date.now())
 
 describe('Resource', () => {
   const client = new Client({
@@ -9,7 +11,7 @@ describe('Resource', () => {
     connectionString: process.env.BUCKET_CONNECTION_STRING
       .replace('USER', process.env.MINIO_USER)
       .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/s3db/tests/${currentDate}/resources`
+      + `/${testPrefix}`
   })
 
   const resource = new Resource({
