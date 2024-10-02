@@ -1,10 +1,14 @@
 import {
   // classes
   S3db,
+  Cache,
   Client,
   Plugin,
+  S3Cache,
   Database,
   Validator,
+  CachePlugin,
+  MemoryCache,
   ConnectionString,
   
   // objects
@@ -22,18 +26,22 @@ import {
   NoSuchKey,
   NoSuchBucket,
   UnknownError,
-  InvalidResourceItem,
   MissingMetadata,
+  InvalidResourceItem,
 } from "../dist/s3db.es.js"
 
 describe("Bundle package", () => {
   [
     // classes
     S3db,
+    Cache,
     Client,
     Plugin,
+    S3Cache,
     Database,
     Validator,
+    CachePlugin,
+    MemoryCache,
     ConnectionString,
     
     // objects
@@ -53,9 +61,9 @@ describe("Bundle package", () => {
     UnknownError,
     MissingMetadata,
     InvalidResourceItem,
-  ].forEach((name) => {
-    it(`should export ${name.name}`, () => {
-      expect(name).toBeDefined()
+  ].forEach((target) => {
+    it(`should export ${target.name || target.constructor.name}`, () => {
+      expect(target).toBeDefined()
     })
   })
 })
