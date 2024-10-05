@@ -1802,8 +1802,8 @@ class Database extends EventEmitter {
     const file = { ...metadata };
     if (lodashEs.isEmpty(file.resources)) return file;
     for (const [name, structure] of Object.entries(file.resources)) {
-      for (const [attr, value] of Object.entries(structure.schema)) {
-        file.resources[name].schema[attr] = JSON.parse(value);
+      for (const [attr, value] of Object.entries(structure.attributes)) {
+        file.resources[name].attributes[attr] = JSON.parse(value);
       }
     }
     return file;
