@@ -839,18 +839,18 @@ ${JSON.stringify(validation, null, 2)}`
       this.client = AwsS3Client || this.createClient();
     }
     createClient() {
-      let options = {
+      let options2 = {
         region: this.config.region,
         endpoint: this.config.endpoint
       };
-      if (this.config.forcePathStyle) options.forcePathStyle = true;
+      if (this.config.forcePathStyle) options2.forcePathStyle = true;
       if (this.config.accessKeyId) {
-        options.credentials = {
+        options2.credentials = {
           accessKeyId: this.config.accessKeyId,
           secretAccessKey: this.config.secretAccessKey
         };
       }
-      return new clientS3.S3Client(options);
+      return new clientS3.S3Client(options2);
     }
     async sendCommand(command) {
       this.emit("command.request", command.constructor.name, command.input);
@@ -885,7 +885,7 @@ ${JSON.stringify(validation, null, 2)}`
       return error;
     }
     async putObject({ key: key2, metadata, contentType, body, contentEncoding }) {
-      const options = {
+      const options2 = {
         Bucket: this.config.bucket,
         Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2,
         Metadata: { ...metadata },
@@ -894,45 +894,63 @@ ${JSON.stringify(validation, null, 2)}`
         ContentEncoding: contentEncoding
       };
       try {
-        const response = await this.sendCommand(new clientS3.PutObjectCommand(options));
-        this.emit("putObject", response, options);
+        const response = await this.sendCommand(new clientS3.PutObjectCommand(options2));
+        this.emit("putObject", response, options2);
         return response;
       } catch (error) {
         throw this.errorProxy(error, {
           key: key2,
-          command: options
+          command: options2
         });
       }
     }
     async getObject(key2) {
-      const options = {
+      const options2 = {
         Bucket: this.config.bucket,
         Key: path.join(this.config.keyPrefix, key2)
       };
       try {
-        const response = await this.sendCommand(new clientS3.GetObjectCommand(options));
-        this.emit("getObject", response, options);
+        const response = await this.sendCommand(new clientS3.GetObjectCommand(options2));
+        this.emit("getObject", response, options2);
         return response;
       } catch (error) {
         throw this.errorProxy(error, {
           key: key2,
-          command: options
+          command: options2
         });
       }
     }
     async headObject(key2) {
-      const options = {
+      const options2 = {
         Bucket: this.config.bucket,
         Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2
       };
       try {
-        const response = await this.client.send(new clientS3.HeadObjectCommand(options));
-        this.emit("headObject", response, options);
+        const response = await this.client.send(new clientS3.HeadObjectCommand(options2));
+        this.emit("headObject", response, options2);
         return response;
       } catch (error) {
         throw this.errorProxy(error, {
           key: key2,
-          command: options
+          command: options2
+        });
+      }
+    }
+    async copyObject({ from, to }) {
+      const options2 = {
+        Bucket: this.config.bucket,
+        Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
+        CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
+      };
+      try {
+        const response = await this.client.send(new clientS3.CopyObjectCommand(options2));
+        this.emit("copyObject", response, options2);
+        return response;
+      } catch (error) {
+        throw this.errorProxy(error, {
+          from,
+          to,
+          command: options2
         });
       }
     }
@@ -947,25 +965,25 @@ ${JSON.stringify(validation, null, 2)}`
       }
     }
     async deleteObject(key2) {
-      const options = {
+      const options2 = {
         Bucket: this.config.bucket,
         Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2
       };
       try {
-        const response = await this.sendCommand(new clientS3.DeleteObjectCommand(options));
-        this.emit("deleteObject", response, options);
+        const response = await this.sendCommand(new clientS3.DeleteObjectCommand(options2));
+        this.emit("deleteObject", response, options2);
         return response;
       } catch (error) {
         throw this.errorProxy(error, {
           key: key2,
-          command: options
+          command: options2
         });
       }
     }
     async deleteObjects(keys) {
       const packages = lodashEs.chunk(keys, 1e3);
       const { results, errors } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
-        const options = {
+        const options2 = {
           Bucket: this.config.bucket,
           Delete: {
             Objects: keys2.map((key2) => ({
@@ -974,12 +992,12 @@ ${JSON.stringify(validation, null, 2)}`
           }
         };
         try {
-          const response = await this.sendCommand(new clientS3.DeleteObjectsCommand(options));
+          const response = await this.sendCommand(new clientS3.DeleteObjectsCommand(options2));
           return response;
         } catch (error) {
           throw this.errorProxy(error, {
             key,
-            command: options
+            command: options2
           });
         }
       });
@@ -990,23 +1008,42 @@ ${JSON.stringify(validation, null, 2)}`
       this.emit("deleteObjects", report, keys);
       return report;
     }
+    async deleteAll({ prefix } = {}) {
+      const keys = await this.getAllKeys({ prefix });
+      const report = await this.deleteObjects(keys);
+      this.emit("deleteAll", { prefix, report });
+      return report;
+    }
+    async moveObject({ from, to }) {
+      try {
+        await this.copyObject({ from, to });
+        await this.deleteObject(from);
+        return true;
+      } catch (error) {
+        throw this.errorProxy(error, {
+          from,
+          to,
+          command: options
+        });
+      }
+    }
     async listObjects({
       prefix,
       maxKeys = 1e3,
       continuationToken
     } = {}) {
-      const options = {
+      const options2 = {
         Bucket: this.config.bucket,
         MaxKeys: maxKeys,
         ContinuationToken: continuationToken,
         Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
       };
       try {
-        const response = await this.sendCommand(new clientS3.ListObjectsV2Command(options));
-        this.emit("listObjects", response, options);
+        const response = await this.sendCommand(new clientS3.ListObjectsV2Command(options2));
+        this.emit("listObjects", response, options2);
         return response;
       } catch (error) {
-        throw this.errorProxy(error, { command: options });
+        throw this.errorProxy(error, { command: options2 });
       }
     }
     async count({ prefix } = {}) {
@@ -1014,11 +1051,11 @@ ${JSON.stringify(validation, null, 2)}`
       let truncated = true;
       let continuationToken;
       while (truncated) {
-        const options = {
+        const options2 = {
           prefix,
           continuationToken
         };
-        const response = await this.listObjects(options);
+        const response = await this.listObjects(options2);
         count += response.KeyCount || 0;
         truncated = response.IsTruncated || false;
         continuationToken = response.NextContinuationToken;
@@ -1031,11 +1068,11 @@ ${JSON.stringify(validation, null, 2)}`
       let truncated = true;
       let continuationToken;
       while (truncated) {
-        const options = {
+        const options2 = {
           prefix,
           continuationToken
         };
-        const response = await this.listObjects(options);
+        const response = await this.listObjects(options2);
         if (response.Contents) {
           keys = keys.concat(response.Contents.map((x) => x.Key));
         }
@@ -1059,12 +1096,12 @@ ${JSON.stringify(validation, null, 2)}`
       let skipped = 0;
       while (truncated) {
         let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
-        const options = {
+        const options2 = {
           prefix,
           maxKeys,
           continuationToken
         };
-        const res = await this.listObjects(options);
+        const res = await this.listObjects(options2);
         if (res.Contents) {
           skipped += res.Contents.length;
         }
@@ -1093,11 +1130,11 @@ ${JSON.stringify(validation, null, 2)}`
         });
       }
       while (truncated) {
-        const options = {
+        const options2 = {
           prefix,
           continuationToken
         };
-        const res = await this.listObjects(options);
+        const res = await this.listObjects(options2);
         if (res.Contents) {
           keys = keys.concat(res.Contents.map((x) => x.Key));
         }
@@ -1113,6 +1150,30 @@ ${JSON.stringify(validation, null, 2)}`
       }
       this.emit("getKeysPage", keys, params);
       return keys;
+    }
+    async moveAllObjects({ prefixFrom, prefixTo }) {
+      const keys = await this.getAllKeys({ prefix: prefixFrom });
+      const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key2) => {
+        const to = key2.replace(prefixFrom, prefixTo);
+        try {
+          await this.moveObject({
+            from: key2,
+            to
+          });
+          return to;
+        } catch (error) {
+          throw this.errorProxy(error, {
+            from: key2,
+            to
+          });
+        }
+      });
+      this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+      if (errors.length > 0) {
+        console.log({ errors });
+        throw new Error("Some objects could not be moved");
+      }
+      return results;
     }
   }
 
@@ -12859,7 +12920,6 @@ ${JSON.stringify(validation, null, 2)}`
       const keys = await this.client.getAllKeys({
         prefix: join(this.keyPrefix, dir)
       });
-      console.log({ keys });
       await this.client.deleteObjects(keys);
     }
   }
@@ -12982,12 +13042,10 @@ ${JSON.stringify(validation, null, 2)}`
     async stop() {
     }
     installDatabaseProxy() {
-      const db = this;
       const installResourcesProxies = this.installResourcesProxies.bind(this);
       this.database._createResource = this.database.createResource;
       this.database.createResource = async function(...args) {
         const resource = await this._createResource(...args);
-        console.log(db.driver);
         installResourcesProxies(resource);
         return resource;
       };
