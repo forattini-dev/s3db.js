@@ -35,7 +35,6 @@ export class CachePlugin extends Plugin {
     this.database._createResource = this.database.createResource
     this.database.createResource = async function (...args) {
       const resource = await this._createResource(...args);
-      console.log(db.driver)
       installResourcesProxies(resource);
       return resource
     }

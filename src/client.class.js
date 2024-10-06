@@ -8,6 +8,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  CopyObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
@@ -151,7 +152,26 @@ export class Client extends EventEmitter {
         command: options,
       });
     }
+  }
 
+  async copyObject({ from, to }) {
+    const options = {
+      Bucket: this.config.bucket,
+      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
+      CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from),
+    };
+
+    try {
+      const response = await this.client.send(new CopyObjectCommand(options));
+      this.emit("copyObject", response, options);
+      return response;
+    } catch (error) {
+      throw this.errorProxy(error, {
+        from,
+        to,
+        command: options,
+      });
+    }
   }
 
   async exists(key) {
@@ -161,7 +181,7 @@ export class Client extends EventEmitter {
     } catch (err) {
       if (err.name === "NoSuchKey") return false;
       else if (err.name === "NotFound") return false;
-      
+
       throw err
     }
   }
@@ -221,6 +241,28 @@ export class Client extends EventEmitter {
     return report;
   }
 
+  async deleteAll({ prefix } = {}) {
+    const keys = await this.getAllKeys({ prefix });
+    const report = await this.deleteObjects(keys);
+
+    this.emit("deleteAll", { prefix, report });
+    return report;
+  }
+
+  async moveObject({ from, to }) {
+    try {
+      await this.copyObject({ from, to });
+      await this.deleteObject(from);
+      return true
+    } catch (error) {
+      throw this.errorProxy(error, {
+        from,
+        to,
+        command: options,
+      });
+    }
+  }
+
   async listObjects({
     prefix,
     maxKeys = 1000,
@@ -256,12 +298,12 @@ export class Client extends EventEmitter {
       };
 
       const response = await this.listObjects(options);
-      
+
       count += response.KeyCount || 0;
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
-    
+
     this.emit("count", count, { prefix });
     return count;
   }
@@ -388,6 +430,39 @@ export class Client extends EventEmitter {
 
     this.emit("getKeysPage", keys, params);
     return keys;
+  }
+
+  async moveAllObjects({ prefixFrom, prefixTo }) {
+    const keys = await this.getAllKeys({ prefix: prefixFrom });
+
+    const { results, errors } = await PromisePool
+      .for(keys)
+      .withConcurrency(this.parallelism)
+      .process(async (key) => {
+        const to = key.replace(prefixFrom, prefixTo)
+
+        try {
+          await this.moveObject({ 
+            from: key, 
+            to,
+          });
+          return to;
+        } catch (error) {
+          throw this.errorProxy(error, {
+            from: key,
+            to,
+          });
+        }
+      });
+
+    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+
+    if (errors.length > 0) {
+      console.log({ errors })
+      throw new Error("Some objects could not be moved");
+    }
+
+    return results;
   }
 }
 

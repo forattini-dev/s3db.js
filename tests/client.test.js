@@ -1,9 +1,10 @@
+import { join } from 'path';
 import { jest as otherJest } from '@jest/globals'
 
 import Client from '../src/client.class';
 import { streamToString } from '../src/stream';
 
-const currentDate = new Date().toISOString().substring(0, 10)
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'client-' + Date.now())
 
 describe('Client', () => {
   let client
@@ -14,7 +15,7 @@ describe('Client', () => {
       connectionString: process.env.BUCKET_CONNECTION_STRING
         .replace('USER', process.env.MINIO_USER)
         .replace('PASSWORD', process.env.MINIO_PASSWORD)
-        + `/s3db/tests/${currentDate}/client`
+      + `/${testPrefix}`
     });
   })
 
@@ -119,5 +120,48 @@ describe('Client', () => {
     const list3 = await client.listObjects();
     expect(list3).toBeDefined();
     expect(list3.KeyCount).toBe(0);
+
+    const [put4, put5] = await Promise.all([
+      client.putObject({
+        key: 'dir=a/test1.txt',
+        metadata: { A: '4' },
+        ...common,
+      }),
+      client.putObject({
+        key: 'dir=a/test2.txt',
+        metadata: { A: '5' },
+        ...common,
+      }),
+    ])
+
+    const cp1 = await client.copyObject({
+      from: 'dir=a/test1.txt', 
+      to: 'dir=a/test3.txt'
+    });
+    
+    const exists1 = await client.exists('dir=a/test1.txt');
+    const exists2 = await client.exists('dir=a/test3.txt');
+    expect(cp1).toBeDefined();
+    expect(exists1).toBe(true);
+    expect(exists2).toBe(true);
+
+    const mov1 = await client.moveObject({
+      from: 'dir=a/test1.txt', 
+      to: 'dib=b/test1.txt'
+    });
+    expect(mov1).toBe(true);
+    const exists3 = await client.exists('dir=a/test1.txt');
+    const exists4 = await client.exists('dib=b/test1.txt');
+    expect(exists3).toBe(false);
+    expect(exists4).toBe(true);
+
+    await client.moveAllObjects({
+      prefixFrom: 'dir=a',
+      prefixTo: 'dib=b'
+    })
+    const exists5 = await client.exists('dir=a/test2.txt');
+    const exists6 = await client.exists('dib=b/test2.txt');
+    expect(exists5).toBe(false);
+    expect(exists6).toBe(true);
   });
 });
