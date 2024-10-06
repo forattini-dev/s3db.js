@@ -54,8 +54,6 @@ export class S3Cache extends Cache {
       prefix: join(this.keyPrefix, dir),
     });
 
-    console.log({keys})
-
     await this.client.deleteObjects(keys);
   }
 }
