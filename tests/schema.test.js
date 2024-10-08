@@ -97,9 +97,7 @@ describe(`map & unmap`, () => {
         password: 'secret',
       }
     },
-    options: {
-
-    }
+    options: {}
   })
 
   test('simple', async () => {
