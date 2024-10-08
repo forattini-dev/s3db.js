@@ -1358,7 +1358,7 @@ ${JSON.stringify(validation, null, 2)}`
         this.reversedMap = lodashEs.invert(map);
       } else {
         const flatAttrs = flat.flatten(this.attributes, { safe: true });
-        this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.includes("$$type")) };
+        this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.startsWith("$$")) };
         this.map = lodashEs.invert(this.reversedMap);
       }
     }

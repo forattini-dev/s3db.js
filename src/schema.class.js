@@ -56,7 +56,7 @@ export class Schema {
     }
     else {
       const flatAttrs = flatten(this.attributes, { safe: true });
-      this.reversedMap = { ...Object.keys(flatAttrs).filter(k => !k.includes('$$type')) }
+      this.reversedMap = { ...Object.keys(flatAttrs).filter(k => !k.startsWith('$$')) }
       this.map = invert(this.reversedMap);
     }
   }
