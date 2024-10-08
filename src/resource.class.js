@@ -108,6 +108,17 @@ class Resource extends EventEmitter {
     return data;
   }
 
+  async exists(id) {
+    try {
+      await this.client.headObject(
+        join(`resource=${this.name}`, `id=${id}`)
+      );
+      return true
+    } catch (error) {
+      return false
+    }
+  }
+
   async update(id, attributes) {
     const live = await this.get(id);
     const attrs = merge(live, attributes);

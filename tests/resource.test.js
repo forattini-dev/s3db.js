@@ -38,6 +38,11 @@ describe('Resource', () => {
     expect(in1.animal).toBe('dog')
     expect(in1.name).toBe('beagle')
 
+    const ex1 = await resource.exists(in1.id)
+    expect(ex1).toBe(true)
+    const ex2 = await resource.exists(in1.id + '$$')
+    expect(ex2).toBe(false)
+
     const up1 = await resource.update(in1.id, { name: 'bulldog' })
 
     expect(up1).toBeDefined()

@@ -1358,7 +1358,7 @@ ${JSON.stringify(validation, null, 2)}`
         this.reversedMap = lodashEs.invert(map);
       } else {
         const flatAttrs = flat.flatten(this.attributes, { safe: true });
-        this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.startsWith("$$")) };
+        this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.includes("$$")) };
         this.map = lodashEs.invert(this.reversedMap);
       }
     }
@@ -1670,6 +1670,16 @@ ${JSON.stringify(validation, null, 2)}`
       if (request.Expiration) data._expiresAt = request.Expiration;
       this.emit("get", data);
       return data;
+    }
+    async exists(id) {
+      try {
+        await this.client.headObject(
+          join(`resource=${this.name}`, `id=${id}`)
+        );
+        return true;
+      } catch (error) {
+        return false;
+      }
     }
     async update(id, attributes) {
       const live = await this.get(id);
