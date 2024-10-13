@@ -1329,9 +1329,9 @@ ${JSON.stringify(validation, null, 2)}`
     toString: (value) => String(value),
     fromArray: (value, { separator }) => (value || []).join(separator),
     toArray: (value, { separator }) => (value || "").split(separator),
-    toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
     toJSON: (value) => JSON.stringify(value),
-    fromJSON: (value) => JSON.parse(value)
+    fromJSON: (value) => JSON.parse(value),
+    toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value
   };
   class Schema {
     constructor(args) {
@@ -1400,8 +1400,8 @@ ${JSON.stringify(validation, null, 2)}`
             this.addHook("afterUnmap", name, "toNumber");
           }
           if (definition.includes("boolean")) {
-            this.addHook("beforeMap", name, "toJson");
-            this.addHook("afterUnmap", name, "fromJson");
+            this.addHook("beforeMap", name, "toJSON");
+            this.addHook("afterUnmap", name, "fromJSON");
           }
         }
       }
