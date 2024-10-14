@@ -1181,7 +1181,7 @@ ${JSON.stringify(validation, null, 2)}`
     let lib;
     if (process) {
       try {
-        const { webcrypto } = await Promise.resolve().then(function () { return _polyfillNode_crypto; });
+        const { webcrypto } = await import('crypto');
         lib = webcrypto;
       } catch (error) {
         throw new Error("Crypto API not available");
@@ -13178,10 +13178,6 @@ ${JSON.stringify(validation, null, 2)}`
       };
     }
   }
-
-  var _polyfillNode_crypto = /*#__PURE__*/Object.freeze({
-    __proto__: null
-  });
 
   exports.BaseError = BaseError;
   exports.Cache = Cache;

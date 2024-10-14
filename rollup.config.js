@@ -65,10 +65,10 @@ export default {
   ],
 
   external: [
+    'crypto',
     '@aws-sdk/client-s3',
     '@supercharge/promise-pool',
     'avsc',
-    'crypto-js',
     'fastest-validator',
     'flat',
     'lodash-es',
