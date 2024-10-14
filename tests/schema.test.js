@@ -75,8 +75,8 @@ describe('Auto generated hooks', () => {
   })
 
   test('boolean', async () => {
-    expect(sch.options.hooks.beforeMap.active).toEqual(['toJson'])
-    expect(sch.options.hooks.afterUnmap.active).toEqual(['fromJson'])
+    expect(sch.options.hooks.beforeMap.active).toEqual(['toJSON'])
+    expect(sch.options.hooks.afterUnmap.active).toEqual(['fromJSON'])
   })
 
   test('secret', async () => {

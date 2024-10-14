@@ -32,7 +32,7 @@ export class NoSuchBucket extends BaseError {
 
 export class NoSuchKey extends BaseError {
   constructor({ bucket, key, ...rest }) {
-    super({ ...rest, bucket, message: `Key does not exists [bucket:${bucket}/${key}]` });
+    super({ ...rest, bucket, message: `Key [${key}] does not exists [bucket:${bucket}/${key}]` });
     this.key = key;
   }
 }

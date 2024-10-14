@@ -1,24 +1,35 @@
 import { isObject } from 'lodash-es';
 
 async function dynamicCrypto() {
-  if (isObject(process)) {
-    return (await import('crypto')).webcrypto;
-  } else {
-    return window.crypto;
+  let lib
+
+  if (process) {
+    try {
+      const { webcrypto } = await import('crypto')
+      lib = webcrypto
+    } catch (error) {
+      throw new Error('Crypto API not available')      
+    }
+  } else if (window) {
+    lib = window.crypto;
   }
+
+  if (!lib) throw new Error('Could not load any crypto library');
+  
+  return lib
 }
 
 export async function sha256(message) {
   const cryptoLib = await dynamicCrypto();
-  
+
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
   const hashBuffer = await cryptoLib.subtle.digest('SHA-256', data);
-  
+
   // Convert buffer to hex string
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  
+
   return hashHex;
 }
 
