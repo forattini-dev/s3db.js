@@ -1186,7 +1186,7 @@ async function dynamicCrypto() {
   let lib;
   if (process) {
     try {
-      const { webcrypto } = await Promise.resolve().then(function () { return _polyfillNode_crypto; });
+      const { webcrypto } = await import('crypto');
       lib = webcrypto;
     } catch (error) {
       throw new Error("Crypto API not available");
@@ -13183,9 +13183,5 @@ class CachePlugin extends Plugin {
     };
   }
 }
-
-var _polyfillNode_crypto = /*#__PURE__*/Object.freeze({
-  __proto__: null
-});
 
 export { BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, Database, ErrorMap, InvalidResourceItem, MemoryCache, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, Plugin, PluginObject, ResourceIdsPageReader, ResourceIdsReader, ResourceReader, ResourceWriter, S3Cache, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, UnknownError, Validator, ValidatorManager, decrypt, encrypt, sha256, streamToString };
