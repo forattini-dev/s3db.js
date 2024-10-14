@@ -746,7 +746,7 @@ class NoSuchBucket extends BaseError {
 }
 class NoSuchKey extends BaseError {
   constructor({ bucket, key, ...rest }) {
-    super({ ...rest, bucket, message: `Key does not exists [bucket:${bucket}/${key}]` });
+    super({ ...rest, bucket, message: `Key [${key}] does not exists [bucket:${bucket}/${key}]` });
     this.key = key;
   }
 }
@@ -1185,11 +1185,19 @@ class Client extends EventEmitter {
 }
 
 async function dynamicCrypto() {
-  if (lodashEs.isObject(process)) {
-    return (await Promise.resolve().then(function () { return _polyfillNode_crypto; })).webcrypto;
-  } else {
-    return window.crypto;
+  let lib;
+  if (process) {
+    try {
+      const { webcrypto } = await Promise.resolve().then(function () { return _polyfillNode_crypto; });
+      lib = webcrypto;
+    } catch (error) {
+      throw new Error("Crypto API not available");
+    }
+  } else if (window) {
+    lib = window.crypto;
   }
+  if (!lib) throw new Error("Could not load any crypto library");
+  return lib;
 }
 async function sha256(message) {
   const cryptoLib = await dynamicCrypto();
