@@ -1347,7 +1347,7 @@ const SchemaActions = {
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
   toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
-  toBool: (value) => ["true", "1", "yes"].includes(value),
+  toBool: (value) => ["1", "true", "yes", true, "y"].includes(value),
   fromBool: (value) => value ? "1" : "0"
 };
 class Schema {
@@ -1457,7 +1457,7 @@ class Schema {
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
       for (const action of actions) {
         const value = lodashEs.get(resourceItem, attribute);
-        if (value) {
+        if (value !== void 0) {
           lodashEs.set(resourceItem, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator
