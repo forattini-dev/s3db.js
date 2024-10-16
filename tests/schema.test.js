@@ -130,8 +130,6 @@ describe(`map & unmap`, () => {
     expect(data1.user.password).toBe(password)
 
     const mapped = await sch.mapper(data1)
-    console.log(mapped,1)
-    console.log(sch.options.hooks)
     expect(Object.keys(mapped)).toEqual(['1', '2', '3', '4', '_v'])
 
     const unmapped = await sch.unmapper(mapped)
