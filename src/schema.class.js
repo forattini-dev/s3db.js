@@ -30,7 +30,7 @@ export const SchemaActions = {
 
   toNumber: (value) => isString(value) ? value.includes('.') ? parseFloat(value) : parseInt(value) : value,
 
-  toBool: (value) => ['true', '1', 'yes'].includes(value),
+  toBool: (value) => ['1', 'true', 'yes', true, 'y'].includes(value),
   fromBool: (value) => value ? '1' : '0',
 }
 
@@ -162,7 +162,7 @@ export class Schema {
       for (const action of actions) {
         const value = get(resourceItem, attribute)
 
-        if (value) {
+        if (value !== undefined) {
           set(resourceItem, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator,
