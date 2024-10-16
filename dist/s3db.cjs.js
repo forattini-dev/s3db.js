@@ -1347,8 +1347,8 @@ const SchemaActions = {
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
   toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
-  toBool: (value) => ["1", "true", "yes", true, "y"].includes(value),
-  fromBool: (value) => value ? "1" : "0"
+  toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
+  fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0"
 };
 class Schema {
   constructor(args) {
