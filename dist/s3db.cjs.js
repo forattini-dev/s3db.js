@@ -1346,7 +1346,9 @@ const SchemaActions = {
   toArray: (value, { separator }) => (value || "").split(separator),
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
-  toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value
+  toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
+  toBool: (value) => ["true", "1", "yes"].includes(value),
+  fromBool: (value) => value ? "1" : "0"
 };
 class Schema {
   constructor(args) {
@@ -1415,8 +1417,8 @@ class Schema {
           this.addHook("afterUnmap", name, "toNumber");
         }
         if (definition.includes("boolean")) {
-          this.addHook("beforeMap", name, "toJSON");
-          this.addHook("afterUnmap", name, "fromJSON");
+          this.addHook("beforeMap", name, "fromBool");
+          this.addHook("afterUnmap", name, "toBool");
         }
       }
     }

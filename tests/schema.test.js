@@ -75,8 +75,8 @@ describe('Auto generated hooks', () => {
   })
 
   test('boolean', async () => {
-    expect(sch.options.hooks.beforeMap.active).toEqual(['toJSON'])
-    expect(sch.options.hooks.afterUnmap.active).toEqual(['fromJSON'])
+    expect(sch.options.hooks.beforeMap.active).toEqual(['fromBool'])
+    expect(sch.options.hooks.afterUnmap.active).toEqual(['toBool'])
   })
 
   test('secret', async () => {
@@ -90,6 +90,7 @@ describe(`map & unmap`, () => {
     name: 'users',
     attributes: {
       level: 'number|optional',
+      active: 'boolean|optional|default:false',
       user: {
         $$type: 'object',
         name: 'string',
@@ -115,18 +116,22 @@ describe(`map & unmap`, () => {
 
     const check1 = await sch.validate(data1, { mutateOriginal: false })
     expect(check1).toBe(true)
+    expect(data1.active).toBeUndefined()
     expect(data1.user.name).toBe(name)
     expect(data1.user.email).toBe(email)
     expect(data1.user.password).toBe(password)
 
     const check2 = await sch.validate(data1, { mutateOriginal: true })
     expect(check2).toBe(true)
+    expect(data1.active).toBeDefined()
+    expect(data1.active).toBe(false)
     expect(data1.user.name).toBe(name.trim())
     expect(data1.user.email).toBe(email)
     expect(data1.user.password).toBe(password)
 
     const mapped = await sch.mapper(data1)
-    expect(Object.keys(mapped)).toEqual(['1', '2', '3', '_v'])
+    console.log(mapped)
+    expect(Object.keys(mapped)).toEqual(['1', '2', '3', '4', '_v'])
 
     const unmapped = await sch.unmapper(mapped)
     expect(unmapped).toEqual(data1)

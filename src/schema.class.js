@@ -16,14 +16,22 @@ import { ValidatorManager } from "./validator.class";
 
 export const SchemaActions = {
   trim: (value) => value.trim(),
+
   encrypt: (value, { passphrase }) => encrypt(value, passphrase),
   decrypt: (value, { passphrase }) => decrypt(value, passphrase),
+
   toString: (value) => String(value),
+
   fromArray: (value, { separator }) => (value || []).join(separator),
   toArray: (value, { separator }) => (value || "").split(separator),
+
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
+
   toNumber: (value) => isString(value) ? value.includes('.') ? parseFloat(value) : parseInt(value) : value,
+
+  toBool: (value) => ['true', '1', 'yes'].includes(value),
+  fromBool: (value) => value ? '1' : '0',
 }
 
 export class Schema {
@@ -106,8 +114,8 @@ export class Schema {
         }
 
         if (definition.includes("boolean")) {
-          this.addHook("beforeMap", name, "toJSON");
-          this.addHook("afterUnmap", name, "fromJSON");
+          this.addHook("beforeMap", name, "fromBool");
+          this.addHook("afterUnmap", name, "toBool");
         }
       }
     }
