@@ -1634,8 +1634,8 @@ class Resource extends EventEmitter {
       ...options
     };
     if (options.timestamps) {
-      attributes.createdAt = "string";
-      attributes.updatedAt = "string";
+      attributes.createdAt = "string|optional";
+      attributes.updatedAt = "string|optional";
     }
     this.schema = new Schema({
       name,
