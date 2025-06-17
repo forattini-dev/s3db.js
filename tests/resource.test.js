@@ -20,6 +20,9 @@ describe('Resource', () => {
     attributes: {
       animal: 'string',
       name: 'string',
+    },
+    options: {
+      timestamps: true,
     }
   })
 
@@ -37,6 +40,8 @@ describe('Resource', () => {
     expect(in1.id).toBeDefined()
     expect(in1.animal).toBe('dog')
     expect(in1.name).toBe('beagle')
+    expect(in1.createdAt).toBeDefined()
+    expect(in1.updatedAt).toBeDefined()
 
     const ex1 = await resource.exists(in1.id)
     expect(ex1).toBe(true)
@@ -49,12 +54,48 @@ describe('Resource', () => {
     expect(up1.id).toBe(in1.id)
     expect(up1.animal).toBe('dog')
     expect(up1.name).toBe('bulldog')
+    expect(up1.createdAt).toBeDefined()
+    expect(up1.updatedAt).toBeDefined()
+    expect(up1.createdAt).toBe(in1.createdAt)
+    expect(up1.updatedAt).not.toBe(in1.updatedAt)
+
+    const up2 = await resource.upsert({ 
+      id: in1.id, 
+      name: 'dalmata',
+    })
+
+    expect(up2).toBeDefined()
+    expect(up2.id).toBe(in1.id)
+    expect(up2.animal).toBe('dog')
+    expect(up2.name).toBe('dalmata')
+    expect(up2.createdAt).toBeDefined()
+    expect(up2.updatedAt).toBeDefined()
+    expect(up2.createdAt).toBe(in1.createdAt)
+    expect(up2.updatedAt).not.toBe(in1.updatedAt)
 
     const del1 = await resource.delete(in1.id)
     const count = await resource.count()
 
     expect(del1).toBeDefined()
     expect(count).toBe(0)
+
+    const in2 = await resource.upsert({
+      animal: 'cat',
+      name: 'persian',
+    })
+
+    expect(in2).toBeDefined()
+    expect(in2.id).toBeDefined()
+    expect(in2.animal).toBe('cat')
+    expect(in2.name).toBe('persian')
+    expect(in2.createdAt).toBeDefined()
+    expect(in2.updatedAt).toBeDefined()
+
+    const del2 = await resource.delete(in2.id)
+    const count2 = await resource.count()
+
+    expect(del2).toBeDefined()
+    expect(count2).toBe(0)
   });
 
   test('multiple elements complete example', async () => {

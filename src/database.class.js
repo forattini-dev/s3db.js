@@ -128,7 +128,6 @@ export class Database extends EventEmitter {
       client: this.client,
 
       options: {
-        autoDecrypt: true,
         cache: this.cache,
         ...options,
       },
