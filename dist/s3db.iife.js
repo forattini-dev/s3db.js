@@ -1627,8 +1627,8 @@ ${JSON.stringify(validation, null, 2)}`
         ...options
       };
       if (options.timestamps) {
-        attributes.createdAt = "string";
-        attributes.updatedAt = "string";
+        attributes.createdAt = "string|optional";
+        attributes.updatedAt = "string|optional";
       }
       this.schema = new Schema({
         name,
