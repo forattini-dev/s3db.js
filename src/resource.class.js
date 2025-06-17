@@ -27,10 +27,21 @@ class Resource extends EventEmitter {
 
     this.name = name;
     this.client = client;
-    this.options = options;
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+
+    this.options = {
+      cache: false,
+      autoDecrypt: true,
+      timestamps: false,
+      ...options,
+    };
+
+    if (options.timestamps) {
+      attributes.createdAt = 'string';
+      attributes.updatedAt = 'string';
+    }
 
     this.schema = new Schema({
       name,
@@ -63,6 +74,11 @@ class Resource extends EventEmitter {
   }
 
   async insert({ id, ...attributes }) {
+    if (this.options.timestamps) {
+      attributes.createdAt = new Date().toISOString();
+      attributes.updatedAt = new Date().toISOString();
+    }
+
     const {
       errors,
       isValid,
@@ -79,6 +95,8 @@ class Resource extends EventEmitter {
     }
 
     if (!id && id !== 0) id = nanoid();
+
+
     const metadata = await this.schema.mapper(validated);
 
     await this.client.putObject({
@@ -100,8 +118,9 @@ class Resource extends EventEmitter {
     let data = await this.schema.unmapper(request.Metadata);
     data.id = id;
     data._length = request.ContentLength;
-    data._createdAt = request.LastModified;
+    data._lastModified = request.LastModified;
 
+    if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
 
     this.emit("get", data);
@@ -121,6 +140,11 @@ class Resource extends EventEmitter {
 
   async update(id, attributes) {
     const live = await this.get(id);
+
+    if (this.options.timestamps) {
+      attributes.updatedAt = new Date().toISOString();
+    }
+
     const attrs = merge(live, attributes);
     delete attrs.id;
 
@@ -153,6 +177,16 @@ class Resource extends EventEmitter {
 
     this.emit("delete", id);
     return response;
+  }
+
+  async upsert({ id, ...attributes }) {
+    const exists = await this.exists(id);
+
+    if (exists) {
+      return this.update(id, attributes);
+    }
+
+    return this.insert({ id, ...attributes });
   }
 
   async count() {
