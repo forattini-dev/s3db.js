@@ -61,14 +61,16 @@ class Resource extends EventEmitter {
       // Automatically add timestamp partitions for date-based organization
       if (!this.options.partitions.byCreatedDate) {
         this.options.partitions.byCreatedDate = {
-          field: 'createdAt',
-          rule: 'date|maxlength:10'
+          fields: {
+            createdAt: 'date|maxlength:10'
+          }
         };
       }
       if (!this.options.partitions.byUpdatedDate) {
         this.options.partitions.byUpdatedDate = {
-          field: 'updatedAt', 
-          rule: 'date|maxlength:10'
+          fields: {
+            updatedAt: 'date|maxlength:10'
+          }
         };
       }
     }
@@ -106,14 +108,16 @@ class Resource extends EventEmitter {
       // Automatically add timestamp partitions for date-based organization
       if (!this.options.partitions.byCreatedDate) {
         this.options.partitions.byCreatedDate = {
-          field: 'createdAt',
-          rule: 'date|maxlength:10'
+          fields: {
+            createdAt: 'date|maxlength:10'
+          }
         };
       }
       if (!this.options.partitions.byUpdatedDate) {
         this.options.partitions.byUpdatedDate = {
-          field: 'updatedAt', 
-          rule: 'date|maxlength:10'
+          fields: {
+            updatedAt: 'date|maxlength:10'
+          }
         };
       }
     }
@@ -268,7 +272,7 @@ class Resource extends EventEmitter {
    * @param {string} partitionName - Name of the partition
    * @param {string} id - Resource ID  
    * @param {Object} data - Data object for partition value generation
-   * @returns {string} The partition reference S3 key path
+   * @returns {string|null} The partition reference S3 key path
    */
   getPartitionKey(partitionName, id, data) {
     const partition = this.options.partitions[partitionName];
@@ -276,12 +280,24 @@ class Resource extends EventEmitter {
       throw new Error(`Partition '${partitionName}' not found`);
     }
 
-    const fieldValue = this.applyPartitionRule(data[partition.field], partition.rule);
-    if (fieldValue === undefined || fieldValue === null) {
-      return null; // Skip if no value
+    const partitionSegments = [];
+    
+    // Process each field in the partition
+    for (const [fieldName, rule] of Object.entries(partition.fields)) {
+      const fieldValue = this.applyPartitionRule(data[fieldName], rule);
+      
+      if (fieldValue === undefined || fieldValue === null) {
+        return null; // Skip if any required field is missing
+      }
+      
+      partitionSegments.push(`${fieldName}=${fieldValue}`);
     }
 
-    return join(`resource=${this.name}`, `partitions`, partitionName, `${partition.field}=${fieldValue}`, `id=${id}`);
+    if (partitionSegments.length === 0) {
+      return null;
+    }
+
+    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
   }
 
   async insert({ id, ...attributes }) {
@@ -328,7 +344,7 @@ class Resource extends EventEmitter {
     return final;
   }
 
-  async get(id, partitionData = {}) {
+  async get(id) {
     const key = this.getResourceKey(id);
     
     const request = await this.client.headObject(key);
@@ -454,16 +470,31 @@ class Resource extends EventEmitter {
     return this.insert({ id, ...attributes });
   }
 
-  async count(partitionName = null, partitionValue = null) {
+  async count({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     
-    if (partitionName && partitionValue) {
+    if (partition && Object.keys(partitionValues).length > 0) {
       // Count in specific partition
-      const partition = this.options.partitions[partitionName];
-      if (!partition) {
-        throw new Error(`Partition '${partitionName}' not found`);
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
       }
-      prefix = `resource=${this.name}/partitions/${partitionName}/${partition.field}=${partitionValue}`;
+      
+      // Build partition segments
+      const partitionSegments = [];
+      for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+        const value = partitionValues[fieldName];
+        if (value !== undefined && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
     } else {
       // Count all in main resource
       prefix = `resource=${this.name}/v=${this.version}`;
@@ -532,16 +563,31 @@ class Resource extends EventEmitter {
     await this.deleteMany(ids);
   }
 
-  async listIds(partitionName = null, partitionValue = null) {
+  async listIds({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     
-    if (partitionName && partitionValue) {
+    if (partition && Object.keys(partitionValues).length > 0) {
       // List from specific partition
-      const partition = this.options.partitions[partitionName];
-      if (!partition) {
-        throw new Error(`Partition '${partitionName}' not found`);
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
       }
-      prefix = `resource=${this.name}/partitions/${partitionName}/${partition.field}=${partitionValue}`;
+      
+      // Build partition segments
+      const partitionSegments = [];
+      for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+        const value = partitionValues[fieldName];
+        if (value !== undefined && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
     } else {
       // List from main resource
       prefix = `resource=${this.name}/v=${this.version}`;
@@ -554,7 +600,7 @@ class Resource extends EventEmitter {
     const ids = keys.map((key) => {
       // Extract ID from different path patterns:
       // /resource={name}/v={version}/id={id}
-      // /resource={name}/partitions/{name}/{field}={value}/id={id}
+      // /resource={name}/partition={name}/{field}={value}/id={id}
       const parts = key.split('/');
       const idPart = parts.find(part => part.startsWith('id='));
       return idPart ? idPart.replace('id=', '') : null;
@@ -565,16 +611,15 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * List objects by partition name and value
-   * @param {string} partitionName - Name of the partition
-   * @param {string} partitionValue - Value to filter by
+   * List objects by partition name and values
+   * @param {Object} partitionOptions - Partition options
    * @param {Object} options - Listing options
    * @returns {Array} Array of objects
    */
-  async listByPartition(partitionName, partitionValue, options = {}) {
+  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
     const { limit, offset = 0 } = options;
     
-    const ids = await this.listIds(partitionName, partitionValue);
+    const ids = await this.listIds({ partition, partitionValues });
     
     // Apply offset and limit
     let filteredIds = ids.slice(offset);
@@ -589,7 +634,7 @@ class Resource extends EventEmitter {
         return await this.get(id);
       });
 
-    this.emit("listByPartition", { partitionName, partitionValue, count: results.length });
+    this.emit("listByPartition", { partition, partitionValues, count: results.length });
     return results;
   }
 
@@ -623,8 +668,8 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async page(offset = 0, size = 100, partitionName = null, partitionValue = null) {
-    const allIds = await this.listIds(partitionName, partitionValue);
+  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
+    const allIds = await this.listIds({ partition, partitionValues });
     const totalItems = allIds.length;
     const totalPages = Math.ceil(totalItems / size);
     
