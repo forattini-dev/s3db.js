@@ -20,7 +20,7 @@ class Resource extends EventEmitter {
   constructor({
     name,
     client,
-    database = null,
+    version = '1',
     options = {},
     attributes = {},
     parallelism = 10,
@@ -31,17 +31,16 @@ class Resource extends EventEmitter {
 
     this.name = name;
     this.client = client;
-    this.database = database; // Reference to database for versioning
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+    this.version = version;
 
     this.options = {
       cache: false,
       autoDecrypt: true,
       timestamps: false,
       partitionRules: {},
-      version: 'v0', // Default version
       ...options,
     };
 
@@ -72,6 +71,7 @@ class Resource extends EventEmitter {
       name,
       attributes,
       passphrase,
+      version: this.version,
       options: this.options,
     });
 
@@ -111,6 +111,7 @@ class Resource extends EventEmitter {
       name: this.name,
       attributes: newAttributes,
       passphrase: this.passphrase,
+      version: this.version,
       options: this.options,
     });
 
@@ -332,7 +333,7 @@ class Resource extends EventEmitter {
       return join(`resource=${this.name}`, partitionPath, `id=${id}`);
     } else {
       // Standard path with version: /resource={name}/v={version}/id={id}
-      return join(`resource=${this.name}`, `v=${this.schema.version}`, `id=${id}`);
+      return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
     }
   }
 
@@ -389,7 +390,7 @@ class Resource extends EventEmitter {
     const request = await this.client.headObject(key);
 
     // Get the correct schema version for unmapping
-    const objectVersion = this.extractVersionFromKey(key) || this.options.version;
+    const objectVersion = this.extractVersionFromKey(key) || this.version;
     const schema = await this.getSchemaForVersion(objectVersion);
 
     let data = await schema.unmapper(request.Metadata);
@@ -822,25 +823,8 @@ class Resource extends EventEmitter {
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {
-    // If it's the current version, use current schema
-    if (version === this.options.version) {
-      return this.schema;
-    }
-
-    // Get version data from database metadata
-    if (this.database?.savedMetadata?.resources?.[this.name]?.versions?.[version]) {
-      const versionData = this.database.savedMetadata.resources[this.name].versions[version];
-      
-      // Create schema for this version
-      return new Schema({
-        name: this.name,
-        attributes: versionData.attributes,
-        passphrase: this.passphrase,
-        options: versionData.options,
-      });
-    }
-
-    // Fallback to current schema if version not found
+    // For now, always return current schema
+    // TODO: If backward compatibility needed, implement version storage differently
     return this.schema;
   }
 

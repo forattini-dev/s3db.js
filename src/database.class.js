@@ -59,10 +59,9 @@ export class Database extends EventEmitter {
         this.resources[name] = new Resource({
           name,
           client: this.client,
-          database: this, // Add database reference for versioning
+          version: currentVersion,
           options: {
             ...versionData.options,
-            version: currentVersion,
             partitionRules: resourceMetadata.partitions || versionData.options?.partitionRules || {}
           },
           attributes: versionData.attributes,
@@ -235,8 +234,8 @@ export class Database extends EventEmitter {
       };
 
       // Update resource version safely
-      if (resource.options.version !== version) {
-        resource.options.version = version;
+      if (resource.version !== version) {
+        resource.version = version;
         resource.emit('versionUpdated', { oldVersion: currentVersion, newVersion: version });
       }
     });
@@ -290,11 +289,10 @@ export class Database extends EventEmitter {
       attributes,
       observers: [this],
       client: this.client,
-      database: this, // Add database reference
+      version,
 
       options: {
         cache: this.cache,
-        version, // Set the version
         ...options,
       },
     });

@@ -168,7 +168,7 @@ describe('Resource Instance Management (Mocked)', () => {
         attributes: { name: 'string' }
       });
 
-      const initialVersion = users.options.version;
+      const initialVersion = users.version;
       console.log('Initial version:', initialVersion);
 
       // Update schema - should increment version on SAME instance
@@ -178,7 +178,7 @@ describe('Resource Instance Management (Mocked)', () => {
       });
 
       // Same instance should have updated version
-      const finalVersion = users.options.version;
+      const finalVersion = users.version;
       console.log('Final version:', finalVersion);
       
       // Version should have been updated
@@ -187,7 +187,7 @@ describe('Resource Instance Management (Mocked)', () => {
       // Still same instance
       const currentRef = db.resource('users');
       expect(users).toBe(currentRef);
-      expect(currentRef.options.version).toBe(finalVersion);
+      expect(currentRef.version).toBe(finalVersion);
       
       console.log('✅ Version updated on same instance');
     });
