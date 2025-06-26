@@ -63,6 +63,7 @@ console.log(foundUser.name); // "John Doe"
 - [🎛️ Advanced Features](#️-advanced-features)
 - [🚨 Limitations & Best Practices](#-limitations--best-practices)
 - [🧪 Testing](#-testing)
+- [📅 Version Compatibility](#-version-compatibility)
 
 ## 🎯 What is s3db.js?
 
@@ -923,82 +924,85 @@ const robustData = {
 
 ### ⚠️ Critical: Resource Schema Versioning
 
-**🚨 IMPORTANT**: Resource schema versioning is planned for future releases but is **NOT CURRENTLY SUPPORTED**. Once you create a resource, **DO NOT MODIFY ITS STRUCTURE** in production.
+**🚨 IMPORTANT**: Starting from v4.0.0, s3db.js includes **BREAKING CHANGES** with automatic schema versioning support. Resources now use versioned paths that are **NOT BACKWARD COMPATIBLE** with v3.x.
 
-**What this means:**
-- You cannot add, remove, or modify attributes in existing resources
-- Schema changes require creating new resources with different names
-- Data migration between resource versions must be handled manually
+### 🚨 Breaking Changes in v4.0.0
 
-**Example of proper versioning approach:**
+**Path Structure Changes:**
+- **v3.x**: Resources stored at `resource={name}/id={id}`
+- **v4.x**: Resources stored at `resource={name}/v={version}/id={id}`
+
+**Impact:**
+- Existing v3.x databases **CANNOT** be read by v4.x without migration
+- Resource paths now include version subdirectories 
+- Automatic schema versioning is now supported
+- Schema changes create new versions instead of breaking existing data
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
 
 ```javascript
-// Version 1: Basic user resource
-const usersV1 = await s3db.createResource({
-  name: "users_v1",
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
   attributes: {
     name: "string|min:2|max:100",
     email: "email|unique",
     age: "number|integer|positive"
   }
 });
+// Stored at: resource=users/v=v0/id={id}
 
-// Version 2: Enhanced user resource with new fields
-const usersV2 = await s3db.createResource({
-  name: "users_v2", 
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
   attributes: {
     name: "string|min:2|max:100",
-    email: "email|unique",
+    email: "email|unique", 
     age: "number|integer|positive",
     phone: "string|optional",        // New field
     address: {                       // New nested object
       street: "string",
-      city: "string",
+      city: "string", 
       country: "string"
     }
   }
 });
-
-// Migration script using streams
-const migrateUsersV1ToV2 = async () => {
-  const readableStream = await usersV1.readable();
-  const writableStream = await usersV2.writable();
-  
-  readableStream.on("data", async (userV1) => {
-    // Transform V1 data to V2 format
-    const userV2 = {
-      id: userV1.id,
-      name: userV1.name,
-      email: userV1.email,
-      age: userV1.age,
-      phone: null,  // New field with default value
-      address: {    // New nested object with default values
-        street: "",
-        city: "",
-        country: ""
-      }
-    };
-    
-    // Write to V2 resource
-    writableStream.write(userV2);
-  });
-  
-  readableStream.on("end", () => {
-    writableStream.end();
-    console.log("Migration completed!");
-  });
-  
-  readableStream.on("error", (error) => {
-    console.error("Migration error:", error);
-    writableStream.destroy(error);
-  });
-};
-
-// Run migration
-await migrateUsersV1ToV2();
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
 ```
-
-**Roadmap**: Resource schema versioning with automatic migration tools is planned for future releases.
 
 ### 🔮 Roadmap: Object Tags Support
 
@@ -1224,7 +1228,27 @@ npm test
 - **Test Structure**: Journey-based scenarios demonstrating complete workflows
 - **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
 
-## 📄 License
+## � Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+## �📄 License
 
 This project is licensed under the Unlicense - see the [LICENSE](LICENSE) file for details.
 
