@@ -175,11 +175,11 @@ describe('Timestamp Partitions', () => {
       await resource.setContent(event.id, buffer, 'text/plain', partitionData);
 
       // Verify content exists
-      const hasContent = await resource.hasContent(event.id, partitionData);
-      expect(hasContent).toBe(true);
+              const hasContent = await resource.hasContent(event.id);
+        expect(hasContent).toBe(true);
 
-      // Retrieve content
-      const content = await resource.content(event.id, partitionData);
+        // Retrieve content
+        const content = await resource.content(event.id);
       expect(content.buffer.toString('utf8')).toBe('Document content');
       expect(content.contentType).toBe('text/plain');
 

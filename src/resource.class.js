@@ -412,7 +412,7 @@ class Resource extends EventEmitter {
     return data;
   }
 
-  async exists(id, partitionData = {}) {
+  async exists(id) {
     try {
       const key = this.getResourceKey(id);
       await this.client.headObject(key);
@@ -422,8 +422,8 @@ class Resource extends EventEmitter {
     }
   }
 
-  async update(id, attributes, partitionData = {}) {
-    const live = await this.get(id, partitionData);
+  async update(id, attributes) {
+    const live = await this.get(id);
 
     if (this.options.timestamps) {
       attributes.updatedAt = new Date().toISOString();
@@ -477,14 +477,14 @@ class Resource extends EventEmitter {
     return validated;
   }
 
-  async delete(id, partitionData = {}) {
+  async delete(id) {
     // Get object data before deletion for hooks
     let objectData;
     try {
-      objectData = await this.get(id, partitionData);
+      objectData = await this.get(id);
     } catch (error) {
       // Object doesn't exist, create minimal data for hooks
-      objectData = { id, ...partitionData };
+      objectData = { id };
     }
 
     // Execute preDelete hooks
@@ -501,10 +501,10 @@ class Resource extends EventEmitter {
   }
 
   async upsert({ id, ...attributes }) {
-    const exists = await this.exists(id, attributes);
+    const exists = await this.exists(id);
 
     if (exists) {
-      return this.update(id, attributes, attributes);
+      return this.update(id, attributes);
     }
 
     return this.insert({ id, ...attributes });
@@ -565,9 +565,9 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async deleteMany(ids, partitionData = {}) {
+  async deleteMany(ids) {
     const packages = chunk(
-      ids.map((id) => this.getResourceKey(id, partitionData)),
+      ids.map((id) => this.getResourceKey(id)),
       1000
     );
 
@@ -853,10 +853,9 @@ class Resource extends EventEmitter {
   /**
    * Check if binary content exists for a resource
    * @param {string} id - Resource ID
-   * @param {Object} partitionData - Partition data for locating the resource
    * @returns {boolean}
    */
-  async hasContent(id, partitionData = {}) {
+  async hasContent(id) {
     const key = this.getResourceKey(id);
     
     try {
@@ -871,9 +870,8 @@ class Resource extends EventEmitter {
   /**
    * Delete binary content but preserve metadata
    * @param {string} id - Resource ID
-   * @param {Object} partitionData - Partition data for locating the resource
    */
-  async deleteContent(id, partitionData = {}) {
+  async deleteContent(id) {
     const key = this.getResourceKey(id);
     
     // Get existing metadata first
