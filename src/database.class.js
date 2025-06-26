@@ -62,7 +62,7 @@ export class Database extends EventEmitter {
           version: currentVersion,
           options: {
             ...versionData.options,
-            partitionRules: resourceMetadata.partitions || versionData.options?.partitionRules || {}
+            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
           },
           attributes: versionData.attributes,
           parallelism: this.parallelism,
@@ -221,7 +221,7 @@ export class Database extends EventEmitter {
 
       metadata.resources[name] = {
         currentVersion: version,
-        partitions: resourceDef.options?.partitionRules || {},
+        partitions: resourceDef.options?.partitions || {},
         versions: {
           ...existingResource?.versions, // Preserve previous versions
           [version]: {

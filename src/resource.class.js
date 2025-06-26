@@ -40,7 +40,7 @@ class Resource extends EventEmitter {
       cache: false,
       autoDecrypt: true,
       timestamps: false,
-      partitionRules: {},
+      partitions: {},  // Changed from partitionRules to partitions (named)
       ...options,
     };
 
@@ -59,11 +59,17 @@ class Resource extends EventEmitter {
       attributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
-      if (!this.options.partitionRules.createdAt) {
-        this.options.partitionRules.createdAt = 'date|maxlength:10';
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          field: 'createdAt',
+          rule: 'date|maxlength:10'
+        };
       }
-      if (!this.options.partitionRules.updatedAt) {
-        this.options.partitionRules.updatedAt = 'date|maxlength:10';
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          field: 'updatedAt', 
+          rule: 'date|maxlength:10'
+        };
       }
     }
 
@@ -98,11 +104,17 @@ class Resource extends EventEmitter {
       newAttributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
-      if (!this.options.partitionRules.createdAt) {
-        this.options.partitionRules.createdAt = 'date|maxlength:10';
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          field: 'createdAt',
+          rule: 'date|maxlength:10'
+        };
       }
-      if (!this.options.partitionRules.updatedAt) {
-        this.options.partitionRules.updatedAt = 'date|maxlength:10';
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          field: 'updatedAt', 
+          rule: 'date|maxlength:10'
+        };
       }
     }
 
@@ -152,27 +164,21 @@ class Resource extends EventEmitter {
    * Setup automatic partition hooks
    */
   setupPartitionHooks() {
-    const partitionRules = this.options.partitionRules;
+    const partitions = this.options.partitions;
     
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+    if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
 
-    // Add afterInsert hook to create partition objects
+    // Add afterInsert hook to create partition references
     this.addHook('afterInsert', async (data) => {
-      await this.createPartitionObjects(data);
+      await this.createPartitionReferences(data);
       return data;
     });
 
-    // Add afterUpdate hook to update partition objects if partition fields changed
-    this.addHook('afterUpdate', async (data) => {
-      await this.updatePartitionObjects(data);
-      return data;
-    });
-
-    // Add afterDelete hook to clean up partition objects
+    // Add afterDelete hook to clean up partition references
     this.addHook('afterDelete', async (data) => {
-      await this.deletePartitionObjects(data);
+      await this.deletePartitionReferences(data);
       return data;
     });
   }
@@ -197,144 +203,85 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Apply partition rules to transform field values
-   * @param {Object} data - The data object to transform
-   * @param {boolean} inPlace - Whether to modify the original object
-   * @returns {Object} Transformed data
+   * Apply a single partition rule to a field value
+   * @param {*} value - The field value
+   * @param {string} rule - The partition rule
+   * @returns {*} Transformed value
    */
-  applyPartitionRules(data, inPlace = false) {
-    const { partitionRules } = this.options;
-    
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
-      return data;
+  applyPartitionRule(value, rule) {
+    if (value === undefined || value === null) {
+      return value;
     }
 
-    const result = inPlace ? data : { ...data };
-    
-    for (const [field, rule] of Object.entries(partitionRules)) {
-      let value = result[field];
-      
-      if (value === undefined || value === null) {
-        continue;
-      }
+    let transformedValue = value;
 
-      let transformedValue = value;
-
-      // Apply maxlength rule manually
-      if (typeof rule === 'string' && rule.includes('maxlength:')) {
-        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
-        if (maxLengthMatch) {
-          const maxLength = parseInt(maxLengthMatch[1]);
-          if (typeof transformedValue === 'string' && transformedValue.length > maxLength) {
-            transformedValue = transformedValue.substring(0, maxLength);
-          }
+    // Apply maxlength rule manually
+    if (typeof rule === 'string' && rule.includes('maxlength:')) {
+      const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+      if (maxLengthMatch) {
+        const maxLength = parseInt(maxLengthMatch[1]);
+        if (typeof transformedValue === 'string' && transformedValue.length > maxLength) {
+          transformedValue = transformedValue.substring(0, maxLength);
         }
       }
+    }
 
-      // Format date values
-      if (rule.includes('date')) {
-        if (transformedValue instanceof Date) {
-          transformedValue = transformedValue.toISOString().split('T')[0]; // YYYY-MM-DD format
-        } else if (typeof transformedValue === 'string') {
-          try {
-            // Handle ISO8601 timestamp strings (e.g., from timestamps)
-            if (transformedValue.includes('T') && transformedValue.includes('Z')) {
-              transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
-            } else {
-              // Try to parse as date
-              const date = new Date(transformedValue);
-              if (!isNaN(date.getTime())) {
-                transformedValue = date.toISOString().split('T')[0];
-              }
+    // Format date values
+    if (rule.includes('date')) {
+      if (transformedValue instanceof Date) {
+        transformedValue = transformedValue.toISOString().split('T')[0]; // YYYY-MM-DD format
+      } else if (typeof transformedValue === 'string') {
+        try {
+          // Handle ISO8601 timestamp strings (e.g., from timestamps)
+          if (transformedValue.includes('T') && transformedValue.includes('Z')) {
+            transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
+          } else {
+            // Try to parse as date
+            const date = new Date(transformedValue);
+            if (!isNaN(date.getTime())) {
+              transformedValue = date.toISOString().split('T')[0];
             }
-          } catch (e) {
-            // Keep original value if not a valid date
           }
+        } catch (e) {
+          // Keep original value if not a valid date
         }
       }
-
-      result[field] = transformedValue;
     }
 
-    return result;
+    return transformedValue;
   }
 
-  /**
-   * Generate partition path based on partition rules and data
-   * @param {Object} data - The data object to generate partitions from
-   * @returns {string} Partition path segment
-   */
-  generatePartitionPath(data) {
-    const { partitionRules } = this.options;
-    
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
-      return '';
-    }
 
-    const partitionSegments = [];
-    
-    for (const [field, rule] of Object.entries(partitionRules)) {
-      let value = data[field];
-      
-      if (value === undefined || value === null) {
-        continue;
-      }
-
-      // Apply maxlength rule manually
-      if (typeof rule === 'string' && rule.includes('maxlength:')) {
-        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
-        if (maxLengthMatch) {
-          const maxLength = parseInt(maxLengthMatch[1]);
-          if (typeof value === 'string' && value.length > maxLength) {
-            value = value.substring(0, maxLength);
-          }
-        }
-      }
-
-      // Format date values
-      if (rule.includes('date')) {
-        if (value instanceof Date) {
-          value = value.toISOString().split('T')[0]; // YYYY-MM-DD format
-        } else if (typeof value === 'string') {
-          try {
-            // Handle ISO8601 timestamp strings (e.g., from timestamps)
-            if (value.includes('T') && value.includes('Z')) {
-              value = value.split('T')[0]; // Extract date part from ISO8601
-            } else {
-              // Try to parse as date
-              const date = new Date(value);
-              if (!isNaN(date.getTime())) {
-                value = date.toISOString().split('T')[0];
-              }
-            }
-          } catch (e) {
-            // Keep original value if not a valid date
-          }
-        }
-      }
-
-      partitionSegments.push(`${field}=${value}`);
-    }
-
-    return partitionSegments.length > 0 ? `partitions/${partitionSegments.join('/')}/` : '';
-  }
 
   /**
-   * Get the base key for a resource (with or without partitions)
+   * Get the main resource key (always versioned path)
    * @param {string} id - Resource ID
-   * @param {Object} data - Data object for partition generation
-   * @returns {string} The S3 key path
+   * @returns {string} The main S3 key path
    */
-  getResourceKey(id, data = {}) {
-    const partitionPath = this.generatePartitionPath(data);
-    
-    if (partitionPath) {
-      // Partitioned path: /resource={name}/partitions/{pName}={value}/id={id}
-      return join(`resource=${this.name}`, partitionPath, `id=${id}`);
-    } else {
-      // Standard path with version: /resource={name}/v={version}/id={id}
-      return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+  getResourceKey(id) {
+    // ALWAYS use versioned path for main object
+    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+  }
+
+  /**
+   * Get partition reference key for a specific partition
+   * @param {string} partitionName - Name of the partition
+   * @param {string} id - Resource ID  
+   * @param {Object} data - Data object for partition value generation
+   * @returns {string} The partition reference S3 key path
+   */
+  getPartitionKey(partitionName, id, data) {
+    const partition = this.options.partitions[partitionName];
+    if (!partition) {
+      throw new Error(`Partition '${partitionName}' not found`);
     }
+
+    const fieldValue = this.applyPartitionRule(data[partition.field], partition.rule);
+    if (fieldValue === undefined || fieldValue === null) {
+      return null; // Skip if no value
+    }
+
+    return join(`resource=${this.name}`, `partitions`, partitionName, `${partition.field}=${fieldValue}`, `id=${id}`);
   }
 
   async insert({ id, ...attributes }) {
@@ -363,11 +310,8 @@ class Resource extends EventEmitter {
 
     if (!id && id !== 0) id = nanoid();
 
-    // Apply partition rules to transform the data
-    const partitionTransformed = this.applyPartitionRules(validated);
-
-    const metadata = await this.schema.mapper(partitionTransformed);
-    const key = this.getResourceKey(id, partitionTransformed);
+    const metadata = await this.schema.mapper(validated);
+    const key = this.getResourceKey(id);
 
     await this.client.putObject({
       metadata,
@@ -375,7 +319,7 @@ class Resource extends EventEmitter {
       body: "", // Empty body for metadata-only objects
     });
 
-    const final = merge({ id }, partitionTransformed);
+    const final = merge({ id }, validated);
 
     // Execute afterInsert hooks
     await this.executeHooks('afterInsert', final);
@@ -385,7 +329,7 @@ class Resource extends EventEmitter {
   }
 
   async get(id, partitionData = {}) {
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     
     const request = await this.client.headObject(key);
 
@@ -414,7 +358,7 @@ class Resource extends EventEmitter {
 
   async exists(id, partitionData = {}) {
     try {
-      const key = this.getResourceKey(id, partitionData);
+      const key = this.getResourceKey(id);
       await this.client.headObject(key);
       return true
     } catch (error) {
@@ -446,10 +390,7 @@ class Resource extends EventEmitter {
       })
     }
 
-    // Apply partition rules to transform the data
-    const partitionTransformed = this.applyPartitionRules(validated);
-
-    const key = this.getResourceKey(id, partitionTransformed);
+    const key = this.getResourceKey(id);
 
     // Check if object has existing content
     let existingBody = "";
@@ -468,16 +409,16 @@ class Resource extends EventEmitter {
       key,
       body: existingBody,
       contentType: existingContentType,
-      metadata: await this.schema.mapper(partitionTransformed),
+      metadata: await this.schema.mapper(validated),
     });
 
-    partitionTransformed.id = id;
+    validated.id = id;
 
     // Execute afterUpdate hooks
-    await this.executeHooks('afterUpdate', partitionTransformed);
+    await this.executeHooks('afterUpdate', validated);
 
-    this.emit("update", preProcessedData, partitionTransformed);
-    return partitionTransformed;
+    this.emit("update", preProcessedData, validated);
+    return validated;
   }
 
   async delete(id, partitionData = {}) {
@@ -493,7 +434,7 @@ class Resource extends EventEmitter {
     // Execute preDelete hooks
     await this.executeHooks('preDelete', objectData);
 
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     const response = await this.client.deleteObject(key);
 
     // Execute afterDelete hooks
@@ -513,15 +454,19 @@ class Resource extends EventEmitter {
     return this.insert({ id, ...attributes });
   }
 
-  async count(partitionData = {}) {
-    let prefix = `resource=${this.name}`;
+  async count(partitionName = null, partitionValue = null) {
+    let prefix;
     
-    // If partition data is provided, use it to narrow the search
-    if (partitionData && Object.keys(partitionData).length > 0) {
-      const partitionPath = this.generatePartitionPath(partitionData);
-      if (partitionPath) {
-        prefix = `resource=${this.name}/${partitionPath}`;
+    if (partitionName && partitionValue) {
+      // Count in specific partition
+      const partition = this.options.partitions[partitionName];
+      if (!partition) {
+        throw new Error(`Partition '${partitionName}' not found`);
       }
+      prefix = `resource=${this.name}/partitions/${partitionName}/${partition.field}=${partitionValue}`;
+    } else {
+      // Count all in main resource
+      prefix = `resource=${this.name}/v=${this.version}`;
     }
 
     const count = await this.client.count({
@@ -587,15 +532,19 @@ class Resource extends EventEmitter {
     await this.deleteMany(ids);
   }
 
-  async listIds(partitionData = {}) {
-    let prefix = `resource=${this.name}`;
+  async listIds(partitionName = null, partitionValue = null) {
+    let prefix;
     
-    // If partition data is provided, use it to narrow the search
-    if (partitionData && Object.keys(partitionData).length > 0) {
-      const partitionPath = this.generatePartitionPath(partitionData);
-      if (partitionPath) {
-        prefix = `resource=${this.name}/${partitionPath}`;
+    if (partitionName && partitionValue) {
+      // List from specific partition
+      const partition = this.options.partitions[partitionName];
+      if (!partition) {
+        throw new Error(`Partition '${partitionName}' not found`);
       }
+      prefix = `resource=${this.name}/partitions/${partitionName}/${partition.field}=${partitionValue}`;
+    } else {
+      // List from main resource
+      prefix = `resource=${this.name}/v=${this.version}`;
     }
 
     const keys = await this.client.getAllKeys({
@@ -605,7 +554,7 @@ class Resource extends EventEmitter {
     const ids = keys.map((key) => {
       // Extract ID from different path patterns:
       // /resource={name}/v={version}/id={id}
-      // /resource={name}/partitions/.../id={id}
+      // /resource={name}/partitions/{name}/{field}={value}/id={id}
       const parts = key.split('/');
       const idPart = parts.find(part => part.startsWith('id='));
       return idPart ? idPart.replace('id=', '') : null;
@@ -613,6 +562,35 @@ class Resource extends EventEmitter {
 
     this.emit("listIds", ids.length);
     return ids;
+  }
+
+  /**
+   * List objects by partition name and value
+   * @param {string} partitionName - Name of the partition
+   * @param {string} partitionValue - Value to filter by
+   * @param {Object} options - Listing options
+   * @returns {Array} Array of objects
+   */
+  async listByPartition(partitionName, partitionValue, options = {}) {
+    const { limit, offset = 0 } = options;
+    
+    const ids = await this.listIds(partitionName, partitionValue);
+    
+    // Apply offset and limit
+    let filteredIds = ids.slice(offset);
+    if (limit) {
+      filteredIds = filteredIds.slice(0, limit);
+    }
+
+    // Get full data for each ID
+    const { results } = await PromisePool.for(filteredIds)
+      .withConcurrency(this.parallelism)
+      .process(async (id) => {
+        return await this.get(id);
+      });
+
+    this.emit("listByPartition", { partitionName, partitionValue, count: results.length });
+    return results;
   }
 
   async getMany(ids) {
@@ -645,27 +623,17 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async page(offset = 0, size = 100, partitionData = {}) {
-    let prefix = `resource=${this.name}`;
-    
-    // If partition data is provided, use it to narrow the search
-    if (partitionData && Object.keys(partitionData).length > 0) {
-      const partitionPath = this.generatePartitionPath(partitionData);
-      if (partitionPath) {
-        prefix = `resource=${this.name}/${partitionPath}`;
-      }
-    }
-
-    const allIds = await this.listIds(partitionData);
+  async page(offset = 0, size = 100, partitionName = null, partitionValue = null) {
+    const allIds = await this.listIds(partitionName, partitionValue);
     const totalItems = allIds.length;
     const totalPages = Math.ceil(totalItems / size);
     
     // Get paginated IDs
     const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
     
-    // Get full data for each ID with partition data if needed
+    // Get full data for each ID
     const items = await Promise.all(
-      paginatedIds.map(id => this.get(id, partitionData))
+      paginatedIds.map(id => this.get(id))
     );
 
     const result = {
@@ -702,7 +670,7 @@ class Resource extends EventEmitter {
       throw new Error('Content must be a Buffer');
     }
 
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     
     // Get existing metadata first
     let existingMetadata = {};
@@ -731,7 +699,7 @@ class Resource extends EventEmitter {
    * @returns {Object} Object with buffer and contentType
    */
   async getContent(id, partitionData = {}) {
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     
     try {
       const response = await this.client.getObject(key);
@@ -762,7 +730,7 @@ class Resource extends EventEmitter {
    * @returns {boolean}
    */
   async hasContent(id, partitionData = {}) {
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     
     try {
       const response = await this.client.headObject(key);
@@ -779,7 +747,7 @@ class Resource extends EventEmitter {
    * @param {Object} partitionData - Partition data for locating the resource
    */
   async deleteContent(id, partitionData = {}) {
-    const key = this.getResourceKey(id, partitionData);
+    const key = this.getResourceKey(id);
     
     // Get existing metadata first
     const existingObject = await this.client.headObject(key);
@@ -829,329 +797,64 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Create partition objects after insert
+   * Create partition references after insert
    * @param {Object} data - Inserted object data
    */
-  async createPartitionObjects(data) {
-    const partitionRules = this.options.partitionRules;
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+  async createPartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
 
-    // Extract partition values from data
-    const partitionData = {};
-    for (const field of Object.keys(partitionRules)) {
-      if (data[field] !== undefined && data[field] !== null) {
-        partitionData[field] = data[field];
-      }
-    }
-
-    if (Object.keys(partitionData).length === 0) {
-      return;
-    }
-
-    // Create partition object with reference to main object
-    const partitionKey = this.getResourceKey(data.id, partitionData);
-    
-    // Only create if different from main object path
-    const mainKey = this.getResourceKey(data.id, {});
-    if (partitionKey !== mainKey) {
-      const metadata = await this.schema.mapper(data);
+    // Create reference in each partition
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
       
-      await this.client.putObject({
-        key: partitionKey,
-        metadata,
-        body: "", // Partition objects are metadata-only by default
-      });
+      if (partitionKey) {
+        // Create minimal reference object pointing to main object
+        const referenceMetadata = {
+          _ref: this.getResourceKey(data.id),
+          _partition: partitionName,
+          _id: data.id
+        };
+        
+        await this.client.putObject({
+          key: partitionKey,
+          metadata: referenceMetadata,
+          body: "", // Partition references are metadata-only
+        });
+      }
     }
   }
 
   /**
-   * Update partition objects after update
-   * @param {Object} data - Updated object data
+   * Delete partition references after delete
+   * @param {Object} data - Deleted object data
    */
-  async updatePartitionObjects(data) {
-    // For now, recreate partition objects
-    // In a more sophisticated implementation, we could track partition changes
-    await this.createPartitionObjects(data);
-  }
-
-  /**
-   * Delete partition objects after delete
-   * @param {Object} data - Deleted object data (should include id and partition data)
-   */
-  async deletePartitionObjects(data) {
-    const partitionRules = this.options.partitionRules;
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+  async deletePartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
 
-    // Extract partition values from data
-    const partitionData = {};
-    for (const field of Object.keys(partitionRules)) {
-      if (data[field] !== undefined && data[field] !== null) {
-        partitionData[field] = data[field];
-      }
-    }
-
-    if (Object.keys(partitionData).length > 0) {
-      const partitionKey = this.getResourceKey(data.id, partitionData);
+    // Delete reference in each partition
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
       
-      try {
-        await this.client.deleteObject(partitionKey);
-      } catch (error) {
-        // Ignore errors if partition object doesn't exist
-        if (error.name !== 'NoSuchKey') {
-          throw error;
+      if (partitionKey) {
+        try {
+          await this.client.deleteObject(partitionKey);
+        } catch (error) {
+          // Ignore errors if partition reference doesn't exist
+          if (error.name !== 'NoSuchKey') {
+            throw error;
+          }
         }
       }
     }
   }
 
-  /**
-   * List all available partition values for discovery
-   * @returns {Object} Object with partition field as key and array of values
-   */
-  async listPartitions() {
-    const partitionRules = this.options.partitionRules;
-    if (!partitionRules || Object.keys(partitionRules).length === 0) {
-      return {};
-    }
 
-    // Get all keys with partition prefix
-    const partitionPrefix = `resource=${this.name}/partitions/`;
-    const keys = await this.client.getAllKeys({
-      prefix: partitionPrefix,
-    });
-
-    const partitions = {};
-    
-    // Initialize partition fields
-    Object.keys(partitionRules).forEach(field => {
-      partitions[field] = new Set();
-    });
-
-    // Extract partition values from keys
-    keys.forEach(key => {
-      // Extract partition path: resource=users/partitions/region=US/status=active/id=123
-      const pathParts = key.split('/');
-      const partitionIndex = pathParts.indexOf('partitions');
-      
-      if (partitionIndex !== -1) {
-        // Get partition segments between 'partitions' and 'id='
-        const partitionSegments = pathParts.slice(partitionIndex + 1);
-        const idIndex = partitionSegments.findIndex(segment => segment.startsWith('id='));
-        const actualPartitions = idIndex !== -1 ? partitionSegments.slice(0, idIndex) : partitionSegments;
-        
-        actualPartitions.forEach(segment => {
-          const [field, value] = segment.split('=');
-          if (partitions[field]) {
-            partitions[field].add(value);
-          }
-        });
-      }
-    });
-
-    // Convert Sets to Arrays and sort
-    Object.keys(partitions).forEach(field => {
-      partitions[field] = Array.from(partitions[field]).sort();
-    });
-
-    this.emit("listPartitions", partitions);
-    return partitions;
-  }
-
-  /**
-   * Get all unique values for a specific partition field
-   * @param {string} field - Partition field name
-   * @returns {Array} Array of unique values for the field
-   */
-  async getPartitionValues(field) {
-    const partitions = await this.listPartitions();
-    return partitions[field] || [];
-  }
-
-  /**
-   * List objects with full data filtered by partition criteria
-   * @param {Object} partitionData - Partition criteria to filter by
-   * @param {Object} options - Options for listing (limit, offset, etc.)
-   * @returns {Array} Array of full object data
-   */
-  async listByPartition(partitionData = {}, options = {}) {
-    const { limit, offset = 0, includeContent = false } = options;
-    
-    const ids = await this.listIds(partitionData);
-    
-    // Apply offset and limit
-    let filteredIds = ids.slice(offset);
-    if (limit) {
-      filteredIds = filteredIds.slice(0, limit);
-    }
-
-    // Get full data for each ID
-    const { results } = await PromisePool.for(filteredIds)
-      .withConcurrency(this.parallelism)
-      .process(async (id) => {
-        const data = await this.get(id, partitionData);
-        
-        // Include binary content if requested
-        if (includeContent && data._hasContent) {
-          const content = await this.getContent(id, partitionData);
-          data._content = content;
-        }
-        
-        return data;
-      });
-
-    this.emit("listByPartition", { partitionData, count: results.length });
-    return results;
-  }
-
-  /**
-   * Find objects matching multiple criteria with flexible filtering
-   * @param {Object} criteria - Search criteria
-   * @param {Object} options - Search options
-   * @returns {Array} Array of matching objects
-   */
-  async findBy(criteria = {}, options = {}) {
-    const { limit, offset = 0, sortBy, sortOrder = 'asc', includeContent = false } = options;
-    
-    // Separate partition criteria from data criteria
-    const partitionRules = this.options.partitionRules || {};
-    const partitionCriteria = {};
-    const dataCriteria = {};
-    
-    Object.entries(criteria).forEach(([field, value]) => {
-      if (partitionRules[field]) {
-        partitionCriteria[field] = value;
-      } else {
-        dataCriteria[field] = value;
-      }
-    });
-
-    // Get objects by partition first (most efficient)
-    const partitionResults = await this.listByPartition(partitionCriteria, { includeContent });
-    
-    // Apply data criteria filtering
-    let filteredResults = partitionResults;
-    
-    if (Object.keys(dataCriteria).length > 0) {
-      filteredResults = partitionResults.filter(item => {
-        return Object.entries(dataCriteria).every(([field, expectedValue]) => {
-          const actualValue = item[field];
-          
-          // Handle different value types and comparison
-          if (typeof expectedValue === 'object' && expectedValue !== null) {
-            // Support for operators like { $gt: 10, $lt: 20 }
-            if (expectedValue.$gt !== undefined) return actualValue > expectedValue.$gt;
-            if (expectedValue.$gte !== undefined) return actualValue >= expectedValue.$gte;
-            if (expectedValue.$lt !== undefined) return actualValue < expectedValue.$lt;
-            if (expectedValue.$lte !== undefined) return actualValue <= expectedValue.$lte;
-            if (expectedValue.$ne !== undefined) return actualValue !== expectedValue.$ne;
-            if (expectedValue.$in !== undefined) return expectedValue.$in.includes(actualValue);
-            if (expectedValue.$nin !== undefined) return !expectedValue.$nin.includes(actualValue);
-          }
-          
-          // Exact match or regex
-          if (expectedValue instanceof RegExp) {
-            return expectedValue.test(String(actualValue));
-          }
-          
-          return actualValue === expectedValue;
-        });
-      });
-    }
-
-    // Apply sorting
-    if (sortBy) {
-      filteredResults.sort((a, b) => {
-        const aVal = a[sortBy];
-        const bVal = b[sortBy];
-        
-        let comparison = 0;
-        if (aVal < bVal) comparison = -1;
-        if (aVal > bVal) comparison = 1;
-        
-        return sortOrder === 'desc' ? -comparison : comparison;
-      });
-    }
-
-    // Apply offset and limit
-    const startIndex = offset;
-    const endIndex = limit ? startIndex + limit : undefined;
-    const paginatedResults = filteredResults.slice(startIndex, endIndex);
-
-    this.emit("findBy", { criteria, count: paginatedResults.length, total: filteredResults.length });
-    return paginatedResults;
-  }
-
-  /**
-   * Group objects by partition field values
-   * @param {string} field - Field to group by (must be a partition field)
-   * @param {Object} partitionFilter - Additional partition filters
-   * @param {Object} options - Grouping options
-   * @returns {Object} Object with field values as keys and arrays of objects as values
-   */
-  async groupBy(field, partitionFilter = {}, options = {}) {
-    const { includeContent = false, includeCount = true } = options;
-    
-    const partitionRules = this.options.partitionRules || {};
-    
-    if (!partitionRules[field]) {
-      throw new Error(`Field '${field}' is not a partition field. Available partition fields: ${Object.keys(partitionRules).join(', ')}`);
-    }
-
-    // Get all possible values for the field
-    const fieldValues = await this.getPartitionValues(field);
-    const results = {};
-
-    // Get data for each field value
-    for (const value of fieldValues) {
-      const criteria = { ...partitionFilter, [field]: value };
-      const objects = await this.listByPartition(criteria, { includeContent });
-      
-      results[value] = {
-        items: objects,
-        ...(includeCount && { count: objects.length })
-      };
-    }
-
-    this.emit("groupBy", { field, groupCount: Object.keys(results).length });
-    return results;
-  }
-
-  /**
-   * Get partition statistics and metrics
-   * @returns {Object} Statistics about partitions and data distribution
-   */
-  async getPartitionStats() {
-    const partitionRules = this.options.partitionRules || {};
-    
-    if (Object.keys(partitionRules).length === 0) {
-      return { hasPartitions: false, totalObjects: await this.count() };
-    }
-
-    const partitions = await this.listPartitions();
-    const stats = {
-      hasPartitions: true,
-      totalObjects: await this.count(),
-      partitionFields: Object.keys(partitionRules),
-      partitionCounts: {}
-    };
-
-    // Get count for each partition value
-    for (const [field, values] of Object.entries(partitions)) {
-      stats.partitionCounts[field] = {};
-      
-      for (const value of values) {
-        const count = await this.count({ [field]: value });
-        stats.partitionCounts[field][value] = count;
-      }
-    }
-
-    this.emit("getPartitionStats", stats);
-    return stats;
-  }
 }
 
 export default Resource;
