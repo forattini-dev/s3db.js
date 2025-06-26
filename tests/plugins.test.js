@@ -1,5 +1,5 @@
 import { join } from 'path';
-import { nanoid } from 'nanoid';
+import { idGenerator } from '../src/concerns/id.js';
 
 import Database from '../src/database.class';
 

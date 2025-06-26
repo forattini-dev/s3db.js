@@ -1,5 +1,5 @@
 import { join } from "path";
-import { nanoid } from "nanoid";
+import { idGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { createHash } from "crypto";
 import { PromisePool } from "@supercharge/promise-pool";
@@ -364,7 +364,7 @@ class Resource extends EventEmitter {
       })
     }
 
-    if (!id && id !== 0) id = nanoid();
+    if (!id && id !== 0) id = idGenerator();
 
     const metadata = await this.schema.mapper(validated);
     const key = this.getResourceKey(id);

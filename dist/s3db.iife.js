@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-(function (exports, nanoid, lodashEs, promisePool, clientS3, crypto, flat, FastestValidator, web) {
+(function (exports, nanoid$1, lodashEs, promisePool, clientS3, crypto, flat, FastestValidator, web) {
   'use strict';
 
   // Copyright Joyent, Inc. and other Node contributors.
@@ -234,6 +234,8 @@
           return str.substr(start, len);
       }
   ;
+
+  const idGenerator = nanoid$1.customAlphabet(nanoid$1.urlAlphabet, 22);
 
   var domain;
 
@@ -833,7 +835,7 @@ ${JSON.stringify(validation, null, 2)}`
     }) {
       super();
       this.verbose = verbose;
-      this.id = id ?? nanoid.nanoid(7);
+      this.id = id ?? nanoid(7);
       this.parallelism = parallelism;
       this.config = new ConnectionString(connectionString);
       this.client = AwsS3Client || this.createClient();
@@ -4009,7 +4011,7 @@ ${JSON.stringify(validation, null, 2)}`
           validation: errors
         });
       }
-      if (!id && id !== 0) id = nanoid.nanoid();
+      if (!id && id !== 0) id = idGenerator();
       const metadata = await this.schema.mapper(validated);
       const key = this.getResourceKey(id);
       await this.client.putObject({
@@ -16001,4 +16003,4 @@ ${JSON.stringify(validation, null, 2)}`
 
   return exports;
 
-})({}, nanoid, lodashEs, promisePool, clientS3, crypto, flat, FastestValidator, web);
+})({}, nanoid$1, lodashEs, promisePool, clientS3, crypto, flat, FastestValidator, web);

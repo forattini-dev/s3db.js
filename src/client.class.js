@@ -1,5 +1,5 @@
 import path from "path";
-import { nanoid } from "nanoid";
+import { idGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { chunk } from "lodash-es";
 import { PromisePool } from "@supercharge/promise-pool";
