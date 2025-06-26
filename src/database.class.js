@@ -14,6 +14,7 @@ export class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = "0.6.2"; // Current library version
     this.resources = {};
+    this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
@@ -39,32 +40,45 @@ export class Database extends EventEmitter {
     if (await this.client.exists(`s3db.json`)) {
       const request = await this.client.getObject(`s3db.json`);
       metadata = JSON.parse(await streamToString(request?.Body));
-      metadata = this.unserializeMetadata(metadata);
     } else {
       metadata = this.blankMetadataStructure();
       await this.uploadMetadataFile();
     }
 
-    // Check for definition changes
+    this.savedMetadata = metadata;
+
+    // Check for definition changes (this happens before creating resources from createResource calls)
     const definitionChanges = this.detectDefinitionChanges(metadata);
     
-    for (const resource of Object.entries(metadata.resources)) {
-      const [name, definition] = resource;
-
-      this.resources[name] = new Resource({
-        name,
-        client: this.client,
-        options: definition.options,
-        attributes: definition.schema,
-        parallelism: this.parallelism,
-        passphrase: this.passphrase,
-        observers: [this],
-      });
+    // Create resources from saved metadata using current version
+    for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
+      const currentVersion = resourceMetadata.currentVersion || 'v0';
+      const versionData = resourceMetadata.versions?.[currentVersion];
+      
+      if (versionData) {
+        this.resources[name] = new Resource({
+          name,
+          client: this.client,
+          database: this, // Add database reference for versioning
+          options: {
+            ...versionData.options,
+            version: currentVersion,
+            partitionRules: resourceMetadata.partitions || versionData.options?.partitionRules || {}
+          },
+          attributes: versionData.attributes,
+          parallelism: this.parallelism,
+          passphrase: this.passphrase,
+          observers: [this],
+        });
+      }
     }
 
     // Emit definition changes if any were detected
     if (definitionChanges.length > 0) {
-      this.emit("definitionChanges", definitionChanges);
+      this.emit("resourceDefinitionsChanged", {
+        changes: definitionChanges,
+        metadata: this.savedMetadata
+      });
     }
 
     this.emit("connected", new Date());
@@ -80,7 +94,7 @@ export class Database extends EventEmitter {
     
     for (const [name, currentResource] of Object.entries(this.resources)) {
       const currentHash = this.generateDefinitionHash(currentResource.export());
-      const savedResource = savedMetadata.resources[name];
+      const savedResource = savedMetadata.resources?.[name];
       
       if (!savedResource) {
         changes.push({
@@ -89,24 +103,36 @@ export class Database extends EventEmitter {
           currentHash,
           savedHash: null
         });
-      } else if (savedResource.definitionHash !== currentHash) {
-        changes.push({
-          type: 'changed',
-          resourceName: name,
-          currentHash,
-          savedHash: savedResource.definitionHash
-        });
+      } else {
+        // Get current version hash from saved metadata
+        const currentVersion = savedResource.currentVersion || 'v0';
+        const versionData = savedResource.versions?.[currentVersion];
+        const savedHash = versionData?.hash;
+        
+        if (savedHash !== currentHash) {
+          changes.push({
+            type: 'changed',
+            resourceName: name,
+            currentHash,
+            savedHash,
+            fromVersion: currentVersion,
+            toVersion: this.getNextVersion(savedResource.versions)
+          });
+        }
       }
     }
     
     // Check for deleted resources
     for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
       if (!this.resources[name]) {
+        const currentVersion = savedResource.currentVersion || 'v0';
+        const versionData = savedResource.versions?.[currentVersion];
         changes.push({
           type: 'deleted',
           resourceName: name,
           currentHash: null,
-          savedHash: savedResource.definitionHash
+          savedHash: versionData?.hash,
+          deletedVersion: currentVersion
         });
       }
     }
@@ -122,6 +148,21 @@ export class Database extends EventEmitter {
   generateDefinitionHash(definition) {
     const stableString = jsonStableStringify(definition);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
+  }
+
+  /**
+   * Get the next version number for a resource
+   * @param {Object} versions - Existing versions object
+   * @returns {string} Next version string (e.g., 'v1', 'v2')
+   */
+  getNextVersion(versions = {}) {
+    const versionNumbers = Object.keys(versions)
+      .filter(v => v.startsWith('v'))
+      .map(v => parseInt(v.substring(1)))
+      .filter(n => !isNaN(n));
+    
+    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+    return `v${maxVersion + 1}`;
   }
 
   async startPlugins() {
@@ -148,39 +189,63 @@ export class Database extends EventEmitter {
     }
   }
 
-  unserializeMetadata(metadata) {
-    const file = { ...metadata };
-    if (isEmpty(file.resources)) return file;
 
-    for (const [name, structure] of Object.entries(file.resources)) {
-      for (const [attr, value] of Object.entries(structure.attributes)) {
-        file.resources[name].attributes[attr] = JSON.parse(value);
-      }
-    }
-
-    return file;
-  }
 
   async uploadMetadataFile() {
-    const file = {
+    const metadata = {
       version: this.version,
       s3dbVersion: this.s3dbVersion,
-      resources: Object.entries(this.resources).reduce((acc, definition) => {
-        const [name, resource] = definition;
-        const exportedResource = resource.export();
-        acc[name] = {
-          ...exportedResource,
-          definitionHash: this.generateDefinitionHash(exportedResource)
-        };
-        return acc;
-      }, {}),
+      lastUpdated: new Date().toISOString(),
+      resources: {}
     };
 
-    await this.client.putObject({
-      key: `s3db.json`,
-      contentType: "application/json",
-      body: JSON.stringify(file, null, 2),
+    // Generate versioned definition for each resource
+    Object.entries(this.resources).forEach(([name, resource]) => {
+      const resourceDef = resource.export();
+      const definitionHash = this.generateDefinitionHash(resourceDef);
+      
+      // Check if resource exists in saved metadata
+      const existingResource = this.savedMetadata?.resources?.[name];
+      const currentVersion = existingResource?.currentVersion || 'v0';
+      const existingVersionData = existingResource?.versions?.[currentVersion];
+      
+      let version, isNewVersion;
+      
+      // If hash is different, create new version
+      if (!existingVersionData || existingVersionData.hash !== definitionHash) {
+        version = this.getNextVersion(existingResource?.versions);
+        isNewVersion = true;
+      } else {
+        version = currentVersion;
+        isNewVersion = false;
+      }
+
+      metadata.resources[name] = {
+        currentVersion: version,
+        partitions: resourceDef.options?.partitionRules || {},
+        versions: {
+          ...existingResource?.versions, // Preserve previous versions
+          [version]: {
+            hash: definitionHash,
+            attributes: resourceDef.attributes,
+            options: resourceDef.options,
+            createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
+          }
+        }
+      };
+
+      // Update resource version
+      resource.options.version = version;
     });
+
+    await this.client.putObject({
+      key: 's3db.json',
+      body: JSON.stringify(metadata, null, 2),
+      contentType: 'application/json'
+    });
+
+    this.savedMetadata = metadata;
+    this.emit('metadataUploaded', metadata);
   }
 
   blankMetadataStructure() {
@@ -192,20 +257,27 @@ export class Database extends EventEmitter {
   }
 
   async createResource({ name, attributes, options = {} }) {
+    // Check if resource exists and determine version
+    const existingResource = this.savedMetadata?.resources?.[name];
+    const version = existingResource?.currentVersion || 'v0';
+    
     const resource = new Resource({
       name,
       attributes,
       observers: [this],
       client: this.client,
+      database: this, // Add database reference
 
       options: {
         cache: this.cache,
+        version, // Set the version
         ...options,
       },
     });
 
     this.resources[name] = resource;
 
+    // Upload metadata will handle versioning
     await this.uploadMetadataFile();
 
     this.emit("s3db.resourceCreated", name);
