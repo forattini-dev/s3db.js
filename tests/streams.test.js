@@ -12,17 +12,18 @@ import {
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'streams-' + Date.now())
 
 describe('Readable streams', () => {
-  let s3db = new Database({
-    verbose: true,
-    connectionString: process.env.BUCKET_CONNECTION_STRING
-      .replace('USER', process.env.MINIO_USER)
-      .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/${testPrefix}-read`
-  });
-
-  let resource
+  let s3db;
+  let resource;
 
   beforeAll(async () => {
+    s3db = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}-read`
+    });
+
     await s3db.connect()
 
     resource = await s3db.createResource({
@@ -89,17 +90,18 @@ describe('Readable streams', () => {
 })
 
 describe('Writable streams', () => {
-  let s3db = new Database({
-    verbose: true,
-    connectionString: process.env.BUCKET_CONNECTION_STRING
-      .replace('USER', process.env.MINIO_USER)
-      .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/${testPrefix}-write`
-  });
-
-  let resource
+  let s3db;
+  let resource;
 
   beforeAll(async () => {
+    s3db = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}-write`
+    });
+
     await s3db.connect()
 
     resource = await s3db.createResource({

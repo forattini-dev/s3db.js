@@ -5,18 +5,20 @@ import Database from '../src/database.class.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-journey-' + Date.now());
 
-describe('Database Class - Complete Journey', () => {
-  let database;
+describe('Database', () => {
+  let s3db;
 
-  beforeEach(async () => {
-    database = new Database({
-      verbose: false,
+  beforeAll(async () => {
+    s3db = new Database({
+      verbose: true,
       connectionString: process.env.BUCKET_CONNECTION_STRING
-        ?.replace('USER', process.env.MINIO_USER)
-        ?.replace('PASSWORD', process.env.MINIO_PASSWORD)
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
         + `/${testPrefix}`
-    });
-  });
+    })
+
+    await s3db.connect()
+  })
 
   test('Database Journey: Connect → Create Resources → Manage Schema → Version Control → Events', async () => {
 

@@ -6,18 +6,33 @@ import Resource from '../src/resource.class.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-journey-' + Date.now());
 
-describe('Resource Class - Complete Journey', () => {
+describe('Resource', () => {
   let client;
   let resource;
 
   beforeEach(async () => {
     client = new Client({
-      verbose: false,
+      verbose: true,
       connectionString: process.env.BUCKET_CONNECTION_STRING
-        ?.replace('USER', process.env.MINIO_USER)
-        ?.replace('PASSWORD', process.env.MINIO_PASSWORD)
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
         + `/${testPrefix}`
-    });
+    })
+
+    resource = new Resource({
+      client,
+      name: 'breeds',
+      attributes: {
+        animal: 'string',
+        name: 'string',
+      },
+      options: {
+        timestamps: true,
+      }
+    })
+
+    await resource.deleteAll()
+  })
 
     resource = new Resource({
       client,
@@ -386,5 +401,192 @@ describe('Resource Class - Complete Journey', () => {
       expect(error.message).toContain('paranoid');
     }
 
+  });
+
+  describe('Partitioning', () => {
+    let partitionedResource;
+
+    beforeEach(async () => {
+      partitionedResource = new Resource({
+        client,
+        name: 'users',
+        attributes: {
+          name: 'string',
+          email: 'string',
+          age: 'number',
+          city: 'string',
+        },
+        options: {
+          timestamps: true,
+          partitionBy: ['city', 'age'],
+        }
+      })
+
+      await partitionedResource.deleteAll()
+    })
+
+    test('should create partitioned keys correctly', async () => {
+      const user1 = await partitionedResource.insert({
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 30,
+        city: 'New York',
+      })
+
+      const user2 = await partitionedResource.insert({
+        name: 'Jane Smith',
+        email: 'jane@example.com',
+        age: 25,
+        city: 'Los Angeles',
+      })
+
+      expect(user1.id).toBeDefined()
+      expect(user2.id).toBeDefined()
+      expect(user1.id).not.toBe(user2.id)
+
+      // Verify the data is stored correctly
+      const retrieved1 = await partitionedResource.get(user1.id)
+      const retrieved2 = await partitionedResource.get(user2.id)
+
+      expect(retrieved1.name).toBe('John Doe')
+      expect(retrieved1.city).toBe('New York')
+      expect(retrieved1.age).toBe(30)
+      expect(retrieved2.name).toBe('Jane Smith')
+      expect(retrieved2.city).toBe('Los Angeles')
+      expect(retrieved2.age).toBe(25)
+    })
+
+    test('should query by partition', async () => {
+      // Insert users in different cities
+      await partitionedResource.insertMany([
+        { name: 'John', email: 'john@ny.com', age: 30, city: 'New York' },
+        { name: 'Jane', email: 'jane@ny.com', age: 25, city: 'New York' },
+        { name: 'Bob', email: 'bob@la.com', age: 35, city: 'Los Angeles' },
+        { name: 'Alice', email: 'alice@la.com', age: 28, city: 'Los Angeles' },
+        { name: 'Charlie', email: 'charlie@sf.com', age: 32, city: 'San Francisco' },
+      ])
+
+      // Query by city partition
+      const nyUsers = await partitionedResource.query({ city: 'New York' })
+      const laUsers = await partitionedResource.query({ city: 'Los Angeles' })
+      const sfUsers = await partitionedResource.query({ city: 'San Francisco' })
+
+      expect(nyUsers.length).toBe(2)
+      expect(laUsers.length).toBe(2)
+      expect(sfUsers.length).toBe(1)
+
+      // Verify all users from NY have correct city
+      nyUsers.forEach(user => {
+        expect(user.city).toBe('New York')
+      })
+    })
+
+    test('should query by multiple partition fields', async () => {
+      await partitionedResource.insertMany([
+        { name: 'John', email: 'john@ny.com', age: 30, city: 'New York' },
+        { name: 'Jane', email: 'jane@ny.com', age: 25, city: 'New York' },
+        { name: 'Bob', email: 'bob@ny.com', age: 30, city: 'New York' },
+        { name: 'Alice', email: 'alice@la.com', age: 28, city: 'Los Angeles' },
+      ])
+
+      // Query by both city and age
+      const ny30Users = await partitionedResource.query({ city: 'New York', age: 30 })
+      const ny25Users = await partitionedResource.query({ city: 'New York', age: 25 })
+
+      expect(ny30Users.length).toBe(2)
+      expect(ny25Users.length).toBe(1)
+
+      ny30Users.forEach(user => {
+        expect(user.city).toBe('New York')
+        expect(user.age).toBe(30)
+      })
+    })
+
+    test('should handle partition updates correctly', async () => {
+      const user = await partitionedResource.insert({
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 30,
+        city: 'New York',
+      })
+
+      // Update partition field
+      const updated = await partitionedResource.update(user.id, { city: 'Los Angeles' })
+
+      expect(updated.city).toBe('Los Angeles')
+      expect(updated.age).toBe(30)
+      expect(updated.name).toBe('John Doe')
+
+      // Verify the update is reflected in queries
+      const nyUsers = await partitionedResource.query({ city: 'New York' })
+      const laUsers = await partitionedResource.query({ city: 'Los Angeles' })
+
+      expect(nyUsers.length).toBe(0)
+      expect(laUsers.length).toBe(1)
+      expect(laUsers[0].id).toBe(user.id)
+    })
+
+    test('should handle partition deletion', async () => {
+      await partitionedResource.insertMany([
+        { name: 'John', email: 'john@ny.com', age: 30, city: 'New York' },
+        { name: 'Jane', email: 'jane@ny.com', age: 25, city: 'New York' },
+        { name: 'Bob', email: 'bob@la.com', age: 35, city: 'Los Angeles' },
+      ])
+
+      // Delete by partition
+      const deleted = await partitionedResource.deleteByPartition({ city: 'New York' })
+
+      expect(deleted).toBe(2)
+
+      const remainingUsers = await partitionedResource.query({})
+      expect(remainingUsers.length).toBe(1)
+      expect(remainingUsers[0].city).toBe('Los Angeles')
+    })
+
+    test('should handle complex partition queries', async () => {
+      await partitionedResource.insertMany([
+        { name: 'John', email: 'john@ny.com', age: 30, city: 'New York' },
+        { name: 'Jane', email: 'jane@ny.com', age: 25, city: 'New York' },
+        { name: 'Bob', email: 'bob@ny.com', age: 30, city: 'New York' },
+        { name: 'Alice', email: 'alice@la.com', age: 28, city: 'Los Angeles' },
+        { name: 'Charlie', email: 'charlie@la.com', age: 30, city: 'Los Angeles' },
+      ])
+
+      // Query with partial partition match
+      const all30YearOlds = await partitionedResource.query({ age: 30 })
+      expect(all30YearOlds.length).toBe(3)
+
+      // Query with non-partition field
+      const johnUsers = await partitionedResource.query({ name: 'John' })
+      expect(johnUsers.length).toBe(1)
+      expect(johnUsers[0].name).toBe('John')
+    })
+
+    test('should handle partition migration', async () => {
+      const user = await partitionedResource.insert({
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 30,
+        city: 'New York',
+      })
+
+      // Migrate partition (this would typically be done through a migration script)
+      const migrated = await partitionedResource.migratePartition(user.id, {
+        city: 'Los Angeles',
+        age: 31
+      })
+
+      expect(migrated.city).toBe('Los Angeles')
+      expect(migrated.age).toBe(31)
+
+      // Verify old partition is empty
+      const nyUsers = await partitionedResource.query({ city: 'New York', age: 30 })
+      expect(nyUsers.length).toBe(0)
+
+      // Verify new partition has the user
+      const laUsers = await partitionedResource.query({ city: 'Los Angeles', age: 31 })
+      expect(laUsers.length).toBe(1)
+      expect(laUsers[0].id).toBe(user.id)
+    })
   });
 });

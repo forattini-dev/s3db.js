@@ -10,6 +10,10 @@ import {
   CachePlugin,
   MemoryCache,
   ConnectionString,
+  ResourceReader,
+  ResourceWriter,
+  ResourceIdsReader,
+  ResourceIdsPageReader,
   
   // objects
   ErrorMap,
@@ -19,6 +23,7 @@ import {
   // functions
   encrypt,
   decrypt,
+  streamToString,
 
   // errors
   BaseError,
@@ -43,6 +48,10 @@ describe("Bundle package", () => {
     CachePlugin,
     MemoryCache,
     ConnectionString,
+    ResourceReader,
+    ResourceWriter,
+    ResourceIdsReader,
+    ResourceIdsPageReader,
     
     // objects
     ErrorMap,
@@ -52,6 +61,7 @@ describe("Bundle package", () => {
     // functions
     encrypt,
     decrypt,
+    streamToString,
 
     // errors
     BaseError,
@@ -62,7 +72,7 @@ describe("Bundle package", () => {
     MissingMetadata,
     InvalidResourceItem,
   ].forEach((target) => {
-    it(`should export ${target.name || target.constructor.name}`, () => {
+    it(`should export ${target.name || target.constructor.name || 'function'}`, () => {
       expect(target).toBeDefined()
     })
   })
