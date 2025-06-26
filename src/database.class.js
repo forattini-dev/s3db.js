@@ -12,7 +12,16 @@ export class Database extends EventEmitter {
     super();
 
     this.version = "1";
-    this.s3dbVersion = __PACKAGE_VERSION__; // Injected during build
+    // Version is injected during build, fallback to "latest" for development
+    this.s3dbVersion = (() => {
+      try {
+        return typeof __PACKAGE_VERSION__ !== 'undefined' && __PACKAGE_VERSION__ !== '__PACKAGE_VERSION__' 
+          ? __PACKAGE_VERSION__ 
+          : "latest";
+      } catch (e) {
+        return "latest";
+      }
+    })();
     this.resources = {};
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;

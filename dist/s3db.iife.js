@@ -4474,7 +4474,13 @@ ${JSON.stringify(validation, null, 2)}`
     constructor(options) {
       super();
       this.version = "1";
-      this.s3dbVersion = "3.3.2";
+      this.s3dbVersion = (() => {
+        try {
+          return true ? "3.3.2" : "latest";
+        } catch (e) {
+          return "latest";
+        }
+      })();
       this.resources = {};
       this.savedMetadata = null;
       this.options = options;
