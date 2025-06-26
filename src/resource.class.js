@@ -282,8 +282,9 @@ class Resource extends EventEmitter {
 
     const partitionSegments = [];
     
-    // Process each field in the partition
-    for (const [fieldName, rule] of Object.entries(partition.fields)) {
+    // Process each field in the partition (sorted by field name for consistency)
+    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
       const fieldValue = this.applyPartitionRule(data[fieldName], rule);
       
       if (fieldValue === undefined || fieldValue === null) {
@@ -480,9 +481,10 @@ class Resource extends EventEmitter {
         throw new Error(`Partition '${partition}' not found`);
       }
       
-      // Build partition segments
+      // Build partition segments (sorted by field name for consistency)
       const partitionSegments = [];
-      for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
         const value = partitionValues[fieldName];
         if (value !== undefined && value !== null) {
           const transformedValue = this.applyPartitionRule(value, rule);
@@ -573,9 +575,10 @@ class Resource extends EventEmitter {
         throw new Error(`Partition '${partition}' not found`);
       }
       
-      // Build partition segments
+      // Build partition segments (sorted by field name for consistency)
       const partitionSegments = [];
-      for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
         const value = partitionValues[fieldName];
         if (value !== undefined && value !== null) {
           const transformedValue = this.applyPartitionRule(value, rule);
