@@ -20,6 +20,7 @@ class Resource extends EventEmitter {
   constructor({
     name,
     client,
+    database = null,
     options = {},
     attributes = {},
     parallelism = 10,
@@ -30,6 +31,7 @@ class Resource extends EventEmitter {
 
     this.name = name;
     this.client = client;
+    this.database = database; // Reference to database for versioning
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
@@ -39,7 +41,18 @@ class Resource extends EventEmitter {
       autoDecrypt: true,
       timestamps: false,
       partitionRules: {},
+      version: 'v0', // Default version
       ...options,
+    };
+
+    // Initialize hooks system
+    this.hooks = {
+      preInsert: [],
+      afterInsert: [],
+      preUpdate: [],
+      afterUpdate: [],
+      preDelete: [],
+      afterDelete: []
     };
 
     if (options.timestamps) {
@@ -60,11 +73,70 @@ class Resource extends EventEmitter {
       attributes,
       passphrase,
       options: this.options,
-    })
+    });
+
+    // Setup automatic partition hooks if partitions are defined
+    this.setupPartitionHooks();
   }
 
   export() {
     return this.schema.export();
+  }
+
+  /**
+   * Add a hook function for a specific event
+   * @param {string} event - Hook event (preInsert, afterInsert, etc.)
+   * @param {Function} fn - Hook function
+   */
+  addHook(event, fn) {
+    if (this.hooks[event]) {
+      this.hooks[event].push(fn.bind(this));
+    }
+  }
+
+  /**
+   * Execute hooks for a specific event
+   * @param {string} event - Hook event
+   * @param {*} data - Data to pass to hooks
+   * @returns {*} Modified data
+   */
+  async executeHooks(event, data) {
+    if (!this.hooks[event]) return data;
+    
+    let result = data;
+    for (const hook of this.hooks[event]) {
+      result = await hook(result);
+    }
+    return result;
+  }
+
+  /**
+   * Setup automatic partition hooks
+   */
+  setupPartitionHooks() {
+    const partitionRules = this.options.partitionRules;
+    
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return;
+    }
+
+    // Add afterInsert hook to create partition objects
+    this.addHook('afterInsert', async (data) => {
+      await this.createPartitionObjects(data);
+      return data;
+    });
+
+    // Add afterUpdate hook to update partition objects if partition fields changed
+    this.addHook('afterUpdate', async (data) => {
+      await this.updatePartitionObjects(data);
+      return data;
+    });
+
+    // Add afterDelete hook to clean up partition objects
+    this.addHook('afterDelete', async (data) => {
+      await this.deletePartitionObjects(data);
+      return data;
+    });
   }
 
   async validate(data) {
@@ -170,17 +242,20 @@ class Resource extends EventEmitter {
       attributes.updatedAt = new Date().toISOString();
     }
 
+    // Execute preInsert hooks
+    const preProcessedData = await this.executeHooks('preInsert', attributes);
+
     const {
       errors,
       isValid,
       data: validated,
-    } = await this.validate(attributes);
+    } = await this.validate(preProcessedData);
 
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
         resourceName: this.name,
-        attributes,
+        attributes: preProcessedData,
         validation: errors,
       })
     }
@@ -198,6 +273,9 @@ class Resource extends EventEmitter {
 
     const final = merge({ id }, validated);
 
+    // Execute afterInsert hooks
+    await this.executeHooks('afterInsert', final);
+
     this.emit("insert", final);
     return final;
   }
@@ -207,7 +285,11 @@ class Resource extends EventEmitter {
     
     const request = await this.client.headObject(key);
 
-    let data = await this.schema.unmapper(request.Metadata);
+    // Get the correct schema version for unmapping
+    const objectVersion = this.extractVersionFromKey(key) || this.options.version;
+    const schema = await this.getSchemaForVersion(objectVersion);
+
+    let data = await schema.unmapper(request.Metadata);
     data.id = id;
     data._contentLength = request.ContentLength;
     data._lastModified = request.LastModified;
@@ -243,7 +325,10 @@ class Resource extends EventEmitter {
       attributes.updatedAt = new Date().toISOString();
     }
 
-    const attrs = merge(live, attributes);
+    // Execute preUpdate hooks
+    const preProcessedData = await this.executeHooks('preUpdate', attributes);
+
+    const attrs = merge(live, preProcessedData);
     delete attrs.id;
 
     const { isValid, errors, data: validated } = await this.validate(attrs);
@@ -252,7 +337,7 @@ class Resource extends EventEmitter {
       throw new InvalidResourceItem({
         bucket: this.client.bucket,
         resourceName: this.name,
-        attributes,
+        attributes: preProcessedData,
         validation: errors,
       })
     }
@@ -281,13 +366,31 @@ class Resource extends EventEmitter {
 
     validated.id = id;
 
-    this.emit("update", attributes, validated);
+    // Execute afterUpdate hooks
+    await this.executeHooks('afterUpdate', validated);
+
+    this.emit("update", preProcessedData, validated);
     return validated;
   }
 
   async delete(id, partitionData = {}) {
+    // Get object data before deletion for hooks
+    let objectData;
+    try {
+      objectData = await this.get(id, partitionData);
+    } catch (error) {
+      // Object doesn't exist, create minimal data for hooks
+      objectData = { id, ...partitionData };
+    }
+
+    // Execute preDelete hooks
+    await this.executeHooks('preDelete', objectData);
+
     const key = this.getResourceKey(id, partitionData);
     const response = await this.client.deleteObject(key);
+
+    // Execute afterDelete hooks
+    await this.executeHooks('afterDelete', objectData);
 
     this.emit("delete", id);
     return response;
@@ -594,6 +697,125 @@ class Resource extends EventEmitter {
     const exportedSchema = this.schema.export();
     const stableString = jsonStableStringify(exportedSchema);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
+  }
+
+  /**
+   * Extract version from S3 key
+   * @param {string} key - S3 object key
+   * @returns {string|null} Version string or null
+   */
+  extractVersionFromKey(key) {
+    const parts = key.split('/');
+    const versionPart = parts.find(part => part.startsWith('v='));
+    return versionPart ? versionPart.replace('v=', '') : null;
+  }
+
+  /**
+   * Get schema for a specific version
+   * @param {string} version - Version string (e.g., 'v0', 'v1')
+   * @returns {Object} Schema object for the version
+   */
+  async getSchemaForVersion(version) {
+    // If it's the current version, use current schema
+    if (version === this.options.version) {
+      return this.schema;
+    }
+
+    // Get version data from database metadata
+    if (this.database?.savedMetadata?.resources?.[this.name]?.versions?.[version]) {
+      const versionData = this.database.savedMetadata.resources[this.name].versions[version];
+      
+      // Create schema for this version
+      return new Schema({
+        name: this.name,
+        attributes: versionData.attributes,
+        passphrase: this.passphrase,
+        options: versionData.options,
+      });
+    }
+
+    // Fallback to current schema if version not found
+    return this.schema;
+  }
+
+  /**
+   * Create partition objects after insert
+   * @param {Object} data - Inserted object data
+   */
+  async createPartitionObjects(data) {
+    const partitionRules = this.options.partitionRules;
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return;
+    }
+
+    // Extract partition values from data
+    const partitionData = {};
+    for (const field of Object.keys(partitionRules)) {
+      if (data[field] !== undefined && data[field] !== null) {
+        partitionData[field] = data[field];
+      }
+    }
+
+    if (Object.keys(partitionData).length === 0) {
+      return;
+    }
+
+    // Create partition object with reference to main object
+    const partitionKey = this.getResourceKey(data.id, partitionData);
+    
+    // Only create if different from main object path
+    const mainKey = this.getResourceKey(data.id, {});
+    if (partitionKey !== mainKey) {
+      const metadata = await this.schema.mapper(data);
+      
+      await this.client.putObject({
+        key: partitionKey,
+        metadata,
+        body: "", // Partition objects are metadata-only by default
+      });
+    }
+  }
+
+  /**
+   * Update partition objects after update
+   * @param {Object} data - Updated object data
+   */
+  async updatePartitionObjects(data) {
+    // For now, recreate partition objects
+    // In a more sophisticated implementation, we could track partition changes
+    await this.createPartitionObjects(data);
+  }
+
+  /**
+   * Delete partition objects after delete
+   * @param {Object} data - Deleted object data (should include id and partition data)
+   */
+  async deletePartitionObjects(data) {
+    const partitionRules = this.options.partitionRules;
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return;
+    }
+
+    // Extract partition values from data
+    const partitionData = {};
+    for (const field of Object.keys(partitionRules)) {
+      if (data[field] !== undefined && data[field] !== null) {
+        partitionData[field] = data[field];
+      }
+    }
+
+    if (Object.keys(partitionData).length > 0) {
+      const partitionKey = this.getResourceKey(data.id, partitionData);
+      
+      try {
+        await this.client.deleteObject(partitionKey);
+      } catch (error) {
+        // Ignore errors if partition object doesn't exist
+        if (error.name !== 'NoSuchKey') {
+          throw error;
+        }
+      }
+    }
   }
 }
 
