@@ -229,7 +229,111 @@ async function main() {
   console.log('Partitioned (no version):', events.getResourceKey(event1.id, { eventDate: '2025-06-26', region: 'US-WE' }));
   console.log('User partitioned:', users.getResourceKey(user.id, { region: 'US', joinDate: '2025-06-26' }));
 
-  console.log('\n✅ Roadmap features demo completed successfully!');
+  // 7. Automatic Timestamp Partitions
+  console.log('\n⏰ Automatic Timestamp Partitions');
+  console.log('=================================');
+
+  const meetings = await db.createResource({
+    name: 'meetings',
+    attributes: {
+      title: 'string',
+      description: 'string',
+      category: 'string'
+    },
+    options: {
+      timestamps: true, // Automatically adds createdAt and updatedAt partitions
+      partitionRules: {
+        category: 'string|maxlength:8' // Manual partition rule
+        // createdAt and updatedAt partitions are automatically added as 'date|maxlength:10'
+      }
+    }
+  });
+
+  console.log('📋 Meeting partition rules:', meetings.options.partitionRules);
+  // Should show: { category: 'string|maxlength:8', createdAt: 'date|maxlength:10', updatedAt: 'date|maxlength:10' }
+
+  // Insert meetings with automatic timestamp partitioning
+  const meeting1 = await meetings.insert({
+    title: 'Technical Review',
+    description: 'Quarterly technical review meeting',
+    category: 'engineering-review'
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 50)); // Small delay for different timestamps
+
+  const meeting2 = await meetings.insert({
+    title: 'Budget Planning',
+    description: 'Annual budget planning session',
+    category: 'finance-planning'
+  });
+
+  console.log('📅 Meeting 1:', meeting1);
+  console.log('📅 Meeting 2:', meeting2);
+
+  // Demonstrate automatic partition path generation
+  const today = meeting1.createdAt.split('T')[0]; // Extract date (YYYY-MM-DD)
+  const meetingPartitionPath = meetings.generatePartitionPath({
+    category: meeting1.category,
+    createdAt: meeting1.createdAt,
+    updatedAt: meeting1.updatedAt
+  });
+
+  console.log('🗂️ Generated partition path:', meetingPartitionPath);
+  // Should be something like: partitions/category=engineer/createdAt=2025-06-26/updatedAt=2025-06-26/
+
+  // List meetings by date partition (automatic)
+  const todayMeetings = await meetings.listIds({ createdAt: today });
+  console.log('📋 Meetings created today:', todayMeetings);
+
+  // Filter by category and date
+  const engineeringMeetingsToday = await meetings.listIds({
+    category: 'engineering-review',
+    createdAt: today
+  });
+  console.log('🔧 Engineering meetings today:', engineeringMeetingsToday);
+
+  // Paginate with timestamp partitions
+  const meetingPage = await meetings.page(0, 10, { createdAt: today });
+  console.log('📄 Page of today\'s meetings:', {
+    totalItems: meetingPage.totalItems,
+    itemsOnPage: meetingPage.items.length,
+    pageInfo: `${meetingPage.page + 1}/${meetingPage.totalPages}`
+  });
+
+  // Count meetings by date
+  const todayMeetingCount = await meetings.count({ createdAt: today });
+  console.log('🔢 Total meetings today:', todayMeetingCount);
+
+  // Add meeting notes (binary content) with timestamp partitions
+  const meetingPartitionData = {
+    category: meeting1.category,
+    createdAt: meeting1.createdAt,
+    updatedAt: meeting1.updatedAt
+  };
+
+  const meetingNotes = Buffer.from('Meeting notes: Discussed Q4 objectives, performance metrics, and team structure...', 'utf8');
+  await meetings.setContent(meeting1.id, meetingNotes, 'text/plain', meetingPartitionData);
+
+  // Verify content with partitions
+  const hasNotes = await meetings.hasContent(meeting1.id, meetingPartitionData);
+  console.log('📝 Meeting has notes:', hasNotes);
+
+  const notes = await meetings.getContent(meeting1.id, meetingPartitionData);
+  console.log('📖 Retrieved notes preview:', notes.buffer.toString('utf8').substring(0, 50) + '...');
+
+  // Get enhanced metadata including partition info
+  const meetingWithMetadata = await meetings.get(meeting1.id, meetingPartitionData);
+  console.log('📊 Meeting with full metadata:', {
+    id: meetingWithMetadata.id,
+    title: meetingWithMetadata.title,
+    createdAt: meetingWithMetadata.createdAt,
+    _hasContent: meetingWithMetadata._hasContent,
+    _contentLength: meetingWithMetadata._contentLength,
+    definitionHash: meetingWithMetadata.definitionHash.substring(0, 16) + '...'
+  });
+
+  console.log('\n✅ All roadmap features working! 🎉');
+  console.log('Binary content, partitions, versioning, automatic timestamp partitions - everything is ready!');
 }
 
 main().catch(console.error);

@@ -45,6 +45,14 @@ class Resource extends EventEmitter {
     if (options.timestamps) {
       attributes.createdAt = 'string|optional';
       attributes.updatedAt = 'string|optional';
+      
+      // Automatically add timestamp partitions for date-based organization
+      if (!this.options.partitionRules.createdAt) {
+        this.options.partitionRules.createdAt = 'date|maxlength:10';
+      }
+      if (!this.options.partitionRules.updatedAt) {
+        this.options.partitionRules.updatedAt = 'date|maxlength:10';
+      }
     }
 
     this.schema = new Schema({
@@ -111,14 +119,24 @@ class Resource extends EventEmitter {
       }
 
       // Format date values
-      if (rule.includes('date') && value instanceof Date) {
-        value = value.toISOString().split('T')[0]; // YYYY-MM-DD format
-      } else if (rule.includes('date') && typeof value === 'string') {
-        try {
-          const date = new Date(value);
-          value = date.toISOString().split('T')[0];
-        } catch (e) {
-          // Keep original value if not a valid date
+      if (rule.includes('date')) {
+        if (value instanceof Date) {
+          value = value.toISOString().split('T')[0]; // YYYY-MM-DD format
+        } else if (typeof value === 'string') {
+          try {
+            // Handle ISO8601 timestamp strings (e.g., from timestamps)
+            if (value.includes('T') && value.includes('Z')) {
+              value = value.split('T')[0]; // Extract date part from ISO8601
+            } else {
+              // Try to parse as date
+              const date = new Date(value);
+              if (!isNaN(date.getTime())) {
+                value = date.toISOString().split('T')[0];
+              }
+            }
+          } catch (e) {
+            // Keep original value if not a valid date
+          }
         }
       }
 
@@ -285,9 +303,19 @@ class Resource extends EventEmitter {
     return this.insert({ id, ...attributes });
   }
 
-  async count() {
+  async count(partitionData = {}) {
+    let prefix = `resource=${this.name}`;
+    
+    // If partition data is provided, use it to narrow the search
+    if (partitionData && Object.keys(partitionData).length > 0) {
+      const partitionPath = this.generatePartitionPath(partitionData);
+      if (partitionPath) {
+        prefix = `resource=${this.name}/${partitionPath}`;
+      }
+    }
+
     const count = await this.client.count({
-      prefix: `resource=${this.name}`,
+      prefix,
     });
 
     this.emit("count", count);
@@ -349,9 +377,19 @@ class Resource extends EventEmitter {
     await this.deleteMany(ids);
   }
 
-  async listIds() {
+  async listIds(partitionData = {}) {
+    let prefix = `resource=${this.name}`;
+    
+    // If partition data is provided, use it to narrow the search
+    if (partitionData && Object.keys(partitionData).length > 0) {
+      const partitionPath = this.generatePartitionPath(partitionData);
+      if (partitionPath) {
+        prefix = `resource=${this.name}/${partitionPath}`;
+      }
+    }
+
     const keys = await this.client.getAllKeys({
-      prefix: `resource=${this.name}`,
+      prefix,
     });
 
     const ids = keys.map((key) => {
@@ -397,25 +435,39 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async page({ offset = 0, size = 100 }) {
-    const keys = await this.client.getKeysPage({
-      offset,
-      amount: size,
-      prefix: `resource=${this.name}`,
-    });
-
-    const ids = keys.map((key) => {
-      // Extract ID from different path patterns:
-      // /resource={name}/v={version}/id={id}
-      // /resource={name}/partitions/.../id={id}
-      const parts = key.split('/');
-      const idPart = parts.find(part => part.startsWith('id='));
-      return idPart ? idPart.replace('id=', '') : null;
-    }).filter(Boolean);
+  async page(offset = 0, size = 100, partitionData = {}) {
+    let prefix = `resource=${this.name}`;
     
-    const data = await this.getMany(ids);
+    // If partition data is provided, use it to narrow the search
+    if (partitionData && Object.keys(partitionData).length > 0) {
+      const partitionPath = this.generatePartitionPath(partitionData);
+      if (partitionPath) {
+        prefix = `resource=${this.name}/${partitionPath}`;
+      }
+    }
 
-    return data;
+    const allIds = await this.listIds(partitionData);
+    const totalItems = allIds.length;
+    const totalPages = Math.ceil(totalItems / size);
+    
+    // Get paginated IDs
+    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
+    
+    // Get full data for each ID with partition data if needed
+    const items = await Promise.all(
+      paginatedIds.map(id => this.get(id, partitionData))
+    );
+
+    const result = {
+      items,
+      totalItems,
+      page: offset,
+      pageSize: size,
+      totalPages
+    };
+
+    this.emit("page", result);
+    return result;
   }
 
   readable() {
