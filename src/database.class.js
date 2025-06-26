@@ -1,5 +1,7 @@
 import { isEmpty, isFunction } from "lodash-es";
 import EventEmitter from "events";
+import jsonStableStringify from "json-stable-stringify";
+import { createHash } from "crypto";
 
 import Client from "./client.class.js";
 import Resource from "./resource.class.js";
@@ -10,6 +12,7 @@ export class Database extends EventEmitter {
     super();
 
     this.version = "1";
+    this.s3dbVersion = "0.6.2"; // Current library version
     this.resources = {};
     this.options = options;
     this.verbose = options.verbose || false;
@@ -42,6 +45,9 @@ export class Database extends EventEmitter {
       await this.uploadMetadataFile();
     }
 
+    // Check for definition changes
+    const definitionChanges = this.detectDefinitionChanges(metadata);
+    
     for (const resource of Object.entries(metadata.resources)) {
       const [name, definition] = resource;
 
@@ -56,7 +62,66 @@ export class Database extends EventEmitter {
       });
     }
 
+    // Emit definition changes if any were detected
+    if (definitionChanges.length > 0) {
+      this.emit("definitionChanges", definitionChanges);
+    }
+
     this.emit("connected", new Date());
+  }
+
+  /**
+   * Detect changes in resource definitions compared to saved metadata
+   * @param {Object} savedMetadata - The metadata loaded from s3db.json
+   * @returns {Array} Array of change objects
+   */
+  detectDefinitionChanges(savedMetadata) {
+    const changes = [];
+    
+    for (const [name, currentResource] of Object.entries(this.resources)) {
+      const currentHash = this.generateDefinitionHash(currentResource.export());
+      const savedResource = savedMetadata.resources[name];
+      
+      if (!savedResource) {
+        changes.push({
+          type: 'new',
+          resourceName: name,
+          currentHash,
+          savedHash: null
+        });
+      } else if (savedResource.definitionHash !== currentHash) {
+        changes.push({
+          type: 'changed',
+          resourceName: name,
+          currentHash,
+          savedHash: savedResource.definitionHash
+        });
+      }
+    }
+    
+    // Check for deleted resources
+    for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
+      if (!this.resources[name]) {
+        changes.push({
+          type: 'deleted',
+          resourceName: name,
+          currentHash: null,
+          savedHash: savedResource.definitionHash
+        });
+      }
+    }
+    
+    return changes;
+  }
+
+  /**
+   * Generate a consistent hash for a resource definition
+   * @param {Object} definition - Resource definition to hash
+   * @returns {string} SHA256 hash
+   */
+  generateDefinitionHash(definition) {
+    const stableString = jsonStableStringify(definition);
+    return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 
   async startPlugins() {
@@ -99,9 +164,14 @@ export class Database extends EventEmitter {
   async uploadMetadataFile() {
     const file = {
       version: this.version,
+      s3dbVersion: this.s3dbVersion,
       resources: Object.entries(this.resources).reduce((acc, definition) => {
         const [name, resource] = definition;
-        acc[name] = resource.export();
+        const exportedResource = resource.export();
+        acc[name] = {
+          ...exportedResource,
+          definitionHash: this.generateDefinitionHash(exportedResource)
+        };
         return acc;
       }, {}),
     };
@@ -116,6 +186,7 @@ export class Database extends EventEmitter {
   blankMetadataStructure() {
     return {
       version: `1`,
+      s3dbVersion: this.s3dbVersion,
       resources: {},
     };
   }
