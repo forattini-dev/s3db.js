@@ -11,8 +11,8 @@ import {
   cloneDeep,
 } from "lodash-es";
 
-import { encrypt, decrypt } from "./crypto";
-import { ValidatorManager } from "./validator.class";
+import { encrypt, decrypt } from "./crypto.js";
+import { ValidatorManager } from "./validator.class.js";
 
 export const SchemaActions = {
   trim: (value) => value.trim(),
@@ -22,8 +22,82 @@ export const SchemaActions = {
 
   toString: (value) => String(value),
 
-  fromArray: (value, { separator }) => (value || []).join(separator),
-  toArray: (value, { separator }) => (value || "").split(separator),
+  fromArray: (value, { separator }) => {
+    // Handle null, undefined, or non-array values
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value; // Preserve null/undefined, don't serialize non-arrays
+    }
+    
+    // Handle empty arrays
+    if (value.length === 0) {
+      return '[]'; // Special marker for empty arrays
+    }
+    
+    // Escape separator characters in array items before joining
+    // First escape backslashes, then escape the separator
+    const escapedItems = value.map(item => {
+      if (typeof item === 'string') {
+        return item
+          .replace(/\\/g, '\\\\') // Escape backslashes first
+          .replace(new RegExp(`\\${separator}`, 'g'), `\\${separator}`); // Then escape separator
+      }
+      return String(item);
+    });
+    
+    return escapedItems.join(separator);
+  },
+
+  toArray: (value, { separator }) => {
+    // Handle null/undefined values - preserve them
+    if (value === null || value === undefined) {
+      return value;
+    }
+    
+    // Handle empty array marker
+    if (value === '[]') {
+      return [];
+    }
+    
+    // Handle empty string (should also be empty array)
+    if (value === '') {
+      return [];
+    }
+    
+    // Custom split that respects escaped separators
+    const items = [];
+    let current = '';
+    let i = 0;
+    const str = String(value);
+    
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        // Handle escaped characters
+        if (str[i + 1] === separator) {
+          current += separator; // Unescape separator
+          i += 2;
+        } else if (str[i + 1] === '\\') {
+          current += '\\'; // Unescape backslash
+          i += 2;
+        } else {
+          current += str[i]; // Keep backslash for other chars
+          i++;
+        }
+      } else if (str[i] === separator) {
+        // Found unescaped separator
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    
+    // Add the last item
+    items.push(current);
+    
+    return items;
+  },
 
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
@@ -64,7 +138,15 @@ export class Schema {
     }
     else {
       const flatAttrs = flatten(this.attributes, { safe: true });
-      this.reversedMap = { ...Object.keys(flatAttrs).filter(k => !k.includes('$$')) }
+      const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
+      
+      // Also include parent object keys for objects that can be empty
+      const objectKeys = this.extractObjectKeys(this.attributes);
+      
+      // Combine leaf keys and object keys, removing duplicates
+      const allKeys = [...new Set([...leafKeys, ...objectKeys])];
+      
+      this.reversedMap = { ...allKeys }
       this.map = invert(this.reversedMap);
     }
   }
@@ -88,6 +170,29 @@ export class Schema {
   addHook(hook, attribute, action) {
     if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
     this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action])
+  }
+
+  extractObjectKeys(obj, prefix = '') {
+    const objectKeys = [];
+    
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith('$$')) continue; // Skip schema metadata
+      
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // This is an object, add its key
+        objectKeys.push(fullKey);
+        
+        // Check if it has nested objects
+        if (value.$$type === 'object') {
+          // Recursively extract nested object keys
+          objectKeys.push(...this.extractObjectKeys(value, fullKey));
+        }
+      }
+    }
+    
+    return objectKeys;
   }
 
   generateAutoHooks() {

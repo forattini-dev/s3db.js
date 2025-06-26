@@ -1,5 +1,5 @@
 import path from "path";
-import { nanoid } from "nanoid";
+import { idGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { chunk } from "lodash-es";
 import { PromisePool } from "@supercharge/promise-pool";
@@ -15,8 +15,8 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { ErrorMap } from "./errors";
-import { ConnectionString } from "./connection-string.class";
+import { ErrorMap } from "./errors.js";
+import { ConnectionString } from "./connection-string.class.js";
 
 export class Client extends EventEmitter {
   constructor({
@@ -241,12 +241,53 @@ export class Client extends EventEmitter {
     return report;
   }
 
+  /**
+   * Delete all objects under a specific prefix using efficient pagination
+   * @param {Object} options - Delete options
+   * @param {string} options.prefix - S3 prefix to delete
+   * @returns {Promise<number>} Number of objects deleted
+   */
   async deleteAll({ prefix } = {}) {
-    const keys = await this.getAllKeys({ prefix });
-    const report = await this.deleteObjects(keys);
+    let continuationToken;
+    let totalDeleted = 0;
 
-    this.emit("deleteAll", { prefix, report });
-    return report;
+    do {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: this.config.bucket,
+        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix) : prefix,
+        ContinuationToken: continuationToken,
+      });
+
+      const listResponse = await this.client.send(listCommand);
+
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: this.config.bucket,
+          Delete: {
+            Objects: listResponse.Contents.map(obj => ({ Key: obj.Key }))
+          }
+        });
+
+        const deleteResponse = await this.client.send(deleteCommand);
+        const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
+        totalDeleted += deletedCount;
+
+        this.emit("deleteAll", {
+          prefix,
+          batch: deletedCount,
+          total: totalDeleted
+        });
+      }
+
+      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    this.emit("deleteAllComplete", {
+      prefix,
+      totalDeleted
+    });
+
+    return totalDeleted;
   }
 
   async moveObject({ from, to }) {

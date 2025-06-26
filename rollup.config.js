@@ -3,6 +3,10 @@ import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
 import esbuild, { minify } from 'rollup-plugin-esbuild';
 import nodePolyfills from 'rollup-plugin-polyfill-node';
+import { readFileSync } from 'fs';
+
+// Read package.json to get version
+const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 
 export default {
   input: 'src/index.js',
@@ -58,9 +62,23 @@ export default {
     json(),
     nodePolyfills(),
     
+    // Replace __PACKAGE_VERSION__ with actual version during build
+    {
+      name: 'version-replacement',
+      transform(code, id) {
+        if (id.includes('database.class.js')) {
+          return code.replace(/__PACKAGE_VERSION__/g, `"${packageJson.version}"`);
+        }
+        return null;
+      }
+    },
+    
     esbuild({
       sourceMap: true,
       target: 'esnext',
+      define: {
+        __PACKAGE_VERSION__: `"${packageJson.version}"`
+      }
     })
   ],
 

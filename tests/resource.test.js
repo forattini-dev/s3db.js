@@ -1,121 +1,390 @@
 import { join } from 'path';
+import { describe, expect, test, beforeEach } from '@jest/globals';
 
-import Client from '../src/client.class';
-import Resource from '../src/resource.class';
+import Client from '../src/client.class.js';
+import Resource from '../src/resource.class.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-' + Date.now())
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-journey-' + Date.now());
 
-describe('Resource', () => {
-  const client = new Client({
-    verbose: true,
-    connectionString: process.env.BUCKET_CONNECTION_STRING
-      .replace('USER', process.env.MINIO_USER)
-      .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/${testPrefix}`
-  })
-
-  const resource = new Resource({
-    client,
-    name: 'breeds',
-    attributes: {
-      animal: 'string',
-      name: 'string',
-    },
-    options: {
-      timestamps: true,
-    }
-  })
+describe('Resource Class - Complete Journey', () => {
+  let client;
+  let resource;
 
   beforeEach(async () => {
-    await resource.deleteAll()
-  })
+    client = new Client({
+      verbose: false,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        ?.replace('USER', process.env.MINIO_USER)
+        ?.replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
 
-  test('single element complete example', async () => {
-    const in1 = await resource.insert({
-      animal: 'dog',
-      name: 'beagle',
-    })
+    resource = new Resource({
+      client,
+      name: 'users',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required',
+        age: 'number|optional',
+        active: 'boolean|default:true',
+        bio: 'string|optional',
+        tags: 'array|items:string'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byRegion: {
+            fields: {
+              region: 'string|maxlength:2'
+            }
+          },
+          byAgeGroup: {
+            fields: {
+              ageGroup: 'string'
+            }
+          }
+        }
+      }
+    });
 
-    expect(in1).toBeDefined()
-    expect(in1.id).toBeDefined()
-    expect(in1.animal).toBe('dog')
-    expect(in1.name).toBe('beagle')
-    expect(in1.createdAt).toBeDefined()
-    expect(in1.updatedAt).toBeDefined()
-
-    const ex1 = await resource.exists(in1.id)
-    expect(ex1).toBe(true)
-    const ex2 = await resource.exists(in1.id + '$$')
-    expect(ex2).toBe(false)
-
-    const up1 = await resource.update(in1.id, { name: 'bulldog' })
-
-    expect(up1).toBeDefined()
-    expect(up1.id).toBe(in1.id)
-    expect(up1.animal).toBe('dog')
-    expect(up1.name).toBe('bulldog')
-    expect(up1.createdAt).toBeDefined()
-    expect(up1.updatedAt).toBeDefined()
-    expect(up1.createdAt).toBe(in1.createdAt)
-    expect(up1.updatedAt).not.toBe(in1.updatedAt)
-
-    const up2 = await resource.upsert({ 
-      id: in1.id, 
-      name: 'dalmata',
-    })
-
-    expect(up2).toBeDefined()
-    expect(up2.id).toBe(in1.id)
-    expect(up2.animal).toBe('dog')
-    expect(up2.name).toBe('dalmata')
-    expect(up2.createdAt).toBeDefined()
-    expect(up2.updatedAt).toBeDefined()
-    expect(up2.createdAt).toBe(in1.createdAt)
-    expect(up2.updatedAt).not.toBe(in1.updatedAt)
-
-    const del1 = await resource.delete(in1.id)
-    const count = await resource.count()
-
-    expect(del1).toBeDefined()
-    expect(count).toBe(0)
-
-    const in2 = await resource.upsert({
-      animal: 'cat',
-      name: 'persian',
-    })
-
-    expect(in2).toBeDefined()
-    expect(in2.id).toBeDefined()
-    expect(in2.animal).toBe('cat')
-    expect(in2.name).toBe('persian')
-    expect(in2.createdAt).toBeDefined()
-    expect(in2.updatedAt).toBeDefined()
-
-    const del2 = await resource.delete(in2.id)
-    const count2 = await resource.count()
-
-    expect(del2).toBeDefined()
-    expect(count2).toBe(0)
+    // Clean slate for each test
+    try {
+      await resource.deleteAll({ paranoid: false });
+    } catch (error) {
+      // Ignore if no data exists
+    }
   });
 
-  test('multiple elements complete example', async () => {
-    const [in1, in2, in3] = await resource.insertMany([
-      { animal: 'dog', name: 'beagle', token: '$ecret1' },
-      { animal: 'dog', name: 'poodle', token: '$ecret3' },
-      { animal: 'dog', name: 'bulldog', token: '$ecret2' },
-    ])
+  test('Resource Journey: Create → Insert → Update → Query → Partition → Content → Delete', async () => {
 
-    const count = await resource.count()
-    expect(count).toBe(3)
+    // 1. Create and verify resource structure
+    expect(resource.name).toBe('users');
+    expect(resource.attributes.name).toBe('string|required');
+    expect(resource.attributes.email).toBe('email|required');
+    expect(resource.options.timestamps).toBe(true);
+    expect(resource.options.partitions).toBeDefined();
+    expect(resource.options.partitions.byRegion).toBeDefined();
 
-    const list = await resource.listIds()
-    expect(list).toBeDefined()
-    expect(list.length).toBe(3)
+    // 2. Insert single user
+    const user1 = await resource.insert({
+      name: 'João Silva',
+      email: 'joao@example.com',
+      age: 30,
+      bio: 'Desenvolvedor Full Stack',
+      tags: ['javascript', 'node.js', 'react'],
+      region: 'BR',
+      ageGroup: 'adult'
+    });
 
-    const del1 = await resource.deleteMany([ in1.id, in2.id, in3.id ])
-    expect(del1).toBeDefined()
+    expect(user1.id).toBeDefined();
+    expect(user1.name).toBe('João Silva');
+    expect(user1.email).toBe('joao@example.com');
+    expect(user1.age).toBe(30);
+    expect(user1.active).toBe(true); // Default value
+    expect(user1.createdAt).toBeDefined();
+    expect(user1.updatedAt).toBeDefined();
+    expect(Array.isArray(user1.tags)).toBe(true);
+    expect(user1.tags).toEqual(['javascript', 'node.js', 'react']);
+    
 
-    const count2 = await resource.count()
-    expect(count2).toBe(0)
+    // 3. Verify user exists
+    const exists = await resource.exists(user1.id);
+    expect(exists).toBe(true);
+    
+    const notExists = await resource.exists('non-existent-id');
+    expect(notExists).toBe(false);
+    
+
+    // 4. Get user and verify enhanced metadata
+    const retrievedUser = await resource.get(user1.id);
+    
+    expect(retrievedUser.id).toBe(user1.id);
+    expect(retrievedUser.name).toBe('João Silva');
+    expect(retrievedUser._contentLength).toBeDefined();
+    expect(retrievedUser._lastModified).toBeInstanceOf(Date);
+    expect(retrievedUser.mimeType).toBeDefined();
+    expect(retrievedUser.definitionHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(typeof retrievedUser._hasContent).toBe('boolean');
+    
+
+    // 5. Update user
+    const updatedUser = await resource.update(user1.id, {
+      bio: 'Senior Full Stack Developer',
+      age: 31,
+      tags: ['javascript', 'node.js', 'react', 'typescript']
+    });
+
+    expect(updatedUser.id).toBe(user1.id);
+    expect(updatedUser.bio).toBe('Senior Full Stack Developer');
+    expect(updatedUser.age).toBe(31);
+    expect(updatedUser.tags).toEqual(['javascript', 'node.js', 'react', 'typescript']);
+    expect(updatedUser.createdAt).toBe(user1.createdAt); // Should not change
+    expect(updatedUser.updatedAt).not.toBe(user1.updatedAt); // Should change
+    
+
+    // 6. Insert multiple users for querying
+    const users = await resource.insertMany([
+      {
+        name: 'Maria Santos',
+        email: 'maria@example.com',
+        age: 25,
+        region: 'BR',
+        ageGroup: 'young-adult',
+        tags: ['python', 'django']
+      },
+      {
+        name: 'John Doe',
+        email: 'john@example.com',
+        age: 35,
+        region: 'US',
+        ageGroup: 'adult',
+        tags: ['java', 'spring']
+      },
+      {
+        name: 'Anna Johnson',
+        email: 'anna@example.com',
+        age: 28,
+        region: 'US',
+        ageGroup: 'young-adult',
+        tags: ['go', 'kubernetes']
+      }
+    ]);
+
+    expect(users).toHaveLength(3);
+    expect(users.every(u => u.id && u.createdAt && u.updatedAt)).toBe(true);
+    
+
+    // 7. Test listing and counting
+    const allIds = await resource.listIds();
+    expect(allIds).toHaveLength(4); // 1 original + 3 new
+
+    const totalCount = await resource.count();
+    expect(totalCount).toBe(4);
+
+
+    // 8. Test pagination
+    const page1 = await resource.page(0, 2);
+    expect(page1.items).toHaveLength(2);
+    expect(page1.totalItems).toBe(4);
+    expect(page1.totalPages).toBe(2);
+    expect(page1.page).toBe(0);
+    expect(page1.pageSize).toBe(2);
+
+    const page2 = await resource.page(1, 2);
+    expect(page2.items).toHaveLength(2);
+    expect(page2.page).toBe(1);
+
+
+    // 9. Test partitioned queries
+    
+    // Query by region partition
+    const brUsersIds = await resource.listByPartition({
+      partition: 'byRegion',
+      partitionValues: { region: 'BR' }
+    });
+    expect(brUsersIds).toHaveLength(2); // João and Maria
+
+    const usUsersIds = await resource.listByPartition({
+      partition: 'byRegion',
+      partitionValues: { region: 'US' }
+    });
+    expect(usUsersIds).toHaveLength(2); // John and Anna
+
+    // Query by age group partition
+    const youngAdultsIds = await resource.listByPartition({
+      partition: 'byAgeGroup',
+      partitionValues: { ageGroup: 'young-adult' }
+    });
+    expect(youngAdultsIds).toHaveLength(2); // Maria and Anna
+
+
+    // 10. Test binary content operations
+    const user = users[0]; // Maria
+    
+    // Add binary content
+    const profileImage = Buffer.from('fake-image-data-here', 'utf8');
+    await resource.setContent(user.id, profileImage, 'image/jpeg');
+
+    // Verify content exists
+    const hasContent = await resource.hasContent(user.id);
+    expect(hasContent).toBe(true);
+
+    // Retrieve content
+    const content = await resource.content(user.id);
+    expect(content.buffer).toBeInstanceOf(Buffer);
+    expect(content.buffer.toString('utf8')).toBe('fake-image-data-here');
+    expect(content.contentType).toBe('image/jpeg');
+
+    // Verify _hasContent flag in get()
+    const userWithContent = await resource.get(user.id);
+    expect(userWithContent._hasContent).toBe(true);
+
+
+    // 11. Test upsert operation
+    
+    // Upsert existing user (update)
+    const upserted1 = await resource.upsert({
+      id: user1.id,
+      name: 'João Silva Santos', // Changed
+      email: 'joao@example.com'
+    });
+    expect(upserted1.id).toBe(user1.id);
+    expect(upserted1.name).toBe('João Silva Santos');
+
+    // Upsert new user (insert)
+    const upserted2 = await resource.upsert({
+      name: 'New User',
+      email: 'new@example.com',
+      age: 40,
+      region: 'EU',
+      ageGroup: 'adult'
+    });
+    expect(upserted2.id).toBeDefined();
+    expect(upserted2.name).toBe('New User');
+
+
+    // 12. Test getMany operation
+    const userIds = [user1.id, users[0].id, users[1].id];
+    const retrievedUsers = await resource.getMany(userIds);
+    
+    expect(retrievedUsers).toHaveLength(3);
+    expect(retrievedUsers.every(u => u.id && u.name && u.email)).toBe(true);
+
+
+    // 13. Test delete content (preserve metadata)
+    await resource.deleteContent(users[0].id);
+
+    const userAfterContentDelete = await resource.get(users[0].id);
+    expect(userAfterContentDelete.name).toBe('Maria Santos'); // Metadata preserved
+    expect(userAfterContentDelete._hasContent).toBe(false); // Content gone
+
+
+    // 14. Test individual delete
+    const deleteResult = await resource.delete(users[2].id); // Anna
+    expect(deleteResult).toBe(true);
+
+    const countAfterDelete = await resource.count();
+    expect(countAfterDelete).toBe(4); // 5 total - 1 deleted
+
+
+    // 15. Test deleteMany
+    const deleteIds = [users[0].id, users[1].id]; // Maria and John
+    const deleteManyResult = await resource.deleteMany(deleteIds);
+    expect(deleteManyResult).toEqual(deleteIds);
+
+    const finalCount = await resource.count();
+    expect(finalCount).toBe(2); // 4 - 2 deleted
+
+
+    // 16. Test definition hash consistency
+    const hash1 = resource.getDefinitionHash();
+    const hash2 = resource.getDefinitionHash();
+    expect(hash1).toBe(hash2);
+    expect(hash1).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+
+  });
+
+  test('Multi-Field Partitions Journey', async () => {
+
+    // Create resource with multi-field partitions
+    const partitionedResource = new Resource({
+      client,
+      name: 'events',
+      attributes: {
+        id: 'string|required',
+        title: 'string|required',
+        region: 'string|required',
+        department: 'string|required',
+        status: 'string|required'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byRegionDept: {
+            fields: {
+              region: 'string|maxlength:2',
+              department: 'string'
+            }
+          },
+          byStatus: {
+            fields: {
+              status: 'string'
+            }
+          }
+        }
+      }
+    });
+
+    // Clean slate
+    try {
+      await partitionedResource.deleteAll({ paranoid: false });
+    } catch (error) {
+      // Ignore
+    }
+
+    // Insert events with partition data
+    const events = await partitionedResource.insertMany([
+      {
+        title: 'Tech Conference',
+        region: 'US-WEST',
+        department: 'engineering',
+        status: 'active'
+      },
+      {
+        title: 'Sales Meeting', 
+        region: 'US-EAST',
+        department: 'sales',
+        status: 'active'
+      },
+      {
+        title: 'Engineering Sync',
+        region: 'US-WEST',
+        department: 'engineering',
+        status: 'completed'
+      }
+    ]);
+
+    // Test multi-field partition queries
+    const engineeringEvents = await partitionedResource.listByPartition({
+      partition: 'byRegionDept',
+      partitionValues: { region: 'US-WEST', department: 'engineering' }
+    });
+    expect(engineeringEvents).toHaveLength(2);
+
+    const activeEvents = await partitionedResource.listByPartition({
+      partition: 'byStatus', 
+      partitionValues: { status: 'active' }
+    });
+    expect(activeEvents).toHaveLength(2);
+
+  });
+
+  test('Error Handling Journey', async () => {
+
+    // Test invalid content type
+    try {
+      await resource.setContent('test-id', 'not a buffer', 'text/plain');
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      expect(error.message).toContain('Content must be a Buffer');
+    }
+
+    // Test non-existent resource operations
+    const nonExistent = await resource.get('non-existent-id');
+    expect(nonExistent).toBe(null);
+
+    const noContent = await resource.content('non-existent-id');
+    expect(noContent.buffer).toBe(null);
+    expect(noContent.contentType).toBe(null);
+
+    // Test paranoid mode protection
+    try {
+      await resource.deleteAll(); // Should fail - paranoid mode enabled by default
+      expect(true).toBe(false); // Should not reach here
+    } catch (error) {
+      expect(error.message).toContain('paranoid');
+    }
+
   });
 });

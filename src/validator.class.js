@@ -1,7 +1,7 @@
 import { merge } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
-import { encrypt } from "./crypto";
+import { encrypt } from "./crypto.js";
 
 async function custom (actual, errors, schema) {
   if (!this.passphrase) {

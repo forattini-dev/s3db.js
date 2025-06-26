@@ -1,7 +1,7 @@
-export * from "./resource-reader.class"
-export * from "./resource-writer.class"
-export * from "./resource-ids-reader.class"
-export * from "./resource-ids-page-reader.class"
+export * from "./resource-reader.class.js"
+export * from "./resource-writer.class.js"
+export * from "./resource-ids-reader.class.js"
+export * from "./resource-ids-page-reader.class.js"
 
 export function streamToString(stream) {
   return new Promise((resolve, reject) => {

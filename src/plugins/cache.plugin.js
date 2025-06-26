@@ -1,8 +1,8 @@
 import { join } from "path";
 
-import { sha256 } from "../crypto";
-import Plugin from "./plugin.class";
-import S3Cache from "../cache/s3-cache.class";
+import { sha256 } from "../crypto.js";
+import Plugin from "./plugin.class.js";
+import S3Cache from "../cache/s3-cache.class.js";
 
 export class CachePlugin extends Plugin {
   constructor(options = {}) {

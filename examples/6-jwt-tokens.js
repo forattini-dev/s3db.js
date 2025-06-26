@@ -1,7 +1,7 @@
 const { ENV, S3db } = require("./concerns");
 
 const jwt = require("jsonwebtoken");
-const { nanoid } = require("nanoid");
+const { idGenerator } = require("../src/concerns/id.js");
 const Fakerator = require("fakerator");
 const sha256 = require("crypto-js/sha256");
 const { take, shuffle } = require("lodash");
@@ -16,7 +16,7 @@ const userFactory = () => {
     id: email,
     email,
     name: fake.names.name(),
-    password: nanoid(),
+    password: idGenerator(),
     scopes: take(shuffle(scopes), fake.random.number(scopes.length)),
   };
 };
