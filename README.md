@@ -62,6 +62,7 @@ console.log(foundUser.name); // "John Doe"
 - [💰 Cost Analysis](#-cost-analysis)
 - [🎛️ Advanced Features](#️-advanced-features)
 - [🚨 Limitations & Best Practices](#-limitations--best-practices)
+- [🧪 Testing](#-testing)
 
 ## 🎯 What is s3db.js?
 
@@ -76,6 +77,8 @@ console.log(foundUser.name); // "John Doe"
 - **💾 Caching**: Reduce API calls with intelligent caching
 - **📊 Cost Tracking**: Monitor AWS costs with built-in plugins
 - **🛡️ Type Safety**: Full TypeScript support
+- **🔧 Robust Serialization**: Advanced handling of arrays and objects with edge cases
+- **📝 Comprehensive Testing**: Complete test suite with journey-based scenarios
 
 ## 💡 How it Works
 
@@ -205,7 +208,7 @@ const users = await s3db.createResource({
 
 ### 3. Schema Validation
 
-`s3db.js` uses [fastest-validator](https://github.com/icebob/fastest-validator) for schema validation:
+`s3db.js` uses [fastest-validator](https://github.com/icebob/fastest-validator) for schema validation with robust handling of edge cases:
 
 ```javascript
 const attributes = {
@@ -224,7 +227,7 @@ const attributes = {
   // Custom s3db types
   password: "secret",  // Encrypted field
   
-  // Nested objects
+  // Nested objects (supports empty objects and null values)
   address: {
     street: "string",
     city: "string",
@@ -232,13 +235,55 @@ const attributes = {
     zipCode: "string|optional"
   },
   
-  // Arrays
-  tags: "array|items:string|unique",
-  scores: "array|items:number|min:1",
+  // Arrays (robust serialization with special character handling)
+  tags: "array|items:string|unique",        // Handles empty arrays: []
+  scores: "array|items:number|min:1",       // Handles null arrays
+  categories: "array|items:string",         // Handles arrays with pipe characters: ['tag|special', 'normal']
   
   // Multiple types
-  id: ["string", "number"]
+  id: ["string", "number"],
+  
+  // Complex nested structures
+  metadata: {
+    settings: "object|optional",     // Can be empty: {}
+    preferences: "object|optional"   // Can be null
+  }
 };
+```
+
+### Enhanced Array and Object Handling
+
+s3db.js now provides robust serialization for complex data structures:
+
+```javascript
+// ✅ Supported: Empty arrays and objects
+const user = await users.insert({
+  name: "John Doe",
+  tags: [],              // Empty array - properly serialized
+  metadata: {},          // Empty object - properly handled
+  preferences: null      // Null object - correctly preserved
+});
+
+// ✅ Supported: Arrays with special characters
+const product = await products.insert({
+  name: "Widget",
+  categories: ["electronics|gadgets", "home|office"],  // Pipe characters escaped
+  tags: ["tag|with|pipes", "normal-tag"]               // Multiple pipes handled
+});
+
+// ✅ Supported: Complex nested structures
+const order = await orders.insert({
+  customerId: "user-123",
+  items: ["item-1", "item-2"],
+  shipping: {
+    address: {
+      street: "123 Main St",
+      city: "New York"
+    },
+    options: {}  // Empty nested object
+  },
+  notes: null    // Null field
+});
 ```
 
 ## 🛠️ API Reference
@@ -842,6 +887,40 @@ const count = await client.count({
 5. **No Transactions**: No ACID transactions across multiple operations
 6. **S3 Pagination**: S3 lists objects in pages of 1000 items maximum, and these operations are not parallelizable, which can make listing large datasets slow
 
+### ✅ Recent Improvements
+
+**🔧 Enhanced Data Serialization (v3.3.2+)**
+
+s3db.js now handles complex data structures robustly:
+
+- **Empty Arrays**: `[]` correctly serialized and preserved
+- **Null Arrays**: `null` values maintained without corruption  
+- **Special Characters**: Arrays with pipe `|` characters properly escaped
+- **Empty Objects**: `{}` correctly mapped and stored
+- **Null Objects**: `null` object values preserved during serialization
+- **Nested Structures**: Complex nested objects with mixed empty/null values supported
+
+**Previous Issues Fixed:**
+```javascript
+// ❌ Before: These cases would break or corrupt data
+const problematicData = {
+  tags: [],                    // Became [''] (array with empty string)
+  categories: null,            // Became [''] (array with empty string)  
+  specialTags: ['a|b', 'c'],   // Became ambiguous: 'a|b|c'
+  metadata: {},                // Would break schema mapping
+  settings: null               // Could break entire record
+};
+
+// ✅ Now: All cases handled correctly
+const robustData = {
+  tags: [],                    // Correctly preserved as empty array
+  categories: null,            // Correctly preserved as null
+  specialTags: ['a|b', 'c'],   // Correctly escaped: 'a\\|b|c'  
+  metadata: {},                // Properly mapped and stored
+  settings: null               // Correctly preserved as null
+};
+```
+
 ### ⚠️ Critical: Resource Schema Versioning
 
 **🚨 IMPORTANT**: Resource schema versioning is planned for future releases but is **NOT CURRENTLY SUPPORTED**. Once you create a resource, **DO NOT MODIFY ITS STRUCTURE** in production.
@@ -1067,7 +1146,65 @@ if (await users.exists(userId)) {
 5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
 6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
 
-## 🤝 Contributing
+## � Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## �🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -1079,6 +1216,13 @@ cd s3db.js
 npm install
 npm test
 ```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
 
 ## 📄 License
 
