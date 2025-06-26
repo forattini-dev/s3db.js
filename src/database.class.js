@@ -12,7 +12,7 @@ export class Database extends EventEmitter {
     super();
 
     this.version = "1";
-    this.s3dbVersion = "0.6.2"; // Current library version
+    this.s3dbVersion = __PACKAGE_VERSION__; // Injected during build
     this.resources = {};
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;

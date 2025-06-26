@@ -5,6 +5,7 @@ var nanoid = require('nanoid');
 var lodashEs = require('lodash-es');
 var promisePool = require('@supercharge/promise-pool');
 var clientS3 = require('@aws-sdk/client-s3');
+var crypto = require('crypto');
 var flat = require('flat');
 var FastestValidator = require('fastest-validator');
 var web = require('node:stream/web');
@@ -1015,11 +1016,45 @@ class Client extends EventEmitter {
     this.emit("deleteObjects", report, keys);
     return report;
   }
+  /**
+   * Delete all objects under a specific prefix using efficient pagination
+   * @param {Object} options - Delete options
+   * @param {string} options.prefix - S3 prefix to delete
+   * @returns {Promise<number>} Number of objects deleted
+   */
   async deleteAll({ prefix } = {}) {
-    const keys = await this.getAllKeys({ prefix });
-    const report = await this.deleteObjects(keys);
-    this.emit("deleteAll", { prefix, report });
-    return report;
+    let continuationToken;
+    let totalDeleted = 0;
+    do {
+      const listCommand = new clientS3.ListObjectsV2Command({
+        Bucket: this.config.bucket,
+        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix) : prefix,
+        ContinuationToken: continuationToken
+      });
+      const listResponse = await this.client.send(listCommand);
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        const deleteCommand = new clientS3.DeleteObjectsCommand({
+          Bucket: this.config.bucket,
+          Delete: {
+            Objects: listResponse.Contents.map((obj) => ({ Key: obj.Key }))
+          }
+        });
+        const deleteResponse = await this.client.send(deleteCommand);
+        const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
+        totalDeleted += deletedCount;
+        this.emit("deleteAll", {
+          prefix,
+          batch: deletedCount,
+          total: totalDeleted
+        });
+      }
+      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
+    } while (continuationToken);
+    this.emit("deleteAllComplete", {
+      prefix,
+      totalDeleted
+    });
+    return totalDeleted;
   }
   async moveObject({ from, to }) {
     try {
@@ -1279,6 +1314,2034 @@ function base64ToArrayBuffer(base64) {
   }
 }
 
+function getDefaultExportFromCjs (x) {
+	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
+}
+
+var jsonify = {};
+
+var parse;
+var hasRequiredParse;
+
+function requireParse () {
+	if (hasRequiredParse) return parse;
+	hasRequiredParse = 1;
+
+	var at; // The index of the current character
+	var ch; // The current character
+	var escapee = {
+		'"': '"',
+		'\\': '\\',
+		'/': '/',
+		b: '\b',
+		f: '\f',
+		n: '\n',
+		r: '\r',
+		t: '\t'
+	};
+	var text;
+
+	// Call error when something is wrong.
+	function error(m) {
+		throw {
+			name: 'SyntaxError',
+			message: m,
+			at: at,
+			text: text
+		};
+	}
+
+	function next(c) {
+		// If a c parameter is provided, verify that it matches the current character.
+		if (c && c !== ch) {
+			error("Expected '" + c + "' instead of '" + ch + "'");
+		}
+
+		// Get the next character. When there are no more characters, return the empty string.
+
+		ch = text.charAt(at);
+		at += 1;
+		return ch;
+	}
+
+	function number() {
+		// Parse a number value.
+		var num;
+		var str = '';
+
+		if (ch === '-') {
+			str = '-';
+			next('-');
+		}
+		while (ch >= '0' && ch <= '9') {
+			str += ch;
+			next();
+		}
+		if (ch === '.') {
+			str += '.';
+			while (next() && ch >= '0' && ch <= '9') {
+				str += ch;
+			}
+		}
+		if (ch === 'e' || ch === 'E') {
+			str += ch;
+			next();
+			if (ch === '-' || ch === '+') {
+				str += ch;
+				next();
+			}
+			while (ch >= '0' && ch <= '9') {
+				str += ch;
+				next();
+			}
+		}
+		num = Number(str);
+		if (!isFinite(num)) {
+			error('Bad number');
+		}
+		return num;
+	}
+
+	function string() {
+		// Parse a string value.
+		var hex;
+		var i;
+		var str = '';
+		var uffff;
+
+		// When parsing for string values, we must look for " and \ characters.
+		if (ch === '"') {
+			while (next()) {
+				if (ch === '"') {
+					next();
+					return str;
+				} else if (ch === '\\') {
+					next();
+					if (ch === 'u') {
+						uffff = 0;
+						for (i = 0; i < 4; i += 1) {
+							hex = parseInt(next(), 16);
+							if (!isFinite(hex)) {
+								break;
+							}
+							uffff = (uffff * 16) + hex;
+						}
+						str += String.fromCharCode(uffff);
+					} else if (typeof escapee[ch] === 'string') {
+						str += escapee[ch];
+					} else {
+						break;
+					}
+				} else {
+					str += ch;
+				}
+			}
+		}
+		error('Bad string');
+	}
+
+	// Skip whitespace.
+	function white() {
+		while (ch && ch <= ' ') {
+			next();
+		}
+	}
+
+	// true, false, or null.
+	function word() {
+		switch (ch) {
+			case 't':
+				next('t');
+				next('r');
+				next('u');
+				next('e');
+				return true;
+			case 'f':
+				next('f');
+				next('a');
+				next('l');
+				next('s');
+				next('e');
+				return false;
+			case 'n':
+				next('n');
+				next('u');
+				next('l');
+				next('l');
+				return null;
+			default:
+				error("Unexpected '" + ch + "'");
+		}
+	}
+
+	// Parse an array value.
+	function array() {
+		var arr = [];
+
+		if (ch === '[') {
+			next('[');
+			white();
+			if (ch === ']') {
+				next(']');
+				return arr; // empty array
+			}
+			while (ch) {
+				arr.push(value()); // eslint-disable-line no-use-before-define
+				white();
+				if (ch === ']') {
+					next(']');
+					return arr;
+				}
+				next(',');
+				white();
+			}
+		}
+		error('Bad array');
+	}
+
+	// Parse an object value.
+	function object() {
+		var key;
+		var obj = {};
+
+		if (ch === '{') {
+			next('{');
+			white();
+			if (ch === '}') {
+				next('}');
+				return obj; // empty object
+			}
+			while (ch) {
+				key = string();
+				white();
+				next(':');
+				if (Object.prototype.hasOwnProperty.call(obj, key)) {
+					error('Duplicate key "' + key + '"');
+				}
+				obj[key] = value(); // eslint-disable-line no-use-before-define
+				white();
+				if (ch === '}') {
+					next('}');
+					return obj;
+				}
+				next(',');
+				white();
+			}
+		}
+		error('Bad object');
+	}
+
+	// Parse a JSON value. It could be an object, an array, a string, a number, or a word.
+	function value() {
+		white();
+		switch (ch) {
+			case '{':
+				return object();
+			case '[':
+				return array();
+			case '"':
+				return string();
+			case '-':
+				return number();
+			default:
+				return ch >= '0' && ch <= '9' ? number() : word();
+		}
+	}
+
+	// Return the json_parse function. It will have access to all of the above functions and variables.
+	parse = function (source, reviver) {
+		var result;
+
+		text = source;
+		at = 0;
+		ch = ' ';
+		result = value();
+		white();
+		if (ch) {
+			error('Syntax error');
+		}
+
+		// If there is a reviver function, we recursively walk the new structure,
+		// passing each name/value pair to the reviver function for possible
+		// transformation, starting with a temporary root object that holds the result
+		// in an empty key. If there is not a reviver function, we simply return the
+		// result.
+
+		return typeof reviver === 'function' ? (function walk(holder, key) {
+			var k;
+			var v;
+			var val = holder[key];
+			if (val && typeof val === 'object') {
+				for (k in value) {
+					if (Object.prototype.hasOwnProperty.call(val, k)) {
+						v = walk(val, k);
+						if (typeof v === 'undefined') {
+							delete val[k];
+						} else {
+							val[k] = v;
+						}
+					}
+				}
+			}
+			return reviver.call(holder, key, val);
+		}({ '': result }, '')) : result;
+	};
+	return parse;
+}
+
+var stringify;
+var hasRequiredStringify;
+
+function requireStringify () {
+	if (hasRequiredStringify) return stringify;
+	hasRequiredStringify = 1;
+
+	var escapable = /[\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
+	var gap;
+	var indent;
+	var meta = { // table of character substitutions
+		'\b': '\\b',
+		'\t': '\\t',
+		'\n': '\\n',
+		'\f': '\\f',
+		'\r': '\\r',
+		'"': '\\"',
+		'\\': '\\\\'
+	};
+	var rep;
+
+	function quote(string) {
+		// If the string contains no control characters, no quote characters, and no
+		// backslash characters, then we can safely slap some quotes around it.
+		// Otherwise we must also replace the offending characters with safe escape sequences.
+
+		escapable.lastIndex = 0;
+		return escapable.test(string) ? '"' + string.replace(escapable, function (a) {
+			var c = meta[a];
+			return typeof c === 'string' ? c
+				: '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+		}) + '"' : '"' + string + '"';
+	}
+
+	function str(key, holder) {
+		// Produce a string from holder[key].
+		var i; // The loop counter.
+		var k; // The member key.
+		var v; // The member value.
+		var length;
+		var mind = gap;
+		var partial;
+		var value = holder[key];
+
+		// If the value has a toJSON method, call it to obtain a replacement value.
+		if (value && typeof value === 'object' && typeof value.toJSON === 'function') {
+			value = value.toJSON(key);
+		}
+
+		// If we were called with a replacer function, then call the replacer to obtain a replacement value.
+		if (typeof rep === 'function') {
+			value = rep.call(holder, key, value);
+		}
+
+		// What happens next depends on the value's type.
+		switch (typeof value) {
+			case 'string':
+				return quote(value);
+
+			case 'number':
+				// JSON numbers must be finite. Encode non-finite numbers as null.
+				return isFinite(value) ? String(value) : 'null';
+
+			case 'boolean':
+			case 'null':
+				// If the value is a boolean or null, convert it to a string. Note:
+				// typeof null does not produce 'null'. The case is included here in
+				// the remote chance that this gets fixed someday.
+				return String(value);
+
+			case 'object':
+				if (!value) {
+					return 'null';
+				}
+				gap += indent;
+				partial = [];
+
+				// Array.isArray
+				if (Object.prototype.toString.apply(value) === '[object Array]') {
+					length = value.length;
+					for (i = 0; i < length; i += 1) {
+						partial[i] = str(i, value) || 'null';
+					}
+
+					// Join all of the elements together, separated with commas, and wrap them in brackets.
+					v = partial.length === 0 ? '[]' : gap
+						? '[\n' + gap + partial.join(',\n' + gap) + '\n' + mind + ']'
+						: '[' + partial.join(',') + ']';
+					gap = mind;
+					return v;
+				}
+
+				// If the replacer is an array, use it to select the members to be stringified.
+				if (rep && typeof rep === 'object') {
+					length = rep.length;
+					for (i = 0; i < length; i += 1) {
+						k = rep[i];
+						if (typeof k === 'string') {
+							v = str(k, value);
+							if (v) {
+								partial.push(quote(k) + (gap ? ': ' : ':') + v);
+							}
+						}
+					}
+				} else {
+					// Otherwise, iterate through all of the keys in the object.
+					for (k in value) {
+						if (Object.prototype.hasOwnProperty.call(value, k)) {
+							v = str(k, value);
+							if (v) {
+								partial.push(quote(k) + (gap ? ': ' : ':') + v);
+							}
+						}
+					}
+				}
+
+				// Join all of the member texts together, separated with commas, and wrap them in braces.
+
+				v = partial.length === 0 ? '{}' : gap
+					? '{\n' + gap + partial.join(',\n' + gap) + '\n' + mind + '}'
+					: '{' + partial.join(',') + '}';
+				gap = mind;
+				return v;
+		}
+	}
+
+	stringify = function (value, replacer, space) {
+		var i;
+		gap = '';
+		indent = '';
+
+		// If the space parameter is a number, make an indent string containing that many spaces.
+		if (typeof space === 'number') {
+			for (i = 0; i < space; i += 1) {
+				indent += ' ';
+			}
+		} else if (typeof space === 'string') {
+			// If the space parameter is a string, it will be used as the indent string.
+			indent = space;
+		}
+
+		// If there is a replacer, it must be a function or an array. Otherwise, throw an error.
+		rep = replacer;
+		if (
+			replacer
+			&& typeof replacer !== 'function'
+			&& (typeof replacer !== 'object' || typeof replacer.length !== 'number')
+		) {
+			throw new Error('JSON.stringify');
+		}
+
+		// Make a fake root object containing our value under the key of ''.
+		// Return the result of stringifying the value.
+		return str('', { '': value });
+	};
+	return stringify;
+}
+
+var hasRequiredJsonify;
+
+function requireJsonify () {
+	if (hasRequiredJsonify) return jsonify;
+	hasRequiredJsonify = 1;
+
+	jsonify.parse = requireParse();
+	jsonify.stringify = requireStringify();
+	return jsonify;
+}
+
+var isarray;
+var hasRequiredIsarray;
+
+function requireIsarray () {
+	if (hasRequiredIsarray) return isarray;
+	hasRequiredIsarray = 1;
+	var toString = {}.toString;
+
+	isarray = Array.isArray || function (arr) {
+	  return toString.call(arr) == '[object Array]';
+	};
+	return isarray;
+}
+
+var isArguments;
+var hasRequiredIsArguments;
+
+function requireIsArguments () {
+	if (hasRequiredIsArguments) return isArguments;
+	hasRequiredIsArguments = 1;
+
+	var toStr = Object.prototype.toString;
+
+	isArguments = function isArguments(value) {
+		var str = toStr.call(value);
+		var isArgs = str === '[object Arguments]';
+		if (!isArgs) {
+			isArgs = str !== '[object Array]' &&
+				value !== null &&
+				typeof value === 'object' &&
+				typeof value.length === 'number' &&
+				value.length >= 0 &&
+				toStr.call(value.callee) === '[object Function]';
+		}
+		return isArgs;
+	};
+	return isArguments;
+}
+
+var implementation$1;
+var hasRequiredImplementation$1;
+
+function requireImplementation$1 () {
+	if (hasRequiredImplementation$1) return implementation$1;
+	hasRequiredImplementation$1 = 1;
+
+	var keysShim;
+	if (!Object.keys) {
+		// modified from https://github.com/es-shims/es5-shim
+		var has = Object.prototype.hasOwnProperty;
+		var toStr = Object.prototype.toString;
+		var isArgs = requireIsArguments(); // eslint-disable-line global-require
+		var isEnumerable = Object.prototype.propertyIsEnumerable;
+		var hasDontEnumBug = !isEnumerable.call({ toString: null }, 'toString');
+		var hasProtoEnumBug = isEnumerable.call(function () {}, 'prototype');
+		var dontEnums = [
+			'toString',
+			'toLocaleString',
+			'valueOf',
+			'hasOwnProperty',
+			'isPrototypeOf',
+			'propertyIsEnumerable',
+			'constructor'
+		];
+		var equalsConstructorPrototype = function (o) {
+			var ctor = o.constructor;
+			return ctor && ctor.prototype === o;
+		};
+		var excludedKeys = {
+			$applicationCache: true,
+			$console: true,
+			$external: true,
+			$frame: true,
+			$frameElement: true,
+			$frames: true,
+			$innerHeight: true,
+			$innerWidth: true,
+			$onmozfullscreenchange: true,
+			$onmozfullscreenerror: true,
+			$outerHeight: true,
+			$outerWidth: true,
+			$pageXOffset: true,
+			$pageYOffset: true,
+			$parent: true,
+			$scrollLeft: true,
+			$scrollTop: true,
+			$scrollX: true,
+			$scrollY: true,
+			$self: true,
+			$webkitIndexedDB: true,
+			$webkitStorageInfo: true,
+			$window: true
+		};
+		var hasAutomationEqualityBug = (function () {
+			/* global window */
+			if (typeof window === 'undefined') { return false; }
+			for (var k in window) {
+				try {
+					if (!excludedKeys['$' + k] && has.call(window, k) && window[k] !== null && typeof window[k] === 'object') {
+						try {
+							equalsConstructorPrototype(window[k]);
+						} catch (e) {
+							return true;
+						}
+					}
+				} catch (e) {
+					return true;
+				}
+			}
+			return false;
+		}());
+		var equalsConstructorPrototypeIfNotBuggy = function (o) {
+			/* global window */
+			if (typeof window === 'undefined' || !hasAutomationEqualityBug) {
+				return equalsConstructorPrototype(o);
+			}
+			try {
+				return equalsConstructorPrototype(o);
+			} catch (e) {
+				return false;
+			}
+		};
+
+		keysShim = function keys(object) {
+			var isObject = object !== null && typeof object === 'object';
+			var isFunction = toStr.call(object) === '[object Function]';
+			var isArguments = isArgs(object);
+			var isString = isObject && toStr.call(object) === '[object String]';
+			var theKeys = [];
+
+			if (!isObject && !isFunction && !isArguments) {
+				throw new TypeError('Object.keys called on a non-object');
+			}
+
+			var skipProto = hasProtoEnumBug && isFunction;
+			if (isString && object.length > 0 && !has.call(object, 0)) {
+				for (var i = 0; i < object.length; ++i) {
+					theKeys.push(String(i));
+				}
+			}
+
+			if (isArguments && object.length > 0) {
+				for (var j = 0; j < object.length; ++j) {
+					theKeys.push(String(j));
+				}
+			} else {
+				for (var name in object) {
+					if (!(skipProto && name === 'prototype') && has.call(object, name)) {
+						theKeys.push(String(name));
+					}
+				}
+			}
+
+			if (hasDontEnumBug) {
+				var skipConstructor = equalsConstructorPrototypeIfNotBuggy(object);
+
+				for (var k = 0; k < dontEnums.length; ++k) {
+					if (!(skipConstructor && dontEnums[k] === 'constructor') && has.call(object, dontEnums[k])) {
+						theKeys.push(dontEnums[k]);
+					}
+				}
+			}
+			return theKeys;
+		};
+	}
+	implementation$1 = keysShim;
+	return implementation$1;
+}
+
+var objectKeys;
+var hasRequiredObjectKeys;
+
+function requireObjectKeys () {
+	if (hasRequiredObjectKeys) return objectKeys;
+	hasRequiredObjectKeys = 1;
+
+	var slice = Array.prototype.slice;
+	var isArgs = requireIsArguments();
+
+	var origKeys = Object.keys;
+	var keysShim = origKeys ? function keys(o) { return origKeys(o); } : requireImplementation$1();
+
+	var originalKeys = Object.keys;
+
+	keysShim.shim = function shimObjectKeys() {
+		if (Object.keys) {
+			var keysWorksWithArguments = (function () {
+				// Safari 5.0 bug
+				var args = Object.keys(arguments);
+				return args && args.length === arguments.length;
+			}(1, 2));
+			if (!keysWorksWithArguments) {
+				Object.keys = function keys(object) { // eslint-disable-line func-name-matching
+					if (isArgs(object)) {
+						return originalKeys(slice.call(object));
+					}
+					return originalKeys(object);
+				};
+			}
+		} else {
+			Object.keys = keysShim;
+		}
+		return Object.keys || keysShim;
+	};
+
+	objectKeys = keysShim;
+	return objectKeys;
+}
+
+var callBind = {exports: {}};
+
+var esObjectAtoms;
+var hasRequiredEsObjectAtoms;
+
+function requireEsObjectAtoms () {
+	if (hasRequiredEsObjectAtoms) return esObjectAtoms;
+	hasRequiredEsObjectAtoms = 1;
+
+	/** @type {import('.')} */
+	esObjectAtoms = Object;
+	return esObjectAtoms;
+}
+
+var esErrors;
+var hasRequiredEsErrors;
+
+function requireEsErrors () {
+	if (hasRequiredEsErrors) return esErrors;
+	hasRequiredEsErrors = 1;
+
+	/** @type {import('.')} */
+	esErrors = Error;
+	return esErrors;
+}
+
+var _eval;
+var hasRequired_eval;
+
+function require_eval () {
+	if (hasRequired_eval) return _eval;
+	hasRequired_eval = 1;
+
+	/** @type {import('./eval')} */
+	_eval = EvalError;
+	return _eval;
+}
+
+var range;
+var hasRequiredRange;
+
+function requireRange () {
+	if (hasRequiredRange) return range;
+	hasRequiredRange = 1;
+
+	/** @type {import('./range')} */
+	range = RangeError;
+	return range;
+}
+
+var ref;
+var hasRequiredRef;
+
+function requireRef () {
+	if (hasRequiredRef) return ref;
+	hasRequiredRef = 1;
+
+	/** @type {import('./ref')} */
+	ref = ReferenceError;
+	return ref;
+}
+
+var syntax;
+var hasRequiredSyntax;
+
+function requireSyntax () {
+	if (hasRequiredSyntax) return syntax;
+	hasRequiredSyntax = 1;
+
+	/** @type {import('./syntax')} */
+	syntax = SyntaxError;
+	return syntax;
+}
+
+var type;
+var hasRequiredType;
+
+function requireType () {
+	if (hasRequiredType) return type;
+	hasRequiredType = 1;
+
+	/** @type {import('./type')} */
+	type = TypeError;
+	return type;
+}
+
+var uri;
+var hasRequiredUri;
+
+function requireUri () {
+	if (hasRequiredUri) return uri;
+	hasRequiredUri = 1;
+
+	/** @type {import('./uri')} */
+	uri = URIError;
+	return uri;
+}
+
+var abs;
+var hasRequiredAbs;
+
+function requireAbs () {
+	if (hasRequiredAbs) return abs;
+	hasRequiredAbs = 1;
+
+	/** @type {import('./abs')} */
+	abs = Math.abs;
+	return abs;
+}
+
+var floor;
+var hasRequiredFloor;
+
+function requireFloor () {
+	if (hasRequiredFloor) return floor;
+	hasRequiredFloor = 1;
+
+	/** @type {import('./floor')} */
+	floor = Math.floor;
+	return floor;
+}
+
+var max;
+var hasRequiredMax;
+
+function requireMax () {
+	if (hasRequiredMax) return max;
+	hasRequiredMax = 1;
+
+	/** @type {import('./max')} */
+	max = Math.max;
+	return max;
+}
+
+var min;
+var hasRequiredMin;
+
+function requireMin () {
+	if (hasRequiredMin) return min;
+	hasRequiredMin = 1;
+
+	/** @type {import('./min')} */
+	min = Math.min;
+	return min;
+}
+
+var pow;
+var hasRequiredPow;
+
+function requirePow () {
+	if (hasRequiredPow) return pow;
+	hasRequiredPow = 1;
+
+	/** @type {import('./pow')} */
+	pow = Math.pow;
+	return pow;
+}
+
+var round;
+var hasRequiredRound;
+
+function requireRound () {
+	if (hasRequiredRound) return round;
+	hasRequiredRound = 1;
+
+	/** @type {import('./round')} */
+	round = Math.round;
+	return round;
+}
+
+var _isNaN;
+var hasRequired_isNaN;
+
+function require_isNaN () {
+	if (hasRequired_isNaN) return _isNaN;
+	hasRequired_isNaN = 1;
+
+	/** @type {import('./isNaN')} */
+	_isNaN = Number.isNaN || function isNaN(a) {
+		return a !== a;
+	};
+	return _isNaN;
+}
+
+var sign;
+var hasRequiredSign;
+
+function requireSign () {
+	if (hasRequiredSign) return sign;
+	hasRequiredSign = 1;
+
+	var $isNaN = require_isNaN();
+
+	/** @type {import('./sign')} */
+	sign = function sign(number) {
+		if ($isNaN(number) || number === 0) {
+			return number;
+		}
+		return number < 0 ? -1 : +1;
+	};
+	return sign;
+}
+
+var gOPD;
+var hasRequiredGOPD;
+
+function requireGOPD () {
+	if (hasRequiredGOPD) return gOPD;
+	hasRequiredGOPD = 1;
+
+	/** @type {import('./gOPD')} */
+	gOPD = Object.getOwnPropertyDescriptor;
+	return gOPD;
+}
+
+var gopd;
+var hasRequiredGopd;
+
+function requireGopd () {
+	if (hasRequiredGopd) return gopd;
+	hasRequiredGopd = 1;
+
+	/** @type {import('.')} */
+	var $gOPD = requireGOPD();
+
+	if ($gOPD) {
+		try {
+			$gOPD([], 'length');
+		} catch (e) {
+			// IE 8 has a broken gOPD
+			$gOPD = null;
+		}
+	}
+
+	gopd = $gOPD;
+	return gopd;
+}
+
+var esDefineProperty;
+var hasRequiredEsDefineProperty;
+
+function requireEsDefineProperty () {
+	if (hasRequiredEsDefineProperty) return esDefineProperty;
+	hasRequiredEsDefineProperty = 1;
+
+	/** @type {import('.')} */
+	var $defineProperty = Object.defineProperty || false;
+	if ($defineProperty) {
+		try {
+			$defineProperty({}, 'a', { value: 1 });
+		} catch (e) {
+			// IE 8 has a broken defineProperty
+			$defineProperty = false;
+		}
+	}
+
+	esDefineProperty = $defineProperty;
+	return esDefineProperty;
+}
+
+var shams;
+var hasRequiredShams;
+
+function requireShams () {
+	if (hasRequiredShams) return shams;
+	hasRequiredShams = 1;
+
+	/** @type {import('./shams')} */
+	/* eslint complexity: [2, 18], max-statements: [2, 33] */
+	shams = function hasSymbols() {
+		if (typeof Symbol !== 'function' || typeof Object.getOwnPropertySymbols !== 'function') { return false; }
+		if (typeof Symbol.iterator === 'symbol') { return true; }
+
+		/** @type {{ [k in symbol]?: unknown }} */
+		var obj = {};
+		var sym = Symbol('test');
+		var symObj = Object(sym);
+		if (typeof sym === 'string') { return false; }
+
+		if (Object.prototype.toString.call(sym) !== '[object Symbol]') { return false; }
+		if (Object.prototype.toString.call(symObj) !== '[object Symbol]') { return false; }
+
+		// temp disabled per https://github.com/ljharb/object.assign/issues/17
+		// if (sym instanceof Symbol) { return false; }
+		// temp disabled per https://github.com/WebReflection/get-own-property-symbols/issues/4
+		// if (!(symObj instanceof Symbol)) { return false; }
+
+		// if (typeof Symbol.prototype.toString !== 'function') { return false; }
+		// if (String(sym) !== Symbol.prototype.toString.call(sym)) { return false; }
+
+		var symVal = 42;
+		obj[sym] = symVal;
+		for (var _ in obj) { return false; } // eslint-disable-line no-restricted-syntax, no-unreachable-loop
+		if (typeof Object.keys === 'function' && Object.keys(obj).length !== 0) { return false; }
+
+		if (typeof Object.getOwnPropertyNames === 'function' && Object.getOwnPropertyNames(obj).length !== 0) { return false; }
+
+		var syms = Object.getOwnPropertySymbols(obj);
+		if (syms.length !== 1 || syms[0] !== sym) { return false; }
+
+		if (!Object.prototype.propertyIsEnumerable.call(obj, sym)) { return false; }
+
+		if (typeof Object.getOwnPropertyDescriptor === 'function') {
+			// eslint-disable-next-line no-extra-parens
+			var descriptor = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(obj, sym));
+			if (descriptor.value !== symVal || descriptor.enumerable !== true) { return false; }
+		}
+
+		return true;
+	};
+	return shams;
+}
+
+var hasSymbols;
+var hasRequiredHasSymbols;
+
+function requireHasSymbols () {
+	if (hasRequiredHasSymbols) return hasSymbols;
+	hasRequiredHasSymbols = 1;
+
+	var origSymbol = typeof Symbol !== 'undefined' && Symbol;
+	var hasSymbolSham = requireShams();
+
+	/** @type {import('.')} */
+	hasSymbols = function hasNativeSymbols() {
+		if (typeof origSymbol !== 'function') { return false; }
+		if (typeof Symbol !== 'function') { return false; }
+		if (typeof origSymbol('foo') !== 'symbol') { return false; }
+		if (typeof Symbol('bar') !== 'symbol') { return false; }
+
+		return hasSymbolSham();
+	};
+	return hasSymbols;
+}
+
+var Reflect_getPrototypeOf;
+var hasRequiredReflect_getPrototypeOf;
+
+function requireReflect_getPrototypeOf () {
+	if (hasRequiredReflect_getPrototypeOf) return Reflect_getPrototypeOf;
+	hasRequiredReflect_getPrototypeOf = 1;
+
+	/** @type {import('./Reflect.getPrototypeOf')} */
+	Reflect_getPrototypeOf = (typeof Reflect !== 'undefined' && Reflect.getPrototypeOf) || null;
+	return Reflect_getPrototypeOf;
+}
+
+var Object_getPrototypeOf;
+var hasRequiredObject_getPrototypeOf;
+
+function requireObject_getPrototypeOf () {
+	if (hasRequiredObject_getPrototypeOf) return Object_getPrototypeOf;
+	hasRequiredObject_getPrototypeOf = 1;
+
+	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
+
+	/** @type {import('./Object.getPrototypeOf')} */
+	Object_getPrototypeOf = $Object.getPrototypeOf || null;
+	return Object_getPrototypeOf;
+}
+
+var implementation;
+var hasRequiredImplementation;
+
+function requireImplementation () {
+	if (hasRequiredImplementation) return implementation;
+	hasRequiredImplementation = 1;
+
+	/* eslint no-invalid-this: 1 */
+
+	var ERROR_MESSAGE = 'Function.prototype.bind called on incompatible ';
+	var toStr = Object.prototype.toString;
+	var max = Math.max;
+	var funcType = '[object Function]';
+
+	var concatty = function concatty(a, b) {
+	    var arr = [];
+
+	    for (var i = 0; i < a.length; i += 1) {
+	        arr[i] = a[i];
+	    }
+	    for (var j = 0; j < b.length; j += 1) {
+	        arr[j + a.length] = b[j];
+	    }
+
+	    return arr;
+	};
+
+	var slicy = function slicy(arrLike, offset) {
+	    var arr = [];
+	    for (var i = offset, j = 0; i < arrLike.length; i += 1, j += 1) {
+	        arr[j] = arrLike[i];
+	    }
+	    return arr;
+	};
+
+	var joiny = function (arr, joiner) {
+	    var str = '';
+	    for (var i = 0; i < arr.length; i += 1) {
+	        str += arr[i];
+	        if (i + 1 < arr.length) {
+	            str += joiner;
+	        }
+	    }
+	    return str;
+	};
+
+	implementation = function bind(that) {
+	    var target = this;
+	    if (typeof target !== 'function' || toStr.apply(target) !== funcType) {
+	        throw new TypeError(ERROR_MESSAGE + target);
+	    }
+	    var args = slicy(arguments, 1);
+
+	    var bound;
+	    var binder = function () {
+	        if (this instanceof bound) {
+	            var result = target.apply(
+	                this,
+	                concatty(args, arguments)
+	            );
+	            if (Object(result) === result) {
+	                return result;
+	            }
+	            return this;
+	        }
+	        return target.apply(
+	            that,
+	            concatty(args, arguments)
+	        );
+
+	    };
+
+	    var boundLength = max(0, target.length - args.length);
+	    var boundArgs = [];
+	    for (var i = 0; i < boundLength; i++) {
+	        boundArgs[i] = '$' + i;
+	    }
+
+	    bound = Function('binder', 'return function (' + joiny(boundArgs, ',') + '){ return binder.apply(this,arguments); }')(binder);
+
+	    if (target.prototype) {
+	        var Empty = function Empty() {};
+	        Empty.prototype = target.prototype;
+	        bound.prototype = new Empty();
+	        Empty.prototype = null;
+	    }
+
+	    return bound;
+	};
+	return implementation;
+}
+
+var functionBind;
+var hasRequiredFunctionBind;
+
+function requireFunctionBind () {
+	if (hasRequiredFunctionBind) return functionBind;
+	hasRequiredFunctionBind = 1;
+
+	var implementation = requireImplementation();
+
+	functionBind = Function.prototype.bind || implementation;
+	return functionBind;
+}
+
+var functionCall;
+var hasRequiredFunctionCall;
+
+function requireFunctionCall () {
+	if (hasRequiredFunctionCall) return functionCall;
+	hasRequiredFunctionCall = 1;
+
+	/** @type {import('./functionCall')} */
+	functionCall = Function.prototype.call;
+	return functionCall;
+}
+
+var functionApply;
+var hasRequiredFunctionApply;
+
+function requireFunctionApply () {
+	if (hasRequiredFunctionApply) return functionApply;
+	hasRequiredFunctionApply = 1;
+
+	/** @type {import('./functionApply')} */
+	functionApply = Function.prototype.apply;
+	return functionApply;
+}
+
+var reflectApply;
+var hasRequiredReflectApply;
+
+function requireReflectApply () {
+	if (hasRequiredReflectApply) return reflectApply;
+	hasRequiredReflectApply = 1;
+
+	/** @type {import('./reflectApply')} */
+	reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
+	return reflectApply;
+}
+
+var actualApply;
+var hasRequiredActualApply;
+
+function requireActualApply () {
+	if (hasRequiredActualApply) return actualApply;
+	hasRequiredActualApply = 1;
+
+	var bind = requireFunctionBind();
+
+	var $apply = requireFunctionApply();
+	var $call = requireFunctionCall();
+	var $reflectApply = requireReflectApply();
+
+	/** @type {import('./actualApply')} */
+	actualApply = $reflectApply || bind.call($call, $apply);
+	return actualApply;
+}
+
+var callBindApplyHelpers;
+var hasRequiredCallBindApplyHelpers;
+
+function requireCallBindApplyHelpers () {
+	if (hasRequiredCallBindApplyHelpers) return callBindApplyHelpers;
+	hasRequiredCallBindApplyHelpers = 1;
+
+	var bind = requireFunctionBind();
+	var $TypeError = /*@__PURE__*/ requireType();
+
+	var $call = requireFunctionCall();
+	var $actualApply = requireActualApply();
+
+	/** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
+	callBindApplyHelpers = function callBindBasic(args) {
+		if (args.length < 1 || typeof args[0] !== 'function') {
+			throw new $TypeError('a function is required');
+		}
+		return $actualApply(bind, $call, args);
+	};
+	return callBindApplyHelpers;
+}
+
+var get;
+var hasRequiredGet;
+
+function requireGet () {
+	if (hasRequiredGet) return get;
+	hasRequiredGet = 1;
+
+	var callBind = requireCallBindApplyHelpers();
+	var gOPD = /*@__PURE__*/ requireGopd();
+
+	var hasProtoAccessor;
+	try {
+		// eslint-disable-next-line no-extra-parens, no-proto
+		hasProtoAccessor = /** @type {{ __proto__?: typeof Array.prototype }} */ ([]).__proto__ === Array.prototype;
+	} catch (e) {
+		if (!e || typeof e !== 'object' || !('code' in e) || e.code !== 'ERR_PROTO_ACCESS') {
+			throw e;
+		}
+	}
+
+	// eslint-disable-next-line no-extra-parens
+	var desc = !!hasProtoAccessor && gOPD && gOPD(Object.prototype, /** @type {keyof typeof Object.prototype} */ ('__proto__'));
+
+	var $Object = Object;
+	var $getPrototypeOf = $Object.getPrototypeOf;
+
+	/** @type {import('./get')} */
+	get = desc && typeof desc.get === 'function'
+		? callBind([desc.get])
+		: typeof $getPrototypeOf === 'function'
+			? /** @type {import('./get')} */ function getDunder(value) {
+				// eslint-disable-next-line eqeqeq
+				return $getPrototypeOf(value == null ? value : $Object(value));
+			}
+			: false;
+	return get;
+}
+
+var getProto;
+var hasRequiredGetProto;
+
+function requireGetProto () {
+	if (hasRequiredGetProto) return getProto;
+	hasRequiredGetProto = 1;
+
+	var reflectGetProto = requireReflect_getPrototypeOf();
+	var originalGetProto = requireObject_getPrototypeOf();
+
+	var getDunderProto = /*@__PURE__*/ requireGet();
+
+	/** @type {import('.')} */
+	getProto = reflectGetProto
+		? function getProto(O) {
+			// @ts-expect-error TS can't narrow inside a closure, for some reason
+			return reflectGetProto(O);
+		}
+		: originalGetProto
+			? function getProto(O) {
+				if (!O || (typeof O !== 'object' && typeof O !== 'function')) {
+					throw new TypeError('getProto: not an object');
+				}
+				// @ts-expect-error TS can't narrow inside a closure, for some reason
+				return originalGetProto(O);
+			}
+			: getDunderProto
+				? function getProto(O) {
+					// @ts-expect-error TS can't narrow inside a closure, for some reason
+					return getDunderProto(O);
+				}
+				: null;
+	return getProto;
+}
+
+var hasown;
+var hasRequiredHasown;
+
+function requireHasown () {
+	if (hasRequiredHasown) return hasown;
+	hasRequiredHasown = 1;
+
+	var call = Function.prototype.call;
+	var $hasOwn = Object.prototype.hasOwnProperty;
+	var bind = requireFunctionBind();
+
+	/** @type {import('.')} */
+	hasown = bind.call(call, $hasOwn);
+	return hasown;
+}
+
+var getIntrinsic;
+var hasRequiredGetIntrinsic;
+
+function requireGetIntrinsic () {
+	if (hasRequiredGetIntrinsic) return getIntrinsic;
+	hasRequiredGetIntrinsic = 1;
+
+	var undefined$1;
+
+	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
+
+	var $Error = /*@__PURE__*/ requireEsErrors();
+	var $EvalError = /*@__PURE__*/ require_eval();
+	var $RangeError = /*@__PURE__*/ requireRange();
+	var $ReferenceError = /*@__PURE__*/ requireRef();
+	var $SyntaxError = /*@__PURE__*/ requireSyntax();
+	var $TypeError = /*@__PURE__*/ requireType();
+	var $URIError = /*@__PURE__*/ requireUri();
+
+	var abs = /*@__PURE__*/ requireAbs();
+	var floor = /*@__PURE__*/ requireFloor();
+	var max = /*@__PURE__*/ requireMax();
+	var min = /*@__PURE__*/ requireMin();
+	var pow = /*@__PURE__*/ requirePow();
+	var round = /*@__PURE__*/ requireRound();
+	var sign = /*@__PURE__*/ requireSign();
+
+	var $Function = Function;
+
+	// eslint-disable-next-line consistent-return
+	var getEvalledConstructor = function (expressionSyntax) {
+		try {
+			return $Function('"use strict"; return (' + expressionSyntax + ').constructor;')();
+		} catch (e) {}
+	};
+
+	var $gOPD = /*@__PURE__*/ requireGopd();
+	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+	var throwTypeError = function () {
+		throw new $TypeError();
+	};
+	var ThrowTypeError = $gOPD
+		? (function () {
+			try {
+				// eslint-disable-next-line no-unused-expressions, no-caller, no-restricted-properties
+				arguments.callee; // IE 8 does not throw here
+				return throwTypeError;
+			} catch (calleeThrows) {
+				try {
+					// IE 8 throws on Object.getOwnPropertyDescriptor(arguments, '')
+					return $gOPD(arguments, 'callee').get;
+				} catch (gOPDthrows) {
+					return throwTypeError;
+				}
+			}
+		}())
+		: throwTypeError;
+
+	var hasSymbols = requireHasSymbols()();
+
+	var getProto = requireGetProto();
+	var $ObjectGPO = requireObject_getPrototypeOf();
+	var $ReflectGPO = requireReflect_getPrototypeOf();
+
+	var $apply = requireFunctionApply();
+	var $call = requireFunctionCall();
+
+	var needsEval = {};
+
+	var TypedArray = typeof Uint8Array === 'undefined' || !getProto ? undefined$1 : getProto(Uint8Array);
+
+	var INTRINSICS = {
+		__proto__: null,
+		'%AggregateError%': typeof AggregateError === 'undefined' ? undefined$1 : AggregateError,
+		'%Array%': Array,
+		'%ArrayBuffer%': typeof ArrayBuffer === 'undefined' ? undefined$1 : ArrayBuffer,
+		'%ArrayIteratorPrototype%': hasSymbols && getProto ? getProto([][Symbol.iterator]()) : undefined$1,
+		'%AsyncFromSyncIteratorPrototype%': undefined$1,
+		'%AsyncFunction%': needsEval,
+		'%AsyncGenerator%': needsEval,
+		'%AsyncGeneratorFunction%': needsEval,
+		'%AsyncIteratorPrototype%': needsEval,
+		'%Atomics%': typeof Atomics === 'undefined' ? undefined$1 : Atomics,
+		'%BigInt%': typeof BigInt === 'undefined' ? undefined$1 : BigInt,
+		'%BigInt64Array%': typeof BigInt64Array === 'undefined' ? undefined$1 : BigInt64Array,
+		'%BigUint64Array%': typeof BigUint64Array === 'undefined' ? undefined$1 : BigUint64Array,
+		'%Boolean%': Boolean,
+		'%DataView%': typeof DataView === 'undefined' ? undefined$1 : DataView,
+		'%Date%': Date,
+		'%decodeURI%': decodeURI,
+		'%decodeURIComponent%': decodeURIComponent,
+		'%encodeURI%': encodeURI,
+		'%encodeURIComponent%': encodeURIComponent,
+		'%Error%': $Error,
+		'%eval%': eval, // eslint-disable-line no-eval
+		'%EvalError%': $EvalError,
+		'%Float16Array%': typeof Float16Array === 'undefined' ? undefined$1 : Float16Array,
+		'%Float32Array%': typeof Float32Array === 'undefined' ? undefined$1 : Float32Array,
+		'%Float64Array%': typeof Float64Array === 'undefined' ? undefined$1 : Float64Array,
+		'%FinalizationRegistry%': typeof FinalizationRegistry === 'undefined' ? undefined$1 : FinalizationRegistry,
+		'%Function%': $Function,
+		'%GeneratorFunction%': needsEval,
+		'%Int8Array%': typeof Int8Array === 'undefined' ? undefined$1 : Int8Array,
+		'%Int16Array%': typeof Int16Array === 'undefined' ? undefined$1 : Int16Array,
+		'%Int32Array%': typeof Int32Array === 'undefined' ? undefined$1 : Int32Array,
+		'%isFinite%': isFinite,
+		'%isNaN%': isNaN,
+		'%IteratorPrototype%': hasSymbols && getProto ? getProto(getProto([][Symbol.iterator]())) : undefined$1,
+		'%JSON%': typeof JSON === 'object' ? JSON : undefined$1,
+		'%Map%': typeof Map === 'undefined' ? undefined$1 : Map,
+		'%MapIteratorPrototype%': typeof Map === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Map()[Symbol.iterator]()),
+		'%Math%': Math,
+		'%Number%': Number,
+		'%Object%': $Object,
+		'%Object.getOwnPropertyDescriptor%': $gOPD,
+		'%parseFloat%': parseFloat,
+		'%parseInt%': parseInt,
+		'%Promise%': typeof Promise === 'undefined' ? undefined$1 : Promise,
+		'%Proxy%': typeof Proxy === 'undefined' ? undefined$1 : Proxy,
+		'%RangeError%': $RangeError,
+		'%ReferenceError%': $ReferenceError,
+		'%Reflect%': typeof Reflect === 'undefined' ? undefined$1 : Reflect,
+		'%RegExp%': RegExp,
+		'%Set%': typeof Set === 'undefined' ? undefined$1 : Set,
+		'%SetIteratorPrototype%': typeof Set === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Set()[Symbol.iterator]()),
+		'%SharedArrayBuffer%': typeof SharedArrayBuffer === 'undefined' ? undefined$1 : SharedArrayBuffer,
+		'%String%': String,
+		'%StringIteratorPrototype%': hasSymbols && getProto ? getProto(''[Symbol.iterator]()) : undefined$1,
+		'%Symbol%': hasSymbols ? Symbol : undefined$1,
+		'%SyntaxError%': $SyntaxError,
+		'%ThrowTypeError%': ThrowTypeError,
+		'%TypedArray%': TypedArray,
+		'%TypeError%': $TypeError,
+		'%Uint8Array%': typeof Uint8Array === 'undefined' ? undefined$1 : Uint8Array,
+		'%Uint8ClampedArray%': typeof Uint8ClampedArray === 'undefined' ? undefined$1 : Uint8ClampedArray,
+		'%Uint16Array%': typeof Uint16Array === 'undefined' ? undefined$1 : Uint16Array,
+		'%Uint32Array%': typeof Uint32Array === 'undefined' ? undefined$1 : Uint32Array,
+		'%URIError%': $URIError,
+		'%WeakMap%': typeof WeakMap === 'undefined' ? undefined$1 : WeakMap,
+		'%WeakRef%': typeof WeakRef === 'undefined' ? undefined$1 : WeakRef,
+		'%WeakSet%': typeof WeakSet === 'undefined' ? undefined$1 : WeakSet,
+
+		'%Function.prototype.call%': $call,
+		'%Function.prototype.apply%': $apply,
+		'%Object.defineProperty%': $defineProperty,
+		'%Object.getPrototypeOf%': $ObjectGPO,
+		'%Math.abs%': abs,
+		'%Math.floor%': floor,
+		'%Math.max%': max,
+		'%Math.min%': min,
+		'%Math.pow%': pow,
+		'%Math.round%': round,
+		'%Math.sign%': sign,
+		'%Reflect.getPrototypeOf%': $ReflectGPO
+	};
+
+	if (getProto) {
+		try {
+			null.error; // eslint-disable-line no-unused-expressions
+		} catch (e) {
+			// https://github.com/tc39/proposal-shadowrealm/pull/384#issuecomment-1364264229
+			var errorProto = getProto(getProto(e));
+			INTRINSICS['%Error.prototype%'] = errorProto;
+		}
+	}
+
+	var doEval = function doEval(name) {
+		var value;
+		if (name === '%AsyncFunction%') {
+			value = getEvalledConstructor('async function () {}');
+		} else if (name === '%GeneratorFunction%') {
+			value = getEvalledConstructor('function* () {}');
+		} else if (name === '%AsyncGeneratorFunction%') {
+			value = getEvalledConstructor('async function* () {}');
+		} else if (name === '%AsyncGenerator%') {
+			var fn = doEval('%AsyncGeneratorFunction%');
+			if (fn) {
+				value = fn.prototype;
+			}
+		} else if (name === '%AsyncIteratorPrototype%') {
+			var gen = doEval('%AsyncGenerator%');
+			if (gen && getProto) {
+				value = getProto(gen.prototype);
+			}
+		}
+
+		INTRINSICS[name] = value;
+
+		return value;
+	};
+
+	var LEGACY_ALIASES = {
+		__proto__: null,
+		'%ArrayBufferPrototype%': ['ArrayBuffer', 'prototype'],
+		'%ArrayPrototype%': ['Array', 'prototype'],
+		'%ArrayProto_entries%': ['Array', 'prototype', 'entries'],
+		'%ArrayProto_forEach%': ['Array', 'prototype', 'forEach'],
+		'%ArrayProto_keys%': ['Array', 'prototype', 'keys'],
+		'%ArrayProto_values%': ['Array', 'prototype', 'values'],
+		'%AsyncFunctionPrototype%': ['AsyncFunction', 'prototype'],
+		'%AsyncGenerator%': ['AsyncGeneratorFunction', 'prototype'],
+		'%AsyncGeneratorPrototype%': ['AsyncGeneratorFunction', 'prototype', 'prototype'],
+		'%BooleanPrototype%': ['Boolean', 'prototype'],
+		'%DataViewPrototype%': ['DataView', 'prototype'],
+		'%DatePrototype%': ['Date', 'prototype'],
+		'%ErrorPrototype%': ['Error', 'prototype'],
+		'%EvalErrorPrototype%': ['EvalError', 'prototype'],
+		'%Float32ArrayPrototype%': ['Float32Array', 'prototype'],
+		'%Float64ArrayPrototype%': ['Float64Array', 'prototype'],
+		'%FunctionPrototype%': ['Function', 'prototype'],
+		'%Generator%': ['GeneratorFunction', 'prototype'],
+		'%GeneratorPrototype%': ['GeneratorFunction', 'prototype', 'prototype'],
+		'%Int8ArrayPrototype%': ['Int8Array', 'prototype'],
+		'%Int16ArrayPrototype%': ['Int16Array', 'prototype'],
+		'%Int32ArrayPrototype%': ['Int32Array', 'prototype'],
+		'%JSONParse%': ['JSON', 'parse'],
+		'%JSONStringify%': ['JSON', 'stringify'],
+		'%MapPrototype%': ['Map', 'prototype'],
+		'%NumberPrototype%': ['Number', 'prototype'],
+		'%ObjectPrototype%': ['Object', 'prototype'],
+		'%ObjProto_toString%': ['Object', 'prototype', 'toString'],
+		'%ObjProto_valueOf%': ['Object', 'prototype', 'valueOf'],
+		'%PromisePrototype%': ['Promise', 'prototype'],
+		'%PromiseProto_then%': ['Promise', 'prototype', 'then'],
+		'%Promise_all%': ['Promise', 'all'],
+		'%Promise_reject%': ['Promise', 'reject'],
+		'%Promise_resolve%': ['Promise', 'resolve'],
+		'%RangeErrorPrototype%': ['RangeError', 'prototype'],
+		'%ReferenceErrorPrototype%': ['ReferenceError', 'prototype'],
+		'%RegExpPrototype%': ['RegExp', 'prototype'],
+		'%SetPrototype%': ['Set', 'prototype'],
+		'%SharedArrayBufferPrototype%': ['SharedArrayBuffer', 'prototype'],
+		'%StringPrototype%': ['String', 'prototype'],
+		'%SymbolPrototype%': ['Symbol', 'prototype'],
+		'%SyntaxErrorPrototype%': ['SyntaxError', 'prototype'],
+		'%TypedArrayPrototype%': ['TypedArray', 'prototype'],
+		'%TypeErrorPrototype%': ['TypeError', 'prototype'],
+		'%Uint8ArrayPrototype%': ['Uint8Array', 'prototype'],
+		'%Uint8ClampedArrayPrototype%': ['Uint8ClampedArray', 'prototype'],
+		'%Uint16ArrayPrototype%': ['Uint16Array', 'prototype'],
+		'%Uint32ArrayPrototype%': ['Uint32Array', 'prototype'],
+		'%URIErrorPrototype%': ['URIError', 'prototype'],
+		'%WeakMapPrototype%': ['WeakMap', 'prototype'],
+		'%WeakSetPrototype%': ['WeakSet', 'prototype']
+	};
+
+	var bind = requireFunctionBind();
+	var hasOwn = /*@__PURE__*/ requireHasown();
+	var $concat = bind.call($call, Array.prototype.concat);
+	var $spliceApply = bind.call($apply, Array.prototype.splice);
+	var $replace = bind.call($call, String.prototype.replace);
+	var $strSlice = bind.call($call, String.prototype.slice);
+	var $exec = bind.call($call, RegExp.prototype.exec);
+
+	/* adapted from https://github.com/lodash/lodash/blob/4.17.15/dist/lodash.js#L6735-L6744 */
+	var rePropName = /[^%.[\]]+|\[(?:(-?\d+(?:\.\d+)?)|(["'])((?:(?!\2)[^\\]|\\.)*?)\2)\]|(?=(?:\.|\[\])(?:\.|\[\]|%$))/g;
+	var reEscapeChar = /\\(\\)?/g; /** Used to match backslashes in property paths. */
+	var stringToPath = function stringToPath(string) {
+		var first = $strSlice(string, 0, 1);
+		var last = $strSlice(string, -1);
+		if (first === '%' && last !== '%') {
+			throw new $SyntaxError('invalid intrinsic syntax, expected closing `%`');
+		} else if (last === '%' && first !== '%') {
+			throw new $SyntaxError('invalid intrinsic syntax, expected opening `%`');
+		}
+		var result = [];
+		$replace(string, rePropName, function (match, number, quote, subString) {
+			result[result.length] = quote ? $replace(subString, reEscapeChar, '$1') : number || match;
+		});
+		return result;
+	};
+	/* end adaptation */
+
+	var getBaseIntrinsic = function getBaseIntrinsic(name, allowMissing) {
+		var intrinsicName = name;
+		var alias;
+		if (hasOwn(LEGACY_ALIASES, intrinsicName)) {
+			alias = LEGACY_ALIASES[intrinsicName];
+			intrinsicName = '%' + alias[0] + '%';
+		}
+
+		if (hasOwn(INTRINSICS, intrinsicName)) {
+			var value = INTRINSICS[intrinsicName];
+			if (value === needsEval) {
+				value = doEval(intrinsicName);
+			}
+			if (typeof value === 'undefined' && !allowMissing) {
+				throw new $TypeError('intrinsic ' + name + ' exists, but is not available. Please file an issue!');
+			}
+
+			return {
+				alias: alias,
+				name: intrinsicName,
+				value: value
+			};
+		}
+
+		throw new $SyntaxError('intrinsic ' + name + ' does not exist!');
+	};
+
+	getIntrinsic = function GetIntrinsic(name, allowMissing) {
+		if (typeof name !== 'string' || name.length === 0) {
+			throw new $TypeError('intrinsic name must be a non-empty string');
+		}
+		if (arguments.length > 1 && typeof allowMissing !== 'boolean') {
+			throw new $TypeError('"allowMissing" argument must be a boolean');
+		}
+
+		if ($exec(/^%?[^%]*%?$/, name) === null) {
+			throw new $SyntaxError('`%` may not be present anywhere but at the beginning and end of the intrinsic name');
+		}
+		var parts = stringToPath(name);
+		var intrinsicBaseName = parts.length > 0 ? parts[0] : '';
+
+		var intrinsic = getBaseIntrinsic('%' + intrinsicBaseName + '%', allowMissing);
+		var intrinsicRealName = intrinsic.name;
+		var value = intrinsic.value;
+		var skipFurtherCaching = false;
+
+		var alias = intrinsic.alias;
+		if (alias) {
+			intrinsicBaseName = alias[0];
+			$spliceApply(parts, $concat([0, 1], alias));
+		}
+
+		for (var i = 1, isOwn = true; i < parts.length; i += 1) {
+			var part = parts[i];
+			var first = $strSlice(part, 0, 1);
+			var last = $strSlice(part, -1);
+			if (
+				(
+					(first === '"' || first === "'" || first === '`')
+					|| (last === '"' || last === "'" || last === '`')
+				)
+				&& first !== last
+			) {
+				throw new $SyntaxError('property names with quotes must have matching quotes');
+			}
+			if (part === 'constructor' || !isOwn) {
+				skipFurtherCaching = true;
+			}
+
+			intrinsicBaseName += '.' + part;
+			intrinsicRealName = '%' + intrinsicBaseName + '%';
+
+			if (hasOwn(INTRINSICS, intrinsicRealName)) {
+				value = INTRINSICS[intrinsicRealName];
+			} else if (value != null) {
+				if (!(part in value)) {
+					if (!allowMissing) {
+						throw new $TypeError('base intrinsic for ' + name + ' exists, but the property is not available.');
+					}
+					return void undefined$1;
+				}
+				if ($gOPD && (i + 1) >= parts.length) {
+					var desc = $gOPD(value, part);
+					isOwn = !!desc;
+
+					// By convention, when a data property is converted to an accessor
+					// property to emulate a data property that does not suffer from
+					// the override mistake, that accessor's getter is marked with
+					// an `originalValue` property. Here, when we detect this, we
+					// uphold the illusion by pretending to see that original data
+					// property, i.e., returning the value rather than the getter
+					// itself.
+					if (isOwn && 'get' in desc && !('originalValue' in desc.get)) {
+						value = desc.get;
+					} else {
+						value = value[part];
+					}
+				} else {
+					isOwn = hasOwn(value, part);
+					value = value[part];
+				}
+
+				if (isOwn && !skipFurtherCaching) {
+					INTRINSICS[intrinsicRealName] = value;
+				}
+			}
+		}
+		return value;
+	};
+	return getIntrinsic;
+}
+
+var defineDataProperty;
+var hasRequiredDefineDataProperty;
+
+function requireDefineDataProperty () {
+	if (hasRequiredDefineDataProperty) return defineDataProperty;
+	hasRequiredDefineDataProperty = 1;
+
+	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+	var $SyntaxError = /*@__PURE__*/ requireSyntax();
+	var $TypeError = /*@__PURE__*/ requireType();
+
+	var gopd = /*@__PURE__*/ requireGopd();
+
+	/** @type {import('.')} */
+	defineDataProperty = function defineDataProperty(
+		obj,
+		property,
+		value
+	) {
+		if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) {
+			throw new $TypeError('`obj` must be an object or a function`');
+		}
+		if (typeof property !== 'string' && typeof property !== 'symbol') {
+			throw new $TypeError('`property` must be a string or a symbol`');
+		}
+		if (arguments.length > 3 && typeof arguments[3] !== 'boolean' && arguments[3] !== null) {
+			throw new $TypeError('`nonEnumerable`, if provided, must be a boolean or null');
+		}
+		if (arguments.length > 4 && typeof arguments[4] !== 'boolean' && arguments[4] !== null) {
+			throw new $TypeError('`nonWritable`, if provided, must be a boolean or null');
+		}
+		if (arguments.length > 5 && typeof arguments[5] !== 'boolean' && arguments[5] !== null) {
+			throw new $TypeError('`nonConfigurable`, if provided, must be a boolean or null');
+		}
+		if (arguments.length > 6 && typeof arguments[6] !== 'boolean') {
+			throw new $TypeError('`loose`, if provided, must be a boolean');
+		}
+
+		var nonEnumerable = arguments.length > 3 ? arguments[3] : null;
+		var nonWritable = arguments.length > 4 ? arguments[4] : null;
+		var nonConfigurable = arguments.length > 5 ? arguments[5] : null;
+		var loose = arguments.length > 6 ? arguments[6] : false;
+
+		/* @type {false | TypedPropertyDescriptor<unknown>} */
+		var desc = !!gopd && gopd(obj, property);
+
+		if ($defineProperty) {
+			$defineProperty(obj, property, {
+				configurable: nonConfigurable === null && desc ? desc.configurable : !nonConfigurable,
+				enumerable: nonEnumerable === null && desc ? desc.enumerable : !nonEnumerable,
+				value: value,
+				writable: nonWritable === null && desc ? desc.writable : !nonWritable
+			});
+		} else if (loose || (!nonEnumerable && !nonWritable && !nonConfigurable)) {
+			// must fall back to [[Set]], and was not explicitly asked to make non-enumerable, non-writable, or non-configurable
+			obj[property] = value; // eslint-disable-line no-param-reassign
+		} else {
+			throw new $SyntaxError('This environment does not support defining a property as non-configurable, non-writable, or non-enumerable.');
+		}
+	};
+	return defineDataProperty;
+}
+
+var hasPropertyDescriptors_1;
+var hasRequiredHasPropertyDescriptors;
+
+function requireHasPropertyDescriptors () {
+	if (hasRequiredHasPropertyDescriptors) return hasPropertyDescriptors_1;
+	hasRequiredHasPropertyDescriptors = 1;
+
+	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+	var hasPropertyDescriptors = function hasPropertyDescriptors() {
+		return !!$defineProperty;
+	};
+
+	hasPropertyDescriptors.hasArrayLengthDefineBug = function hasArrayLengthDefineBug() {
+		// node v0.6 has a bug where array lengths can be Set but not Defined
+		if (!$defineProperty) {
+			return null;
+		}
+		try {
+			return $defineProperty([], 'length', { value: 1 }).length !== 1;
+		} catch (e) {
+			// In Firefox 4-22, defining length on an array throws an exception.
+			return true;
+		}
+	};
+
+	hasPropertyDescriptors_1 = hasPropertyDescriptors;
+	return hasPropertyDescriptors_1;
+}
+
+var setFunctionLength;
+var hasRequiredSetFunctionLength;
+
+function requireSetFunctionLength () {
+	if (hasRequiredSetFunctionLength) return setFunctionLength;
+	hasRequiredSetFunctionLength = 1;
+
+	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
+	var define = /*@__PURE__*/ requireDefineDataProperty();
+	var hasDescriptors = /*@__PURE__*/ requireHasPropertyDescriptors()();
+	var gOPD = /*@__PURE__*/ requireGopd();
+
+	var $TypeError = /*@__PURE__*/ requireType();
+	var $floor = GetIntrinsic('%Math.floor%');
+
+	/** @type {import('.')} */
+	setFunctionLength = function setFunctionLength(fn, length) {
+		if (typeof fn !== 'function') {
+			throw new $TypeError('`fn` is not a function');
+		}
+		if (typeof length !== 'number' || length < 0 || length > 0xFFFFFFFF || $floor(length) !== length) {
+			throw new $TypeError('`length` must be a positive 32-bit integer');
+		}
+
+		var loose = arguments.length > 2 && !!arguments[2];
+
+		var functionLengthIsConfigurable = true;
+		var functionLengthIsWritable = true;
+		if ('length' in fn && gOPD) {
+			var desc = gOPD(fn, 'length');
+			if (desc && !desc.configurable) {
+				functionLengthIsConfigurable = false;
+			}
+			if (desc && !desc.writable) {
+				functionLengthIsWritable = false;
+			}
+		}
+
+		if (functionLengthIsConfigurable || functionLengthIsWritable || !loose) {
+			if (hasDescriptors) {
+				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length, true, true);
+			} else {
+				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length);
+			}
+		}
+		return fn;
+	};
+	return setFunctionLength;
+}
+
+var applyBind;
+var hasRequiredApplyBind;
+
+function requireApplyBind () {
+	if (hasRequiredApplyBind) return applyBind;
+	hasRequiredApplyBind = 1;
+
+	var bind = requireFunctionBind();
+	var $apply = requireFunctionApply();
+	var actualApply = requireActualApply();
+
+	/** @type {import('./applyBind')} */
+	applyBind = function applyBind() {
+		return actualApply(bind, $apply, arguments);
+	};
+	return applyBind;
+}
+
+var hasRequiredCallBind;
+
+function requireCallBind () {
+	if (hasRequiredCallBind) return callBind.exports;
+	hasRequiredCallBind = 1;
+	(function (module) {
+
+		var setFunctionLength = /*@__PURE__*/ requireSetFunctionLength();
+
+		var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+		var callBindBasic = requireCallBindApplyHelpers();
+		var applyBind = requireApplyBind();
+
+		module.exports = function callBind(originalFunction) {
+			var func = callBindBasic(arguments);
+			var adjustedLength = originalFunction.length - (arguments.length - 1);
+			return setFunctionLength(
+				func,
+				1 + (adjustedLength > 0 ? adjustedLength : 0),
+				true
+			);
+		};
+
+		if ($defineProperty) {
+			$defineProperty(module.exports, 'apply', { value: applyBind });
+		} else {
+			module.exports.apply = applyBind;
+		} 
+	} (callBind));
+	return callBind.exports;
+}
+
+var callBound;
+var hasRequiredCallBound;
+
+function requireCallBound () {
+	if (hasRequiredCallBound) return callBound;
+	hasRequiredCallBound = 1;
+
+	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
+
+	var callBindBasic = requireCallBindApplyHelpers();
+
+	/** @type {(thisArg: string, searchString: string, position?: number) => number} */
+	var $indexOf = callBindBasic([GetIntrinsic('%String.prototype.indexOf%')]);
+
+	/** @type {import('.')} */
+	callBound = function callBoundIntrinsic(name, allowMissing) {
+		/* eslint no-extra-parens: 0 */
+
+		var intrinsic = /** @type {(this: unknown, ...args: unknown[]) => unknown} */ (GetIntrinsic(name, !!allowMissing));
+		if (typeof intrinsic === 'function' && $indexOf(name, '.prototype.') > -1) {
+			return callBindBasic(/** @type {const} */ ([intrinsic]));
+		}
+		return intrinsic;
+	};
+	return callBound;
+}
+
+var jsonStableStringify$1;
+var hasRequiredJsonStableStringify;
+
+function requireJsonStableStringify () {
+	if (hasRequiredJsonStableStringify) return jsonStableStringify$1;
+	hasRequiredJsonStableStringify = 1;
+
+	/** @type {typeof JSON.stringify} */
+	var jsonStringify = (typeof JSON !== 'undefined' ? JSON : requireJsonify()).stringify;
+
+	var isArray = requireIsarray();
+	var objectKeys = requireObjectKeys();
+	var callBind = requireCallBind();
+	var callBound = /*@__PURE__*/ requireCallBound();
+
+	var $join = callBound('Array.prototype.join');
+	var $indexOf = callBound('Array.prototype.indexOf');
+	var $splice = callBound('Array.prototype.splice');
+	var $sort = callBound('Array.prototype.sort');
+
+	/** @type {(n: number, char: string) => string} */
+	var strRepeat = function repeat(n, char) {
+		var str = '';
+		for (var i = 0; i < n; i += 1) {
+			str += char;
+		}
+		return str;
+	};
+
+	/** @type {(parent: import('.').Node, key: import('.').Key, value: unknown) => unknown} */
+	var defaultReplacer = function (_parent, _key, value) { return value; };
+
+	/** @type {import('.')} */
+	jsonStableStringify$1 = function stableStringify(obj) {
+		/** @type {Parameters<import('.')>[1]} */
+		var opts = arguments.length > 1 ? arguments[1] : void undefined;
+		var space = (opts && opts.space) || '';
+		if (typeof space === 'number') { space = strRepeat(space, ' '); }
+		var cycles = !!opts && typeof opts.cycles === 'boolean' && opts.cycles;
+		/** @type {undefined | typeof defaultReplacer} */
+		var replacer = opts && opts.replacer ? callBind(opts.replacer) : defaultReplacer;
+		if (opts && typeof opts.collapseEmpty !== 'undefined' && typeof opts.collapseEmpty !== 'boolean') {
+			throw new TypeError('`collapseEmpty` must be a boolean, if provided');
+		}
+		var collapseEmpty = !!opts && opts.collapseEmpty;
+
+		var cmpOpt = typeof opts === 'function' ? opts : opts && opts.cmp;
+		/** @type {undefined | (<T extends import('.').NonArrayNode>(node: T) => (a: Exclude<keyof T, symbol | number>, b: Exclude<keyof T, symbol | number>) => number)} */
+		var cmp = cmpOpt && function (node) {
+			// eslint-disable-next-line no-extra-parens
+			var get = /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt).length > 2
+				&& /** @type {import('.').Getter['get']} */ function get(k) { return node[k]; };
+			return function (a, b) {
+				// eslint-disable-next-line no-extra-parens
+				return /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt)(
+					{ key: a, value: node[a] },
+					{ key: b, value: node[b] },
+					// @ts-expect-error TS doesn't understand the optimization used here
+					get ? /** @type {import('.').Getter} */ { __proto__: null, get: get } : void undefined
+				);
+			};
+		};
+
+		/** @type {import('.').Node[]} */
+		var seen = [];
+		return (/** @type {(parent: import('.').Node, key: string | number, node: unknown, level: number) => string | undefined} */
+			function stringify(parent, key, node, level) {
+				var indent = space ? '\n' + strRepeat(level, space) : '';
+				var colonSeparator = space ? ': ' : ':';
+
+				// eslint-disable-next-line no-extra-parens
+				if (node && /** @type {{ toJSON?: unknown }} */ (node).toJSON && typeof /** @type {{ toJSON?: unknown }} */ (node).toJSON === 'function') {
+					// eslint-disable-next-line no-extra-parens
+					node = /** @type {{ toJSON: Function }} */ (node).toJSON();
+				}
+
+				node = replacer(parent, key, node);
+				if (node === undefined) {
+					return;
+				}
+				if (typeof node !== 'object' || node === null) {
+					return jsonStringify(node);
+				}
+
+				/** @type {(out: string[], brackets: '[]' | '{}') => string} */
+				var groupOutput = function (out, brackets) {
+					return collapseEmpty && out.length === 0
+						? brackets
+						: (brackets === '[]' ? '[' : '{') + $join(out, ',') + indent + (brackets === '[]' ? ']' : '}');
+				};
+
+				if (isArray(node)) {
+					var out = [];
+					for (var i = 0; i < node.length; i++) {
+						var item = stringify(node, i, node[i], level + 1) || jsonStringify(null);
+						out[out.length] = indent + space + item;
+					}
+					return groupOutput(out, '[]');
+				}
+
+				if ($indexOf(seen, node) !== -1) {
+					if (cycles) { return jsonStringify('__cycle__'); }
+					throw new TypeError('Converting circular structure to JSON');
+				} else {
+					seen[seen.length] = /** @type {import('.').NonArrayNode} */ (node);
+				}
+
+				/** @type {import('.').Key[]} */
+				// eslint-disable-next-line no-extra-parens
+				var keys = $sort(objectKeys(node), cmp && cmp(/** @type {import('.').NonArrayNode} */ (node)));
+				var out = [];
+				for (var i = 0; i < keys.length; i++) {
+					var key = keys[i];
+					// eslint-disable-next-line no-extra-parens
+					var value = stringify(/** @type {import('.').Node} */ (node), key, /** @type {import('.').NonArrayNode} */ (node)[key], level + 1);
+
+					if (!value) { continue; }
+
+					var keyValue = jsonStringify(key)
+						+ colonSeparator
+						+ value;
+
+					out[out.length] = indent + space + keyValue;
+				}
+				$splice(seen, $indexOf(seen, node), 1);
+				return groupOutput(out, '{}');
+			}({ '': obj }, '', obj, 0)
+		);
+	};
+	return jsonStableStringify$1;
+}
+
+var jsonStableStringifyExports = requireJsonStableStringify();
+var jsonStableStringify = /*@__PURE__*/getDefaultExportFromCjs(jsonStableStringifyExports);
+
 async function custom(actual, errors, schema) {
   if (!this.passphrase) {
     errors.push({ actual, type: "encryptionKeyMissing" });
@@ -1342,8 +3405,59 @@ const SchemaActions = {
   encrypt: (value, { passphrase }) => encrypt(value, passphrase),
   decrypt: (value, { passphrase }) => decrypt(value, passphrase),
   toString: (value) => String(value),
-  fromArray: (value, { separator }) => (value || []).join(separator),
-  toArray: (value, { separator }) => (value || "").split(separator),
+  fromArray: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "[]";
+    }
+    const escapedItems = value.map((item) => {
+      if (typeof item === "string") {
+        return item.replace(/\\/g, "\\\\").replace(new RegExp(`\\${separator}`, "g"), `\\${separator}`);
+      }
+      return String(item);
+    });
+    return escapedItems.join(separator);
+  },
+  toArray: (value, { separator }) => {
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "[]") {
+      return [];
+    }
+    if (value === "") {
+      return [];
+    }
+    const items = [];
+    let current = "";
+    let i = 0;
+    const str = String(value);
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        if (str[i + 1] === separator) {
+          current += separator;
+          i += 2;
+        } else if (str[i + 1] === "\\") {
+          current += "\\";
+          i += 2;
+        } else {
+          current += str[i];
+          i++;
+        }
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items;
+  },
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
   toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
@@ -1375,7 +3489,10 @@ class Schema {
       this.reversedMap = lodashEs.invert(map);
     } else {
       const flatAttrs = flat.flatten(this.attributes, { safe: true });
-      this.reversedMap = { ...Object.keys(flatAttrs).filter((k) => !k.includes("$$")) };
+      const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
+      const objectKeys = this.extractObjectKeys(this.attributes);
+      const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
+      this.reversedMap = { ...allKeys };
       this.map = lodashEs.invert(this.reversedMap);
     }
   }
@@ -1396,6 +3513,20 @@ class Schema {
   addHook(hook, attribute, action) {
     if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
     this.options.hooks[hook][attribute] = lodashEs.uniq([...this.options.hooks[hook][attribute], action]);
+  }
+  extractObjectKeys(obj, prefix = "") {
+    const objectKeys = [];
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith("$$")) continue;
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        objectKeys.push(fullKey);
+        if (value.$$type === "object") {
+          objectKeys.push(...this.extractObjectKeys(value, fullKey));
+        }
+      }
+    }
+    return objectKeys;
   }
   generateAutoHooks() {
     const schema = flat.flatten(lodashEs.cloneDeep(this.attributes), { safe: true });
@@ -1615,6 +3746,7 @@ class Resource extends EventEmitter {
   constructor({
     name,
     client,
+    version = "1",
     options = {},
     attributes = {},
     parallelism = 10,
@@ -1627,24 +3759,133 @@ class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
+    this.version = version;
     this.options = {
       cache: false,
       autoDecrypt: true,
       timestamps: false,
+      partitions: {},
+      // Changed from partitionRules to partitions (named)
+      paranoid: true,
+      // Security flag for dangerous operations
       ...options
     };
+    this.hooks = {
+      preInsert: [],
+      afterInsert: [],
+      preUpdate: [],
+      afterUpdate: [],
+      preDelete: [],
+      afterDelete: []
+    };
+    this.attributes = attributes || {};
     if (options.timestamps) {
-      attributes.createdAt = "string|optional";
-      attributes.updatedAt = "string|optional";
+      this.attributes.createdAt = "string|optional";
+      this.attributes.updatedAt = "string|optional";
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          fields: {
+            createdAt: "date|maxlength:10"
+          }
+        };
+      }
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          fields: {
+            updatedAt: "date|maxlength:10"
+          }
+        };
+      }
     }
     this.schema = new Schema({
       name,
-      attributes,
-      passphrase
+      attributes: this.attributes,
+      passphrase,
+      version: this.version,
+      options: this.options
     });
+    this.validatePartitions();
+    this.setupPartitionHooks();
   }
   export() {
     return this.schema.export();
+  }
+  /**
+   * Update resource attributes and rebuild schema
+   * @param {Object} newAttributes - New attributes definition
+   */
+  updateAttributes(newAttributes) {
+    const oldAttributes = this.attributes;
+    this.attributes = newAttributes;
+    if (this.options.timestamps) {
+      newAttributes.createdAt = "string|optional";
+      newAttributes.updatedAt = "string|optional";
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          fields: {
+            createdAt: "date|maxlength:10"
+          }
+        };
+      }
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          fields: {
+            updatedAt: "date|maxlength:10"
+          }
+        };
+      }
+    }
+    this.schema = new Schema({
+      name: this.name,
+      attributes: newAttributes,
+      passphrase: this.passphrase,
+      version: this.version,
+      options: this.options
+    });
+    this.validatePartitions();
+    this.setupPartitionHooks();
+    return { oldAttributes, newAttributes };
+  }
+  /**
+   * Add a hook function for a specific event
+   * @param {string} event - Hook event (preInsert, afterInsert, etc.)
+   * @param {Function} fn - Hook function
+   */
+  addHook(event, fn) {
+    if (this.hooks[event]) {
+      this.hooks[event].push(fn.bind(this));
+    }
+  }
+  /**
+   * Execute hooks for a specific event
+   * @param {string} event - Hook event
+   * @param {*} data - Data to pass to hooks
+   * @returns {*} Modified data
+   */
+  async executeHooks(event, data) {
+    if (!this.hooks[event]) return data;
+    let result = data;
+    for (const hook of this.hooks[event]) {
+      result = await hook(result);
+    }
+    return result;
+  }
+  /**
+   * Setup automatic partition hooks
+   */
+  setupPartitionHooks() {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    this.addHook("afterInsert", async (data) => {
+      await this.createPartitionReferences(data);
+      return data;
+    });
+    this.addHook("afterDelete", async (data) => {
+      await this.deletePartitionReferences(data);
+      return data;
+    });
   }
   async validate(data) {
     const result = {
@@ -1661,52 +3902,156 @@ class Resource extends EventEmitter {
     result.data = data;
     return result;
   }
+  /**
+   * Validate that all partition fields exist in current resource attributes
+   * @throws {Error} If partition fields don't exist in current schema
+   */
+  validatePartitions() {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    const currentAttributes = Object.keys(this.attributes || {});
+    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+      if (!partitionDef.fields) {
+        continue;
+      }
+      for (const fieldName of Object.keys(partitionDef.fields)) {
+        if (!currentAttributes.includes(fieldName)) {
+          throw new Error(
+            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. Available fields: ${currentAttributes.join(", ")}. This version of resource does not have support for this partition.`
+          );
+        }
+      }
+    }
+  }
+  /**
+   * Apply a single partition rule to a field value
+   * @param {*} value - The field value
+   * @param {string} rule - The partition rule
+   * @returns {*} Transformed value
+   */
+  applyPartitionRule(value, rule) {
+    if (value === void 0 || value === null) {
+      return value;
+    }
+    let transformedValue = value;
+    if (typeof rule === "string" && rule.includes("maxlength:")) {
+      const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+      if (maxLengthMatch) {
+        const maxLength = parseInt(maxLengthMatch[1]);
+        if (typeof transformedValue === "string" && transformedValue.length > maxLength) {
+          transformedValue = transformedValue.substring(0, maxLength);
+        }
+      }
+    }
+    if (rule.includes("date")) {
+      if (transformedValue instanceof Date) {
+        transformedValue = transformedValue.toISOString().split("T")[0];
+      } else if (typeof transformedValue === "string") {
+        try {
+          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
+            transformedValue = transformedValue.split("T")[0];
+          } else {
+            const date = new Date(transformedValue);
+            if (!isNaN(date.getTime())) {
+              transformedValue = date.toISOString().split("T")[0];
+            }
+          }
+        } catch (e) {
+        }
+      }
+    }
+    return transformedValue;
+  }
+  /**
+   * Get the main resource key (always versioned path)
+   * @param {string} id - Resource ID
+   * @returns {string} The main S3 key path
+   */
+  getResourceKey(id) {
+    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+  }
+  /**
+   * Get partition reference key for a specific partition
+   * @param {string} partitionName - Name of the partition
+   * @param {string} id - Resource ID  
+   * @param {Object} data - Data object for partition value generation
+   * @returns {string|null} The partition reference S3 key path
+   */
+  getPartitionKey(partitionName, id, data) {
+    const partition = this.options.partitions[partitionName];
+    if (!partition) {
+      throw new Error(`Partition '${partitionName}' not found`);
+    }
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const fieldValue = this.applyPartitionRule(data[fieldName], rule);
+      if (fieldValue === void 0 || fieldValue === null) {
+        return null;
+      }
+      partitionSegments.push(`${fieldName}=${fieldValue}`);
+    }
+    if (partitionSegments.length === 0) {
+      return null;
+    }
+    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+  }
   async insert({ id, ...attributes }) {
     if (this.options.timestamps) {
       attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
+    const preProcessedData = await this.executeHooks("preInsert", attributes);
     const {
       errors,
       isValid,
       data: validated
-    } = await this.validate(attributes);
+    } = await this.validate(preProcessedData);
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
         resourceName: this.name,
-        attributes,
+        attributes: preProcessedData,
         validation: errors
       });
     }
     if (!id && id !== 0) id = nanoid.nanoid();
     const metadata = await this.schema.mapper(validated);
+    const key = this.getResourceKey(id);
     await this.client.putObject({
       metadata,
-      key: join(`resource=${this.name}`, `id=${id}`)
+      key,
+      body: ""
+      // Empty body for metadata-only objects
     });
     const final = lodashEs.merge({ id }, validated);
+    await this.executeHooks("afterInsert", final);
     this.emit("insert", final);
     return final;
   }
   async get(id) {
-    const request = await this.client.headObject(
-      join(`resource=${this.name}`, `id=${id}`)
-    );
-    let data = await this.schema.unmapper(request.Metadata);
+    const key = this.getResourceKey(id);
+    const request = await this.client.headObject(key);
+    const objectVersion = this.extractVersionFromKey(key) || this.version;
+    const schema = await this.getSchemaForVersion(objectVersion);
+    let data = await schema.unmapper(request.Metadata);
     data.id = id;
-    data._length = request.ContentLength;
+    data._contentLength = request.ContentLength;
     data._lastModified = request.LastModified;
+    data.mimeType = request.ContentType || null;
     if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
+    data.definitionHash = this.getDefinitionHash();
+    data._hasContent = request.ContentLength > 0;
     this.emit("get", data);
     return data;
   }
   async exists(id) {
     try {
-      await this.client.headObject(
-        join(`resource=${this.name}`, `id=${id}`)
-      );
+      const key = this.getResourceKey(id);
+      await this.client.headObject(key);
       return true;
     } catch (error) {
       return false;
@@ -1717,29 +4062,51 @@ class Resource extends EventEmitter {
     if (this.options.timestamps) {
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
-    const attrs = lodashEs.merge(live, attributes);
+    const preProcessedData = await this.executeHooks("preUpdate", attributes);
+    const attrs = lodashEs.merge(live, preProcessedData);
     delete attrs.id;
     const { isValid, errors, data: validated } = await this.validate(attrs);
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.bucket,
         resourceName: this.name,
-        attributes,
+        attributes: preProcessedData,
         validation: errors
       });
     }
+    const key = this.getResourceKey(id);
+    let existingBody = "";
+    let existingContentType = void 0;
+    try {
+      const existingObject = await this.client.getObject(key);
+      if (existingObject.ContentLength > 0) {
+        existingBody = Buffer.from(await existingObject.Body.transformToByteArray());
+        existingContentType = existingObject.ContentType;
+      }
+    } catch (error) {
+    }
     await this.client.putObject({
-      key: join(`resource=${this.name}`, `id=${id}`),
-      body: "",
+      key,
+      body: existingBody,
+      contentType: existingContentType,
       metadata: await this.schema.mapper(validated)
     });
     validated.id = id;
-    this.emit("update", attributes, validated);
+    await this.executeHooks("afterUpdate", validated);
+    this.emit("update", preProcessedData, validated);
     return validated;
   }
   async delete(id) {
-    const key = join(`resource=${this.name}`, `id=${id}`);
+    let objectData;
+    try {
+      objectData = await this.get(id);
+    } catch (error) {
+      objectData = { id };
+    }
+    await this.executeHooks("preDelete", objectData);
+    const key = this.getResourceKey(id);
     const response = await this.client.deleteObject(key);
+    await this.executeHooks("afterDelete", objectData);
     this.emit("delete", id);
     return response;
   }
@@ -1750,9 +4117,32 @@ class Resource extends EventEmitter {
     }
     return this.insert({ id, ...attributes });
   }
-  async count() {
+  async count({ partition = null, partitionValues = {} } = {}) {
+    let prefix;
+    if (partition && Object.keys(partitionValues).length > 0) {
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
+      }
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
+    } else {
+      prefix = `resource=${this.name}/v=${this.version}`;
+    }
     const count = await this.client.count({
-      prefix: `resource=${this.name}`
+      prefix
     });
     this.emit("count", count);
     return count;
@@ -1770,7 +4160,7 @@ class Resource extends EventEmitter {
   }
   async deleteMany(ids) {
     const packages = lodashEs.chunk(
-      ids.map((x) => join(`resource=${this.name}`, `id=${x}`)),
+      ids.map((id) => this.getResourceKey(id)),
       1e3
     );
     const { results } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
@@ -1779,9 +4169,13 @@ class Resource extends EventEmitter {
     }).process(async (keys) => {
       const response = await this.client.deleteObjects(keys);
       keys.forEach((key) => {
-        const id = key.split("=").pop();
-        this.emit("deleted", id);
-        this.observers.map((x) => x.emit("deleted", this.name, id));
+        const parts = key.split("/");
+        const idPart = parts.find((part) => part.startsWith("id="));
+        const id = idPart ? idPart.replace("id=", "") : null;
+        if (id) {
+          this.emit("deleted", id);
+          this.observers.map((x) => x.emit("deleted", this.name, id));
+        }
       });
       return response;
     });
@@ -1789,17 +4183,92 @@ class Resource extends EventEmitter {
     return results;
   }
   async deleteAll() {
-    const ids = await this.listIds();
-    this.emit("deleteAll", ids.length);
-    await this.deleteMany(ids);
-  }
-  async listIds() {
-    const keys = await this.client.getAllKeys({
-      prefix: `resource=${this.name}`
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+    const prefix = `resource=${this.name}/v=${this.version}`;
+    const deletedCount = await this.client.deleteAll({ prefix });
+    this.emit("deleteAll", {
+      version: this.version,
+      prefix,
+      deletedCount
     });
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+    return { deletedCount, version: this.version };
+  }
+  /**
+   * Delete all data for this resource across ALL versions
+   * @returns {Promise<Object>} Deletion report
+   */
+  async deleteAllData() {
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+    const prefix = `resource=${this.name}`;
+    const deletedCount = await this.client.deleteAll({ prefix });
+    this.emit("deleteAllData", {
+      resource: this.name,
+      prefix,
+      deletedCount
+    });
+    return { deletedCount, resource: this.name };
+  }
+  async listIds({ partition = null, partitionValues = {} } = {}) {
+    let prefix;
+    if (partition && Object.keys(partitionValues).length > 0) {
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
+      }
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
+    } else {
+      prefix = `resource=${this.name}/v=${this.version}`;
+    }
+    const keys = await this.client.getAllKeys({
+      prefix
+    });
+    const ids = keys.map((key) => {
+      const parts = key.split("/");
+      const idPart = parts.find((part) => part.startsWith("id="));
+      return idPart ? idPart.replace("id=", "") : null;
+    }).filter(Boolean);
     this.emit("listIds", ids.length);
     return ids;
+  }
+  /**
+   * List objects by partition name and values
+   * @param {Object} partitionOptions - Partition options
+   * @param {Object} options - Listing options
+   * @returns {Array} Array of objects
+   */
+  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
+    const { limit, offset = 0 } = options;
+    const ids = await this.listIds({ partition, partitionValues });
+    let filteredIds = ids.slice(offset);
+    if (limit) {
+      filteredIds = filteredIds.slice(0, limit);
+    }
+    const { results } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).process(async (id) => {
+      return await this.get(id);
+    });
+    this.emit("listByPartition", { partition, partitionValues, count: results.length });
+    return results;
   }
   async getMany(ids) {
     const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
@@ -1821,15 +4290,23 @@ class Resource extends EventEmitter {
     this.emit("getAll", results.length);
     return results;
   }
-  async page({ offset = 0, size = 100 }) {
-    const keys = await this.client.getKeysPage({
-      offset,
-      amount: size,
-      prefix: `resource=${this.name}`
-    });
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
-    const data = await this.getMany(ids);
-    return data;
+  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
+    const allIds = await this.listIds({ partition, partitionValues });
+    const totalItems = allIds.length;
+    const totalPages = Math.ceil(totalItems / size);
+    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
+    const items = await Promise.all(
+      paginatedIds.map((id) => this.get(id))
+    );
+    const result = {
+      items,
+      totalItems,
+      page: offset,
+      pageSize: size,
+      totalPages
+    };
+    this.emit("page", result);
+    return result;
   }
   readable() {
     const stream = new ResourceReader({ resource: this });
@@ -1839,13 +4316,175 @@ class Resource extends EventEmitter {
     const stream = new ResourceWriter({ resource: this });
     return stream.build();
   }
+  /**
+   * Store binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @param {Buffer} buffer - Binary content
+   * @param {string} contentType - Optional content type
+   */
+  async setContent(id, buffer, contentType = "application/octet-stream") {
+    if (!Buffer.isBuffer(buffer)) {
+      throw new Error("Content must be a Buffer");
+    }
+    const key = this.getResourceKey(id);
+    let existingMetadata = {};
+    try {
+      const existingObject = await this.client.headObject(key);
+      existingMetadata = existingObject.Metadata || {};
+    } catch (error) {
+    }
+    const response = await this.client.putObject({
+      key,
+      body: buffer,
+      contentType,
+      metadata: existingMetadata
+      // Preserve existing metadata
+    });
+    this.emit("setContent", id, buffer.length, contentType);
+    return response;
+  }
+  /**
+   * Retrieve binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @returns {Object} Object with buffer and contentType
+   */
+  async content(id) {
+    const key = this.getResourceKey(id);
+    try {
+      const response = await this.client.getObject(key);
+      const buffer = Buffer.from(await response.Body.transformToByteArray());
+      const contentType = response.ContentType || null;
+      this.emit("content", id, buffer.length, contentType);
+      return {
+        buffer,
+        contentType
+      };
+    } catch (error) {
+      if (error.name === "NoSuchKey") {
+        return {
+          buffer: null,
+          contentType: null
+        };
+      }
+      throw error;
+    }
+  }
+  /**
+   * Check if binary content exists for a resource
+   * @param {string} id - Resource ID
+   * @returns {boolean}
+   */
+  async hasContent(id) {
+    const key = this.getResourceKey(id);
+    try {
+      const response = await this.client.headObject(key);
+      return response.ContentLength > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+  /**
+   * Delete binary content but preserve metadata
+   * @param {string} id - Resource ID
+   */
+  async deleteContent(id) {
+    const key = this.getResourceKey(id);
+    const existingObject = await this.client.headObject(key);
+    const existingMetadata = existingObject.Metadata || {};
+    const response = await this.client.putObject({
+      key,
+      body: "",
+      metadata: existingMetadata
+    });
+    this.emit("deleteContent", id);
+    return response;
+  }
+  /**
+   * Generate definition hash for this resource
+   * @returns {string} SHA256 hash of the schema definition
+   */
+  getDefinitionHash() {
+    const exportedSchema = this.schema.export();
+    const stableString = jsonStableStringify(exportedSchema);
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+  }
+  /**
+   * Extract version from S3 key
+   * @param {string} key - S3 object key
+   * @returns {string|null} Version string or null
+   */
+  extractVersionFromKey(key) {
+    const parts = key.split("/");
+    const versionPart = parts.find((part) => part.startsWith("v="));
+    return versionPart ? versionPart.replace("v=", "") : null;
+  }
+  /**
+   * Get schema for a specific version
+   * @param {string} version - Version string (e.g., 'v0', 'v1')
+   * @returns {Object} Schema object for the version
+   */
+  async getSchemaForVersion(version) {
+    return this.schema;
+  }
+  /**
+   * Create partition references after insert
+   * @param {Object} data - Inserted object data
+   */
+  async createPartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      if (partitionKey) {
+        const referenceMetadata = {
+          _ref: this.getResourceKey(data.id),
+          _partition: partitionName,
+          _id: data.id
+        };
+        await this.client.putObject({
+          key: partitionKey,
+          metadata: referenceMetadata,
+          body: ""
+          // Partition references are metadata-only
+        });
+      }
+    }
+  }
+  /**
+   * Delete partition references after delete
+   * @param {Object} data - Deleted object data
+   */
+  async deletePartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    const keysToDelete = [];
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      if (partitionKey) {
+        keysToDelete.push(partitionKey);
+      }
+    }
+    if (keysToDelete.length > 0) {
+      try {
+        await this.client.deleteObjects(keysToDelete);
+      } catch (error) {
+        console.warn("Some partition references could not be deleted:", error.message);
+      }
+    }
+  }
 }
 
 class Database extends EventEmitter {
   constructor(options) {
     super();
     this.version = "1";
+    this.s3dbVersion = "3.3.2";
     this.resources = {};
+    this.savedMetadata = null;
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
@@ -1866,24 +4505,105 @@ class Database extends EventEmitter {
     if (await this.client.exists(`s3db.json`)) {
       const request = await this.client.getObject(`s3db.json`);
       metadata = JSON.parse(await streamToString(request?.Body));
-      metadata = this.unserializeMetadata(metadata);
     } else {
       metadata = this.blankMetadataStructure();
       await this.uploadMetadataFile();
     }
-    for (const resource of Object.entries(metadata.resources)) {
-      const [name, definition] = resource;
-      this.resources[name] = new Resource({
-        name,
-        client: this.client,
-        options: definition.options,
-        attributes: definition.schema,
-        parallelism: this.parallelism,
-        passphrase: this.passphrase,
-        observers: [this]
+    this.savedMetadata = metadata;
+    const definitionChanges = this.detectDefinitionChanges(metadata);
+    for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
+      const currentVersion = resourceMetadata.currentVersion || "v0";
+      const versionData = resourceMetadata.versions?.[currentVersion];
+      if (versionData) {
+        this.resources[name] = new Resource({
+          name,
+          client: this.client,
+          version: currentVersion,
+          options: {
+            ...versionData.options,
+            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
+          },
+          attributes: versionData.attributes,
+          parallelism: this.parallelism,
+          passphrase: this.passphrase,
+          observers: [this]
+        });
+      }
+    }
+    if (definitionChanges.length > 0) {
+      this.emit("resourceDefinitionsChanged", {
+        changes: definitionChanges,
+        metadata: this.savedMetadata
       });
     }
     this.emit("connected", /* @__PURE__ */ new Date());
+  }
+  /**
+   * Detect changes in resource definitions compared to saved metadata
+   * @param {Object} savedMetadata - The metadata loaded from s3db.json
+   * @returns {Array} Array of change objects
+   */
+  detectDefinitionChanges(savedMetadata) {
+    const changes = [];
+    for (const [name, currentResource] of Object.entries(this.resources)) {
+      const currentHash = this.generateDefinitionHash(currentResource.export());
+      const savedResource = savedMetadata.resources?.[name];
+      if (!savedResource) {
+        changes.push({
+          type: "new",
+          resourceName: name,
+          currentHash,
+          savedHash: null
+        });
+      } else {
+        const currentVersion = savedResource.currentVersion || "v0";
+        const versionData = savedResource.versions?.[currentVersion];
+        const savedHash = versionData?.hash;
+        if (savedHash !== currentHash) {
+          changes.push({
+            type: "changed",
+            resourceName: name,
+            currentHash,
+            savedHash,
+            fromVersion: currentVersion,
+            toVersion: this.getNextVersion(savedResource.versions)
+          });
+        }
+      }
+    }
+    for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
+      if (!this.resources[name]) {
+        const currentVersion = savedResource.currentVersion || "v0";
+        const versionData = savedResource.versions?.[currentVersion];
+        changes.push({
+          type: "deleted",
+          resourceName: name,
+          currentHash: null,
+          savedHash: versionData?.hash,
+          deletedVersion: currentVersion
+        });
+      }
+    }
+    return changes;
+  }
+  /**
+   * Generate a consistent hash for a resource definition
+   * @param {Object} definition - Resource definition to hash
+   * @returns {string} SHA256 hash
+   */
+  generateDefinitionHash(definition) {
+    const stableString = jsonStableStringify(definition);
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+  }
+  /**
+   * Get the next version number for a resource
+   * @param {Object} versions - Existing versions object
+   * @returns {string} Next version string (e.g., 'v1', 'v2')
+   */
+  getNextVersion(versions = {}) {
+    const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
+    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+    return `v${maxVersion + 1}`;
   }
   async startPlugins() {
     const db = this;
@@ -1903,43 +4623,81 @@ class Database extends EventEmitter {
       await Promise.all(startProms);
     }
   }
-  unserializeMetadata(metadata) {
-    const file = { ...metadata };
-    if (lodashEs.isEmpty(file.resources)) return file;
-    for (const [name, structure] of Object.entries(file.resources)) {
-      for (const [attr, value] of Object.entries(structure.attributes)) {
-        file.resources[name].attributes[attr] = JSON.parse(value);
-      }
-    }
-    return file;
-  }
   async uploadMetadataFile() {
-    const file = {
+    const metadata = {
       version: this.version,
-      resources: Object.entries(this.resources).reduce((acc, definition) => {
-        const [name, resource] = definition;
-        acc[name] = resource.export();
-        return acc;
-      }, {})
+      s3dbVersion: this.s3dbVersion,
+      lastUpdated: (/* @__PURE__ */ new Date()).toISOString(),
+      resources: {}
     };
-    await this.client.putObject({
-      key: `s3db.json`,
-      contentType: "application/json",
-      body: JSON.stringify(file, null, 2)
+    Object.entries(this.resources).forEach(([name, resource]) => {
+      const resourceDef = resource.export();
+      const definitionHash = this.generateDefinitionHash(resourceDef);
+      const existingResource = this.savedMetadata?.resources?.[name];
+      const currentVersion = existingResource?.currentVersion || "v0";
+      const existingVersionData = existingResource?.versions?.[currentVersion];
+      let version, isNewVersion;
+      if (!existingVersionData || existingVersionData.hash !== definitionHash) {
+        version = this.getNextVersion(existingResource?.versions);
+        isNewVersion = true;
+      } else {
+        version = currentVersion;
+        isNewVersion = false;
+      }
+      metadata.resources[name] = {
+        currentVersion: version,
+        partitions: resourceDef.options?.partitions || {},
+        versions: {
+          ...existingResource?.versions,
+          // Preserve previous versions
+          [version]: {
+            hash: definitionHash,
+            attributes: resourceDef.attributes,
+            options: resourceDef.options,
+            createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
+          }
+        }
+      };
+      if (resource.version !== version) {
+        resource.version = version;
+        resource.emit("versionUpdated", { oldVersion: currentVersion, newVersion: version });
+      }
     });
+    await this.client.putObject({
+      key: "s3db.json",
+      body: JSON.stringify(metadata, null, 2),
+      contentType: "application/json"
+    });
+    this.savedMetadata = metadata;
+    this.emit("metadataUploaded", metadata);
   }
   blankMetadataStructure() {
     return {
       version: `1`,
+      s3dbVersion: this.s3dbVersion,
       resources: {}
     };
   }
   async createResource({ name, attributes, options = {} }) {
+    if (this.resources[name]) {
+      const existingResource = this.resources[name];
+      Object.assign(existingResource.options, {
+        cache: this.cache,
+        ...options
+      });
+      existingResource.updateAttributes(attributes);
+      await this.uploadMetadataFile();
+      this.emit("s3db.resourceUpdated", name);
+      return existingResource;
+    }
+    const existingMetadata = this.savedMetadata?.resources?.[name];
+    const version = existingMetadata?.currentVersion || "v0";
     const resource = new Resource({
       name,
       attributes,
       observers: [this],
       client: this.client,
+      version,
       options: {
         cache: this.cache,
         ...options
