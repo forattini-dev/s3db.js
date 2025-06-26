@@ -1,4 +1,4 @@
-import { Cache } from "./cache.class"
+import { Cache } from "./cache.class.js"
 
 export class MemoryCache extends Cache {
   constructor() {
