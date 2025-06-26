@@ -41,6 +41,7 @@ class Resource extends EventEmitter {
       autoDecrypt: true,
       timestamps: false,
       partitions: {},  // Changed from partitionRules to partitions (named)
+      paranoid: true,  // Security flag for dangerous operations
       ...options,
     };
 
@@ -54,9 +55,12 @@ class Resource extends EventEmitter {
       afterDelete: []
     };
 
+    // Store attributes first
+    this.attributes = attributes || {};
+
     if (options.timestamps) {
-      attributes.createdAt = 'string|optional';
-      attributes.updatedAt = 'string|optional';
+      this.attributes.createdAt = 'string|optional';
+      this.attributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
       if (!this.options.partitions.byCreatedDate) {
@@ -77,11 +81,14 @@ class Resource extends EventEmitter {
 
     this.schema = new Schema({
       name,
-      attributes,
+      attributes: this.attributes,
       passphrase,
       version: this.version,
       options: this.options,
     });
+
+    // Validate partitions against current attributes
+    this.validatePartitions();
 
     // Setup automatic partition hooks if partitions are defined
     this.setupPartitionHooks();
@@ -130,6 +137,9 @@ class Resource extends EventEmitter {
       version: this.version,
       options: this.options,
     });
+
+    // Validate partitions against new attributes
+    this.validatePartitions();
 
     // Re-setup partition hooks with new schema
     this.setupPartitionHooks();
@@ -204,6 +214,35 @@ class Resource extends EventEmitter {
 
     result.data = data;
     return result
+  }
+
+  /**
+   * Validate that all partition fields exist in current resource attributes
+   * @throws {Error} If partition fields don't exist in current schema
+   */
+  validatePartitions() {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return; // No partitions to validate
+    }
+
+    const currentAttributes = Object.keys(this.attributes || {});
+    
+    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+      if (!partitionDef.fields) {
+        continue; // Skip invalid partition definitions
+      }
+
+      for (const fieldName of Object.keys(partitionDef.fields)) {
+        if (!currentAttributes.includes(fieldName)) {
+          throw new Error(
+            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. ` +
+            `Available fields: ${currentAttributes.join(', ')}. ` +
+            `This version of resource does not have support for this partition.`
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -560,9 +599,51 @@ class Resource extends EventEmitter {
   }
 
   async deleteAll() {
-    const ids = await this.listIds();
-    this.emit("deleteAll", ids.length);
-    await this.deleteMany(ids);
+    // Security check: only allow if paranoid mode is disabled
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAll() is a dangerous operation and requires paranoid: false option. ` +
+        `Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+
+    // Use deletePrefix to efficiently delete all objects for current version
+    const prefix = `resource=${this.name}/v=${this.version}`;
+    const deletedCount = await this.client.deletePrefix(prefix);
+    
+    this.emit("deleteAll", { 
+      version: this.version, 
+      prefix, 
+      deletedCount 
+    });
+    
+    return { deletedCount, version: this.version };
+  }
+
+  /**
+   * Delete all data for this resource across ALL versions
+   * @returns {Promise<Object>} Deletion report
+   */
+  async deleteAllData() {
+    // Security check: only allow if paranoid mode is disabled
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAllData() is a dangerous operation and requires paranoid: false option. ` +
+        `Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+
+    // Use deletePrefix to efficiently delete everything for this resource
+    const prefix = `resource=${this.name}`;
+    const deletedCount = await this.client.deletePrefix(prefix);
+    
+    this.emit("deleteAllData", { 
+      resource: this.name, 
+      prefix, 
+      deletedCount 
+    });
+    
+    return { deletedCount, resource: this.name };
   }
 
   async listIds({ partition = null, partitionValues = {} } = {}) {
