@@ -2,6 +2,8 @@ import { join } from "path";
 import { nanoid } from "nanoid";
 import EventEmitter from "events";
 import { PromisePool } from "@supercharge/promise-pool";
+import jsonStableStringify from "json-stable-stringify";
+import { createHash } from "crypto";
 
 import {
   chunk,
@@ -12,6 +14,7 @@ import {
 import Schema from "./schema.class";
 import { InvalidResourceItem } from "./errors";
 import { ResourceReader, ResourceWriter } from "./stream/index"
+import { streamToString } from "./stream/index.js";
 
 class Resource extends EventEmitter {
   constructor({
@@ -35,6 +38,7 @@ class Resource extends EventEmitter {
       cache: false,
       autoDecrypt: true,
       timestamps: false,
+      partitionRules: {},
       ...options,
     };
 
@@ -47,6 +51,7 @@ class Resource extends EventEmitter {
       name,
       attributes,
       passphrase,
+      options: this.options,
     })
   }
 
@@ -73,6 +78,67 @@ class Resource extends EventEmitter {
     return result
   }
 
+  /**
+   * Generate partition path based on partition rules and data
+   * @param {Object} data - The data object to generate partitions from
+   * @returns {string} Partition path segment
+   */
+  generatePartitionPath(data) {
+    const { partitionRules } = this.options;
+    
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return '';
+    }
+
+    const partitionSegments = [];
+    
+    for (const [field, rule] of Object.entries(partitionRules)) {
+      let value = data[field];
+      
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      // Apply maxlength rule manually
+      if (typeof rule === 'string' && rule.includes('maxlength:')) {
+        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+        if (maxLengthMatch) {
+          const maxLength = parseInt(maxLengthMatch[1]);
+          if (typeof value === 'string' && value.length > maxLength) {
+            value = value.substring(0, maxLength);
+          }
+        }
+      }
+
+      // Format date values
+      if (rule.includes('date') && value instanceof Date) {
+        value = value.toISOString().split('T')[0]; // YYYY-MM-DD format
+      } else if (rule.includes('date') && typeof value === 'string') {
+        try {
+          const date = new Date(value);
+          value = date.toISOString().split('T')[0];
+        } catch (e) {
+          // Keep original value if not a valid date
+        }
+      }
+
+      partitionSegments.push(`${field}=${value}`);
+    }
+
+    return partitionSegments.length > 0 ? `partitions/${partitionSegments.join('/')}/` : '';
+  }
+
+  /**
+   * Get the base key for a resource (with or without partitions)
+   * @param {string} id - Resource ID
+   * @param {Object} data - Data object for partition generation
+   * @returns {string} The S3 key path
+   */
+  getResourceKey(id, data = {}) {
+    const partitionPath = this.generatePartitionPath(data);
+    return join(`resource=${this.name}`, partitionPath, `id=${id}`);
+  }
+
   async insert({ id, ...attributes }) {
     if (this.options.timestamps) {
       attributes.createdAt = new Date().toISOString();
@@ -96,12 +162,12 @@ class Resource extends EventEmitter {
 
     if (!id && id !== 0) id = nanoid();
 
-
     const metadata = await this.schema.mapper(validated);
+    const key = this.getResourceKey(id, validated);
 
     await this.client.putObject({
       metadata,
-      key: join(`resource=${this.name}`, `id=${id}`),
+      key,
     });
 
     const final = merge({ id }, validated);
@@ -110,36 +176,39 @@ class Resource extends EventEmitter {
     return final;
   }
 
-  async get(id) {
-    const request = await this.client.headObject(
-      join(`resource=${this.name}`, `id=${id}`)
-    );
+  async get(id, partitionData = {}) {
+    const key = this.getResourceKey(id, partitionData);
+    
+    const request = await this.client.headObject(key);
 
     let data = await this.schema.unmapper(request.Metadata);
     data.id = id;
-    data._length = request.ContentLength;
+    data._contentLength = request.ContentLength;
     data._lastModified = request.LastModified;
+    data.mimeType = request.ContentType || null;
 
     if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
+
+    // Add definition hash
+    data.definitionHash = this.getDefinitionHash();
 
     this.emit("get", data);
     return data;
   }
 
-  async exists(id) {
+  async exists(id, partitionData = {}) {
     try {
-      await this.client.headObject(
-        join(`resource=${this.name}`, `id=${id}`)
-      );
+      const key = this.getResourceKey(id, partitionData);
+      await this.client.headObject(key);
       return true
     } catch (error) {
       return false
     }
   }
 
-  async update(id, attributes) {
-    const live = await this.get(id);
+  async update(id, attributes, partitionData = {}) {
+    const live = await this.get(id, partitionData);
 
     if (this.options.timestamps) {
       attributes.updatedAt = new Date().toISOString();
@@ -159,8 +228,10 @@ class Resource extends EventEmitter {
       })
     }
 
+    const key = this.getResourceKey(id, validated);
+
     await this.client.putObject({
-      key: join(`resource=${this.name}`, `id=${id}`),
+      key,
       body: "",
       metadata: await this.schema.mapper(validated),
     });
@@ -171,8 +242,8 @@ class Resource extends EventEmitter {
     return validated;
   }
 
-  async delete(id) {
-    const key = join(`resource=${this.name}`, `id=${id}`);
+  async delete(id, partitionData = {}) {
+    const key = this.getResourceKey(id, partitionData);
     const response = await this.client.deleteObject(key);
 
     this.emit("delete", id);
@@ -180,10 +251,10 @@ class Resource extends EventEmitter {
   }
 
   async upsert({ id, ...attributes }) {
-    const exists = await this.exists(id);
+    const exists = await this.exists(id, attributes);
 
     if (exists) {
-      return this.update(id, attributes);
+      return this.update(id, attributes, attributes);
     }
 
     return this.insert({ id, ...attributes });
@@ -216,7 +287,7 @@ class Resource extends EventEmitter {
 
   async deleteMany(ids) {
     const packages = chunk(
-      ids.map((x) => join(`resource=${this.name}`, `id=${x}`)),
+      ids.map((x) => this.getResourceKey(x)),
       1000
     );
 
@@ -230,7 +301,7 @@ class Resource extends EventEmitter {
         const response = await this.client.deleteObjects(keys);
 
         keys.forEach((key) => {
-          const id = key.split("=").pop();
+          const id = key.split("/").pop().split("=").pop();
           this.emit("deleted", id);
           this.observers.map((x) => x.emit("deleted", this.name, id));
         });
@@ -310,6 +381,91 @@ class Resource extends EventEmitter {
   writable() {
     const stream = new ResourceWriter({ resource: this });
     return stream.build()
+  }
+
+  /**
+   * Store binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @param {Buffer} buffer - Binary content
+   * @param {string} contentType - Optional content type
+   */
+  async setContent(id, buffer, contentType = 'application/octet-stream') {
+    if (!Buffer.isBuffer(buffer)) {
+      throw new Error('Content must be a Buffer');
+    }
+
+    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+    
+    const response = await this.client.putObject({
+      key,
+      body: buffer,
+      contentType,
+    });
+
+    this.emit("setContent", id, buffer.length, contentType);
+    return response;
+  }
+
+  /**
+   * Retrieve binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @returns {Object} Object with buffer and contentType
+   */
+  async getContent(id) {
+    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+    
+    try {
+      const response = await this.client.getObject(key);
+      const buffer = Buffer.from(await response.Body.transformToByteArray());
+      const contentType = response.ContentType || null;
+
+      this.emit("getContent", id, buffer.length, contentType);
+      
+      return {
+        buffer,
+        contentType
+      };
+    } catch (error) {
+      if (error.name === "NoSuchKey") {
+        return {
+          buffer: null,
+          contentType: null
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check if binary content exists for a resource
+   * @param {string} id - Resource ID
+   * @returns {boolean}
+   */
+  async hasContent(id) {
+    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+    return await this.client.exists(key);
+  }
+
+  /**
+   * Delete binary content associated with a resource
+   * @param {string} id - Resource ID
+   */
+  async deleteContent(id) {
+    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+    const response = await this.client.deleteObject(key);
+    
+    this.emit("deleteContent", id);
+    return response;
+  }
+
+  /**
+   * Generate definition hash for this resource
+   * @returns {string} SHA256 hash of the schema definition
+   */
+  getDefinitionHash() {
+    const exportedSchema = this.schema.export();
+    const stableString = jsonStableStringify(exportedSchema);
+    return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 }
 
