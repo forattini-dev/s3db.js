@@ -138,7 +138,15 @@ export class Schema {
     }
     else {
       const flatAttrs = flatten(this.attributes, { safe: true });
-      this.reversedMap = { ...Object.keys(flatAttrs).filter(k => !k.includes('$$')) }
+      const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
+      
+      // Also include parent object keys for objects that can be empty
+      const objectKeys = this.extractObjectKeys(this.attributes);
+      
+      // Combine leaf keys and object keys, removing duplicates
+      const allKeys = [...new Set([...leafKeys, ...objectKeys])];
+      
+      this.reversedMap = { ...allKeys }
       this.map = invert(this.reversedMap);
     }
   }
@@ -162,6 +170,29 @@ export class Schema {
   addHook(hook, attribute, action) {
     if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
     this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action])
+  }
+
+  extractObjectKeys(obj, prefix = '') {
+    const objectKeys = [];
+    
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith('$$')) continue; // Skip schema metadata
+      
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // This is an object, add its key
+        objectKeys.push(fullKey);
+        
+        // Check if it has nested objects
+        if (value.$$type === 'object') {
+          // Recursively extract nested object keys
+          objectKeys.push(...this.extractObjectKeys(value, fullKey));
+        }
+      }
+    }
+    
+    return objectKeys;
   }
 
   generateAutoHooks() {
