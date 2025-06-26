@@ -19,19 +19,15 @@ describe('Database Class - Complete Journey', () => {
   });
 
   test('Database Journey: Connect → Create Resources → Manage Schema → Version Control → Events', async () => {
-    console.log('\n🚀 Starting Database Journey...\n');
 
     // 1. Connect to database
-    console.log('1️⃣ Connecting to database...');
     await database.connect();
     
     expect(database.client).toBeDefined();
     expect(database.resources).toBeDefined();
     
-    console.log('✅ Database connected successfully');
 
     // 2. Create first resource
-    console.log('\n2️⃣ Creating first resource...');
     const users = await database.createResource({
       name: 'users',
       attributes: {
@@ -61,10 +57,8 @@ describe('Database Class - Complete Journey', () => {
     // Verify resource is stored in database
     expect(database.resources.users).toBe(users);
     
-    console.log('✅ Users resource created');
 
     // 3. Insert test data
-    console.log('\n3️⃣ Inserting test data...');
     const user1 = await users.insert({
       name: 'João Silva',
       email: 'joao@example.com',
@@ -82,10 +76,8 @@ describe('Database Class - Complete Journey', () => {
     expect(user1.id).toBeDefined();
     expect(user2.id).toBeDefined();
     
-    console.log('✅ Test data inserted');
 
     // 4. Create second resource with different schema
-    console.log('\n4️⃣ Creating second resource...');
     const products = await database.createResource({
       name: 'products',
       attributes: {
@@ -115,10 +107,8 @@ describe('Database Class - Complete Journey', () => {
     expect(products.name).toBe('products');
     expect(database.resources.products).toBe(products);
     
-    console.log('✅ Products resource created');
 
     // 5. Insert product data
-    console.log('\n5️⃣ Inserting product data...');
     const product1 = await products.insert({
       title: 'Laptop Pro',
       price: 2500,
@@ -138,10 +128,8 @@ describe('Database Class - Complete Journey', () => {
     expect(product1.id).toBeDefined();
     expect(product2.id).toBeDefined();
     
-    console.log('✅ Product data inserted');
 
     // 6. Test database-level queries across resources
-    console.log('\n6️⃣ Testing database-level operations...');
     
     // Access resources through database
     const usersRef = database.resource('users');
@@ -157,10 +145,8 @@ describe('Database Class - Complete Journey', () => {
     expect(userCount).toBe(2);
     expect(productCount).toBe(2);
     
-    console.log('✅ Database-level operations working');
 
     // 7. Test schema versioning and hashing
-    console.log('\n7️⃣ Testing schema versioning...');
     
     // Generate definition hashes
     const usersHash = database.generateDefinitionHash(users.export());
@@ -174,10 +160,8 @@ describe('Database Class - Complete Journey', () => {
     const usersHash2 = database.generateDefinitionHash(users.export());
     expect(usersHash).toBe(usersHash2);
     
-    console.log('✅ Schema versioning working');
 
     // 8. Test metadata file operations
-    console.log('\n8️⃣ Testing metadata file operations...');
     
     // Upload metadata
     await database.uploadMetadataFile();
@@ -197,10 +181,8 @@ describe('Database Class - Complete Journey', () => {
     expect(metadata.resources.users.definitionHash).toBe(usersHash);
     expect(metadata.resources.products.definitionHash).toBe(productsHash);
     
-    console.log('✅ Metadata file operations working');
 
     // 9. Test change detection
-    console.log('\n9️⃣ Testing change detection...');
     
     // Simulate metadata with different hashes (schema changes)
     const oldMetadata = {
@@ -224,10 +206,8 @@ describe('Database Class - Complete Journey', () => {
     expect(changes.find(c => c.type === 'changed' && c.resourceName === 'users')).toBeDefined();
     expect(changes.find(c => c.type === 'deleted' && c.resourceName === 'deletedResource')).toBeDefined();
     
-    console.log('✅ Change detection working');
 
     // 10. Test event emission
-    console.log('\n🔟 Testing event emission...');
     
     let emittedEvents = [];
     database.on('resourceDefinitionsChanged', (event) => {
@@ -240,10 +220,8 @@ describe('Database Class - Complete Journey', () => {
     // Since we just uploaded current metadata, no changes should be detected
     expect(emittedEvents).toHaveLength(0);
     
-    console.log('✅ Event emission working');
 
     // 11. Test resource schema updates
-    console.log('\n1️⃣1️⃣ Testing resource schema updates...');
     
     // Update users resource with new field
     const updatedUsers = await database.createResource({
@@ -275,10 +253,8 @@ describe('Database Class - Complete Journey', () => {
     const newUsersHash = database.generateDefinitionHash(users.export());
     expect(newUsersHash).not.toBe(usersHash);
     
-    console.log('✅ Resource schema updates working');
 
     // 12. Test data integrity after schema change
-    console.log('\n1️⃣2️⃣ Testing data integrity after schema change...');
     
     // Original data should still be accessible
     const retrievedUser1 = await users.get(user1.id);
@@ -297,10 +273,8 @@ describe('Database Class - Complete Journey', () => {
     
     expect(user3.lastLogin).toBe('2025-01-09T10:00:00Z');
     
-    console.log('✅ Data integrity maintained after schema change');
 
     // 13. Test complex partition queries across resources
-    console.log('\n1️⃣3️⃣ Testing complex partition queries...');
     
     // Query users by region partition
     const brUsers = await users.listByPartition({
@@ -316,10 +290,8 @@ describe('Database Class - Complete Journey', () => {
     });
     expect(electronics).toHaveLength(1); // Laptop Pro
     
-    console.log('✅ Complex partition queries working');
 
     // 14. Test database resource management
-    console.log('\n1️⃣4️⃣ Testing database resource management...');
     
     // List all resources
     const resourceNames = Object.keys(database.resources);
@@ -332,10 +304,8 @@ describe('Database Class - Complete Journey', () => {
       expect(resource.name).toBe(name);
     }
     
-    console.log('✅ Database resource management working');
 
     // 15. Test error handling
-    console.log('\n1️⃣5️⃣ Testing error handling...');
     
     // Try to access non-existent resource
     try {
@@ -346,10 +316,8 @@ describe('Database Class - Complete Journey', () => {
       expect(error).toBeDefined();
     }
     
-    console.log('✅ Error handling working');
 
     // 16. Final verification and cleanup
-    console.log('\n1️⃣6️⃣ Final verification...');
     
     // Verify final counts
     const finalUserCount = await users.count();
@@ -365,48 +333,36 @@ describe('Database Class - Complete Journey', () => {
     expect(finalMetadata.resources.users.definitionHash).toBe(newUsersHash);
     expect(finalMetadata.resources.products.definitionHash).toBe(productsHash);
     
-    console.log('✅ Final verification completed');
 
-    console.log('\n🎉 Database Journey completed successfully! All database operations working correctly.\n');
   }, 120000); // 2 minute timeout for comprehensive test
 
   test('Database Connection and Configuration Journey', async () => {
-    console.log('\n🔗 Testing Database Connection and Configuration...\n');
 
     // Test configuration before connection
-    console.log('1️⃣ Testing pre-connection configuration...');
     expect(database.connectionString).toBeDefined();
     expect(database.options).toBeDefined();
     
-    console.log('✅ Pre-connection configuration verified');
 
     // Test connection
-    console.log('\n2️⃣ Testing connection process...');
     await database.connect();
     
     expect(database.client).toBeDefined();
     expect(database.client.config).toBeDefined();
     expect(database.client.config.bucket).toBeDefined();
     
-    console.log('✅ Connection process working');
 
     // Test s3db version
-    console.log('\n3️⃣ Testing s3db version management...');
     expect(database.s3dbVersion).toBeDefined();
     expect(typeof database.s3dbVersion).toBe('string');
     
-    console.log('✅ Version management working');
 
-    console.log('\n✅ Connection and configuration journey completed successfully!\n');
   });
 
   test('Database Error Handling and Edge Cases Journey', async () => {
-    console.log('\n⚠️  Testing Database Error Handling...\n');
 
     await database.connect();
 
     // Test invalid resource creation
-    console.log('1️⃣ Testing invalid resource creation...');
     try {
       await database.createResource({
         // Missing required fields
@@ -419,10 +375,8 @@ describe('Database Class - Complete Journey', () => {
       expect(error).toBeDefined();
     }
 
-    console.log('✅ Invalid resource creation handled');
 
     // Test corrupted metadata handling
-    console.log('\n2️⃣ Testing corrupted metadata handling...');
     
     // Simulate corrupted s3db.json
     await database.client.putObject({
@@ -435,10 +389,8 @@ describe('Database Class - Complete Journey', () => {
     expect(metadata.s3dbVersion).toBe('1.0.0'); // Should return default
     expect(metadata.resources).toEqual({});
 
-    console.log('✅ Corrupted metadata handled gracefully');
 
     // Test missing metadata handling
-    console.log('\n3️⃣ Testing missing metadata handling...');
     
     await database.client.deleteObject('s3db.json');
     
@@ -446,9 +398,7 @@ describe('Database Class - Complete Journey', () => {
     expect(missingMetadata.s3dbVersion).toBe('1.0.0');
     expect(missingMetadata.resources).toEqual({});
 
-    console.log('✅ Missing metadata handled gracefully');
 
-    console.log('\n✅ Error handling journey completed successfully!\n');
   });
 });
 

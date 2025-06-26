@@ -56,20 +56,16 @@ describe('Resource Class - Complete Journey', () => {
   });
 
   test('Resource Journey: Create → Insert → Update → Query → Partition → Content → Delete', async () => {
-    console.log('\n🚀 Starting Resource Journey...\n');
 
     // 1. Create and verify resource structure
-    console.log('1️⃣ Verifying resource structure...');
     expect(resource.name).toBe('users');
     expect(resource.attributes.name).toBe('string|required');
     expect(resource.attributes.email).toBe('email|required');
     expect(resource.options.timestamps).toBe(true);
     expect(resource.options.partitions).toBeDefined();
     expect(resource.options.partitions.byRegion).toBeDefined();
-    console.log('✅ Resource structure verified');
 
     // 2. Insert single user
-    console.log('\n2️⃣ Inserting single user...');
     const user1 = await resource.insert({
       name: 'João Silva',
       email: 'joao@example.com',
@@ -90,20 +86,16 @@ describe('Resource Class - Complete Journey', () => {
     expect(Array.isArray(user1.tags)).toBe(true);
     expect(user1.tags).toEqual(['javascript', 'node.js', 'react']);
     
-    console.log('✅ User inserted:', user1.id);
 
     // 3. Verify user exists
-    console.log('\n3️⃣ Verifying user exists...');
     const exists = await resource.exists(user1.id);
     expect(exists).toBe(true);
     
     const notExists = await resource.exists('non-existent-id');
     expect(notExists).toBe(false);
     
-    console.log('✅ Existence checks working');
 
     // 4. Get user and verify enhanced metadata
-    console.log('\n4️⃣ Getting user with enhanced metadata...');
     const retrievedUser = await resource.get(user1.id);
     
     expect(retrievedUser.id).toBe(user1.id);
@@ -114,10 +106,8 @@ describe('Resource Class - Complete Journey', () => {
     expect(retrievedUser.definitionHash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(typeof retrievedUser._hasContent).toBe('boolean');
     
-    console.log('✅ Enhanced metadata retrieved');
 
     // 5. Update user
-    console.log('\n5️⃣ Updating user...');
     const updatedUser = await resource.update(user1.id, {
       bio: 'Senior Full Stack Developer',
       age: 31,
@@ -131,10 +121,8 @@ describe('Resource Class - Complete Journey', () => {
     expect(updatedUser.createdAt).toBe(user1.createdAt); // Should not change
     expect(updatedUser.updatedAt).not.toBe(user1.updatedAt); // Should change
     
-    console.log('✅ User updated successfully');
 
     // 6. Insert multiple users for querying
-    console.log('\n6️⃣ Inserting multiple users...');
     const users = await resource.insertMany([
       {
         name: 'Maria Santos',
@@ -165,20 +153,16 @@ describe('Resource Class - Complete Journey', () => {
     expect(users).toHaveLength(3);
     expect(users.every(u => u.id && u.createdAt && u.updatedAt)).toBe(true);
     
-    console.log('✅ Multiple users inserted');
 
     // 7. Test listing and counting
-    console.log('\n7️⃣ Testing listing and counting...');
     const allIds = await resource.listIds();
     expect(allIds).toHaveLength(4); // 1 original + 3 new
 
     const totalCount = await resource.count();
     expect(totalCount).toBe(4);
 
-    console.log('✅ Listing and counting working');
 
     // 8. Test pagination
-    console.log('\n8️⃣ Testing pagination...');
     const page1 = await resource.page(0, 2);
     expect(page1.items).toHaveLength(2);
     expect(page1.totalItems).toBe(4);
@@ -190,10 +174,8 @@ describe('Resource Class - Complete Journey', () => {
     expect(page2.items).toHaveLength(2);
     expect(page2.page).toBe(1);
 
-    console.log('✅ Pagination working');
 
     // 9. Test partitioned queries
-    console.log('\n9️⃣ Testing partitioned queries...');
     
     // Query by region partition
     const brUsersIds = await resource.listByPartition({
@@ -215,10 +197,8 @@ describe('Resource Class - Complete Journey', () => {
     });
     expect(youngAdultsIds).toHaveLength(2); // Maria and Anna
 
-    console.log('✅ Partitioned queries working');
 
     // 10. Test binary content operations
-    console.log('\n🔟 Testing binary content operations...');
     const user = users[0]; // Maria
     
     // Add binary content
@@ -239,10 +219,8 @@ describe('Resource Class - Complete Journey', () => {
     const userWithContent = await resource.get(user.id);
     expect(userWithContent._hasContent).toBe(true);
 
-    console.log('✅ Binary content operations working');
 
     // 11. Test upsert operation
-    console.log('\n1️⃣1️⃣ Testing upsert operation...');
     
     // Upsert existing user (update)
     const upserted1 = await resource.upsert({
@@ -264,40 +242,32 @@ describe('Resource Class - Complete Journey', () => {
     expect(upserted2.id).toBeDefined();
     expect(upserted2.name).toBe('New User');
 
-    console.log('✅ Upsert operations working');
 
     // 12. Test getMany operation
-    console.log('\n1️⃣2️⃣ Testing getMany operation...');
     const userIds = [user1.id, users[0].id, users[1].id];
     const retrievedUsers = await resource.getMany(userIds);
     
     expect(retrievedUsers).toHaveLength(3);
     expect(retrievedUsers.every(u => u.id && u.name && u.email)).toBe(true);
 
-    console.log('✅ GetMany operation working');
 
     // 13. Test delete content (preserve metadata)
-    console.log('\n1️⃣3️⃣ Testing delete content...');
     await resource.deleteContent(users[0].id);
 
     const userAfterContentDelete = await resource.get(users[0].id);
     expect(userAfterContentDelete.name).toBe('Maria Santos'); // Metadata preserved
     expect(userAfterContentDelete._hasContent).toBe(false); // Content gone
 
-    console.log('✅ Content deletion working');
 
     // 14. Test individual delete
-    console.log('\n1️⃣4️⃣ Testing individual delete...');
     const deleteResult = await resource.delete(users[2].id); // Anna
     expect(deleteResult).toBe(true);
 
     const countAfterDelete = await resource.count();
     expect(countAfterDelete).toBe(4); // 5 total - 1 deleted
 
-    console.log('✅ Individual delete working');
 
     // 15. Test deleteMany
-    console.log('\n1️⃣5️⃣ Testing deleteMany...');
     const deleteIds = [users[0].id, users[1].id]; // Maria and John
     const deleteManyResult = await resource.deleteMany(deleteIds);
     expect(deleteManyResult).toEqual(deleteIds);
@@ -305,22 +275,17 @@ describe('Resource Class - Complete Journey', () => {
     const finalCount = await resource.count();
     expect(finalCount).toBe(2); // 4 - 2 deleted
 
-    console.log('✅ DeleteMany working');
 
     // 16. Test definition hash consistency
-    console.log('\n1️⃣6️⃣ Testing definition hash...');
     const hash1 = resource.getDefinitionHash();
     const hash2 = resource.getDefinitionHash();
     expect(hash1).toBe(hash2);
     expect(hash1).toMatch(/^sha256:[a-f0-9]{64}$/);
 
-    console.log('✅ Definition hash consistent');
 
-    console.log('\n🎉 Resource Journey completed successfully! All operations working correctly.\n');
   });
 
   test('Multi-Field Partitions Journey', async () => {
-    console.log('\n🔄 Testing Multi-Field Partitions...\n');
 
     // Create resource with multi-field partitions
     const partitionedResource = new Resource({
@@ -393,11 +358,9 @@ describe('Resource Class - Complete Journey', () => {
     });
     expect(activeEvents).toHaveLength(2);
 
-    console.log('✅ Multi-field partitions working correctly');
   });
 
   test('Error Handling Journey', async () => {
-    console.log('\n⚠️  Testing Error Handling...\n');
 
     // Test invalid content type
     try {
@@ -423,6 +386,5 @@ describe('Resource Class - Complete Journey', () => {
       expect(error.message).toContain('paranoid');
     }
 
-    console.log('✅ Error handling working correctly');
   });
 });

@@ -19,10 +19,8 @@ describe('Client Class - Complete Journey', () => {
   });
 
   test('Client Journey: Connect → Upload → List → Download → Copy → Move → Delete', async () => {
-    console.log('\n🚀 Starting Client Journey...\n');
 
     // 1. Setup event listeners to track operations
-    console.log('1️⃣ Setting up event tracking...');
     
     const events = {
       commandRequest: 0,
@@ -48,10 +46,8 @@ describe('Client Class - Complete Journey', () => {
     client.on('count', () => events.count++);
     client.on('getAllKeys', () => events.getAllKeys++);
 
-    console.log('✅ Event tracking setup complete');
 
     // 2. Upload multiple objects
-    console.log('\n2️⃣ Uploading multiple objects...');
     
     const uploadData = {
       body: 'Hello, S3DB World!',
@@ -82,10 +78,8 @@ describe('Client Class - Complete Journey', () => {
     expect(events.commandRequest).toBeGreaterThan(0);
     expect(events.commandResponse).toBeGreaterThan(0);
 
-    console.log('✅ Objects uploaded successfully');
 
     // 3. Head object operations (get metadata)
-    console.log('\n3️⃣ Checking object metadata...');
     
     const headResult = await client.headObject('file1.txt');
     expect(headResult.Metadata).toBeDefined();
@@ -95,10 +89,8 @@ describe('Client Class - Complete Journey', () => {
     expect(headResult.LastModified).toBeInstanceOf(Date);
     expect(events.headObject).toBe(1);
 
-    console.log('✅ Object metadata retrieved');
 
     // 4. Download and verify content
-    console.log('\n4️⃣ Downloading and verifying content...');
     
     const downloadResult = await client.getObject('file1.txt');
     expect(downloadResult.Body).toBeDefined();
@@ -124,10 +116,8 @@ describe('Client Class - Complete Journey', () => {
     expect(content).toBe('Hello, S3DB World!');
     expect(events.getObject).toBe(1);
 
-    console.log('✅ Content downloaded and verified');
 
     // 5. List objects and count
-    console.log('\n5️⃣ Listing objects and counting...');
     
     const listResult = await client.listObjects();
     expect(listResult.KeyCount).toBe(3);
@@ -138,10 +128,8 @@ describe('Client Class - Complete Journey', () => {
     expect(totalCount).toBe(3);
     expect(events.count).toBe(1);
 
-    console.log('✅ Object listing and counting working');
 
     // 6. Get all keys
-    console.log('\n6️⃣ Getting all object keys...');
     
     const allKeys = await client.getAllKeys();
     expect(allKeys).toHaveLength(3);
@@ -150,10 +138,8 @@ describe('Client Class - Complete Journey', () => {
     expect(allKeys).toContain('subfolder/file3.txt');
     expect(events.getAllKeys).toBe(1);
 
-    console.log('✅ All keys retrieved');
 
     // 7. Test object existence
-    console.log('\n7️⃣ Testing object existence...');
     
     const existsFile1 = await client.exists('file1.txt');
     expect(existsFile1).toBe(true);
@@ -161,10 +147,8 @@ describe('Client Class - Complete Journey', () => {
     const existsNonExistent = await client.exists('non-existent-file.txt');
     expect(existsNonExistent).toBe(false);
 
-    console.log('✅ Existence checks working');
 
     // 8. Copy operations
-    console.log('\n8️⃣ Testing copy operations...');
     
     const copyResult = await client.copyObject({
       from: 'file1.txt',
@@ -179,10 +163,8 @@ describe('Client Class - Complete Journey', () => {
     expect(originalExists).toBe(true);
     expect(copyExists).toBe(true);
 
-    console.log('✅ Copy operations working');
 
     // 9. Move operations
-    console.log('\n9️⃣ Testing move operations...');
     
     const moveResult = await client.moveObject({
       from: 'file2.txt',
@@ -197,10 +179,8 @@ describe('Client Class - Complete Journey', () => {
     expect(originalExists2).toBe(false);
     expect(movedExists).toBe(true);
 
-    console.log('✅ Move operations working');
 
     // 10. Bulk move operations
-    console.log('\n🔟 Testing bulk move operations...');
     
     // First create some objects with a common prefix
     await Promise.all([
@@ -233,10 +213,8 @@ describe('Client Class - Complete Journey', () => {
     expect(archiveExists1).toBe(true);
     expect(archiveExists2).toBe(true);
 
-    console.log('✅ Bulk move operations working');
 
     // 11. Delete single objects
-    console.log('\n1️⃣1️⃣ Testing single object deletion...');
     
     const deleteResult = await client.deleteObject('backup/file1-copy.txt');
     expect(deleteResult).toBeDefined();
@@ -245,10 +223,8 @@ describe('Client Class - Complete Journey', () => {
     const deletedExists = await client.exists('backup/file1-copy.txt');
     expect(deletedExists).toBe(false);
 
-    console.log('✅ Single object deletion working');
 
     // 12. Delete multiple objects
-    console.log('\n1️⃣2️⃣ Testing bulk object deletion...');
     
     const keysToDelete = ['moved/file2-moved.txt', 'archive/temp1.txt'];
     const bulkDeleteResult = await client.deleteObjects(keysToDelete);
@@ -261,10 +237,8 @@ describe('Client Class - Complete Journey', () => {
       expect(exists).toBe(false);
     }
 
-    console.log('✅ Bulk object deletion working');
 
     // 13. Test prefix-based operations
-    console.log('\n1️⃣3️⃣ Testing prefix-based operations...');
     
     // Create objects with specific prefixes
     await Promise.all([
@@ -298,10 +272,8 @@ describe('Client Class - Complete Journey', () => {
     expect(prefixKeys).toHaveLength(2);
     expect(prefixKeys.every(key => key.startsWith('prefix-test/group1/'))).toBe(true);
 
-    console.log('✅ Prefix-based operations working');
 
     // 14. Test deleteAll functionality
-    console.log('\n1️⃣4️⃣ Testing deleteAll functionality...');
     
     // Delete all objects with specific prefix
     const deleteAllResult = await client.deleteAll({ prefix: 'prefix-test/' });
@@ -312,13 +284,10 @@ describe('Client Class - Complete Journey', () => {
     const remainingPrefixObjects = await client.count('prefix-test/');
     expect(remainingPrefixObjects).toBe(0);
 
-    console.log('✅ DeleteAll functionality working');
 
     // 15. Final cleanup and verification
-    console.log('\n1️⃣5️⃣ Final verification...');
     
     const finalList = await client.listObjects();
-    console.log('Remaining objects:', finalList.KeyCount);
     
     // Clean up remaining objects
     if (finalList.KeyCount > 0) {
@@ -331,11 +300,8 @@ describe('Client Class - Complete Journey', () => {
     const finalCount = await client.count();
     expect(finalCount).toBe(0);
 
-    console.log('✅ Final cleanup completed');
 
     // 16. Event tracking summary
-    console.log('\n1️⃣6️⃣ Event tracking summary...');
-    console.log('Events tracked:', events);
     
     expect(events.commandRequest).toBeGreaterThan(0);
     expect(events.commandResponse).toBeGreaterThan(0);
@@ -347,16 +313,12 @@ describe('Client Class - Complete Journey', () => {
     expect(events.count).toBeGreaterThan(0);
     expect(events.getAllKeys).toBeGreaterThan(0);
 
-    console.log('✅ All events tracked correctly');
 
-    console.log('\n🎉 Client Journey completed successfully! All S3 operations working correctly.\n');
   }, 60000); // 60 second timeout for comprehensive test
 
   test('Client Error Handling Journey', async () => {
-    console.log('\n⚠️  Testing Client Error Handling...\n');
 
     // Test operations on non-existent objects
-    console.log('1️⃣ Testing non-existent object operations...');
     
     try {
       await client.getObject('non-existent-file.txt');
@@ -372,10 +334,8 @@ describe('Client Class - Complete Journey', () => {
       expect(error.name).toBe('NoSuchKey');
     }
 
-    console.log('✅ Non-existent object errors handled correctly');
 
     // Test invalid operations
-    console.log('\n2️⃣ Testing invalid operations...');
     
     try {
       await client.copyObject({
@@ -398,26 +358,20 @@ describe('Client Class - Complete Journey', () => {
       expect(error.name).toBe('NoSuchKey');
     }
 
-    console.log('✅ Invalid operations handled correctly');
 
-    console.log('\n✅ Error handling journey completed successfully!\n');
   });
 
   test('Client Configuration Journey', async () => {
-    console.log('\n⚙️  Testing Client Configuration...\n');
 
     // Test client configuration properties
-    console.log('1️⃣ Verifying client configuration...');
     
     expect(client.config).toBeDefined();
     expect(client.config.bucket).toBeDefined();
     expect(client.config.region).toBeDefined();
     expect(client.config.endpoint).toBeDefined();
 
-    console.log('✅ Client configuration verified');
 
     // Test connection string parsing
-    console.log('\n2️⃣ Testing connection string parsing...');
     
     const testClient = new Client({
       connectionString: 'http://test:test@localhost:9000/test-bucket/test-prefix?param1=value1'
@@ -428,8 +382,6 @@ describe('Client Class - Complete Journey', () => {
     expect(testClient.config.accessKeyId).toBe('test');
     expect(testClient.config.secretAccessKey).toBe('test');
 
-    console.log('✅ Connection string parsing working');
 
-    console.log('\n✅ Configuration journey completed successfully!\n');
   });
 });
