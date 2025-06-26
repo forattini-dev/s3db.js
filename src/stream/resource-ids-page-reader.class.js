@@ -1,4 +1,4 @@
-import ResourceIdsReader from "./resource-ids-reader.class";
+import ResourceIdsReader from "./resource-ids-reader.class.js";
 
 export class ResourceIdsPageReader extends ResourceIdsReader {
   enqueue(ids) {

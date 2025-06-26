@@ -11,9 +11,9 @@ import {
   cloneDeep,
 } from "lodash-es";
 
-import Schema from "./schema.class";
-import { InvalidResourceItem } from "./errors";
-import { ResourceReader, ResourceWriter } from "./stream/index"
+import Schema from "./schema.class.js";
+import { InvalidResourceItem } from "./errors.js";
+import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { streamToString } from "./stream/index.js";
 
 class Resource extends EventEmitter {
@@ -159,6 +159,69 @@ class Resource extends EventEmitter {
   }
 
   /**
+   * Apply partition rules to transform field values
+   * @param {Object} data - The data object to transform
+   * @param {boolean} inPlace - Whether to modify the original object
+   * @returns {Object} Transformed data
+   */
+  applyPartitionRules(data, inPlace = false) {
+    const { partitionRules } = this.options;
+    
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return data;
+    }
+
+    const result = inPlace ? data : { ...data };
+    
+    for (const [field, rule] of Object.entries(partitionRules)) {
+      let value = result[field];
+      
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      let transformedValue = value;
+
+      // Apply maxlength rule manually
+      if (typeof rule === 'string' && rule.includes('maxlength:')) {
+        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+        if (maxLengthMatch) {
+          const maxLength = parseInt(maxLengthMatch[1]);
+          if (typeof transformedValue === 'string' && transformedValue.length > maxLength) {
+            transformedValue = transformedValue.substring(0, maxLength);
+          }
+        }
+      }
+
+      // Format date values
+      if (rule.includes('date')) {
+        if (transformedValue instanceof Date) {
+          transformedValue = transformedValue.toISOString().split('T')[0]; // YYYY-MM-DD format
+        } else if (typeof transformedValue === 'string') {
+          try {
+            // Handle ISO8601 timestamp strings (e.g., from timestamps)
+            if (transformedValue.includes('T') && transformedValue.includes('Z')) {
+              transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
+            } else {
+              // Try to parse as date
+              const date = new Date(transformedValue);
+              if (!isNaN(date.getTime())) {
+                transformedValue = date.toISOString().split('T')[0];
+              }
+            }
+          } catch (e) {
+            // Keep original value if not a valid date
+          }
+        }
+      }
+
+      result[field] = transformedValue;
+    }
+
+    return result;
+  }
+
+  /**
    * Generate partition path based on partition rules and data
    * @param {Object} data - The data object to generate partitions from
    * @returns {string} Partition path segment
@@ -262,8 +325,11 @@ class Resource extends EventEmitter {
 
     if (!id && id !== 0) id = nanoid();
 
-    const metadata = await this.schema.mapper(validated);
-    const key = this.getResourceKey(id, validated);
+    // Apply partition rules to transform the data
+    const partitionTransformed = this.applyPartitionRules(validated);
+
+    const metadata = await this.schema.mapper(partitionTransformed);
+    const key = this.getResourceKey(id, partitionTransformed);
 
     await this.client.putObject({
       metadata,
@@ -271,7 +337,7 @@ class Resource extends EventEmitter {
       body: "", // Empty body for metadata-only objects
     });
 
-    const final = merge({ id }, validated);
+    const final = merge({ id }, partitionTransformed);
 
     // Execute afterInsert hooks
     await this.executeHooks('afterInsert', final);
@@ -342,7 +408,10 @@ class Resource extends EventEmitter {
       })
     }
 
-    const key = this.getResourceKey(id, validated);
+    // Apply partition rules to transform the data
+    const partitionTransformed = this.applyPartitionRules(validated);
+
+    const key = this.getResourceKey(id, partitionTransformed);
 
     // Check if object has existing content
     let existingBody = "";
@@ -361,16 +430,16 @@ class Resource extends EventEmitter {
       key,
       body: existingBody,
       contentType: existingContentType,
-      metadata: await this.schema.mapper(validated),
+      metadata: await this.schema.mapper(partitionTransformed),
     });
 
-    validated.id = id;
+    partitionTransformed.id = id;
 
     // Execute afterUpdate hooks
-    await this.executeHooks('afterUpdate', validated);
+    await this.executeHooks('afterUpdate', partitionTransformed);
 
-    this.emit("update", preProcessedData, validated);
-    return validated;
+    this.emit("update", preProcessedData, partitionTransformed);
+    return partitionTransformed;
   }
 
   async delete(id, partitionData = {}) {

@@ -15,8 +15,8 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 
-import { ErrorMap } from "./errors";
-import { ConnectionString } from "./connection-string.class";
+import { ErrorMap } from "./errors.js";
+import { ConnectionString } from "./connection-string.class.js";
 
 export class Client extends EventEmitter {
   constructor({

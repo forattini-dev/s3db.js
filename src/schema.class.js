@@ -11,8 +11,8 @@ import {
   cloneDeep,
 } from "lodash-es";
 
-import { encrypt, decrypt } from "./crypto";
-import { ValidatorManager } from "./validator.class";
+import { encrypt, decrypt } from "./crypto.js";
+import { ValidatorManager } from "./validator.class.js";
 
 export const SchemaActions = {
   trim: (value) => value.trim(),

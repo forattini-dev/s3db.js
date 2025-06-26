@@ -1,8 +1,8 @@
 import zlib from "zlib";
 import { join } from "path";
 
-import { Cache } from "./cache.class"
-import { streamToString } from "../stream";
+import { Cache } from "./cache.class.js"
+import { streamToString } from "../stream/index.js";
 
 export class S3Cache extends Cache {
   constructor({ 
