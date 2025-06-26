@@ -962,19 +962,23 @@ class Resource extends EventEmitter {
       return;
     }
 
-    // Delete reference in each partition
+    // Collect all partition keys to delete
+    const keysToDelete = [];
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const partitionKey = this.getPartitionKey(partitionName, data.id, data);
       
       if (partitionKey) {
-        try {
-          await this.client.deleteObject(partitionKey);
-        } catch (error) {
-          // Ignore errors if partition reference doesn't exist
-          if (error.name !== 'NoSuchKey') {
-            throw error;
-          }
-        }
+        keysToDelete.push(partitionKey);
+      }
+    }
+
+    // Delete all partition references in a single batch operation
+    if (keysToDelete.length > 0) {
+      try {
+        await this.client.deleteObjects(keysToDelete);
+      } catch (error) {
+        // Log but don't fail if some partition references don't exist
+        console.warn('Some partition references could not be deleted:', error.message);
       }
     }
   }
