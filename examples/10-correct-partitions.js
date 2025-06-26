@@ -1,141 +1,227 @@
-import S3db from '../src/index.js';
+const s3db = require('../src/index.js');
 
-// Exemplo CORRETO de partições nomeadas
-async function correctPartitionsExample() {
-  console.log('🎯 CORRECT Partitions Example\n');
+(async () => {
+  try {
+    console.log('\n🔀 Testing Multi-Field Partitions with Consistent Ordering\n');
 
-  // 1. Setup database
-  const db = new S3db({
-    connectionString: 'http://localhost:9000/correct-partitions?accessKeyId=s3db&secretAccessKey=thisissecret&forcePathStyle=true',
-    verbose: true
-  });
+    // Create database instance with auto-created bucket
+    const db = new s3db.Database({
+      bucketName: 'my-s3db-multi-partitions',
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      region: 'us-east-1',
+      endpoint: 'http://localhost:4566',
+      forcePathStyle: true,
+      autoCreateBucket: true
+    });
 
-  await db.connect();
+    await db.connect();
 
-  // 2. Criar resource com PARTIÇÕES NOMEADAS
-  const users = await db.createResource({
-    name: 'users',
-    attributes: {
-      name: 'string',
-      email: 'string',
-      region: 'string',
-      department: 'string',
-      status: 'string',
-    },
-    options: {
-      timestamps: true,  // Automaticamente adiciona byCreatedDate e byUpdatedDate
-      partitions: {
-        // Nome da partição: { field: 'campo', rule: 'regra' }
-        byRegion: {
-          field: 'region',
-          rule: 'string|maxlength:2'  // US-WEST → US
-        },
-        byDepartment: {
-          field: 'department', 
-          rule: 'string'              // engineering, sales, marketing
-        },
-        byStatus: {
-          field: 'status',
-          rule: 'string'              // active, inactive, pending
+    // Define a users resource with multi-field partitions
+    const users = await db.createResource({
+      name: 'users',
+      attributes: {
+        id: 'string|required',
+        name: 'string|required', 
+        email: 'string|required',
+        region: 'string|required',
+        department: 'string|required',
+        status: 'string|required',
+        role: 'string|required'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          // Multi-field partition: region + department (sorted alphabetically)
+          byRegionDept: {
+            fields: {
+              region: 'string|maxlength:2',    // US-WEST -> US
+              department: 'string'             // engineering
+            }
+          },
+          // Multi-field partition: status + role (sorted alphabetically)
+          byStatusRole: {
+            fields: {
+              status: 'string',                // active
+              role: 'string'                   // admin
+            }
+          },
+          // Single-field partition for comparison
+          byRegionOnly: {
+            fields: {
+              region: 'string|maxlength:2'
+            }
+          }
         }
-        // byCreatedDate e byUpdatedDate são adicionadas automaticamente pelo timestamps: true
       }
+    });
+
+    console.log('✅ Resource created with multi-field partitions\n');
+
+    // Insert test data
+    const testUsers = [
+      {
+        id: 'user1',
+        name: 'João Silva',
+        email: 'joao@company.com',
+        region: 'US-WEST',
+        department: 'engineering',
+        status: 'active',
+        role: 'admin'
+      },
+      {
+        id: 'user2', 
+        name: 'Maria Santos',
+        email: 'maria@company.com',
+        region: 'US-EAST',
+        department: 'engineering',
+        status: 'active',
+        role: 'user'
+      },
+      {
+        id: 'user3',
+        name: 'Carlos Lima',
+        email: 'carlos@company.com', 
+        region: 'US-WEST',
+        department: 'marketing',
+        status: 'inactive',
+        role: 'user'
+      },
+      {
+        id: 'user4',
+        name: 'Ana Costa',
+        email: 'ana@company.com',
+        region: 'US-WEST', 
+        department: 'engineering',
+        status: 'active',
+        role: 'admin'
+      }
+    ];
+
+    for (const user of testUsers) {
+      await users.insert(user);
     }
-  });
 
-  console.log('✅ Resource criado com partições nomeadas:');
-  console.log('Partições:', Object.keys(users.options.partitions));
+    console.log('📝 Inserted 4 test users\n');
 
-  // 3. Inserir dados (objetos principais + referências nas partições)
-  const userData = [
-    { name: 'João Silva', email: 'joao@empresa.com', region: 'US-WEST', department: 'engineering', status: 'active' },
-    { name: 'Maria Santos', email: 'maria@empresa.com', region: 'EU-NORTH', department: 'sales', status: 'active' },
-    { name: 'Carlos Lima', email: 'carlos@empresa.com', region: 'AS-EAST', department: 'marketing', status: 'pending' }
-  ];
+    // Test listing with multi-field partitions using new API
+    console.log('🔍 Testing multi-field partition queries (with consistent field ordering):\n');
 
-  console.log('\n📝 Inserindo usuários...');
-  for (const user of userData) {
-    const inserted = await users.insert(user);
-    console.log(`   → ${user.name} inserido com ID: ${inserted.id}`);
-    console.log(`     Objeto principal: /resource=users/v=1/id=${inserted.id}`);
-    console.log(`     Referência byRegion: /resource=users/partitions/byRegion/region=US/id=${inserted.id}`);
-    console.log(`     Referência byDepartment: /resource=users/partitions/byDepartment/department=${user.department}/id=${inserted.id}`);
-    console.log(`     Referência byStatus: /resource=users/partitions/byStatus/status=${user.status}/id=${inserted.id}`);
+    // Query by region + department (fields will be sorted: department, region)
+    console.log('1. US-WEST engineering team:');
+    const usWestEngineering = await users.listByPartition({
+      partition: 'byRegionDept',
+      partitionValues: {
+        region: 'US-WEST',      // Will become region=US (after maxlength:2)
+        department: 'engineering'
+      }
+    });
+    console.log(`   Found ${usWestEngineering.length} users: ${usWestEngineering.map(u => u.name).join(', ')}`);
+    console.log(`   Partition path: department=engineering/region=US (sorted alphabetically)\n`);
+
+    // Query by status + role (fields will be sorted: role, status)
+    console.log('2. Active admins:');
+    const activeAdmins = await users.listByPartition({
+      partition: 'byStatusRole',
+      partitionValues: {
+        status: 'active',
+        role: 'admin'
+      }
+    });
+    console.log(`   Found ${activeAdmins.length} users: ${activeAdmins.map(u => u.name).join(', ')}`);
+    console.log(`   Partition path: role=admin/status=active (sorted alphabetically)\n`);
+
+    // Query with single field
+    console.log('3. All US-WEST users (single field):');
+    const usWestUsers = await users.listByPartition({
+      partition: 'byRegionOnly',
+      partitionValues: {
+        region: 'US-WEST'  // Will become region=US
+      }
+    });
+    console.log(`   Found ${usWestUsers.length} users: ${usWestUsers.map(u => u.name).join(', ')}\n`);
+
+    // Test count with multi-field partitions
+    console.log('📊 Testing count with partitions:\n');
+
+    const engCount = await users.count({
+      partition: 'byRegionDept',
+      partitionValues: {
+        region: 'US-WEST',
+        department: 'engineering'
+      }
+    });
+    console.log(`US-WEST Engineering: ${engCount} users`);
+
+    const adminCount = await users.count({
+      partition: 'byStatusRole',
+      partitionValues: {
+        status: 'active',
+        role: 'admin'
+      }
+    });
+    console.log(`Active Admins: ${adminCount} users`);
+
+    const totalCount = await users.count();
+    console.log(`Total Users: ${totalCount} users\n`);
+
+    // Test pagination with multi-field partitions
+    console.log('� Testing pagination with partitions:\n');
+    
+    const page1 = await users.page(0, 2, {
+      partition: 'byRegionDept',
+      partitionValues: {
+        region: 'US-WEST',
+        department: 'engineering'
+      }
+    });
+    
+    console.log(`Page 1 of US-WEST Engineering (${page1.items.length}/${page1.totalItems} items):`);
+    page1.items.forEach(user => {
+      console.log(`  - ${user.name} (${user.role})`);
+    });
+
+    // Demonstrate key ordering consistency
+    console.log('\n🔑 Demonstrating consistent key ordering:\n');
+    
+    const testData1 = { region: 'US-WEST', department: 'engineering' };
+    const testData2 = { department: 'engineering', region: 'US-WEST' }; // Different input order
+    
+    const key1 = users.getPartitionKey('byRegionDept', 'test-user', testData1);
+    const key2 = users.getPartitionKey('byRegionDept', 'test-user', testData2);
+    
+    console.log('Input order 1 (region first):', Object.keys(testData1).join(', '));
+    console.log('Generated key 1:', key1);
+    console.log('\nInput order 2 (department first):', Object.keys(testData2).join(', '));
+    console.log('Generated key 2:', key2);
+    console.log('\nKeys are identical:', key1 === key2 ? '✅ YES' : '❌ NO');
+
+    console.log('\n� Expected S3 structure (with sorted field order):');
+    console.log('bucket/');
+    console.log('├── s3db.json');
+    console.log('├── resource=users/');
+    console.log('│   ├── v=v0/');
+    console.log('│   │   ├── id=user1          # ← MAIN OBJECT (complete data)');
+    console.log('│   │   ├── id=user2          # ← MAIN OBJECT');
+    console.log('│   │   ├── id=user3          # ← MAIN OBJECT');
+    console.log('│   │   └── id=user4          # ← MAIN OBJECT');
+    console.log('│   └── partition=byRegionDept/');
+    console.log('│       ├── department=engineering/region=US/  # ← SORTED: dept before region');
+    console.log('│       │   ├── id=user1      # ← REFERENCE (pointer to main)');
+    console.log('│       │   ├── id=user2      # ← REFERENCE (US-EAST -> US)');
+    console.log('│       │   └── id=user4      # ← REFERENCE');
+    console.log('│       ├── department=marketing/region=US/    # ← SORTED');
+    console.log('│       │   └── id=user3      # ← REFERENCE');
+    console.log('│       └── partition=byStatusRole/');
+    console.log('│           ├── role=admin/status=active/     # ← SORTED: role before status');
+    console.log('│           │   ├── id=user1  # ← REFERENCE');
+    console.log('│           │   └── id=user4  # ← REFERENCE');
+    console.log('│           └── role=user/status=active/      # ← SORTED');
+    console.log('│               └── id=user2  # ← REFERENCE');
+
+    console.log('\n✅ Multi-field partitions with consistent ordering completed successfully!');
+
+  } catch (error) {
+    console.error('\n❌ Error:', error.message);
+    console.error(error.stack);
   }
-
-  // 4. LISTAGEM SIMPLES (sem partições)
-  console.log('\n📋 LISTAGEM SIMPLES (todos os usuários)');
-  console.log('=====================================');
-  
-  const allUsers = await users.listByPartition();
-  console.log(`Total de usuários: ${allUsers.length}`);
-  allUsers.forEach(user => console.log(`  - ${user.name} (${user.region}/${user.department}/${user.status})`));
-
-  // 5. LISTAGEM POR PARTIÇÃO NOMEADA
-  console.log('\n🗂️ LISTAGEM POR PARTIÇÃO');
-  console.log('=====================================');
-
-  // Listar usuários ativos (usando partição byStatus)
-  console.log('\n👥 Usuários ATIVOS (partição: byStatus):');
-  const activeUsers = await users.listByPartition('byStatus', 'active');
-  activeUsers.forEach(user => console.log(`  - ${user.name} (${user.region})`));
-
-  // Listar usuários da região US (usando partição byRegion)  
-  console.log('\n🇺🇸 Usuários da região US (partição: byRegion):');
-  const usUsers = await users.listByPartition('byRegion', 'US');
-  usUsers.forEach(user => console.log(`  - ${user.name} (${user.department})`));
-
-  // Listar usuários de engenharia (usando partição byDepartment)
-  console.log('\n💻 Usuários de Engineering (partição: byDepartment):');
-  const engineeringUsers = await users.listByPartition('byDepartment', 'engineering');  
-  engineeringUsers.forEach(user => console.log(`  - ${user.name} (${user.region})`));
-
-  // 6. CONTAGEM POR PARTIÇÃO
-  console.log('\n📊 CONTAGEM POR PARTIÇÃO');
-  console.log('=====================================');
-
-  const totalUsers = await users.count();
-  console.log(`Total geral: ${totalUsers}`);
-
-  const activeCount = await users.count('byStatus', 'active');
-  console.log(`Usuários ativos: ${activeCount}`);
-
-  const usCount = await users.count('byRegion', 'US');
-  console.log(`Usuários US: ${usCount}`);
-
-  const engineeringCount = await users.count('byDepartment', 'engineering');
-  console.log(`Usuários Engineering: ${engineeringCount}`);
-
-  // 7. PAGINAÇÃO COM PARTIÇÕES
-  console.log('\n📄 PAGINAÇÃO COM PARTIÇÕES');
-  console.log('=====================================');
-
-  const page1 = await users.page(0, 2, 'byStatus', 'active');
-  console.log(`Página 1 (${page1.items.length} de ${page1.totalItems}):`, 
-    page1.items.map(u => u.name));
-
-  // 8. DEMONSTRAÇÃO DA ESTRUTURA CORRETA
-  console.log('\n🏗️ ESTRUTURA DE ARQUIVOS NO S3');
-  console.log('=====================================');
-  console.log('✅ OBJETOS PRINCIPAIS (dados completos):');
-  console.log('  /resource=users/v=1/id=abc123  (João Silva)');
-  console.log('  /resource=users/v=1/id=def456  (Maria Santos)');
-  console.log('  /resource=users/v=1/id=ghi789  (Carlos Lima)');
-  
-  console.log('\n✅ REFERÊNCIAS DE PARTIÇÃO (ponteiros):');
-  console.log('  /resource=users/partitions/byRegion/region=US/id=abc123  → aponta para objeto principal');
-  console.log('  /resource=users/partitions/byRegion/region=EU/id=def456  → aponta para objeto principal');
-  console.log('  /resource=users/partitions/byDepartment/department=engineering/id=abc123  → aponta para objeto principal');
-  console.log('  /resource=users/partitions/byStatus/status=active/id=abc123  → aponta para objeto principal');
-
-  console.log('\n🎉 Exemplo de partições CORRETAS concluído!');
-  console.log('\n💡 PONTOS IMPORTANTES:');
-  console.log('- Objetos SEMPRE salvos no path versionado principal');
-  console.log('- Partições são REFERÊNCIAS que apontam para o objeto principal');
-  console.log('- Partições têm NOMES para facilitar uso na listagem');
-  console.log('- Timestamps automáticos criam partições byCreatedDate e byUpdatedDate');
-  console.log('- Listagem eficiente usando prefix S3 nas partições');
-}
-
-// Executar exemplo
-correctPartitionsExample().catch(console.error);
+})();
