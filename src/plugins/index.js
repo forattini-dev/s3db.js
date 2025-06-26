@@ -1,7 +1,7 @@
-export * from './plugin.class'
-export * from './plugin.obj'
-export { default as Plugin } from './plugin.class'
+export * from './plugin.class.js'
+export * from './plugin.obj.js'
+export { default as Plugin } from './plugin.class.js'
 
 // plugins:
-export * from './costs.plugin'
-export * from './cache.plugin'
+export * from './costs.plugin.js'
+export * from './cache.plugin.js'

@@ -13,14 +13,14 @@
 
 import { Database } from '../src/index.js';
 
-const connectionString = process.env.BUCKET_CONNECTION_STRING || 's3://localhost:9000/test?accessKeyId=minioadmin&secretAccessKey=minioadmin&forcePathStyle=true';
+const connectionString = process.env.BUCKET_CONNECTION_STRING || 's3://s3db:thisissecret@localhost:9000/s3db?forcePathStyle=true';
 
 async function main() {
   console.log('🏗️ s3db.js Advanced Versioning & Hooks Demo\n');
 
   const db = new Database({
     verbose: true,
-    connectionString: connectionString + '/advanced-demo'
+    connectionString: 'http://s3db:thisissecret@localhost:9000/s3db?forcePathStyle=true'
   });
 
   // Listen for resource definition changes
@@ -168,15 +168,23 @@ async function main() {
   // =====================================================
   console.log('\n5. Testing updates with hooks...');
 
-  await users.update(user1.id, {
+  // For updates, we need to provide the original partition data to locate the object
+  const originalPartition = {
+    region: user1.region,
+    status: user1.status,
+    createdAt: user1.createdAt,
+    updatedAt: user1.updatedAt
+  };
+
+  console.log('🔍 Original partition data:', originalPartition);
+
+  const updatedUser = await users.update(user1.id, {
     name: 'Alice Johnson-Smith',
     email: 'newemail@example.com', // This will be removed by preUpdate hook
     status: 'premium'
-  }, {
-    region: user1.region,
-    status: user1.status,
-    createdAt: user1.createdAt
-  });
+  }, originalPartition);
+
+  console.log('✏️ User updated:', updatedUser);
 
   // =====================================================
   // 6. Test Binary Content with Partitions
@@ -302,11 +310,17 @@ async function main() {
   });
 
   // Delete a user (this will also clean up partition objects via hooks)
-  await users.delete(user1.id, {
-    region: user1.region,
-    status: 'premium',
-    createdAt: user1.createdAt
-  });
+  // Note: Since we updated the user, we need to use the NEW partition data
+  const updatedPartition = {
+    region: updatedUser.region,
+    status: updatedUser.status, // Now 'premium'
+    createdAt: updatedUser.createdAt,
+    updatedAt: updatedUser.updatedAt // This will be a new timestamp
+  };
+
+  console.log('🔍 Updated partition data for deletion:', updatedPartition);
+
+  await users.delete(user1.id, updatedPartition);
 
   console.log('🗑️ User deleted with automatic partition cleanup');
 
