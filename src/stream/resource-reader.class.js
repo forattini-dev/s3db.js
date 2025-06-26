@@ -2,7 +2,7 @@ import EventEmitter from "events";
 import { TransformStream } from "node:stream/web";
 import { PromisePool } from "@supercharge/promise-pool";
 
-import { ResourceIdsPageReader } from "./resource-ids-page-reader.class"
+import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js"
 
 export class ResourceReader  extends EventEmitter {
   constructor({ resource }) {

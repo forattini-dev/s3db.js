@@ -1,6 +1,6 @@
 const { ENV, CostsPlugin, S3db } = require("./concerns");
 
-const { nanoid } = require("nanoid");
+const { idGenerator } = require("../src/concerns/id.js");
 const Fakerator = require("fakerator");
 const ProgressBar = require("progress");
 
@@ -52,7 +52,7 @@ async function main() {
       id: k,
       name: fake.names.name(),
       email: fake.internet.email(),
-      token: nanoid(),
+      token: idGenerator(),
     }))
   );
 
