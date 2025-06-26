@@ -10,10 +10,8 @@ const DEFAULT_PASSPHRASE = '$ecret';
 describe('Validator Class - Complete Journey', () => {
 
   test('Validator Journey: Create → Configure → Compile → Validate → Encrypt/Decrypt', async () => {
-    console.log('\n🚀 Starting Validator Journey...\n');
 
     // 1. Create validator with configuration
-    console.log('1️⃣ Creating validator with configuration...');
     const validator = new Validator({ 
       passphrase: DEFAULT_PASSPHRASE,
       customMessages: {
@@ -25,10 +23,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(validator).toBeDefined();
     expect(validator.passphrase).toBe(DEFAULT_PASSPHRASE);
     
-    console.log('✅ Validator created with configuration');
 
     // 2. Test basic validation rules
-    console.log('\n2️⃣ Testing basic validation rules...');
     const basicSchema = {
       $$async: true,
       name: 'string|required|min:2|max:50',
@@ -52,10 +48,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(validResult).toBe(true);
     expect(validData.active).toBe(true); // Default value applied
     
-    console.log('✅ Basic validation working');
 
     // 3. Test validation errors
-    console.log('\n3️⃣ Testing validation errors...');
     
     const invalidData = {
       name: 'J', // Too short
@@ -74,10 +68,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(errors.some(e => e.type === 'email')).toBe(true);
     expect(errors.some(e => e.type === 'numberPositive')).toBe(true);
     
-    console.log('✅ Validation errors working correctly');
 
     // 4. Test secret field encryption
-    console.log('\n4️⃣ Testing secret field encryption...');
     
     const secretSchema = {
       $$async: true,
@@ -98,13 +90,9 @@ describe('Validator Class - Complete Journey', () => {
     expect(secretResult).toBe(true);
     
     // Password should be encrypted (if encryption is enabled)
-    console.log('Original password length:', 'mysecretpassword123'.length);
-    console.log('Final password length:', userData.password.length);
     
-    console.log('✅ Secret field handling working');
 
     // 5. Test nested object validation
-    console.log('\n5️⃣ Testing nested object validation...');
     
     const nestedSchema = {
       $$async: true,
@@ -152,10 +140,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(nestedResult).toBe(true);
     expect(nestedData.profile.preferences.notifications).toBe(true); // Default applied
     
-    console.log('✅ Nested object validation working');
 
     // 6. Test array validation
-    console.log('\n6️⃣ Testing array validation...');
     
     const arraySchema = {
       $$async: true,
@@ -184,10 +170,8 @@ describe('Validator Class - Complete Journey', () => {
     const arrayResult = await arrayValidator(arrayData);
     expect(arrayResult).toBe(true);
     
-    console.log('✅ Array validation working');
 
     // 7. Test array validation errors
-    console.log('\n7️⃣ Testing array validation errors...');
     
     const invalidArrayData = {
       name: 'Test User',
@@ -199,10 +183,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(Array.isArray(arrayErrorResult)).toBe(true);
     expect(arrayErrorResult.length).toBeGreaterThan(0);
     
-    console.log('✅ Array validation errors working');
 
     // 8. Test validation manager functionality
-    console.log('\n8️⃣ Testing validation manager functionality...');
     
     // Test simple validation without custom functions
     const simpleSchema = {
@@ -232,20 +214,16 @@ describe('Validator Class - Complete Journey', () => {
     expect(Array.isArray(simpleInvalidResult)).toBe(true);
     expect(simpleInvalidResult.length).toBeGreaterThan(0);
     
-    console.log('✅ Simple validation working');
 
     // 9. Test ValidatorManager singleton
-    console.log('\n9️⃣ Testing ValidatorManager singleton...');
     
     const manager1 = new ValidatorManager();
     const manager2 = new ValidatorManager();
     
     expect(manager1).toBe(manager2); // Should be the same instance
     
-    console.log('✅ ValidatorManager singleton working');
 
     // 10. Test error handling for missing passphrase
-    console.log('\n🔟 Testing error handling for missing passphrase...');
     
     const validatorWithoutPassphrase = new Validator();
     const secretSchemaCheck = validatorWithoutPassphrase.compile({ password: 'secret' });
@@ -256,10 +234,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(Array.isArray(result)).toBe(true);
     expect(result.some(e => e.type === 'encryptionKeyMissing')).toBe(true);
     
-    console.log('✅ Missing passphrase error handling working');
 
     // 11. Test async vs sync behavior
-    console.log('\n1️⃣1️⃣ Testing async vs sync behavior...');
     
     // Sync behavior (default)
     const syncValidator = new Validator({ passphrase: DEFAULT_PASSPHRASE });
@@ -281,10 +257,8 @@ describe('Validator Class - Complete Journey', () => {
     await asyncCheck(asyncData);
     expect(asyncData.password).not.toBeInstanceOf(Promise);
     
-    console.log('✅ Async vs sync behavior working');
 
     // 12. Test simplified real-world scenario
-    console.log('\n1️⃣2️⃣ Testing simplified real-world scenario...');
     
     const realWorldSchema = {
       $$async: true,
@@ -335,18 +309,14 @@ describe('Validator Class - Complete Journey', () => {
     expect(realWorldResult).toBe(true);
     expect(realWorldData.preferences.notifications).toBe(true); // Default applied
     
-    console.log('✅ Simplified real-world scenario working');
 
-    console.log('\n🎉 Validator Journey completed successfully! All validation features working correctly.\n');
   });
 
   test('Validator Error Scenarios Journey', async () => {
-    console.log('\n⚠️  Testing Validator Error Scenarios...\n');
 
     const validator = new Validator({ passphrase: DEFAULT_PASSPHRASE });
 
     // Test multiple validation errors
-    console.log('1️⃣ Testing multiple validation errors...');
     
     const multiErrorSchema = {
       $$async: true,
@@ -370,10 +340,8 @@ describe('Validator Class - Complete Journey', () => {
     expect(Array.isArray(errors)).toBe(true);
     expect(errors.length).toBeGreaterThan(3);
     
-    console.log('✅ Multiple validation errors handled');
 
     // Test edge cases
-    console.log('\n2️⃣ Testing edge cases...');
     
     const edgeSchema = {
       $$async: true,
@@ -397,8 +365,6 @@ describe('Validator Class - Complete Journey', () => {
     const edgeResult = await edgeValidator(edgeData);
     expect(edgeResult).toBe(true);
     
-    console.log('✅ Edge cases handled correctly');
 
-    console.log('\n✅ Error scenarios journey completed successfully!\n');
   });
 });

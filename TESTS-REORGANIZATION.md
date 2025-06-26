@@ -94,7 +94,7 @@ test('Schema Journey: Create → Validate → Map → Serialize → Deserialize 
 - `tests/crypto.test.js` - ✅ **Funcional** (1 teste passando)
 - `tests/bundle.test.js` - ✅ **Funcional** (21 testes passando)
 
-**Total: 37 testes passando nos arquivos core ✅**
+**Total: 38 testes passando nos arquivos core ✅**
 
 ### ⚠️ Necessitam Configuração S3/MinIO
 Os seguintes testes precisam das variáveis de ambiente para funcionar:
@@ -126,7 +126,7 @@ export MINIO_PASSWORD="password"
 - ✅ Mostram o fluxo de uso real da biblioteca
 - ✅ Casos de teste conectados que fazem sentido juntos
 - ✅ História completa: do início ao fim de um processo
-- ✅ Emojis e logs descritivos mostrando o progresso
+- ✅ Comentários descritivos documentando cada etapa
 
 ### 3. **✅ Manutenibilidade**
 - ✅ Eliminação de duplicação de código de teste
@@ -181,7 +181,8 @@ Durante a reorganização, foram corrigidos problemas críticos de serializaçã
 ✅ **Exemplos práticos de uso da API** - documentação viva  
 ✅ **Testes core funcionando** - Schema e Validator 100% funcionais  
 ✅ **Bugs críticos corrigidos** - Arrays e objetos funcionando perfeitamente  
-✅ **37 testes passando** nos componentes principais independentes  
+✅ **38 testes passando** nos componentes principais independentes  
+✅ **Testes limpos** - Console.logs removidos para saída mais clara  
 
 ---
 
