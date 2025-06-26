@@ -633,9 +633,9 @@ class Resource extends EventEmitter {
       );
     }
 
-    // Use deletePrefix to efficiently delete everything for this resource
+    // Use deleteAll to efficiently delete everything for this resource
     const prefix = `resource=${this.name}`;
-    const deletedCount = await this.client.deletePrefix(prefix);
+    const deletedCount = await this.client.deleteAll({ prefix });
     
     this.emit("deleteAllData", { 
       resource: this.name, 
@@ -825,7 +825,7 @@ class Resource extends EventEmitter {
    * @param {string} id - Resource ID
    * @returns {Object} Object with buffer and contentType
    */
-  async getContent(id) {
+  async content(id) {
     const key = this.getResourceKey(id);
     
     try {
@@ -833,7 +833,7 @@ class Resource extends EventEmitter {
       const buffer = Buffer.from(await response.Body.transformToByteArray());
       const contentType = response.ContentType || null;
 
-      this.emit("getContent", id, buffer.length, contentType);
+      this.emit("content", id, buffer.length, contentType);
       
       return {
         buffer,

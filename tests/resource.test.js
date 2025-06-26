@@ -141,7 +141,7 @@ describe('Resource binary content', () => {
     await contentResource.setContent(user.id, buffer, 'text/plain');
     
     // Retrieve content
-    const content = await contentResource.getContent(user.id);
+    const content = await contentResource.content(user.id);
     expect(content.buffer.toString('utf8')).toBe('Hello, World!');
     expect(content.contentType).toBe('text/plain');
     
@@ -166,7 +166,7 @@ describe('Resource binary content', () => {
   });
 
   test('should handle non-existent content gracefully', async () => {
-    const content = await contentResource.getContent('non-existent-id');
+    const content = await contentResource.content('non-existent-id');
     expect(content.buffer).toBe(null);
     expect(content.contentType).toBe(null);
     
