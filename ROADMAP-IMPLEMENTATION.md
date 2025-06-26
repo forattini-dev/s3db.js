@@ -134,7 +134,67 @@ db.on('definitionChanges', (changes) => {
 await db.connect(); // Triggers change detection
 ```
 
-### 5. File Organization
+### 5. Automatic Timestamp Partitions
+
+When `timestamps: true` is enabled, the library automatically adds timestamp-based partitions for date-based organization:
+
+```javascript
+const meetings = new Resource({
+  client,
+  name: 'meetings',
+  attributes: {
+    title: 'string',
+    category: 'string'
+  },
+  options: {
+    timestamps: true, // Automatically adds createdAt and updatedAt partitions
+    partitionRules: {
+      category: 'string|maxlength:5'
+      // createdAt: 'date|maxlength:10' - automatically added
+      // updatedAt: 'date|maxlength:10' - automatically added
+    }
+  }
+});
+```
+
+#### **Key Features:**
+- **Automatic Addition**: `createdAt` and `updatedAt` partition rules are automatically added when `timestamps: true`
+- **Date Format**: Uses `date|maxlength:10` rule to extract YYYY-MM-DD from ISO8601 timestamps
+- **Preserves Manual Rules**: Won't override existing partition rules for timestamp fields
+- **Mixed Partitions**: Works seamlessly with manual partition rules
+
+#### **Usage Examples:**
+```javascript
+const meeting = await meetings.insert({
+  title: 'Team Standup',
+  category: 'engineering'
+});
+
+// List meetings created today
+const today = new Date().toISOString().split('T')[0]; // 2025-06-26
+const todayMeetings = await meetings.listIds({ createdAt: today });
+
+// Filter by category and date
+const engMeetingsToday = await meetings.listIds({
+  category: 'engineering',
+  createdAt: today
+});
+
+// Paginate with timestamp filters
+const page = await meetings.page(0, 10, { createdAt: today });
+
+// Count with partition filters
+const count = await meetings.count({ createdAt: today });
+```
+
+#### **Automatic Path Structure:**
+```
+bucket/
+├── resource=meetings/partitions/category=engin/createdAt=2025-06-26/updatedAt=2025-06-26/id=meeting123
+└── resource=meetings/partitions/category=sales/createdAt=2025-06-25/updatedAt=2025-06-25/id=meeting456
+```
+
+### 6. File Organization
 
 The complete S3 file structure:
 
@@ -264,15 +324,27 @@ For existing s3db.js users:
 3. **New Features**: Opt-in by adding `partitionRules` to resource options
 4. **Enhanced Metadata**: `get()` method now returns additional fields
 
-## 📦 Ready for Production
+## � Complete Feature Summary
+
+All roadmap features have been successfully implemented:
+
+✅ **Binary Content Storage**: `setContent()`, `getContent()`, `hasContent()`, `deleteContent()`
+✅ **Extended get() Method**: Additional metadata fields including `_hasContent`
+✅ **Partition Support**: Configurable rules with date formatting and maxlength truncation
+✅ **Automatic Timestamp Partitions**: Auto-added when `timestamps: true` 
+✅ **Schema Versioning**: Definition hashing and change detection with events
+✅ **Correct Path Structure**: Standard and partitioned paths as specified
+✅ **Backward Compatibility**: Works with existing resources
+
+## �📦 Ready for Production
 
 The implementation is complete and includes:
 
-- ✅ Full test coverage
+- ✅ Full test coverage (including automatic timestamp partitions)
 - ✅ Comprehensive documentation
-- ✅ Example implementations
+- ✅ Example implementations with all features
 - ✅ Backward compatibility
-- ✅ Error handling
+- ✅ Error handling and edge cases
 - ✅ Performance optimizations
 
-The s3db.js library now provides a complete S3-based database solution suitable for autonomous agents, development teams, and production applications.
+The s3db.js library now provides a complete S3-based database solution with intelligent date-based partitioning, suitable for autonomous agents, development teams, and production applications.
