@@ -242,11 +242,12 @@ export class Client extends EventEmitter {
   }
 
   /**
-   * Delete all objects under a specific prefix using direct S3 operations
-   * @param {string} prefix - S3 prefix to delete
+   * Delete all objects under a specific prefix using efficient pagination
+   * @param {Object} options - Delete options
+   * @param {string} options.prefix - S3 prefix to delete
    * @returns {Promise<number>} Number of objects deleted
    */
-  async deletePrefix(prefix) {
+  async deleteAll({ prefix } = {}) {
     let continuationToken;
     let totalDeleted = 0;
 
@@ -271,7 +272,7 @@ export class Client extends EventEmitter {
         const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
         totalDeleted += deletedCount;
 
-        this.emit("deletePrefix", {
+        this.emit("deleteAll", {
           prefix,
           batch: deletedCount,
           total: totalDeleted
@@ -281,20 +282,12 @@ export class Client extends EventEmitter {
       continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined;
     } while (continuationToken);
 
-    this.emit("deletePrefixComplete", {
+    this.emit("deleteAllComplete", {
       prefix,
       totalDeleted
     });
 
     return totalDeleted;
-  }
-
-  async deleteAll({ prefix } = {}) {
-    const keys = await this.getAllKeys({ prefix });
-    const report = await this.deleteObjects(keys);
-
-    this.emit("deleteAll", { prefix, report });
-    return report;
   }
 
   async moveObject({ from, to }) {
