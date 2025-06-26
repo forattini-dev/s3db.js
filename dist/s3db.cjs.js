@@ -1,7 +1,7 @@
 /* istanbul ignore file */
 'use strict';
 
-var nanoid = require('nanoid');
+var nanoid$1 = require('nanoid');
 var lodashEs = require('lodash-es');
 var promisePool = require('@supercharge/promise-pool');
 var clientS3 = require('@aws-sdk/client-s3');
@@ -242,6 +242,8 @@ var substr = 'ab'.substr(-1) === 'b' ?
         return str.substr(start, len);
     }
 ;
+
+const idGenerator = nanoid$1.customAlphabet(nanoid$1.urlAlphabet, 22);
 
 var domain;
 
@@ -841,7 +843,7 @@ class Client extends EventEmitter {
   }) {
     super();
     this.verbose = verbose;
-    this.id = id ?? nanoid.nanoid(7);
+    this.id = id ?? nanoid(7);
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.client = AwsS3Client || this.createClient();
@@ -4017,7 +4019,7 @@ class Resource extends EventEmitter {
         validation: errors
       });
     }
-    if (!id && id !== 0) id = nanoid.nanoid();
+    if (!id && id !== 0) id = idGenerator();
     const metadata = await this.schema.mapper(validated);
     const key = this.getResourceKey(id);
     await this.client.putObject({

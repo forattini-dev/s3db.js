@@ -1,5 +1,5 @@
 /* istanbul ignore file */
-import { nanoid } from 'nanoid';
+import { customAlphabet, urlAlphabet } from 'nanoid';
 import { chunk, isObject as isObject$1, merge, cloneDeep, isEmpty, invert, uniq, isString as isString$1, get as get$1, set, isFunction as isFunction$1 } from 'lodash-es';
 import { PromisePool } from '@supercharge/promise-pool';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
@@ -240,6 +240,8 @@ var substr = 'ab'.substr(-1) === 'b' ?
         return str.substr(start, len);
     }
 ;
+
+const idGenerator = customAlphabet(urlAlphabet, 22);
 
 var domain;
 
@@ -4015,7 +4017,7 @@ class Resource extends EventEmitter {
         validation: errors
       });
     }
-    if (!id && id !== 0) id = nanoid();
+    if (!id && id !== 0) id = idGenerator();
     const metadata = await this.schema.mapper(validated);
     const key = this.getResourceKey(id);
     await this.client.putObject({
