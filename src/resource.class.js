@@ -84,6 +84,43 @@ class Resource extends EventEmitter {
   }
 
   /**
+   * Update resource attributes and rebuild schema
+   * @param {Object} newAttributes - New attributes definition
+   */
+  updateAttributes(newAttributes) {
+    // Store old attributes for comparison
+    const oldAttributes = this.attributes;
+    this.attributes = newAttributes;
+
+    // Add timestamp attributes if enabled
+    if (this.options.timestamps) {
+      newAttributes.createdAt = 'string|optional';
+      newAttributes.updatedAt = 'string|optional';
+      
+      // Automatically add timestamp partitions for date-based organization
+      if (!this.options.partitionRules.createdAt) {
+        this.options.partitionRules.createdAt = 'date|maxlength:10';
+      }
+      if (!this.options.partitionRules.updatedAt) {
+        this.options.partitionRules.updatedAt = 'date|maxlength:10';
+      }
+    }
+
+    // Rebuild schema with new attributes
+    this.schema = new Schema({
+      name: this.name,
+      attributes: newAttributes,
+      passphrase: this.passphrase,
+      options: this.options,
+    });
+
+    // Re-setup partition hooks with new schema
+    this.setupPartitionHooks();
+
+    return { oldAttributes, newAttributes };
+  }
+
+  /**
    * Add a hook function for a specific event
    * @param {string} event - Hook event (preInsert, afterInsert, etc.)
    * @param {Function} fn - Hook function

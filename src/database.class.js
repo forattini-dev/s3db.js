@@ -234,8 +234,11 @@ export class Database extends EventEmitter {
         }
       };
 
-      // Update resource version
-      resource.options.version = version;
+      // Update resource version safely
+      if (resource.options.version !== version) {
+        resource.options.version = version;
+        resource.emit('versionUpdated', { oldVersion: currentVersion, newVersion: version });
+      }
     });
 
     await this.client.putObject({
@@ -257,9 +260,30 @@ export class Database extends EventEmitter {
   }
 
   async createResource({ name, attributes, options = {} }) {
-    // Check if resource exists and determine version
-    const existingResource = this.savedMetadata?.resources?.[name];
-    const version = existingResource?.currentVersion || 'v0';
+    // Check if resource already exists in memory
+    if (this.resources[name]) {
+      // Update existing resource instead of creating new instance
+      const existingResource = this.resources[name];
+      
+      // Update options first
+      Object.assign(existingResource.options, {
+        cache: this.cache,
+        ...options,
+      });
+      
+      // Update attributes using the new method that rebuilds schema
+      existingResource.updateAttributes(attributes);
+
+      // Version will be updated by uploadMetadataFile if needed
+      await this.uploadMetadataFile();
+      
+      this.emit("s3db.resourceUpdated", name);
+      return existingResource;
+    }
+
+    // Create new resource only if it doesn't exist
+    const existingMetadata = this.savedMetadata?.resources?.[name];
+    const version = existingMetadata?.currentVersion || 'v0';
     
     const resource = new Resource({
       name,
