@@ -188,8 +188,6 @@ export class Database extends EventEmitter {
     }
   }
 
-
-
   async uploadMetadataFile() {
     const metadata = {
       version: this.version,
