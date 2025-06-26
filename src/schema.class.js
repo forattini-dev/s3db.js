@@ -22,8 +22,82 @@ export const SchemaActions = {
 
   toString: (value) => String(value),
 
-  fromArray: (value, { separator }) => (value || []).join(separator),
-  toArray: (value, { separator }) => (value || "").split(separator),
+  fromArray: (value, { separator }) => {
+    // Handle null, undefined, or non-array values
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value; // Preserve null/undefined, don't serialize non-arrays
+    }
+    
+    // Handle empty arrays
+    if (value.length === 0) {
+      return '[]'; // Special marker for empty arrays
+    }
+    
+    // Escape separator characters in array items before joining
+    // First escape backslashes, then escape the separator
+    const escapedItems = value.map(item => {
+      if (typeof item === 'string') {
+        return item
+          .replace(/\\/g, '\\\\') // Escape backslashes first
+          .replace(new RegExp(`\\${separator}`, 'g'), `\\${separator}`); // Then escape separator
+      }
+      return String(item);
+    });
+    
+    return escapedItems.join(separator);
+  },
+
+  toArray: (value, { separator }) => {
+    // Handle null/undefined values - preserve them
+    if (value === null || value === undefined) {
+      return value;
+    }
+    
+    // Handle empty array marker
+    if (value === '[]') {
+      return [];
+    }
+    
+    // Handle empty string (should also be empty array)
+    if (value === '') {
+      return [];
+    }
+    
+    // Custom split that respects escaped separators
+    const items = [];
+    let current = '';
+    let i = 0;
+    const str = String(value);
+    
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        // Handle escaped characters
+        if (str[i + 1] === separator) {
+          current += separator; // Unescape separator
+          i += 2;
+        } else if (str[i + 1] === '\\') {
+          current += '\\'; // Unescape backslash
+          i += 2;
+        } else {
+          current += str[i]; // Keep backslash for other chars
+          i++;
+        }
+      } else if (str[i] === separator) {
+        // Found unescaped separator
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    
+    // Add the last item
+    items.push(current);
+    
+    return items;
+  },
 
   toJSON: (value) => JSON.stringify(value),
   fromJSON: (value) => JSON.parse(value),
