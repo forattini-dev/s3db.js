@@ -149,13 +149,17 @@ describe('Resource binary content', () => {
     const hasContent = await contentResource.hasContent(user.id);
     expect(hasContent).toBe(true);
     
-    // Delete content
+    // Verify _hasContent flag in get method
+    const userData = await contentResource.get(user.id);
+    expect(userData._hasContent).toBe(true);
+    
+    // Delete content (preserves metadata)
     await contentResource.deleteContent(user.id);
     
-    // Verify content is deleted
-    const deletedContent = await contentResource.getContent(user.id);
-    expect(deletedContent.buffer).toBe(null);
-    expect(deletedContent.contentType).toBe(null);
+    // Verify metadata still exists but content is gone
+    const userAfterDelete = await contentResource.get(user.id);
+    expect(userAfterDelete.name).toBe('John Doe'); // Metadata preserved
+    expect(userAfterDelete._hasContent).toBe(false); // No content
     
     const hasContentAfterDelete = await contentResource.hasContent(user.id);
     expect(hasContentAfterDelete).toBe(false);

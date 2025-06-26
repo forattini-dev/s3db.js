@@ -19,7 +19,7 @@ const profilePicture = Buffer.from(imageData);
 await users.setContent(user.id, profilePicture, 'image/jpeg');
 ```
 
-**S3 Path Structure:** `/resource=<name>/data/id=<id>.bin`
+**S3 Path Structure:** Binary content is stored within the resource object itself
 
 #### **getContent(id)**
 Retrieves binary content with metadata.
@@ -30,8 +30,10 @@ const content = await users.getContent(user.id);
 ```
 
 #### **Additional Content Methods**
-- `hasContent(id)`: Check if binary content exists
-- `deleteContent(id)`: Remove binary content
+- `hasContent(id, partitionData)`: Check if binary content exists
+- `deleteContent(id, partitionData)`: Remove binary content (preserves metadata)
+
+**Important:** Binary content is now stored within the same S3 object as the metadata. The object's body contains the binary data, while metadata is stored in S3 object metadata headers. This approach eliminates the need for separate content files.
 
 ### 2. Enhanced get() Method
 
@@ -45,6 +47,7 @@ const user = await users.get(userId);
 // - _versionId: S3 version ID (if versioning enabled)
 // - mimeType: Content type
 // - definitionHash: SHA256 hash of resource definition
+// - _hasContent: Boolean indicating if object contains binary content
 ```
 
 ### 3. Partition Support
@@ -71,7 +74,7 @@ const events = await db.createResource({
 
 #### **S3 Path Structure**
 ```
-Standard:     /resource=<name>/id=<id>
+Standard:     /resource=<name>/v=<version>/id=<id>
 Partitioned:  /resource=<name>/partitions/eventDate=2025-06-26/region=US/id=<id>
 Nested:       /resource=<name>/partitions/region=BR/state=SP/id=<id>
 ```
@@ -139,16 +142,16 @@ The complete S3 file structure:
 bucket/
 ├── s3db.json                                    # Database metadata & versioning
 ├── resource=documents/
-│   ├── id=doc123                               # Standard metadata
-│   └── data/id=doc123.bin                      # Binary content
+│   └── v=1/
+│       └── id=doc123                           # Standard object (metadata + content)
 ├── resource=events/
 │   └── partitions/
 │       └── eventDate=2025-06-26/
 │           └── region=US/
-│               └── id=event456                 # Partitioned metadata
+│               └── id=event456                 # Partitioned object (metadata + content)
 └── resource=users/
-    ├── partitions/region=BR/state=SP/id=user789
-    └── data/id=user789.bin
+    ├── v=1/id=user123                          # Standard user object
+    └── partitions/region=BR/state=SP/id=user789  # Partitioned user object
 ```
 
 ## 🛠️ Technical Implementation
@@ -235,22 +238,20 @@ const user = await users.insert({
   joinDate: '2025-06-26'
 });
 
-// Store binary content
+// Store binary content (with partition data for partitioned resources)
 const profilePicture = Buffer.from(imageData);
-await users.setContent(user.id, profilePicture, 'image/jpeg');
+const partitionData = { region: 'US', joinDate: '2025-06-26' };
+await users.setContent(user.id, profilePicture, 'image/jpeg', partitionData);
 
 // Retrieve with full metadata
-const fullUser = await users.get(user.id, {
-  region: 'US',
-  joinDate: '2025-06-26'
-});
+const fullUser = await users.get(user.id, partitionData);
 
 console.log(fullUser);
 // Includes: id, name, email, region, joinDate, createdAt, updatedAt,
-//          _contentLength, _lastModified, mimeType, definitionHash, etc.
+//          _contentLength, _lastModified, mimeType, definitionHash, _hasContent, etc.
 
-// Get binary content
-const content = await users.getContent(user.id);
+// Get binary content (with partition data)
+const content = await users.getContent(user.id, partitionData);
 console.log('Profile picture:', content.buffer, content.contentType);
 ```
 

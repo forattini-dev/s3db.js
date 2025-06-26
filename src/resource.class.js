@@ -136,7 +136,14 @@ class Resource extends EventEmitter {
    */
   getResourceKey(id, data = {}) {
     const partitionPath = this.generatePartitionPath(data);
-    return join(`resource=${this.name}`, partitionPath, `id=${id}`);
+    
+    if (partitionPath) {
+      // Partitioned path: /resource={name}/partitions/{pName}={value}/id={id}
+      return join(`resource=${this.name}`, partitionPath, `id=${id}`);
+    } else {
+      // Standard path with version: /resource={name}/v={version}/id={id}
+      return join(`resource=${this.name}`, `v=${this.schema.version}`, `id=${id}`);
+    }
   }
 
   async insert({ id, ...attributes }) {
@@ -168,6 +175,7 @@ class Resource extends EventEmitter {
     await this.client.putObject({
       metadata,
       key,
+      body: "", // Empty body for metadata-only objects
     });
 
     const final = merge({ id }, validated);
@@ -192,6 +200,9 @@ class Resource extends EventEmitter {
 
     // Add definition hash
     data.definitionHash = this.getDefinitionHash();
+
+    // Indicate if object has binary content
+    data._hasContent = request.ContentLength > 0;
 
     this.emit("get", data);
     return data;
@@ -230,9 +241,23 @@ class Resource extends EventEmitter {
 
     const key = this.getResourceKey(id, validated);
 
+    // Check if object has existing content
+    let existingBody = "";
+    let existingContentType = undefined;
+    try {
+      const existingObject = await this.client.getObject(key);
+      if (existingObject.ContentLength > 0) {
+        existingBody = Buffer.from(await existingObject.Body.transformToByteArray());
+        existingContentType = existingObject.ContentType;
+      }
+    } catch (error) {
+      // No existing content, use empty body
+    }
+
     await this.client.putObject({
       key,
-      body: "",
+      body: existingBody,
+      contentType: existingContentType,
       metadata: await this.schema.mapper(validated),
     });
 
@@ -285,9 +310,9 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async deleteMany(ids) {
+  async deleteMany(ids, partitionData = {}) {
     const packages = chunk(
-      ids.map((x) => this.getResourceKey(x)),
+      ids.map((id) => this.getResourceKey(id, partitionData)),
       1000
     );
 
@@ -301,9 +326,14 @@ class Resource extends EventEmitter {
         const response = await this.client.deleteObjects(keys);
 
         keys.forEach((key) => {
-          const id = key.split("/").pop().split("=").pop();
-          this.emit("deleted", id);
-          this.observers.map((x) => x.emit("deleted", this.name, id));
+          // Extract ID from key path
+          const parts = key.split('/');
+          const idPart = parts.find(part => part.startsWith('id='));
+          const id = idPart ? idPart.replace('id=', '') : null;
+          if (id) {
+            this.emit("deleted", id);
+            this.observers.map((x) => x.emit("deleted", this.name, id));
+          }
         });
 
         return response;
@@ -324,7 +354,14 @@ class Resource extends EventEmitter {
       prefix: `resource=${this.name}`,
     });
 
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+    const ids = keys.map((key) => {
+      // Extract ID from different path patterns:
+      // /resource={name}/v={version}/id={id}
+      // /resource={name}/partitions/.../id={id}
+      const parts = key.split('/');
+      const idPart = parts.find(part => part.startsWith('id='));
+      return idPart ? idPart.replace('id=', '') : null;
+    }).filter(Boolean);
 
     this.emit("listIds", ids.length);
     return ids;
@@ -367,7 +404,15 @@ class Resource extends EventEmitter {
       prefix: `resource=${this.name}`,
     });
 
-    const ids = keys.map((x) => x.replace(`resource=${this.name}/id=`, ""));
+    const ids = keys.map((key) => {
+      // Extract ID from different path patterns:
+      // /resource={name}/v={version}/id={id}
+      // /resource={name}/partitions/.../id={id}
+      const parts = key.split('/');
+      const idPart = parts.find(part => part.startsWith('id='));
+      return idPart ? idPart.replace('id=', '') : null;
+    }).filter(Boolean);
+    
     const data = await this.getMany(ids);
 
     return data;
@@ -388,18 +433,29 @@ class Resource extends EventEmitter {
    * @param {string} id - Resource ID
    * @param {Buffer} buffer - Binary content
    * @param {string} contentType - Optional content type
+   * @param {Object} partitionData - Partition data for locating the resource
    */
-  async setContent(id, buffer, contentType = 'application/octet-stream') {
+  async setContent(id, buffer, contentType = 'application/octet-stream', partitionData = {}) {
     if (!Buffer.isBuffer(buffer)) {
       throw new Error('Content must be a Buffer');
     }
 
-    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+    const key = this.getResourceKey(id, partitionData);
+    
+    // Get existing metadata first
+    let existingMetadata = {};
+    try {
+      const existingObject = await this.client.headObject(key);
+      existingMetadata = existingObject.Metadata || {};
+    } catch (error) {
+      // Object doesn't exist yet, that's ok
+    }
     
     const response = await this.client.putObject({
       key,
       body: buffer,
       contentType,
+      metadata: existingMetadata, // Preserve existing metadata
     });
 
     this.emit("setContent", id, buffer.length, contentType);
@@ -409,10 +465,11 @@ class Resource extends EventEmitter {
   /**
    * Retrieve binary content associated with a resource
    * @param {string} id - Resource ID
+   * @param {Object} partitionData - Partition data for locating the resource
    * @returns {Object} Object with buffer and contentType
    */
-  async getContent(id) {
-    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
+  async getContent(id, partitionData = {}) {
+    const key = this.getResourceKey(id, partitionData);
     
     try {
       const response = await this.client.getObject(key);
@@ -439,20 +496,39 @@ class Resource extends EventEmitter {
   /**
    * Check if binary content exists for a resource
    * @param {string} id - Resource ID
+   * @param {Object} partitionData - Partition data for locating the resource
    * @returns {boolean}
    */
-  async hasContent(id) {
-    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
-    return await this.client.exists(key);
+  async hasContent(id, partitionData = {}) {
+    const key = this.getResourceKey(id, partitionData);
+    
+    try {
+      const response = await this.client.headObject(key);
+      // Check if object has actual content (not just metadata)
+      return response.ContentLength > 0;
+    } catch (error) {
+      return false;
+    }
   }
 
   /**
-   * Delete binary content associated with a resource
+   * Delete binary content but preserve metadata
    * @param {string} id - Resource ID
+   * @param {Object} partitionData - Partition data for locating the resource
    */
-  async deleteContent(id) {
-    const key = join(`resource=${this.name}`, 'data', `id=${id}.bin`);
-    const response = await this.client.deleteObject(key);
+  async deleteContent(id, partitionData = {}) {
+    const key = this.getResourceKey(id, partitionData);
+    
+    // Get existing metadata first
+    const existingObject = await this.client.headObject(key);
+    const existingMetadata = existingObject.Metadata || {};
+    
+    // Recreate object with empty body but preserve metadata
+    const response = await this.client.putObject({
+      key,
+      body: "",
+      metadata: existingMetadata,
+    });
     
     this.emit("deleteContent", id);
     return response;

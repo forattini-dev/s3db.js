@@ -210,9 +210,9 @@ async function main() {
     contentType: picture.contentType
   });
 
-  // 6. Resource Statistics
-  console.log('\n📈 Resource Statistics');
-  console.log('=====================');
+  // 6. Resource Statistics & Path Structure
+  console.log('\n📈 Resource Statistics & Path Structure');
+  console.log('======================================');
 
   const documentCount = await documents.count();
   const eventCount = await events.count();
@@ -223,6 +223,11 @@ async function main() {
     events: eventCount,
     users: userCount
   });
+
+  console.log('\n📁 Path Structure Examples:');
+  console.log('Standard (with version):', documents.getResourceKey(doc.id));
+  console.log('Partitioned (no version):', events.getResourceKey(event1.id, { eventDate: '2025-06-26', region: 'US-WE' }));
+  console.log('User partitioned:', users.getResourceKey(user.id, { region: 'US', joinDate: '2025-06-26' }));
 
   console.log('\n✅ Roadmap features demo completed successfully!');
 }
