@@ -907,6 +907,251 @@ class Resource extends EventEmitter {
       }
     }
   }
+
+  /**
+   * List all available partition values for discovery
+   * @returns {Object} Object with partition field as key and array of values
+   */
+  async listPartitions() {
+    const partitionRules = this.options.partitionRules;
+    if (!partitionRules || Object.keys(partitionRules).length === 0) {
+      return {};
+    }
+
+    // Get all keys with partition prefix
+    const partitionPrefix = `resource=${this.name}/partitions/`;
+    const keys = await this.client.getAllKeys({
+      prefix: partitionPrefix,
+    });
+
+    const partitions = {};
+    
+    // Initialize partition fields
+    Object.keys(partitionRules).forEach(field => {
+      partitions[field] = new Set();
+    });
+
+    // Extract partition values from keys
+    keys.forEach(key => {
+      // Extract partition path: resource=users/partitions/region=US/status=active/id=123
+      const pathParts = key.split('/');
+      const partitionIndex = pathParts.indexOf('partitions');
+      
+      if (partitionIndex !== -1) {
+        // Get partition segments between 'partitions' and 'id='
+        const partitionSegments = pathParts.slice(partitionIndex + 1);
+        const idIndex = partitionSegments.findIndex(segment => segment.startsWith('id='));
+        const actualPartitions = idIndex !== -1 ? partitionSegments.slice(0, idIndex) : partitionSegments;
+        
+        actualPartitions.forEach(segment => {
+          const [field, value] = segment.split('=');
+          if (partitions[field]) {
+            partitions[field].add(value);
+          }
+        });
+      }
+    });
+
+    // Convert Sets to Arrays and sort
+    Object.keys(partitions).forEach(field => {
+      partitions[field] = Array.from(partitions[field]).sort();
+    });
+
+    this.emit("listPartitions", partitions);
+    return partitions;
+  }
+
+  /**
+   * Get all unique values for a specific partition field
+   * @param {string} field - Partition field name
+   * @returns {Array} Array of unique values for the field
+   */
+  async getPartitionValues(field) {
+    const partitions = await this.listPartitions();
+    return partitions[field] || [];
+  }
+
+  /**
+   * List objects with full data filtered by partition criteria
+   * @param {Object} partitionData - Partition criteria to filter by
+   * @param {Object} options - Options for listing (limit, offset, etc.)
+   * @returns {Array} Array of full object data
+   */
+  async listByPartition(partitionData = {}, options = {}) {
+    const { limit, offset = 0, includeContent = false } = options;
+    
+    const ids = await this.listIds(partitionData);
+    
+    // Apply offset and limit
+    let filteredIds = ids.slice(offset);
+    if (limit) {
+      filteredIds = filteredIds.slice(0, limit);
+    }
+
+    // Get full data for each ID
+    const { results } = await PromisePool.for(filteredIds)
+      .withConcurrency(this.parallelism)
+      .process(async (id) => {
+        const data = await this.get(id, partitionData);
+        
+        // Include binary content if requested
+        if (includeContent && data._hasContent) {
+          const content = await this.getContent(id, partitionData);
+          data._content = content;
+        }
+        
+        return data;
+      });
+
+    this.emit("listByPartition", { partitionData, count: results.length });
+    return results;
+  }
+
+  /**
+   * Find objects matching multiple criteria with flexible filtering
+   * @param {Object} criteria - Search criteria
+   * @param {Object} options - Search options
+   * @returns {Array} Array of matching objects
+   */
+  async findBy(criteria = {}, options = {}) {
+    const { limit, offset = 0, sortBy, sortOrder = 'asc', includeContent = false } = options;
+    
+    // Separate partition criteria from data criteria
+    const partitionRules = this.options.partitionRules || {};
+    const partitionCriteria = {};
+    const dataCriteria = {};
+    
+    Object.entries(criteria).forEach(([field, value]) => {
+      if (partitionRules[field]) {
+        partitionCriteria[field] = value;
+      } else {
+        dataCriteria[field] = value;
+      }
+    });
+
+    // Get objects by partition first (most efficient)
+    const partitionResults = await this.listByPartition(partitionCriteria, { includeContent });
+    
+    // Apply data criteria filtering
+    let filteredResults = partitionResults;
+    
+    if (Object.keys(dataCriteria).length > 0) {
+      filteredResults = partitionResults.filter(item => {
+        return Object.entries(dataCriteria).every(([field, expectedValue]) => {
+          const actualValue = item[field];
+          
+          // Handle different value types and comparison
+          if (typeof expectedValue === 'object' && expectedValue !== null) {
+            // Support for operators like { $gt: 10, $lt: 20 }
+            if (expectedValue.$gt !== undefined) return actualValue > expectedValue.$gt;
+            if (expectedValue.$gte !== undefined) return actualValue >= expectedValue.$gte;
+            if (expectedValue.$lt !== undefined) return actualValue < expectedValue.$lt;
+            if (expectedValue.$lte !== undefined) return actualValue <= expectedValue.$lte;
+            if (expectedValue.$ne !== undefined) return actualValue !== expectedValue.$ne;
+            if (expectedValue.$in !== undefined) return expectedValue.$in.includes(actualValue);
+            if (expectedValue.$nin !== undefined) return !expectedValue.$nin.includes(actualValue);
+          }
+          
+          // Exact match or regex
+          if (expectedValue instanceof RegExp) {
+            return expectedValue.test(String(actualValue));
+          }
+          
+          return actualValue === expectedValue;
+        });
+      });
+    }
+
+    // Apply sorting
+    if (sortBy) {
+      filteredResults.sort((a, b) => {
+        const aVal = a[sortBy];
+        const bVal = b[sortBy];
+        
+        let comparison = 0;
+        if (aVal < bVal) comparison = -1;
+        if (aVal > bVal) comparison = 1;
+        
+        return sortOrder === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    // Apply offset and limit
+    const startIndex = offset;
+    const endIndex = limit ? startIndex + limit : undefined;
+    const paginatedResults = filteredResults.slice(startIndex, endIndex);
+
+    this.emit("findBy", { criteria, count: paginatedResults.length, total: filteredResults.length });
+    return paginatedResults;
+  }
+
+  /**
+   * Group objects by partition field values
+   * @param {string} field - Field to group by (must be a partition field)
+   * @param {Object} partitionFilter - Additional partition filters
+   * @param {Object} options - Grouping options
+   * @returns {Object} Object with field values as keys and arrays of objects as values
+   */
+  async groupBy(field, partitionFilter = {}, options = {}) {
+    const { includeContent = false, includeCount = true } = options;
+    
+    const partitionRules = this.options.partitionRules || {};
+    
+    if (!partitionRules[field]) {
+      throw new Error(`Field '${field}' is not a partition field. Available partition fields: ${Object.keys(partitionRules).join(', ')}`);
+    }
+
+    // Get all possible values for the field
+    const fieldValues = await this.getPartitionValues(field);
+    const results = {};
+
+    // Get data for each field value
+    for (const value of fieldValues) {
+      const criteria = { ...partitionFilter, [field]: value };
+      const objects = await this.listByPartition(criteria, { includeContent });
+      
+      results[value] = {
+        items: objects,
+        ...(includeCount && { count: objects.length })
+      };
+    }
+
+    this.emit("groupBy", { field, groupCount: Object.keys(results).length });
+    return results;
+  }
+
+  /**
+   * Get partition statistics and metrics
+   * @returns {Object} Statistics about partitions and data distribution
+   */
+  async getPartitionStats() {
+    const partitionRules = this.options.partitionRules || {};
+    
+    if (Object.keys(partitionRules).length === 0) {
+      return { hasPartitions: false, totalObjects: await this.count() };
+    }
+
+    const partitions = await this.listPartitions();
+    const stats = {
+      hasPartitions: true,
+      totalObjects: await this.count(),
+      partitionFields: Object.keys(partitionRules),
+      partitionCounts: {}
+    };
+
+    // Get count for each partition value
+    for (const [field, values] of Object.entries(partitions)) {
+      stats.partitionCounts[field] = {};
+      
+      for (const value of values) {
+        const count = await this.count({ [field]: value });
+        stats.partitionCounts[field][value] = count;
+      }
+    }
+
+    this.emit("getPartitionStats", stats);
+    return stats;
+  }
 }
 
 export default Resource;
