@@ -983,7 +983,6 @@ class Resource extends EventEmitter {
     }
   }
 
-
 }
 
 export default Resource;
