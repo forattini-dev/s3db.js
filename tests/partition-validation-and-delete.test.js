@@ -23,7 +23,7 @@ const mockClient = {
   deleteObject: () => Promise.resolve({ DeleteMarker: true }),
   getAllKeys: () => Promise.resolve([]),
   count: () => Promise.resolve(0),
-  deletePrefix: () => Promise.resolve(42) // Mock that returns number of deleted objects
+  deleteAll: () => Promise.resolve(42) // Mock that returns number of deleted objects
 };
 
 describe('Partition Validation and Delete Operations', () => {
@@ -145,18 +145,18 @@ describe('Partition Validation and Delete Operations', () => {
     });
   });
 
-  describe('Client deletePrefix Method', () => {
-    test('should have deletePrefix method', () => {
+  describe('Client deleteAll Method', () => {
+    test('should have deleteAll method', () => {
       const client = new Client({
         connectionString: 's3://test:test@localhost:4566/test-bucket'
       });
       
-      expect(typeof client.deletePrefix).toBe('function');
+      expect(typeof client.deleteAll).toBe('function');
     });
 
-    test('should call deletePrefix and return deleted count', async () => {
+    test('should call deleteAll and return deleted count', async () => {
       const client = mockClient;
-      const deletedCount = await client.deletePrefix('test-prefix/');
+      const deletedCount = await client.deleteAll({ prefix: 'test-prefix/' });
       
       expect(deletedCount).toBe(42);
     });

@@ -607,9 +607,9 @@ class Resource extends EventEmitter {
       );
     }
 
-    // Use deletePrefix to efficiently delete all objects for current version
+    // Use deleteAll to efficiently delete all objects for current version
     const prefix = `resource=${this.name}/v=${this.version}`;
-    const deletedCount = await this.client.deletePrefix(prefix);
+    const deletedCount = await this.client.deleteAll({ prefix });
     
     this.emit("deleteAll", { 
       version: this.version, 
@@ -792,9 +792,8 @@ class Resource extends EventEmitter {
    * @param {string} id - Resource ID
    * @param {Buffer} buffer - Binary content
    * @param {string} contentType - Optional content type
-   * @param {Object} partitionData - Partition data for locating the resource
    */
-  async setContent(id, buffer, contentType = 'application/octet-stream', partitionData = {}) {
+  async setContent(id, buffer, contentType = 'application/octet-stream') {
     if (!Buffer.isBuffer(buffer)) {
       throw new Error('Content must be a Buffer');
     }
@@ -824,10 +823,9 @@ class Resource extends EventEmitter {
   /**
    * Retrieve binary content associated with a resource
    * @param {string} id - Resource ID
-   * @param {Object} partitionData - Partition data for locating the resource
    * @returns {Object} Object with buffer and contentType
    */
-  async getContent(id, partitionData = {}) {
+  async getContent(id) {
     const key = this.getResourceKey(id);
     
     try {
