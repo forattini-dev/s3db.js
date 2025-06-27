@@ -9701,7 +9701,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "3.3.2" : "latest";
+        return true ? "4.0.0" : "latest";
       } catch (e) {
         return "latest";
       }
