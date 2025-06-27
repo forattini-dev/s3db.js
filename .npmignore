@@ -5,6 +5,16 @@ examples/
 node_modules/
 src/
 tests/
+scripts/
 .env
-README.md
+.env.*
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.test.js
+*.spec.js
+jest.config.js
 rollup.config.js
+pnpm-workspace.yaml
+pnpm-lock.yaml

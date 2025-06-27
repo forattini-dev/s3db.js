@@ -1,7 +1,7 @@
 /* istanbul ignore file */
 'use strict';
 
-var nanoid$1 = require('nanoid');
+var nanoid = require('nanoid');
 var lodashEs = require('lodash-es');
 var promisePool = require('@supercharge/promise-pool');
 var clientS3 = require('@aws-sdk/client-s3');
@@ -243,7 +243,7 @@ var substr = 'ab'.substr(-1) === 'b' ?
     }
 ;
 
-const idGenerator = nanoid$1.customAlphabet(nanoid$1.urlAlphabet, 22);
+const idGenerator = nanoid.customAlphabet(nanoid.urlAlphabet, 22);
 
 var domain;
 
@@ -275,7 +275,9 @@ EventEmitter.init = function() {
   this.domain = null;
   if (EventEmitter.usingDomains) {
     // if there is an active domain, then attach to it.
-    if (domain.active) ;
+    if (domain.active && !(this instanceof domain.Domain)) {
+      this.domain = domain.active;
+    }
   }
 
   if (!this._events || this._events === Object.getPrototypeOf(this)._events) {
@@ -843,7 +845,7 @@ class Client extends EventEmitter {
   }) {
     super();
     this.verbose = verbose;
-    this.id = id ?? nanoid(7);
+    this.id = id ?? idGenerator();
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.client = AwsS3Client || this.createClient();
@@ -894,10 +896,10 @@ class Client extends EventEmitter {
     if (errorClass) return new errorClass(data);
     return error;
   }
-  async putObject({ key: key2, metadata, contentType, body, contentEncoding }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding }) {
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2,
+      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
       Metadata: { ...metadata },
       Body: body || "",
       ContentType: contentType,
@@ -909,15 +911,15 @@ class Client extends EventEmitter {
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
-        key: key2,
+        key,
         command: options2
       });
     }
   }
-  async getObject(key2) {
+  async getObject(key) {
     const options2 = {
       Bucket: this.config.bucket,
-      Key: path.join(this.config.keyPrefix, key2)
+      Key: path.join(this.config.keyPrefix, key)
     };
     try {
       const response = await this.sendCommand(new clientS3.GetObjectCommand(options2));
@@ -925,15 +927,15 @@ class Client extends EventEmitter {
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
-        key: key2,
+        key,
         command: options2
       });
     }
   }
-  async headObject(key2) {
+  async headObject(key) {
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2
+      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
     };
     try {
       const response = await this.client.send(new clientS3.HeadObjectCommand(options2));
@@ -941,7 +943,7 @@ class Client extends EventEmitter {
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
-        key: key2,
+        key,
         command: options2
       });
     }
@@ -964,9 +966,9 @@ class Client extends EventEmitter {
       });
     }
   }
-  async exists(key2) {
+  async exists(key) {
     try {
-      await this.headObject(key2);
+      await this.headObject(key);
       return true;
     } catch (err) {
       if (err.name === "NoSuchKey") return false;
@@ -974,10 +976,10 @@ class Client extends EventEmitter {
       throw err;
     }
   }
-  async deleteObject(key2) {
+  async deleteObject(key) {
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2
+      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
     };
     try {
       const response = await this.sendCommand(new clientS3.DeleteObjectCommand(options2));
@@ -985,7 +987,7 @@ class Client extends EventEmitter {
       return response;
     } catch (error) {
       throw this.errorProxy(error, {
-        key: key2,
+        key,
         command: options2
       });
     }
@@ -996,8 +998,8 @@ class Client extends EventEmitter {
       const options2 = {
         Bucket: this.config.bucket,
         Delete: {
-          Objects: keys2.map((key2) => ({
-            Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key2) : key2
+          Objects: keys2.map((key) => ({
+            Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
           }))
         }
       };
@@ -1006,7 +1008,7 @@ class Client extends EventEmitter {
         return response;
       } catch (error) {
         throw this.errorProxy(error, {
-          key,
+          keys: keys2,
           command: options2
         });
       }
@@ -1155,8 +1157,8 @@ class Client extends EventEmitter {
         break;
       }
     }
-    this.emit("getContinuationTokenAfterOffset", continuationToken, params);
-    return continuationToken;
+    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+    return continuationToken || null;
   }
   async getKeysPage(params = {}) {
     const {
@@ -1197,24 +1199,23 @@ class Client extends EventEmitter {
   }
   async moveAllObjects({ prefixFrom, prefixTo }) {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
-    const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key2) => {
-      const to = key2.replace(prefixFrom, prefixTo);
+    const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
+      const to = key.replace(prefixFrom, prefixTo);
       try {
         await this.moveObject({
-          from: key2,
+          from: key,
           to
         });
         return to;
       } catch (error) {
         throw this.errorProxy(error, {
-          from: key2,
+          from: key,
           to
         });
       }
     });
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
-      console.log({ errors });
       throw new Error("Some objects could not be moved");
     }
     return results;
@@ -1223,14 +1224,14 @@ class Client extends EventEmitter {
 
 async function dynamicCrypto() {
   let lib;
-  if (process) {
+  if (typeof process !== "undefined") {
     try {
       const { webcrypto } = await import('crypto');
       lib = webcrypto;
     } catch (error) {
       throw new Error("Crypto API not available");
     }
-  } else if (window) {
+  } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
   if (!lib) throw new Error("Could not load any crypto library");
@@ -1295,7 +1296,7 @@ async function getKeyMaterial(passphrase, salt) {
   );
 }
 function arrayBufferToBase64(buffer) {
-  if (lodashEs.isObject(process)) {
+  if (typeof process !== "undefined") {
     return Buffer.from(buffer).toString("base64");
   } else {
     const binary = String.fromCharCode.apply(null, new Uint8Array(buffer));
@@ -1303,7 +1304,7 @@ function arrayBufferToBase64(buffer) {
   }
 }
 function base64ToArrayBuffer(base64) {
-  if (lodashEs.isObject(process)) {
+  if (typeof process !== "undefined") {
     return new Uint8Array(Buffer.from(base64, "base64"));
   } else {
     const binaryString = window.atob(base64);
@@ -2167,7 +2168,7 @@ function requireSign () {
 		if ($isNaN(number) || number === 0) {
 			return number;
 		}
-		return number < 0 ? -1 : +1;
+		return number < 0 ? -1 : 1;
 	};
 	return sign;
 }
@@ -3478,7 +3479,7 @@ class Schema {
     } = args;
     this.name = name;
     this.version = version;
-    this.attributes = attributes;
+    this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
     this.options = lodashEs.merge({}, this.defaultOptions(), options);
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
@@ -3582,7 +3583,11 @@ class Schema {
       map: this.map
     };
     for (const [name, definition] of Object.entries(this.attributes)) {
-      data.attributes[name] = JSON.stringify(definition);
+      if (typeof definition !== "string") {
+        data.attributes[name] = JSON.stringify(definition);
+      } else {
+        data.attributes[name] = definition;
+      }
     }
     return data;
   }
@@ -3590,7 +3595,7 @@ class Schema {
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
       for (const action of actions) {
         const value = lodashEs.get(resourceItem, attribute);
-        if (value !== void 0) {
+        if (value !== void 0 && typeof SchemaActions[action] === "function") {
           lodashEs.set(resourceItem, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator
@@ -3627,1163 +3632,673 @@ class Schema {
   }
 }
 
-class ResourceIdsReader extends EventEmitter {
-  constructor({ resource }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.stream = new web.ReadableStream({
-      highWaterMark: this.client.parallelism * 3,
-      start: this._start.bind(this),
-      pull: this._pull.bind(this),
-      cancel: this._cancel.bind(this)
-    });
-  }
-  build() {
-    return this.stream.getReader();
-  }
-  async _start(controller) {
-    this.controller = controller;
-    this.continuationToken = null;
-    this.closeNextIteration = false;
-  }
-  async _pull(controller) {
-    if (this.closeNextIteration) {
-      controller.close();
-      return;
-    }
-    const response = await this.client.listObjects({
-      prefix: `resource=${this.resource.name}`,
-      continuationToken: this.continuationToken
-    });
-    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
-    this.continuationToken = response.NextContinuationToken;
-    this.enqueue(keys);
-    if (!response.IsTruncated) this.closeNextIteration = true;
-  }
-  enqueue(ids) {
-    ids.forEach((key) => {
-      this.controller.enqueue(key);
-      this.emit("id", key);
-    });
-  }
-  _cancel(reason) {
-    console.warn("Stream cancelled", reason);
-  }
+// shim for using process in browser
+// based off https://github.com/defunctzombie/node-process/blob/master/browser.js
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+var cachedSetTimeout = defaultSetTimout;
+var cachedClearTimeout = defaultClearTimeout;
+if (typeof global.setTimeout === 'function') {
+    cachedSetTimeout = setTimeout;
+}
+if (typeof global.clearTimeout === 'function') {
+    cachedClearTimeout = clearTimeout;
 }
 
-class ResourceIdsPageReader extends ResourceIdsReader {
-  enqueue(ids) {
-    this.controller.enqueue(ids);
-    this.emit("page", ids);
-  }
-}
-
-class ResourceReader extends EventEmitter {
-  constructor({ resource }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.input = new ResourceIdsPageReader({ resource: this.resource });
-    this.output = new web.TransformStream(
-      { transform: this._transform.bind(this) },
-      { highWaterMark: this.client.parallelism * 2 },
-      { highWaterMark: 1 }
-    );
-    this.stream = this.input.stream.pipeThrough(this.output);
-  }
-  build() {
-    return this.stream.getReader();
-  }
-  async _transform(chunk, controller) {
-    await promisePool.PromisePool.for(chunk).withConcurrency(this.client.parallelism).process(async (id) => {
-      const data = await this.resource.get(id);
-      controller.enqueue(data);
-      return data;
-    });
-  }
-}
-
-class ResourceWriter extends EventEmitter {
-  constructor({ resource }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.stream = new web.WritableStream({
-      start: this._start.bind(this),
-      write: this._write.bind(this),
-      close: this._close.bind(this),
-      abort: this._abort.bind(this)
-    });
-  }
-  build() {
-    return this.stream.getWriter();
-  }
-  async _start(controller) {
-    this.controller = controller;
-  }
-  async _write(chunk, controller) {
-    const resource = this.resource;
-    await promisePool.PromisePool.for([].concat(chunk)).withConcurrency(this.client.parallelism).process(async (item) => {
-      await resource.insert(item);
-    });
-  }
-  async _close(controller) {
-  }
-  async _abort(reason) {
-    console.error("Stream aborted:", reason);
-  }
-}
-
-function streamToString(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-  });
-}
-
-class Resource extends EventEmitter {
-  constructor({
-    name,
-    client,
-    version = "1",
-    options = {},
-    attributes = {},
-    parallelism = 10,
-    passphrase = "secret",
-    observers = []
-  }) {
-    super();
-    this.name = name;
-    this.client = client;
-    this.observers = observers;
-    this.parallelism = parallelism;
-    this.passphrase = passphrase ?? "secret";
-    this.version = version;
-    this.options = {
-      cache: false,
-      autoDecrypt: true,
-      timestamps: false,
-      partitions: {},
-      // Changed from partitionRules to partitions (named)
-      paranoid: true,
-      // Security flag for dangerous operations
-      ...options
-    };
-    this.hooks = {
-      preInsert: [],
-      afterInsert: [],
-      preUpdate: [],
-      afterUpdate: [],
-      preDelete: [],
-      afterDelete: []
-    };
-    this.attributes = attributes || {};
-    if (options.timestamps) {
-      this.attributes.createdAt = "string|optional";
-      this.attributes.updatedAt = "string|optional";
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
-          fields: {
-            createdAt: "date|maxlength:10"
-          }
-        };
-      }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
-          fields: {
-            updatedAt: "date|maxlength:10"
-          }
-        };
-      }
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
     }
-    this.schema = new Schema({
-      name,
-      attributes: this.attributes,
-      passphrase,
-      version: this.version,
-      options: this.options
-    });
-    this.validatePartitions();
-    this.setupPartitionHooks();
-  }
-  export() {
-    return this.schema.export();
-  }
-  /**
-   * Update resource attributes and rebuild schema
-   * @param {Object} newAttributes - New attributes definition
-   */
-  updateAttributes(newAttributes) {
-    const oldAttributes = this.attributes;
-    this.attributes = newAttributes;
-    if (this.options.timestamps) {
-      newAttributes.createdAt = "string|optional";
-      newAttributes.updatedAt = "string|optional";
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
-          fields: {
-            createdAt: "date|maxlength:10"
-          }
-        };
-      }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
-          fields: {
-            updatedAt: "date|maxlength:10"
-          }
-        };
-      }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
     }
-    this.schema = new Schema({
-      name: this.name,
-      attributes: newAttributes,
-      passphrase: this.passphrase,
-      version: this.version,
-      options: this.options
-    });
-    this.validatePartitions();
-    this.setupPartitionHooks();
-    return { oldAttributes, newAttributes };
-  }
-  /**
-   * Add a hook function for a specific event
-   * @param {string} event - Hook event (preInsert, afterInsert, etc.)
-   * @param {Function} fn - Hook function
-   */
-  addHook(event, fn) {
-    if (this.hooks[event]) {
-      this.hooks[event].push(fn.bind(this));
-    }
-  }
-  /**
-   * Execute hooks for a specific event
-   * @param {string} event - Hook event
-   * @param {*} data - Data to pass to hooks
-   * @returns {*} Modified data
-   */
-  async executeHooks(event, data) {
-    if (!this.hooks[event]) return data;
-    let result = data;
-    for (const hook of this.hooks[event]) {
-      result = await hook(result);
-    }
-    return result;
-  }
-  /**
-   * Setup automatic partition hooks
-   */
-  setupPartitionHooks() {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    this.addHook("afterInsert", async (data) => {
-      await this.createPartitionReferences(data);
-      return data;
-    });
-    this.addHook("afterDelete", async (data) => {
-      await this.deletePartitionReferences(data);
-      return data;
-    });
-  }
-  async validate(data) {
-    const result = {
-      original: lodashEs.cloneDeep(data),
-      isValid: false,
-      errors: []
-    };
-    const check = await this.schema.validate(data, { mutateOriginal: true });
-    if (check === true) {
-      result.isValid = true;
-    } else {
-      result.errors = check;
-    }
-    result.data = data;
-    return result;
-  }
-  /**
-   * Validate that all partition fields exist in current resource attributes
-   * @throws {Error} If partition fields don't exist in current schema
-   */
-  validatePartitions() {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    const currentAttributes = Object.keys(this.attributes || {});
-    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
-      if (!partitionDef.fields) {
-        continue;
-      }
-      for (const fieldName of Object.keys(partitionDef.fields)) {
-        if (!currentAttributes.includes(fieldName)) {
-          throw new Error(
-            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. Available fields: ${currentAttributes.join(", ")}. This version of resource does not have support for this partition.`
-          );
-        }
-      }
-    }
-  }
-  /**
-   * Apply a single partition rule to a field value
-   * @param {*} value - The field value
-   * @param {string} rule - The partition rule
-   * @returns {*} Transformed value
-   */
-  applyPartitionRule(value, rule) {
-    if (value === void 0 || value === null) {
-      return value;
-    }
-    let transformedValue = value;
-    if (typeof rule === "string" && rule.includes("maxlength:")) {
-      const maxLengthMatch = rule.match(/maxlength:(\d+)/);
-      if (maxLengthMatch) {
-        const maxLength = parseInt(maxLengthMatch[1]);
-        if (typeof transformedValue === "string" && transformedValue.length > maxLength) {
-          transformedValue = transformedValue.substring(0, maxLength);
-        }
-      }
-    }
-    if (rule.includes("date")) {
-      if (transformedValue instanceof Date) {
-        transformedValue = transformedValue.toISOString().split("T")[0];
-      } else if (typeof transformedValue === "string") {
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
         try {
-          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
-            transformedValue = transformedValue.split("T")[0];
-          } else {
-            const date = new Date(transformedValue);
-            if (!isNaN(date.getTime())) {
-              transformedValue = date.toISOString().split("T")[0];
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
+}
+
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
+
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
             }
-          }
-        } catch (e) {
         }
-      }
+        queueIndex = -1;
+        len = queue.length;
     }
-    return transformedValue;
-  }
-  /**
-   * Get the main resource key (always versioned path)
-   * @param {string} id - Resource ID
-   * @returns {string} The main S3 key path
-   */
-  getResourceKey(id) {
-    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
-  }
-  /**
-   * Get partition reference key for a specific partition
-   * @param {string} partitionName - Name of the partition
-   * @param {string} id - Resource ID  
-   * @param {Object} data - Data object for partition value generation
-   * @returns {string|null} The partition reference S3 key path
-   */
-  getPartitionKey(partitionName, id, data) {
-    const partition = this.options.partitions[partitionName];
-    if (!partition) {
-      throw new Error(`Partition '${partitionName}' not found`);
-    }
-    const partitionSegments = [];
-    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
-    for (const [fieldName, rule] of sortedFields) {
-      const fieldValue = this.applyPartitionRule(data[fieldName], rule);
-      if (fieldValue === void 0 || fieldValue === null) {
-        return null;
-      }
-      partitionSegments.push(`${fieldName}=${fieldValue}`);
-    }
-    if (partitionSegments.length === 0) {
-      return null;
-    }
-    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-  }
-  async insert({ id, ...attributes }) {
-    if (this.options.timestamps) {
-      attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
-      attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    }
-    const preProcessedData = await this.executeHooks("preInsert", attributes);
-    const {
-      errors,
-      isValid,
-      data: validated
-    } = await this.validate(preProcessedData);
-    if (!isValid) {
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes: preProcessedData,
-        validation: errors
-      });
-    }
-    if (!id && id !== 0) id = idGenerator();
-    const metadata = await this.schema.mapper(validated);
-    const key = this.getResourceKey(id);
-    await this.client.putObject({
-      metadata,
-      key,
-      body: ""
-      // Empty body for metadata-only objects
-    });
-    const final = lodashEs.merge({ id }, validated);
-    await this.executeHooks("afterInsert", final);
-    this.emit("insert", final);
-    return final;
-  }
-  async get(id) {
-    const key = this.getResourceKey(id);
-    const request = await this.client.headObject(key);
-    const objectVersion = this.extractVersionFromKey(key) || this.version;
-    const schema = await this.getSchemaForVersion(objectVersion);
-    let data = await schema.unmapper(request.Metadata);
-    data.id = id;
-    data._contentLength = request.ContentLength;
-    data._lastModified = request.LastModified;
-    data.mimeType = request.ContentType || null;
-    if (request.VersionId) data._versionId = request.VersionId;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-    data.definitionHash = this.getDefinitionHash();
-    data._hasContent = request.ContentLength > 0;
-    this.emit("get", data);
-    return data;
-  }
-  async exists(id) {
-    try {
-      const key = this.getResourceKey(id);
-      await this.client.headObject(key);
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-  async update(id, attributes) {
-    const live = await this.get(id);
-    if (this.options.timestamps) {
-      attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    }
-    const preProcessedData = await this.executeHooks("preUpdate", attributes);
-    const attrs = lodashEs.merge(live, preProcessedData);
-    delete attrs.id;
-    const { isValid, errors, data: validated } = await this.validate(attrs);
-    if (!isValid) {
-      throw new InvalidResourceItem({
-        bucket: this.client.bucket,
-        resourceName: this.name,
-        attributes: preProcessedData,
-        validation: errors
-      });
-    }
-    const key = this.getResourceKey(id);
-    let existingBody = "";
-    let existingContentType = void 0;
-    try {
-      const existingObject = await this.client.getObject(key);
-      if (existingObject.ContentLength > 0) {
-        existingBody = Buffer.from(await existingObject.Body.transformToByteArray());
-        existingContentType = existingObject.ContentType;
-      }
-    } catch (error) {
-    }
-    await this.client.putObject({
-      key,
-      body: existingBody,
-      contentType: existingContentType,
-      metadata: await this.schema.mapper(validated)
-    });
-    validated.id = id;
-    await this.executeHooks("afterUpdate", validated);
-    this.emit("update", preProcessedData, validated);
-    return validated;
-  }
-  async delete(id) {
-    let objectData;
-    try {
-      objectData = await this.get(id);
-    } catch (error) {
-      objectData = { id };
-    }
-    await this.executeHooks("preDelete", objectData);
-    const key = this.getResourceKey(id);
-    const response = await this.client.deleteObject(key);
-    await this.executeHooks("afterDelete", objectData);
-    this.emit("delete", id);
-    return response;
-  }
-  async upsert({ id, ...attributes }) {
-    const exists = await this.exists(id);
-    if (exists) {
-      return this.update(id, attributes);
-    }
-    return this.insert({ id, ...attributes });
-  }
-  async count({ partition = null, partitionValues = {} } = {}) {
-    let prefix;
-    if (partition && Object.keys(partitionValues).length > 0) {
-      const partitionDef = this.options.partitions[partition];
-      if (!partitionDef) {
-        throw new Error(`Partition '${partition}' not found`);
-      }
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
+function nextTick(fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
         }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+}
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+var env = {};
+
+var browser$1 = {
+  env: env};
+
+var inherits;
+if (typeof Object.create === 'function'){
+  inherits = function inherits(ctor, superCtor) {
+    // implementation from standard node.js 'util' module
+    ctor.super_ = superCtor;
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
       }
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
+    });
+  };
+} else {
+  inherits = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor;
+    var TempCtor = function () {};
+    TempCtor.prototype = superCtor.prototype;
+    ctor.prototype = new TempCtor();
+    ctor.prototype.constructor = ctor;
+  };
+}
+
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+var formatRegExp = /%[sdj%]/g;
+function format(f) {
+  if (!isString(f)) {
+    var objects = [];
+    for (var i = 0; i < arguments.length; i++) {
+      objects.push(inspect(arguments[i]));
+    }
+    return objects.join(' ');
+  }
+
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  var str = String(f).replace(formatRegExp, function(x) {
+    if (x === '%%') return '%';
+    if (i >= len) return x;
+    switch (x) {
+      case '%s': return String(args[i++]);
+      case '%d': return Number(args[i++]);
+      case '%j':
+        try {
+          return JSON.stringify(args[i++]);
+        } catch (_) {
+          return '[Circular]';
+        }
+      default:
+        return x;
+    }
+  });
+  for (var x = args[i]; i < len; x = args[++i]) {
+    if (isNull(x) || !isObject(x)) {
+      str += ' ' + x;
     } else {
-      prefix = `resource=${this.name}/v=${this.version}`;
+      str += ' ' + inspect(x);
     }
-    const count = await this.client.count({
-      prefix
-    });
-    this.emit("count", count);
-    return count;
   }
-  async insertMany(objects) {
-    const { results } = await promisePool.PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
-    }).process(async (attributes) => {
-      const result = await this.insert(attributes);
-      return result;
-    });
-    this.emit("insertMany", objects.length);
-    return results;
-  }
-  async deleteMany(ids) {
-    const packages = lodashEs.chunk(
-      ids.map((id) => this.getResourceKey(id)),
-      1e3
-    );
-    const { results } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
-    }).process(async (keys) => {
-      const response = await this.client.deleteObjects(keys);
-      keys.forEach((key) => {
-        const parts = key.split("/");
-        const idPart = parts.find((part) => part.startsWith("id="));
-        const id = idPart ? idPart.replace("id=", "") : null;
-        if (id) {
-          this.emit("deleted", id);
-          this.observers.map((x) => x.emit("deleted", this.name, id));
-        }
-      });
-      return response;
-    });
-    this.emit("deleteMany", ids.length);
-    return results;
-  }
-  async deleteAll() {
-    if (this.options.paranoid !== false) {
-      throw new Error(
-        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
-      );
-    }
-    const prefix = `resource=${this.name}/v=${this.version}`;
-    const deletedCount = await this.client.deleteAll({ prefix });
-    this.emit("deleteAll", {
-      version: this.version,
-      prefix,
-      deletedCount
-    });
-    return { deletedCount, version: this.version };
-  }
-  /**
-   * Delete all data for this resource across ALL versions
-   * @returns {Promise<Object>} Deletion report
-   */
-  async deleteAllData() {
-    if (this.options.paranoid !== false) {
-      throw new Error(
-        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
-      );
-    }
-    const prefix = `resource=${this.name}`;
-    const deletedCount = await this.client.deleteAll({ prefix });
-    this.emit("deleteAllData", {
-      resource: this.name,
-      prefix,
-      deletedCount
-    });
-    return { deletedCount, resource: this.name };
-  }
-  async listIds({ partition = null, partitionValues = {} } = {}) {
-    let prefix;
-    if (partition && Object.keys(partitionValues).length > 0) {
-      const partitionDef = this.options.partitions[partition];
-      if (!partitionDef) {
-        throw new Error(`Partition '${partition}' not found`);
-      }
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
-    } else {
-      prefix = `resource=${this.name}/v=${this.version}`;
-    }
-    const keys = await this.client.getAllKeys({
-      prefix
-    });
-    const ids = keys.map((key) => {
-      const parts = key.split("/");
-      const idPart = parts.find((part) => part.startsWith("id="));
-      return idPart ? idPart.replace("id=", "") : null;
-    }).filter(Boolean);
-    this.emit("listIds", ids.length);
-    return ids;
-  }
-  /**
-   * List objects by partition name and values
-   * @param {Object} partitionOptions - Partition options
-   * @param {Object} options - Listing options
-   * @returns {Array} Array of objects
-   */
-  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
-    const { limit, offset = 0 } = options;
-    const ids = await this.listIds({ partition, partitionValues });
-    let filteredIds = ids.slice(offset);
-    if (limit) {
-      filteredIds = filteredIds.slice(0, limit);
-    }
-    const { results } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).process(async (id) => {
-      return await this.get(id);
-    });
-    this.emit("listByPartition", { partition, partitionValues, count: results.length });
-    return results;
-  }
-  async getMany(ids) {
-    const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
-      this.emit("id", id);
-      const data = await this.get(id);
-      this.emit("data", data);
-      return data;
-    });
-    this.emit("getMany", ids.length);
-    return results;
-  }
-  async getAll() {
-    let ids = await this.listIds();
-    if (ids.length === 0) return [];
-    const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
-      const data = await this.get(id);
-      return data;
-    });
-    this.emit("getAll", results.length);
-    return results;
-  }
-  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
-    const allIds = await this.listIds({ partition, partitionValues });
-    const totalItems = allIds.length;
-    const totalPages = Math.ceil(totalItems / size);
-    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
-    const items = await Promise.all(
-      paginatedIds.map((id) => this.get(id))
-    );
-    const result = {
-      items,
-      totalItems,
-      page: offset,
-      pageSize: size,
-      totalPages
+  return str;
+}
+
+// Mark that a method should not be used.
+// Returns a modified function which warns once by default.
+// If --no-deprecation is set, then it is a no-op.
+function deprecate(fn, msg) {
+  // Allow for deprecating things in the process of starting up.
+  if (isUndefined(global.process)) {
+    return function() {
+      return deprecate(fn, msg).apply(this, arguments);
     };
-    this.emit("page", result);
-    return result;
   }
-  readable() {
-    const stream = new ResourceReader({ resource: this });
-    return stream.build();
+
+  if (browser$1.noDeprecation === true) {
+    return fn;
   }
-  writable() {
-    const stream = new ResourceWriter({ resource: this });
-    return stream.build();
-  }
-  /**
-   * Store binary content associated with a resource
-   * @param {string} id - Resource ID
-   * @param {Buffer} buffer - Binary content
-   * @param {string} contentType - Optional content type
-   */
-  async setContent(id, buffer, contentType = "application/octet-stream") {
-    if (!Buffer.isBuffer(buffer)) {
-      throw new Error("Content must be a Buffer");
+
+  var warned = false;
+  function deprecated() {
+    if (!warned) {
+      if (browser$1.throwDeprecation) {
+        throw new Error(msg);
+      } else if (browser$1.traceDeprecation) {
+        console.trace(msg);
+      } else {
+        console.error(msg);
+      }
+      warned = true;
     }
-    const key = this.getResourceKey(id);
-    let existingMetadata = {};
-    try {
-      const existingObject = await this.client.headObject(key);
-      existingMetadata = existingObject.Metadata || {};
-    } catch (error) {
-    }
-    const response = await this.client.putObject({
-      key,
-      body: buffer,
-      contentType,
-      metadata: existingMetadata
-      // Preserve existing metadata
-    });
-    this.emit("setContent", id, buffer.length, contentType);
-    return response;
+    return fn.apply(this, arguments);
   }
-  /**
-   * Retrieve binary content associated with a resource
-   * @param {string} id - Resource ID
-   * @returns {Object} Object with buffer and contentType
-   */
-  async content(id) {
-    const key = this.getResourceKey(id);
-    try {
-      const response = await this.client.getObject(key);
-      const buffer = Buffer.from(await response.Body.transformToByteArray());
-      const contentType = response.ContentType || null;
-      this.emit("content", id, buffer.length, contentType);
-      return {
-        buffer,
-        contentType
+
+  return deprecated;
+}
+
+var debugs = {};
+var debugEnviron;
+function debuglog(set) {
+  if (isUndefined(debugEnviron))
+    debugEnviron = browser$1.env.NODE_DEBUG || '';
+  set = set.toUpperCase();
+  if (!debugs[set]) {
+    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
+      var pid = 0;
+      debugs[set] = function() {
+        var msg = format.apply(null, arguments);
+        console.error('%s %d: %s', set, pid, msg);
       };
-    } catch (error) {
-      if (error.name === "NoSuchKey") {
-        return {
-          buffer: null,
-          contentType: null
-        };
-      }
-      throw error;
-    }
-  }
-  /**
-   * Check if binary content exists for a resource
-   * @param {string} id - Resource ID
-   * @returns {boolean}
-   */
-  async hasContent(id) {
-    const key = this.getResourceKey(id);
-    try {
-      const response = await this.client.headObject(key);
-      return response.ContentLength > 0;
-    } catch (error) {
-      return false;
-    }
-  }
-  /**
-   * Delete binary content but preserve metadata
-   * @param {string} id - Resource ID
-   */
-  async deleteContent(id) {
-    const key = this.getResourceKey(id);
-    const existingObject = await this.client.headObject(key);
-    const existingMetadata = existingObject.Metadata || {};
-    const response = await this.client.putObject({
-      key,
-      body: "",
-      metadata: existingMetadata
-    });
-    this.emit("deleteContent", id);
-    return response;
-  }
-  /**
-   * Generate definition hash for this resource
-   * @returns {string} SHA256 hash of the schema definition
-   */
-  getDefinitionHash() {
-    const exportedSchema = this.schema.export();
-    const stableString = jsonStableStringify(exportedSchema);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
-  }
-  /**
-   * Extract version from S3 key
-   * @param {string} key - S3 object key
-   * @returns {string|null} Version string or null
-   */
-  extractVersionFromKey(key) {
-    const parts = key.split("/");
-    const versionPart = parts.find((part) => part.startsWith("v="));
-    return versionPart ? versionPart.replace("v=", "") : null;
-  }
-  /**
-   * Get schema for a specific version
-   * @param {string} version - Version string (e.g., 'v0', 'v1')
-   * @returns {Object} Schema object for the version
-   */
-  async getSchemaForVersion(version) {
-    return this.schema;
-  }
-  /**
-   * Create partition references after insert
-   * @param {Object} data - Inserted object data
-   */
-  async createPartitionReferences(data) {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
-      if (partitionKey) {
-        const referenceMetadata = {
-          _ref: this.getResourceKey(data.id),
-          _partition: partitionName,
-          _id: data.id
-        };
-        await this.client.putObject({
-          key: partitionKey,
-          metadata: referenceMetadata,
-          body: ""
-          // Partition references are metadata-only
-        });
-      }
-    }
-  }
-  /**
-   * Delete partition references after delete
-   * @param {Object} data - Deleted object data
-   */
-  async deletePartitionReferences(data) {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    const keysToDelete = [];
-    for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
-      if (partitionKey) {
-        keysToDelete.push(partitionKey);
-      }
-    }
-    if (keysToDelete.length > 0) {
-      try {
-        await this.client.deleteObjects(keysToDelete);
-      } catch (error) {
-        console.warn("Some partition references could not be deleted:", error.message);
-      }
-    }
-  }
-}
-
-class Database extends EventEmitter {
-  constructor(options) {
-    super();
-    this.version = "1";
-    this.s3dbVersion = (() => {
-      try {
-        return true ? "3.3.2" : "latest";
-      } catch (e) {
-        return "latest";
-      }
-    })();
-    this.resources = {};
-    this.savedMetadata = null;
-    this.options = options;
-    this.verbose = options.verbose || false;
-    this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
-    this.cache = options.cache;
-    this.passphrase = options.passphrase || "secret";
-    this.client = options.client || new Client({
-      verbose: this.verbose,
-      parallelism: this.parallelism,
-      connectionString: options.connectionString
-    });
-    this.bucket = this.client.bucket;
-    this.keyPrefix = this.client.keyPrefix;
-  }
-  async connect() {
-    await this.startPlugins();
-    let metadata = null;
-    if (await this.client.exists(`s3db.json`)) {
-      const request = await this.client.getObject(`s3db.json`);
-      metadata = JSON.parse(await streamToString(request?.Body));
     } else {
-      metadata = this.blankMetadataStructure();
-      await this.uploadMetadataFile();
+      debugs[set] = function() {};
     }
-    this.savedMetadata = metadata;
-    const definitionChanges = this.detectDefinitionChanges(metadata);
-    for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
-      const currentVersion = resourceMetadata.currentVersion || "v0";
-      const versionData = resourceMetadata.versions?.[currentVersion];
-      if (versionData) {
-        this.resources[name] = new Resource({
-          name,
-          client: this.client,
-          version: currentVersion,
-          options: {
-            ...versionData.options,
-            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
-          },
-          attributes: versionData.attributes,
-          parallelism: this.parallelism,
-          passphrase: this.passphrase,
-          observers: [this]
-        });
-      }
-    }
-    if (definitionChanges.length > 0) {
-      this.emit("resourceDefinitionsChanged", {
-        changes: definitionChanges,
-        metadata: this.savedMetadata
-      });
-    }
-    this.emit("connected", /* @__PURE__ */ new Date());
   }
-  /**
-   * Detect changes in resource definitions compared to saved metadata
-   * @param {Object} savedMetadata - The metadata loaded from s3db.json
-   * @returns {Array} Array of change objects
-   */
-  detectDefinitionChanges(savedMetadata) {
-    const changes = [];
-    for (const [name, currentResource] of Object.entries(this.resources)) {
-      const currentHash = this.generateDefinitionHash(currentResource.export());
-      const savedResource = savedMetadata.resources?.[name];
-      if (!savedResource) {
-        changes.push({
-          type: "new",
-          resourceName: name,
-          currentHash,
-          savedHash: null
-        });
+  return debugs[set];
+}
+
+/**
+ * Echos the value of a value. Trys to print the value out
+ * in the best way possible given the different types.
+ *
+ * @param {Object} obj The object to print out.
+ * @param {Object} opts Optional options object that alters the output.
+ */
+/* legacy: obj, showHidden, depth, colors*/
+function inspect(obj, opts) {
+  // default options
+  var ctx = {
+    seen: [],
+    stylize: stylizeNoColor
+  };
+  // legacy...
+  if (arguments.length >= 3) ctx.depth = arguments[2];
+  if (arguments.length >= 4) ctx.colors = arguments[3];
+  if (isBoolean(opts)) {
+    // legacy...
+    ctx.showHidden = opts;
+  } else if (opts) {
+    // got an "options" object
+    _extend(ctx, opts);
+  }
+  // set default options
+  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
+  if (isUndefined(ctx.depth)) ctx.depth = 2;
+  if (isUndefined(ctx.colors)) ctx.colors = false;
+  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
+  if (ctx.colors) ctx.stylize = stylizeWithColor;
+  return formatValue(ctx, obj, ctx.depth);
+}
+
+// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
+inspect.colors = {
+  'bold' : [1, 22],
+  'italic' : [3, 23],
+  'underline' : [4, 24],
+  'inverse' : [7, 27],
+  'white' : [37, 39],
+  'grey' : [90, 39],
+  'black' : [30, 39],
+  'blue' : [34, 39],
+  'cyan' : [36, 39],
+  'green' : [32, 39],
+  'magenta' : [35, 39],
+  'red' : [31, 39],
+  'yellow' : [33, 39]
+};
+
+// Don't use 'blue' not visible on cmd.exe
+inspect.styles = {
+  'special': 'cyan',
+  'number': 'yellow',
+  'boolean': 'yellow',
+  'undefined': 'grey',
+  'null': 'bold',
+  'string': 'green',
+  'date': 'magenta',
+  // "name": intentionally not styling
+  'regexp': 'red'
+};
+
+
+function stylizeWithColor(str, styleType) {
+  var style = inspect.styles[styleType];
+
+  if (style) {
+    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
+           '\u001b[' + inspect.colors[style][1] + 'm';
+  } else {
+    return str;
+  }
+}
+
+
+function stylizeNoColor(str, styleType) {
+  return str;
+}
+
+
+function arrayToHash(array) {
+  var hash = {};
+
+  array.forEach(function(val, idx) {
+    hash[val] = true;
+  });
+
+  return hash;
+}
+
+
+function formatValue(ctx, value, recurseTimes) {
+  // Provide a hook for user-specified inspect functions.
+  // Check that value is an object with an inspect function on it
+  if (ctx.customInspect &&
+      value &&
+      isFunction(value.inspect) &&
+      // Filter out the util module, it's inspect function is special
+      value.inspect !== inspect &&
+      // Also filter out any prototype objects using the circular check.
+      !(value.constructor && value.constructor.prototype === value)) {
+    var ret = value.inspect(recurseTimes, ctx);
+    if (!isString(ret)) {
+      ret = formatValue(ctx, ret, recurseTimes);
+    }
+    return ret;
+  }
+
+  // Primitive types cannot have properties
+  var primitive = formatPrimitive(ctx, value);
+  if (primitive) {
+    return primitive;
+  }
+
+  // Look up the keys of the object.
+  var keys = Object.keys(value);
+  var visibleKeys = arrayToHash(keys);
+
+  if (ctx.showHidden) {
+    keys = Object.getOwnPropertyNames(value);
+  }
+
+  // IE doesn't make error fields non-enumerable
+  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
+  if (isError(value)
+      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
+    return formatError(value);
+  }
+
+  // Some type of object without properties can be shortcutted.
+  if (keys.length === 0) {
+    if (isFunction(value)) {
+      var name = value.name ? ': ' + value.name : '';
+      return ctx.stylize('[Function' + name + ']', 'special');
+    }
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    }
+    if (isDate(value)) {
+      return ctx.stylize(Date.prototype.toString.call(value), 'date');
+    }
+    if (isError(value)) {
+      return formatError(value);
+    }
+  }
+
+  var base = '', array = false, braces = ['{', '}'];
+
+  // Make Array say that they are Array
+  if (isArray$1(value)) {
+    array = true;
+    braces = ['[', ']'];
+  }
+
+  // Make functions say that they are functions
+  if (isFunction(value)) {
+    var n = value.name ? ': ' + value.name : '';
+    base = ' [Function' + n + ']';
+  }
+
+  // Make RegExps say that they are RegExps
+  if (isRegExp(value)) {
+    base = ' ' + RegExp.prototype.toString.call(value);
+  }
+
+  // Make dates with properties first say the date
+  if (isDate(value)) {
+    base = ' ' + Date.prototype.toUTCString.call(value);
+  }
+
+  // Make error with message first say the error
+  if (isError(value)) {
+    base = ' ' + formatError(value);
+  }
+
+  if (keys.length === 0 && (!array || value.length == 0)) {
+    return braces[0] + base + braces[1];
+  }
+
+  if (recurseTimes < 0) {
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    } else {
+      return ctx.stylize('[Object]', 'special');
+    }
+  }
+
+  ctx.seen.push(value);
+
+  var output;
+  if (array) {
+    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
+  } else {
+    output = keys.map(function(key) {
+      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
+    });
+  }
+
+  ctx.seen.pop();
+
+  return reduceToSingleString(output, base, braces);
+}
+
+
+function formatPrimitive(ctx, value) {
+  if (isUndefined(value))
+    return ctx.stylize('undefined', 'undefined');
+  if (isString(value)) {
+    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
+                                             .replace(/'/g, "\\'")
+                                             .replace(/\\"/g, '"') + '\'';
+    return ctx.stylize(simple, 'string');
+  }
+  if (isNumber(value))
+    return ctx.stylize('' + value, 'number');
+  if (isBoolean(value))
+    return ctx.stylize('' + value, 'boolean');
+  // For some reason typeof null is "object", so special case here.
+  if (isNull(value))
+    return ctx.stylize('null', 'null');
+}
+
+
+function formatError(value) {
+  return '[' + Error.prototype.toString.call(value) + ']';
+}
+
+
+function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
+  var output = [];
+  for (var i = 0, l = value.length; i < l; ++i) {
+    if (hasOwnProperty(value, String(i))) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          String(i), true));
+    } else {
+      output.push('');
+    }
+  }
+  keys.forEach(function(key) {
+    if (!key.match(/^\d+$/)) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          key, true));
+    }
+  });
+  return output;
+}
+
+
+function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
+  var name, str, desc;
+  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
+  if (desc.get) {
+    if (desc.set) {
+      str = ctx.stylize('[Getter/Setter]', 'special');
+    } else {
+      str = ctx.stylize('[Getter]', 'special');
+    }
+  } else {
+    if (desc.set) {
+      str = ctx.stylize('[Setter]', 'special');
+    }
+  }
+  if (!hasOwnProperty(visibleKeys, key)) {
+    name = '[' + key + ']';
+  }
+  if (!str) {
+    if (ctx.seen.indexOf(desc.value) < 0) {
+      if (isNull(recurseTimes)) {
+        str = formatValue(ctx, desc.value, null);
       } else {
-        const currentVersion = savedResource.currentVersion || "v0";
-        const versionData = savedResource.versions?.[currentVersion];
-        const savedHash = versionData?.hash;
-        if (savedHash !== currentHash) {
-          changes.push({
-            type: "changed",
-            resourceName: name,
-            currentHash,
-            savedHash,
-            fromVersion: currentVersion,
-            toVersion: this.getNextVersion(savedResource.versions)
-          });
+        str = formatValue(ctx, desc.value, recurseTimes - 1);
+      }
+      if (str.indexOf('\n') > -1) {
+        if (array) {
+          str = str.split('\n').map(function(line) {
+            return '  ' + line;
+          }).join('\n').substr(2);
+        } else {
+          str = '\n' + str.split('\n').map(function(line) {
+            return '   ' + line;
+          }).join('\n');
         }
       }
-    }
-    for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
-      if (!this.resources[name]) {
-        const currentVersion = savedResource.currentVersion || "v0";
-        const versionData = savedResource.versions?.[currentVersion];
-        changes.push({
-          type: "deleted",
-          resourceName: name,
-          currentHash: null,
-          savedHash: versionData?.hash,
-          deletedVersion: currentVersion
-        });
-      }
-    }
-    return changes;
-  }
-  /**
-   * Generate a consistent hash for a resource definition
-   * @param {Object} definition - Resource definition to hash
-   * @returns {string} SHA256 hash
-   */
-  generateDefinitionHash(definition) {
-    const stableString = jsonStableStringify(definition);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
-  }
-  /**
-   * Get the next version number for a resource
-   * @param {Object} versions - Existing versions object
-   * @returns {string} Next version string (e.g., 'v1', 'v2')
-   */
-  getNextVersion(versions = {}) {
-    const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
-    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
-    return `v${maxVersion + 1}`;
-  }
-  async startPlugins() {
-    const db = this;
-    if (!lodashEs.isEmpty(this.plugins)) {
-      const plugins = this.plugins.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
-      const setupProms = plugins.map(async (plugin) => {
-        if (plugin.beforeSetup) await plugin.beforeSetup();
-        await plugin.setup(db);
-        if (plugin.afterSetup) await plugin.afterSetup();
-      });
-      await Promise.all(setupProms);
-      const startProms = plugins.map(async (plugin) => {
-        if (plugin.beforeStart) await plugin.beforeStart();
-        await plugin.start();
-        if (plugin.afterStart) await plugin.afterStart();
-      });
-      await Promise.all(startProms);
+    } else {
+      str = ctx.stylize('[Circular]', 'special');
     }
   }
-  async uploadMetadataFile() {
-    const metadata = {
-      version: this.version,
-      s3dbVersion: this.s3dbVersion,
-      lastUpdated: (/* @__PURE__ */ new Date()).toISOString(),
-      resources: {}
-    };
-    Object.entries(this.resources).forEach(([name, resource]) => {
-      const resourceDef = resource.export();
-      const definitionHash = this.generateDefinitionHash(resourceDef);
-      const existingResource = this.savedMetadata?.resources?.[name];
-      const currentVersion = existingResource?.currentVersion || "v0";
-      const existingVersionData = existingResource?.versions?.[currentVersion];
-      let version, isNewVersion;
-      if (!existingVersionData || existingVersionData.hash !== definitionHash) {
-        version = this.getNextVersion(existingResource?.versions);
-        isNewVersion = true;
-      } else {
-        version = currentVersion;
-        isNewVersion = false;
-      }
-      metadata.resources[name] = {
-        currentVersion: version,
-        partitions: resourceDef.options?.partitions || {},
-        versions: {
-          ...existingResource?.versions,
-          // Preserve previous versions
-          [version]: {
-            hash: definitionHash,
-            attributes: resourceDef.attributes,
-            options: resourceDef.options,
-            createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
-          }
-        }
-      };
-      if (resource.version !== version) {
-        resource.version = version;
-        resource.emit("versionUpdated", { oldVersion: currentVersion, newVersion: version });
-      }
-    });
-    await this.client.putObject({
-      key: "s3db.json",
-      body: JSON.stringify(metadata, null, 2),
-      contentType: "application/json"
-    });
-    this.savedMetadata = metadata;
-    this.emit("metadataUploaded", metadata);
-  }
-  blankMetadataStructure() {
-    return {
-      version: `1`,
-      s3dbVersion: this.s3dbVersion,
-      resources: {}
-    };
-  }
-  async createResource({ name, attributes, options = {} }) {
-    if (this.resources[name]) {
-      const existingResource = this.resources[name];
-      Object.assign(existingResource.options, {
-        cache: this.cache,
-        ...options
-      });
-      existingResource.updateAttributes(attributes);
-      await this.uploadMetadataFile();
-      this.emit("s3db.resourceUpdated", name);
-      return existingResource;
+  if (isUndefined(name)) {
+    if (array && key.match(/^\d+$/)) {
+      return str;
     }
-    const existingMetadata = this.savedMetadata?.resources?.[name];
-    const version = existingMetadata?.currentVersion || "v0";
-    const resource = new Resource({
-      name,
-      attributes,
-      observers: [this],
-      client: this.client,
-      version,
-      options: {
-        cache: this.cache,
-        ...options
-      }
-    });
-    this.resources[name] = resource;
-    await this.uploadMetadataFile();
-    this.emit("s3db.resourceCreated", name);
-    return resource;
-  }
-  resource(name) {
-    if (!this.resources[name]) {
-      return Promise.reject(`resource ${name} does not exist`);
+    name = JSON.stringify('' + key);
+    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
+      name = name.substr(1, name.length - 2);
+      name = ctx.stylize(name, 'name');
+    } else {
+      name = name.replace(/'/g, "\\'")
+                 .replace(/\\"/g, '"')
+                 .replace(/(^"|"$)/g, "'");
+      name = ctx.stylize(name, 'string');
     }
-    return this.resources[name];
   }
-}
-class S3db extends Database {
+
+  return name + ': ' + str;
 }
 
-class Cache extends EventEmitter {
-  // to implement:
-  async _set(key, data) {
+
+function reduceToSingleString(output, base, braces) {
+  var length = output.reduce(function(prev, cur) {
+    if (cur.indexOf('\n') >= 0) ;
+    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
+  }, 0);
+
+  if (length > 60) {
+    return braces[0] +
+           (base === '' ? '' : base + '\n ') +
+           ' ' +
+           output.join(',\n  ') +
+           ' ' +
+           braces[1];
   }
-  async _get(key) {
-  }
-  async _del(key) {
-  }
-  async _clear(key) {
-  }
-  // generic class methods
-  async set(key, data) {
-    await this._set(key, data);
-    this.emit("set", data);
-    return data;
-  }
-  async get(key) {
-    const data = await this._get(key);
-    this.emit("get", data);
-    return data;
-  }
-  async del(key) {
-    const data = await this._del(key);
-    this.emit("delete", data);
-    return data;
-  }
-  async clear() {
-    const data = await this._clear();
-    this.emit("clear", data);
-    return data;
-  }
+
+  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
 }
 
-class MemoryCache extends Cache {
-  constructor() {
-    super();
-    this.cache = {};
-  }
-  async _set(key, data) {
-    this.cache[key] = data;
-    return data;
-  }
-  async _get(key) {
-    return this.cache[key];
-  }
-  async _del(key) {
-    delete this.cache[key];
-    return true;
-  }
-  async _clear() {
-    this.cache = {};
-    return true;
-  }
+
+// NOTE: These type checking functions intentionally don't use `instanceof`
+// because it is fragile and can be easily faked with `Object.create()`.
+function isArray$1(ar) {
+  return Array.isArray(ar);
 }
 
-var global$1 = (typeof global !== "undefined" ? global :
-  typeof self !== "undefined" ? self :
-  typeof window !== "undefined" ? window : {});
+function isBoolean(arg) {
+  return typeof arg === 'boolean';
+}
+
+function isNull(arg) {
+  return arg === null;
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isString(arg) {
+  return typeof arg === 'string';
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+function isRegExp(re) {
+  return isObject(re) && objectToString(re) === '[object RegExp]';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isDate(d) {
+  return isObject(d) && objectToString(d) === '[object Date]';
+}
+
+function isError(e) {
+  return isObject(e) &&
+      (objectToString(e) === '[object Error]' || e instanceof Error);
+}
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function objectToString(o) {
+  return Object.prototype.toString.call(o);
+}
+
+function _extend(origin, add) {
+  // Don't do anything if add isn't an object
+  if (!add || !isObject(add)) return origin;
+
+  var keys = Object.keys(add);
+  var i = keys.length;
+  while (i--) {
+    origin[keys[i]] = add[keys[i]];
+  }
+  return origin;
+}
+function hasOwnProperty(obj, prop) {
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
 
 var lookup = [];
 var revLookup = [];
@@ -4982,7 +4497,7 @@ function write (buffer, value, offset, isLE, mLen, nBytes) {
 
 var toString = {}.toString;
 
-var isArray$1 = Array.isArray || function (arr) {
+var isArray = Array.isArray || function (arr) {
   return toString.call(arr) == '[object Array]';
 };
 
@@ -5021,8 +4536,8 @@ var INSPECT_MAX_BYTES = 50;
  * We detect these buggy browsers and set `Buffer.TYPED_ARRAY_SUPPORT` to `false` so they
  * get the Object implementation, which is slower but behaves correctly.
  */
-Buffer$1.TYPED_ARRAY_SUPPORT = global$1.TYPED_ARRAY_SUPPORT !== undefined
-  ? global$1.TYPED_ARRAY_SUPPORT
+Buffer$1.TYPED_ARRAY_SUPPORT = global.TYPED_ARRAY_SUPPORT !== undefined
+  ? global.TYPED_ARRAY_SUPPORT
   : true;
 
 /*
@@ -5266,7 +4781,7 @@ function fromObject (that, obj) {
       return fromArrayLike(that, obj)
     }
 
-    if (obj.type === 'Buffer' && isArray$1(obj.data)) {
+    if (obj.type === 'Buffer' && isArray(obj.data)) {
       return fromArrayLike(that, obj.data)
     }
   }
@@ -5331,7 +4846,7 @@ Buffer$1.isEncoding = function isEncoding (encoding) {
 };
 
 Buffer$1.concat = function concat (list, length) {
-  if (!isArray$1(list)) {
+  if (!isArray(list)) {
     throw new TypeError('"list" argument must be an Array of Buffers')
   }
 
@@ -5623,8 +5138,8 @@ function bidirectionalIndexOf (buffer, val, byteOffset, encoding, dir) {
     byteOffset = 0;
   } else if (byteOffset > 0x7fffffff) {
     byteOffset = 0x7fffffff;
-  } else if (byteOffset < -0x80000000) {
-    byteOffset = -0x80000000;
+  } else if (byteOffset < -2147483648) {
+    byteOffset = -2147483648;
   }
   byteOffset = +byteOffset;  // Coerce to Number.
   if (isNaN(byteOffset)) {
@@ -6383,7 +5898,7 @@ Buffer$1.prototype.writeIntBE = function writeIntBE (value, offset, byteLength, 
 Buffer$1.prototype.writeInt8 = function writeInt8 (value, offset, noAssert) {
   value = +value;
   offset = offset | 0;
-  if (!noAssert) checkInt(this, value, offset, 1, 0x7f, -0x80);
+  if (!noAssert) checkInt(this, value, offset, 1, 0x7f, -128);
   if (!Buffer$1.TYPED_ARRAY_SUPPORT) value = Math.floor(value);
   if (value < 0) value = 0xff + value + 1;
   this[offset] = (value & 0xff);
@@ -6393,7 +5908,7 @@ Buffer$1.prototype.writeInt8 = function writeInt8 (value, offset, noAssert) {
 Buffer$1.prototype.writeInt16LE = function writeInt16LE (value, offset, noAssert) {
   value = +value;
   offset = offset | 0;
-  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -0x8000);
+  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -32768);
   if (Buffer$1.TYPED_ARRAY_SUPPORT) {
     this[offset] = (value & 0xff);
     this[offset + 1] = (value >>> 8);
@@ -6406,7 +5921,7 @@ Buffer$1.prototype.writeInt16LE = function writeInt16LE (value, offset, noAssert
 Buffer$1.prototype.writeInt16BE = function writeInt16BE (value, offset, noAssert) {
   value = +value;
   offset = offset | 0;
-  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -0x8000);
+  if (!noAssert) checkInt(this, value, offset, 2, 0x7fff, -32768);
   if (Buffer$1.TYPED_ARRAY_SUPPORT) {
     this[offset] = (value >>> 8);
     this[offset + 1] = (value & 0xff);
@@ -6419,7 +5934,7 @@ Buffer$1.prototype.writeInt16BE = function writeInt16BE (value, offset, noAssert
 Buffer$1.prototype.writeInt32LE = function writeInt32LE (value, offset, noAssert) {
   value = +value;
   offset = offset | 0;
-  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000);
+  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -2147483648);
   if (Buffer$1.TYPED_ARRAY_SUPPORT) {
     this[offset] = (value & 0xff);
     this[offset + 1] = (value >>> 8);
@@ -6434,7 +5949,7 @@ Buffer$1.prototype.writeInt32LE = function writeInt32LE (value, offset, noAssert
 Buffer$1.prototype.writeInt32BE = function writeInt32BE (value, offset, noAssert) {
   value = +value;
   offset = offset | 0;
-  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -0x80000000);
+  if (!noAssert) checkInt(this, value, offset, 4, 0x7fffffff, -2147483648);
   if (value < 0) value = 0xffffffff + value + 1;
   if (Buffer$1.TYPED_ARRAY_SUPPORT) {
     this[offset] = (value >>> 24);
@@ -6760,737 +6275,6 @@ function isFastBuffer (obj) {
 // For Node v0.10 support. Remove this eventually.
 function isSlowBuffer (obj) {
   return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isFastBuffer(obj.slice(0, 0))
-}
-
-// shim for using process in browser
-// based off https://github.com/defunctzombie/node-process/blob/master/browser.js
-
-function defaultSetTimout() {
-    throw new Error('setTimeout has not been defined');
-}
-function defaultClearTimeout () {
-    throw new Error('clearTimeout has not been defined');
-}
-var cachedSetTimeout = defaultSetTimout;
-var cachedClearTimeout = defaultClearTimeout;
-if (typeof global$1.setTimeout === 'function') {
-    cachedSetTimeout = setTimeout;
-}
-if (typeof global$1.clearTimeout === 'function') {
-    cachedClearTimeout = clearTimeout;
-}
-
-function runTimeout(fun) {
-    if (cachedSetTimeout === setTimeout) {
-        //normal enviroments in sane situations
-        return setTimeout(fun, 0);
-    }
-    // if setTimeout wasn't available but was latter defined
-    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
-        cachedSetTimeout = setTimeout;
-        return setTimeout(fun, 0);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedSetTimeout(fun, 0);
-    } catch(e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
-            return cachedSetTimeout.call(null, fun, 0);
-        } catch(e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
-            return cachedSetTimeout.call(this, fun, 0);
-        }
-    }
-
-
-}
-function runClearTimeout(marker) {
-    if (cachedClearTimeout === clearTimeout) {
-        //normal enviroments in sane situations
-        return clearTimeout(marker);
-    }
-    // if clearTimeout wasn't available but was latter defined
-    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
-        cachedClearTimeout = clearTimeout;
-        return clearTimeout(marker);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedClearTimeout(marker);
-    } catch (e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
-            return cachedClearTimeout.call(null, marker);
-        } catch (e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
-            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
-            return cachedClearTimeout.call(this, marker);
-        }
-    }
-
-
-
-}
-var queue = [];
-var draining = false;
-var currentQueue;
-var queueIndex = -1;
-
-function cleanUpNextTick() {
-    if (!draining || !currentQueue) {
-        return;
-    }
-    draining = false;
-    if (currentQueue.length) {
-        queue = currentQueue.concat(queue);
-    } else {
-        queueIndex = -1;
-    }
-    if (queue.length) {
-        drainQueue();
-    }
-}
-
-function drainQueue() {
-    if (draining) {
-        return;
-    }
-    var timeout = runTimeout(cleanUpNextTick);
-    draining = true;
-
-    var len = queue.length;
-    while(len) {
-        currentQueue = queue;
-        queue = [];
-        while (++queueIndex < len) {
-            if (currentQueue) {
-                currentQueue[queueIndex].run();
-            }
-        }
-        queueIndex = -1;
-        len = queue.length;
-    }
-    currentQueue = null;
-    draining = false;
-    runClearTimeout(timeout);
-}
-function nextTick(fun) {
-    var args = new Array(arguments.length - 1);
-    if (arguments.length > 1) {
-        for (var i = 1; i < arguments.length; i++) {
-            args[i - 1] = arguments[i];
-        }
-    }
-    queue.push(new Item(fun, args));
-    if (queue.length === 1 && !draining) {
-        runTimeout(drainQueue);
-    }
-}
-// v8 likes predictible objects
-function Item(fun, array) {
-    this.fun = fun;
-    this.array = array;
-}
-Item.prototype.run = function () {
-    this.fun.apply(null, this.array);
-};
-var title = 'browser';
-var platform = 'browser';
-var browser = true;
-var env = {};
-var argv = [];
-var version = ''; // empty string to avoid regexp issues
-var versions = {};
-var release = {};
-var config = {};
-
-function noop() {}
-
-var on = noop;
-var addListener = noop;
-var once = noop;
-var off = noop;
-var removeListener = noop;
-var removeAllListeners = noop;
-var emit = noop;
-
-function binding$1(name) {
-    throw new Error('process.binding is not supported');
-}
-
-function cwd () { return '/' }
-function chdir (dir) {
-    throw new Error('process.chdir is not supported');
-}function umask() { return 0; }
-
-// from https://github.com/kumavis/browser-process-hrtime/blob/master/index.js
-var performance = global$1.performance || {};
-var performanceNow =
-  performance.now        ||
-  performance.mozNow     ||
-  performance.msNow      ||
-  performance.oNow       ||
-  performance.webkitNow  ||
-  function(){ return (new Date()).getTime() };
-
-// generate timestamp or delta
-// see http://nodejs.org/api/process.html#process_process_hrtime
-function hrtime(previousTimestamp){
-  var clocktime = performanceNow.call(performance)*1e-3;
-  var seconds = Math.floor(clocktime);
-  var nanoseconds = Math.floor((clocktime%1)*1e9);
-  if (previousTimestamp) {
-    seconds = seconds - previousTimestamp[0];
-    nanoseconds = nanoseconds - previousTimestamp[1];
-    if (nanoseconds<0) {
-      seconds--;
-      nanoseconds += 1e9;
-    }
-  }
-  return [seconds,nanoseconds]
-}
-
-var startTime = new Date();
-function uptime() {
-  var currentTime = new Date();
-  var dif = currentTime - startTime;
-  return dif / 1000;
-}
-
-var browser$1 = {
-  nextTick: nextTick,
-  title: title,
-  browser: browser,
-  env: env,
-  argv: argv,
-  version: version,
-  versions: versions,
-  on: on,
-  addListener: addListener,
-  once: once,
-  off: off,
-  removeListener: removeListener,
-  removeAllListeners: removeAllListeners,
-  emit: emit,
-  binding: binding$1,
-  cwd: cwd,
-  chdir: chdir,
-  umask: umask,
-  hrtime: hrtime,
-  platform: platform,
-  release: release,
-  config: config,
-  uptime: uptime
-};
-
-var inherits;
-if (typeof Object.create === 'function'){
-  inherits = function inherits(ctor, superCtor) {
-    // implementation from standard node.js 'util' module
-    ctor.super_ = superCtor;
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-  };
-} else {
-  inherits = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor;
-    var TempCtor = function () {};
-    TempCtor.prototype = superCtor.prototype;
-    ctor.prototype = new TempCtor();
-    ctor.prototype.constructor = ctor;
-  };
-}
-
-var formatRegExp = /%[sdj%]/g;
-function format(f) {
-  if (!isString(f)) {
-    var objects = [];
-    for (var i = 0; i < arguments.length; i++) {
-      objects.push(inspect(arguments[i]));
-    }
-    return objects.join(' ');
-  }
-
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  var str = String(f).replace(formatRegExp, function(x) {
-    if (x === '%%') return '%';
-    if (i >= len) return x;
-    switch (x) {
-      case '%s': return String(args[i++]);
-      case '%d': return Number(args[i++]);
-      case '%j':
-        try {
-          return JSON.stringify(args[i++]);
-        } catch (_) {
-          return '[Circular]';
-        }
-      default:
-        return x;
-    }
-  });
-  for (var x = args[i]; i < len; x = args[++i]) {
-    if (isNull(x) || !isObject(x)) {
-      str += ' ' + x;
-    } else {
-      str += ' ' + inspect(x);
-    }
-  }
-  return str;
-}
-
-// Mark that a method should not be used.
-// Returns a modified function which warns once by default.
-// If --no-deprecation is set, then it is a no-op.
-function deprecate(fn, msg) {
-  // Allow for deprecating things in the process of starting up.
-  if (isUndefined(global$1.process)) {
-    return function() {
-      return deprecate(fn, msg).apply(this, arguments);
-    };
-  }
-
-  if (browser$1.noDeprecation === true) {
-    return fn;
-  }
-
-  var warned = false;
-  function deprecated() {
-    if (!warned) {
-      if (browser$1.throwDeprecation) {
-        throw new Error(msg);
-      } else if (browser$1.traceDeprecation) {
-        console.trace(msg);
-      } else {
-        console.error(msg);
-      }
-      warned = true;
-    }
-    return fn.apply(this, arguments);
-  }
-
-  return deprecated;
-}
-
-var debugs = {};
-var debugEnviron;
-function debuglog(set) {
-  if (isUndefined(debugEnviron))
-    debugEnviron = browser$1.env.NODE_DEBUG || '';
-  set = set.toUpperCase();
-  if (!debugs[set]) {
-    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
-      var pid = 0;
-      debugs[set] = function() {
-        var msg = format.apply(null, arguments);
-        console.error('%s %d: %s', set, pid, msg);
-      };
-    } else {
-      debugs[set] = function() {};
-    }
-  }
-  return debugs[set];
-}
-
-/**
- * Echos the value of a value. Trys to print the value out
- * in the best way possible given the different types.
- *
- * @param {Object} obj The object to print out.
- * @param {Object} opts Optional options object that alters the output.
- */
-/* legacy: obj, showHidden, depth, colors*/
-function inspect(obj, opts) {
-  // default options
-  var ctx = {
-    seen: [],
-    stylize: stylizeNoColor
-  };
-  // legacy...
-  if (arguments.length >= 3) ctx.depth = arguments[2];
-  if (arguments.length >= 4) ctx.colors = arguments[3];
-  if (isBoolean(opts)) {
-    // legacy...
-    ctx.showHidden = opts;
-  } else if (opts) {
-    // got an "options" object
-    _extend(ctx, opts);
-  }
-  // set default options
-  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
-  if (isUndefined(ctx.depth)) ctx.depth = 2;
-  if (isUndefined(ctx.colors)) ctx.colors = false;
-  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
-  if (ctx.colors) ctx.stylize = stylizeWithColor;
-  return formatValue(ctx, obj, ctx.depth);
-}
-
-// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-inspect.colors = {
-  'bold' : [1, 22],
-  'italic' : [3, 23],
-  'underline' : [4, 24],
-  'inverse' : [7, 27],
-  'white' : [37, 39],
-  'grey' : [90, 39],
-  'black' : [30, 39],
-  'blue' : [34, 39],
-  'cyan' : [36, 39],
-  'green' : [32, 39],
-  'magenta' : [35, 39],
-  'red' : [31, 39],
-  'yellow' : [33, 39]
-};
-
-// Don't use 'blue' not visible on cmd.exe
-inspect.styles = {
-  'special': 'cyan',
-  'number': 'yellow',
-  'boolean': 'yellow',
-  'undefined': 'grey',
-  'null': 'bold',
-  'string': 'green',
-  'date': 'magenta',
-  // "name": intentionally not styling
-  'regexp': 'red'
-};
-
-
-function stylizeWithColor(str, styleType) {
-  var style = inspect.styles[styleType];
-
-  if (style) {
-    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
-           '\u001b[' + inspect.colors[style][1] + 'm';
-  } else {
-    return str;
-  }
-}
-
-
-function stylizeNoColor(str, styleType) {
-  return str;
-}
-
-
-function arrayToHash(array) {
-  var hash = {};
-
-  array.forEach(function(val, idx) {
-    hash[val] = true;
-  });
-
-  return hash;
-}
-
-
-function formatValue(ctx, value, recurseTimes) {
-  // Provide a hook for user-specified inspect functions.
-  // Check that value is an object with an inspect function on it
-  if (ctx.customInspect &&
-      value &&
-      isFunction(value.inspect) &&
-      // Filter out the util module, it's inspect function is special
-      value.inspect !== inspect &&
-      // Also filter out any prototype objects using the circular check.
-      !(value.constructor && value.constructor.prototype === value)) {
-    var ret = value.inspect(recurseTimes, ctx);
-    if (!isString(ret)) {
-      ret = formatValue(ctx, ret, recurseTimes);
-    }
-    return ret;
-  }
-
-  // Primitive types cannot have properties
-  var primitive = formatPrimitive(ctx, value);
-  if (primitive) {
-    return primitive;
-  }
-
-  // Look up the keys of the object.
-  var keys = Object.keys(value);
-  var visibleKeys = arrayToHash(keys);
-
-  if (ctx.showHidden) {
-    keys = Object.getOwnPropertyNames(value);
-  }
-
-  // IE doesn't make error fields non-enumerable
-  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
-  if (isError(value)
-      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
-    return formatError(value);
-  }
-
-  // Some type of object without properties can be shortcutted.
-  if (keys.length === 0) {
-    if (isFunction(value)) {
-      var name = value.name ? ': ' + value.name : '';
-      return ctx.stylize('[Function' + name + ']', 'special');
-    }
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    }
-    if (isDate(value)) {
-      return ctx.stylize(Date.prototype.toString.call(value), 'date');
-    }
-    if (isError(value)) {
-      return formatError(value);
-    }
-  }
-
-  var base = '', array = false, braces = ['{', '}'];
-
-  // Make Array say that they are Array
-  if (isArray(value)) {
-    array = true;
-    braces = ['[', ']'];
-  }
-
-  // Make functions say that they are functions
-  if (isFunction(value)) {
-    var n = value.name ? ': ' + value.name : '';
-    base = ' [Function' + n + ']';
-  }
-
-  // Make RegExps say that they are RegExps
-  if (isRegExp(value)) {
-    base = ' ' + RegExp.prototype.toString.call(value);
-  }
-
-  // Make dates with properties first say the date
-  if (isDate(value)) {
-    base = ' ' + Date.prototype.toUTCString.call(value);
-  }
-
-  // Make error with message first say the error
-  if (isError(value)) {
-    base = ' ' + formatError(value);
-  }
-
-  if (keys.length === 0 && (!array || value.length == 0)) {
-    return braces[0] + base + braces[1];
-  }
-
-  if (recurseTimes < 0) {
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    } else {
-      return ctx.stylize('[Object]', 'special');
-    }
-  }
-
-  ctx.seen.push(value);
-
-  var output;
-  if (array) {
-    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
-  } else {
-    output = keys.map(function(key) {
-      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
-    });
-  }
-
-  ctx.seen.pop();
-
-  return reduceToSingleString(output, base, braces);
-}
-
-
-function formatPrimitive(ctx, value) {
-  if (isUndefined(value))
-    return ctx.stylize('undefined', 'undefined');
-  if (isString(value)) {
-    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-                                             .replace(/'/g, "\\'")
-                                             .replace(/\\"/g, '"') + '\'';
-    return ctx.stylize(simple, 'string');
-  }
-  if (isNumber(value))
-    return ctx.stylize('' + value, 'number');
-  if (isBoolean(value))
-    return ctx.stylize('' + value, 'boolean');
-  // For some reason typeof null is "object", so special case here.
-  if (isNull(value))
-    return ctx.stylize('null', 'null');
-}
-
-
-function formatError(value) {
-  return '[' + Error.prototype.toString.call(value) + ']';
-}
-
-
-function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
-  var output = [];
-  for (var i = 0, l = value.length; i < l; ++i) {
-    if (hasOwnProperty(value, String(i))) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          String(i), true));
-    } else {
-      output.push('');
-    }
-  }
-  keys.forEach(function(key) {
-    if (!key.match(/^\d+$/)) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          key, true));
-    }
-  });
-  return output;
-}
-
-
-function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
-  var name, str, desc;
-  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
-  if (desc.get) {
-    if (desc.set) {
-      str = ctx.stylize('[Getter/Setter]', 'special');
-    } else {
-      str = ctx.stylize('[Getter]', 'special');
-    }
-  } else {
-    if (desc.set) {
-      str = ctx.stylize('[Setter]', 'special');
-    }
-  }
-  if (!hasOwnProperty(visibleKeys, key)) {
-    name = '[' + key + ']';
-  }
-  if (!str) {
-    if (ctx.seen.indexOf(desc.value) < 0) {
-      if (isNull(recurseTimes)) {
-        str = formatValue(ctx, desc.value, null);
-      } else {
-        str = formatValue(ctx, desc.value, recurseTimes - 1);
-      }
-      if (str.indexOf('\n') > -1) {
-        if (array) {
-          str = str.split('\n').map(function(line) {
-            return '  ' + line;
-          }).join('\n').substr(2);
-        } else {
-          str = '\n' + str.split('\n').map(function(line) {
-            return '   ' + line;
-          }).join('\n');
-        }
-      }
-    } else {
-      str = ctx.stylize('[Circular]', 'special');
-    }
-  }
-  if (isUndefined(name)) {
-    if (array && key.match(/^\d+$/)) {
-      return str;
-    }
-    name = JSON.stringify('' + key);
-    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
-      name = name.substr(1, name.length - 2);
-      name = ctx.stylize(name, 'name');
-    } else {
-      name = name.replace(/'/g, "\\'")
-                 .replace(/\\"/g, '"')
-                 .replace(/(^"|"$)/g, "'");
-      name = ctx.stylize(name, 'string');
-    }
-  }
-
-  return name + ': ' + str;
-}
-
-
-function reduceToSingleString(output, base, braces) {
-  var length = output.reduce(function(prev, cur) {
-    if (cur.indexOf('\n') >= 0) ;
-    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
-  }, 0);
-
-  if (length > 60) {
-    return braces[0] +
-           (base === '' ? '' : base + '\n ') +
-           ' ' +
-           output.join(',\n  ') +
-           ' ' +
-           braces[1];
-  }
-
-  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
-}
-
-
-// NOTE: These type checking functions intentionally don't use `instanceof`
-// because it is fragile and can be easily faked with `Object.create()`.
-function isArray(ar) {
-  return Array.isArray(ar);
-}
-
-function isBoolean(arg) {
-  return typeof arg === 'boolean';
-}
-
-function isNull(arg) {
-  return arg === null;
-}
-
-function isNumber(arg) {
-  return typeof arg === 'number';
-}
-
-function isString(arg) {
-  return typeof arg === 'string';
-}
-
-function isUndefined(arg) {
-  return arg === void 0;
-}
-
-function isRegExp(re) {
-  return isObject(re) && objectToString(re) === '[object RegExp]';
-}
-
-function isObject(arg) {
-  return typeof arg === 'object' && arg !== null;
-}
-
-function isDate(d) {
-  return isObject(d) && objectToString(d) === '[object Date]';
-}
-
-function isError(e) {
-  return isObject(e) &&
-      (objectToString(e) === '[object Error]' || e instanceof Error);
-}
-
-function isFunction(arg) {
-  return typeof arg === 'function';
-}
-
-function objectToString(o) {
-  return Object.prototype.toString.call(o);
-}
-
-function _extend(origin, add) {
-  // Don't do anything if add isn't an object
-  if (!add || !isObject(add)) return origin;
-
-  var keys = Object.keys(add);
-  var i = keys.length;
-  while (i--) {
-    origin[keys[i]] = add[keys[i]];
-  }
-  return origin;
-}
-function hasOwnProperty(obj, prop) {
-  return Object.prototype.hasOwnProperty.call(obj, prop);
 }
 
 function BufferList() {
@@ -7884,7 +6668,7 @@ Readable.prototype.push = function (chunk, encoding) {
   if (!state.objectMode && typeof chunk === 'string') {
     encoding = encoding || state.defaultEncoding;
     if (encoding !== state.encoding) {
-      chunk = Buffer$1.from(chunk, encoding);
+      chunk = Buffer.from(chunk, encoding);
       encoding = '';
     }
   }
@@ -8110,7 +6894,7 @@ Readable.prototype.read = function (n) {
 
 function chunkInvalid(state, chunk) {
   var er = null;
-  if (!Buffer$1.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
+  if (!Buffer.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
     er = new TypeError('Invalid non-string/buffer chunk');
   }
   return er;
@@ -8594,7 +7378,7 @@ function copyFromBufferString(n, list) {
 // This function is designed to be inlinable, so please take care when making
 // changes to the function body.
 function copyFromBuffer(n, list) {
-  var ret = Buffer$1.allocUnsafe(n);
+  var ret = Buffer.allocUnsafe(n);
   var p = list.head;
   var c = 1;
   p.data.copy(ret);
@@ -9448,6 +8232,1787 @@ Stream.prototype.pipe = function(dest, options) {
   // Allow for unix-like usage: A.pipe(B).pipe(C)
   return dest;
 };
+
+class ResourceIdsReader extends EventEmitter {
+  constructor({ resource }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.stream = new web.ReadableStream({
+      highWaterMark: this.client.parallelism * 3,
+      start: this._start.bind(this),
+      pull: this._pull.bind(this),
+      cancel: this._cancel.bind(this)
+    });
+  }
+  build() {
+    return this.stream.getReader();
+  }
+  async _start(controller) {
+    this.controller = controller;
+    this.continuationToken = null;
+    this.closeNextIteration = false;
+  }
+  async _pull(controller) {
+    if (this.closeNextIteration) {
+      controller.close();
+      return;
+    }
+    const response = await this.client.listObjects({
+      prefix: `resource=${this.resource.name}`,
+      continuationToken: this.continuationToken
+    });
+    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
+    this.continuationToken = response.NextContinuationToken;
+    this.enqueue(keys);
+    if (!response.IsTruncated) this.closeNextIteration = true;
+  }
+  enqueue(ids) {
+    ids.forEach((key) => {
+      this.controller.enqueue(key);
+      this.emit("id", key);
+    });
+  }
+  _cancel(reason) {
+    console.warn("Stream cancelled", reason);
+  }
+}
+
+class ResourceIdsPageReader extends ResourceIdsReader {
+  enqueue(ids) {
+    this.controller.enqueue(ids);
+    this.emit("page", ids);
+  }
+}
+
+class ResourceReader extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    if (!resource) {
+      throw new Error("Resource is required for ResourceReader");
+    }
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.input = new ResourceIdsPageReader({ resource: this.resource });
+    this.transform = new Transform({
+      objectMode: true,
+      transform: this._transform.bind(this)
+    });
+    this.input.on("data", (chunk) => {
+      this.transform.write(chunk);
+    });
+    this.input.on("end", () => {
+      this.transform.end();
+    });
+    this.input.on("error", (error) => {
+      this.emit("error", error);
+    });
+    this.transform.on("data", (data) => {
+      this.emit("data", data);
+    });
+    this.transform.on("end", () => {
+      this.emit("end");
+    });
+    this.transform.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  async _transform(chunk, encoding, callback) {
+    try {
+      await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
+        this.emit("error", error, content);
+      }).process(async (id) => {
+        const data = await this.resource.get(id);
+        this.push(data);
+        return data;
+      });
+      callback();
+    } catch (error) {
+      callback(error);
+    }
+  }
+  resume() {
+    this.input.resume();
+  }
+}
+
+class ResourceWriter extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.buffer = [];
+    this.writing = false;
+    this.writable = new Writable({
+      objectMode: true,
+      write: this._write.bind(this)
+    });
+    this.writable.on("finish", () => {
+      this.emit("finish");
+    });
+    this.writable.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  write(chunk) {
+    this.buffer.push(chunk);
+    this._maybeWrite();
+    return true;
+  }
+  end() {
+    this.ended = true;
+    this._maybeWrite();
+  }
+  async _maybeWrite() {
+    if (this.writing) return;
+    if (this.buffer.length === 0 && !this.ended) return;
+    this.writing = true;
+    while (this.buffer.length > 0) {
+      const batch = this.buffer.splice(0, this.batchSize);
+      try {
+        await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
+          this.emit("error", error, content);
+        }).process(async (item) => {
+          await this.resource.insert(item);
+        });
+      } catch (error) {
+        this.emit("error", error);
+      }
+    }
+    this.writing = false;
+    if (this.ended) {
+      this.writable.emit("finish");
+    }
+  }
+  async _write(chunk, encoding, callback) {
+    callback();
+  }
+}
+
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+  });
+}
+
+function calculateUTF8Bytes(str) {
+  if (typeof str !== "string") {
+    str = String(str);
+  }
+  let bytes = 0;
+  for (let i = 0; i < str.length; i++) {
+    const codePoint = str.codePointAt(i);
+    if (codePoint <= 127) {
+      bytes += 1;
+    } else if (codePoint <= 2047) {
+      bytes += 2;
+    } else if (codePoint <= 65535) {
+      bytes += 3;
+    } else if (codePoint <= 1114111) {
+      bytes += 4;
+      if (codePoint > 65535) {
+        i++;
+      }
+    }
+  }
+  return bytes;
+}
+function transformValue(value) {
+  if (value === null || value === void 0) {
+    return "";
+  }
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "[]";
+    }
+    return value.map((item) => String(item)).join("|");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+function calculateAttributeSizes(mappedObject) {
+  const sizes = {};
+  for (const [key, value] of Object.entries(mappedObject)) {
+    const transformedValue = transformValue(value);
+    const byteSize = calculateUTF8Bytes(transformedValue);
+    sizes[key] = byteSize;
+  }
+  return sizes;
+}
+function calculateTotalSize(mappedObject) {
+  const sizes = calculateAttributeSizes(mappedObject);
+  return Object.values(sizes).reduce((total, size) => total + size, 0);
+}
+
+const S3_METADATA_LIMIT_BYTES$3 = 2048;
+async function handleInsert$3({ resource, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
+    resource.emit("exceedsLimit", {
+      operation: "insert",
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES$3,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
+      data
+    });
+  }
+  return { mappedData, body: "" };
+}
+async function handleUpdate$3({ resource, id, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
+    resource.emit("exceedsLimit", {
+      operation: "update",
+      id,
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES$3,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
+      data
+    });
+  }
+  return { mappedData, body: "" };
+}
+async function handleUpsert$3({ resource, id, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
+    resource.emit("exceedsLimit", {
+      operation: "upsert",
+      id,
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES$3,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
+      data
+    });
+  }
+  return { mappedData, body: "" };
+}
+async function handleGet$3({ resource, metadata, body }) {
+  return { metadata, body };
+}
+
+var userManagement = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$3,
+  handleInsert: handleInsert$3,
+  handleUpdate: handleUpdate$3,
+  handleUpsert: handleUpsert$3
+});
+
+const S3_METADATA_LIMIT_BYTES$2 = 2048;
+async function handleInsert$2({ resource, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  }
+  return { mappedData, body: "" };
+}
+async function handleUpdate$2({ resource, id, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  }
+  return { mappedData, body: "" };
+}
+async function handleUpsert$2({ resource, id, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  }
+  return { mappedData, body: "" };
+}
+async function handleGet$2({ resource, metadata, body }) {
+  return { metadata, body };
+}
+
+var enforceLimits = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$2,
+  handleInsert: handleInsert$2,
+  handleUpdate: handleUpdate$2,
+  handleUpsert: handleUpsert$2
+});
+
+const S3_METADATA_LIMIT_BYTES$1 = 2048;
+const TRUNCATE_SUFFIX = "...";
+const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
+async function handleInsert$1({ resource, data, mappedData }) {
+  return handleTruncate({ resource, data, mappedData });
+}
+async function handleUpdate$1({ resource, id, data, mappedData }) {
+  return handleTruncate({ resource, data, mappedData });
+}
+async function handleUpsert$1({ resource, id, data, mappedData }) {
+  return handleTruncate({ resource, data, mappedData });
+}
+async function handleGet$1({ resource, metadata, body }) {
+  return { metadata, body };
+}
+function handleTruncate({ resource, data, mappedData }) {
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedAttributes = Object.entries(attributeSizes).sort(([, sizeA], [, sizeB]) => sizeA - sizeB);
+  const result = {};
+  let currentSize = 0;
+  for (const [key, size] of sortedAttributes) {
+    const availableSpace = S3_METADATA_LIMIT_BYTES$1 - currentSize;
+    if (size <= availableSpace) {
+      result[key] = mappedData[key];
+      currentSize += size;
+    } else if (availableSpace > TRUNCATE_SUFFIX_BYTES) {
+      const maxContentBytes = availableSpace - TRUNCATE_SUFFIX_BYTES;
+      const originalValue = transformValue(mappedData[key]);
+      let truncatedValue = "";
+      let bytes = 0;
+      for (let i = 0; i < originalValue.length; i++) {
+        const char = originalValue[i];
+        const charBytes = calculateUTF8Bytes(char);
+        if (bytes + charBytes <= maxContentBytes) {
+          truncatedValue += char;
+          bytes += charBytes;
+        } else {
+          break;
+        }
+      }
+      result[key] = truncatedValue + TRUNCATE_SUFFIX;
+      currentSize = S3_METADATA_LIMIT_BYTES$1;
+      break;
+    } else {
+      break;
+    }
+  }
+  return { mappedData: result, body: "" };
+}
+
+var dataTruncate = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$1,
+  handleInsert: handleInsert$1,
+  handleUpdate: handleUpdate$1,
+  handleUpsert: handleUpsert$1
+});
+
+const S3_METADATA_LIMIT_BYTES = 2048;
+const OVERFLOW_FLAG = "$overflow";
+const OVERFLOW_FLAG_VALUE = "true";
+const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
+async function handleInsert({ resource, data, mappedData }) {
+  return handleOverflow({ resource, data, mappedData });
+}
+async function handleUpdate({ resource, id, data, mappedData }) {
+  return handleOverflow({ resource, data, mappedData });
+}
+async function handleUpsert({ resource, id, data, mappedData }) {
+  return handleOverflow({ resource, data, mappedData });
+}
+async function handleGet({ resource, metadata, body }) {
+  if (metadata[OVERFLOW_FLAG] === OVERFLOW_FLAG_VALUE) {
+    try {
+      const bodyData = body ? JSON.parse(body) : {};
+      const cleanMetadata = { ...metadata };
+      delete cleanMetadata[OVERFLOW_FLAG];
+      const mergedData = { ...cleanMetadata, ...bodyData };
+      return { metadata: mergedData, body: "" };
+    } catch (error) {
+      return { metadata, body };
+    }
+  }
+  return { metadata, body };
+}
+function handleOverflow({ resource, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  if (totalSize <= S3_METADATA_LIMIT_BYTES) {
+    return { mappedData, body: "" };
+  }
+  const availableMetadataSpace = S3_METADATA_LIMIT_BYTES - OVERFLOW_FLAG_BYTES;
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedAttributes = Object.entries(attributeSizes).sort(([, sizeA], [, sizeB]) => sizeA - sizeB);
+  const metadataAttributes = {};
+  const bodyAttributes = {};
+  let currentMetadataSize = 0;
+  for (const [key, size] of sortedAttributes) {
+    if (currentMetadataSize + size <= availableMetadataSpace) {
+      metadataAttributes[key] = mappedData[key];
+      currentMetadataSize += size;
+    } else {
+      bodyAttributes[key] = mappedData[key];
+    }
+  }
+  metadataAttributes[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
+  const bodyContent = Object.keys(bodyAttributes).length > 0 ? JSON.stringify(bodyAttributes) : "";
+  return {
+    mappedData: metadataAttributes,
+    body: bodyContent
+  };
+}
+
+var bodyOverflow = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet,
+  handleInsert: handleInsert,
+  handleUpdate: handleUpdate,
+  handleUpsert: handleUpsert
+});
+
+const behaviors = {
+  "user-management": userManagement,
+  "enforce-limits": enforceLimits,
+  "data-truncate": dataTruncate,
+  "body-overflow": bodyOverflow
+};
+function getBehavior(behaviorName) {
+  const behavior = behaviors[behaviorName];
+  if (!behavior) {
+    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
+  }
+  return behavior;
+}
+const DEFAULT_BEHAVIOR = "user-management";
+
+class Resource extends EventEmitter {
+  constructor({
+    name,
+    client,
+    version = "1",
+    options = {},
+    attributes = {},
+    parallelism = 10,
+    passphrase = "secret",
+    observers = [],
+    behavior = DEFAULT_BEHAVIOR
+  }) {
+    super();
+    this.name = name;
+    this.client = client;
+    this.version = version;
+    this.behavior = behavior;
+    this.observers = observers;
+    this.parallelism = parallelism;
+    this.passphrase = passphrase ?? "secret";
+    this.options = {
+      cache: false,
+      autoDecrypt: true,
+      timestamps: false,
+      partitions: {},
+      paranoid: true,
+      // Security flag for dangerous operations
+      ...options
+    };
+    this.hooks = {
+      preInsert: [],
+      afterInsert: [],
+      preUpdate: [],
+      afterUpdate: [],
+      preDelete: [],
+      afterDelete: []
+    };
+    this.attributes = attributes || {};
+    if (options.timestamps) {
+      this.attributes.createdAt = "string|optional";
+      this.attributes.updatedAt = "string|optional";
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          fields: {
+            createdAt: "date|maxlength:10"
+          }
+        };
+      }
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          fields: {
+            updatedAt: "date|maxlength:10"
+          }
+        };
+      }
+    }
+    this.schema = new Schema({
+      name,
+      attributes: this.attributes,
+      passphrase,
+      version: this.version,
+      options: this.options
+    });
+    this.validatePartitions();
+    this.setupPartitionHooks();
+    if (options.hooks) {
+      for (const [event, hooksArr] of Object.entries(options.hooks)) {
+        if (Array.isArray(hooksArr) && this.hooks[event]) {
+          for (const fn of hooksArr) {
+            this.hooks[event].push(fn.bind(this));
+          }
+        }
+      }
+    }
+  }
+  export() {
+    const exported = this.schema.export();
+    exported.behavior = this.behavior;
+    return exported;
+  }
+  /**
+   * Update resource attributes and rebuild schema
+   * @param {Object} newAttributes - New attributes definition
+   */
+  updateAttributes(newAttributes) {
+    const oldAttributes = this.attributes;
+    this.attributes = newAttributes;
+    if (this.options.timestamps) {
+      newAttributes.createdAt = "string|optional";
+      newAttributes.updatedAt = "string|optional";
+      if (!this.options.partitions.byCreatedDate) {
+        this.options.partitions.byCreatedDate = {
+          fields: {
+            createdAt: "date|maxlength:10"
+          }
+        };
+      }
+      if (!this.options.partitions.byUpdatedDate) {
+        this.options.partitions.byUpdatedDate = {
+          fields: {
+            updatedAt: "date|maxlength:10"
+          }
+        };
+      }
+    }
+    this.schema = new Schema({
+      name: this.name,
+      attributes: newAttributes,
+      passphrase: this.passphrase,
+      version: this.version,
+      options: this.options
+    });
+    this.validatePartitions();
+    this.setupPartitionHooks();
+    return { oldAttributes, newAttributes };
+  }
+  /**
+   * Add a hook function for a specific event
+   * @param {string} event - Hook event (preInsert, afterInsert, etc.)
+   * @param {Function} fn - Hook function
+   */
+  addHook(event, fn) {
+    if (this.hooks[event]) {
+      this.hooks[event].push(fn.bind(this));
+    }
+  }
+  /**
+   * Execute hooks for a specific event
+   * @param {string} event - Hook event
+   * @param {*} data - Data to pass to hooks
+   * @returns {*} Modified data
+   */
+  async executeHooks(event, data) {
+    if (!this.hooks[event]) return data;
+    let result = data;
+    for (const hook of this.hooks[event]) {
+      result = await hook(result);
+    }
+    return result;
+  }
+  /**
+   * Setup automatic partition hooks
+   */
+  setupPartitionHooks() {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    this.addHook("afterInsert", async (data) => {
+      await this.createPartitionReferences(data);
+      return data;
+    });
+    this.addHook("afterDelete", async (data) => {
+      await this.deletePartitionReferences(data);
+      return data;
+    });
+  }
+  async validate(data) {
+    const result = {
+      original: lodashEs.cloneDeep(data),
+      isValid: false,
+      errors: []
+    };
+    const check = await this.schema.validate(data, { mutateOriginal: true });
+    if (check === true) {
+      result.isValid = true;
+    } else {
+      result.errors = check;
+    }
+    result.data = data;
+    return result;
+  }
+  /**
+   * Validate that all partition fields exist in current resource attributes
+   * @throws {Error} If partition fields don't exist in current schema
+   */
+  validatePartitions() {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    const currentAttributes = Object.keys(this.attributes || {});
+    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+      if (!partitionDef.fields) {
+        continue;
+      }
+      for (const fieldName of Object.keys(partitionDef.fields)) {
+        if (!currentAttributes.includes(fieldName)) {
+          throw new Error(
+            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. Available fields: ${currentAttributes.join(", ")}. This version of resource does not have support for this partition.`
+          );
+        }
+      }
+    }
+  }
+  /**
+   * Apply a single partition rule to a field value
+   * @param {*} value - The field value
+   * @param {string} rule - The partition rule
+   * @returns {*} Transformed value
+   */
+  applyPartitionRule(value, rule) {
+    if (value === void 0 || value === null) {
+      return value;
+    }
+    let transformedValue = value;
+    if (typeof rule === "string" && rule.includes("maxlength:")) {
+      const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+      if (maxLengthMatch) {
+        const maxLength = parseInt(maxLengthMatch[1]);
+        if (typeof transformedValue === "string" && transformedValue.length > maxLength) {
+          transformedValue = transformedValue.substring(0, maxLength);
+        }
+      }
+    }
+    if (rule.includes("date")) {
+      if (transformedValue instanceof Date) {
+        transformedValue = transformedValue.toISOString().split("T")[0];
+      } else if (typeof transformedValue === "string") {
+        try {
+          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
+            transformedValue = transformedValue.split("T")[0];
+          } else {
+            const date = new Date(transformedValue);
+            if (!isNaN(date.getTime())) {
+              transformedValue = date.toISOString().split("T")[0];
+            }
+          }
+        } catch (e) {
+        }
+      }
+    }
+    return transformedValue;
+  }
+  /**
+   * Get the main resource key (always versioned path)
+   * @param {string} id - Resource ID
+   * @returns {string} The main S3 key path
+   */
+  getResourceKey(id) {
+    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+  }
+  /**
+   * Get partition reference key for a specific partition
+   * @param {string} partitionName - Name of the partition
+   * @param {string} id - Resource ID  
+   * @param {Object} data - Data object for partition value generation
+   * @returns {string|null} The partition reference S3 key path
+   */
+  getPartitionKey(partitionName, id, data) {
+    const partition = this.options.partitions[partitionName];
+    if (!partition) {
+      throw new Error(`Partition '${partitionName}' not found`);
+    }
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const fieldValue = this.applyPartitionRule(data[fieldName], rule);
+      if (fieldValue === void 0 || fieldValue === null) {
+        return null;
+      }
+      partitionSegments.push(`${fieldName}=${fieldValue}`);
+    }
+    if (partitionSegments.length === 0) {
+      return null;
+    }
+    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+  }
+  async insert({ id, ...attributes }) {
+    if (this.options.timestamps) {
+      attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
+      attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    const preProcessedData = await this.executeHooks("preInsert", attributes);
+    const {
+      errors,
+      isValid,
+      data: validated
+    } = await this.validate(preProcessedData);
+    if (!isValid) {
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes: preProcessedData,
+        validation: errors
+      });
+    }
+    if (!id && id !== 0) id = idGenerator();
+    const mappedData = await this.schema.mapper(validated);
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: validated,
+      mappedData
+    });
+    const key = this.getResourceKey(id);
+    await this.client.putObject({
+      metadata: processedMetadata,
+      key,
+      body
+    });
+    const final = lodashEs.merge({ id }, validated);
+    await this.executeHooks("afterInsert", final);
+    this.emit("insert", final);
+    return final;
+  }
+  async get(id) {
+    const key = this.getResourceKey(id);
+    const request = await this.client.headObject(key);
+    const objectVersion = this.extractVersionFromKey(key) || this.version;
+    const schema = await this.getSchemaForVersion(objectVersion);
+    let metadata = await schema.unmapper(request.Metadata);
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+    if (request.ContentLength > 0) {
+      try {
+        const fullObject = await this.client.getObject(key);
+        body = await streamToString(fullObject.Body);
+      } catch (error) {
+        body = "";
+      }
+    }
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+    let data = processedMetadata;
+    data.id = id;
+    data._contentLength = request.ContentLength;
+    data._lastModified = request.LastModified;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
+    if (request.VersionId) data._versionId = request.VersionId;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+    data._definitionHash = this.getDefinitionHash();
+    this.emit("get", data);
+    return data;
+  }
+  async exists(id) {
+    try {
+      const key = this.getResourceKey(id);
+      await this.client.headObject(key);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  async update(id, attributes) {
+    const live = await this.get(id);
+    if (this.options.timestamps) {
+      attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    }
+    const preProcessedData = await this.executeHooks("preUpdate", attributes);
+    const attrs = lodashEs.merge(live, preProcessedData);
+    delete attrs.id;
+    const { isValid, errors, data: validated } = await this.validate(attrs);
+    if (!isValid) {
+      throw new InvalidResourceItem({
+        bucket: this.client.bucket,
+        resourceName: this.name,
+        attributes: preProcessedData,
+        validation: errors
+      });
+    }
+    const mappedData = await this.schema.mapper(validated);
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+      resource: this,
+      id,
+      data: validated,
+      mappedData
+    });
+    const key = this.getResourceKey(id);
+    let existingContentType = void 0;
+    let finalBody = body;
+    if (body === "" && this.behavior !== "body-overflow") {
+      try {
+        const existingObject = await this.client.getObject(key);
+        if (existingObject.ContentLength > 0) {
+          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+          const existingBodyString = existingBodyBuffer.toString();
+          try {
+            JSON.parse(existingBodyString);
+          } catch {
+            finalBody = existingBodyBuffer;
+            existingContentType = existingObject.ContentType;
+          }
+        }
+      } catch (error) {
+      }
+    }
+    await this.client.putObject({
+      key,
+      body: finalBody,
+      contentType: existingContentType,
+      metadata: processedMetadata
+    });
+    validated.id = id;
+    await this.executeHooks("afterUpdate", validated);
+    await this.updatePartitionReferences(validated);
+    this.emit("update", preProcessedData, validated);
+    return validated;
+  }
+  async delete(id) {
+    let objectData;
+    try {
+      objectData = await this.get(id);
+    } catch (error) {
+      objectData = { id };
+    }
+    await this.executeHooks("preDelete", objectData);
+    const key = this.getResourceKey(id);
+    const response = await this.client.deleteObject(key);
+    await this.executeHooks("afterDelete", objectData);
+    this.emit("delete", id);
+    return response;
+  }
+  async upsert({ id, ...attributes }) {
+    const exists = await this.exists(id);
+    if (exists) {
+      return this.update(id, attributes);
+    }
+    return this.insert({ id, ...attributes });
+  }
+  async count({ partition = null, partitionValues = {} } = {}) {
+    let prefix;
+    if (partition && Object.keys(partitionValues).length > 0) {
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
+      }
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
+    } else {
+      prefix = `resource=${this.name}/v=${this.version}`;
+    }
+    const count = await this.client.count({
+      prefix
+    });
+    this.emit("count", count);
+    return count;
+  }
+  async insertMany(objects) {
+    const { results } = await promisePool.PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
+    }).process(async (attributes) => {
+      const result = await this.insert(attributes);
+      return result;
+    });
+    this.emit("insertMany", objects.length);
+    return results;
+  }
+  async deleteMany(ids) {
+    const packages = lodashEs.chunk(
+      ids.map((id) => this.getResourceKey(id)),
+      1e3
+    );
+    const { results } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
+    }).process(async (keys) => {
+      const response = await this.client.deleteObjects(keys);
+      keys.forEach((key) => {
+        const parts = key.split("/");
+        const idPart = parts.find((part) => part.startsWith("id="));
+        const id = idPart ? idPart.replace("id=", "") : null;
+        if (id) {
+          this.emit("deleted", id);
+          this.observers.map((x) => x.emit("deleted", this.name, id));
+        }
+      });
+      return response;
+    });
+    this.emit("deleteMany", ids.length);
+    return results;
+  }
+  async deleteAll() {
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+    const prefix = `resource=${this.name}/v=${this.version}`;
+    const deletedCount = await this.client.deleteAll({ prefix });
+    this.emit("deleteAll", {
+      version: this.version,
+      prefix,
+      deletedCount
+    });
+    return { deletedCount, version: this.version };
+  }
+  /**
+   * Delete all data for this resource across ALL versions
+   * @returns {Promise<Object>} Deletion report
+   */
+  async deleteAllData() {
+    if (this.options.paranoid !== false) {
+      throw new Error(
+        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+      );
+    }
+    const prefix = `resource=${this.name}`;
+    const deletedCount = await this.client.deleteAll({ prefix });
+    this.emit("deleteAllData", {
+      resource: this.name,
+      prefix,
+      deletedCount
+    });
+    return { deletedCount, resource: this.name };
+  }
+  async listIds({ partition = null, partitionValues = {} } = {}) {
+    let prefix;
+    if (partition && Object.keys(partitionValues).length > 0) {
+      const partitionDef = this.options.partitions[partition];
+      if (!partitionDef) {
+        throw new Error(`Partition '${partition}' not found`);
+      }
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
+    } else {
+      prefix = `resource=${this.name}/v=${this.version}`;
+    }
+    const keys = await this.client.getAllKeys({
+      prefix
+    });
+    const ids = keys.map((key) => {
+      const parts = key.split("/");
+      const idPart = parts.find((part) => part.startsWith("id="));
+      return idPart ? idPart.replace("id=", "") : null;
+    }).filter(Boolean);
+    this.emit("listIds", ids.length);
+    return ids;
+  }
+  /**
+   * List objects by partition name and values
+   * @param {Object} partitionOptions - Partition options
+   * @param {Object} options - Listing options
+   * @returns {Array} Array of objects
+   */
+  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
+    const { limit, offset = 0 } = options;
+    if (!partition) {
+      const ids2 = await this.listIds({ partition, partitionValues });
+      let filteredIds2 = ids2.slice(offset);
+      if (limit) {
+        filteredIds2 = filteredIds2.slice(0, limit);
+      }
+      const { results: results2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).process(async (id) => {
+        return await this.get(id);
+      });
+      this.emit("listByPartition", { partition, partitionValues, count: results2.length });
+      return results2;
+    }
+    const partitionDef = this.options.partitions[partition];
+    if (!partitionDef) {
+      throw new Error(`Partition '${partition}' not found`);
+    }
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== void 0 && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
+      }
+    }
+    let prefix;
+    if (partitionSegments.length > 0) {
+      prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+    } else {
+      prefix = `resource=${this.name}/partition=${partition}`;
+    }
+    const keys = await this.client.getAllKeys({ prefix });
+    const ids = keys.map((key) => {
+      const parts = key.split("/");
+      const idPart = parts.find((part) => part.startsWith("id="));
+      return idPart ? idPart.replace("id=", "") : null;
+    }).filter(Boolean);
+    let filteredIds = ids.slice(offset);
+    if (limit) {
+      filteredIds = filteredIds.slice(0, limit);
+    }
+    const { results } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).process(async (id) => {
+      return await this.getFromPartition(id, partition, partitionValues);
+    });
+    this.emit("listByPartition", { partition, partitionValues, count: results.length });
+    return results;
+  }
+  async getMany(ids) {
+    const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
+      this.emit("id", id);
+      const data = await this.get(id);
+      this.emit("data", data);
+      return data;
+    });
+    this.emit("getMany", ids.length);
+    return results;
+  }
+  async getAll() {
+    let ids = await this.listIds();
+    if (ids.length === 0) return [];
+    const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
+      const data = await this.get(id);
+      return data;
+    });
+    this.emit("getAll", results.length);
+    return results;
+  }
+  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
+    const allIds = await this.listIds({ partition, partitionValues });
+    const totalItems = allIds.length;
+    const totalPages = Math.ceil(totalItems / size);
+    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
+    const items = await Promise.all(
+      paginatedIds.map((id) => this.get(id))
+    );
+    const result = {
+      items,
+      totalItems,
+      page: offset,
+      pageSize: size,
+      totalPages
+    };
+    this.emit("page", result);
+    return result;
+  }
+  readable() {
+    const stream = new ResourceReader({ resource: this });
+    return stream.build();
+  }
+  writable() {
+    const stream = new ResourceWriter({ resource: this });
+    return stream.build();
+  }
+  /**
+   * Store binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @param {Buffer} buffer - Binary content
+   * @param {string} contentType - Optional content type
+   */
+  async setContent(id, buffer, contentType = "application/octet-stream") {
+    if (!Buffer.isBuffer(buffer)) {
+      throw new Error("Content must be a Buffer");
+    }
+    const key = this.getResourceKey(id);
+    let existingMetadata = {};
+    try {
+      const existingObject = await this.client.headObject(key);
+      existingMetadata = existingObject.Metadata || {};
+    } catch (error) {
+    }
+    const response = await this.client.putObject({
+      key,
+      body: buffer,
+      contentType,
+      metadata: existingMetadata
+      // Preserve existing metadata
+    });
+    this.emit("setContent", id, buffer.length, contentType);
+    return response;
+  }
+  /**
+   * Retrieve binary content associated with a resource
+   * @param {string} id - Resource ID
+   * @returns {Object} Object with buffer and contentType
+   */
+  async content(id) {
+    const key = this.getResourceKey(id);
+    try {
+      const response = await this.client.getObject(key);
+      const buffer = Buffer.from(await response.Body.transformToByteArray());
+      const contentType = response.ContentType || null;
+      this.emit("content", id, buffer.length, contentType);
+      return {
+        buffer,
+        contentType
+      };
+    } catch (error) {
+      if (error.name === "NoSuchKey") {
+        return {
+          buffer: null,
+          contentType: null
+        };
+      }
+      throw error;
+    }
+  }
+  /**
+   * Check if binary content exists for a resource
+   * @param {string} id - Resource ID
+   * @returns {boolean}
+   */
+  async hasContent(id) {
+    const key = this.getResourceKey(id);
+    try {
+      const response = await this.client.headObject(key);
+      return response.ContentLength > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+  /**
+   * Delete binary content but preserve metadata
+   * @param {string} id - Resource ID
+   */
+  async deleteContent(id) {
+    const key = this.getResourceKey(id);
+    const existingObject = await this.client.headObject(key);
+    const existingMetadata = existingObject.Metadata || {};
+    const response = await this.client.putObject({
+      key,
+      body: "",
+      metadata: existingMetadata
+    });
+    this.emit("deleteContent", id);
+    return response;
+  }
+  /**
+   * Generate definition hash for this resource
+   * @returns {string} SHA256 hash of the schema definition
+   */
+  getDefinitionHash() {
+    const exportedSchema = this.schema.export();
+    const stableString = jsonStableStringify(exportedSchema);
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+  }
+  /**
+   * Extract version from S3 key
+   * @param {string} key - S3 object key
+   * @returns {string|null} Version string or null
+   */
+  extractVersionFromKey(key) {
+    const parts = key.split("/");
+    const versionPart = parts.find((part) => part.startsWith("v="));
+    return versionPart ? versionPart.replace("v=", "") : null;
+  }
+  /**
+   * Get schema for a specific version
+   * @param {string} version - Version string (e.g., 'v0', 'v1')
+   * @returns {Object} Schema object for the version
+   */
+  async getSchemaForVersion(version) {
+    return this.schema;
+  }
+  /**
+   * Create partition references after insert
+   * @param {Object} data - Inserted object data
+   */
+  async createPartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      if (partitionKey) {
+        const mappedData = await this.schema.mapper(data);
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+          resource: this,
+          data,
+          mappedData
+        });
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
+        };
+        await this.client.putObject({
+          key: partitionKey,
+          metadata: partitionMetadata,
+          body
+        });
+      }
+    }
+  }
+  /**
+   * Delete partition references after delete
+   * @param {Object} data - Deleted object data
+   */
+  async deletePartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    const keysToDelete = [];
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      if (partitionKey) {
+        keysToDelete.push(partitionKey);
+      }
+    }
+    if (keysToDelete.length > 0) {
+      try {
+        await this.client.deleteObjects(keysToDelete);
+      } catch (error) {
+        console.warn("Some partition objects could not be deleted:", error.message);
+      }
+    }
+  }
+  /**
+   * Query documents with simple filtering
+   * @param {Object} filter - Filter criteria
+   * @returns {Array} Filtered documents
+   */
+  async query(filter = {}) {
+    const allDocuments = await this.getAll();
+    if (Object.keys(filter).length === 0) {
+      return allDocuments;
+    }
+    return allDocuments.filter((doc) => {
+      return Object.entries(filter).every(([key, value]) => {
+        return doc[key] === value;
+      });
+    });
+  }
+  /**
+   * Update partition objects to keep them in sync
+   * @param {Object} data - Updated object data
+   */
+  async updatePartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      if (partitionKey) {
+        const mappedData = await this.schema.mapper(data);
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+          resource: this,
+          id: data.id,
+          data,
+          mappedData
+        });
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
+        };
+        try {
+          await this.client.putObject({
+            key: partitionKey,
+            metadata: partitionMetadata,
+            body
+          });
+        } catch (error) {
+          console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+        }
+      }
+    }
+  }
+  /**
+   * Get object directly from a specific partition
+   * @param {string} id - Resource ID
+   * @param {string} partitionName - Name of the partition
+   * @param {Object} partitionValues - Values for partition fields
+   * @returns {Object} The resource data
+   */
+  async getFromPartition(id, partitionName, partitionValues = {}) {
+    const partition = this.options.partitions[partitionName];
+    if (!partition) {
+      throw new Error(`Partition '${partitionName}' not found`);
+    }
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== void 0 && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
+      }
+    }
+    if (partitionSegments.length === 0) {
+      throw new Error(`No partition values provided for partition '${partitionName}'`);
+    }
+    const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+    const request = await this.client.headObject(partitionKey);
+    const objectVersion = request.Metadata?._version || this.version;
+    const schema = await this.getSchemaForVersion(objectVersion);
+    let metadata = await schema.unmapper(request.Metadata);
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+    if (request.ContentLength > 0) {
+      try {
+        const fullObject = await this.client.getObject(partitionKey);
+        body = await streamToString(fullObject.Body);
+      } catch (error) {
+        body = "";
+      }
+    }
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+    let data = processedMetadata;
+    data.id = id;
+    data._contentLength = request.ContentLength;
+    data._lastModified = request.LastModified;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
+    data._partition = partitionName;
+    data._partitionValues = partitionValues;
+    if (request.VersionId) data._versionId = request.VersionId;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+    data._definitionHash = this.getDefinitionHash();
+    this.emit("getFromPartition", data);
+    return data;
+  }
+}
+
+class Database extends EventEmitter {
+  constructor(options) {
+    super();
+    this.version = "1";
+    this.s3dbVersion = (() => {
+      try {
+        return true ? "3.3.2" : "latest";
+      } catch (e) {
+        return "latest";
+      }
+    })();
+    this.resources = {};
+    this.savedMetadata = null;
+    this.options = options;
+    this.verbose = options.verbose || false;
+    this.parallelism = parseInt(options.parallelism + "") || 10;
+    this.plugins = options.plugins || [];
+    this.cache = options.cache;
+    this.passphrase = options.passphrase || "secret";
+    this.client = options.client || new Client({
+      verbose: this.verbose,
+      parallelism: this.parallelism,
+      connectionString: options.connectionString
+    });
+    this.bucket = this.client.bucket;
+    this.keyPrefix = this.client.keyPrefix;
+  }
+  async connect() {
+    await this.startPlugins();
+    let metadata = null;
+    if (await this.client.exists(`s3db.json`)) {
+      const request = await this.client.getObject(`s3db.json`);
+      metadata = JSON.parse(await streamToString(request?.Body));
+    } else {
+      metadata = this.blankMetadataStructure();
+      await this.uploadMetadataFile();
+    }
+    this.savedMetadata = metadata;
+    const definitionChanges = this.detectDefinitionChanges(metadata);
+    for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
+      const currentVersion = resourceMetadata.currentVersion || "v0";
+      const versionData = resourceMetadata.versions?.[currentVersion];
+      if (versionData) {
+        this.resources[name] = new Resource({
+          name,
+          client: this.client,
+          version: currentVersion,
+          options: {
+            ...versionData.options,
+            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
+          },
+          attributes: versionData.attributes,
+          behavior: versionData.behavior || "user-management",
+          parallelism: this.parallelism,
+          passphrase: this.passphrase,
+          observers: [this]
+        });
+      }
+    }
+    if (definitionChanges.length > 0) {
+      this.emit("resourceDefinitionsChanged", {
+        changes: definitionChanges,
+        metadata: this.savedMetadata
+      });
+    }
+    this.emit("connected", /* @__PURE__ */ new Date());
+  }
+  /**
+   * Detect changes in resource definitions compared to saved metadata
+   * @param {Object} savedMetadata - The metadata loaded from s3db.json
+   * @returns {Array} Array of change objects
+   */
+  detectDefinitionChanges(savedMetadata) {
+    const changes = [];
+    for (const [name, currentResource] of Object.entries(this.resources)) {
+      const currentHash = this.generateDefinitionHash(currentResource.export());
+      const savedResource = savedMetadata.resources?.[name];
+      if (!savedResource) {
+        changes.push({
+          type: "new",
+          resourceName: name,
+          currentHash,
+          savedHash: null
+        });
+      } else {
+        const currentVersion = savedResource.currentVersion || "v0";
+        const versionData = savedResource.versions?.[currentVersion];
+        const savedHash = versionData?.hash;
+        if (savedHash !== currentHash) {
+          changes.push({
+            type: "changed",
+            resourceName: name,
+            currentHash,
+            savedHash,
+            fromVersion: currentVersion,
+            toVersion: this.getNextVersion(savedResource.versions)
+          });
+        }
+      }
+    }
+    for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
+      if (!this.resources[name]) {
+        const currentVersion = savedResource.currentVersion || "v0";
+        const versionData = savedResource.versions?.[currentVersion];
+        changes.push({
+          type: "deleted",
+          resourceName: name,
+          currentHash: null,
+          savedHash: versionData?.hash,
+          deletedVersion: currentVersion
+        });
+      }
+    }
+    return changes;
+  }
+  /**
+   * Generate a consistent hash for a resource definition
+   * @param {Object} definition - Resource definition to hash
+   * @returns {string} SHA256 hash
+   */
+  generateDefinitionHash(definition) {
+    const stableString = jsonStableStringify(definition);
+    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+  }
+  /**
+   * Get the next version number for a resource
+   * @param {Object} versions - Existing versions object
+   * @returns {string} Next version string (e.g., 'v1', 'v2')
+   */
+  getNextVersion(versions = {}) {
+    const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
+    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+    return `v${maxVersion + 1}`;
+  }
+  async startPlugins() {
+    const db = this;
+    if (!lodashEs.isEmpty(this.plugins)) {
+      const plugins = this.plugins.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
+      const setupProms = plugins.map(async (plugin) => {
+        if (plugin.beforeSetup) await plugin.beforeSetup();
+        await plugin.setup(db);
+        if (plugin.afterSetup) await plugin.afterSetup();
+      });
+      await Promise.all(setupProms);
+      const startProms = plugins.map(async (plugin) => {
+        if (plugin.beforeStart) await plugin.beforeStart();
+        await plugin.start();
+        if (plugin.afterStart) await plugin.afterStart();
+      });
+      await Promise.all(startProms);
+    }
+  }
+  async uploadMetadataFile() {
+    const metadata = {
+      version: this.version,
+      s3dbVersion: this.s3dbVersion,
+      lastUpdated: (/* @__PURE__ */ new Date()).toISOString(),
+      resources: {}
+    };
+    Object.entries(this.resources).forEach(([name, resource]) => {
+      const resourceDef = resource.export();
+      const definitionHash = this.generateDefinitionHash(resourceDef);
+      const existingResource = this.savedMetadata?.resources?.[name];
+      const currentVersion = existingResource?.currentVersion || "v0";
+      const existingVersionData = existingResource?.versions?.[currentVersion];
+      let version, isNewVersion;
+      if (!existingVersionData || existingVersionData.hash !== definitionHash) {
+        version = this.getNextVersion(existingResource?.versions);
+        isNewVersion = true;
+      } else {
+        version = currentVersion;
+        isNewVersion = false;
+      }
+      metadata.resources[name] = {
+        currentVersion: version,
+        partitions: resourceDef.options?.partitions || {},
+        versions: {
+          ...existingResource?.versions,
+          // Preserve previous versions
+          [version]: {
+            hash: definitionHash,
+            attributes: resourceDef.attributes,
+            options: resourceDef.options,
+            behavior: resourceDef.behavior || "user-management",
+            createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
+          }
+        }
+      };
+      if (resource.version !== version) {
+        resource.version = version;
+        resource.emit("versionUpdated", { oldVersion: currentVersion, newVersion: version });
+      }
+    });
+    await this.client.putObject({
+      key: "s3db.json",
+      body: JSON.stringify(metadata, null, 2),
+      contentType: "application/json"
+    });
+    this.savedMetadata = metadata;
+    this.emit("metadataUploaded", metadata);
+  }
+  blankMetadataStructure() {
+    return {
+      version: `1`,
+      s3dbVersion: this.s3dbVersion,
+      resources: {}
+    };
+  }
+  async createResource({ name, attributes, options = {}, behavior = "user-management" }) {
+    if (this.resources[name]) {
+      const existingResource = this.resources[name];
+      Object.assign(existingResource.options, {
+        cache: this.cache,
+        ...options
+      });
+      if (behavior) {
+        existingResource.behavior = behavior;
+      }
+      existingResource.updateAttributes(attributes);
+      await this.uploadMetadataFile();
+      this.emit("s3db.resourceUpdated", name);
+      return existingResource;
+    }
+    const existingMetadata = this.savedMetadata?.resources?.[name];
+    const version = existingMetadata?.currentVersion || "v0";
+    const resource = new Resource({
+      name,
+      attributes,
+      behavior,
+      observers: [this],
+      client: this.client,
+      version,
+      options: {
+        cache: this.cache,
+        ...options
+      }
+    });
+    this.resources[name] = resource;
+    await this.uploadMetadataFile();
+    this.emit("s3db.resourceCreated", name);
+    return resource;
+  }
+  resource(name) {
+    if (!this.resources[name]) {
+      return Promise.reject(`resource ${name} does not exist`);
+    }
+    return this.resources[name];
+  }
+  /**
+   * List all resource names
+   * @returns {Array} Array of resource names
+   */
+  async listResources() {
+    return Object.keys(this.resources).map((name) => ({ name }));
+  }
+  /**
+   * Get a specific resource by name
+   * @param {string} name - Resource name
+   * @returns {Resource} Resource instance
+   */
+  async getResource(name) {
+    if (!this.resources[name]) {
+      throw new Error(`Resource not found: ${name}`);
+    }
+    return this.resources[name];
+  }
+  /**
+   * Get database configuration
+   * @returns {Object} Configuration object
+   */
+  get config() {
+    return {
+      version: this.version,
+      s3dbVersion: this.s3dbVersion,
+      bucket: this.bucket,
+      keyPrefix: this.keyPrefix,
+      parallelism: this.parallelism,
+      verbose: this.verbose
+    };
+  }
+  isConnected() {
+    return !!this.savedMetadata;
+  }
+}
+class S3db extends Database {
+}
+
+class Cache extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.config = config;
+  }
+  // to implement:
+  async _set(key, data) {
+  }
+  async _get(key) {
+  }
+  async _del(key) {
+  }
+  async _clear(key) {
+  }
+  validateKey(key) {
+    if (key === null || key === void 0 || typeof key !== "string" || !key) {
+      throw new Error("Invalid key");
+    }
+  }
+  // generic class methods
+  async set(key, data) {
+    this.validateKey(key);
+    await this._set(key, data);
+    this.emit("set", data);
+    return data;
+  }
+  async get(key) {
+    this.validateKey(key);
+    const data = await this._get(key);
+    this.emit("get", data);
+    return data;
+  }
+  async del(key) {
+    this.validateKey(key);
+    const data = await this._del(key);
+    this.emit("delete", data);
+    return data;
+  }
+  async delete(key) {
+    return this.del(key);
+  }
+  async clear() {
+    const data = await this._clear();
+    this.emit("clear", data);
+    return data;
+  }
+}
+
+class MemoryCache extends Cache {
+  constructor(config = {}) {
+    super(config);
+    this.cache = {};
+    this.meta = {};
+    this.maxSize = config.maxSize || 0;
+    this.ttl = config.ttl || 0;
+  }
+  async _set(key, data) {
+    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
+      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+      if (oldestKey) {
+        delete this.cache[oldestKey];
+        delete this.meta[oldestKey];
+      }
+    }
+    this.cache[key] = data;
+    this.meta[key] = { ts: Date.now() };
+    return data;
+  }
+  async _get(key) {
+    if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+    if (this.ttl > 0) {
+      const now = Date.now();
+      const meta = this.meta[key];
+      if (meta && now - meta.ts > this.ttl * 1e3) {
+        delete this.cache[key];
+        delete this.meta[key];
+        return null;
+      }
+    }
+    return this.cache[key];
+  }
+  async _del(key) {
+    delete this.cache[key];
+    delete this.meta[key];
+    return true;
+  }
+  async _clear() {
+    this.cache = {};
+    this.meta = {};
+    return true;
+  }
+  async size() {
+    return Object.keys(this.cache).length;
+  }
+  async keys() {
+    return Object.keys(this.cache);
+  }
+}
 
 var msg = {
   2:      'need dictionary',     /* Z_NEED_DICT       2  */
@@ -14899,7 +15464,7 @@ Zlib$1.prototype.write = function(flush, input, in_off, in_len, out, out_off, ou
   this.write_in_progress = true;
 
   var self = this;
-  browser$1.nextTick(function() {
+  process.nextTick(function() {
     self.write_in_progress = false;
     var res = self._write(flush, input, in_off, in_len, out, out_off, out_len);
     self.callback(res[0], res[1]);
@@ -14936,7 +15501,7 @@ Zlib$1.prototype._write = function(flush, input, in_off, in_len, out, out_off, o
   }
 
   if (input == null) {
-    input = new Buffer$1(0);
+    input = new Buffer(0);
     in_len = 0;
     in_off = 0;
   }
@@ -15080,6 +15645,27 @@ var _binding = /*#__PURE__*/Object.freeze({
   Z_UNKNOWN: Z_UNKNOWN,
   Zlib: Zlib$1
 });
+
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 function assert (a, msg) {
   if (!a) {
@@ -15270,7 +15856,7 @@ function zlibBuffer(engine, buffer, callback) {
   }
 
   function onEnd() {
-    var buf = Buffer$1.concat(buffers, nread);
+    var buf = Buffer.concat(buffers, nread);
     buffers = [];
     callback(null, buf);
     engine.close();
@@ -15279,8 +15865,8 @@ function zlibBuffer(engine, buffer, callback) {
 
 function zlibBufferSync(engine, buffer) {
   if (typeof buffer === 'string')
-    buffer = new Buffer$1(buffer);
-  if (!Buffer$1.isBuffer(buffer))
+    buffer = new Buffer(buffer);
+  if (!Buffer.isBuffer(buffer))
     throw new TypeError('Not a string or buffer');
 
   var flushFlag = binding.Z_FINISH;
@@ -15396,7 +15982,7 @@ function Zlib(opts, mode) {
   }
 
   if (opts.dictionary) {
-    if (!Buffer$1.isBuffer(opts.dictionary)) {
+    if (!Buffer.isBuffer(opts.dictionary)) {
       throw new Error('Invalid dictionary: it should be a Buffer instance');
     }
   }
@@ -15429,7 +16015,7 @@ function Zlib(opts, mode) {
                      strategy,
                      opts.dictionary);
 
-  this._buffer = new Buffer$1(this._chunkSize);
+  this._buffer = new Buffer(this._chunkSize);
   this._offset = 0;
   this._closed = false;
   this._level = level;
@@ -15464,7 +16050,7 @@ Zlib.prototype.params = function(level, strategy, callback) {
       }
     });
   } else {
-    browser$1.nextTick(callback);
+    process.nextTick(callback);
   }
 };
 
@@ -15475,7 +16061,7 @@ Zlib.prototype.reset = function() {
 // This is the _flush function called by the transform class,
 // internally, when the last chunk has been written.
 Zlib.prototype._flush = function(callback) {
-  this._transform(new Buffer$1(0), '', callback);
+  this._transform(new Buffer(0), '', callback);
 };
 
 Zlib.prototype.flush = function(kind, callback) {
@@ -15488,7 +16074,7 @@ Zlib.prototype.flush = function(kind, callback) {
 
   if (ws.ended) {
     if (callback)
-      browser$1.nextTick(callback);
+      process.nextTick(callback);
   } else if (ws.ending) {
     if (callback)
       this.once('end', callback);
@@ -15499,13 +16085,13 @@ Zlib.prototype.flush = function(kind, callback) {
     });
   } else {
     this._flushFlag = kind;
-    this.write(new Buffer$1(0), '', callback);
+    this.write(new Buffer(0), '', callback);
   }
 };
 
 Zlib.prototype.close = function(callback) {
   if (callback)
-    browser$1.nextTick(callback);
+    process.nextTick(callback);
 
   if (this._closed)
     return;
@@ -15515,7 +16101,7 @@ Zlib.prototype.close = function(callback) {
   this._binding.close();
 
   var self = this;
-  browser$1.nextTick(function() {
+  process.nextTick(function() {
     self.emit('close');
   });
 };
@@ -15526,7 +16112,7 @@ Zlib.prototype._transform = function(chunk, encoding, cb) {
   var ending = ws.ending || ws.ended;
   var last = ending && (!chunk || ws.length === chunk.length);
 
-  if (!chunk === null && !Buffer$1.isBuffer(chunk))
+  if (!chunk === null && !Buffer.isBuffer(chunk))
     return cb(new Error('invalid input'));
 
   // If it's the last chunk, or a final flush, we use the Z_FINISH flush flag.
@@ -15579,7 +16165,7 @@ Zlib.prototype._processChunk = function(chunk, flushFlag, cb) {
       throw error;
     }
 
-    var buf = Buffer$1.concat(buffers, nread);
+    var buf = Buffer.concat(buffers, nread);
     this.close();
 
     return buf;
@@ -15619,7 +16205,7 @@ Zlib.prototype._processChunk = function(chunk, flushFlag, cb) {
     if (availOutAfter === 0 || self._offset >= self._chunkSize) {
       availOutBefore = self._chunkSize;
       self._offset = 0;
-      self._buffer = new Buffer$1(self._chunkSize);
+      self._buffer = new Buffer(self._chunkSize);
     }
 
     if (availOutAfter === 0) {
@@ -15696,11 +16282,16 @@ var zlib = {
 class S3Cache extends Cache {
   constructor({
     client,
-    keyPrefix = "cache"
+    keyPrefix = "cache",
+    ttl = 0,
+    prefix = void 0
   }) {
-    super();
+    super({ client, keyPrefix, ttl, prefix });
     this.client = client;
     this.keyPrefix = keyPrefix;
+    this.config.ttl = ttl;
+    this.config.client = client;
+    this.config.prefix = prefix !== void 0 ? prefix : keyPrefix + (keyPrefix.endsWith("/") ? "" : "/");
   }
   async _set(key, data) {
     let body = JSON.stringify(data);
@@ -15722,21 +16313,39 @@ class S3Cache extends Cache {
     });
   }
   async _get(key) {
-    const { Body } = await this.client.getObject(join(this.keyPrefix, key));
-    let content = await streamToString(Body);
-    content = Buffer.from(content, "base64");
-    content = zlib.unzipSync(content).toString();
-    return JSON.parse(content);
+    try {
+      const { Body } = await this.client.getObject(join(this.keyPrefix, key));
+      let content = await streamToString(Body);
+      content = Buffer.from(content, "base64");
+      content = zlib.unzipSync(content).toString();
+      return JSON.parse(content);
+    } catch (error) {
+      if (error.name === "NoSuchKey" || error.name === "NotFound") {
+        return null;
+      }
+      throw error;
+    }
   }
   async _del(key) {
     await this.client.deleteObject(join(this.keyPrefix, key));
     return true;
   }
-  async _clear(dir = "") {
+  async _clear() {
     const keys = await this.client.getAllKeys({
-      prefix: join(this.keyPrefix, dir)
+      prefix: this.keyPrefix
     });
-    await this.client.deleteObjects(keys);
+    for (const key of keys) {
+      await this.client.deleteObject(key);
+    }
+  }
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+  async keys() {
+    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
+    const prefix = this.keyPrefix.endsWith("/") ? this.keyPrefix : this.keyPrefix + "/";
+    return allKeys.map((k) => k.startsWith(prefix) ? k.slice(prefix.length) : k);
   }
 }
 
