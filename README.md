@@ -148,9 +148,9 @@ const s3db = new S3db({
 });
 ```
 
-## 🔧 Configuration
+## �� Configuration
 
-### Connection Options
+### Database Connection Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -160,6 +160,50 @@ const s3db = new S3db({
 | `cache` | `boolean` | `false` | Enable caching |
 | `ttl` | `number` | `86400` | Cache TTL in seconds |
 | `plugins` | `array` | `[]` | Custom plugins |
+| `endpoint` | `string` | `undefined` | Custom S3 endpoint (for MinIO, etc.) |
+| `verbose` | `boolean` | `false` | Enable verbose logging |
+| `client` | `object` | `undefined` | Custom S3 client instance |
+
+### Resource Creation Options
+
+When creating resources, you can specify additional options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | `string` | **required** | Resource name |
+| `attributes` | `object` | **required** | Schema definition |
+| `behavior` | `string` | `"user-management"` | How to handle 2KB metadata limit |
+| `options` | `object` | `{}` | Additional resource options |
+
+#### Behavior Options
+
+| Behavior | Description | Use Case |
+|----------|-------------|----------|
+| `user-management` | Warns but allows operation (default) | Development, when you want to handle limits manually |
+| `enforce-limits` | Throws error when limit exceeded | Strict applications requiring data integrity |
+| `data-truncate` | Truncates data to fit within limit | When partial data is acceptable |
+| `body-overflow` | Stores excess data in S3 object body | When complete data preservation is required |
+
+#### Resource Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timestamps` | `boolean` | `false` | Auto-add createdAt/updatedAt fields |
+| `partitions` | `object` | `{}` | Define data partitions for efficient queries |
+| `hooks` | `object` | `{}` | Custom logic before/after operations |
+| `cache` | `boolean` | `false` | Enable resource-level caching |
+| `autoDecrypt` | `boolean` | `true` | Auto-decrypt secret fields |
+| `paranoid` | `boolean` | `true` | Security flag for dangerous operations |
+
+#### Schema Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `autoEncrypt` | `boolean` | `true` | Auto-encrypt secret fields |
+| `autoDecrypt` | `boolean` | `true` | Auto-decrypt secret fields |
+| `arraySeparator` | `string` | `"|"` | Separator for array serialization |
+| `generateAutoHooks` | `boolean` | `true` | Auto-generate field transformation hooks |
+| `hooks` | `object` | `{}` | Custom schema transformation hooks |
 
 ### 🔐 Authentication & Connectivity
 
@@ -1497,5 +1541,5 @@ const updatedUsers = await s3db.createResource({
   }
 });
 // New data stored at: resource=users/v=v1/id={id}
-// Old data remains at: resource=users/v=v0/id={id}
+// Old data remains at: resource=users/id={id}
 ```

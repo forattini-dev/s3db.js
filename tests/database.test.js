@@ -1,5 +1,6 @@
 import { join } from 'path';
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { EventEmitter } from 'events';
 
 import Database from '../src/database.class.js';
 import Resource from '../src/resource.class.js';
@@ -262,6 +263,585 @@ describe('Database Class - Complete Journey', () => {
 
     // Test connection status
     expect(database.isConnected()).toBe(true);
+  });
+});
+
+describe('Database Constructor and Edge Cases', () => {
+  test('should handle constructor with minimal options', () => {
+    const db = new Database({
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    expect(db.version).toBe('1');
+    expect(db.s3dbVersion).toBeDefined();
+    expect(db.resources).toEqual({});
+    expect(db.verbose).toBe(false);
+    expect(db.parallelism).toBe(10);
+    expect(db.plugins).toEqual([]);
+    expect(db.passphrase).toBe('secret');
+  });
+
+  test('should handle constructor with all options', () => {
+    const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
+    const mockPlugin = { setup: jest.fn(), start: jest.fn() };
+    
+    const db = new Database({
+      verbose: true,
+      parallelism: 5,
+      plugins: [mockPlugin],
+      cache: { type: 'memory' },
+      passphrase: 'custom-secret',
+      client: mockClient
+    });
+
+    expect(db.verbose).toBe(true);
+    expect(db.parallelism).toBe(5);
+    expect(db.plugins).toEqual([mockPlugin]);
+    expect(db.cache).toEqual({ type: 'memory' });
+    expect(db.passphrase).toBe('custom-secret');
+    expect(db.client).toBe(mockClient);
+    expect(db.bucket).toBe('test-bucket');
+    expect(db.keyPrefix).toBe('test/');
+  });
+
+  test('should handle constructor with string parallelism', () => {
+    const db = new Database({ 
+      parallelism: '15',
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    expect(db.parallelism).toBe(15);
+  });
+
+  test('should handle constructor with invalid parallelism', () => {
+    const db = new Database({ 
+      parallelism: 'invalid',
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    expect(db.parallelism).toBe(10); // Default value
+  });
+
+  test('should handle s3dbVersion fallback', () => {
+    // Mock __PACKAGE_VERSION__ to be undefined
+    const originalPackageVersion = global.__PACKAGE_VERSION__;
+    delete global.__PACKAGE_VERSION__;
+    
+    const db = new Database({
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    expect(db.s3dbVersion).toBe('latest');
+    
+    // Restore
+    if (originalPackageVersion !== undefined) {
+      global.__PACKAGE_VERSION__ = originalPackageVersion;
+    }
+  });
+
+  test('should handle s3dbVersion with package version', () => {
+    // Mock __PACKAGE_VERSION__ to have a value
+    const originalPackageVersion = global.__PACKAGE_VERSION__;
+    global.__PACKAGE_VERSION__ = '1.2.3';
+    
+    const db = new Database({
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    expect(db.s3dbVersion).toBe('1.2.3');
+    
+    // Restore
+    if (originalPackageVersion !== undefined) {
+      global.__PACKAGE_VERSION__ = originalPackageVersion;
+    } else {
+      delete global.__PACKAGE_VERSION__;
+    }
+  });
+});
+
+describe('Database Plugin System', () => {
+  test('should start plugins with function plugins', async () => {
+    const mockPlugin = jest.fn().mockImplementation(() => ({
+      beforeSetup: jest.fn(),
+      setup: jest.fn(),
+      afterSetup: jest.fn(),
+      beforeStart: jest.fn(),
+      start: jest.fn(),
+      afterStart: jest.fn()
+    }));
+
+    const db = new Database({
+      plugins: [mockPlugin],
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await db.connect();
+    
+    expect(mockPlugin).toHaveBeenCalledWith(db);
+  });
+
+  test('should start plugins with instance plugins', async () => {
+    const mockPlugin = {
+      beforeSetup: jest.fn(),
+      setup: jest.fn(),
+      afterSetup: jest.fn(),
+      beforeStart: jest.fn(),
+      start: jest.fn(),
+      afterStart: jest.fn()
+    };
+
+    const db = new Database({
+      plugins: [mockPlugin],
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await db.connect();
+    
+    expect(mockPlugin.setup).toHaveBeenCalledWith(db);
+    expect(mockPlugin.start).toHaveBeenCalled();
+  });
+
+  test('should handle plugins without hooks', async () => {
+    const mockPlugin = {
+      setup: jest.fn(),
+      start: jest.fn()
+    };
+
+    const db = new Database({
+      plugins: [mockPlugin],
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await db.connect();
+    
+    expect(mockPlugin.setup).toHaveBeenCalledWith(db);
+    expect(mockPlugin.start).toHaveBeenCalled();
+  });
+
+  test('should handle empty plugins array', async () => {
+    const db = new Database({
+      plugins: [],
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await expect(db.connect()).resolves.not.toThrow();
+  });
+});
+
+describe('Database Resource Updates and Versioning', () => {
+  let database;
+
+  beforeEach(async () => {
+    database = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await database.connect();
+  });
+
+  test('should update existing resource instead of creating new one', async () => {
+    // Create initial resource
+    const resource1 = await database.createResource({
+      name: 'updatable',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required'
+      }
+    });
+
+    expect(resource1.name).toBe('updatable');
+    expect(Object.keys(resource1.attributes)).toHaveLength(2);
+
+    // Update the same resource
+    const resource2 = await database.createResource({
+      name: 'updatable',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required',
+        age: 'number|optional'
+      },
+      behavior: 'enforce-limits'
+    });
+
+    expect(resource2).toBe(resource1); // Same instance
+    expect(Object.keys(resource2.attributes)).toHaveLength(3);
+    expect(resource2.behavior).toBe('enforce-limits');
+  });
+
+  test('should handle resource version updates', async () => {
+    const resource = await database.createResource({
+      name: 'versioned',
+      attributes: {
+        name: 'string|required'
+      }
+    });
+
+    const versionSpy = jest.spyOn(resource, 'emit');
+
+    // Update resource to trigger version change
+    await database.createResource({
+      name: 'versioned',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required'
+      }
+    });
+
+    expect(versionSpy).toHaveBeenCalledWith('versionUpdated', expect.any(Object));
+  });
+
+  test('should emit resource events', async () => {
+    const events = [];
+    database.on('s3db.resourceCreated', (name) => events.push({ type: 'created', name }));
+    database.on('s3db.resourceUpdated', (name) => events.push({ type: 'updated', name }));
+
+    // Create resource
+    await database.createResource({
+      name: 'event-test',
+      attributes: { name: 'string|required' }
+    });
+
+    // Update resource
+    await database.createResource({
+      name: 'event-test',
+      attributes: { name: 'string|required', email: 'email|required' }
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ type: 'created', name: 'event-test' });
+    expect(events[1]).toEqual({ type: 'updated', name: 'event-test' });
+  });
+});
+
+describe('Database Definition Changes and Versioning', () => {
+  let database;
+
+  beforeEach(async () => {
+    database = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+  });
+
+  test('should detect new resources', async () => {
+    // Create a resource before connecting
+    database.resources['new-resource'] = new Resource({
+      name: 'new-resource',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+
+    const changes = database.detectDefinitionChanges({ resources: {} });
+    
+    expect(changes).toHaveLength(1);
+    expect(changes[0].type).toBe('new');
+    expect(changes[0].resourceName).toBe('new-resource');
+    expect(changes[0].currentHash).toBeDefined();
+    expect(changes[0].savedHash).toBeNull();
+  });
+
+  test('should detect changed resources', async () => {
+    const resource = new Resource({
+      name: 'changed-resource',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+
+    database.resources['changed-resource'] = resource;
+
+    const savedMetadata = {
+      resources: {
+        'changed-resource': {
+          currentVersion: 'v0',
+          versions: {
+            v0: {
+              hash: 'different-hash',
+              attributes: { name: 'string|required' }
+            }
+          }
+        }
+      }
+    };
+
+    const changes = database.detectDefinitionChanges(savedMetadata);
+    
+    expect(changes).toHaveLength(1);
+    expect(changes[0].type).toBe('changed');
+    expect(changes[0].resourceName).toBe('changed-resource');
+    expect(changes[0].currentHash).not.toBe('different-hash');
+    expect(changes[0].fromVersion).toBe('v0');
+    expect(changes[0].toVersion).toBe('v1');
+  });
+
+  test('should detect deleted resources', async () => {
+    const savedMetadata = {
+      resources: {
+        'deleted-resource': {
+          currentVersion: 'v0',
+          versions: {
+            v0: {
+              hash: 'some-hash',
+              attributes: { name: 'string|required' }
+            }
+          }
+        }
+      }
+    };
+
+    const changes = database.detectDefinitionChanges(savedMetadata);
+    
+    expect(changes).toHaveLength(1);
+    expect(changes[0].type).toBe('deleted');
+    expect(changes[0].resourceName).toBe('deleted-resource');
+    expect(changes[0].currentHash).toBeNull();
+    expect(changes[0].savedHash).toBe('some-hash');
+    expect(changes[0].deletedVersion).toBe('v0');
+  });
+
+  test('should generate consistent hashes', () => {
+    const definition1 = {
+      attributes: { name: 'string|required' },
+      options: { timestamps: true }
+    };
+
+    const definition2 = {
+      attributes: { name: 'string|required' },
+      options: { timestamps: true }
+    };
+
+    const hash1 = database.generateDefinitionHash(definition1);
+    const hash2 = database.generateDefinitionHash(definition2);
+
+    expect(hash1).toBe(hash2);
+    expect(hash1).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  test('should get next version correctly', () => {
+    expect(database.getNextVersion({})).toBe('v0');
+    expect(database.getNextVersion({ v0: {} })).toBe('v1');
+    expect(database.getNextVersion({ v0: {}, v1: {}, v2: {} })).toBe('v3');
+    expect(database.getNextVersion({ v0: {}, v5: {} })).toBe('v6');
+  });
+
+  test('should handle version with non-numeric parts', () => {
+    // The logic filters out non-v* versions, so v1beta is ignored
+    expect(database.getNextVersion({ v0: {}, 'v1beta': {} })).toBe('v2');
+    expect(database.getNextVersion({ 'invalid': {}, v2: {} })).toBe('v3');
+  });
+});
+
+describe('Database Metadata and File Operations', () => {
+  let database;
+
+  beforeEach(async () => {
+    database = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+  });
+
+  test('should create blank metadata structure', () => {
+    const metadata = database.blankMetadataStructure();
+    
+    expect(metadata).toEqual({
+      version: '1',
+      s3dbVersion: database.s3dbVersion,
+      resources: {}
+    });
+  });
+
+  test('should upload metadata file', async () => {
+    // Create a resource first
+    const resource = await database.createResource({
+      name: 'metadata-test',
+      attributes: { name: 'string|required' }
+    });
+
+    const uploadSpy = jest.spyOn(database.client, 'putObject');
+    const emitSpy = jest.spyOn(database, 'emit');
+
+    await database.uploadMetadataFile();
+
+    expect(uploadSpy).toHaveBeenCalledWith({
+      key: 's3db.json',
+      body: expect.any(String),
+      contentType: 'application/json'
+    });
+
+    expect(emitSpy).toHaveBeenCalledWith('metadataUploaded', expect.any(Object));
+
+    const uploadedBody = JSON.parse(uploadSpy.mock.calls[0][0].body);
+    expect(uploadedBody.version).toBe('1');
+    expect(uploadedBody.resources['metadata-test']).toBeDefined();
+    expect(uploadedBody.resources['metadata-test'].currentVersion).toBe('v0');
+  });
+
+  test('should handle metadata with existing versions', async () => {
+    // Create initial resource
+    await database.createResource({
+      name: 'version-test',
+      attributes: { name: 'string|required' }
+    });
+
+    // Simulate existing metadata
+    database.savedMetadata = {
+      version: '1',
+      s3dbVersion: database.s3dbVersion,
+      resources: {
+        'version-test': {
+          currentVersion: 'v0',
+          versions: {
+            v0: {
+              hash: 'old-hash',
+              attributes: { name: 'string|required' },
+              options: {},
+              behavior: 'user-management',
+              createdAt: '2024-01-01T00:00:00Z'
+            }
+          }
+        }
+      }
+    };
+
+    const uploadSpy = jest.spyOn(database.client, 'putObject');
+
+    await database.uploadMetadataFile();
+
+    const uploadedBody = JSON.parse(uploadSpy.mock.calls[0][0].body);
+    const resourceMeta = uploadedBody.resources['version-test'];
+    
+    expect(resourceMeta.versions.v0).toBeDefined();
+    expect(resourceMeta.versions.v0.createdAt).toBe('2024-01-01T00:00:00Z');
+  });
+});
+
+describe('Database Resource Methods', () => {
+  let database;
+
+  beforeEach(async () => {
+    database = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await database.connect();
+  });
+
+  test('should reject non-existent resource', async () => {
+    await expect(database.resource('non-existent')).rejects.toBe('resource non-existent does not exist');
+  });
+
+  test('should return existing resource', async () => {
+    await database.createResource({
+      name: 'test-resource',
+      attributes: { name: 'string|required' }
+    });
+
+    const resource = await database.resource('test-resource');
+    expect(resource.name).toBe('test-resource');
+  });
+
+  test('should list resources correctly', async () => {
+    // Clean up any existing resources first
+    const existingResources = await database.listResources();
+    
+    await database.createResource({
+      name: 'resource1',
+      attributes: { name: 'string|required' }
+    });
+
+    await database.createResource({
+      name: 'resource2',
+      attributes: { email: 'email|required' }
+    });
+
+    const resources = await database.listResources();
+    
+    // Should have at least the 2 new resources
+    expect(resources.length).toBeGreaterThanOrEqual(2);
+    expect(resources.some(r => r.name === 'resource1')).toBe(true);
+    expect(resources.some(r => r.name === 'resource2')).toBe(true);
+  });
+
+  test('should get resource by name', async () => {
+    await database.createResource({
+      name: 'get-test',
+      attributes: { name: 'string|required' }
+    });
+
+    const resource = await database.getResource('get-test');
+    expect(resource.name).toBe('get-test');
+  });
+
+  test('should throw error for non-existent resource in getResource', async () => {
+    await expect(database.getResource('non-existent')).rejects.toThrow('Resource not found: non-existent');
+  });
+});
+
+describe('Database Configuration and Status', () => {
+  test('should return correct configuration', () => {
+    const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
+    const db = new Database({
+      verbose: true,
+      parallelism: 5,
+      client: mockClient
+    });
+
+    const config = db.config;
+    
+    expect(config).toEqual({
+      version: '1',
+      s3dbVersion: db.s3dbVersion,
+      bucket: 'test-bucket',
+      keyPrefix: 'test/',
+      parallelism: 5,
+      verbose: true
+    });
+  });
+
+  test('should return connection status', () => {
+    const db = new Database({
+      client: { bucket: 'test', keyPrefix: 'test/' }
+    });
+    
+    expect(db.isConnected()).toBe(false); // Not connected yet
+    
+    db.savedMetadata = { version: '1' };
+    expect(db.isConnected()).toBe(true);
+  });
+});
+
+describe('Database S3db Export', () => {
+  test('should export S3db class', async () => {
+    const { S3db } = await import('../src/database.class.js');
+    expect(S3db).toBeDefined();
+    expect(S3db.prototype).toBeInstanceOf(EventEmitter);
+  });
+
+  test('should export Database as default', async () => {
+    const Database = (await import('../src/database.class.js')).default;
+    expect(Database).toBeDefined();
+    expect(Database.prototype).toBeInstanceOf(EventEmitter);
   });
 });
 
