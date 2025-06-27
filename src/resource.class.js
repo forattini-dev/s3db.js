@@ -544,6 +544,9 @@ class Resource extends EventEmitter {
     // Execute afterUpdate hooks
     await this.executeHooks('afterUpdate', validated);
 
+    // Update partition objects to keep them in sync
+    await this.updatePartitionReferences(validated);
+
     this.emit("update", preProcessedData, validated);
     return validated;
   }
@@ -774,19 +777,72 @@ class Resource extends EventEmitter {
   async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
     const { limit, offset = 0 } = options;
     
-    const ids = await this.listIds({ partition, partitionValues });
+    if (!partition) {
+      // Fallback to main resource listing
+      const ids = await this.listIds({ partition, partitionValues });
+      
+      // Apply offset and limit
+      let filteredIds = ids.slice(offset);
+      if (limit) {
+        filteredIds = filteredIds.slice(0, limit);
+      }
+
+      // Get full data for each ID
+      const { results } = await PromisePool.for(filteredIds)
+        .withConcurrency(this.parallelism)
+        .process(async (id) => {
+          return await this.get(id);
+        });
+
+      this.emit("listByPartition", { partition, partitionValues, count: results.length });
+      return results;
+    }
+
+    // Get partition definition
+    const partitionDef = this.options.partitions[partition];
+    if (!partitionDef) {
+      throw new Error(`Partition '${partition}' not found`);
+    }
     
+    // Build partition prefix
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== undefined && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
+      }
+    }
+    
+    let prefix;
+    if (partitionSegments.length > 0) {
+      prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
+    } else {
+      prefix = `resource=${this.name}/partition=${partition}`;
+    }
+
+    // Get all keys in the partition
+    const keys = await this.client.getAllKeys({ prefix });
+    
+    // Extract IDs and apply pagination
+    const ids = keys.map((key) => {
+      const parts = key.split('/');
+      const idPart = parts.find(part => part.startsWith('id='));
+      return idPart ? idPart.replace('id=', '') : null;
+    }).filter(Boolean);
+
     // Apply offset and limit
     let filteredIds = ids.slice(offset);
     if (limit) {
       filteredIds = filteredIds.slice(0, limit);
     }
 
-    // Get full data for each ID
+    // Get full data directly from partition objects (no extra request needed!)
     const { results } = await PromisePool.for(filteredIds)
       .withConcurrency(this.parallelism)
       .process(async (id) => {
-        return await this.get(id);
+        return await this.getFromPartition(id, partition, partitionValues);
       });
 
     this.emit("listByPartition", { partition, partitionValues, count: results.length });
@@ -1007,17 +1063,28 @@ class Resource extends EventEmitter {
       const partitionKey = this.getPartitionKey(partitionName, data.id, data);
       
       if (partitionKey) {
-        // Create minimal reference object pointing to main object
-        const referenceMetadata = {
-          _ref: this.getResourceKey(data.id),
-          _partition: partitionName,
-          _id: data.id
+        // Store the actual resource data in the partition path
+        // This creates a direct copy with the same ID as the main resource
+        const mappedData = await this.schema.mapper(data);
+        
+        // Apply behavior strategy for partition storage
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+          resource: this,
+          data: data,
+          mappedData
+        });
+        
+        // Add version metadata for consistency
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
         };
         
         await this.client.putObject({
           key: partitionKey,
-          metadata: referenceMetadata,
-          body: "", // Partition references are metadata-only
+          metadata: partitionMetadata,
+          body,
         });
       }
     }
@@ -1043,13 +1110,13 @@ class Resource extends EventEmitter {
       }
     }
 
-    // Delete all partition references in a single batch operation
+    // Delete all partition objects in a single batch operation
     if (keysToDelete.length > 0) {
       try {
         await this.client.deleteObjects(keysToDelete);
       } catch (error) {
-        // Log but don't fail if some partition references don't exist
-        console.warn('Some partition references could not be deleted:', error.message);
+        // Log but don't fail if some partition objects don't exist
+        console.warn('Some partition objects could not be deleted:', error.message);
       }
     }
   }
@@ -1071,6 +1138,129 @@ class Resource extends EventEmitter {
         return doc[key] === value;
       });
     });
+  }
+
+  /**
+   * Update partition objects to keep them in sync
+   * @param {Object} data - Updated object data
+   */
+  async updatePartitionReferences(data) {
+    const partitions = this.options.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+
+    // Update each partition object
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      
+      if (partitionKey) {
+        // Store the updated resource data in the partition path
+        const mappedData = await this.schema.mapper(data);
+        
+        // Apply behavior strategy for partition storage
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+          resource: this,
+          id: data.id,
+          data: data,
+          mappedData
+        });
+        
+        // Add version metadata for consistency
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
+        };
+        
+        try {
+          await this.client.putObject({
+            key: partitionKey,
+            metadata: partitionMetadata,
+            body,
+          });
+        } catch (error) {
+          // Log but don't fail if partition object doesn't exist
+          console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get object directly from a specific partition
+   * @param {string} id - Resource ID
+   * @param {string} partitionName - Name of the partition
+   * @param {Object} partitionValues - Values for partition fields
+   * @returns {Object} The resource data
+   */
+  async getFromPartition(id, partitionName, partitionValues = {}) {
+    const partition = this.options.partitions[partitionName];
+    if (!partition) {
+      throw new Error(`Partition '${partitionName}' not found`);
+    }
+
+    // Build partition key using provided values
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== undefined && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
+      }
+    }
+    
+    if (partitionSegments.length === 0) {
+      throw new Error(`No partition values provided for partition '${partitionName}'`);
+    }
+
+    const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+    
+    const request = await this.client.headObject(partitionKey);
+
+    // Get the correct schema version for unmapping
+    const objectVersion = request.Metadata?._version || this.version;
+    const schema = await this.getSchemaForVersion(objectVersion);
+
+    let metadata = await schema.unmapper(request.Metadata);
+    
+    // Apply behavior strategy for reading
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+    
+    // Get body content if needed
+    if (request.ContentLength > 0) {
+      try {
+        const fullObject = await this.client.getObject(partitionKey);
+        body = await streamToString(fullObject.Body);
+      } catch (error) {
+        body = "";
+      }
+    }
+    
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+
+    let data = processedMetadata;
+    data.id = id;
+    data._contentLength = request.ContentLength;
+    data._lastModified = request.LastModified;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
+    data._partition = partitionName;
+    data._partitionValues = partitionValues;
+
+    if (request.VersionId) data._versionId = request.VersionId;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+
+    data._definitionHash = this.getDefinitionHash();
+
+    this.emit("getFromPartition", data);
+    return data;
   }
 
 }
