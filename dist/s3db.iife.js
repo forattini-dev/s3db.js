@@ -3474,9 +3474,10 @@ ${JSON.stringify(validation, null, 2)}`
       this.attributes = attributes || {};
       this.passphrase = passphrase ?? "secret";
       this.options = lodashEs.merge({}, this.defaultOptions(), options);
+      const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
       this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
         { $$async: true },
-        lodashEs.cloneDeep(this.attributes)
+        processedAttributes
       ));
       if (this.options.generateAutoHooks) this.generateAutoHooks();
       if (!lodashEs.isEmpty(map)) {
@@ -3621,6 +3622,26 @@ ${JSON.stringify(validation, null, 2)}`
       }
       await this.applyHooksActions(rest, "afterUnmap");
       return flat.unflatten(rest);
+    }
+    /**
+     * Preprocess attributes to convert nested objects into validator-compatible format
+     * @param {Object} attributes - Original attributes
+     * @returns {Object} Processed attributes for validator
+     */
+    preprocessAttributesForValidation(attributes) {
+      const processed = {};
+      for (const [key, value] of Object.entries(attributes)) {
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          processed[key] = {
+            type: "object",
+            properties: this.preprocessAttributesForValidation(value),
+            strict: false
+          };
+        } else {
+          processed[key] = value;
+        }
+      }
+      return processed;
     }
   }
 
@@ -8937,13 +8958,32 @@ ${JSON.stringify(validation, null, 2)}`
           continue;
         }
         for (const fieldName of Object.keys(partitionDef.fields)) {
-          if (!currentAttributes.includes(fieldName)) {
+          if (!this.fieldExistsInAttributes(fieldName)) {
             throw new Error(
               `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. Available fields: ${currentAttributes.join(", ")}. This version of resource does not have support for this partition.`
             );
           }
         }
       }
+    }
+    /**
+     * Check if a field (including nested fields) exists in the current attributes
+     * @param {string} fieldName - Field name (can be nested like 'utm.source')
+     * @returns {boolean} True if field exists
+     */
+    fieldExistsInAttributes(fieldName) {
+      if (!fieldName.includes(".")) {
+        return Object.keys(this.attributes || {}).includes(fieldName);
+      }
+      const keys = fieldName.split(".");
+      let currentLevel = this.attributes || {};
+      for (const key of keys) {
+        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+          return false;
+        }
+        currentLevel = currentLevel[key];
+      }
+      return true;
     }
     /**
      * Apply a single partition rule to a field value
@@ -9007,16 +9047,37 @@ ${JSON.stringify(validation, null, 2)}`
       const partitionSegments = [];
       const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
       for (const [fieldName, rule] of sortedFields) {
-        const fieldValue = this.applyPartitionRule(data[fieldName], rule);
-        if (fieldValue === void 0 || fieldValue === null) {
+        const fieldValue = this.getNestedFieldValue(data, fieldName);
+        const transformedValue = this.applyPartitionRule(fieldValue, rule);
+        if (transformedValue === void 0 || transformedValue === null) {
           return null;
         }
-        partitionSegments.push(`${fieldName}=${fieldValue}`);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
       }
       if (partitionSegments.length === 0) {
         return null;
       }
       return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+    }
+    /**
+     * Get nested field value from data object using dot notation
+     * @param {Object} data - Data object
+     * @param {string} fieldPath - Field path (e.g., "utm.source", "address.city")
+     * @returns {*} Field value
+     */
+    getNestedFieldValue(data, fieldPath) {
+      if (!fieldPath.includes(".")) {
+        return data[fieldPath];
+      }
+      const keys = fieldPath.split(".");
+      let value = data;
+      for (const key of keys) {
+        if (value === null || value === void 0 || typeof value !== "object") {
+          return void 0;
+        }
+        value = value[key];
+      }
+      return value;
     }
     async insert({ id, ...attributes }) {
       if (this.options.timestamps) {
@@ -9693,7 +9754,7 @@ ${JSON.stringify(validation, null, 2)}`
       this.version = "1";
       this.s3dbVersion = (() => {
         try {
-          return true ? "4.0.1" : "latest";
+          return true ? "4.0.2" : "latest";
         } catch (e) {
           return "latest";
         }
