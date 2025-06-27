@@ -8,22 +8,6 @@ import { readFileSync } from 'fs';
 // Read package.json to get version
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 
-// Plugin to copy types file
-const copyTypesPlugin = {
-  name: 'copy-types',
-  writeBundle() {
-    // Copy the types file to dist if it exists
-    try {
-      const fs = require('fs');
-      if (fs.existsSync('./dist/s3db.d.ts')) {
-        console.log('✅ Types file already exists in dist/');
-      }
-    } catch (error) {
-      console.log('⚠️  Types file not found, you may need to create it manually');
-    }
-  }
-};
-
 export default {
   input: 'src/index.js',
 
@@ -45,38 +29,18 @@ export default {
     {
       format: 'iife',
       file: 'dist/s3db.iife.js',
-      name: 's3db',
       inlineDynamicImports: true,
+      name: 'S3DB',
       plugins: [],
-      globals: {
-        'nanoid': 'nanoid',
-        'lodash-es': 'lodashEs',
-        '@supercharge/promise-pool': 'promisePool',
-        '@aws-sdk/client-s3': 'clientS3',
-        'crypto': 'crypto',
-        'flat': 'flat',
-        'fastest-validator': 'FastestValidator',
-        'node:stream/web': 'web'
-      }
     },
     {
       format: 'iife',
       file: 'dist/s3db.iife.min.js',
-      name: 's3db',
       inlineDynamicImports: true,
+      name: 'S3DB',
       plugins: [
         minify(),
       ],
-      globals: {
-        'nanoid': 'nanoid',
-        'lodash-es': 'lodashEs',
-        '@supercharge/promise-pool': 'promisePool',
-        '@aws-sdk/client-s3': 'clientS3',
-        'crypto': 'crypto',
-        'flat': 'flat',
-        'fastest-validator': 'FastestValidator',
-        'node:stream/web': 'web'
-      }
     },
     {
       format: 'es',
@@ -98,14 +62,7 @@ export default {
     commonjs(),
     resolve(),
     json(),
-    nodePolyfills({
-      include: ['crypto', 'node:stream/web'],
-      globals: {
-        Buffer: true,
-        global: true,
-        process: true
-      }
-    }),
+    nodePolyfills(),
     
     // Replace __PACKAGE_VERSION__ with actual version during build
     {
@@ -124,9 +81,7 @@ export default {
       define: {
         __PACKAGE_VERSION__: `"${packageJson.version}"`
       }
-    }),
-
-    copyTypesPlugin
+    })
   ],
 
   external: [
