@@ -116,12 +116,12 @@ export class Schema {
       attributes,
       passphrase,
       version = 1,
-      options = {},
+      options = {}
     } = args;
 
     this.name = name;
     this.version = version;
-    this.attributes = attributes;
+    this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
     this.options = merge({}, this.defaultOptions(), options);
 
@@ -256,7 +256,11 @@ export class Schema {
     };
 
     for (const [name, definition] of Object.entries(this.attributes)) {
-      data.attributes[name] = JSON.stringify(definition);
+      if (typeof definition !== 'string') {
+        data.attributes[name] = JSON.stringify(definition);
+      } else {
+        data.attributes[name] = definition;
+      }
     }
 
     return data;
@@ -266,8 +270,7 @@ export class Schema {
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
       for (const action of actions) {
         const value = get(resourceItem, attribute)
-
-        if (value !== undefined) {
+        if (value !== undefined && typeof SchemaActions[action] === 'function') {
           set(resourceItem, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator,

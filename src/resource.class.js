@@ -31,16 +31,17 @@ class Resource extends EventEmitter {
 
     this.name = name;
     this.client = client;
+    this.version = version;
+    
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
-    this.version = version;
 
     this.options = {
       cache: false,
       autoDecrypt: true,
       timestamps: false,
-      partitions: {},  // Changed from partitionRules to partitions (named)
+      partitions: {},
       paranoid: true,  // Security flag for dangerous operations
       ...options,
     };
@@ -92,6 +93,17 @@ class Resource extends EventEmitter {
 
     // Setup automatic partition hooks if partitions are defined
     this.setupPartitionHooks();
+
+    // Merge user-provided hooks (added last, after internal hooks)
+    if (options.hooks) {
+      for (const [event, hooksArr] of Object.entries(options.hooks)) {
+        if (Array.isArray(hooksArr) && this.hooks[event]) {
+          for (const fn of hooksArr) {
+            this.hooks[event].push(fn.bind(this));
+          }
+        }
+      }
+    }
   }
 
   export() {
@@ -397,16 +409,13 @@ class Resource extends EventEmitter {
     data.id = id;
     data._contentLength = request.ContentLength;
     data._lastModified = request.LastModified;
-    data.mimeType = request.ContentType || null;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
 
     if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
 
-    // Add definition hash
-    data.definitionHash = this.getDefinitionHash();
-
-    // Indicate if object has binary content
-    data._hasContent = request.ContentLength > 0;
+    data._definitionHash = this.getDefinitionHash();
 
     this.emit("get", data);
     return data;
@@ -981,6 +990,25 @@ class Resource extends EventEmitter {
         console.warn('Some partition references could not be deleted:', error.message);
       }
     }
+  }
+
+  /**
+   * Query documents with simple filtering
+   * @param {Object} filter - Filter criteria
+   * @returns {Array} Filtered documents
+   */
+  async query(filter = {}) {
+    const allDocuments = await this.getAll();
+    
+    if (Object.keys(filter).length === 0) {
+      return allDocuments;
+    }
+    
+    return allDocuments.filter(doc => {
+      return Object.entries(filter).every(([key, value]) => {
+        return doc[key] === value;
+      });
+    });
   }
 
 }

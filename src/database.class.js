@@ -320,6 +320,45 @@ export class Database extends EventEmitter {
 
     return this.resources[name];
   }
+
+  /**
+   * List all resource names
+   * @returns {Array} Array of resource names
+   */
+  async listResources() {
+    return Object.keys(this.resources).map(name => ({ name }));
+  }
+
+  /**
+   * Get a specific resource by name
+   * @param {string} name - Resource name
+   * @returns {Resource} Resource instance
+   */
+  async getResource(name) {
+    if (!this.resources[name]) {
+      throw new Error(`Resource not found: ${name}`);
+    }
+    return this.resources[name];
+  }
+
+  /**
+   * Get database configuration
+   * @returns {Object} Configuration object
+   */
+  get config() {
+    return {
+      version: this.version,
+      s3dbVersion: this.s3dbVersion,
+      bucket: this.bucket,
+      keyPrefix: this.keyPrefix,
+      parallelism: this.parallelism,
+      verbose: this.verbose
+    };
+  }
+
+  isConnected() {
+    return !!this.savedMetadata;
+  }
 }
 
 export class S3db extends Database { }
