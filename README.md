@@ -953,6 +953,253 @@ const s3db = new S3db({
 });
 ```
 
+## Resource Behaviors
+
+`s3db.js` provides **Resource Behaviors** to handle the 2KB S3 metadata limit in different ways. When your document data exceeds this limit, you can choose how the system should respond.
+
+### Available Behaviors
+
+| Behavior | Description | Use Case |
+|----------|-------------|----------|
+| `user-management` | Warns but allows operation (default) | Development, when you want to handle limits manually |
+| `enforce-limits` | Throws error when limit exceeded | Strict applications requiring data integrity |
+| `data-truncate` | Truncates data to fit within limit | When partial data is acceptable |
+| `body-overflow` | Stores excess data in S3 object body | When complete data preservation is required |
+
+### Setting Behavior
+
+You can set the behavior when creating a resource:
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  behavior: "body-overflow", // Choose your behavior
+  attributes: {
+    name: "string",
+    email: "email",
+    bio: "string|optional",
+    description: "string|optional"
+  }
+});
+```
+
+### 1. User Management Behavior (Default)
+
+The default behavior that warns you when data exceeds the 2KB limit but doesn't block operations.
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  behavior: "user-management", // Default behavior
+  attributes: {
+    name: "string",
+    email: "email",
+    bio: "string|optional"
+  }
+});
+
+// Listen for warning events
+users.on("exceedsLimit", (context) => {
+  console.log(`⚠️  Warning: Metadata size exceeds limit!`);
+  console.log(`   Operation: ${context.operation}`);
+  console.log(`   Size: ${context.totalSize} bytes (limit: ${context.limit} bytes)`);
+  console.log(`   Excess: ${context.excess} bytes`);
+});
+
+// Insert large data (will emit warning but succeed)
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com",
+  bio: "A".repeat(1000) // Large bio that exceeds limit
+});
+```
+
+### 2. Enforce Limits Behavior
+
+Strict behavior that throws an error when data exceeds the 2KB limit.
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  behavior: "enforce-limits",
+  attributes: {
+    name: "string",
+    email: "email",
+    bio: "string|optional"
+  }
+});
+
+try {
+  const user = await users.insert({
+    name: "John Doe",
+    email: "john@example.com",
+    bio: "A".repeat(1000) // Large bio
+  });
+} catch (error) {
+  console.log("Insert failed:", error.message);
+  // Error: S3 metadata size exceeds 2KB limit. Current size: 2049 bytes, limit: 2048 bytes
+}
+```
+
+### 3. Data Truncate Behavior
+
+Automatically truncates data to fit within the 2KB limit, prioritizing smaller attributes.
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  behavior: "data-truncate",
+  attributes: {
+    name: "string",
+    email: "email",
+    bio: "string|optional",
+    description: "string|optional"
+  }
+});
+
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com",
+  bio: "A".repeat(1000), // Will be truncated
+  description: "B".repeat(1000) // Will be truncated
+});
+
+// Retrieve the truncated data
+const retrieved = await users.get(user.id);
+console.log(retrieved.bio); // "AAA...AAA..." (truncated with "..." suffix)
+console.log(retrieved.description); // May be completely removed if no space
+```
+
+### 4. Body Overflow Behavior
+
+Stores excess data in the S3 object body, preserving complete data integrity.
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  behavior: "body-overflow",
+  attributes: {
+    name: "string",
+    email: "email",
+    bio: "string|optional",
+    description: "string|optional"
+  }
+});
+
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com",
+  bio: "A".repeat(1000), // Stored in body
+  description: "B".repeat(1000) // Stored in body
+});
+
+// Retrieve complete data (no loss)
+const retrieved = await users.get(user.id);
+console.log(retrieved.bio.length); // 1000 (complete)
+console.log(retrieved.description.length); // 1000 (complete)
+```
+
+### Behavior Comparison
+
+| Aspect | user-management | enforce-limits | data-truncate | body-overflow |
+|--------|----------------|----------------|---------------|---------------|
+| **Data Loss** | None | None | Partial | None |
+| **Error Handling** | Warnings | Errors | None | None |
+| **Performance** | Fast | Fast | Fast | Slower (body I/O) |
+| **Storage Cost** | Low | Low | Low | Higher (body storage) |
+| **Use Case** | Development | Strict apps | Partial data OK | Complete data required |
+
+### Best Practices
+
+#### Choose the Right Behavior
+
+```js
+// Development/Testing
+const devUsers = await s3db.createResource({
+  name: "users_dev",
+  behavior: "user-management" // Get warnings to understand data size
+});
+
+// Production with strict requirements
+const prodUsers = await s3db.createResource({
+  name: "users_prod", 
+  behavior: "enforce-limits" // Fail fast on size issues
+});
+
+// When partial data is acceptable
+const logs = await s3db.createResource({
+  name: "logs",
+  behavior: "data-truncate" // Truncate long log messages
+});
+
+// When complete data is critical
+const documents = await s3db.createResource({
+  name: "documents",
+  behavior: "body-overflow" // Preserve all document content
+});
+```
+
+#### Monitor Data Size
+
+```js
+// Listen for size warnings
+users.on("exceedsLimit", (context) => {
+  // Log to monitoring system
+  console.log(`Resource ${context.resource.name} exceeded limit:`, {
+    operation: context.operation,
+    size: context.totalSize,
+    excess: context.excess,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Send alert if needed
+  if (context.excess > 500) {
+    sendAlert(`Large data detected: ${context.excess} bytes excess`);
+  }
+});
+```
+
+#### Design for Metadata Limits
+
+```js
+// ✅ Good: Keep important data small
+const user = {
+  name: "John Doe",
+  email: "john@example.com",
+  status: "active",
+  // Store large content in separate resource
+  profileId: "profile-123" // Reference to profile resource
+};
+
+// ❌ Avoid: Large data in main document
+const user = {
+  name: "John Doe", 
+  email: "john@example.com",
+  bio: "Very long biography...".repeat(100), // Could exceed limit
+  fullProfile: { /* large nested object */ }
+};
+```
+
+### Behavior Migration
+
+You can change a resource's behavior after creation:
+
+```js
+// Create resource with default behavior
+const users = await s3db.createResource({
+  name: "users",
+  attributes: { name: "string", email: "email" }
+});
+
+// Later, update the behavior
+await s3db.createResource({
+  name: "users", // Same name
+  behavior: "body-overflow" // New behavior
+});
+```
+
+**⚠️ Note**: Changing behavior affects new operations but doesn't migrate existing data. Existing documents retain their original storage format.
+
 ## 🚨 Limitations & Best Practices
 
 ### Limitations
