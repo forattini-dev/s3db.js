@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
   "main": "dist/s3db.cjs.js",
   "module": "dist/s3db.es.js",
