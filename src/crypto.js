@@ -1,5 +1,3 @@
-import { isObject } from 'lodash-es';
-
 async function dynamicCrypto() {
   let lib
 

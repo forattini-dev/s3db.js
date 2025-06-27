@@ -2,8 +2,24 @@
   "name": "s3db.js",
   "version": "3.3.2",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
-  "main": "dist/s3db.es.js",
+  "main": "dist/s3db.cjs.js",
+  "module": "dist/s3db.es.js",
+  "browser": "dist/s3db.iife.js",
+  "types": "dist/s3db.d.ts",
+  "unpkg": "dist/s3db.iife.min.js",
+  "jsdelivr": "dist/s3db.iife.min.js",
   "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/s3db.es.js",
+      "require": "./dist/s3db.cjs.js",
+      "browser": "./dist/s3db.iife.js",
+      "default": "./dist/s3db.es.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "author": "forattini-dev",
   "license": "UNLICENSED",
   "repository": {
@@ -22,6 +38,8 @@
   "scripts": {
     "build": "rollup -c",
     "postbuild": "node scripts/prefix-files-istanbul-ignore.js",
+    "verify": "node scripts/verify-build.js",
+    "prepublishOnly": "npm run build && npm run verify",
     "coverage": "coveralls < coverage/lcov.info",
     "coverage:serve": "npx http-server ./coverage/lcov-report",
     "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
