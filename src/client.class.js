@@ -420,8 +420,8 @@ export class Client extends EventEmitter {
       }
     }
 
-    this.emit("getContinuationTokenAfterOffset", continuationToken, params);
-    return continuationToken;
+    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+    return continuationToken || null;
   }
 
   async getKeysPage(params = {}) {
@@ -499,7 +499,6 @@ export class Client extends EventEmitter {
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
 
     if (errors.length > 0) {
-      console.log({ errors })
       throw new Error("Some objects could not be moved");
     }
 
