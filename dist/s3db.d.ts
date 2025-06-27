@@ -130,4 +130,4 @@ declare module 's3db.js' {
 
   // Default export
   export default S3db;
-} 
+}
