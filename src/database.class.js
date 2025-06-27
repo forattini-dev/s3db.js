@@ -74,6 +74,7 @@ export class Database extends EventEmitter {
             partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
           },
           attributes: versionData.attributes,
+          behavior: versionData.behavior || 'user-management',
           parallelism: this.parallelism,
           passphrase: this.passphrase,
           observers: [this],
@@ -235,6 +236,7 @@ export class Database extends EventEmitter {
             hash: definitionHash,
             attributes: resourceDef.attributes,
             options: resourceDef.options,
+            behavior: resourceDef.behavior || 'user-management',
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
           }
         }
@@ -265,7 +267,7 @@ export class Database extends EventEmitter {
     };
   }
 
-  async createResource({ name, attributes, options = {} }) {
+  async createResource({ name, attributes, options = {}, behavior = 'user-management' }) {
     // Check if resource already exists in memory
     if (this.resources[name]) {
       // Update existing resource instead of creating new instance
@@ -276,6 +278,11 @@ export class Database extends EventEmitter {
         cache: this.cache,
         ...options,
       });
+      
+      // Update behavior if provided
+      if (behavior) {
+        existingResource.behavior = behavior;
+      }
       
       // Update attributes using the new method that rebuilds schema
       existingResource.updateAttributes(attributes);
@@ -294,6 +301,7 @@ export class Database extends EventEmitter {
     const resource = new Resource({
       name,
       attributes,
+      behavior,
       observers: [this],
       client: this.client,
       version,
