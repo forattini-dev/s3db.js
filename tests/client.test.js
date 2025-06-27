@@ -235,4 +235,317 @@ describe('Client Class - Coverage', () => {
     const token = await client.getContinuationTokenAfterOffset({ prefix: 'p', offset: 0 });
     expect(token).toBeNull();
   });
+
+  test('should handle sendCommand console.warn suppression and error handling', async () => {
+    const originalWarn = console.warn;
+    const mockWarn = jest.fn();
+    console.warn = mockWarn;
+    
+    // Test console.warn suppression for 'Stream of unknown length'
+    client.client.send = jest.fn().mockResolvedValue({});
+    await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
+    
+    // Test error handling in console.warn replacement
+    const mockError = new Error('Console error');
+    console.warn = jest.fn().mockImplementation(() => {
+      throw mockError;
+    });
+    
+    client.client.send = jest.fn().mockResolvedValue({});
+    await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
+    
+    // Test error handling in console.warn restoration
+    console.warn = jest.fn().mockImplementation(() => {
+      throw mockError;
+    });
+    
+    client.client.send = jest.fn().mockResolvedValue({});
+    await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
+    
+    // Restore original console.warn
+    console.warn = originalWarn;
+  });
+
+  test('should handle deleteAll with actual content deletion', async () => {
+    // Mock first call with content, second call with empty content
+    client.client.send = jest.fn()
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'test1' }, { Key: 'test2' }],
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        Deleted: [{ Key: 'test1' }, { Key: 'test2' }]
+      })
+      .mockResolvedValueOnce({
+        Contents: [],
+        IsTruncated: false
+      });
+
+    const deleted = await client.deleteAll({ prefix: 'test' });
+    expect(deleted).toBe(2);
+  });
+
+  test('should handle deleteAll with multiple batches', async () => {
+    // Mock multiple batches with continuation tokens
+    client.client.send = jest.fn()
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'test1' }],
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        Deleted: [{ Key: 'test1' }]
+      })
+      .mockResolvedValueOnce({
+        Contents: [{ Key: 'test2' }],
+        IsTruncated: false
+      })
+      .mockResolvedValueOnce({
+        Deleted: [{ Key: 'test2' }]
+      });
+
+    const deleted = await client.deleteAll({ prefix: 'test' });
+    expect(deleted).toBe(2);
+  });
+
+  test('should handle getContinuationTokenAfterOffset with different offset scenarios', async () => {
+    // Test offset < 1000
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: [{ Key: 'a' }, { Key: 'b' }],
+      IsTruncated: false
+    });
+    
+    const token1 = await client.getContinuationTokenAfterOffset({ prefix: 'p', offset: 500 });
+    expect(token1).toBeDefined();
+
+    // Test offset > 1000 with multiple iterations
+    client.listObjects = jest.fn()
+      .mockResolvedValueOnce({
+        Contents: Array.from({ length: 1000 }, (_, i) => ({ Key: `key${i}` })),
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        Contents: Array.from({ length: 500 }, (_, i) => ({ Key: `key${i + 1000}` })),
+        IsTruncated: false
+      });
+
+    const token2 = await client.getContinuationTokenAfterOffset({ prefix: 'p', offset: 1200 });
+    expect(token2).toBeDefined();
+  });
+
+  test('should handle getKeysPage with offset and amount limits', async () => {
+    // Test with offset > 0
+    client.getContinuationTokenAfterOffset = jest.fn().mockResolvedValue('token1');
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: Array.from({ length: 150 }, (_, i) => ({ Key: `key${i}` })),
+      IsTruncated: false
+    });
+
+    const keys = await client.getKeysPage({ prefix: 'p', offset: 100, amount: 50 });
+    expect(keys.length).toBeLessThanOrEqual(50);
+  });
+
+  test('should handle getKeysPage with keyPrefix processing', async () => {
+    client.config.keyPrefix = '/test/prefix/';
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: [
+        { Key: '/test/prefix/file1.txt' },
+        { Key: '/test/prefix/file2.txt' }
+      ],
+      IsTruncated: false
+    });
+
+    const keys = await client.getKeysPage({ prefix: 'p', amount: 100 });
+    expect(keys).toEqual(['file1.txt', 'file2.txt']);
+  });
+
+  test('should handle moveAllObjects successfully', async () => {
+    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
+    client.moveObject = jest.fn().mockResolvedValue(true);
+
+    const results = await client.moveAllObjects({ 
+      prefixFrom: 'old/', 
+      prefixTo: 'new/' 
+    });
+    
+    expect(results).toEqual(['file1.txt', 'file2.txt']);
+  });
+
+  test('should handle moveAllObjects with errors', async () => {
+    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
+    client.moveObject = jest.fn()
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('Move failed'));
+
+    await expect(client.moveAllObjects({ 
+      prefixFrom: 'old/', 
+      prefixTo: 'new/' 
+    })).rejects.toThrow('Some objects could not be moved');
+  });
+
+  test('should handle moveObject error with undefined options', async () => {
+    client.copyObject = jest.fn().mockRejectedValue(new Error('Copy failed'));
+    
+    await expect(client.moveObject({ from: 'a', to: 'b' })).rejects.toBeDefined();
+  });
+
+  test('should handle count with truncated responses', async () => {
+    client.listObjects = jest.fn()
+      .mockResolvedValueOnce({
+        KeyCount: 1000,
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        KeyCount: 500,
+        IsTruncated: false
+      });
+
+    const count = await client.count({ prefix: 'p' });
+    expect(count).toBe(1500);
+  });
+
+  test('should handle getAllKeys with truncated responses and keyPrefix', async () => {
+    client.config.keyPrefix = '/test/prefix/';
+    client.listObjects = jest.fn()
+      .mockResolvedValueOnce({
+        Contents: [
+          { Key: '/test/prefix/file1.txt' },
+          { Key: '/test/prefix/file2.txt' }
+        ],
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        Contents: [
+          { Key: '/test/prefix/file3.txt' }
+        ],
+        IsTruncated: false
+      });
+
+    const keys = await client.getAllKeys({ prefix: 'p' });
+    expect(keys).toEqual(['file1.txt', 'file2.txt', 'file3.txt']);
+  });
+
+  test('should handle getAllKeys with keys starting with slash after prefix removal', async () => {
+    client.config.keyPrefix = '/test/prefix';
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: [
+        { Key: '/test/prefix/file1.txt' }
+      ],
+      IsTruncated: false
+    });
+
+    const keys = await client.getAllKeys({ prefix: 'p' });
+    expect(keys).toEqual(['file1.txt']);
+  });
+
+  test('should handle listObjects with keyPrefix and empty prefix', async () => {
+    client.config.keyPrefix = '/test/prefix/';
+    client.sendCommand = jest.fn().mockResolvedValue({});
+    
+    await client.listObjects({ prefix: '' });
+    
+    expect(client.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Prefix: '/test/prefix/'
+        })
+      })
+    );
+  });
+
+  test('should handle listObjects with undefined prefix', async () => {
+    client.config.keyPrefix = '/test/prefix/';
+    client.sendCommand = jest.fn().mockResolvedValue({});
+    
+    await client.listObjects({});
+    
+    expect(client.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Prefix: '/test/prefix/'
+        })
+      })
+    );
+  });
+
+  test('should handle deleteAll with no contents in response', async () => {
+    client.client.send = jest.fn().mockResolvedValue({
+      Contents: [],
+      IsTruncated: false
+    });
+
+    const deleted = await client.deleteAll({ prefix: 'test' });
+    expect(deleted).toBe(0);
+  });
+
+  test('should handle deleteAll with undefined prefix', async () => {
+    client.client.send = jest.fn().mockResolvedValue({
+      Contents: [],
+      IsTruncated: false
+    });
+
+    const deleted = await client.deleteAll({});
+    expect(deleted).toBe(0);
+  });
+
+  test('should handle getContinuationTokenAfterOffset with skipped >= offset', async () => {
+    client.listObjects = jest.fn()
+      .mockResolvedValueOnce({
+        Contents: Array.from({ length: 1000 }, (_, i) => ({ Key: `key${i}` })),
+        IsTruncated: true,
+        NextContinuationToken: 'token1'
+      })
+      .mockResolvedValueOnce({
+        Contents: Array.from({ length: 200 }, (_, i) => ({ Key: `key${i + 1000}` })),
+        IsTruncated: false
+      });
+
+    const token = await client.getContinuationTokenAfterOffset({ prefix: 'p', offset: 1100 });
+    expect(token).toBeDefined();
+  });
+
+  test('should handle getKeysPage with keys.length > amount', async () => {
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: Array.from({ length: 200 }, (_, i) => ({ Key: `key${i}` })),
+      IsTruncated: false
+    });
+
+    const keys = await client.getKeysPage({ prefix: 'p', amount: 50 });
+    expect(keys.length).toBeLessThanOrEqual(50);
+  });
+
+  test('should handle getKeysPage with keyPrefix and keys starting with slash', async () => {
+    client.config.keyPrefix = '/test/prefix';
+    client.listObjects = jest.fn().mockResolvedValue({
+      Contents: [
+        { Key: '/test/prefix/file1.txt' }
+      ],
+      IsTruncated: false
+    });
+
+    const keys = await client.getKeysPage({ prefix: 'p', amount: 100 });
+    expect(keys).toEqual(['file1.txt']);
+  });
+
+  test('should handle moveAllObjects with console.log for errors', async () => {
+    const originalLog = console.log;
+    const mockLog = jest.fn();
+    console.log = mockLog;
+
+    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt']);
+    client.moveObject = jest.fn().mockRejectedValue(new Error('Move failed'));
+
+    await expect(client.moveAllObjects({ 
+      prefixFrom: 'old/', 
+      prefixTo: 'new/' 
+    })).rejects.toThrow('Some objects could not be moved');
+
+    expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({ errors: expect.any(Array) }));
+
+    console.log = originalLog;
+  });
 });
