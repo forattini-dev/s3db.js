@@ -251,7 +251,7 @@ class Resource extends EventEmitter {
       }
 
       for (const fieldName of Object.keys(partitionDef.fields)) {
-        if (!currentAttributes.includes(fieldName)) {
+        if (!this.fieldExistsInAttributes(fieldName)) {
           throw new Error(
             `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. ` +
             `Available fields: ${currentAttributes.join(', ')}. ` +
@@ -260,6 +260,31 @@ class Resource extends EventEmitter {
         }
       }
     }
+  }
+
+  /**
+   * Check if a field (including nested fields) exists in the current attributes
+   * @param {string} fieldName - Field name (can be nested like 'utm.source')
+   * @returns {boolean} True if field exists
+   */
+  fieldExistsInAttributes(fieldName) {
+    // Handle simple field names (no dots)
+    if (!fieldName.includes('.')) {
+      return Object.keys(this.attributes || {}).includes(fieldName);
+    }
+
+    // Handle nested field names using dot notation
+    const keys = fieldName.split('.');
+    let currentLevel = this.attributes || {};
+    
+    for (const key of keys) {
+      if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
+        return false;
+      }
+      currentLevel = currentLevel[key];
+    }
+    
+    return true;
   }
 
   /**
@@ -311,8 +336,6 @@ class Resource extends EventEmitter {
     return transformedValue;
   }
 
-
-
   /**
    * Get the main resource key (always versioned path)
    * @param {string} id - Resource ID
@@ -341,13 +364,15 @@ class Resource extends EventEmitter {
     // Process each field in the partition (sorted by field name for consistency)
     const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, rule] of sortedFields) {
-      const fieldValue = this.applyPartitionRule(data[fieldName], rule);
+      // Handle nested fields using dot notation (e.g., "utm.source", "address.city")
+      const fieldValue = this.getNestedFieldValue(data, fieldName);
+      const transformedValue = this.applyPartitionRule(fieldValue, rule);
       
-      if (fieldValue === undefined || fieldValue === null) {
+      if (transformedValue === undefined || transformedValue === null) {
         return null; // Skip if any required field is missing
       }
       
-      partitionSegments.push(`${fieldName}=${fieldValue}`);
+      partitionSegments.push(`${fieldName}=${transformedValue}`);
     }
 
     if (partitionSegments.length === 0) {
@@ -355,6 +380,32 @@ class Resource extends EventEmitter {
     }
 
     return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+  }
+
+  /**
+   * Get nested field value from data object using dot notation
+   * @param {Object} data - Data object
+   * @param {string} fieldPath - Field path (e.g., "utm.source", "address.city")
+   * @returns {*} Field value
+   */
+  getNestedFieldValue(data, fieldPath) {
+    // Handle simple field names (no dots)
+    if (!fieldPath.includes('.')) {
+      return data[fieldPath];
+    }
+
+    // Handle nested field names using dot notation
+    const keys = fieldPath.split('.');
+    let value = data;
+    
+    for (const key of keys) {
+      if (value === null || value === undefined || typeof value !== 'object') {
+        return undefined;
+      }
+      value = value[key];
+    }
+    
+    return value;
   }
 
   async insert({ id, ...attributes }) {
