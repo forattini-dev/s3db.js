@@ -1,2 +1,2 @@
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ debug: false, silent: true });

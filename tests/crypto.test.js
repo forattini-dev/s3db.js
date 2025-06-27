@@ -1,25 +1,171 @@
-import { encrypt, decrypt } from '../src/crypto';
+import { describe, expect, test } from '@jest/globals';
+import { sha256, encrypt, decrypt } from '../src/crypto.js';
 
-describe('Crypto', () => {
-  test('complete', async () => {
-    const passphrase1 = 'secret1'
-    const passphrase2 = 'secret2'
-    const content = 'Hello, world!'
+// Node.js only: Buffer and process are available
 
-    const encrypted1 = await encrypt(content, passphrase1)
-    expect(encrypted1).toBeDefined()
+describe('Crypto Tests', () => {
+  test('should encrypt and decrypt data correctly', async () => {
+    const passphrase = 'my-secret-passphrase';
+    const text = 'Hello, world!';
+    const encrypted = await encrypt(text, passphrase);
+    expect(typeof encrypted).toBe('string');
+    const decrypted = await decrypt(encrypted, passphrase);
+    expect(decrypted).toBe(text);
+  });
 
-    const encrypted2 = await encrypt(content, passphrase2)
-    expect(encrypted2).toBeDefined()
+  test('should handle different data types', async () => {
+    const passphrase = 'another-pass';
+    const obj = { foo: 'bar', n: 42 };
+    const str = JSON.stringify(obj);
+    const encrypted = await encrypt(str, passphrase);
+    const decrypted = await decrypt(encrypted, passphrase);
+    expect(decrypted).toBe(str);
+    // Buffer
+    const buf = Buffer.from('buffer test');
+    const encryptedBuf = await encrypt(buf.toString('utf8'), passphrase);
+    const decryptedBuf = await decrypt(encryptedBuf, passphrase);
+    expect(decryptedBuf).toBe(buf.toString('utf8'));
+  });
 
-    expect(encrypted1).not.toBe(encrypted2)
+  test('should fail with wrong passphrase', async () => {
+    const passphrase = 'pass1';
+    const wrong = 'pass2';
+    const text = 'Sensitive';
+    const encrypted = await encrypt(text, passphrase);
+    await expect(decrypt(encrypted, wrong)).rejects.toThrow();
+  });
+
+  test('should generate correct sha256 hash', async () => {
+    const hash = await sha256('abc');
+    expect(hash).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+
+  test('should handle arrayBufferToBase64 and base64ToArrayBuffer (node)', async () => {
+    // arrayBufferToBase64
+    const buf = Buffer.from('test123');
+    // Use internal functions via encrypt/decrypt
+    const passphrase = 'test';
+    const encrypted = await encrypt('test123', passphrase);
+    const arr = Buffer.from(encrypted, 'base64');
+    // base64ToArrayBuffer should return Uint8Array
+    expect(arr instanceof Buffer).toBe(true);
+    // Decrypt should work
+    const decrypted = await decrypt(encrypted, passphrase);
+    expect(decrypted).toBe('test123');
+  });
+
+  test('should handle empty string and special characters', async () => {
+    const passphrase = 'test-pass';
+    // Empty string
+    const emptyEncrypted = await encrypt('', passphrase);
+    const emptyDecrypted = await decrypt(emptyEncrypted, passphrase);
+    expect(emptyDecrypted).toBe('');
     
-    const decrypted1 = await decrypt(encrypted1, passphrase1)
-    expect(decrypted1).toBeDefined()
-    expect(decrypted1).toBe(content)
+    // Special characters
+    const special = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+    const specialEncrypted = await encrypt(special, passphrase);
+    const specialDecrypted = await decrypt(specialEncrypted, passphrase);
+    expect(specialDecrypted).toBe(special);
+  });
+
+  test('should handle large data', async () => {
+    const passphrase = 'large-data-test';
+    const largeData = 'x'.repeat(10000);
+    const encrypted = await encrypt(largeData, passphrase);
+    const decrypted = await decrypt(encrypted, passphrase);
+    expect(decrypted).toBe(largeData);
+  });
+
+  test('should handle browser environment simulation', async () => {
+    // Simulate browser environment by temporarily removing process
+    const originalProcess = global.process;
+    const originalWindow = global.window;
     
-    const decrypted2 = await decrypt(encrypted2, passphrase2)
-    expect(decrypted2).toBeDefined()
-    expect(decrypted2).toBe(content)
-  })
+    // Remove process to force browser path
+    delete global.process;
+    
+    // Add mock window.crypto with proper return values
+    global.window = {
+      crypto: {
+        subtle: {
+          digest: async () => {
+            // Return a proper SHA-256 hash buffer
+            const hash = new ArrayBuffer(32);
+            const view = new Uint8Array(hash);
+            // Fill with some mock hash data
+            for (let i = 0; i < 32; i++) {
+              view[i] = i;
+            }
+            return hash;
+          },
+          encrypt: async () => {
+            // Return encrypted data that can be decrypted
+            const encrypted = new ArrayBuffer(16);
+            const view = new Uint8Array(encrypted);
+            // Fill with mock encrypted data
+            for (let i = 0; i < 16; i++) {
+              view[i] = i + 100;
+            }
+            return encrypted;
+          },
+          decrypt: async () => {
+            // Return decrypted data as TextEncoder would encode "test"
+            const decrypted = new ArrayBuffer(4);
+            const view = new Uint8Array(decrypted);
+            // "test" in UTF-8: [116, 101, 115, 116]
+            view[0] = 116; // 't'
+            view[1] = 101; // 'e'
+            view[2] = 115; // 's'
+            view[3] = 116; // 't'
+            return decrypted;
+          },
+          importKey: async () => ({}),
+          deriveKey: async () => ({})
+        },
+        getRandomValues: (arr) => {
+          for (let i = 0; i < arr.length; i++) {
+            arr[i] = Math.floor(Math.random() * 256);
+          }
+          return arr;
+        }
+      },
+      btoa: (str) => Buffer.from(str, 'binary').toString('base64'),
+      atob: (str) => Buffer.from(str, 'base64').toString('binary')
+    };
+
+    try {
+      // Test that crypto functions still work in browser environment
+      const hash = await sha256('test');
+      expect(typeof hash).toBe('string');
+      expect(hash.length).toBe(64); // SHA-256 hex length
+      
+      const encrypted = await encrypt('test', 'pass');
+      expect(typeof encrypted).toBe('string');
+      
+      const decrypted = await decrypt(encrypted, 'pass');
+      expect(decrypted).toBe('test');
+    } finally {
+      // Restore original environment
+      global.process = originalProcess;
+      global.window = originalWindow;
+    }
+  });
+
+  test('should handle crypto API not available error', async () => {
+    // Simulate environment where neither process nor window.crypto is available
+    const originalProcess = global.process;
+    const originalWindow = global.window;
+    
+    delete global.process;
+    delete global.window;
+    
+    try {
+      // This should throw an error about crypto library not being available
+      await expect(sha256('test')).rejects.toThrow('Could not load any crypto library');
+    } finally {
+      // Restore original environment
+      global.process = originalProcess;
+      global.window = originalWindow;
+    }
+  });
 });

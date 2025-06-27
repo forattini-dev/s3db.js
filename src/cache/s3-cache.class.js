@@ -7,12 +7,16 @@ import { streamToString } from "../stream/index.js";
 export class S3Cache extends Cache {
   constructor({ 
     client, 
-    keyPrefix = 'cache' 
+    keyPrefix = 'cache',
+    ttl = 0,
+    prefix = undefined
   }) {
-    super();
-  
+    super({ client, keyPrefix, ttl, prefix });
     this.client = client
     this.keyPrefix = keyPrefix;
+    this.config.ttl = ttl;
+    this.config.client = client;
+    this.config.prefix = prefix !== undefined ? prefix : keyPrefix + (keyPrefix.endsWith('/') ? '' : '/');
   }
 
   async _set(key, data) {
@@ -37,11 +41,18 @@ export class S3Cache extends Cache {
   }
 
   async _get(key) {
-    const { Body } = await this.client.getObject(join(this.keyPrefix, key));
-    let content = await streamToString(Body);
-    content = Buffer.from(content, 'base64');
-    content = zlib.unzipSync(content).toString();
-    return JSON.parse(content);
+    try {
+      const { Body } = await this.client.getObject(join(this.keyPrefix, key));
+      let content = await streamToString(Body);
+      content = Buffer.from(content, 'base64');
+      content = zlib.unzipSync(content).toString();
+      return JSON.parse(content);
+    } catch (error) {
+      if (error.name === 'NoSuchKey' || error.name === 'NotFound') {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async _del(key) {
@@ -49,12 +60,25 @@ export class S3Cache extends Cache {
     return true
   }
 
-  async _clear(dir = '') {
+  async _clear() {
     const keys = await this.client.getAllKeys({ 
-      prefix: join(this.keyPrefix, dir),
+      prefix: this.keyPrefix,
     });
+    for (const key of keys) {
+      await this.client.deleteObject(key);
+    }
+  }
 
-    await this.client.deleteObjects(keys);
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+
+  async keys() {
+    // Busca todas as chaves com o prefixo do cache e remove o prefixo
+    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
+    const prefix = this.keyPrefix.endsWith('/') ? this.keyPrefix : this.keyPrefix + '/';
+    return allKeys.map(k => k.startsWith(prefix) ? k.slice(prefix.length) : k);
   }
 }
 
