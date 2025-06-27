@@ -125,9 +125,12 @@ export class Schema {
     this.passphrase = passphrase ?? "secret";
     this.options = merge({}, this.defaultOptions(), options);
 
+    // Preprocess attributes to handle nested objects for validator compilation
+    const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
+
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
       { $$async: true },
-      cloneDeep(this.attributes),
+      processedAttributes,
     ))
 
     if (this.options.generateAutoHooks) this.generateAutoHooks();
@@ -313,6 +316,31 @@ export class Schema {
     
     await this.applyHooksActions(rest, "afterUnmap");
     return unflatten(rest);
+  }
+
+  /**
+   * Preprocess attributes to convert nested objects into validator-compatible format
+   * @param {Object} attributes - Original attributes
+   * @returns {Object} Processed attributes for validator
+   */
+  preprocessAttributesForValidation(attributes) {
+    const processed = {};
+    
+    for (const [key, value] of Object.entries(attributes)) {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // This is a nested object, convert it to a validator-compatible format
+        processed[key] = {
+          type: 'object',
+          properties: this.preprocessAttributesForValidation(value),
+          strict: false
+        };
+      } else {
+        // This is a simple field, keep as is
+        processed[key] = value;
+      }
+    }
+    
+    return processed;
   }
 }
 

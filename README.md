@@ -263,6 +263,75 @@ const users = await s3db.createResource({
 });
 ```
 
+#### Nested Attributes
+
+`s3db.js` fully supports nested object attributes, allowing you to create complex document structures:
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "email|required",
+    utm: {
+      source: "string|required",
+      medium: "string|required",
+      campaign: "string|required",
+      term: "string|optional",
+      content: "string|optional"
+    },
+    address: {
+      street: "string|required",
+      city: "string|required",
+      state: "string|required",
+      country: "string|required",
+      zipCode: "string|optional"
+    },
+    metadata: {
+      category: "string|required",
+      priority: "string|required",
+      settings: "object|optional"
+    }
+  }
+});
+
+// Insert data with nested objects
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com",
+  utm: {
+    source: "google",
+    medium: "cpc",
+    campaign: "brand_awareness",
+    term: "search term"
+  },
+  address: {
+    street: "123 Main St",
+    city: "San Francisco",
+    state: "California",
+    country: "US",
+    zipCode: "94105"
+  },
+  metadata: {
+    category: "premium",
+    priority: "high",
+    settings: { theme: "dark", notifications: true }
+  }
+});
+
+// Access nested data
+console.log(user.utm.source); // "google"
+console.log(user.address.city); // "San Francisco"
+console.log(user.metadata.category); // "premium"
+```
+
+**Key features of nested attributes:**
+- **Deep nesting**: Support for multiple levels of nested objects
+- **Validation**: Each nested field can have its own validation rules
+- **Optional fields**: Nested objects can contain optional fields
+- **Mixed types**: Combine simple types, arrays, and nested objects
+- **Partition support**: Use dot notation for partitions on nested fields (e.g., `"utm.source"`, `"address.country"`)
+
 #### Automatic Timestamps
 
 If you enable the `timestamps` option, `s3db.js` will automatically add `createdAt` and `updatedAt` fields to your resource, and keep them updated on insert and update operations.
@@ -456,6 +525,31 @@ const resource = await s3db.createResource({
       zipCode: "string|optional"
     },
     
+    // Complex nested structures
+    profile: {
+      bio: "string|max:500|optional",
+      avatar: "url|optional",
+      birthDate: "date|optional",
+      preferences: {
+        theme: "string|enum:light,dark|default:light",
+        language: "string|enum:en,es,fr|default:en",
+        notifications: "boolean|default:true"
+      }
+    },
+    
+    // Nested objects with validation
+    contact: {
+      phone: {
+        mobile: "string|pattern:^\\+?[1-9]\\d{1,14}$|optional",
+        work: "string|pattern:^\\+?[1-9]\\d{1,14}$|optional"
+      },
+      social: {
+        twitter: "string|optional",
+        linkedin: "url|optional",
+        github: "url|optional"
+      }
+    },
+    
     // Arrays
     tags: "array|items:string|unique",
     scores: "array|items:number|min:1",
@@ -467,6 +561,19 @@ const resource = await s3db.createResource({
     metadata: {
       settings: "object|optional",
       preferences: "object|optional"
+    },
+    
+    // Analytics and tracking
+    analytics: {
+      utm: {
+        source: "string|optional",
+        medium: "string|optional",
+        campaign: "string|optional",
+        term: "string|optional",
+        content: "string|optional"
+      },
+      events: "array|items:object|optional",
+      lastVisit: "date|optional"
     }
   },
   
@@ -582,7 +689,104 @@ const attributes = {
 };
 ```
 
-### Enhanced Array and Object Handling
+#### Nested Object Validation
+
+Nested objects support comprehensive validation rules at each level:
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    
+    // Simple nested object
+    profile: {
+      bio: "string|max:500|optional",
+      avatar: "url|optional",
+      birthDate: "date|optional"
+    },
+    
+    // Complex nested structure with validation
+    contact: {
+      phone: {
+        mobile: "string|pattern:^\\+?[1-9]\\d{1,14}$|optional",
+        work: "string|pattern:^\\+?[1-9]\\d{1,14}$|optional"
+      },
+      social: {
+        twitter: "string|optional",
+        linkedin: "url|optional"
+      }
+    },
+    
+    // Nested object with arrays
+    preferences: {
+      categories: "array|items:string|unique|optional",
+      notifications: {
+        email: "boolean|default:true",
+        sms: "boolean|default:false",
+        push: "boolean|default:true"
+      }
+    },
+    
+    // Deep nesting with validation
+    analytics: {
+      tracking: {
+        utm: {
+          source: "string|optional",
+          medium: "string|optional",
+          campaign: "string|optional"
+        },
+        events: "array|items:object|optional"
+      }
+    }
+  }
+});
+
+// Insert data with complex nested structure
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer with 10+ years of experience",
+    avatar: "https://example.com/avatar.jpg",
+    birthDate: new Date("1990-01-15")
+  },
+  contact: {
+    phone: {
+      mobile: "+1234567890",
+      work: "+1987654321"
+    },
+    social: {
+      twitter: "@johndoe",
+      linkedin: "https://linkedin.com/in/johndoe"
+    }
+  },
+  preferences: {
+    categories: ["technology", "programming", "web-development"],
+    notifications: {
+      email: true,
+      sms: false,
+      push: true
+    }
+  },
+  analytics: {
+    tracking: {
+      utm: {
+        source: "google",
+        medium: "organic",
+        campaign: "brand"
+      },
+      events: [
+        { type: "page_view", timestamp: new Date() },
+        { type: "signup", timestamp: new Date() }
+      ]
+    }
+  }
+});
+```
+
+#### Enhanced Array and Object Handling
 
 s3db.js now provides robust serialization for complex data structures:
 
@@ -1119,7 +1323,8 @@ const users = await s3db.createResource({
     name: "string",
     email: "email",
     region: "string",
-    ageGroup: "string"
+    ageGroup: "string",
+    createdAt: "date"
   },
   options: {
     partitions: {
@@ -1128,6 +1333,9 @@ const users = await s3db.createResource({
       },
       byAgeGroup: {
         fields: { ageGroup: "string" }
+      },
+      byDate: {
+        fields: { createdAt: "date|maxlength:10" }
       }
     }
   }
@@ -1136,12 +1344,68 @@ const users = await s3db.createResource({
 
 ### Querying by partition
 
-```js
-// Find all users in the 'south' region
-const usersSouth = await users.query({ region: "south" });
+Partitions are automatically created when you insert documents, and you can query them using specific methods that accept partition parameters:
 
-// Find all users in the 'adult' age group
-const adults = await users.query({ ageGroup: "adult" });
+#### List IDs by partition
+
+```js
+// Get all user IDs in the 'south' region
+const userIds = await users.listIds({ 
+  partition: "byRegion", 
+  partitionValues: { region: "south" } 
+});
+
+// Get all user IDs in the 'adult' age group
+const adultIds = await users.listIds({ 
+  partition: "byAgeGroup", 
+  partitionValues: { ageGroup: "adult" } 
+});
+```
+
+#### Count documents by partition
+
+```js
+// Count users in the 'south' region
+const count = await users.count({ 
+  partition: "byRegion", 
+  partitionValues: { region: "south" } 
+});
+
+// Count adult users
+const adultCount = await users.count({ 
+  partition: "byAgeGroup", 
+  partitionValues: { ageGroup: "adult" } 
+});
+```
+
+#### List objects by partition
+
+```js
+// Get all users in the 'south' region
+const usersSouth = await users.listByPartition({ 
+  partition: "byRegion", 
+  partitionValues: { region: "south" } 
+});
+
+// Get all adult users with pagination
+const adultUsers = await users.listByPartition(
+  { partition: "byAgeGroup", partitionValues: { ageGroup: "adult" } },
+  { limit: 10, offset: 0 }
+);
+```
+
+#### Page through partition data
+
+```js
+// Get first page of users in 'south' region
+const page = await users.page(0, 10, { 
+  partition: "byRegion", 
+  partitionValues: { region: "south" } 
+});
+
+console.log(page.items); // Array of user objects
+console.log(page.totalItems); // Total count in this partition
+console.log(page.totalPages); // Total pages available
 ```
 
 ### Example: Time-based partition
@@ -1163,9 +1427,201 @@ const logs = await s3db.createResource({
   }
 });
 
+// Insert logs (partitions are created automatically)
+await logs.insert({
+  message: "User login",
+  level: "info",
+  createdAt: new Date("2024-06-27")
+});
+
 // Query logs for a specific day
-const logsToday = await logs.query({ createdAt: "2024-06-27" });
+const logsToday = await logs.listByPartition({ 
+  partition: "byDate", 
+  partitionValues: { createdAt: "2024-06-27" } 
+});
+
+// Count logs for a specific day
+const count = await logs.count({ 
+  partition: "byDate", 
+  partitionValues: { createdAt: "2024-06-27" } 
+});
 ```
+
+### Partitions with Nested Fields
+
+`s3db.js` supports partitions using nested object fields using dot notation, just like the schema mapper:
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    utm: {
+      source: "string|required",
+      medium: "string|required",
+      campaign: "string|required"
+    },
+    address: {
+      country: "string|required",
+      state: "string|required",
+      city: "string|required"
+    },
+    metadata: {
+      category: "string|required",
+      priority: "string|required"
+    }
+  },
+  options: {
+    partitions: {
+      byUtmSource: {
+        fields: {
+          "utm.source": "string"
+        }
+      },
+      byAddressCountry: {
+        fields: {
+          "address.country": "string|maxlength:2"
+        }
+      },
+      byAddressState: {
+        fields: {
+          "address.country": "string|maxlength:2",
+          "address.state": "string"
+        }
+      },
+      byUtmAndAddress: {
+        fields: {
+          "utm.source": "string",
+          "utm.medium": "string",
+          "address.country": "string|maxlength:2"
+        }
+      }
+    }
+  }
+});
+
+// Insert user with nested data
+await users.insert({
+  name: "John Doe",
+  utm: {
+    source: "google",
+    medium: "cpc",
+    campaign: "brand"
+  },
+  address: {
+    country: "US",
+    state: "California",
+    city: "San Francisco"
+  },
+  metadata: {
+    category: "premium",
+    priority: "high"
+  }
+});
+
+// Query by nested UTM source
+const googleUsers = await users.listIds({
+  partition: "byUtmSource",
+  partitionValues: { "utm.source": "google" }
+});
+
+// Query by nested address country
+const usUsers = await users.listIds({
+  partition: "byAddressCountry",
+  partitionValues: { "address.country": "US" }
+});
+
+// Query by multiple nested fields
+const usCaliforniaUsers = await users.listIds({
+  partition: "byAddressState",
+  partitionValues: { 
+    "address.country": "US", 
+    "address.state": "California" 
+  }
+});
+
+// Complex query with UTM and address
+const googleCpcUsUsers = await users.listIds({
+  partition: "byUtmAndAddress",
+  partitionValues: { 
+    "utm.source": "google", 
+    "utm.medium": "cpc", 
+    "address.country": "US" 
+  }
+});
+
+// Count and list operations work the same way
+const googleCount = await users.count({
+  partition: "byUtmSource",
+  partitionValues: { "utm.source": "google" }
+});
+
+const googleUsersData = await users.listByPartition({
+  partition: "byUtmSource",
+  partitionValues: { "utm.source": "google" }
+});
+```
+
+**Key features of nested field partitions:**
+
+- **Dot notation**: Use `"parent.child"` to access nested fields
+- **Multiple levels**: Support for deeply nested objects like `"address.country.state"`
+- **Mixed partitions**: Combine nested and flat fields in the same partition
+- **Rules support**: Apply maxlength, date formatting, etc. to nested fields
+- **Automatic flattening**: Uses the same flattening logic as the schema mapper
+
+### Partition rules and transformations
+
+Partitions support various field rules that automatically transform values:
+
+```js
+const products = await s3db.createResource({
+  name: "products",
+  attributes: {
+    name: "string",
+    category: "string",
+    price: "number",
+    createdAt: "date"
+  },
+  options: {
+    partitions: {
+      byCategory: {
+        fields: { category: "string" }
+      },
+      byDate: {
+        fields: { createdAt: "date|maxlength:10" } // Truncates to YYYY-MM-DD
+      }
+    }
+  }
+});
+
+// Date values are automatically formatted
+await products.insert({
+  name: "Widget",
+  category: "electronics",
+  price: 99.99,
+  createdAt: new Date("2024-06-27T15:30:00Z") // Will be stored as "2024-06-27"
+});
+```
+
+### Important notes about partitions
+
+1. **Automatic creation**: Partitions are automatically created when you insert documents
+2. **Performance**: Partition queries are more efficient than filtering all documents
+3. **Storage**: Each partition creates additional S3 objects, increasing storage costs
+4. **Consistency**: Partition data is automatically kept in sync with main resource data
+5. **Field requirements**: All partition fields must exist in your resource attributes
+
+### Available partition-aware methods
+
+| Method | Description | Partition Support |
+|--------|-------------|-------------------|
+| `listIds()` | Get array of document IDs | ✅ `{ partition, partitionValues }` |
+| `count()` | Count documents | ✅ `{ partition, partitionValues }` |
+| `listByPartition()` | List documents by partition | ✅ `{ partition, partitionValues }` |
+| `page()` | Paginate documents | ✅ `{ partition, partitionValues }` |
+| `getFromPartition()` | Get single document from partition | ✅ Direct partition access |
+| `query()` | Filter documents in memory | ❌ No partition support |
 
 ## Hooks
 
