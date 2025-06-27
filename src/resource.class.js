@@ -15,6 +15,7 @@ import Schema from "./schema.class.js";
 import { InvalidResourceItem } from "./errors.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { streamToString } from "./stream/index.js";
+import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
 class Resource extends EventEmitter {
   constructor({
@@ -26,12 +27,14 @@ class Resource extends EventEmitter {
     parallelism = 10,
     passphrase = 'secret',
     observers = [],
+    behavior = DEFAULT_BEHAVIOR,
   }) {
     super();
 
     this.name = name;
     this.client = client;
     this.version = version;
+    this.behavior = behavior;
     
     this.observers = observers;
     this.parallelism = parallelism;
@@ -107,7 +110,9 @@ class Resource extends EventEmitter {
   }
 
   export() {
-    return this.schema.export();
+    const exported = this.schema.export();
+    exported.behavior = this.behavior;
+    return exported;
   }
 
   /**
@@ -378,13 +383,22 @@ class Resource extends EventEmitter {
 
     if (!id && id !== 0) id = idGenerator();
 
-    const metadata = await this.schema.mapper(validated);
+    const mappedData = await this.schema.mapper(validated);
+    
+    // Apply behavior strategy
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: validated,
+      mappedData
+    });
+
     const key = this.getResourceKey(id);
 
     await this.client.putObject({
-      metadata,
+      metadata: processedMetadata,
       key,
-      body: "", // Empty body for metadata-only objects
+      body,
     });
 
     const final = merge({ id }, validated);
@@ -405,7 +419,30 @@ class Resource extends EventEmitter {
     const objectVersion = this.extractVersionFromKey(key) || this.version;
     const schema = await this.getSchemaForVersion(objectVersion);
 
-    let data = await schema.unmapper(request.Metadata);
+    let metadata = await schema.unmapper(request.Metadata);
+    
+    // Apply behavior strategy for reading (important for body-overflow)
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+    
+    // Get body content if needed (for body-overflow behavior)
+    if (request.ContentLength > 0) {
+      try {
+        const fullObject = await this.client.getObject(key);
+        body = await streamToString(fullObject.Body);
+      } catch (error) {
+        // Body read failed, continue with metadata only
+        body = "";
+      }
+    }
+    
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+
+    let data = processedMetadata;
     data.id = id;
     data._contentLength = request.ContentLength;
     data._lastModified = request.LastModified;
@@ -455,26 +492,51 @@ class Resource extends EventEmitter {
       })
     }
 
+    const mappedData = await this.schema.mapper(validated);
+    
+    // Apply behavior strategy
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+      resource: this,
+      id,
+      data: validated,
+      mappedData
+    });
+
     const key = this.getResourceKey(id);
 
-    // Check if object has existing content
-    let existingBody = "";
+    // Check if object has existing content (non-behavior content)
     let existingContentType = undefined;
-    try {
-      const existingObject = await this.client.getObject(key);
-      if (existingObject.ContentLength > 0) {
-        existingBody = Buffer.from(await existingObject.Body.transformToByteArray());
-        existingContentType = existingObject.ContentType;
+    let finalBody = body;
+    
+    // For behaviors that don't use body, preserve existing content
+    if (body === "" && this.behavior !== 'body-overflow') {
+      try {
+        const existingObject = await this.client.getObject(key);
+        if (existingObject.ContentLength > 0) {
+          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+          const existingBodyString = existingBodyBuffer.toString();
+          
+          // Only preserve if it's not behavior-managed content (doesn't look like JSON)
+          try {
+            JSON.parse(existingBodyString);
+            // It's JSON, likely from previous body-overflow behavior, use new body
+          } catch {
+            // Not JSON, preserve existing binary content
+            finalBody = existingBodyBuffer;
+            existingContentType = existingObject.ContentType;
+          }
+        }
+      } catch (error) {
+        // No existing content, use new body
       }
-    } catch (error) {
-      // No existing content, use empty body
     }
 
     await this.client.putObject({
       key,
-      body: existingBody,
+      body: finalBody,
       contentType: existingContentType,
-      metadata: await this.schema.mapper(validated),
+      metadata: processedMetadata,
     });
 
     validated.id = id;
