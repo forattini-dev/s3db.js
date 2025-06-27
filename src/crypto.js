@@ -3,14 +3,14 @@ import { isObject } from 'lodash-es';
 async function dynamicCrypto() {
   let lib
 
-  if (process) {
+  if (typeof process !== 'undefined') {
     try {
       const { webcrypto } = await import('crypto')
       lib = webcrypto
     } catch (error) {
       throw new Error('Crypto API not available')      
     }
-  } else if (window) {
+  } else if (typeof window !== 'undefined') {
     lib = window.crypto;
   }
 
@@ -101,7 +101,7 @@ async function getKeyMaterial(passphrase, salt) {
 }
 
 function arrayBufferToBase64(buffer) {
-  if (isObject(process)) {
+  if (typeof process !== 'undefined') {
     // Node.js version
     return Buffer.from(buffer).toString('base64');
   } else {
@@ -112,7 +112,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
-  if (isObject(process)) {
+  if (typeof process !== 'undefined') {
     return new Uint8Array(Buffer.from(base64, 'base64'));
   } else {
     const binaryString = window.atob(base64);

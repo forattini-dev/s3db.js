@@ -28,7 +28,7 @@ export class Client extends EventEmitter {
   }) {
     super();
     this.verbose = verbose;
-    this.id = id ?? nanoid(7);
+    this.id = id ?? idGenerator();
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.client = AwsS3Client || this.createClient()
@@ -226,7 +226,7 @@ export class Client extends EventEmitter {
           return response;
         } catch (error) {
           throw this.errorProxy(error, {
-            key,
+            keys,
             command: options,
           });
         }

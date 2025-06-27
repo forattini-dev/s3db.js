@@ -157,6 +157,113 @@ const s3db = new S3db({
 | `ttl` | `number` | `86400` | Cache TTL in seconds |
 | `plugins` | `array` | `[]` | Custom plugins |
 
+n### 🔐 Authentication & Connectivity
+
+`s3db.js` supports multiple authentication methods and can connect to various S3-compatible services. The connection string format is flexible and supports different authentication scenarios:
+
+#### Connection String Format
+
+```
+s3://[ACCESS_KEY:SECRET_KEY@]BUCKET_NAME[/PREFIX]
+```
+
+#### 1. AWS S3 with Access Keys
+
+```javascript
+// Traditional access key authentication
+const s3db = new S3db({
+  uri: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
+});
+```
+
+#### 2. AWS S3 with IAM Roles (EC2/EKS)
+
+```javascript
+// No credentials needed - uses IAM role permissions
+const s3db = new S3db({
+  uri: "s3://BUCKET_NAME/databases/myapp"
+});
+
+// The AWS SDK will automatically use:
+// - EC2 instance profile (if running on EC2)
+// - EKS service account (if running on EKS)
+// - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+// - AWS credentials file (~/.aws/credentials)
+```
+
+#### 3. MinIO or S3-Compatible Services
+
+```javascript
+// Connect to MinIO with custom endpoint
+const s3db = new S3db({
+  uri: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  endpoint: "http://localhost:9000" // MinIO default endpoint
+});
+
+// Connect to other S3-compatible services
+const s3db = new S3db({
+  uri: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  endpoint: "https://storage.googleapis.com" // Google Cloud Storage
+});
+```
+
+#### 4. Environment-Based Configuration
+
+```javascript
+// Using environment variables for credentials
+const s3db = new S3db({
+  uri: `s3://${process.env.AWS_ACCESS_KEY_ID}:${process.env.AWS_SECRET_ACCESS_KEY}@${process.env.AWS_BUCKET}/databases/${process.env.DATABASE_NAME}`,
+  endpoint: process.env.S3_ENDPOINT // Optional for custom endpoints
+});
+```
+
+#### 5. Advanced Authentication Scenarios
+
+```javascript
+// AWS S3 with session tokens (temporary credentials)
+const s3db = new S3db({
+  uri: "s3://BUCKET_NAME/databases/myapp",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    sessionToken: process.env.AWS_SESSION_TOKEN
+  }
+});
+
+// Custom S3-compatible service with specific region
+const s3db = new S3db({
+  uri: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  endpoint: "https://custom-s3-service.com",
+  region: "us-east-1"
+});
+```
+
+#### Security Best Practices
+
+- **IAM Roles**: Use IAM roles instead of access keys when possible (EC2, EKS, Lambda)
+- **Environment Variables**: Store credentials in environment variables, not in code
+- **Temporary Credentials**: Use session tokens for temporary access
+- **Bucket Permissions**: Ensure your IAM role/user has the necessary S3 permissions:
+  - `s3:GetObject`
+  - `s3:PutObject`
+  - `s3:DeleteObject`
+  - `s3:ListBucket`
+  - `s3:GetBucketLocation`
+
+#### Supported Services
+
+`s3db.js` can connect to any service that implements the S3 API:
+
+- **AWS S3** (default)
+- **MinIO** (self-hosted S3-compatible)
+- **Google Cloud Storage**
+- **DigitalOcean Spaces**
+- **Wasabi**
+- **Backblaze B2**
+- **Any S3-compatible service**
+
+The connection string automatically passes the `endpoint` parameter to the AWS SDK's Credentials configuration, allowing seamless connectivity to different S3-compatible services.
+
 ### Advanced Configuration
 
 ```javascript
@@ -205,6 +312,22 @@ const users = await s3db.createResource({
     metadata: "object|optional"
   }
 });
+```
+
+#### Automatic Timestamps
+
+If you enable the `timestamps` option, `s3db.js` will automatically add `createdAt` and `updatedAt` fields to your resource, and keep them updated on insert and update operations.
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  attributes: { name: "string", email: "email" },
+  options: { timestamps: true }
+});
+
+const user = await users.insert({ name: "John", email: "john@example.com" });
+console.log(user.createdAt); // e.g. "2024-06-27T12:34:56.789Z"
+console.log(user.updatedAt); // same as createdAt on insert
 ```
 
 ### 3. Schema Validation
@@ -791,91 +914,220 @@ console.log("Requests made:", s3db.client.costs.requests.total);
 
 ## 🎛️ Advanced Features
 
-### Events
+### AutoEncrypt / AutoDecrypt
 
-All classes emit events for monitoring:
+Fields with the type `secret` are automatically encrypted and decrypted using the resource's passphrase. This ensures sensitive data is protected at rest.
 
-```javascript
-// Database events
-s3db.on("connected", () => console.log("Database connected"));
-s3db.on("error", (error) => console.error("Database error:", error));
+```js
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    username: "string",
+    password: "secret" // Will be encrypted
+  }
+});
 
-// Resource events
-const users = s3db.resource("users");
+const user = await users.insert({
+  username: "john_doe",
+  password: "my_secret_password"
+});
 
+// The password is stored encrypted in S3, but automatically decrypted when retrieved
+const retrieved = await users.get(user.id);
+console.log(retrieved.password); // "my_secret_password"
+```
+
+You can customize encryption by providing a custom passphrase.
+
+---
+
+### Resource Events
+
+All resources emit events for key operations. You can listen to these events for logging, analytics, or custom workflows.
+
+```js
 users.on("insert", (data) => console.log("User inserted:", data.id));
 users.on("get", (data) => console.log("User retrieved:", data.id));
 users.on("update", (attrs, data) => console.log("User updated:", data.id));
 users.on("delete", (id) => console.log("User deleted:", id));
+```
 
-// Client events
-s3db.client.on("request", (action, params) => {
-  console.log(`S3 ${action} request:`, params);
-});
+---
 
-s3db.client.on("response", (action, params, response) => {
-  console.log(`S3 ${action} response:`, response.statusCode);
+### Resource Schema Export/Import
+
+You can export and import resource schemas for backup, migration, or versioning purposes.
+
+```js
+// Export schema
+const schemaData = users.schema.export();
+
+// Import schema
+const importedSchema = Schema.import(schemaData);
+```
+
+This allows you to persist and restore resource definitions easily.
+
+---
+
+## Partitions
+
+`s3db.js` supports **partitions** to organize and query your data efficiently. Partitions allow you to group documents by one or more fields, making it easy to filter, archive, or manage large datasets.
+
+### What are partitions?
+
+Partitions are logical subdivisions of a resource, based on the value of one or more fields. They are reflected in the S3 object key structure, enabling efficient queries and organization.
+
+### Defining partitions
+
+You can define partitions when creating a resource using the `options.partitions` property:
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string",
+    email: "email",
+    region: "string",
+    ageGroup: "string"
+  },
+  options: {
+    partitions: {
+      byRegion: {
+        fields: { region: "string" }
+      },
+      byAgeGroup: {
+        fields: { ageGroup: "string" }
+      }
+    }
+  }
 });
 ```
 
-### Custom Plugins
+### How partitions work
 
-```javascript
+- Each partition defines one or more fields used to organize data.
+- The S3 object key will include the partition values, making it easy to filter and manage data by partition.
+- You can query by partition fields using standard query methods.
+
+### Querying by partition
+
+```js
+// Find all users in the 'south' region
+const usersSouth = await users.query({ region: "south" });
+
+// Find all users in the 'adult' age group
+const adults = await users.query({ ageGroup: "adult" });
+```
+
+### Benefits
+
+- **Performance**: Faster queries on large datasets by filtering on partition fields.
+- **Organization**: Easier to manage, archive, or delete data by partition.
+- **Scalability**: Supports use cases like multi-tenancy, sharding, or time-based data retention.
+
+### Partition rules and validation
+
+- Partition fields must exist in the resource's attributes.
+- You can use validation rules (e.g., `maxlength`, `pattern`) on partition fields.
+- If a partition references a non-existent field, an error will be thrown at resource creation.
+
+### Example: Time-based partition
+
+```js
+const logs = await s3db.createResource({
+  name: "logs",
+  attributes: {
+    message: "string",
+    level: "string",
+    createdAt: "date"
+  },
+  options: {
+    partitions: {
+      byDate: {
+        fields: { createdAt: "date|maxlength:10" }
+      }
+    }
+  }
+});
+
+// Query logs for a specific day
+const logsToday = await logs.query({ createdAt: "2024-06-27" });
+```
+
+---
+
+## Hooks
+
+`s3db.js` provides a powerful hooks system to let you run custom logic before and after key operations on your resources. Hooks can be used for validation, transformation, logging, or any custom workflow.
+
+### Supported hooks
+- `preInsert` / `afterInsert`
+- `preUpdate` / `afterUpdate`
+- `preDelete` / `afterDelete`
+
+### Registering hooks
+You can register hooks when creating a resource or dynamically:
+
+```js
+const users = await s3db.createResource({
+  name: "users",
+  attributes: { name: "string", email: "email" },
+  options: {
+    hooks: {
+      preInsert: [async (data) => {
+        if (!data.email.includes("@")) throw new Error("Invalid email");
+        return data;
+      }],
+      afterInsert: [async (data) => {
+        console.log("User inserted:", data.id);
+      }]
+    }
+  }
+});
+
+// Or dynamically:
+users.addHook('preInsert', async (data) => {
+  // Custom logic
+  return data;
+});
+```
+
+### Hook execution order
+- Internal hooks run first, user hooks run last (in the order they were added).
+- Hooks can be async and can modify the data (for `pre*` hooks).
+- If a hook throws, the operation is aborted.
+
+---
+
+## Plugins
+
+`s3db.js` supports plugins to extend or customize its behavior. Plugins can hook into lifecycle events, add new methods, or integrate with external systems.
+
+### Example: Custom plugin
+
+```js
 const MyPlugin = {
   setup(s3db) {
     console.log("Plugin setup");
   },
-  
   start() {
     console.log("Plugin started");
   },
-  
-  // Hook into events
   onUserCreated(user) {
     console.log("New user created:", user.id);
   }
 };
 
 const s3db = new S3db({
-  uri: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  uri: "s3://...",
   plugins: [MyPlugin]
 });
 ```
 
-### S3 Client
+See the [Advanced Features](#️-advanced-features) section for more details.
 
-Direct access to S3 operations:
-
-```javascript
-import { S3Client } from "s3db.js";
-
-const client = new S3Client({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
-});
-
-// Upload file
-await client.putObject({
-  key: "uploads/file.txt",
-  contentType: "text/plain",
-  body: "Hello World",
-  metadata: { author: "John Doe" }
-});
-
-// Download file
-const { Body, Metadata } = await client.getObject({
-  key: "uploads/file.txt"
-});
-
-// List files
-const response = await client.listObjects({
-  prefix: "uploads/"
-});
-
-// Count files
-const count = await client.count({
-  prefix: "uploads/"
-});
-```
+---
 
 ## 🚨 Limitations & Best Practices
 
@@ -1150,7 +1402,7 @@ if (await users.exists(userId)) {
 5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
 6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
 
-## � Testing
+## 🧪 Testing
 
 s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
 
@@ -1208,7 +1460,7 @@ export MINIO_USER="your-minio-username"
 export MINIO_PASSWORD="your-minio-password"
 ```
 
-## �🤝 Contributing
+## 🎛️ Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
@@ -1228,7 +1480,7 @@ npm test
 - **Test Structure**: Journey-based scenarios demonstrating complete workflows
 - **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
 
-## � Version Compatibility
+## 📄 Version Compatibility
 
 ### Non-Backward Compatible Versions
 
@@ -1248,17 +1500,3710 @@ If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data usi
 - Better organization with version-based subdirectories
 - Improved data integrity and schema management
 
-## �📄 License
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
 
-This project is licensed under the Unlicense - see the [LICENSE](LICENSE) file for details.
+### 🔄 Migration Guide: v3.x → v4.x
 
-## ⚠️ Disclaimer
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
 
-**Important**: This library is designed for educational and experimental purposes. While it can be used in production, please:
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
 
-1. Understand the limitations and costs involved
-2. Test thoroughly with your specific use case
-3. Monitor AWS costs carefully
-4. Consider traditional databases for critical applications
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
 
-Use at your own risk! 🚀
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES** - Use migration script |
+| **v3.0.0** | • Schema validation improvements<br>• Array/object serialization fixes | No - Data compatible |
+| **v2.0.0** | • API restructure<br>• New connection string format | No - Only API changes |
+
+### ⚠️ Important: v4.x Migration Required
+
+If you're upgrading from **v3.x or earlier**, you **MUST** migrate your data using our migration script (see above). v4.x uses a completely different path structure that is not backward compatible.
+
+**Why the breaking change?**
+- v4.x introduces automatic schema versioning
+- Resources can now evolve over time without breaking existing data
+- Better organization with version-based subdirectories
+- Improved data integrity and schema management
+
+**Migration Required:** If upgrading from v3.x, you **MUST** migrate your data. See migration guide below.
+
+### 🔄 Migration Guide: v3.x → v4.x
+
+We provide a complete migration script to help you upgrade from v3.x to v4.x:
+
+```bash
+# 1. Download the migration script
+curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/examples/migrate-v3-to-v4.js
+
+# 2. Install dependencies
+npm install @aws-sdk/client-s3
+
+# 3. Configure the script with your S3 credentials and resources
+# Edit migrate-v3-to-v4.js and update MIGRATION_CONFIG
+
+# 4. Run a dry run first to test the migration
+node migrate-v3-to-v4.js
+```
+
+**Migration Process:**
+1. **Backup**: Automatically creates backups of your v3.x data
+2. **Read**: Extracts data from v3.x format (`resource={name}/id={id}`)
+3. **Transform**: Converts metadata format and applies schema validation
+4. **Write**: Inserts data into v4.x format (`resource={name}/v={version}/id={id}`)
+5. **Validate**: Verifies data integrity and migration success
+
+**⚠️ Important Notes:**
+- Always run with `dryRun: true` first to test the migration
+- Ensure you have backups before starting the migration
+- The script handles large datasets with batching and progress tracking
+- Original v3.x data is preserved during migration (you can delete it after verification)
+
+**Current Schema Versioning (v4.0.0+):**
+
+```javascript
+// v4.x automatically handles schema versions
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  }
+});
+// Stored at: resource=users/v=v0/id={id}
+
+// Schema evolution - s3db automatically creates new version
+const updatedUsers = await s3db.createResource({
+  name: "users", // Same name!
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique", 
+    age: "number|integer|positive",
+    phone: "string|optional",        // New field
+    address: {                       // New nested object
+      street: "string",
+      city: "string", 
+      country: "string"
+    }
+  }
+});
+// New data stored at: resource=users/v=v1/id={id}
+// Old data remains at: resource=users/v=v0/id={id}
+```
+
+### 🔮 Roadmap: Object Tags Support
+
+**Future Enhancement**: In upcoming versions, s3db.js will support AWS S3 Object Tags as an additional storage option, configurable per resource.
+
+```javascript
+// Future configuration example
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|min:2|max:100",
+    email: "email|unique",
+    age: "number|integer|positive"
+  },
+  storage: {
+    useObjectTags: true,  // Future option to enable object tags
+    metadataLimit: 2048,  // Metadata limit in bytes
+    tagsLimit: 2560       // Tags limit in bytes (10 key-value pairs)
+  }
+});
+```
+
+**Why Object Tags Might Not Be Ideal for Large Projects:**
+
+1. **AWS Cost Reports**: Object tags appear in AWS cost allocation reports, potentially cluttering billing data
+2. **Tag Management**: AWS has a limit of 50 tags per object across all services
+3. **Reporting Complexity**: Large numbers of tagged objects can make cost analysis more complex
+4. **Performance**: Additional API calls may be required for tag operations
+
+**Recommendation**: For enterprise applications or large-scale projects, consider keeping object tags disabled to maintain clean AWS cost reporting and avoid potential tag management overhead.
+
+### Best Practices
+
+#### 1. Design for Document Storage
+
+```javascript
+// ✅ Good: Nested structure is fine
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  email: "john@example.com",
+  profile: {
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+    preferences: {
+      theme: "dark",
+      notifications: true
+    }
+  }
+};
+
+// ❌ Avoid: Large arrays in documents
+const user = {
+  id: "user-123",
+  name: "John Doe",
+  // This could exceed metadata limits
+  purchaseHistory: [
+    { id: "order-1", date: "2023-01-01", total: 99.99 },
+    { id: "order-2", date: "2023-01-15", total: 149.99 },
+    // ... many more items
+  ]
+};
+```
+
+#### 2. Use Sequential IDs
+
+```javascript
+// ✅ Good: Sequential IDs for better performance
+const users = ["00001", "00002", "00003", "00004"];
+
+// ⚠️ Acceptable: Random IDs (but ensure sufficient uniqueness)
+const users = ["abc123", "def456", "ghi789", "jkl012"];
+
+// ❌ Avoid: Random IDs with low combinations (risk of collisions)
+const users = ["a1", "b2", "c3", "d4"]; // Only 26*10 = 260 combinations
+```
+
+**Note**: You can use any type of ID, but remember that random IDs with low combinations can generate collisions. For better performance, sequential IDs are recommended, but if using random IDs, ensure they have sufficient uniqueness (e.g., using nanoid or similar libraries).
+
+#### 3. Optimize for Read Patterns
+
+```javascript
+// ✅ Good: Store frequently accessed data together
+const order = {
+  id: "order-123",
+  customerId: "customer-456",
+  customerName: "John Doe",  // Denormalized for quick access
+  items: ["product-1", "product-2"],
+  total: 99.99
+};
+
+// ❌ Avoid: Requiring multiple lookups
+const order = {
+  id: "order-123",
+  customerId: "customer-456",  // Requires separate lookup
+  items: ["product-1", "product-2"]
+};
+```
+
+#### 4. Use Streaming for Large Datasets
+
+```javascript
+// ✅ Good: Use streams for large operations
+const readableStream = await users.readable();
+readableStream.on("data", (user) => {
+  // Process each user individually
+});
+
+// ❌ Avoid: Loading all data at once
+const allUsers = await users.getAll(); // May timeout with large datasets
+```
+
+#### 5. Implement Proper Error Handling
+
+```javascript
+// Method 1: Try-catch with get()
+try {
+  const user = await users.get("non-existent-id");
+} catch (error) {
+  if (error.message.includes("does not exist")) {
+    console.log("User not found");
+  } else {
+    console.error("Unexpected error:", error);
+  }
+}
+
+// Method 2: Check existence first (⚠️ Additional request cost)
+const userId = "user-123";
+if (await users.exists(userId)) {
+  const user = await users.get(userId);
+  console.log("User found:", user.name);
+} else {
+  console.log("User not found");
+}
+```
+
+**⚠️ Cost Warning**: Using `exists()` creates an additional S3 request. For high-volume operations, prefer the try-catch approach to minimize costs.
+
+### Performance Tips
+
+1. **Enable Caching**: Use `cache: true` for frequently accessed data
+2. **Adjust Parallelism**: Increase `parallelism` for bulk operations
+3. **Use Streams**: For datasets larger than 1,000 records
+4. **Batch Operations**: Use `insertMany()` instead of multiple `insert()` calls
+5. **Monitor Costs**: Use the CostsPlugin to track AWS expenses
+6. **Understand S3 Limits**: S3 paginates results in 1000-item chunks and these operations are sequential, not parallel. For very large datasets (>10,000 items), consider using streams or implementing custom pagination strategies
+
+## 🧪 Testing
+
+s3db.js includes a comprehensive test suite organized as journey-based scenarios that demonstrate real-world usage patterns.
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- tests/schema.test.js      # Schema validation and serialization
+npm test -- tests/validator.test.js  # Field validation and encryption
+npm test -- tests/crypto.test.js     # Encryption/decryption functions
+npm test -- tests/bundle.test.js     # Package exports verification
+
+# Tests requiring S3 configuration
+npm test -- tests/resource.test.js   # Resource operations (needs S3)
+npm test -- tests/client.test.js     # S3 client operations (needs S3)
+npm test -- tests/database.test.js   # Database operations (needs S3)
+```
+
+### Test Structure
+
+Each test file follows a "journey" pattern that tells a complete story:
+
+```javascript
+// Example: Schema Journey
+test('Schema Journey: Create → Validate → Map → Serialize → Deserialize → Unmap', async () => {
+  // 1. Create Schema with diverse field types
+  const schema = new Schema({...});
+  
+  // 2. Test complex data with edge cases
+  const testData = {...};
+  
+  // 3. Validate the data
+  const validationResult = await schema.validate(testData);
+  
+  // 4. Map the data (apply transformations)
+  const mappedData = await schema.mapper(testData);
+  
+  // 5. Test array edge cases (empty arrays, special characters, null values)
+  // 6. Test object edge cases (empty objects, null objects)
+  // 7. Unmap the data (reverse transformations)
+  // 8. Verify data integrity throughout the process
+});
+```
+
+### S3 Configuration for Integration Tests
+
+For tests that require S3 access, set these environment variables:
+
+```bash
+export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME"
+export MINIO_USER="your-minio-username"
+export MINIO_PASSWORD="your-minio-password"
+```
+
+## 🎛️ Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+git clone https://github.com/forattini-dev/s3db.js.git
+cd s3db.js
+npm install
+npm test
+```
+
+### Test Organization
+
+- **Core Tests** (no S3 required): `schema`, `validator`, `crypto`, `connection-string`, `bundle`
+- **Integration Tests** (S3 required): `resource`, `client`, `database`, `cache`, `plugins`, `streams`
+- **Test Structure**: Journey-based scenarios demonstrating complete workflows
+- **Edge Cases**: Comprehensive coverage of array/object serialization edge cases
+
+## 📄 Version Compatibility
+
+### Non-Backward Compatible Versions
+
+| Version | Breaking Changes | Migration Required |
+|---------|-----------------|-------------------|
+| **v4.0.0** | • Resource paths now versioned: `resource={name}/v={version}/id={id}`<br>• Automatic schema versioning introduced<br>• Cannot read v3.x databases without migration | **YES**
