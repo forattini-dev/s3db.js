@@ -1,42 +1,82 @@
 import EventEmitter from "events";
-import { TransformStream } from "node:stream/web";
+import { Transform } from "stream";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js"
 
-export class ResourceReader  extends EventEmitter {
-  constructor({ resource }) {
+export class ResourceReader extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
     super()
+
+    if (!resource) {
+      throw new Error("Resource is required for ResourceReader");
+    }
 
     this.resource = resource;
     this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
     
     this.input = new ResourceIdsPageReader({ resource: this.resource });
 
-    this.output = new TransformStream(
-      { transform: this._transform.bind(this) },
-      { highWaterMark: this.client.parallelism * 2 },
-      { highWaterMark: 1 },
-    )
+    // Create a Node.js Transform stream instead of Web Stream
+    this.transform = new Transform({
+      objectMode: true,
+      transform: this._transform.bind(this)
+    });
 
-    this.stream = this.input.stream.pipeThrough(this.output);
+    // Set up event forwarding
+    this.input.on('data', (chunk) => {
+      this.transform.write(chunk);
+    });
+
+    this.input.on('end', () => {
+      this.transform.end();
+    });
+
+    this.input.on('error', (error) => {
+      this.emit('error', error);
+    });
+
+    // Forward transform events
+    this.transform.on('data', (data) => {
+      this.emit('data', data);
+    });
+
+    this.transform.on('end', () => {
+      this.emit('end');
+    });
+
+    this.transform.on('error', (error) => {
+      this.emit('error', error);
+    });
   }
 
-  build () {
-    return this.stream.getReader();
+  build() {
+    return this;
   }
 
-  async _transform(chunk, controller) {
-    await PromisePool.for(chunk)
-      .withConcurrency(this.client.parallelism)
-      // .handleError(async (error, content) => {
-        // this.emit("error", error, content);
-      // })
-      .process(async (id) => {
-        const data = await this.resource.get(id);
-        controller.enqueue(data);
-        return data;
-      });
+  async _transform(chunk, encoding, callback) {
+    try {
+      await PromisePool.for(chunk)
+        .withConcurrency(this.concurrency)
+        .handleError(async (error, content) => {
+          this.emit("error", error, content);
+        })
+        .process(async (id) => {
+          const data = await this.resource.get(id);
+          this.push(data);
+          return data;
+        });
+      
+      callback();
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  resume() {
+    this.input.resume();
   }
 }
 
