@@ -9,8 +9,12 @@ on:
     types: [opened, reopened]
 
 jobs:
-  PKG:
-    uses: filipeforattini/ff-iac-github-actions/.github/workflows/pkg.yml@main
-    secrets: inherit
-    with:
-      mainBranch: main
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: qltysh/qlty-action/coverage@v1
+        with:
+          token: ${{secrets.QLTY_COVERAGE_TOKEN}}
+          files: coverage/lcov.info
