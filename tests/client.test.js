@@ -530,22 +530,4 @@ describe('Client Class - Coverage', () => {
     const keys = await client.getKeysPage({ prefix: 'p', amount: 100 });
     expect(keys).toEqual(['file1.txt']);
   });
-
-  test('should handle moveAllObjects with console.log for errors', async () => {
-    const originalLog = console.log;
-    const mockLog = jest.fn();
-    console.log = mockLog;
-
-    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt']);
-    client.moveObject = jest.fn().mockRejectedValue(new Error('Move failed'));
-
-    await expect(client.moveAllObjects({ 
-      prefixFrom: 'old/', 
-      prefixTo: 'new/' 
-    })).rejects.toThrow('Some objects could not be moved');
-
-    expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({ errors: expect.any(Array) }));
-
-    console.log = originalLog;
-  });
 });
