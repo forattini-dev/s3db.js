@@ -37,9 +37,10 @@
   ],
   "scripts": {
     "build": "rollup -c",
+    "clean-build": "node scripts/clean-build.js",
     "postbuild": "node scripts/prefix-files-istanbul-ignore.js",
     "verify": "node scripts/verify-build.js",
-    "prepublishOnly": "npm run build && npm run verify",
+    "test-builds": "node examples/test-builds.js",
     "coverage": "coveralls < coverage/lcov.info",
     "coverage:serve": "npx http-server ./coverage/lcov-report",
     "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
