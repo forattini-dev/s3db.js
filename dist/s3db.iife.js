@@ -9693,7 +9693,7 @@ ${JSON.stringify(validation, null, 2)}`
       this.version = "1";
       this.s3dbVersion = (() => {
         try {
-          return true ? "4.0.0" : "latest";
+          return true ? "4.0.1" : "latest";
         } catch (e) {
           return "latest";
         }
