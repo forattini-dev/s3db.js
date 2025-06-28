@@ -845,4 +845,24 @@ describe('Database S3db Export', () => {
   });
 });
 
+describe('Database.generateDefinitionHash is stable and deterministic', () => {
+  const db = new Database({ client: { bucket: 'test', keyPrefix: 'test/' } });
+  const def1 = {
+    attributes: { name: 'string|required', email: 'email|required' },
+    options: { timestamps: true }
+  };
+  const def2 = {
+    attributes: { name: 'string|required', email: 'email|required' },
+    options: { timestamps: true }
+  };
+  expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
+
+  // Mudando um atributo, o hash deve mudar
+  const def3 = {
+    attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
+    options: { timestamps: true }
+  };
+  expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+});
+
 

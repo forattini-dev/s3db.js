@@ -9599,7 +9599,19 @@ ${JSON.stringify(validation, null, 2)}`
      */
     getDefinitionHash() {
       const exportedSchema = this.schema.export();
-      const stableString = jsonStableStringify(exportedSchema);
+      const stableSchema = {
+        ...exportedSchema,
+        attributes: { ...exportedSchema.attributes }
+      };
+      if (this.options.timestamps) {
+        delete stableSchema.attributes.createdAt;
+        delete stableSchema.attributes.updatedAt;
+        if (stableSchema.options && stableSchema.options.partitions) {
+          delete stableSchema.options.partitions.byCreatedDate;
+          delete stableSchema.options.partitions.byUpdatedDate;
+        }
+      }
+      const stableString = jsonStableStringify(stableSchema);
       return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
     }
     /**

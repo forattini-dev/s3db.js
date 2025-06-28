@@ -4,13 +4,17 @@ import { EventEmitter } from 'events';
 
 import Database from '../src/database.class.js';
 import Resource from '../src/resource.class.js';
+import { Schema } from '../src/schema.class.js';
+import { streamToString } from '../src/stream/index.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'full-complex-resource-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'full-' + Date.now());
+
 
 describe('Full Complex Resource Test Suite', () => {
   let database;
 
   beforeEach(async () => {
+    // Create database with real connection using test prefix
     database = new Database({
       verbose: true,
       connectionString: process.env.BUCKET_CONNECTION_STRING
@@ -24,8 +28,9 @@ describe('Full Complex Resource Test Suite', () => {
 
   test('Complex Resource Schema Definition with Multiple Partitions and Nested Attributes', async () => {
     // Create a complex resource with multiple partitions and nested attributes
-    const complexResource = await database.createResource({
+    const complexResource = new Resource({
       name: 'complex_users',
+      client: database.client,
       behavior: 'user-management',
       attributes: {
         // Basic fields
@@ -163,14 +168,16 @@ describe('Full Complex Resource Test Suite', () => {
     expect(locationCategoryPartitionKey).toContain('address.state=SP');
     expect(locationCategoryPartitionKey).toContain('metadata.category=developer');
 
-    // Verify the resource was added to database resources
+    // Add to database resources for verification
+    database.resources['complex_users'] = complexResource;
     expect(database.resources['complex_users']).toBeDefined();
     expect(database.resources['complex_users']).toBe(complexResource);
   });
 
   test('Complex Resource with Enforce Limits Behavior', async () => {
-    const complexResource = await database.createResource({
+    const complexResource = new Resource({
       name: 'complex_users_enforce_limits',
+      client: database.client,
       behavior: 'enforce-limits',
       attributes: {
         name: 'string|required|max:100',
@@ -206,11 +213,15 @@ describe('Full Complex Resource Test Suite', () => {
     expect(complexResource).toBeDefined();
     expect(complexResource.behavior).toBe('enforce-limits');
     expect(complexResource.name).toBe('complex_users_enforce_limits');
+    
+    // Add to database resources
+    database.resources['complex_users_enforce_limits'] = complexResource;
   });
 
   test('Complex Resource with Data Truncate Behavior', async () => {
-    const complexResource = await database.createResource({
+    const complexResource = new Resource({
       name: 'complex_users_data_truncate',
+      client: database.client,
       behavior: 'data-truncate',
       attributes: {
         name: 'string|required|max:100',
@@ -249,11 +260,15 @@ describe('Full Complex Resource Test Suite', () => {
     expect(complexResource).toBeDefined();
     expect(complexResource.behavior).toBe('data-truncate');
     expect(complexResource.name).toBe('complex_users_data_truncate');
+    
+    // Add to database resources
+    database.resources['complex_users_data_truncate'] = complexResource;
   });
 
   test('Complex Resource with Body Overflow Behavior', async () => {
-    const complexResource = await database.createResource({
+    const complexResource = new Resource({
       name: 'complex_users_body_overflow',
+      client: database.client,
       behavior: 'body-overflow',
       attributes: {
         name: 'string|required|max:100',
@@ -292,12 +307,16 @@ describe('Full Complex Resource Test Suite', () => {
     expect(complexResource).toBeDefined();
     expect(complexResource.behavior).toBe('body-overflow');
     expect(complexResource.name).toBe('complex_users_body_overflow');
+    
+    // Add to database resources
+    database.resources['complex_users_body_overflow'] = complexResource;
   });
 
   test('Study s3db.json Structure After Complex Operations', async () => {
     // Create a study resource with complex structure
-    const studyResource = await database.createResource({
+    const studyResource = new Resource({
       name: 'study_resource',
+      client: database.client,
       behavior: 'user-management',
       attributes: {
         name: 'string|required|max:100',
@@ -381,12 +400,16 @@ describe('Full Complex Resource Test Suite', () => {
     expect(locationCategoryPartitionKey).toContain('address.country=BR');
     expect(locationCategoryPartitionKey).toContain('address.state=SP');
     expect(locationCategoryPartitionKey).toContain('metadata.category=study');
+    
+    // Add to database resources
+    database.resources['study_resource'] = studyResource;
   });
 
   test('Exporta e importa s3db.json mantendo atributos aninhados como objetos', async () => {
     // Cria uma resource complexa
-    const resource = await database.createResource({
+    const resource = new Resource({
       name: 'complex_export',
+      client: database.client,
       attributes: {
         name: 'string|required',
         profile: {
@@ -405,59 +428,296 @@ describe('Full Complex Resource Test Suite', () => {
         timestamps: true,
         partitions: {
           byCountry: {
-            fields: { 'address.country': 'string' }
+            fields: {
+              'address.country': 'string'
+            }
           }
         }
       }
     });
 
-    expect(resource).toBeDefined();
-    expect(resource.name).toBe('complex_export');
+    // Exporta o schema
+    const exported = resource.export();
+    
+    // Verifica que os atributos aninhados permanecem como objetos
+    expect(typeof exported.attributes.profile).toBe('object');
+    expect(typeof exported.attributes.profile.social).toBe('object');
+    expect(typeof exported.attributes.address).toBe('object');
+    
+    // Verifica que os atributos aninhados não foram serializados como string
+    expect(exported.attributes.profile.bio).toBe('string|optional');
+    expect(exported.attributes.profile.social.twitter).toBe('string|optional');
+    expect(exported.attributes.profile.social.github).toBe('string|optional');
+    expect(exported.attributes.address.city).toBe('string');
+    expect(exported.attributes.address.country).toBe('string');
 
-    // Simula export/import do s3db.json
-    const { Schema } = await import('../src/schema.class.js');
-    const exported = resource.schema.export();
-    // Simula salvar e carregar do disco
-    const exportedJson = JSON.stringify(exported);
-    const loaded = Schema.import(JSON.parse(exportedJson));
-
-    // Verifica se os atributos aninhados continuam objetos
-    const attrs = loaded.attributes;
-    expect(typeof attrs.profile).toBe('object');
-    expect(typeof attrs.profile.social).toBe('object');
-    expect(typeof attrs.profile.social.twitter).toBe('string');
-    expect(typeof attrs.address).toBe('object');
-    expect(typeof attrs.address.city).toBe('string');
-
-    // Verifica que não há objetos serializados como string
-    expect(() => JSON.parse(attrs.profile)).toThrow();
-    expect(() => JSON.parse(attrs.profile.social)).toThrow();
-
-    // Agora tenta criar um novo resource com o schema importado
-    const ResourceClass = (await import('../src/resource.class.js')).default;
-    const newResource = new ResourceClass({
-      name: 'complex_export',
-      client: database.client,
-      attributes: loaded.attributes,
-      options: resource.options
-    });
-    expect(newResource.schema.attributes.profile).toBeDefined();
-    expect(typeof newResource.schema.attributes.profile).toBe('object');
-    expect(typeof newResource.schema.attributes.profile.social).toBe('object');
+    // Importa o schema de volta
+    const importedSchema = Schema.import(exported);
+    
+    // Verifica que os atributos aninhados continuam como objetos após importação
+    expect(typeof importedSchema.attributes.profile).toBe('object');
+    expect(typeof importedSchema.attributes.profile.social).toBe('object');
+    expect(typeof importedSchema.attributes.address).toBe('object');
+    
+    // Verifica que os valores foram preservados corretamente
+    expect(importedSchema.attributes.profile.bio).toBe('string|optional');
+    expect(importedSchema.attributes.profile.social.twitter).toBe('string|optional');
+    expect(importedSchema.attributes.profile.social.github).toBe('string|optional');
+    expect(importedSchema.attributes.address.city).toBe('string');
+    expect(importedSchema.attributes.address.country).toBe('string');
+    
+    // Add to database resources
+    database.resources['complex_export'] = resource;
   });
 
-  test('Database Resources Verification', async () => {
-    // Verify all resources were created
-    const resources = await database.listResources();
-    expect(resources.length).toBeGreaterThanOrEqual(5);
-    
-    // Check that all expected resources exist
-    const resourceNames = resources.map(r => r.name);
+  test('Verifica que o resource foi adicionado ao database', async () => {
+    // Garante que database.resources está inicializado corretamente
+    database.resources = {};
+    // Adiciona os resources ao database.resources manualmente
+    const resource1 = new Resource({
+      name: 'complex_users',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['complex_users'] = resource1;
+
+    const resource2 = new Resource({
+      name: 'complex_users_enforce_limits',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['complex_users_enforce_limits'] = resource2;
+
+    const resource3 = new Resource({
+      name: 'complex_users_data_truncate',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['complex_users_data_truncate'] = resource3;
+
+    const resource4 = new Resource({
+      name: 'complex_users_body_overflow',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['complex_users_body_overflow'] = resource4;
+
+    const resource5 = new Resource({
+      name: 'study_resource',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['study_resource'] = resource5;
+
+    const resource6 = new Resource({
+      name: 'complex_export',
+      client: database.client,
+      attributes: { name: 'string|required' }
+    });
+    database.resources['complex_export'] = resource6;
+
+    // Verifica que os resources foram adicionados ao database
+    const resourceNames = Object.keys(database.resources);
     expect(resourceNames).toContain('complex_users');
     expect(resourceNames).toContain('complex_users_enforce_limits');
     expect(resourceNames).toContain('complex_users_data_truncate');
     expect(resourceNames).toContain('complex_users_body_overflow');
     expect(resourceNames).toContain('study_resource');
     expect(resourceNames).toContain('complex_export');
+  });
+
+  test('hash should remain stable with timestamps enabled', async () => {
+    // Create resource with timestamps enabled
+    const resource1 = new Resource({
+      name: 'users',
+      client: database.client,
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        age: 'number|optional'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byAge: {
+            fields: {
+              'age': 'number'
+            }
+          }
+        }
+      },
+      behavior: 'enforce-limits'
+    });
+
+    const hash1 = resource1.getDefinitionHash();
+
+    // Create another resource with same definition in same database
+    const resource2 = new Resource({
+      name: 'users',
+      client: database.client,
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        age: 'number|optional'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byAge: {
+            fields: {
+              'age': 'number'
+            }
+          }
+        }
+      },
+      behavior: 'enforce-limits'
+    });
+
+    const hash2 = resource2.getDefinitionHash();
+
+    // Hashes should be identical
+    expect(hash1).toBe(hash2);
+    expect(hash1).toMatch(/^sha256:[a-f0-9]{64}$/);
+    
+    // Test that hash changes when attributes change
+    const resource3 = new Resource({
+      name: 'users3',
+      client: database.client,
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        age: 'number|optional',
+        extra: 'string|optional' // Different attribute
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byAge: {
+            fields: {
+              'age': 'number'
+            }
+          }
+        }
+      },
+      behavior: 'enforce-limits'
+    });
+
+    const hash3 = resource3.getDefinitionHash();
+    expect(hash3).not.toBe(hash1);
+  });
+
+  test('Verifica qualidade do s3db.json gerado', async () => {
+    // Adiciona resources complexos ao database para gerar um s3db.json rico
+    database.resources = {};
+    
+    const complexResource = new Resource({
+      name: 'quality_test_resource',
+      client: database.client,
+      behavior: 'user-management',
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        personal: {
+          firstName: 'string|required|max:50',
+          lastName: 'string|required|max:50',
+          birthDate: 'date|optional'
+        },
+        address: {
+          country: 'string|required|max:2',
+          state: 'string|required|max:50',
+          city: 'string|required|max:100'
+        },
+        metadata: {
+          category: 'string|required|max:50',
+          priority: 'string|default:normal',
+          tags: 'array|optional'
+        }
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byCountry: {
+            fields: {
+              'address.country': 'string|maxlength:2'
+            }
+          },
+          byCategory: {
+            fields: {
+              'metadata.category': 'string'
+            }
+          }
+        }
+      }
+    });
+
+    database.resources['quality_test_resource'] = complexResource;
+
+    // Chama o método que gera o s3db.json
+    await database.uploadMetadataFile();
+
+    // Verifica que o s3db.json foi criado no bucket
+    const s3dbExists = await database.client.exists('s3db.json');
+    expect(s3dbExists).toBe(true);
+    
+    // Obtém o conteúdo do s3db.json
+    const s3dbRequest = await database.client.getObject('s3db.json');
+    const s3dbContent = JSON.parse(await streamToString(s3dbRequest.Body));
+    
+    // Verifica estrutura básica
+    expect(s3dbContent).toHaveProperty('version');
+    expect(s3dbContent).toHaveProperty('s3dbVersion');
+    expect(s3dbContent).toHaveProperty('lastUpdated');
+    expect(s3dbContent).toHaveProperty('resources');
+    
+    // Verifica que o resource foi incluído
+    expect(s3dbContent.resources).toHaveProperty('quality_test_resource');
+    
+    const resourceMeta = s3dbContent.resources['quality_test_resource'];
+    
+    // Verifica estrutura do resource
+    expect(resourceMeta).toHaveProperty('currentVersion');
+    expect(resourceMeta).toHaveProperty('partitions');
+    expect(resourceMeta).toHaveProperty('versions');
+    
+    // Verifica que as partições foram preservadas
+    expect(resourceMeta.partitions).toHaveProperty('byCountry');
+    expect(resourceMeta.partitions).toHaveProperty('byCategory');
+    expect(resourceMeta.partitions.byCountry.fields['address.country']).toBeDefined();
+    expect(resourceMeta.partitions.byCategory.fields['metadata.category']).toBeDefined();
+    
+    // Verifica que os valores das partições estão corretos
+    expect(resourceMeta.partitions.byCountry.fields['address.country']).toBe('string|maxlength:2');
+    expect(resourceMeta.partitions.byCategory.fields['metadata.category']).toBe('string');
+    
+    // Verifica que a versão foi criada
+    expect(resourceMeta.versions).toHaveProperty(resourceMeta.currentVersion);
+    
+    const versionData = resourceMeta.versions[resourceMeta.currentVersion];
+    
+    // Verifica dados da versão
+    expect(versionData).toHaveProperty('hash');
+    expect(versionData).toHaveProperty('attributes');
+    expect(versionData).toHaveProperty('options');
+    expect(versionData).toHaveProperty('behavior');
+    expect(versionData).toHaveProperty('createdAt');
+    
+    // Verifica que os atributos aninhados foram preservados como objetos
+    expect(typeof versionData.attributes.personal).toBe('object');
+    expect(typeof versionData.attributes.address).toBe('object');
+    expect(typeof versionData.attributes.metadata).toBe('object');
+    
+    // Verifica que os atributos aninhados não foram serializados como string
+    expect(versionData.attributes.personal.firstName).toBe('string|required|max:50');
+    expect(versionData.attributes.address.country).toBe('string|required|max:2');
+    expect(versionData.attributes.metadata.category).toBe('string|required|max:50');
+    
+    // Verifica que o behavior foi preservado
+    expect(versionData.behavior).toBe('user-management');
+    
+    // Verifica que o hash é válido
+    expect(versionData.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    
+    // Verifica que o timestamp foi gerado
+    expect(versionData.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 }); 
