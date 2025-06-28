@@ -46,6 +46,7 @@ class Resource extends EventEmitter {
       timestamps: false,
       partitions: {},
       paranoid: true,  // Security flag for dangerous operations
+      allNestedObjectsOptional: options.allNestedObjectsOptional ?? false,
       ...options,
     };
 
@@ -88,7 +89,10 @@ class Resource extends EventEmitter {
       attributes: this.attributes,
       passphrase,
       version: this.version,
-      options: this.options,
+      options: {
+        ...this.options,
+        allNestedObjectsOptional: this.options.allNestedObjectsOptional ?? false
+      },
     });
 
     // Validate partitions against current attributes

@@ -124,6 +124,7 @@ export class Schema {
     this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
     this.options = merge({}, this.defaultOptions(), options);
+    this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
 
     // Preprocess attributes to handle nested objects for validator compilation
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
@@ -369,14 +370,21 @@ export class Schema {
     
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // This is a nested object, convert it to a validator-compatible format
-        processed[key] = {
+        const isExplicitRequired = value.$$type && value.$$type.includes('required');
+        const isExplicitOptional = value.$$type && value.$$type.includes('optional');
+        const objectConfig = {
           type: 'object',
           properties: this.preprocessAttributesForValidation(value),
           strict: false
         };
+        // Se for explicitamente required, não marca como opcional
+        if (isExplicitRequired) {
+          // nada
+        } else if (isExplicitOptional || this.allNestedObjectsOptional) {
+          objectConfig.optional = true;
+        }
+        processed[key] = objectConfig;
       } else {
-        // This is a simple field, keep as is
         processed[key] = value;
       }
     }
