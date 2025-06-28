@@ -143,7 +143,7 @@ export class Client extends EventEmitter {
     };
 
     try {
-      const response = await this.client.send(new HeadObjectCommand(options));
+      const response = await this.sendCommand(new HeadObjectCommand(options));
       this.emit("headObject", response, options);
       return response;
     } catch (error) {
