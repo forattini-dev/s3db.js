@@ -457,6 +457,36 @@ describe('Schema Class - Complete Journey', () => {
     expect(opts).toHaveProperty('autoEncrypt');
     expect(opts).toHaveProperty('hooks');
   });
+
+  test('Export/import de atributos aninhados mantém objetos', () => {
+    const attrs = {
+      name: 'string|required',
+      profile: {
+        bio: 'string|optional',
+        social: {
+          twitter: 'string|optional',
+          github: 'string|optional'
+        }
+      },
+      address: {
+        city: 'string',
+        country: 'string'
+      }
+    };
+    const schema = new Schema({ name: 'nested', attributes: attrs });
+    const exported = schema.export();
+    const json = JSON.stringify(exported);
+    const imported = Schema.import(JSON.parse(json));
+    const impAttrs = imported.attributes;
+    expect(typeof impAttrs.profile).toBe('object');
+    expect(typeof impAttrs.profile.social).toBe('object');
+    expect(typeof impAttrs.profile.social.twitter).toBe('string');
+    expect(typeof impAttrs.address).toBe('object');
+    expect(typeof impAttrs.address.city).toBe('string');
+    // Não deve ser possível dar JSON.parse em objetos
+    expect(() => JSON.parse(impAttrs.profile)).toThrow();
+    expect(() => JSON.parse(impAttrs.profile.social)).toThrow();
+  });
 });
 
 describe('Schema Utility Functions', () => {
