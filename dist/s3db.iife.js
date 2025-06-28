@@ -9598,20 +9598,13 @@ ${JSON.stringify(validation, null, 2)}`
      * @returns {string} SHA256 hash of the schema definition
      */
     getDefinitionHash() {
-      const exportedSchema = this.schema.export();
-      const stableSchema = {
-        ...exportedSchema,
-        attributes: { ...exportedSchema.attributes }
-      };
+      const attributes = this.schema.export().attributes;
+      const stableAttributes = { ...attributes };
       if (this.options.timestamps) {
-        delete stableSchema.attributes.createdAt;
-        delete stableSchema.attributes.updatedAt;
-        if (stableSchema.options && stableSchema.options.partitions) {
-          delete stableSchema.options.partitions.byCreatedDate;
-          delete stableSchema.options.partitions.byUpdatedDate;
-        }
+        delete stableAttributes.createdAt;
+        delete stableAttributes.updatedAt;
       }
-      const stableString = jsonStableStringify(stableSchema);
+      const stableString = jsonStableStringify(stableAttributes);
       return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
     }
     /**
@@ -9805,7 +9798,7 @@ ${JSON.stringify(validation, null, 2)}`
       this.version = "1";
       this.s3dbVersion = (() => {
         try {
-          return true ? "4.1.0" : "latest";
+          return true ? "4.1.1" : "latest";
         } catch (e) {
           return "latest";
         }
@@ -9920,7 +9913,13 @@ ${JSON.stringify(validation, null, 2)}`
      * @returns {string} SHA256 hash
      */
     generateDefinitionHash(definition) {
-      const stableString = jsonStableStringify(definition);
+      const attributes = definition.attributes;
+      const stableAttributes = { ...attributes };
+      if (definition.options?.timestamps) {
+        delete stableAttributes.createdAt;
+        delete stableAttributes.updatedAt;
+      }
+      const stableString = jsonStableStringify(stableAttributes);
       return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
     }
     /**
