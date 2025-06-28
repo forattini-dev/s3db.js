@@ -155,7 +155,20 @@ export class Database extends EventEmitter {
    * @returns {string} SHA256 hash
    */
   generateDefinitionHash(definition) {
-    const stableString = jsonStableStringify(definition);
+    // Extract only the attributes for hashing (exclude name, version, options, etc.)
+    const attributes = definition.attributes;
+    
+    // Create a stable version for hashing by excluding dynamic fields
+    const stableAttributes = { ...attributes };
+    
+    // Remove timestamp fields if they were added automatically
+    if (definition.options?.timestamps) {
+      delete stableAttributes.createdAt;
+      delete stableAttributes.updatedAt;
+    }
+    
+    // Use jsonStableStringify to ensure consistent ordering
+    const stableString = jsonStableStringify(stableAttributes);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 
