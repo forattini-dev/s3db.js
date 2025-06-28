@@ -1073,7 +1073,26 @@ class Resource extends EventEmitter {
    */
   getDefinitionHash() {
     const exportedSchema = this.schema.export();
-    const stableString = jsonStableStringify(exportedSchema);
+    
+    // Create a stable version for hashing by excluding dynamic fields
+    const stableSchema = {
+      ...exportedSchema,
+      attributes: { ...exportedSchema.attributes }
+    };
+    
+    // Remove timestamp fields if they were added automatically
+    if (this.options.timestamps) {
+      delete stableSchema.attributes.createdAt;
+      delete stableSchema.attributes.updatedAt;
+      
+      // Also remove automatic timestamp partitions
+      if (stableSchema.options && stableSchema.options.partitions) {
+        delete stableSchema.options.partitions.byCreatedDate;
+        delete stableSchema.options.partitions.byUpdatedDate;
+      }
+    }
+    
+    const stableString = jsonStableStringify(stableSchema);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 
