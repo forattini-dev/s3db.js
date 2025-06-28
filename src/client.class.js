@@ -101,10 +101,11 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
       Metadata: { ...metadata },
-      Body: body || "",
-      ContentType: contentType,
-      ContentEncoding: contentEncoding,
+      Body: body || Buffer.alloc(0),
     };
+    
+    if (contentType !== undefined) options.ContentType = contentType
+    if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding
 
     try {
       const response = await this.sendCommand(new PutObjectCommand(options));

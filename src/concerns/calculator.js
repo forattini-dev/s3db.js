@@ -35,6 +35,25 @@ export function calculateUTF8Bytes(str) {
 }
 
 /**
+ * Calculates the size in bytes of attribute names (mapped to digits)
+ * @param {Object} mappedObject - The object returned by schema.mapper()
+ * @returns {number} - Total size of attribute names in bytes
+ */
+export function calculateAttributeNamesSize(mappedObject) {
+  let totalSize = 0;
+  
+  for (const key of Object.keys(mappedObject)) {
+    // Skip the version field as it's not a mapped attribute
+    if (key === '_v') continue;
+    
+    // Calculate size of the attribute name (digit)
+    totalSize += calculateUTF8Bytes(key);
+  }
+  
+  return totalSize;
+}
+
+/**
  * Transforms a value according to the schema mapper rules
  * @param {any} value - The value to transform
  * @returns {string} - The transformed value as string
@@ -90,13 +109,18 @@ export function calculateAttributeSizes(mappedObject) {
 }
 
 /**
- * Calculates the total size in bytes of a mapped object
+ * Calculates the total size in bytes of a mapped object (including attribute names)
  * @param {Object} mappedObject - The object returned by schema.mapper()
  * @returns {number} - Total size in bytes
  */
 export function calculateTotalSize(mappedObject) {
-  const sizes = calculateAttributeSizes(mappedObject);
-  return Object.values(sizes).reduce((total, size) => total + size, 0);
+  const valueSizes = calculateAttributeSizes(mappedObject);
+  const valueTotal = Object.values(valueSizes).reduce((total, size) => total + size, 0);
+  
+  // Add the size of attribute names (digits)
+  const namesSize = calculateAttributeNamesSize(mappedObject);
+  
+  return valueTotal + namesSize;
 }
 
 /**
@@ -105,11 +129,14 @@ export function calculateTotalSize(mappedObject) {
  * @returns {Object} - Object with sizes, total, and breakdown information
  */
 export function getSizeBreakdown(mappedObject) {
-  const sizes = calculateAttributeSizes(mappedObject);
-  const total = Object.values(sizes).reduce((sum, size) => sum + size, 0);
+  const valueSizes = calculateAttributeSizes(mappedObject);
+  const namesSize = calculateAttributeNamesSize(mappedObject);
+  
+  const valueTotal = Object.values(valueSizes).reduce((sum, size) => sum + size, 0);
+  const total = valueTotal + namesSize;
   
   // Sort attributes by size (largest first)
-  const sortedAttributes = Object.entries(sizes)
+  const sortedAttributes = Object.entries(valueSizes)
     .sort(([, a], [, b]) => b - a)
     .map(([key, size]) => ({
       attribute: key,
@@ -119,7 +146,15 @@ export function getSizeBreakdown(mappedObject) {
   
   return {
     total,
-    sizes,
-    breakdown: sortedAttributes
+    valueSizes,
+    namesSize,
+    valueTotal,
+    breakdown: sortedAttributes,
+    // Add detailed breakdown including names
+    detailedBreakdown: {
+      values: valueTotal,
+      names: namesSize,
+      total: total
+    }
   };
 }

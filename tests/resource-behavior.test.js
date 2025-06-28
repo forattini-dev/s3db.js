@@ -90,8 +90,8 @@ describe('Resource Behaviors', () => {
       expect(mockResource.emit).toHaveBeenCalledWith('exceedsLimit', {
         operation: 'insert',
         totalSize: calculateTotalSize(mappedData),
-        limit: 2048,
-        excess: calculateTotalSize(mappedData) - 2048,
+        limit: 2000,
+        excess: calculateTotalSize(mappedData) - 2000,
         data: largeData
       });
     });
@@ -265,7 +265,7 @@ describe('Resource Behaviors', () => {
 
       // Should have truncated some data
       expect(result.body).toBe("");
-      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2048);
+      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2000);
       
       // Should preserve smaller fields first
       expect(result.mappedData.name).toBe('Test');
@@ -366,7 +366,7 @@ describe('Resource Behaviors', () => {
       expect(result.mappedData.$overflow).toBe('true');
       
       // Metadata should be <= 2KB
-      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2048);
+      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2000);
       
       // Should have body content
       expect(result.body).not.toBe("");
@@ -629,7 +629,7 @@ describe('Resource Behaviors', () => {
         mappedData: { content: largeField }
       });
 
-      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2048);
+      expect(calculateTotalSize(result.mappedData)).toBeLessThanOrEqual(2000);
     });
 
     test('should handle mixed data types in body-overflow', async () => {

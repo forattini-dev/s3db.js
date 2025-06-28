@@ -1,6 +1,6 @@
 import { calculateAttributeSizes, calculateTotalSize, calculateUTF8Bytes } from '../concerns/calculator.js';
 
-const S3_METADATA_LIMIT_BYTES = 2048;
+const S3_METADATA_LIMIT_BYTES = 2000;
 const OVERFLOW_FLAG = '$overflow';
 const OVERFLOW_FLAG_VALUE = 'true';
 const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);

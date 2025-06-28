@@ -440,7 +440,7 @@ try {
   });
 } catch (error) {
   console.error("Operation failed:", error.message);
-  // Error: S3 metadata size exceeds 2KB limit. Current size: 2500 bytes, limit: 2048 bytes
+  // Error: S3 metadata size exceeds 2KB limit. Current size: 2500 bytes, limit: 2000 bytes
 }
 ```
 
