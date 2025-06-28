@@ -4,6 +4,7 @@ import { join } from 'path';
 
 import Client from '../src/client.class.js';
 import Schema, { SchemaActions } from '../src/schema.class.js';
+import Resource from '../src/resource.class.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'schema-journey-' + Date.now());
 
@@ -486,6 +487,205 @@ describe('Schema Class - Complete Journey', () => {
     // Não deve ser possível dar JSON.parse em objetos
     expect(() => JSON.parse(impAttrs.profile)).toThrow();
     expect(() => JSON.parse(impAttrs.profile.social)).toThrow();
+  });
+
+  test('extractObjectKeys covers nested and $$type', () => {
+    // Testar método isoladamente sem inicializar Validator
+    const schema = Object.create(Schema.prototype);
+    const attributes = {
+      foo: { bar: { baz: { qux: 'string' } } },
+      simple: 'string',
+    };
+    const keys = schema.extractObjectKeys(attributes);
+    expect(keys).toContain('foo');
+    expect(keys).not.toContain('simple'); // simple é string, não objeto
+    expect(keys).not.toContain('foo.bar');
+    expect(keys).not.toContain('foo.bar.baz');
+    expect(keys).not.toContain('$$meta');
+  });
+
+  test('Schema with optional nested objects - preprocessAttributesForValidation', () => {
+    const attributes = {
+      costCenter: 'string',
+      team: 'string',
+      scopes: 'string|optional',
+      isActive: 'boolean|optional|default:true',
+      apiToken: 'secret',
+      webpush: {
+        $$type: 'object|optional',
+        enabled: 'boolean|optional|default:false',
+        endpoint: 'string|optional',
+        p256dh: 'string|optional',
+        auth: 'string|optional',
+      },
+      metadata: 'string|optional',
+    };
+
+    const schema = new Schema({
+      name: 'test',
+      attributes,
+      passphrase: 'secret'
+    });
+
+    // Validar o resultado do preprocessamento
+    const processed = schema.preprocessAttributesForValidation(attributes);
+    expect(processed.webpush).toBeDefined();
+    expect(processed.webpush.type).toBe('object');
+    expect(processed.webpush.optional).toBe(true);
+    expect(processed.webpush.properties.enabled).toBe('boolean|optional|default:false');
+    expect(processed.webpush.properties.endpoint).toBe('string|optional');
+  });
+
+  test('Schema with allNestedObjectsOptional option', () => {
+    const attributes = {
+      costCenter: 'string',
+      team: 'string',
+      webpush: {
+        // Sem $$type, mas deve ser opcional devido à opção global
+        enabled: 'boolean|optional|default:false',
+        endpoint: 'string|optional',
+      },
+      requiredObject: {
+        $$type: 'object|required', // Explicitamente obrigatório
+        field: 'string'
+      },
+      optionalObject: {
+        $$type: 'object|optional', // Explicitamente opcional
+        field: 'string'
+      }
+    };
+
+    const schema = new Schema({
+      name: 'test',
+      attributes,
+      passphrase: 'secret',
+      options: {
+        allNestedObjectsOptional: true
+      }
+    });
+
+    const processed = schema.preprocessAttributesForValidation(attributes);
+    expect(processed.webpush.optional).toBe(true);
+    expect(processed.requiredObject.optional).toBeUndefined();
+    expect(processed.optionalObject.optional).toBe(true);
+  });
+
+  test('Schema validation with optional nested objects', async () => {
+    const attributes = {
+      costCenter: 'string',
+      team: 'string',
+      webpush: {
+        $$type: 'object|optional',
+        enabled: 'boolean|optional|default:false',
+        endpoint: 'string|optional',
+        p256dh: 'string|optional',
+        auth: 'string|optional',
+      },
+      metadata: 'string|optional',
+    };
+
+    const schema = new Schema({
+      name: 'test',
+      attributes,
+      passphrase: 'secret'
+    });
+
+    // Teste 1: Dados válidos sem o campo webpush (deve passar)
+    const validDataWithoutWebpush = {
+      costCenter: '860290021',
+      team: 'dp-martech-growth'
+    };
+
+    const result1 = await schema.validate(validDataWithoutWebpush);
+    expect(result1).toBe(true); // Deve ser válido
+
+    // Teste 2: Dados válidos com o campo webpush (deve passar)
+    const validDataWithWebpush = {
+      costCenter: '860290021',
+      team: 'dp-martech-growth',
+      webpush: {
+        enabled: true,
+        endpoint: 'https://example.com/push'
+      }
+    };
+
+    const result2 = await schema.validate(validDataWithWebpush);
+    expect(result2).toBe(true); // Deve ser válido
+
+    // Teste 3: Dados inválidos (campo obrigatório ausente)
+    const invalidData = {
+      team: 'dp-martech-growth'
+      // costCenter ausente (obrigatório)
+    };
+
+    const result3 = await schema.validate(invalidData);
+    expect(Array.isArray(result3)).toBe(true); // Deve retornar array de erros
+    expect(result3.length).toBeGreaterThan(0);
+  });
+
+  test('Resource with optional nested objects - full integration', async () => {
+    // Criar um resource com objetos opcionais
+    const resource = new Resource({
+      client,
+      name: 'users_v1',
+      attributes: {
+        costCenter: 'string',
+        team: 'string',
+        scopes: 'string|optional',
+        isActive: 'boolean|optional|default:true',
+        apiToken: 'secret',
+        webpush: {
+          $$type: 'object|optional',
+          enabled: 'boolean|optional|default:false',
+          endpoint: 'string|optional',
+          p256dh: 'string|optional',
+          auth: 'string|optional',
+        },
+        metadata: 'string|optional',
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byCostCenter: {
+            fields: { costCenter: 'string' }
+          },
+          byTeam: {
+            fields: { team: 'string' }
+          }
+        }
+      }
+    });
+
+    // Verificar se o resource foi criado corretamente
+    expect(resource.name).toBe('users_v1');
+    expect(resource.attributes.webpush).toBeDefined();
+    expect(resource.attributes.webpush.$$type).toBe('object|optional');
+
+    // Testar validação de dados sem o campo webpush (incluindo apiToken obrigatório)
+    const dataWithoutWebpush = {
+      costCenter: '860290021',
+      team: 'dp-martech-growth',
+      apiToken: 'test-token' // Campo obrigatório
+    };
+
+    const validationResult = await resource.validate(dataWithoutWebpush);
+    expect(validationResult.isValid).toBe(true);
+    expect(validationResult.errors).toHaveLength(0);
+
+    // Testar validação de dados com o campo webpush
+    const dataWithWebpush = {
+      costCenter: '860290021',
+      team: 'dp-martech-growth',
+      apiToken: 'test-token', // Campo obrigatório
+      webpush: {
+        enabled: true,
+        endpoint: 'https://example.com/push'
+      }
+    };
+
+    const validationResult2 = await resource.validate(dataWithWebpush);
+    expect(validationResult2.isValid).toBe(true);
+    expect(validationResult2.errors).toHaveLength(0);
   });
 });
 

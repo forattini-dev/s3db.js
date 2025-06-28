@@ -3482,6 +3482,7 @@ class Schema {
     this.attributes = attributes || {};
     this.passphrase = passphrase ?? "secret";
     this.options = lodashEs.merge({}, this.defaultOptions(), options);
+    this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
       { $$async: true },
@@ -3679,11 +3680,17 @@ class Schema {
     const processed = {};
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        processed[key] = {
+        const isExplicitRequired = value.$$type && value.$$type.includes("required");
+        const isExplicitOptional = value.$$type && value.$$type.includes("optional");
+        const objectConfig = {
           type: "object",
           properties: this.preprocessAttributesForValidation(value),
           strict: false
         };
+        if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
+          objectConfig.optional = true;
+        }
+        processed[key] = objectConfig;
       } else {
         processed[key] = value;
       }
@@ -8845,6 +8852,7 @@ class Resource extends EventEmitter {
       partitions: {},
       paranoid: true,
       // Security flag for dangerous operations
+      allNestedObjectsOptional: options.allNestedObjectsOptional ?? false,
       ...options
     };
     this.hooks = {
@@ -8879,7 +8887,10 @@ class Resource extends EventEmitter {
       attributes: this.attributes,
       passphrase,
       version: this.version,
-      options: this.options
+      options: {
+        ...this.options,
+        allNestedObjectsOptional: this.options.allNestedObjectsOptional ?? false
+      }
     });
     this.validatePartitions();
     this.setupPartitionHooks();
@@ -9806,7 +9817,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.2" : "latest";
+        return true ? "4.1.3" : "latest";
       } catch (e) {
         return "latest";
       }

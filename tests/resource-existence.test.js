@@ -144,12 +144,12 @@ describe('Resource Existence Methods', () => {
   describe('createResourceIfNotExists', () => {
     test('should create new resource when it does not exist', async () => {
       const attributes = { name: 'string|required' };
-      
+      // Limpar resource antes do teste
+      delete db.resources['new-resource'];
       const result = await db.createResourceIfNotExists({
         name: 'new-resource',
         attributes
       });
-
       expect(result.created).toBe(true);
       expect(result.reason).toBe('New resource created');
       expect(result.resource).toBeDefined();
@@ -158,21 +158,19 @@ describe('Resource Existence Methods', () => {
 
     test('should not create resource when it exists with same hash', async () => {
       const attributes = { name: 'string|required', email: 'string|required' };
-      
+      // Limpar resource antes do teste
+      delete db.resources['test-resource'];
       // Create resource first time
       const result1 = await db.createResourceIfNotExists({
         name: 'test-resource',
         attributes
       });
-
       expect(result1.created).toBe(true);
-
       // Try to create same resource again
       const result2 = await db.createResourceIfNotExists({
         name: 'test-resource',
         attributes
       });
-
       expect(result2.created).toBe(false);
       expect(result2.reason).toBe('Resource already exists with same definition hash');
       expect(result2.resource).toBe(result1.resource);
