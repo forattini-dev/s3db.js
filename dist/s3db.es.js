@@ -936,7 +936,7 @@ class Client extends EventEmitter {
       Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
     };
     try {
-      const response = await this.client.send(new HeadObjectCommand(options2));
+      const response = await this.sendCommand(new HeadObjectCommand(options2));
       this.emit("headObject", response, options2);
       return response;
     } catch (error) {
@@ -3564,6 +3564,7 @@ class Schema {
       version,
       attributes
     } = isString$1(data) ? JSON.parse(data) : data;
+    attributes = Schema._importAttributes(attributes);
     const schema = new Schema({
       map,
       name,
@@ -3573,22 +3574,60 @@ class Schema {
     });
     return schema;
   }
+  /**
+   * Recursively import attributes, parsing only stringified objects (legacy)
+   */
+  static _importAttributes(attrs) {
+    if (typeof attrs === "string") {
+      try {
+        const parsed = JSON.parse(attrs);
+        if (typeof parsed === "object" && parsed !== null) {
+          return Schema._importAttributes(parsed);
+        }
+      } catch (e) {
+      }
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      return attrs.map((a) => Schema._importAttributes(a));
+    }
+    if (typeof attrs === "object" && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        out[k] = Schema._importAttributes(v);
+      }
+      return out;
+    }
+    return attrs;
+  }
   export() {
     const data = {
       version: this.version,
       name: this.name,
       options: this.options,
-      attributes: cloneDeep(this.attributes),
+      attributes: this._exportAttributes(this.attributes),
       map: this.map
     };
-    for (const [name, definition] of Object.entries(this.attributes)) {
-      if (typeof definition !== "string") {
-        data.attributes[name] = JSON.stringify(definition);
-      } else {
-        data.attributes[name] = definition;
-      }
-    }
     return data;
+  }
+  /**
+   * Recursively export attributes, keeping objects as objects and only serializing leaves as string
+   */
+  _exportAttributes(attrs) {
+    if (typeof attrs === "string") {
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      return attrs.map((a) => this._exportAttributes(a));
+    }
+    if (typeof attrs === "object" && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        out[k] = this._exportAttributes(v);
+      }
+      return out;
+    }
+    return attrs;
   }
   async applyHooksActions(resourceItem, hook) {
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
@@ -9760,7 +9799,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.0.2" : "latest";
+        return true ? "4.1.0" : "latest";
       } catch (e) {
         return "latest";
       }
