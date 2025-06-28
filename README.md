@@ -830,6 +830,48 @@ const resource = await s3db.createResource({
 });
 ```
 
+#### Check Resource Existence
+
+```javascript
+// Check if a resource exists by name
+const exists = s3db.resourceExists("users");
+console.log(exists); // true or false
+```
+
+#### Create Resource If Not Exists
+
+```javascript
+// Create a resource only if it doesn't exist with the same definition hash
+const result = await s3db.createResourceIfNotExists({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "email|required"
+  },
+  options: { timestamps: true },
+  behavior: "user-management"
+});
+
+console.log(result);
+// {
+//   resource: Resource,
+//   created: true, // or false if already existed
+//   reason: "New resource created" // or "Resource already exists with same definition hash"
+// }
+
+// If the resource already exists with the same hash, it returns the existing resource
+const result2 = await s3db.createResourceIfNotExists({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "email|required"
+  }
+});
+
+console.log(result2.created); // false
+console.log(result2.reason); // "Resource already exists with same definition hash"
+```
+
 #### Get Resource Reference
 
 ```javascript
