@@ -235,18 +235,48 @@ export class Schema {
       name,
       options,
       version,
-      attributes,
+      attributes
     } = isString(data) ? JSON.parse(data) : data;
+
+    // Corrige atributos aninhados que possam ter sido serializados como string JSON
+    attributes = Schema._importAttributes(attributes);
 
     const schema = new Schema({
       map,
       name,
       options,
       version,
-      attributes,
-    })
+      attributes
+    });
+    return schema;
+  }
 
-    return schema
+  /**
+   * Recursively import attributes, parsing only stringified objects (legacy)
+   */
+  static _importAttributes(attrs) {
+    if (typeof attrs === 'string') {
+      // Tenta detectar se é um objeto serializado como string JSON
+      try {
+        const parsed = JSON.parse(attrs);
+        // Só retorna o parse se for objeto ou array
+        if (typeof parsed === 'object' && parsed !== null) {
+          return Schema._importAttributes(parsed);
+        }
+      } catch (e) {}
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      return attrs.map(a => Schema._importAttributes(a));
+    }
+    if (typeof attrs === 'object' && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        out[k] = Schema._importAttributes(v);
+      }
+      return out;
+    }
+    return attrs;
   }
 
   export() {
@@ -254,19 +284,30 @@ export class Schema {
       version: this.version,
       name: this.name,
       options: this.options,
-      attributes: cloneDeep(this.attributes),
+      attributes: this._exportAttributes(this.attributes),
       map: this.map,
     };
-
-    for (const [name, definition] of Object.entries(this.attributes)) {
-      if (typeof definition !== 'string') {
-        data.attributes[name] = JSON.stringify(definition);
-      } else {
-        data.attributes[name] = definition;
-      }
-    }
-
     return data;
+  }
+
+  /**
+   * Recursively export attributes, keeping objects as objects and only serializing leaves as string
+   */
+  _exportAttributes(attrs) {
+    if (typeof attrs === 'string') {
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      return attrs.map(a => this._exportAttributes(a));
+    }
+    if (typeof attrs === 'object' && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        out[k] = this._exportAttributes(v);
+      }
+      return out;
+    }
+    return attrs;
   }
 
   async applyHooksActions(resourceItem, hook) {
