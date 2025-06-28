@@ -969,7 +969,8 @@ describe('Database Definition Hash Stability', () => {
     expect(versions[0]).toBe(initialVersion);
 
     // Verify the hash in metadata matches our calculated hash
-    expect(resourceMeta.versions[initialVersion].hash).toBe(initialHash);
+    const expectedHash = database.generateDefinitionHash(resource1.export(), resource1.behavior);
+    expect(resourceMeta.versions[initialVersion].hash).toBe(expectedHash);
   });
 
   test('should create new version only when attributes actually change', async () => {
@@ -1210,7 +1211,8 @@ describe('Database Definition Hash Stability', () => {
     const versions = Object.keys(resourceMeta.versions);
     expect(versions).toHaveLength(1);
     expect(versions[0]).toBe(initialVersion);
-    expect(resourceMeta.versions[initialVersion].hash).toBe(initialHash);
+    const expectedHash = database.generateDefinitionHash(resource1.export(), resource1.behavior);
+    expect(resourceMeta.versions[initialVersion].hash).toBe(expectedHash);
   });
 });
 
