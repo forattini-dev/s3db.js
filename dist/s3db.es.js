@@ -899,10 +899,10 @@ class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
       Metadata: { ...metadata },
-      Body: body || "",
-      ContentType: contentType,
-      ContentEncoding: contentEncoding
+      Body: body || Buffer.alloc(0)
     };
+    if (contentType !== void 0) options2.ContentType = contentType;
+    if (contentEncoding !== void 0) options2.ContentEncoding = contentEncoding;
     try {
       const response = await this.sendCommand(new PutObjectCommand(options2));
       this.emit("putObject", response, options2);
@@ -8498,12 +8498,16 @@ class ResourceWriter extends EventEmitter {
   }
   write(chunk) {
     this.buffer.push(chunk);
-    this._maybeWrite();
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
     return true;
   }
   end() {
     this.ended = true;
-    this._maybeWrite();
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
   }
   async _maybeWrite() {
     if (this.writing) return;
@@ -8600,7 +8604,7 @@ function calculateTotalSize(mappedObject) {
   return Object.values(sizes).reduce((total, size) => total + size, 0);
 }
 
-const S3_METADATA_LIMIT_BYTES$3 = 2048;
+const S3_METADATA_LIMIT_BYTES$3 = 2e3;
 async function handleInsert$3({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
@@ -8654,7 +8658,7 @@ var userManagement = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$3
 });
 
-const S3_METADATA_LIMIT_BYTES$2 = 2048;
+const S3_METADATA_LIMIT_BYTES$2 = 2e3;
 async function handleInsert$2({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
@@ -8688,7 +8692,7 @@ var enforceLimits = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$2
 });
 
-const S3_METADATA_LIMIT_BYTES$1 = 2048;
+const S3_METADATA_LIMIT_BYTES$1 = 2e3;
 const TRUNCATE_SUFFIX = "...";
 const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
 async function handleInsert$1({ resource, data, mappedData }) {
@@ -8746,7 +8750,7 @@ var dataTruncate = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$1
 });
 
-const S3_METADATA_LIMIT_BYTES = 2048;
+const S3_METADATA_LIMIT_BYTES = 2e3;
 const OVERFLOW_FLAG = "$overflow";
 const OVERFLOW_FLAG_VALUE = "true";
 const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
@@ -9815,7 +9819,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.3" : "latest";
+        return true ? "4.1.4" : "latest";
       } catch (e) {
         return "latest";
       }

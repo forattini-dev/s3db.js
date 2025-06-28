@@ -35,13 +35,17 @@ export class ResourceWriter extends EventEmitter {
 
   write(chunk) {
     this.buffer.push(chunk);
-    this._maybeWrite();
+    this._maybeWrite().catch(error => {
+      this.emit('error', error);
+    });
     return true;
   }
 
   end() {
     this.ended = true;
-    this._maybeWrite();
+    this._maybeWrite().catch(error => {
+      this.emit('error', error);
+    });
   }
 
   async _maybeWrite() {
