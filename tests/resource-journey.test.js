@@ -462,4 +462,34 @@ describe('Resource Journey', () => {
     expect(invalidValidationResult.isValid).toBe(false);
     expect(invalidValidationResult.errors).toBeDefined();
   });
+
+  test('Resource definition hash is stable and deterministic', () => {
+    const def = {
+      name: 'users',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required',
+        age: 'number|optional'
+      },
+      options: {
+        timestamps: true,
+        partitions: {
+          byEmail: {
+            fields: { email: 'string' }
+          }
+        }
+      }
+    };
+    const r1 = new Resource({ ...def, client });
+    const r2 = new Resource({ ...def, client });
+    expect(r1.getDefinitionHash()).toBe(r2.getDefinitionHash());
+
+    // Mudando um atributo, o hash deve mudar
+    const r3 = new Resource({
+      ...def,
+      attributes: { ...def.attributes, extra: 'string|optional' },
+      client
+    });
+    expect(r3.getDefinitionHash()).not.toBe(r1.getDefinitionHash());
+  });
 }); 
