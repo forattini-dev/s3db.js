@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 
 import Database from '../src/database.class.js';
 import Resource from '../src/resource.class.js';
+import { streamToString } from '../src/stream/index.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-journey-' + Date.now());
 
@@ -863,6 +864,354 @@ describe('Database.generateDefinitionHash is stable and deterministic', () => {
     options: { timestamps: true }
   };
   expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+});
+
+describe('Database Definition Hash Stability', () => {
+  let database;
+
+  beforeEach(async () => {
+    database = new Database({
+      verbose: true,
+      connectionString: process.env.BUCKET_CONNECTION_STRING
+        .replace('USER', process.env.MINIO_USER)
+        .replace('PASSWORD', process.env.MINIO_PASSWORD)
+        + `/${testPrefix}`
+    });
+
+    await database.connect();
+  });
+
+  test('should maintain same version when resource definition is identical', async () => {
+    // Define resource attributes in different orders to test sorting
+    const attributes1 = {
+      email: 'email|required',
+      name: 'string|required',
+      age: 'number|optional'
+    };
+
+    const attributes2 = {
+      age: 'number|optional',
+      name: 'string|required', 
+      email: 'email|required'
+    };
+
+    const attributes3 = {
+      name: 'string|required',
+      age: 'number|optional',
+      email: 'email|required'
+    };
+
+    // Create resource with first attribute order
+    const resource1 = await database.createResource({
+      name: 'hash-stability-test',
+      attributes: attributes1,
+      options: {
+        timestamps: true
+      }
+    });
+
+    // Get initial version and hash
+    const initialVersion = resource1.version;
+    const initialHash = resource1.getDefinitionHash();
+
+    // Upload metadata to save the first version
+    await database.uploadMetadataFile();
+
+    // Create same resource with different attribute order (should not create new version)
+    const resource2 = await database.createResource({
+      name: 'hash-stability-test',
+      attributes: attributes2,
+      options: {
+        timestamps: true
+      }
+    });
+
+    const secondVersion = resource2.version;
+    const secondHash = resource2.getDefinitionHash();
+
+
+    // Should be the same resource instance
+    expect(resource2).toBe(resource1);
+    expect(secondVersion).toBe(initialVersion);
+    expect(secondHash).toBe(initialHash);
+
+    // Create same resource with third attribute order (should not create new version)
+    const resource3 = await database.createResource({
+      name: 'hash-stability-test',
+      attributes: attributes3,
+      options: {
+        timestamps: true
+      }
+    });
+
+    const thirdVersion = resource3.version;
+    const thirdHash = resource3.getDefinitionHash();
+
+
+    // Should still be the same
+    expect(resource3).toBe(resource1);
+    expect(thirdVersion).toBe(initialVersion);
+    expect(thirdHash).toBe(initialHash);
+
+    // Upload metadata again and verify no new version was created
+    await database.uploadMetadataFile();
+
+    // Get the s3db.json content to verify only one version exists
+    const s3dbRequest = await database.client.getObject('s3db.json');
+    const s3dbContent = JSON.parse(await streamToString(s3dbRequest.Body));
+    
+    const resourceMeta = s3dbContent.resources['hash-stability-test'];
+    const versions = Object.keys(resourceMeta.versions);
+
+
+    // Should have only one version
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toBe(initialVersion);
+
+    // Verify the hash in metadata matches our calculated hash
+    expect(resourceMeta.versions[initialVersion].hash).toBe(initialHash);
+  });
+
+  test('should create new version only when attributes actually change', async () => {
+    // Create initial resource
+    const resource1 = await database.createResource({
+      name: 'version-change-test',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required'
+      }
+    });
+
+    const initialVersion = resource1.version;
+    const initialHash = resource1.getDefinitionHash();
+
+
+    // Upload metadata
+    await database.uploadMetadataFile();
+
+    // Try to create same resource (should not change version)
+    const resource2 = await database.createResource({
+      name: 'version-change-test',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required'
+      }
+    });
+
+    expect(resource2.version).toBe(initialVersion);
+    expect(resource2.getDefinitionHash()).toBe(initialHash);
+
+    // Now add a new attribute (should create new version)
+    const resource3 = await database.createResource({
+      name: 'version-change-test',
+      attributes: {
+        name: 'string|required',
+        email: 'email|required',
+        age: 'number|optional' // New attribute
+      }
+    });
+
+    const newVersion = resource3.version;
+    const newHash = resource3.getDefinitionHash();
+
+
+    // Should be different
+    expect(newVersion).not.toBe(initialVersion);
+    expect(newHash).not.toBe(initialHash);
+
+    // Upload metadata to save the new version
+    await database.uploadMetadataFile();
+
+    // Verify both versions exist in s3db.json
+    const s3dbRequest = await database.client.getObject('s3db.json');
+    const s3dbContent = JSON.parse(await streamToString(s3dbRequest.Body));
+    
+    const resourceMeta = s3dbContent.resources['version-change-test'];
+    const versions = Object.keys(resourceMeta.versions);
+
+
+    // Should have both versions
+    expect(versions).toHaveLength(2);
+    expect(versions).toContain(initialVersion);
+    expect(versions).toContain(newVersion);
+  });
+
+  test('should generate consistent hashes for identical definitions', async () => {
+    // Test hash consistency with different attribute orders
+    const definition1 = {
+      attributes: {
+        email: 'email|required',
+        name: 'string|required',
+        age: 'number|optional'
+      },
+      options: {
+        timestamps: true
+      }
+    };
+
+    const definition2 = {
+      attributes: {
+        age: 'number|optional',
+        name: 'string|required',
+        email: 'email|required'
+      },
+      options: {
+        timestamps: true
+      }
+    };
+
+    // Generate hashes 4 times to ensure consistency
+    const hashes1 = [];
+    const hashes2 = [];
+
+    for (let i = 0; i < 4; i++) {
+      const resource1 = new Resource({
+        name: 'test1',
+        client: database.client,
+        ...definition1
+      });
+
+      const resource2 = new Resource({
+        name: 'test2', 
+        client: database.client,
+        ...definition2
+      });
+
+      hashes1.push(resource1.getDefinitionHash());
+      hashes2.push(resource2.getDefinitionHash());
+    }
+
+    // All hashes should be identical within each group
+    const firstHash1 = hashes1[0];
+    const firstHash2 = hashes2[0];
+
+    hashes1.forEach((hash, index) => {
+      expect(hash).toBe(firstHash1);
+    });
+
+    hashes2.forEach((hash, index) => {
+      expect(hash).toBe(firstHash2);
+    });
+
+    // Both definitions should generate the same hash (same attributes, different order)
+    expect(firstHash1).toBe(firstHash2);
+  });
+
+  test('should maintain same version and hash for deeply nested attributes with different order', async () => {
+    // Definição 1: ordem "normal"
+    const attributes1 = {
+      name: 'string|required|max:100',
+      email: 'email|required|unique',
+      utm: {
+        source: 'string|required|max:50',
+        medium: 'string|required|max:50',
+        campaign: 'string|optional|max:100',
+        term: 'string|optional|max:100',
+        content: 'string|optional|max:100'
+      },
+      address: {
+        country: 'string|required|max:2',
+        state: 'string|required|max:50',
+        city: 'string|required|max:100'
+      },
+      personal: {
+        firstName: 'string|required|max:50',
+        lastName: 'string|required|max:50',
+        birthDate: 'date|optional'
+      }
+    };
+
+    // Definição 2: muda ordem dos campos de primeiro nível e dos objetos aninhados
+    const attributes2 = {
+      personal: {
+        birthDate: 'date|optional',
+        lastName: 'string|required|max:50',
+        firstName: 'string|required|max:50'
+      },
+      utm: {
+        content: 'string|optional|max:100',
+        term: 'string|optional|max:100',
+        campaign: 'string|optional|max:100',
+        medium: 'string|required|max:50',
+        source: 'string|required|max:50'
+      },
+      address: {
+        city: 'string|required|max:100',
+        state: 'string|required|max:50',
+        country: 'string|required|max:2'
+      },
+      email: 'email|required|unique',
+      name: 'string|required|max:100'
+    };
+
+    // Definição 3: mais uma permutação
+    const attributes3 = {
+      utm: {
+        medium: 'string|required|max:50',
+        source: 'string|required|max:50',
+        campaign: 'string|optional|max:100',
+        content: 'string|optional|max:100',
+        term: 'string|optional|max:100'
+      },
+      name: 'string|required|max:100',
+      personal: {
+        lastName: 'string|required|max:50',
+        firstName: 'string|required|max:50',
+        birthDate: 'date|optional'
+      },
+      address: {
+        state: 'string|required|max:50',
+        country: 'string|required|max:2',
+        city: 'string|required|max:100'
+      },
+      email: 'email|required|unique'
+    };
+
+    // Cria resource com a primeira definição
+    const resource1 = await database.createResource({
+      name: 'deep-nested-hash-test',
+      attributes: attributes1,
+      options: { timestamps: true }
+    });
+    const initialVersion = resource1.version;
+    const initialHash = resource1.getDefinitionHash();
+
+    // Cria resource com a segunda definição (ordem diferente)
+    const resource2 = await database.createResource({
+      name: 'deep-nested-hash-test',
+      attributes: attributes2,
+      options: { timestamps: true }
+    });
+    const secondVersion = resource2.version;
+    const secondHash = resource2.getDefinitionHash();
+
+    // Cria resource com a terceira definição (outra ordem)
+    const resource3 = await database.createResource({
+      name: 'deep-nested-hash-test',
+      attributes: attributes3,
+      options: { timestamps: true }
+    });
+    const thirdVersion = resource3.version;
+    const thirdHash = resource3.getDefinitionHash();
+
+    // Todos devem ser o mesmo resource e mesma versão/hash
+    expect(resource2).toBe(resource1);
+    expect(resource3).toBe(resource1);
+    expect(secondVersion).toBe(initialVersion);
+    expect(thirdVersion).toBe(initialVersion);
+    expect(secondHash).toBe(initialHash);
+    expect(thirdHash).toBe(initialHash);
+
+    // Upload metadata e verifica s3db.json
+    await database.uploadMetadataFile();
+    const s3dbRequest = await database.client.getObject('s3db.json');
+    const s3dbContent = JSON.parse(await streamToString(s3dbRequest.Body));
+    const resourceMeta = s3dbContent.resources['deep-nested-hash-test'];
+    const versions = Object.keys(resourceMeta.versions);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toBe(initialVersion);
+    expect(resourceMeta.versions[initialVersion].hash).toBe(initialHash);
+  });
 });
 
 
