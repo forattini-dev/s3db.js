@@ -152,23 +152,26 @@ export class Database extends EventEmitter {
   /**
    * Generate a consistent hash for a resource definition
    * @param {Object} definition - Resource definition to hash
+   * @param {string} behavior - Resource behavior
    * @returns {string} SHA256 hash
    */
-  generateDefinitionHash(definition) {
+  generateDefinitionHash(definition, behavior = undefined) {
     // Extract only the attributes for hashing (exclude name, version, options, etc.)
     const attributes = definition.attributes;
-    
     // Create a stable version for hashing by excluding dynamic fields
     const stableAttributes = { ...attributes };
-    
     // Remove timestamp fields if they were added automatically
     if (definition.options?.timestamps) {
       delete stableAttributes.createdAt;
       delete stableAttributes.updatedAt;
     }
-    
+    // Include behavior in the hash
+    const hashObj = {
+      attributes: stableAttributes,
+      behavior: behavior || definition.behavior || 'user-management',
+    };
     // Use jsonStableStringify to ensure consistent ordering
-    const stableString = jsonStableStringify(stableAttributes);
+    const stableString = jsonStableStringify(hashObj);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 
@@ -280,37 +283,104 @@ export class Database extends EventEmitter {
     };
   }
 
+  /**
+   * Check if a resource exists by name
+   * @param {string} name - Resource name
+   * @returns {boolean} True if resource exists, false otherwise
+   */
+  resourceExists(name) {
+    return !!this.resources[name];
+  }
+
+  /**
+   * Check if a resource exists with the same definition hash
+   * @param {string} name - Resource name
+   * @param {Object} attributes - Resource attributes
+   * @param {Object} options - Resource options
+   * @param {string} behavior - Resource behavior
+   * @returns {Object} Object with exists flag and hash information
+   */
+  resourceExistsWithSameHash({ name, attributes, options = {}, behavior = 'user-management' }) {
+    // Check if resource exists in memory
+    if (!this.resources[name]) {
+      return { exists: false, sameHash: false, hash: null };
+    }
+    // Create a temporary resource to generate hash
+    const tempResource = new Resource({
+      name,
+      attributes,
+      behavior,
+      observers: [],
+      client: this.client,
+      version: 'temp',
+      options: {
+        cache: this.cache,
+        ...options,
+      },
+    });
+    const newHash = this.generateDefinitionHash(tempResource.export(), behavior);
+    const existingHash = this.generateDefinitionHash(this.resources[name].export(), this.resources[name].behavior);
+    return {
+      exists: true,
+      sameHash: newHash === existingHash,
+      hash: newHash,
+      existingHash
+    };
+  }
+
+  /**
+   * Create a resource only if it doesn't exist with the same definition hash
+   * @param {Object} params - Resource parameters
+   * @param {string} params.name - Resource name
+   * @param {Object} params.attributes - Resource attributes
+   * @param {Object} params.options - Resource options
+   * @param {string} params.behavior - Resource behavior
+   * @returns {Object} Object with resource and created flag
+   */
+  async createResourceIfNotExists({ name, attributes, options = {}, behavior = 'user-management' }) {
+    const alreadyExists = !!this.resources[name];
+    const hashCheck = this.resourceExistsWithSameHash({ name, attributes, options, behavior });
+    if (hashCheck.exists && hashCheck.sameHash) {
+      // Resource exists with same hash, return existing resource
+      return {
+        resource: this.resources[name],
+        created: false,
+        reason: 'Resource already exists with same definition hash'
+      };
+    }
+    // Create or update resource
+    const resource = await this.createResource({ name, attributes, options, behavior });
+    return {
+      resource,
+      created: !alreadyExists,
+      reason: alreadyExists ? 'Resource updated with new definition' : 'New resource created'
+    };
+  }
+
   async createResource({ name, attributes, options = {}, behavior = 'user-management' }) {
-    // Check if resource already exists in memory
     if (this.resources[name]) {
-      // Update existing resource instead of creating new instance
       const existingResource = this.resources[name];
-      
-      // Update options first
       Object.assign(existingResource.options, {
         cache: this.cache,
         ...options,
       });
-      
-      // Update behavior if provided
       if (behavior) {
         existingResource.behavior = behavior;
       }
-      
-      // Update attributes using the new method that rebuilds schema
       existingResource.updateAttributes(attributes);
-
-      // Version will be updated by uploadMetadataFile if needed
-      await this.uploadMetadataFile();
-      
+      // Only upload metadata if hash actually changed
+      const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
+      const existingMetadata = this.savedMetadata?.resources?.[name];
+      const currentVersion = existingMetadata?.currentVersion || 'v0';
+      const existingVersionData = existingMetadata?.versions?.[currentVersion];
+      if (!existingVersionData || existingVersionData.hash !== newHash) {
+        await this.uploadMetadataFile();
+      }
       this.emit("s3db.resourceUpdated", name);
       return existingResource;
     }
-
-    // Create new resource only if it doesn't exist
     const existingMetadata = this.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || 'v0';
-    
     const resource = new Resource({
       name,
       attributes,
@@ -318,18 +388,13 @@ export class Database extends EventEmitter {
       observers: [this],
       client: this.client,
       version,
-
       options: {
         cache: this.cache,
         ...options,
       },
     });
-
     this.resources[name] = resource;
-
-    // Upload metadata will handle versioning
     await this.uploadMetadataFile();
-
     this.emit("s3db.resourceCreated", name);
     return resource;
   }
