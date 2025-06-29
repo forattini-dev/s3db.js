@@ -142,6 +142,21 @@ const users = await s3db.createResource({
     age: "number|integer|positive",
     isActive: "boolean",
     createdAt: "date"
+  },
+  timestamps: true,
+  behavior: "user-management",
+  partitions: {
+    byRegion: { fields: { region: "string" } }
+  },
+  paranoid: true,
+  autoDecrypt: true,
+  cache: false,
+  parallelism: 10,
+  hooks: {
+    preInsert: [async (data) => {
+      console.log("Pre-insert:", data);
+      return data;
+    }]
   }
 });
 ```
@@ -260,6 +275,10 @@ const s3db = new S3db({
 ### 📋 Resources (Collections)
 Resources define the structure of your documents, similar to tables in traditional databases.
 
+#### New Configuration Structure
+
+The Resource class now uses a unified configuration object where all options are passed directly in the config object:
+
 ```javascript
 const users = await s3db.createResource({
   name: "users",
@@ -286,12 +305,21 @@ const users = await s3db.createResource({
     // Encrypted fields
     password: "secret"
   },
-  options: {
-    timestamps: true,    // Automatic createdAt/updatedAt
-    behavior: "user-management", // How to handle large documents
-    partitions: {        // Organize data for efficient queries
-      byRegion: { fields: { region: "string" } }
-    }
+  // All options are now at the root level
+  timestamps: true,    // Automatic createdAt/updatedAt
+  behavior: "user-management", // How to handle large documents
+  partitions: {        // Organize data for efficient queries
+    byRegion: { fields: { region: "string" } }
+  },
+  paranoid: true,      // Security flag for dangerous operations
+  autoDecrypt: true,   // Auto-decrypt secret fields
+  cache: false,        // Enable caching
+  parallelism: 10,     // Parallelism for bulk operations
+  hooks: {             // Custom hooks
+    preInsert: [async (data) => {
+      console.log("Pre-insert:", data);
+      return data;
+    }]
   }
 });
 ```
@@ -342,16 +370,14 @@ const analytics = await s3db.createResource({
       campaign: "string"
     }
   },
-  options: {
-    partitions: {
-      byDate: { fields: { timestamp: "date|maxlength:10" } },
-      byUtmSource: { fields: { "utm.source": "string" } },
-      byUserAndDate: { 
-        fields: { 
-          userId: "string", 
-          timestamp: "date|maxlength:10" 
-        } 
-      }
+  partitions: {
+    byDate: { fields: { timestamp: "date|maxlength:10" } },
+    byUtmSource: { fields: { "utm.source": "string" } },
+    byUserAndDate: { 
+      fields: { 
+        userId: "string", 
+        timestamp: "date|maxlength:10" 
+      } 
     }
   }
 });
@@ -380,32 +406,42 @@ const products = await s3db.createResource({
     price: "number",
     category: "string"
   },
-  options: {
-    hooks: {
-      preInsert: [
-        async (data) => {
-          // Auto-generate SKU
-          data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
-          return data;
+  hooks: {
+    preInsert: [
+      async (data) => {
+        // Auto-generate SKU
+        data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
+        return data;
+      }
+    ],
+    afterInsert: [
+      async (data) => {
+        console.log(`📦 Product ${data.name} created with SKU: ${data.sku}`);
+        // Send notification, update cache, etc.
+      }
+    ],
+    preUpdate: [
+      async (id, data) => {
+        // Log price changes
+        if (data.price) {
+          console.log(`💰 Price update for ${id}: $${data.price}`);
         }
-      ],
-      afterInsert: [
-        async (data) => {
-          console.log(`📦 Product ${data.name} created with SKU: ${data.sku}`);
-          // Send notification, update cache, etc.
-        }
-      ],
-      preUpdate: [
-        async (id, data) => {
-          // Log price changes
-          if (data.price) {
-            console.log(`💰 Price update for ${id}: $${data.price}`);
-          }
-          return data;
-        }
-      ]
-    }
-  }
+        return data;
+      }
+    ]
+  },
+  
+  // Optional: Security settings (default: true)
+  paranoid: true,
+  
+  // Optional: Schema options (default: false)
+  allNestedObjectsOptional: false,
+  
+  // Optional: Encryption settings (default: true)
+  autoDecrypt: true,
+  
+  // Optional: Caching (default: false)
+  cache: false
 });
 ```
 
@@ -456,9 +492,7 @@ const blogs = await s3db.createResource({
     content: "string", // Can be very large
     author: "string"
   },
-  options: {
-    behavior: "body-overflow" // Handles large content automatically
-  }
+  behavior: "body-overflow" // Handles large content automatically
 });
 
 // Strict validation - throws error if limit exceeded
@@ -468,9 +502,7 @@ const settings = await s3db.createResource({
     key: "string",
     value: "string"
   },
-  options: {  
-    behavior: "enforce-limits" // Ensures data stays within 2KB
-  }
+  behavior: "enforce-limits" // Ensures data stays within 2KB
 });
 
 // Smart truncation - preserves structure, truncates content
@@ -480,9 +512,7 @@ const summaries = await s3db.createResource({
     title: "string",
     description: "string"
   },
-  options: {
-    behavior: "data-truncate" // Truncates to fit within limits
-  }
+  behavior: "data-truncate" // Truncates to fit within limits
 });
 ```
 
@@ -548,13 +578,11 @@ const posts = await s3db.createResource({
     published: "boolean|default:false",
     publishedAt: "date|optional"
   },
-  options: {
-    behavior: "body-overflow", // Handle long content
-    timestamps: true,
-    partitions: {
-      byAuthor: { fields: { author: "string" } },
-      byTag: { fields: { "tags.0": "string" } }
-    }
+  behavior: "body-overflow", // Handle long content
+  timestamps: true,
+  partitions: {
+    byAuthor: { fields: { author: "string" } },
+    byTag: { fields: { "tags.0": "string" } }
   }
 });
 
@@ -593,12 +621,10 @@ const products = await s3db.createResource({
     specifications: "object|optional",
     images: "array|items:url"
   },
-  options: {
-    behavior: "body-overflow",
-    timestamps: true,
-    partitions: {
-      byCategory: { fields: { category: "string" } }
-    }
+  behavior: "body-overflow",
+  timestamps: true,
+  partitions: {
+    byCategory: { fields: { category: "string" } }
   }
 });
 
@@ -617,10 +643,8 @@ const orders = await s3db.createResource({
       zipCode: "string"
     }
   },
-  options: {
-    behavior: "enforce-limits",
-    timestamps: true
-  }
+  behavior: "enforce-limits",
+  timestamps: true
 });
 
 // Create a product
@@ -679,21 +703,19 @@ const users = await s3db.createResource({
     },
     lastLogin: "date|optional"
   },
-  options: {
-    behavior: "enforce-limits",
-    timestamps: true,
-    hooks: {
-      preInsert: [async (data) => {
-        // Auto-generate secure password if not provided
-        if (!data.password) {
-          data.password = generateSecurePassword();
-        }
-        return data;
-      }],
-      afterInsert: [async (data) => {
-        console.log(`Welcome ${data.username}! 🎉`);
-      }]
-    }
+  behavior: "enforce-limits",
+  timestamps: true,
+  hooks: {
+    preInsert: [async (data) => {
+      // Auto-generate secure password if not provided
+      if (!data.password) {
+        data.password = generateSecurePassword();
+      }
+      return data;
+    }],
+    afterInsert: [async (data) => {
+      console.log(`Welcome ${data.username}! 🎉`);
+    }]
   }
 });
 
