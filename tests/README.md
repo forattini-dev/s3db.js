@@ -110,6 +110,27 @@ Seguem o padrão `ClassNome-journey.test.js` e testam fluxos completos de uso:
 - Benchmarks de performance
 - Validação de segurança
 
+#### ✅ `cache-journey.test.js` (18KB, 542 linhas)
+**Narrativa**: Sistema de cache base extensível
+- Implementação personalizada com TTL
+- Cache segmentado por namespace
+- Performance e stress testing
+- Eventos de expiração automática
+
+#### ✅ `plugin-journey.test.js` (22KB, 651 linhas)
+**Narrativa**: Sistema de plugins extensível
+- Plugin de logging com lifecycle completo
+- Plugin de métricas e monitoramento
+- Plugin de cache distribuído
+- Múltiplos plugins trabalhando juntos
+
+#### ✅ `index.test.js` (9KB, 259 linhas)
+**Narrativa**: Entry point e compatibilidade de exports
+- Verificação de todos os exports principais
+- Compatibilidade com diferentes padrões de import
+- Instanciação básica e hierarquia de erros
+- Estabilidade de API
+
 ### Testes de Behaviors
 
 #### ✅ `user-management.test.js` (12KB, 329 linhas)
@@ -120,15 +141,21 @@ Seguem o padrão `ClassNome-journey.test.js` e testam fluxos completos de uso:
 - Dados UTF-8 complexos
 - Casos reais de uso
 
+#### ✅ `enforce-limits.test.js` (14KB, 368 linhas)
+**Narrativa**: Validação rigorosa de tamanho S3
+- Enforcement estrito do limite de 2KB
+- Rejeição com erros específicos
+- Cálculo preciso de bytes UTF-8
+- Comparação com user-management behavior
+- Teste de limites exatos
+
 ### Estrutura de Arquivos Faltantes
 
 Ainda precisam ser criados os seguintes testes:
 
 #### Classes Journey (precisam de -journey.test.js):
-- [ ] `cache-journey.test.js` - Sistema de cache em memória e S3
 - [ ] `memory-cache-journey.test.js` - Cache em memória com TTL
 - [ ] `s3-cache-journey.test.js` - Cache distribuído no S3
-- [ ] `plugin-journey.test.js` - Sistema de plugins extensível
 - [ ] `resource-ids-page-reader-journey.test.js` - Leitura paginada de IDs
 - [ ] `resource-ids-reader-journey.test.js` - Stream de IDs de recursos
 - [ ] `resource-reader-journey.test.js` - Leitura de recursos
@@ -137,7 +164,6 @@ Ainda precisam ser criados os seguintes testes:
 #### Arquivos Não-Classe (precisam de .test.js):
 - [ ] `body-overflow.test.js` - Behavior para overflow de body
 - [ ] `data-truncate.test.js` - Behavior para truncamento de dados
-- [ ] `enforce-limits.test.js` - Behavior para enforcement de limites
 - [ ] `behaviors-index.test.js` - Exports de behaviors
 - [ ] `cache-index.test.js` - Exports de cache
 - [ ] `concerns-index.test.js` - Exports de concerns
@@ -146,7 +172,6 @@ Ainda precisam ser criados os seguintes testes:
 - [ ] `plugins-index.test.js` - Exports de plugins
 - [ ] `plugin-obj.test.js` - Objeto base de plugins
 - [ ] `stream-index.test.js` - Exports de stream
-- [ ] `index.test.js` - Entry point principal
 
 ## Convenções de Nomenclatura
 
@@ -314,6 +339,36 @@ test('Deve criptografar campos secret automaticamente', async () => {
 - Dados realistas com caracteres UTF-8 complexos
 - Validação de regras de negócio, não apenas sintaxe
 - Cenários que um usuário real encontraria
+
+## Conclusão
+
+## Status Atual da Suíte
+
+### ✅ Testes Criados (17 arquivos, ~240KB, ~6.500 linhas)
+
+**Classes Journey (15 arquivos):**
+- resource-journey.test.js, users-journey.test.js, database-journey.test.js
+- schema-journey.test.js, validator-journey.test.js, client-journey.test.js
+- connection-string-journey.test.js, cache-journey.test.js, plugin-journey.test.js
+- calculator.test.js, crypto.test.js, errors.test.js, id.test.js
+- index.test.js
+
+**Behaviors (2 arquivos):**
+- user-management.test.js, enforce-limits.test.js
+
+### 📋 Próximos Passos (~11 arquivos restantes)
+
+**Prioridade Alta (6 arquivos):**
+- memory-cache-journey.test.js, s3-cache-journey.test.js
+- body-overflow.test.js, data-truncate.test.js
+- cache-plugin.test.js, costs-plugin.test.js
+
+**Prioridade Média (5 arquivos):**
+- resource-*-journey.test.js (4 streams)
+- plugin-obj.test.js
+
+**Prioridade Baixa (5 arquivos):**
+- *-index.test.js (exports simples)
 
 ## Conclusão
 
