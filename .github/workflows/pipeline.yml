@@ -26,7 +26,7 @@ jobs:
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
-          MINIO_DEFAULT_BUCKETS: s3db-test
+          MINIO_DEFAULT_BUCKETS: s3db
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 30s
@@ -34,7 +34,6 @@ jobs:
           --health-retries 5
         volumes:
           - /tmp/minio-data:/data
-        command: server /data --console-address ":9001"
     
     steps:
       - name: Checkout code
@@ -63,7 +62,7 @@ jobs:
           mc alias set testminio http://localhost:9000 minioadmin minioadmin123
           
           # Create test bucket if it doesn't exist
-          mc mb testminio/s3db-test --ignore-existing
+          mc mb testminio/s3db --ignore-existing
           
           # Verify bucket exists
           mc ls testminio/
@@ -77,12 +76,12 @@ jobs:
           # MinIO configuration for tests (as expected by test files)
           MINIO_USER: minioadmin
           MINIO_PASSWORD: minioadmin123
-          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db-test
+          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db
           # Additional AWS/S3 environment variables
           AWS_ACCESS_KEY_ID: minioadmin
           AWS_SECRET_ACCESS_KEY: minioadmin123
           AWS_ENDPOINT: http://localhost:9000
-          AWS_BUCKET: s3db-test
+          AWS_BUCKET: s3db
           AWS_REGION: us-east-1
           AWS_FORCE_PATH_STYLE: true
       
@@ -103,7 +102,7 @@ jobs:
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
-          MINIO_DEFAULT_BUCKETS: s3db-test
+          MINIO_DEFAULT_BUCKETS: s3db
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 30s
@@ -111,7 +110,6 @@ jobs:
           --health-retries 5
         volumes:
           - /tmp/minio-data:/data
-        command: server /data --console-address ":9001"
     
     steps:
       - name: Checkout code
@@ -140,7 +138,7 @@ jobs:
           mc alias set testminio http://localhost:9000 minioadmin minioadmin123
           
           # Create test bucket if it doesn't exist
-          mc mb testminio/s3db-test --ignore-existing
+          mc mb testminio/s3db --ignore-existing
           
           # Verify bucket exists
           mc ls testminio/
@@ -154,12 +152,12 @@ jobs:
           # MinIO configuration for tests (as expected by test files)
           MINIO_USER: minioadmin
           MINIO_PASSWORD: minioadmin123
-          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db-test
+          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db
           # Additional AWS/S3 environment variables
           AWS_ACCESS_KEY_ID: minioadmin
           AWS_SECRET_ACCESS_KEY: minioadmin123
           AWS_ENDPOINT: http://localhost:9000
-          AWS_BUCKET: s3db-test
+          AWS_BUCKET: s3db
           AWS_REGION: us-east-1
           AWS_FORCE_PATH_STYLE: true
       
