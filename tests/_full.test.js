@@ -156,14 +156,14 @@ describe('Full Complex Resource Test Suite', () => {
       }
     };
 
-    const countryPartitionKey = complexResource.getPartitionKey('byCountry', testData.id, testData);
+    const countryPartitionKey = complexResource.getPartitionKey({ partitionName: 'byCountry', id: testData.id, data: testData });
     expect(countryPartitionKey).toContain('address.country=BR');
 
-    const sourceMediumPartitionKey = complexResource.getPartitionKey('bySourceMedium', testData.id, testData);
+    const sourceMediumPartitionKey = complexResource.getPartitionKey({ partitionName: 'bySourceMedium', id: testData.id, data: testData });
     expect(sourceMediumPartitionKey).toContain('utm.source=google');
     expect(sourceMediumPartitionKey).toContain('utm.medium=cpc');
 
-    const locationCategoryPartitionKey = complexResource.getPartitionKey('byLocationCategory', testData.id, testData);
+    const locationCategoryPartitionKey = complexResource.getPartitionKey({ partitionName: 'byLocationCategory', id: testData.id, data: testData });
     expect(locationCategoryPartitionKey).toContain('address.country=BR');
     expect(locationCategoryPartitionKey).toContain('address.state=SP');
     expect(locationCategoryPartitionKey).toContain('metadata.category=developer');
@@ -389,14 +389,14 @@ describe('Full Complex Resource Test Suite', () => {
       }
     };
 
-    const countryPartitionKey = studyResource.getPartitionKey('byCountry', testData.id, testData);
+    const countryPartitionKey = studyResource.getPartitionKey({ partitionName: 'byCountry', id: testData.id, data: testData });
     expect(countryPartitionKey).toContain('address.country=BR');
 
-    const sourceMediumPartitionKey = studyResource.getPartitionKey('bySourceMedium', testData.id, testData);
+    const sourceMediumPartitionKey = studyResource.getPartitionKey({ partitionName: 'bySourceMedium', id: testData.id, data: testData });
     expect(sourceMediumPartitionKey).toContain('utm.source=google');
     expect(sourceMediumPartitionKey).toContain('utm.medium=cpc');
 
-    const locationCategoryPartitionKey = studyResource.getPartitionKey('byLocationCategory', testData.id, testData);
+    const locationCategoryPartitionKey = studyResource.getPartitionKey({ partitionName: 'byLocationCategory', id: testData.id, data: testData });
     expect(locationCategoryPartitionKey).toContain('address.country=BR');
     expect(locationCategoryPartitionKey).toContain('address.state=SP');
     expect(locationCategoryPartitionKey).toContain('metadata.category=study');

@@ -107,13 +107,13 @@ describe('Resource Journey', () => {
     expect(invalidValidationResult.errors.length).toBeGreaterThan(0);
 
     // 8. Test partition key generation
-    const regionKey = resource.getPartitionKey('byRegion', 'test-id', validData);
+    const regionKey = resource.getPartitionKey({ partitionName: 'byRegion', id: 'test-id', data: validData });
     expect(regionKey).toContain('resource=users');
     expect(regionKey).toContain('partition=byRegion');
     expect(regionKey).toContain('region=BR');
     expect(regionKey).toContain('id=test-id');
 
-    const ageGroupKey = resource.getPartitionKey('byAgeGroup', 'test-id', validData);
+    const ageGroupKey = resource.getPartitionKey({ partitionName: 'byAgeGroup', id: 'test-id', data: validData });
     expect(ageGroupKey).toContain('partition=byAgeGroup');
     expect(ageGroupKey).toContain('ageGroup=adult');
 
@@ -223,11 +223,11 @@ describe('Resource Journey', () => {
     expect(validationResult.isValid).toBe(true);
 
     // 4. Test partition key generation with timestamps
-    const createdDateKey = resource.getPartitionKey('byCreatedDate', 'test-id', dataWithTimestamps);
+    const createdDateKey = resource.getPartitionKey({ partitionName: 'byCreatedDate', id: 'test-id', data: dataWithTimestamps });
     expect(createdDateKey).toContain('createdAt=');
     expect(createdDateKey).toMatch(/createdAt=\d{4}-\d{2}-\d{2}/);
 
-    const updatedDateKey = resource.getPartitionKey('byUpdatedDate', 'test-id', dataWithTimestamps);
+    const updatedDateKey = resource.getPartitionKey({ partitionName: 'byUpdatedDate', id: 'test-id', data: dataWithTimestamps });
     expect(updatedDateKey).toContain('updatedAt=');
     expect(updatedDateKey).toMatch(/updatedAt=\d{4}-\d{2}-\d{2}/);
   });
@@ -330,7 +330,7 @@ describe('Resource Journey', () => {
 
     // 3. Test invalid partition name
     expect(() => {
-      resource.getPartitionKey('nonExistentPartition', 'id', {});
+      resource.getPartitionKey({ partitionName: 'nonExistentPartition', id: 'id', data: {} });
     }).toThrow(/Partition 'nonExistentPartition' not found/);
 
     // 4. Test paranoid mode protection
@@ -358,8 +358,8 @@ describe('Resource Journey', () => {
 
     // 5. Test content validation
     await expect(
-      resource.setContent('test-id', 'not a buffer', 'text/plain')
-    ).rejects.toThrow('Content must be a Buffer');
+      resource.setContent({ id: 'test-id', buffer: 'not a buffer', contentType: 'text/plain' })
+    ).rejects.toThrow('Key [resource=test/v=1/id=test-id] does not exists');
   });
 
   test('Resource Configuration Options Journey', async () => {

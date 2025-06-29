@@ -1,6 +1,6 @@
 import { calculateAttributeSizes, calculateUTF8Bytes, transformValue } from '../concerns/calculator.js';
+import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
 
-const S3_METADATA_LIMIT_BYTES = 2000;
 const TRUNCATE_SUFFIX = "...";
 const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
 

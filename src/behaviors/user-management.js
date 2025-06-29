@@ -1,6 +1,5 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
-
-const S3_METADATA_LIMIT_BYTES = 2000;
+import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
 
 /**
  * User Management Behavior - Default behavior
