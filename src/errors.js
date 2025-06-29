@@ -24,46 +24,102 @@ export class BaseError extends Error {
   }
 }
 
-export class NoSuchBucket extends BaseError {
-  constructor({ bucket, ...rest }) {
-    super({ ...rest, bucket, message: `Bucket does not exists [bucket:${bucket}]` });
+// Base error class for S3DB
+export class S3DBError extends BaseError {
+  constructor(message, details = {}) {
+    super({ message, ...details });
   }
 }
 
-export class NoSuchKey extends BaseError {
+// Database operation errors
+export class DatabaseError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+
+// Validation errors
+export class ValidationError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+
+// Authentication errors
+export class AuthenticationError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+
+// Permission/Authorization errors
+export class PermissionError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+
+// Encryption errors
+export class EncryptionError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+
+// Resource not found error
+export class ResourceNotFound extends S3DBError {
+  constructor({ bucket, resourceName, id, ...rest }) {
+    super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
+      bucket,
+      resourceName,
+      id,
+      ...rest
+    });
+  }
+}
+
+export class NoSuchBucket extends S3DBError {
+  constructor({ bucket, ...rest }) {
+    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, ...rest });
+  }
+}
+
+export class NoSuchKey extends S3DBError {
   constructor({ bucket, key, ...rest }) {
-    super({ ...rest, bucket, message: `Key [${key}] does not exists [bucket:${bucket}/${key}]` });
-    this.key = key;
+    super(`Key [${key}] does not exists [bucket:${bucket}/${key}]`, { bucket, key, ...rest });
   }
 }
 
 export class NotFound extends NoSuchKey {}
 
-export class MissingMetadata extends BaseError {
+export class MissingMetadata extends S3DBError {
   constructor({ bucket, ...rest }) {
-    super({ ...rest, bucket, message: `Missing metadata for bucket [bucket:${bucket}]` });
+    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, ...rest });
   }
 }
 
-export class InvalidResourceItem extends BaseError {
+export class InvalidResourceItem extends S3DBError {
   constructor({
     bucket,
     resourceName,
     attributes,
     validation,
   }) {
-    super({
+    super(`This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`, {
       bucket,
-      message: `This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`,
+      resourceName,
+      attributes,
+      validation,
     });
-
-    this.resourceName = resourceName;
-    this.attributes = attributes;
-    this.validation = validation;
   }
 }
 
-export class UnknownError extends BaseError {}
+export class UnknownError extends S3DBError {}
 
 export const ErrorMap = {
   'NotFound': NotFound,

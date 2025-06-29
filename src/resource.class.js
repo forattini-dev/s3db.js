@@ -560,7 +560,6 @@ class Resource extends EventEmitter {
    * const user = await resource.insert({
    *   name: 'John Doe',
    *   email: 'john@example.com',
-   *   // password will be auto-generated if not provided
    * });
    */
   async insert({ id, ...attributes }) {
@@ -571,7 +570,6 @@ class Resource extends EventEmitter {
     for (const [fieldName, fieldType] of Object.entries(this.attributes)) {
       if (typeof fieldType === 'string' && fieldType.includes('secret') && !(fieldName in processedAttributes)) {
         processedAttributes[fieldName] = passwordGenerator();
-        console.log(`Auto-generated password for field '${fieldName}': ${processedAttributes[fieldName]}`);
       }
     }
 
