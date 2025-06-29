@@ -561,6 +561,75 @@ class Resource extends EventEmitter {
       this.emit("get", data);
       return data;
     } catch (error) {
+      // Check if this is a decryption error
+      if (error.message.includes('Cipher job failed') || 
+          error.message.includes('OperationError') ||
+          error.originalError?.message?.includes('Cipher job failed')) {
+        
+        // Try to get the object without decryption (raw metadata)
+        try {
+          console.warn(`Decryption failed for resource ${id}, attempting to get raw metadata`);
+          
+          const request = await this.client.headObject(key);
+          const objectVersion = this.extractVersionFromKey(key) || this.version;
+          
+          // Create a temporary schema with autoDecrypt disabled
+          const tempSchema = new Schema({
+            name: this.name,
+            attributes: this.attributes,
+            passphrase: this.passphrase,
+            version: objectVersion,
+            options: {
+              ...this.options,
+              autoDecrypt: false, // Disable decryption
+              autoEncrypt: false  // Disable encryption
+            }
+          });
+          
+          let metadata = await tempSchema.unmapper(request.Metadata);
+          
+          // Apply behavior strategy for reading
+          const behaviorImpl = getBehavior(this.behavior);
+          let body = "";
+          
+          if (request.ContentLength > 0) {
+            try {
+              const fullObject = await this.client.getObject(key);
+              body = await streamToString(fullObject.Body);
+            } catch (bodyError) {
+              console.warn(`Failed to read body for resource ${id}:`, bodyError.message);
+              body = "";
+            }
+          }
+          
+          const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+            resource: this,
+            metadata,
+            body
+          });
+
+          let data = processedMetadata;
+          data.id = id;
+          data._contentLength = request.ContentLength;
+          data._lastModified = request.LastModified;
+          data._hasContent = request.ContentLength > 0;
+          data._mimeType = request.ContentType || null;
+          data._version = objectVersion;
+          data._decryptionFailed = true; // Flag to indicate decryption failed
+
+          if (request.VersionId) data._versionId = request.VersionId;
+          if (request.Expiration) data._expiresAt = request.Expiration;
+
+          data._definitionHash = this.getDefinitionHash();
+
+          this.emit("get", data);
+          return data;
+          
+        } catch (fallbackError) {
+          console.error(`Fallback attempt also failed for resource ${id}:`, fallbackError.message);
+        }
+      }
+      
       // Re-throw the error with more context
       const enhancedError = new Error(`Failed to get resource with id '${id}': ${error.message}`);
       enhancedError.originalError = error;
@@ -1046,15 +1115,37 @@ class Resource extends EventEmitter {
         filteredIds = filteredIds.slice(0, limit);
       }
 
-      // Get full data for each ID
-      const { results } = await PromisePool.for(filteredIds)
+      // Get full data for each ID with error handling
+      const { results, errors } = await PromisePool.for(filteredIds)
         .withConcurrency(this.parallelism)
+        .handleError(async (error, id) => {
+          console.warn(`Failed to get resource ${id}:`, error.message);
+          // Return null for failed items so we can filter them out
+          return null;
+        })
         .process(async (id) => {
-          return await this.get(id);
+          try {
+            return await this.get(id);
+          } catch (error) {
+            // If it's a decryption error, try to get basic info
+            if (error.message.includes('Cipher job failed') || 
+                error.message.includes('OperationError')) {
+              console.warn(`Decryption failed for ${id}, returning basic info`);
+              return {
+                id,
+                _decryptionFailed: true,
+                _error: error.message
+              };
+            }
+            throw error; // Re-throw other errors
+          }
         });
 
-      this.emit("list", { partition, partitionValues, count: results.length });
-      return results;
+      // Filter out null results (failed items)
+      const validResults = results.filter(item => item !== null);
+
+      this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
+      return validResults;
     }
 
     // Get partition definition
@@ -1097,15 +1188,38 @@ class Resource extends EventEmitter {
       filteredIds = filteredIds.slice(0, limit);
     }
 
-    // Get full data directly from partition objects (no extra request needed!)
-    const { results } = await PromisePool.for(filteredIds)
+    // Get full data directly from partition objects with error handling
+    const { results, errors } = await PromisePool.for(filteredIds)
       .withConcurrency(this.parallelism)
+      .handleError(async (error, id) => {
+        console.warn(`Failed to get partition resource ${id}:`, error.message);
+        return null;
+      })
       .process(async (id) => {
-        return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+        try {
+          return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+        } catch (error) {
+          // If it's a decryption error, try to get basic info
+          if (error.message.includes('Cipher job failed') || 
+              error.message.includes('OperationError')) {
+            console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
+            return {
+              id,
+              _partition: partition,
+              _partitionValues: partitionValues,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error; // Re-throw other errors
+        }
       });
 
-    this.emit("list", { partition, partitionValues, count: results.length });
-    return results;
+    // Filter out null results (failed items)
+    const validResults = results.filter(item => item !== null);
+
+    this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
+    return validResults;
   }
 
   /**
@@ -1117,17 +1231,39 @@ class Resource extends EventEmitter {
    * users.forEach(user => console.log(user.name));
    */
   async getMany(ids) {
-    const { results } = await PromisePool.for(ids)
+    const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
+      .handleError(async (error, id) => {
+        console.warn(`Failed to get resource ${id}:`, error.message);
+        // Return basic info for failed items
+        return {
+          id,
+          _error: error.message,
+          _decryptionFailed: error.message.includes('Cipher job failed') || error.message.includes('OperationError')
+        };
+      })
       .process(async (id) => {
         this.emit("id", id);
-        const data = await this.get(id);
-        this.emit("data", data);
-        return data;
+        try {
+          const data = await this.get(id);
+          this.emit("data", data);
+          return data;
+        } catch (error) {
+          // If it's a decryption error, return basic info
+          if (error.message.includes('Cipher job failed') || 
+              error.message.includes('OperationError')) {
+            console.warn(`Decryption failed for ${id}, returning basic info`);
+            return {
+              id,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error; // Re-throw other errors
+        }
       });
 
     this.emit("getMany", ids.length);
-
     return results;
   }
 
@@ -1142,11 +1278,34 @@ class Resource extends EventEmitter {
     let ids = await this.listIds();
     if (ids.length === 0) return [];
 
-    const { results } = await PromisePool.for(ids)
+    const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
+      .handleError(async (error, id) => {
+        console.warn(`Failed to get resource ${id}:`, error.message);
+        // Return basic info for failed items
+        return {
+          id,
+          _error: error.message,
+          _decryptionFailed: error.message.includes('Cipher job failed') || error.message.includes('OperationError')
+        };
+      })
       .process(async (id) => {
-        const data = await this.get(id);
-        return data;
+        try {
+          const data = await this.get(id);
+          return data;
+        } catch (error) {
+          // If it's a decryption error, return basic info
+          if (error.message.includes('Cipher job failed') || 
+              error.message.includes('OperationError')) {
+            console.warn(`Decryption failed for ${id}, returning basic info`);
+            return {
+              id,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error; // Re-throw other errors
+        }
       });
 
     this.emit("getAll", results.length);
@@ -1402,9 +1561,32 @@ class Resource extends EventEmitter {
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {
-    // For now, always return current schema
-    // TODO: If backward compatibility needed, implement version storage differently
-    return this.schema;
+    // If version is the same as current, return current schema
+    if (version === this.version) {
+      return this.schema;
+    }
+    
+    // For different versions, try to create a compatible schema
+    // This is especially important for v0 objects that might have different encryption
+    try {
+      const compatibleSchema = new Schema({
+        name: this.name,
+        attributes: this.attributes,
+        passphrase: this.passphrase,
+        version: version,
+        options: {
+          ...this.options,
+          // For older versions, be more lenient with decryption
+          autoDecrypt: true,
+          autoEncrypt: true
+        }
+      });
+      
+      return compatibleSchema;
+    } catch (error) {
+      console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, error.message);
+      return this.schema;
+    }
   }
 
   /**
