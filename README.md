@@ -1338,6 +1338,101 @@ const retrieved = await users.get(user.id);
 console.log(retrieved.password); // "my_secure_password" (decrypted)
 ```
 
+### 🔑 Automatic Password Generation
+
+`s3db.js` can automatically generate secure passwords for `secret` fields when they're not provided during insertion. This is perfect for creating user accounts with secure default credentials.
+
+#### Basic Usage
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "string|required",
+    password: "secret|required",    // Will auto-generate if not provided
+    apiKey: "secret|optional"       // Will auto-generate if not provided
+  }
+});
+
+// Insert user without password - will auto-generate
+const user = await users.insert({
+  name: "John Doe",
+  email: "john@example.com"
+  // password and apiKey will be auto-generated
+});
+
+console.log(user.password); // "Ax7Kp9mN2qR3" (auto-generated)
+console.log(user.apiKey);   // "Bc8Lq0nO3sS4" (auto-generated)
+```
+
+#### Custom Passwords with Auto-Generation
+
+```javascript
+// Insert with custom password, auto-generate apiKey
+const user = await users.insert({
+  name: "Jane Smith",
+  email: "jane@example.com",
+  password: "my-custom-password-123" // Custom password
+  // apiKey will be auto-generated
+});
+
+console.log(user.password); // "my-custom-password-123" (custom)
+console.log(user.apiKey);   // "Dd9Mr1pP4tT5" (auto-generated)
+```
+
+#### Password Generation Features
+
+- **Secure**: Uses nanoid with a custom alphabet that excludes confusing characters (0, O, 1, l, I)
+- **Readable**: 12-character passwords with only safe characters
+- **Unique**: Each generated password is cryptographically unique
+- **Customizable**: You can still provide custom passwords when needed
+
+#### Password Generation Pattern
+
+```javascript
+// Generated passwords follow this pattern:
+// Length: 12 characters
+// Characters: ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789
+// Example: "Ax7Kp9mN2qR3"
+
+const user = await users.insert({
+  name: "Test User",
+  email: "test@example.com"
+});
+
+// Verify password pattern
+const passwordPattern = /^[ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789]{12}$/;
+console.log(passwordPattern.test(user.password)); // true
+```
+
+#### Multiple Secret Fields
+
+```javascript
+const accounts = await s3db.createResource({
+  name: "accounts",
+  attributes: {
+    name: "string|required",
+    email: "string|required",
+    password: "secret|required",      // Auto-generate if not provided
+    apiKey: "secret|optional",        // Auto-generate if not provided
+    accessToken: "secret|optional",   // Auto-generate if not provided
+    refreshToken: "secret|optional"   // Auto-generate if not provided
+  }
+});
+
+const account = await users.insert({
+  name: "API Account",
+  email: "api@example.com"
+  // All secret fields will be auto-generated
+});
+
+console.log(account.password);      // "Ax7Kp9mN2qR3"
+console.log(account.apiKey);        // "Bc8Lq0nO3sS4"
+console.log(account.accessToken);   // "Dd9Mr1pP4tT5"
+console.log(account.refreshToken);  // "Ee0Ns2qQ5uU6"
+```
+
 ### Custom Encryption Key
 
 ```javascript

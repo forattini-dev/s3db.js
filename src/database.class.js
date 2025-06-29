@@ -388,6 +388,7 @@ export class Database extends EventEmitter {
       observers: [this],
       client: this.client,
       version,
+      passphrase: this.passphrase,
       options: {
         cache: this.cache,
         ...options,
