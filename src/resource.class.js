@@ -13,8 +13,8 @@ import {
 
 import Schema from "./schema.class.js";
 import { InvalidResourceItem } from "./errors.js";
-import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { streamToString } from "./stream/index.js";
+import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
 class Resource extends EventEmitter {
@@ -351,13 +351,29 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Get partition reference key for a specific partition
-   * @param {string} partitionName - Name of the partition
-   * @param {string} id - Resource ID  
-   * @param {Object} data - Data object for partition value generation
-   * @returns {string|null} The partition reference S3 key path
+   * Generate partition key for a resource in a specific partition
+   * @param {Object} params - Partition key parameters
+   * @param {string} params.partitionName - Name of the partition
+   * @param {string} params.id - Resource ID
+   * @param {Object} params.data - Resource data for partition value extraction
+   * @returns {string|null} The partition key path or null if required fields are missing
+   * @example
+   * const partitionKey = resource.getPartitionKey({
+   *   partitionName: 'byUtmSource',
+   *   id: 'user-123',
+   *   data: { utm: { source: 'google' } }
+   * });
+   * // Returns: 'resource=users/partition=byUtmSource/utm.source=google/id=user-123'
+   * 
+   * // Returns null if required field is missing
+   * const nullKey = resource.getPartitionKey({
+   *   partitionName: 'byUtmSource',
+   *   id: 'user-123',
+   *   data: { name: 'John' } // Missing utm.source
+   * });
+   * // Returns: null
    */
-  getPartitionKey(partitionName, id, data) {
+  getPartitionKey({ partitionName, id, data }) {
     const partition = this.options.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
@@ -400,18 +416,39 @@ class Resource extends EventEmitter {
 
     // Handle nested field names using dot notation
     const keys = fieldPath.split('.');
-    let value = data;
+    let currentLevel = data;
     
     for (const key of keys) {
-      if (value === null || value === undefined || typeof value !== 'object') {
+      if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
         return undefined;
       }
-      value = value[key];
+      currentLevel = currentLevel[key];
     }
     
-    return value;
+    return currentLevel;
   }
 
+  /**
+   * Insert a new resource object
+   * @param {Object} params - Insert parameters
+   * @param {string} [params.id] - Resource ID (auto-generated if not provided)
+   * @param {...Object} params - Resource attributes (any additional properties)
+   * @returns {Promise<Object>} The inserted resource object with all attributes and generated ID
+   * @example
+   * // Insert with auto-generated ID
+   * const user = await resource.insert({
+   *   name: 'John Doe',
+   *   email: 'john@example.com',
+   *   age: 30
+   * });
+   * 
+   * // Insert with custom ID
+   * const user = await resource.insert({
+   *   id: 'custom-id-123',
+   *   name: 'Jane Smith',
+   *   email: 'jane@example.com'
+   * });
+   */
   async insert({ id, ...attributes }) {
     if (this.options.timestamps) {
       attributes.createdAt = new Date().toISOString();
@@ -465,6 +502,16 @@ class Resource extends EventEmitter {
     return final;
   }
 
+  /**
+   * Retrieve a resource object by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} The resource object with all attributes and metadata
+   * @example
+   * const user = await resource.get('user-123');
+   * console.log(user.name); // 'John Doe'
+   * console.log(user._lastModified); // Date object
+   * console.log(user._hasContent); // boolean
+   */
   async get(id) {
     const key = this.getResourceKey(id);
     
@@ -513,6 +560,16 @@ class Resource extends EventEmitter {
     return data;
   }
 
+  /**
+   * Check if a resource exists by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<boolean>} True if resource exists, false otherwise
+   * @example
+   * const exists = await resource.exists('user-123');
+   * if (exists) {
+   *   console.log('User exists');
+   * }
+   */
   async exists(id) {
     try {
       const key = this.getResourceKey(id);
@@ -523,6 +580,24 @@ class Resource extends EventEmitter {
     }
   }
 
+  /**
+   * Update an existing resource object
+   * @param {string} id - Resource ID
+   * @param {Object} attributes - Attributes to update (partial update supported)
+   * @returns {Promise<Object>} The updated resource object with all attributes
+   * @example
+   * // Update specific fields
+   * const updatedUser = await resource.update('user-123', {
+   *   name: 'John Updated',
+   *   age: 31
+   * });
+   * 
+   * // Update with timestamps (if enabled)
+   * const updatedUser = await resource.update('user-123', {
+   *   email: 'newemail@example.com'
+   * });
+   * console.log(updatedUser.updatedAt); // ISO timestamp
+   */
   async update(id, attributes) {
     const live = await this.get(id);
 
@@ -606,6 +681,14 @@ class Resource extends EventEmitter {
     return validated;
   }
 
+  /**
+   * Delete a resource object by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} S3 delete response
+   * @example
+   * await resource.delete('user-123');
+   * console.log('User deleted successfully');
+   */
   async delete(id) {
     // Get object data before deletion for hooks
     let objectData;
@@ -629,6 +712,20 @@ class Resource extends EventEmitter {
     return response;
   }
 
+  /**
+   * Insert or update a resource object (upsert operation)
+   * @param {Object} params - Upsert parameters
+   * @param {string} params.id - Resource ID (required for upsert)
+   * @param {...Object} params - Resource attributes (any additional properties)
+   * @returns {Promise<Object>} The inserted or updated resource object
+   * @example
+   * // Will insert if doesn't exist, update if exists
+   * const user = await resource.upsert({
+   *   id: 'user-123',
+   *   name: 'John Doe',
+   *   email: 'john@example.com'
+   * });
+   */
   async upsert({ id, ...attributes }) {
     const exists = await this.exists(id);
 
@@ -639,6 +736,28 @@ class Resource extends EventEmitter {
     return this.insert({ id, ...attributes });
   }
 
+  /**
+   * Count resources with optional partition filtering
+   * @param {Object} [params] - Count parameters
+   * @param {string} [params.partition] - Partition name to count in
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<number>} Total count of matching resources
+   * @example
+   * // Count all resources
+   * const total = await resource.count();
+   * 
+   * // Count in specific partition
+   * const googleUsers = await resource.count({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // Count in multi-field partition
+   * const usElectronics = await resource.count({
+   *   partition: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
+   */
   async count({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     
@@ -678,6 +797,19 @@ class Resource extends EventEmitter {
     return count;
   }
 
+  /**
+   * Insert multiple resources in parallel
+   * @param {Object[]} objects - Array of resource objects to insert
+   * @returns {Promise<Object[]>} Array of inserted resource objects
+   * @example
+   * const users = [
+   *   { name: 'John', email: 'john@example.com' },
+   *   { name: 'Jane', email: 'jane@example.com' },
+   *   { name: 'Bob', email: 'bob@example.com' }
+   * ];
+   * const insertedUsers = await resource.insertMany(users);
+   * console.log(`Inserted ${insertedUsers.length} users`);
+   */
   async insertMany(objects) {
     const { results } = await PromisePool.for(objects)
       .withConcurrency(this.parallelism)
@@ -694,6 +826,15 @@ class Resource extends EventEmitter {
     return results;
   }
 
+  /**
+   * Delete multiple resources by their IDs in parallel
+   * @param {string[]} ids - Array of resource IDs to delete
+   * @returns {Promise<Object[]>} Array of S3 delete responses
+   * @example
+   * const deletedIds = ['user-1', 'user-2', 'user-3'];
+   * const results = await resource.deleteMany(deletedIds);
+   * console.log(`Deleted ${deletedIds.length} users`);
+   */
   async deleteMany(ids) {
     const packages = chunk(
       ids.map((id) => this.getResourceKey(id)),
@@ -775,6 +916,28 @@ class Resource extends EventEmitter {
     return { deletedCount, resource: this.name };
   }
 
+  /**
+   * List resource IDs with optional partition filtering
+   * @param {Object} [params] - List parameters
+   * @param {string} [params.partition] - Partition name to list from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<string[]>} Array of resource IDs (strings)
+   * @example
+   * // List all IDs
+   * const allIds = await resource.listIds();
+   * 
+   * // List IDs from specific partition
+   * const googleUserIds = await resource.listIds({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // List IDs from multi-field partition
+   * const usElectronicsIds = await resource.listIds({
+   *   partition: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
+   */
   async listIds({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     
@@ -824,14 +987,36 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * List objects by partition name and values
-   * @param {Object} partitionOptions - Partition options
-   * @param {Object} options - Listing options
-   * @returns {Array} Array of objects
+   * List resource objects with optional partition filtering and pagination
+   * @param {Object} [params] - List parameters
+   * @param {string} [params.partition] - Partition name to list from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @param {number} [params.limit] - Maximum number of results to return
+   * @param {number} [params.offset=0] - Offset for pagination
+   * @returns {Promise<Object[]>} Array of resource objects with all attributes
+   * @example
+   * // List all resources
+   * const allUsers = await resource.list();
+   * 
+   * // List with pagination
+   * const firstPage = await resource.list({ limit: 10, offset: 0 });
+   * const secondPage = await resource.list({ limit: 10, offset: 10 });
+   * 
+   * // List from specific partition
+   * const googleUsers = await resource.list({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // List from partition with pagination
+   * const googleUsersPage = await resource.list({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' },
+   *   limit: 5,
+   *   offset: 0
+   * });
    */
-  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
-    const { limit, offset = 0 } = options;
-    
+  async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     if (!partition) {
       // Fallback to main resource listing
       const ids = await this.listIds({ partition, partitionValues });
@@ -849,7 +1034,7 @@ class Resource extends EventEmitter {
           return await this.get(id);
         });
 
-      this.emit("listByPartition", { partition, partitionValues, count: results.length });
+      this.emit("list", { partition, partitionValues, count: results.length });
       return results;
     }
 
@@ -897,13 +1082,21 @@ class Resource extends EventEmitter {
     const { results } = await PromisePool.for(filteredIds)
       .withConcurrency(this.parallelism)
       .process(async (id) => {
-        return await this.getFromPartition(id, partition, partitionValues);
+        return await this.getFromPartition({ id, partitionName: partition, partitionValues });
       });
 
-    this.emit("listByPartition", { partition, partitionValues, count: results.length });
+    this.emit("list", { partition, partitionValues, count: results.length });
     return results;
   }
 
+  /**
+   * Get multiple resources by their IDs
+   * @param {string[]} ids - Array of resource IDs
+   * @returns {Promise<Object[]>} Array of resource objects
+   * @example
+   * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
+   * users.forEach(user => console.log(user.name));
+   */
   async getMany(ids) {
     const { results } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
@@ -919,6 +1112,13 @@ class Resource extends EventEmitter {
     return results;
   }
 
+  /**
+   * Get all resources (equivalent to list() without pagination)
+   * @returns {Promise<Object[]>} Array of all resource objects
+   * @example
+   * const allUsers = await resource.getAll();
+   * console.log(`Total users: ${allUsers.length}`);
+   */
   async getAll() {
     let ids = await this.listIds();
     if (ids.length === 0) return [];
@@ -934,27 +1134,50 @@ class Resource extends EventEmitter {
     return results;
   }
 
-  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
-    const allIds = await this.listIds({ partition, partitionValues });
-    const totalItems = allIds.length;
+  /**
+   * Get a page of resources with pagination metadata
+   * @param {Object} [params] - Page parameters
+   * @param {number} [params.offset=0] - Offset for pagination
+   * @param {number} [params.size=100] - Page size
+   * @param {string} [params.partition] - Partition name to page from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<Object>} Page result with items and pagination info
+   * @example
+   * // Get first page of all resources
+   * const page = await resource.page({ offset: 0, size: 10 });
+   * console.log(`Page ${page.page + 1} of ${page.totalPages}`);
+   * console.log(`Showing ${page.items.length} of ${page.totalItems} total`);
+   * 
+   * // Get page from specific partition
+   * const googlePage = await resource.page({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' },
+   *   offset: 0,
+   *   size: 5
+   * });
+   */
+  async page({ offset = 0, size = 100, partition = null, partitionValues = {} } = {}) {
+    const ids = await this.listIds({ partition, partitionValues });
+    const totalItems = ids.length;
     const totalPages = Math.ceil(totalItems / size);
+    const page = Math.floor(offset / size);
     
-    // Get paginated IDs
-    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
+    // Get the slice of IDs for this page
+    const pageIds = ids.slice(offset, offset + size);
     
-    // Get full data for each ID
+    // Get full objects for the page
     const items = await Promise.all(
-      paginatedIds.map(id => this.get(id))
+      pageIds.map(id => this.get(id))
     );
-
+    
     const result = {
       items,
       totalItems,
-      page: offset,
+      page,
       pageSize: size,
       totalPages
     };
-
+    
     this.emit("page", result);
     return result;
   }
@@ -970,42 +1193,69 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Store binary content associated with a resource
-   * @param {string} id - Resource ID
-   * @param {Buffer} buffer - Binary content
-   * @param {string} contentType - Optional content type
+   * Set binary content for a resource
+   * @param {Object} params - Content parameters
+   * @param {string} params.id - Resource ID
+   * @param {Buffer|string} params.buffer - Content buffer or string
+   * @param {string} [params.contentType='application/octet-stream'] - Content type
+   * @returns {Promise<Object>} Updated resource data
+   * @example
+   * // Set image content
+   * const imageBuffer = fs.readFileSync('image.jpg');
+   * await resource.setContent({
+   *   id: 'user-123',
+   *   buffer: imageBuffer,
+   *   contentType: 'image/jpeg'
+   * });
+   * 
+   * // Set text content
+   * await resource.setContent({
+   *   id: 'document-456',
+   *   buffer: 'Hello World',
+   *   contentType: 'text/plain'
+   * });
    */
-  async setContent(id, buffer, contentType = 'application/octet-stream') {
-    if (!Buffer.isBuffer(buffer)) {
-      throw new Error('Content must be a Buffer');
+  async setContent({ id, buffer, contentType = 'application/octet-stream' }) {
+    // Get current resource data
+    const currentData = await this.get(id);
+    if (!currentData) {
+      throw new Error(`Resource with id '${id}' not found`);
     }
 
-    const key = this.getResourceKey(id);
-    
-    // Get existing metadata first
-    let existingMetadata = {};
-    try {
-      const existingObject = await this.client.headObject(key);
-      existingMetadata = existingObject.Metadata || {};
-    } catch (error) {
-      // Object doesn't exist yet, that's ok
-    }
-    
-    const response = await this.client.putObject({
-      key,
+    // Update with new content
+    const updatedData = {
+      ...currentData,
+      _hasContent: true,
+      _contentLength: buffer.length,
+      _mimeType: contentType
+    };
+
+    // Store the content in the main resource object
+    await this.client.putObject({
+      key: this.getResourceKey(id),
+      metadata: await this.schema.mapper(updatedData),
       body: buffer,
-      contentType,
-      metadata: existingMetadata, // Preserve existing metadata
+      contentType
     });
 
-    this.emit("setContent", id, buffer.length, contentType);
-    return response;
+    this.emit("setContent", { id, contentType, contentLength: buffer.length });
+    return updatedData;
   }
 
   /**
    * Retrieve binary content associated with a resource
    * @param {string} id - Resource ID
-   * @returns {Object} Object with buffer and contentType
+   * @returns {Promise<Object>} Object with buffer and contentType
+   * @example
+   * const content = await resource.content('user-123');
+   * if (content.buffer) {
+   *   console.log('Content type:', content.contentType);
+   *   console.log('Content size:', content.buffer.length);
+   *   // Save to file
+   *   fs.writeFileSync('output.jpg', content.buffer);
+   * } else {
+   *   console.log('No content found');
+   * }
    */
   async content(id) {
     const key = this.getResourceKey(id);
@@ -1127,7 +1377,7 @@ class Resource extends EventEmitter {
 
     // Create reference in each partition
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       
       if (partitionKey) {
         // Store the actual resource data in the partition path
@@ -1170,7 +1420,7 @@ class Resource extends EventEmitter {
     // Collect all partition keys to delete
     const keysToDelete = [];
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       
       if (partitionKey) {
         keysToDelete.push(partitionKey);
@@ -1189,22 +1439,85 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Query documents with simple filtering
-   * @param {Object} filter - Filter criteria
-   * @returns {Array} Filtered documents
+   * Query resources with simple filtering and pagination
+   * @param {Object} [filter={}] - Filter criteria (exact field matches)
+   * @param {Object} [options] - Query options
+   * @param {number} [options.limit=100] - Maximum number of results
+   * @param {number} [options.offset=0] - Offset for pagination
+   * @param {string} [options.partition] - Partition name to query from
+   * @param {Object} [options.partitionValues] - Partition field values to filter by
+   * @returns {Promise<Object[]>} Array of filtered resource objects
+   * @example
+   * // Query all resources (no filter)
+   * const allUsers = await resource.query();
+   * 
+   * // Query with simple filter
+   * const activeUsers = await resource.query({ status: 'active' });
+   * 
+   * // Query with multiple filters
+   * const usElectronics = await resource.query({
+   *   category: 'electronics',
+   *   region: 'US'
+   * });
+   * 
+   * // Query with pagination
+   * const firstPage = await resource.query(
+   *   { status: 'active' },
+   *   { limit: 10, offset: 0 }
+   * );
+   * 
+   * // Query within partition
+   * const googleUsers = await resource.query(
+   *   { status: 'active' },
+   *   {
+   *     partition: 'byUtmSource',
+   *     partitionValues: { 'utm.source': 'google' },
+   *     limit: 5
+   *   }
+   * );
    */
-  async query(filter = {}) {
-    const allDocuments = await this.getAll();
-    
+  async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
     if (Object.keys(filter).length === 0) {
-      return allDocuments;
+      // No filter, just return paginated results
+      return await this.list({ partition, partitionValues, limit, offset });
+    }
+
+    const results = [];
+    let currentOffset = offset;
+    const batchSize = Math.min(limit, 50); // Process in smaller batches
+    
+    while (results.length < limit) {
+      // Get a batch of objects
+      const batch = await this.list({ 
+        partition, 
+        partitionValues, 
+        limit: batchSize, 
+        offset: currentOffset 
+      });
+      
+      if (batch.length === 0) {
+        break; // No more data
+      }
+      
+      // Filter the batch
+      const filteredBatch = batch.filter(doc => {
+        return Object.entries(filter).every(([key, value]) => {
+          return doc[key] === value;
+        });
+      });
+      
+      // Add filtered results
+      results.push(...filteredBatch);
+      currentOffset += batchSize;
+      
+      // If we got less than batchSize, we've reached the end
+      if (batch.length < batchSize) {
+        break;
+      }
     }
     
-    return allDocuments.filter(doc => {
-      return Object.entries(filter).every(([key, value]) => {
-        return doc[key] === value;
-      });
-    });
+    // Return only up to the requested limit
+    return results.slice(0, limit);
   }
 
   /**
@@ -1219,7 +1532,7 @@ class Resource extends EventEmitter {
 
     // Update each partition object
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       
       if (partitionKey) {
         // Store the updated resource data in the partition path
@@ -1255,13 +1568,30 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Get object directly from a specific partition
-   * @param {string} id - Resource ID
-   * @param {string} partitionName - Name of the partition
-   * @param {Object} partitionValues - Values for partition fields
-   * @returns {Object} The resource data
+   * Get a resource object directly from a specific partition
+   * @param {Object} params - Partition parameters
+   * @param {string} params.id - Resource ID
+   * @param {string} params.partitionName - Name of the partition
+   * @param {Object} params.partitionValues - Values for partition fields
+   * @returns {Promise<Object>} The resource object with partition metadata
+   * @example
+   * // Get user from UTM source partition
+   * const user = await resource.getFromPartition({
+   *   id: 'user-123',
+   *   partitionName: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * console.log(user._partition); // 'byUtmSource'
+   * console.log(user._partitionValues); // { 'utm.source': 'google' }
+   * 
+   * // Get product from multi-field partition
+   * const product = await resource.getFromPartition({
+   *   id: 'product-456',
+   *   partitionName: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
    */
-  async getFromPartition(id, partitionName, partitionValues = {}) {
+  async getFromPartition({ id, partitionName, partitionValues = {} }) {
     const partition = this.options.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
