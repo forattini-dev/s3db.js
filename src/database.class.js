@@ -6,6 +6,7 @@ import { createHash } from "crypto";
 import Client from "./client.class.js";
 import Resource from "./resource.class.js";
 import { streamToString } from "./stream/index.js";
+import { ConnectionString } from "./connection-string.class.js";
 
 export class Database extends EventEmitter {
   constructor(options) {
@@ -31,10 +32,23 @@ export class Database extends EventEmitter {
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
 
+    // Handle both connection string and individual parameters
+    let connectionString = options.connectionString;
+    if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
+      connectionString = ConnectionString.buildFromParams({
+        bucket: options.bucket,
+        region: options.region,
+        accessKeyId: options.accessKeyId,
+        secretAccessKey: options.secretAccessKey,
+        endpoint: options.endpoint,
+        forcePathStyle: options.forcePathStyle
+      });
+    }
+
     this.client = options.client || new Client({
       verbose: this.verbose,
       parallelism: this.parallelism,
-      connectionString: options.connectionString,
+      connectionString: connectionString,
     });
 
     this.bucket = this.client.bucket;
