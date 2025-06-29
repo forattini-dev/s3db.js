@@ -8568,6 +8568,14 @@ function calculateUTF8Bytes(str) {
   }
   return bytes;
 }
+function calculateAttributeNamesSize(mappedObject) {
+  let totalSize = 0;
+  for (const key of Object.keys(mappedObject)) {
+    if (key === "_v") continue;
+    totalSize += calculateUTF8Bytes(key);
+  }
+  return totalSize;
+}
 function transformValue(value) {
   if (value === null || value === void 0) {
     return "";
@@ -8602,49 +8610,31 @@ function calculateAttributeSizes(mappedObject) {
   return sizes;
 }
 function calculateTotalSize(mappedObject) {
-  const sizes = calculateAttributeSizes(mappedObject);
-  return Object.values(sizes).reduce((total, size) => total + size, 0);
+  const valueSizes = calculateAttributeSizes(mappedObject);
+  const valueTotal = Object.values(valueSizes).reduce((total, size) => total + size, 0);
+  const namesSize = calculateAttributeNamesSize(mappedObject);
+  return valueTotal + namesSize;
 }
 
-const S3_METADATA_LIMIT_BYTES$3 = 2e3;
+const S3_METADATA_LIMIT_BYTES = 2048;
 async function handleInsert$3({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
-    resource.emit("exceedsLimit", {
-      operation: "insert",
-      totalSize,
-      limit: S3_METADATA_LIMIT_BYTES$3,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
-      data
-    });
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
 async function handleUpdate$3({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
-    resource.emit("exceedsLimit", {
-      operation: "update",
-      id,
-      totalSize,
-      limit: S3_METADATA_LIMIT_BYTES$3,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
-      data
-    });
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
 async function handleUpsert$3({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$3) {
-    resource.emit("exceedsLimit", {
-      operation: "upsert",
-      id,
-      totalSize,
-      limit: S3_METADATA_LIMIT_BYTES$3,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES$3,
-      data
-    });
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
@@ -8652,33 +8642,53 @@ async function handleGet$3({ resource, metadata, body }) {
   return { metadata, body };
 }
 
-var userManagement = /*#__PURE__*/Object.freeze({
+var enforceLimits = /*#__PURE__*/Object.freeze({
   __proto__: null,
+  S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
   handleGet: handleGet$3,
   handleInsert: handleInsert$3,
   handleUpdate: handleUpdate$3,
   handleUpsert: handleUpsert$3
 });
 
-const S3_METADATA_LIMIT_BYTES$2 = 2e3;
 async function handleInsert$2({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    resource.emit("exceedsLimit", {
+      operation: "insert",
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES,
+      data
+    });
   }
   return { mappedData, body: "" };
 }
 async function handleUpdate$2({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    resource.emit("exceedsLimit", {
+      operation: "update",
+      id,
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES,
+      data
+    });
   }
   return { mappedData, body: "" };
 }
 async function handleUpsert$2({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES$2) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES$2} bytes`);
+  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+    resource.emit("exceedsLimit", {
+      operation: "upsert",
+      id,
+      totalSize,
+      limit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - S3_METADATA_LIMIT_BYTES,
+      data
+    });
   }
   return { mappedData, body: "" };
 }
@@ -8686,7 +8696,7 @@ async function handleGet$2({ resource, metadata, body }) {
   return { metadata, body };
 }
 
-var enforceLimits = /*#__PURE__*/Object.freeze({
+var userManagement = /*#__PURE__*/Object.freeze({
   __proto__: null,
   handleGet: handleGet$2,
   handleInsert: handleInsert$2,
@@ -8694,7 +8704,6 @@ var enforceLimits = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$2
 });
 
-const S3_METADATA_LIMIT_BYTES$1 = 2e3;
 const TRUNCATE_SUFFIX = "...";
 const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
 async function handleInsert$1({ resource, data, mappedData }) {
@@ -8715,7 +8724,7 @@ function handleTruncate({ resource, data, mappedData }) {
   const result = {};
   let currentSize = 0;
   for (const [key, size] of sortedAttributes) {
-    const availableSpace = S3_METADATA_LIMIT_BYTES$1 - currentSize;
+    const availableSpace = S3_METADATA_LIMIT_BYTES - currentSize;
     if (size <= availableSpace) {
       result[key] = mappedData[key];
       currentSize += size;
@@ -8735,7 +8744,7 @@ function handleTruncate({ resource, data, mappedData }) {
         }
       }
       result[key] = truncatedValue + TRUNCATE_SUFFIX;
-      currentSize = S3_METADATA_LIMIT_BYTES$1;
+      currentSize = S3_METADATA_LIMIT_BYTES;
       break;
     } else {
       break;
@@ -8752,7 +8761,6 @@ var dataTruncate = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$1
 });
 
-const S3_METADATA_LIMIT_BYTES = 2e3;
 const OVERFLOW_FLAG = "$overflow";
 const OVERFLOW_FLAG_VALUE = "true";
 const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
@@ -9095,13 +9103,29 @@ class Resource extends EventEmitter {
     return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
   }
   /**
-   * Get partition reference key for a specific partition
-   * @param {string} partitionName - Name of the partition
-   * @param {string} id - Resource ID  
-   * @param {Object} data - Data object for partition value generation
-   * @returns {string|null} The partition reference S3 key path
+   * Generate partition key for a resource in a specific partition
+   * @param {Object} params - Partition key parameters
+   * @param {string} params.partitionName - Name of the partition
+   * @param {string} params.id - Resource ID
+   * @param {Object} params.data - Resource data for partition value extraction
+   * @returns {string|null} The partition key path or null if required fields are missing
+   * @example
+   * const partitionKey = resource.getPartitionKey({
+   *   partitionName: 'byUtmSource',
+   *   id: 'user-123',
+   *   data: { utm: { source: 'google' } }
+   * });
+   * // Returns: 'resource=users/partition=byUtmSource/utm.source=google/id=user-123'
+   * 
+   * // Returns null if required field is missing
+   * const nullKey = resource.getPartitionKey({
+   *   partitionName: 'byUtmSource',
+   *   id: 'user-123',
+   *   data: { name: 'John' } // Missing utm.source
+   * });
+   * // Returns: null
    */
-  getPartitionKey(partitionName, id, data) {
+  getPartitionKey({ partitionName, id, data }) {
     const partition = this.options.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
@@ -9132,15 +9156,36 @@ class Resource extends EventEmitter {
       return data[fieldPath];
     }
     const keys = fieldPath.split(".");
-    let value = data;
+    let currentLevel = data;
     for (const key of keys) {
-      if (value === null || value === void 0 || typeof value !== "object") {
+      if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
         return void 0;
       }
-      value = value[key];
+      currentLevel = currentLevel[key];
     }
-    return value;
+    return currentLevel;
   }
+  /**
+   * Insert a new resource object
+   * @param {Object} params - Insert parameters
+   * @param {string} [params.id] - Resource ID (auto-generated if not provided)
+   * @param {...Object} params - Resource attributes (any additional properties)
+   * @returns {Promise<Object>} The inserted resource object with all attributes and generated ID
+   * @example
+   * // Insert with auto-generated ID
+   * const user = await resource.insert({
+   *   name: 'John Doe',
+   *   email: 'john@example.com',
+   *   age: 30
+   * });
+   * 
+   * // Insert with custom ID
+   * const user = await resource.insert({
+   *   id: 'custom-id-123',
+   *   name: 'Jane Smith',
+   *   email: 'jane@example.com'
+   * });
+   */
   async insert({ id, ...attributes }) {
     if (this.options.timestamps) {
       attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -9179,6 +9224,16 @@ class Resource extends EventEmitter {
     this.emit("insert", final);
     return final;
   }
+  /**
+   * Retrieve a resource object by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} The resource object with all attributes and metadata
+   * @example
+   * const user = await resource.get('user-123');
+   * console.log(user.name); // 'John Doe'
+   * console.log(user._lastModified); // Date object
+   * console.log(user._hasContent); // boolean
+   */
   async get(id) {
     const key = this.getResourceKey(id);
     const request = await this.client.headObject(key);
@@ -9212,6 +9267,16 @@ class Resource extends EventEmitter {
     this.emit("get", data);
     return data;
   }
+  /**
+   * Check if a resource exists by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<boolean>} True if resource exists, false otherwise
+   * @example
+   * const exists = await resource.exists('user-123');
+   * if (exists) {
+   *   console.log('User exists');
+   * }
+   */
   async exists(id) {
     try {
       const key = this.getResourceKey(id);
@@ -9221,6 +9286,24 @@ class Resource extends EventEmitter {
       return false;
     }
   }
+  /**
+   * Update an existing resource object
+   * @param {string} id - Resource ID
+   * @param {Object} attributes - Attributes to update (partial update supported)
+   * @returns {Promise<Object>} The updated resource object with all attributes
+   * @example
+   * // Update specific fields
+   * const updatedUser = await resource.update('user-123', {
+   *   name: 'John Updated',
+   *   age: 31
+   * });
+   * 
+   * // Update with timestamps (if enabled)
+   * const updatedUser = await resource.update('user-123', {
+   *   email: 'newemail@example.com'
+   * });
+   * console.log(updatedUser.updatedAt); // ISO timestamp
+   */
   async update(id, attributes) {
     const live = await this.get(id);
     if (this.options.timestamps) {
@@ -9277,6 +9360,14 @@ class Resource extends EventEmitter {
     this.emit("update", preProcessedData, validated);
     return validated;
   }
+  /**
+   * Delete a resource object by ID
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} S3 delete response
+   * @example
+   * await resource.delete('user-123');
+   * console.log('User deleted successfully');
+   */
   async delete(id) {
     let objectData;
     try {
@@ -9291,6 +9382,20 @@ class Resource extends EventEmitter {
     this.emit("delete", id);
     return response;
   }
+  /**
+   * Insert or update a resource object (upsert operation)
+   * @param {Object} params - Upsert parameters
+   * @param {string} params.id - Resource ID (required for upsert)
+   * @param {...Object} params - Resource attributes (any additional properties)
+   * @returns {Promise<Object>} The inserted or updated resource object
+   * @example
+   * // Will insert if doesn't exist, update if exists
+   * const user = await resource.upsert({
+   *   id: 'user-123',
+   *   name: 'John Doe',
+   *   email: 'john@example.com'
+   * });
+   */
   async upsert({ id, ...attributes }) {
     const exists = await this.exists(id);
     if (exists) {
@@ -9298,6 +9403,28 @@ class Resource extends EventEmitter {
     }
     return this.insert({ id, ...attributes });
   }
+  /**
+   * Count resources with optional partition filtering
+   * @param {Object} [params] - Count parameters
+   * @param {string} [params.partition] - Partition name to count in
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<number>} Total count of matching resources
+   * @example
+   * // Count all resources
+   * const total = await resource.count();
+   * 
+   * // Count in specific partition
+   * const googleUsers = await resource.count({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // Count in multi-field partition
+   * const usElectronics = await resource.count({
+   *   partition: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
+   */
   async count({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
@@ -9328,6 +9455,19 @@ class Resource extends EventEmitter {
     this.emit("count", count);
     return count;
   }
+  /**
+   * Insert multiple resources in parallel
+   * @param {Object[]} objects - Array of resource objects to insert
+   * @returns {Promise<Object[]>} Array of inserted resource objects
+   * @example
+   * const users = [
+   *   { name: 'John', email: 'john@example.com' },
+   *   { name: 'Jane', email: 'jane@example.com' },
+   *   { name: 'Bob', email: 'bob@example.com' }
+   * ];
+   * const insertedUsers = await resource.insertMany(users);
+   * console.log(`Inserted ${insertedUsers.length} users`);
+   */
   async insertMany(objects) {
     const { results } = await promisePool.PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
       this.emit("error", error, content);
@@ -9339,6 +9479,15 @@ class Resource extends EventEmitter {
     this.emit("insertMany", objects.length);
     return results;
   }
+  /**
+   * Delete multiple resources by their IDs in parallel
+   * @param {string[]} ids - Array of resource IDs to delete
+   * @returns {Promise<Object[]>} Array of S3 delete responses
+   * @example
+   * const deletedIds = ['user-1', 'user-2', 'user-3'];
+   * const results = await resource.deleteMany(deletedIds);
+   * console.log(`Deleted ${deletedIds.length} users`);
+   */
   async deleteMany(ids) {
     const packages = lodashEs.chunk(
       ids.map((id) => this.getResourceKey(id)),
@@ -9397,6 +9546,28 @@ class Resource extends EventEmitter {
     });
     return { deletedCount, resource: this.name };
   }
+  /**
+   * List resource IDs with optional partition filtering
+   * @param {Object} [params] - List parameters
+   * @param {string} [params.partition] - Partition name to list from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<string[]>} Array of resource IDs (strings)
+   * @example
+   * // List all IDs
+   * const allIds = await resource.listIds();
+   * 
+   * // List IDs from specific partition
+   * const googleUserIds = await resource.listIds({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // List IDs from multi-field partition
+   * const usElectronicsIds = await resource.listIds({
+   *   partition: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
+   */
   async listIds({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
@@ -9433,13 +9604,36 @@ class Resource extends EventEmitter {
     return ids;
   }
   /**
-   * List objects by partition name and values
-   * @param {Object} partitionOptions - Partition options
-   * @param {Object} options - Listing options
-   * @returns {Array} Array of objects
+   * List resource objects with optional partition filtering and pagination
+   * @param {Object} [params] - List parameters
+   * @param {string} [params.partition] - Partition name to list from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @param {number} [params.limit] - Maximum number of results to return
+   * @param {number} [params.offset=0] - Offset for pagination
+   * @returns {Promise<Object[]>} Array of resource objects with all attributes
+   * @example
+   * // List all resources
+   * const allUsers = await resource.list();
+   * 
+   * // List with pagination
+   * const firstPage = await resource.list({ limit: 10, offset: 0 });
+   * const secondPage = await resource.list({ limit: 10, offset: 10 });
+   * 
+   * // List from specific partition
+   * const googleUsers = await resource.list({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * 
+   * // List from partition with pagination
+   * const googleUsersPage = await resource.list({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' },
+   *   limit: 5,
+   *   offset: 0
+   * });
    */
-  async listByPartition({ partition = null, partitionValues = {} } = {}, options = {}) {
-    const { limit, offset = 0 } = options;
+  async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     if (!partition) {
       const ids2 = await this.listIds({ partition, partitionValues });
       let filteredIds2 = ids2.slice(offset);
@@ -9449,7 +9643,7 @@ class Resource extends EventEmitter {
       const { results: results2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).process(async (id) => {
         return await this.get(id);
       });
-      this.emit("listByPartition", { partition, partitionValues, count: results2.length });
+      this.emit("list", { partition, partitionValues, count: results2.length });
       return results2;
     }
     const partitionDef = this.options.partitions[partition];
@@ -9482,11 +9676,19 @@ class Resource extends EventEmitter {
       filteredIds = filteredIds.slice(0, limit);
     }
     const { results } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).process(async (id) => {
-      return await this.getFromPartition(id, partition, partitionValues);
+      return await this.getFromPartition({ id, partitionName: partition, partitionValues });
     });
-    this.emit("listByPartition", { partition, partitionValues, count: results.length });
+    this.emit("list", { partition, partitionValues, count: results.length });
     return results;
   }
+  /**
+   * Get multiple resources by their IDs
+   * @param {string[]} ids - Array of resource IDs
+   * @returns {Promise<Object[]>} Array of resource objects
+   * @example
+   * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
+   * users.forEach(user => console.log(user.name));
+   */
   async getMany(ids) {
     const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
       this.emit("id", id);
@@ -9497,6 +9699,13 @@ class Resource extends EventEmitter {
     this.emit("getMany", ids.length);
     return results;
   }
+  /**
+   * Get all resources (equivalent to list() without pagination)
+   * @returns {Promise<Object[]>} Array of all resource objects
+   * @example
+   * const allUsers = await resource.getAll();
+   * console.log(`Total users: ${allUsers.length}`);
+   */
   async getAll() {
     let ids = await this.listIds();
     if (ids.length === 0) return [];
@@ -9507,18 +9716,41 @@ class Resource extends EventEmitter {
     this.emit("getAll", results.length);
     return results;
   }
-  async page(offset = 0, size = 100, { partition = null, partitionValues = {} } = {}) {
-    const allIds = await this.listIds({ partition, partitionValues });
-    const totalItems = allIds.length;
+  /**
+   * Get a page of resources with pagination metadata
+   * @param {Object} [params] - Page parameters
+   * @param {number} [params.offset=0] - Offset for pagination
+   * @param {number} [params.size=100] - Page size
+   * @param {string} [params.partition] - Partition name to page from
+   * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @returns {Promise<Object>} Page result with items and pagination info
+   * @example
+   * // Get first page of all resources
+   * const page = await resource.page({ offset: 0, size: 10 });
+   * console.log(`Page ${page.page + 1} of ${page.totalPages}`);
+   * console.log(`Showing ${page.items.length} of ${page.totalItems} total`);
+   * 
+   * // Get page from specific partition
+   * const googlePage = await resource.page({
+   *   partition: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' },
+   *   offset: 0,
+   *   size: 5
+   * });
+   */
+  async page({ offset = 0, size = 100, partition = null, partitionValues = {} } = {}) {
+    const ids = await this.listIds({ partition, partitionValues });
+    const totalItems = ids.length;
     const totalPages = Math.ceil(totalItems / size);
-    const paginatedIds = allIds.slice(offset * size, (offset + 1) * size);
+    const page = Math.floor(offset / size);
+    const pageIds = ids.slice(offset, offset + size);
     const items = await Promise.all(
-      paginatedIds.map((id) => this.get(id))
+      pageIds.map((id) => this.get(id))
     );
     const result = {
       items,
       totalItems,
-      page: offset,
+      page,
       pageSize: size,
       totalPages
     };
@@ -9534,36 +9766,62 @@ class Resource extends EventEmitter {
     return stream.build();
   }
   /**
-   * Store binary content associated with a resource
-   * @param {string} id - Resource ID
-   * @param {Buffer} buffer - Binary content
-   * @param {string} contentType - Optional content type
+   * Set binary content for a resource
+   * @param {Object} params - Content parameters
+   * @param {string} params.id - Resource ID
+   * @param {Buffer|string} params.buffer - Content buffer or string
+   * @param {string} [params.contentType='application/octet-stream'] - Content type
+   * @returns {Promise<Object>} Updated resource data
+   * @example
+   * // Set image content
+   * const imageBuffer = fs.readFileSync('image.jpg');
+   * await resource.setContent({
+   *   id: 'user-123',
+   *   buffer: imageBuffer,
+   *   contentType: 'image/jpeg'
+   * });
+   * 
+   * // Set text content
+   * await resource.setContent({
+   *   id: 'document-456',
+   *   buffer: 'Hello World',
+   *   contentType: 'text/plain'
+   * });
    */
-  async setContent(id, buffer, contentType = "application/octet-stream") {
-    if (!Buffer.isBuffer(buffer)) {
-      throw new Error("Content must be a Buffer");
+  async setContent({ id, buffer, contentType = "application/octet-stream" }) {
+    const currentData = await this.get(id);
+    if (!currentData) {
+      throw new Error(`Resource with id '${id}' not found`);
     }
-    const key = this.getResourceKey(id);
-    let existingMetadata = {};
-    try {
-      const existingObject = await this.client.headObject(key);
-      existingMetadata = existingObject.Metadata || {};
-    } catch (error) {
-    }
-    const response = await this.client.putObject({
-      key,
+    const updatedData = {
+      ...currentData,
+      _hasContent: true,
+      _contentLength: buffer.length,
+      _mimeType: contentType
+    };
+    await this.client.putObject({
+      key: this.getResourceKey(id),
+      metadata: await this.schema.mapper(updatedData),
       body: buffer,
-      contentType,
-      metadata: existingMetadata
-      // Preserve existing metadata
+      contentType
     });
-    this.emit("setContent", id, buffer.length, contentType);
-    return response;
+    this.emit("setContent", { id, contentType, contentLength: buffer.length });
+    return updatedData;
   }
   /**
    * Retrieve binary content associated with a resource
    * @param {string} id - Resource ID
-   * @returns {Object} Object with buffer and contentType
+   * @returns {Promise<Object>} Object with buffer and contentType
+   * @example
+   * const content = await resource.content('user-123');
+   * if (content.buffer) {
+   *   console.log('Content type:', content.contentType);
+   *   console.log('Content size:', content.buffer.length);
+   *   // Save to file
+   *   fs.writeFileSync('output.jpg', content.buffer);
+   * } else {
+   *   console.log('No content found');
+   * }
    */
   async content(id) {
     const key = this.getResourceKey(id);
@@ -9658,7 +9916,7 @@ class Resource extends EventEmitter {
       return;
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         const mappedData = await this.schema.mapper(data);
         const behaviorImpl = getBehavior(this.behavior);
@@ -9690,7 +9948,7 @@ class Resource extends EventEmitter {
     }
     const keysToDelete = [];
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         keysToDelete.push(partitionKey);
       }
@@ -9704,20 +9962,72 @@ class Resource extends EventEmitter {
     }
   }
   /**
-   * Query documents with simple filtering
-   * @param {Object} filter - Filter criteria
-   * @returns {Array} Filtered documents
+   * Query resources with simple filtering and pagination
+   * @param {Object} [filter={}] - Filter criteria (exact field matches)
+   * @param {Object} [options] - Query options
+   * @param {number} [options.limit=100] - Maximum number of results
+   * @param {number} [options.offset=0] - Offset for pagination
+   * @param {string} [options.partition] - Partition name to query from
+   * @param {Object} [options.partitionValues] - Partition field values to filter by
+   * @returns {Promise<Object[]>} Array of filtered resource objects
+   * @example
+   * // Query all resources (no filter)
+   * const allUsers = await resource.query();
+   * 
+   * // Query with simple filter
+   * const activeUsers = await resource.query({ status: 'active' });
+   * 
+   * // Query with multiple filters
+   * const usElectronics = await resource.query({
+   *   category: 'electronics',
+   *   region: 'US'
+   * });
+   * 
+   * // Query with pagination
+   * const firstPage = await resource.query(
+   *   { status: 'active' },
+   *   { limit: 10, offset: 0 }
+   * );
+   * 
+   * // Query within partition
+   * const googleUsers = await resource.query(
+   *   { status: 'active' },
+   *   {
+   *     partition: 'byUtmSource',
+   *     partitionValues: { 'utm.source': 'google' },
+   *     limit: 5
+   *   }
+   * );
    */
-  async query(filter = {}) {
-    const allDocuments = await this.getAll();
+  async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
     if (Object.keys(filter).length === 0) {
-      return allDocuments;
+      return await this.list({ partition, partitionValues, limit, offset });
     }
-    return allDocuments.filter((doc) => {
-      return Object.entries(filter).every(([key, value]) => {
-        return doc[key] === value;
+    const results = [];
+    let currentOffset = offset;
+    const batchSize = Math.min(limit, 50);
+    while (results.length < limit) {
+      const batch = await this.list({
+        partition,
+        partitionValues,
+        limit: batchSize,
+        offset: currentOffset
       });
-    });
+      if (batch.length === 0) {
+        break;
+      }
+      const filteredBatch = batch.filter((doc) => {
+        return Object.entries(filter).every(([key, value]) => {
+          return doc[key] === value;
+        });
+      });
+      results.push(...filteredBatch);
+      currentOffset += batchSize;
+      if (batch.length < batchSize) {
+        break;
+      }
+    }
+    return results.slice(0, limit);
   }
   /**
    * Update partition objects to keep them in sync
@@ -9729,7 +10039,7 @@ class Resource extends EventEmitter {
       return;
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey(partitionName, data.id, data);
+      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         const mappedData = await this.schema.mapper(data);
         const behaviorImpl = getBehavior(this.behavior);
@@ -9756,13 +10066,30 @@ class Resource extends EventEmitter {
     }
   }
   /**
-   * Get object directly from a specific partition
-   * @param {string} id - Resource ID
-   * @param {string} partitionName - Name of the partition
-   * @param {Object} partitionValues - Values for partition fields
-   * @returns {Object} The resource data
+   * Get a resource object directly from a specific partition
+   * @param {Object} params - Partition parameters
+   * @param {string} params.id - Resource ID
+   * @param {string} params.partitionName - Name of the partition
+   * @param {Object} params.partitionValues - Values for partition fields
+   * @returns {Promise<Object>} The resource object with partition metadata
+   * @example
+   * // Get user from UTM source partition
+   * const user = await resource.getFromPartition({
+   *   id: 'user-123',
+   *   partitionName: 'byUtmSource',
+   *   partitionValues: { 'utm.source': 'google' }
+   * });
+   * console.log(user._partition); // 'byUtmSource'
+   * console.log(user._partitionValues); // { 'utm.source': 'google' }
+   * 
+   * // Get product from multi-field partition
+   * const product = await resource.getFromPartition({
+   *   id: 'product-456',
+   *   partitionName: 'byCategoryRegion',
+   *   partitionValues: { category: 'electronics', region: 'US' }
+   * });
    */
-  async getFromPartition(id, partitionName, partitionValues = {}) {
+  async getFromPartition({ id, partitionName, partitionValues = {} }) {
     const partition = this.options.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
@@ -9821,7 +10148,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.4" : "latest";
+        return true ? "4.1.6" : "latest";
       } catch (e) {
         return "latest";
       }
