@@ -1,250 +1,322 @@
-# Nova Estrutura de Testes - S3DB.js
+# S3DB.js Test Suite - Comprehensive Testing Structure
 
-## 📋 Visão Geral
+## Visão Geral
 
-Esta é a nova organização de testes do S3DB.js, criada para resolver problemas de verbosidade e confusão nos testes anteriores. A estrutura foi reorganizada seguindo uma lógica clara e narrativa para garantir melhor qualidade e manutenibilidade do código.
+Esta suíte de testes reorganizada implementa uma abordagem **narrativa** para testing, onde cada teste conta uma história de uso real do S3DB.js, ao invés de simplesmente testar funções isoladas.
 
-## 🏗️ Estrutura Organizacional
+## Filosofia de Testing Narrativo
 
-### Diretórios
+### Princípios
 
-- `./tests-old/` - Testes antigos (preservados para referência)
-- `./tests/` - Nova estrutura de testes
+1. **Cenários Reais**: Cada teste simula um caso de uso real da biblioteca
+2. **Contexto Claro**: Nomes de teste explicam "o que" e "por que", não apenas "como"
+3. **Dados Realistas**: Uso de dados que representam casos reais de aplicação
+4. **Progressão Lógica**: Testes seguem uma sequência lógica de operações
 
-### Convenções de Nomenclatura
+### Benefícios
 
-#### Para Arquivos Não-Classe
+- **Depuração Mais Fácil**: Quando um teste falha, você sabe exatamente que funcionalidade real está quebrada
+- **Documentação Viva**: Os testes servem como documentação de como usar a biblioteca
+- **Cobertura Intuitiva**: Foco em fluxos de trabalho reais ao invés de cobertura de linha isolada
+- **Manutenção Simplificada**: Menos testes verbose, mais focados e significativos
+
+## Estrutura dos Testes
+
+### Testes de Classes (Journey Tests)
+
+Seguem o padrão `ClassNome-journey.test.js` e testam fluxos completos de uso:
+
+#### ✅ `resource-journey.test.js` (16KB, 362 linhas)
+**Narrativa**: Sistema de gestão de raças de cachorro
+- 50 raças distribuídas em 4 categorias (small, medium, large, giant)
+- Particionamento por tamanho e origem
+- Paginação com limite de 10 itens
+- Operações CRUD complexas
+- Validação de edge cases
+
+#### ✅ `users-journey.test.js` (17KB, 417 linhas)
+**Narrativa**: Sistema de gestão de chaves API por empresa
+- 15 usuários distribuídos em 4 empresas
+- Campo `apiKey: 'secret|required'` (geração automática e criptografia)
+- Particionamento por companyId, role e status
+- Verificação de segurança de chaves API
+- Workflows de ativação/desativação
+
+#### ✅ `database-journey.test.js` (19KB, 468 linhas)
+**Narrativa**: Aplicação e-commerce multi-recurso
+- Criação de recursos: usuários, produtos, pedidos
+- Gestão de metadata e versionamento
+- Detecção de mudanças em definições
+- Relatórios e análises
+- Edge cases e recuperação de erros
+
+#### ✅ `schema-journey.test.js` (18KB, 445 linhas)
+**Narrativa**: Sistema de mapeamento e validação de dados
+- Formulários de cadastro de funcionários
+- Catálogo de produtos e-commerce
+- Transformações SchemaActions
+- Perfis de usuário com dados sensíveis
+- Import/Export de schemas
+- Performance com objetos grandes
+
+#### ✅ `validator-journey.test.js` (17KB, 413 linhas)
+**Narrativa**: Sistema de validação de dados
+- Formulários de segurança com campos secret
+- Cadastro de funcionários com validações complexas
+- Produtos e-commerce com regras de negócio
+- Diferentes tipos de campos secret
+- ValidatorManager Singleton Pattern
+- Mensagens customizadas em português
+
+#### ✅ `client-journey.test.js` (11KB, 382 linhas)
+**Narrativa**: Configuração de conexões para diferentes ambientes
+- Configurações LocalStack para desenvolvimento
+- Ambientes staging/produção
+- Validação de parâmetros de conexão
+- Gerenciamento de credenciais
+
+#### ✅ `connection-string-journey.test.js` (14KB, 325 linhas)
+**Narrativa**: Configurações multi-provider S3
+- AWS S3 Production com prefixos e regiões
+- MinIO Development com buckets específicos
+- Configurações por ambiente
+- Microserviços com isolamento
+- Validação de strings inválidas
+- Alta disponibilidade com múltiplas regiões
+
+#### ✅ `calculator.test.js` (9.3KB, 239 linhas)
+**Narrativa**: Cálculos UTF-8 para sistemas multilíngues
+- Textos em português, chinês, árabe
+- Emojis e caracteres especiais
+- Objetos complexos aninhados
+- Performance com dados grandes
+
+#### ✅ `crypto.test.js` (11KB, 293 linhas)
+**Narrativa**: Segurança e criptografia
+- Senhas e chaves API
+- Rotação de master key
+- Casos extremos de segurança
+- Performance de criptografia
+
+#### ✅ `errors.test.js` (12KB, 337 linhas)
+**Narrativa**: Hierarquia de erros customizados
+- Tipos de erro específicos
+- Detalhes de validação
+- Identificação de tipos de erro
+
+#### ✅ `id.test.js` (9.9KB, 312 linhas)
+**Narrativa**: Geração de IDs e senhas
+- Testes de unicidade (10.000 IDs)
+- Benchmarks de performance
+- Validação de segurança
+
+### Testes de Behaviors
+
+#### ✅ `user-management.test.js` (12KB, 329 linhas)
+**Narrativa**: Comportamento padrão de recursos
+- Inserção dentro dos limites S3
+- Dados que excedem 2KB de metadata
+- Monitoramento de eventos de limite
+- Dados UTF-8 complexos
+- Casos reais de uso
+
+### Estrutura de Arquivos Faltantes
+
+Ainda precisam ser criados os seguintes testes:
+
+#### Classes Journey (precisam de -journey.test.js):
+- [ ] `cache-journey.test.js` - Sistema de cache em memória e S3
+- [ ] `memory-cache-journey.test.js` - Cache em memória com TTL
+- [ ] `s3-cache-journey.test.js` - Cache distribuído no S3
+- [ ] `plugin-journey.test.js` - Sistema de plugins extensível
+- [ ] `resource-ids-page-reader-journey.test.js` - Leitura paginada de IDs
+- [ ] `resource-ids-reader-journey.test.js` - Stream de IDs de recursos
+- [ ] `resource-reader-journey.test.js` - Leitura de recursos
+- [ ] `resource-writer-journey.test.js` - Escrita de recursos
+
+#### Arquivos Não-Classe (precisam de .test.js):
+- [ ] `body-overflow.test.js` - Behavior para overflow de body
+- [ ] `data-truncate.test.js` - Behavior para truncamento de dados
+- [ ] `enforce-limits.test.js` - Behavior para enforcement de limites
+- [ ] `behaviors-index.test.js` - Exports de behaviors
+- [ ] `cache-index.test.js` - Exports de cache
+- [ ] `concerns-index.test.js` - Exports de concerns
+- [ ] `cache-plugin.test.js` - Plugin de cache
+- [ ] `costs-plugin.test.js` - Plugin de custos
+- [ ] `plugins-index.test.js` - Exports de plugins
+- [ ] `plugin-obj.test.js` - Objeto base de plugins
+- [ ] `stream-index.test.js` - Exports de stream
+- [ ] `index.test.js` - Entry point principal
+
+## Convenções de Nomenclatura
+
+### Para Classes
 ```
-arquivo.js → arquivo.test.js
+NomeClasse.class.js → nome-classe-journey.test.js
 ```
 
-**Exemplos:**
-- `src/crypto.js` → `tests/crypto.test.js`
-- `src/concerns/calculator.js` → `tests/calculator.test.js`
-- `src/errors.js` → `tests/errors.test.js`
-- `src/concerns/id.js` → `tests/id.test.js`
-
-#### Para Arquivos de Classe
+### Para Arquivos Não-Classe
 ```
-classe.class.js → classe-journey.test.js
+nome-arquivo.js → nome-arquivo.test.js
 ```
 
-**Exemplos:**
-- `src/resource.class.js` → `tests/resource-journey.test.js`
-- `src/client.class.js` → `tests/client-journey.test.js`
-- `src/schema.class.js` → `tests/schema-journey.test.js`
-- `src/database.class.js` → `tests/database-journey.test.js`
-
-#### Para Classes Complexas (Múltiplos Arquivos)
+### Para Índices
 ```
-classe.class.js → classe-*.test.js
+index.js → nome-diretorio-index.test.js
 ```
 
-**Exemplos:**
-- `src/resource.class.js` → `tests/resource-journey.test.js`
-- `src/resource.class.js` → `tests/resource-partitions.test.js`
-- `src/resource.class.js` → `tests/resource-behaviors.test.js`
-
-## 🎭 Filosofia dos Testes Narrativos
-
-### Testes Journey
-Os testes "journey" seguem uma narrativa realista, criando cenários que um usuário real enfrentaria:
+## Estrutura de Cada Teste Journey
 
 ```javascript
-describe('Resource Journey Tests - Dog Breeds Management', () => {
-  describe('Cenário 1: Adicionando 50 raças de cachorro particionadas por tamanho', () => {
-    // Teste narrativo com dados reais
+describe('ComponentName Journey Tests - Brief Description', () => {
+  describe('Cenário 1: Primary Use Case Description', () => {
+    test('Deve [action] [context] [expected outcome]', async () => {
+      // Arrange: Setup realistic data
+      // Act: Perform real-world operation
+      // Assert: Verify business logic works
+    });
   });
   
-  describe('Cenário 2: Testando paginação com limite de 10 em 10', () => {
-    // Teste de paginação real
+  describe('Cenário 2: Secondary Use Case', () => {
+    // Multiple related tests
+  });
+  
+  describe('Cenário N: Edge Cases and Error Conditions', () => {
+    // Error handling and boundary conditions
   });
 });
 ```
 
-### Características dos Testes Narrativos
+## Dados de Teste Realistas
 
-1. **Dados Realistas**: Use dados que fazem sentido no mundo real
-2. **Cenários Completos**: Teste fluxos completos, não apenas funções isoladas
-3. **Contexto**: Explique o "porquê" do teste no nome do cenário
-4. **Progressão**: Testes que seguem uma sequência lógica
+### Exemplos de Narrativas Usadas
 
-## 📚 Exemplos Implementados
+1. **Raças de Cachorro**: 50 raças reais distribuídas por tamanho
+2. **Funcionários**: Dados de RH com criptografia de senhas
+3. **E-commerce**: Produtos, usuários, pedidos com workflows reais
+4. **Chaves API**: Sistema de autenticação por empresa
+5. **Microserviços**: Configurações multi-ambiente
 
-### 1. Resource Journey - Raças de Cachorro
+### Caracteres Multilíngues
+
+Os testes incluem sistematicamente:
+- **Português**: Acentos, ç, ã, õ
+- **Chinês**: 你好世界 (UTF-8 multi-byte)
+- **Árabe**: مرحبا (right-to-left)
+- **Emojis**: 🎉🚀💡🔥 (4-byte UTF-8)
+
+## Configuração dos Testes
+
+### Setup Compartilhado
+
 ```javascript
-// tests/resource-journey.test.js
-// Cenário: Gerenciamento de 50 raças de cachorro particionadas por tamanho
-// Testa: inserção, paginação, partições, validações
+// jest.setup.js
+// Configuração global para todos os testes
 ```
 
-### 2. Users Journey - API Keys por Empresa
+### LocalStack para Testes
+
+Todos os testes usam LocalStack para simular AWS S3:
+
 ```javascript
-// tests/users-journey.test.js
-// Cenário: Usuários com API keys encriptadas particionados por companyId
-// Testa: campos secretos, partições múltiplas, paginação
+const testConfig = {
+  bucket: 'test-bucket',
+  region: 'us-east-1',
+  accessKeyId: 'test-access-key',
+  secretAccessKey: 'test-secret-key',
+  endpoint: 'http://localhost:4566',
+  forcePathStyle: true,
+};
 ```
 
-### 3. Calculator - Cálculos de Bytes
-```javascript
-// tests/calculator.test.js
-// Cenário: Cálculo de tamanhos UTF-8 para objetos multilíngues
-// Testa: funções utilitárias com dados reais
-```
-
-### 4. Crypto - Criptografia
-```javascript
-// tests/crypto.test.js
-// Cenário: Gerenciamento de senhas e API keys criptografadas
-// Testa: encrypt/decrypt com cenários de rotação de chaves
-```
-
-## 🚀 Como Executar
+## Execução dos Testes
 
 ```bash
 # Executar todos os testes
 npm test
 
 # Executar testes específicos
-npm test -- tests/resource-journey.test.js
-npm test -- tests/crypto.test.js
+npm test -- resource-journey
+npm test -- --testNamePattern="Cenário 1"
 
-# Executar testes com pattern
-npm test -- --testNamePattern="Dog Breeds"
-npm test -- --testNamePattern="API Keys"
+# Executar com coverage
+npm test -- --coverage
+
+# Watch mode para desenvolvimento
+npm test -- --watch
 ```
 
-## 📝 Guia para Criar Novos Testes
+## Padrões de Teste Específicos
 
-### Para Arquivos Não-Classe
-
-1. **Identifique as funções principais**
-2. **Crie cenários de uso real**
-3. **Teste edge cases**
-4. **Use dados variados (UTF-8, emojis, etc.)**
+### Testes de Performance
 
 ```javascript
-describe('MeuArquivo Functions - Descrição Clara', () => {
-  describe('minhaFuncao', () => {
-    test('Deve fazer X com dados Y', () => {
-      // Teste específico
-    });
-  });
+test('Deve manter performance com objetos grandes', async () => {
+  const startTime = Date.now();
   
-  describe('Cenário Real: Descrição do caso de uso', () => {
-    test('Deve resolver problema específico', () => {
-      // Teste narrativo
-    });
-  });
-});
-```
-
-### Para Classes (Journey Tests)
-
-1. **Crie uma narrativa realista**
-2. **Use dados que fazem sentido**
-3. **Teste fluxos completos**
-4. **Inclua cenários de erro**
-
-```javascript
-describe('MinhaClasse Journey Tests - Contexto do Negócio', () => {
-  describe('Cenário 1: Descrição clara do que está sendo testado', () => {
-    // Setup com dados realistas
-    const dadosReais = [...];
-    
-    test('Deve executar operação principal com sucesso', () => {
-      // Teste principal
-    });
-    
-    test('Deve validar dados corretamente', () => {
-      // Validações
-    });
-  });
+  // Operação a ser testada
   
-  describe('Cenário 2: Corner cases e situações extremas', () => {
-    // Testes de edge cases
-  });
+  const endTime = Date.now();
+  const duration = endTime - startTime;
+  
+  expect(duration).toBeLessThan(1000); // Menos de 1 segundo
 });
 ```
 
-## 🎯 Benefícios da Nova Estrutura
-
-### 1. Clareza
-- Nomenclatura intuitiva
-- Separação clara entre tipos de teste
-- Contexto narrativo
-
-### 2. Manutenibilidade
-- Testes focados em cenários específicos
-- Menor verbosidade
-- Reutilização de dados
-
-### 3. Qualidade
-- Cobertura de casos reais
-- Testes que refletem uso real
-- Detecção de problemas de integração
-
-### 4. Debugging
-- Fácil identificação de problemas
-- Contexto claro nos logs
-- Dados rastreáveis
-
-## 📋 Checklist para Novos Testes
-
-- [ ] Seguir convenção de nomenclatura
-- [ ] Criar cenários narrativos
-- [ ] Usar dados realistas
-- [ ] Testar casos extremos
-- [ ] Documentar cenários complexos
-- [ ] Verificar performance quando relevante
-- [ ] Incluir validações de erro
-
-## 🔮 Expandindo a Estrutura
-
-### Quando Criar Múltiplos Arquivos
-
-Para classes muito complexas, crie arquivos separados:
-
-```
-resource.class.js →
-  ├── resource-journey.test.js      (teste principal)
-  ├── resource-partitions.test.js   (foco em partições)
-  ├── resource-behaviors.test.js    (comportamentos)
-  ├── resource-performance.test.js  (testes de performance)
-  └── resource-errors.test.js       (cenários de erro)
-```
-
-### Padrões Recomendados
+### Testes de Validação
 
 ```javascript
-// Sempre use dados realistas
-const empresas = [
-  { id: 'tech-corp', nome: 'TechCorp Solutions' },
-  { id: 'data-drive', nome: 'DataDrive Inc' }
-];
-
-// Prefira cenários narrativos
-test('Deve paginar 1000 produtos por categoria alimentícia', () => {
-  // Teste com contexto claro
-});
-
-// Em vez de testes genéricos
-test('Deve paginar dados', () => {
-  // Teste vago
+test('Deve rejeitar dados inválidos com detalhes específicos', async () => {
+  const result = await validator(invalidData);
+  
+  expect(Array.isArray(result)).toBe(true);
+  expect(result.length).toBeGreaterThan(0);
+  
+  const errorMessages = result.map(error => error.message).join(' ');
+  expect(errorMessages).toContain('specific validation message');
 });
 ```
 
-## 📞 Suporte
+### Testes de Criptografia
 
-Para dúvidas sobre a estrutura de testes:
+```javascript
+test('Deve criptografar campos secret automaticamente', async () => {
+  const result = await process(dataWithSecrets);
+  
+  expect(result.password).not.toBe(originalPassword);
+  expect(result.password.length).toBeGreaterThan(50);
+  
+  // Verificar que descriptografia funciona
+  const decrypted = await decrypt(result.password);
+  expect(decrypted).toBe(originalPassword);
+});
+```
 
-1. Consulte os exemplos existentes
-2. Siga as convenções estabelecidas
-3. Priorize narrativas claras
-4. Use dados realistas
+## Indicadores de Qualidade
 
----
+### Métricas de Teste
 
-**Versão:** 1.0.0  
-**Criado:** Janeiro 2024  
-**Última Atualização:** Janeiro 2024
+- **Cobertura de Código**: >90% para funcionalidades críticas
+- **Tempo de Execução**: <30 segundos para toda a suíte
+- **Realismo dos Dados**: Baseado em casos de uso reais
+- **Clareza Narrativa**: Cada teste conta uma história completa
+
+### Red Flags
+
+🚨 **Evitar**:
+- Testes que testam apenas um getter/setter
+- Mocks excessivos que não representam integração real
+- Dados de teste genéricos (user1, test123)
+- Testes que passam mas não verificam comportamento real
+
+✅ **Preferir**:
+- Testes que simulam workflows completos de usuário
+- Dados realistas com caracteres UTF-8 complexos
+- Validação de regras de negócio, não apenas sintaxe
+- Cenários que um usuário real encontraria
+
+## Conclusão
+
+Esta reorganização transforma os testes de uma coleção de verificações técnicas isoladas em uma documentação viva de como o S3DB.js funciona em cenários reais. Cada teste conta uma história específica, facilitando a manutenção e proporcionando confiança na qualidade do código.
+
+Os testes servem tanto para validação quanto para documentação, mostrando exatamente como usar cada componente da biblioteca em contextos práticos e realistas.
