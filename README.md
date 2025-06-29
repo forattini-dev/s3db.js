@@ -283,7 +283,7 @@ const googleUserIds = await users.listIds({
   partitionValues: { 'utm.source': 'google' }
 });
 
-// Paginar resultados
+// Paginar resultados com contagem total
 const page = await users.page({
   partition: 'byUtmSource',
   partitionValues: { 'utm.source': 'google' },
@@ -291,7 +291,20 @@ const page = await users.page({
   size: 10
 });
 console.log(page.items); // Array de usuários
-console.log(page.totalItems, page.totalPages);
+console.log(page.totalItems, page.totalPages); // Contagem total e páginas
+console.log(page.page, page.pageSize); // Página atual e tamanho
+
+// Paginar resultados sem contagem total (mais rápido para grandes coleções)
+const fastPage = await users.page({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' },
+  offset: 0,
+  size: 10,
+  skipCount: true // Pula a contagem total para melhor performance
+});
+console.log(fastPage.items); // Array de usuários
+console.log(fastPage.totalItems); // null (não contado)
+console.log(fastPage._debug); // Informações de debug
 
 // Contar documentos em uma partição
 const count = await users.count({
@@ -959,6 +972,73 @@ await users.delete("user-123");
 const count = await users.count();
 console.log(`Total users: ${count}`);
 ```
+
+#### Page Documents
+
+The `page()` method provides efficient pagination with optional total count for performance optimization.
+
+```javascript
+// Basic pagination with total count
+const page = await users.page({
+  offset: 0,
+  size: 10
+});
+
+console.log(page.items); // Array of user objects
+console.log(page.totalItems); // Total number of items
+console.log(page.totalPages); // Total number of pages
+console.log(page.page); // Current page number (0-based)
+console.log(page.pageSize); // Items per page
+console.log(page._debug); // Debug information
+
+// Pagination with partition filtering
+const googleUsersPage = await users.page({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' },
+  offset: 0,
+  size: 5
+});
+
+// Skip total count for better performance on large collections
+const fastPage = await users.page({
+  offset: 0,
+  size: 100,
+  skipCount: true // Skips counting total items
+});
+
+console.log(fastPage.totalItems); // null (not counted)
+console.log(fastPage.totalPages); // null (not calculated)
+console.log(fastPage._debug.skipCount); // true
+```
+
+**Page Response Structure:**
+
+```javascript
+{
+  items: Array,           // Array of document objects
+  totalItems: number,     // Total count (null if skipCount: true)
+  page: number,           // Current page number (0-based)
+  pageSize: number,       // Number of items per page
+  totalPages: number,     // Total pages (null if skipCount: true)
+  _debug: {               // Debug information
+    requestedSize: number,
+    requestedOffset: number,
+    actualItemsReturned: number,
+    skipCount: boolean,
+    hasTotalItems: boolean
+  }
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `offset` | `number` | `0` | Number of items to skip |
+| `size` | `number` | `100` | Number of items per page |
+| `partition` | `string` | `null` | Partition name to filter by |
+| `partitionValues` | `object` | `{}` | Partition field values |
+| `skipCount` | `boolean` | `false` | Skip total count for performance |
 
 ### Bulk Operations
 
@@ -1680,7 +1760,7 @@ await products.insert({
 | `listIds()` | Get array of document IDs | ✅ `{ partition, partitionValues }` |
 | `count()` | Count documents | ✅ `{ partition, partitionValues }` |
 | `listByPartition()` | List documents by partition | ✅ `{ partition, partitionValues }` |
-| `page()` | Paginate documents | ✅ `{ partition, partitionValues }` |
+| `page()` | Paginate documents | ✅ `{ partition, partitionValues, skipCount }` |
 | `getFromPartition()` | Get single document from partition | ✅ Direct partition access |
 | `query()` | Filter documents in memory | ❌ No partition support |
 
@@ -1766,19 +1846,6 @@ const s3db = new S3db({
 - **`data-truncate`**: Intelligently truncates data to fit within limits
 - **`enforce-limits`**: Strict validation to prevent oversized documents
 - **`user-management`**: Default behavior with warnings and monitoring
-
-### ✅ Recent Improvements
-
-**🔧 Enhanced Data Serialization (v3.3.2+)**
-
-s3db.js now handles complex data structures robustly:
-
-- **Empty Arrays**: `[]` correctly serialized and preserved
-- **Null Arrays**: `null` values maintained without corruption  
-- **Special Characters**: Arrays with pipe `|` characters properly escaped
-- **Empty Objects**: `{}` correctly mapped and stored
-- **Null Objects**: `null` object values preserved during serialization
-- **Nested Structures**: Complex nested objects with mixed empty/null values supported
 
 ### Best Practices
 
