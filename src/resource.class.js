@@ -1,9 +1,8 @@
 import { join } from "path";
-import { idGenerator, passwordGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { createHash } from "crypto";
-import { PromisePool } from "@supercharge/promise-pool";
 import jsonStableStringify from "json-stable-stringify";
+import { PromisePool } from "@supercharge/promise-pool";
 
 import {
   chunk,
@@ -14,6 +13,7 @@ import {
 import Schema from "./schema.class.js";
 import { InvalidResourceItem } from "./errors.js";
 import { streamToString } from "./stream/index.js";
+import { idGenerator, passwordGenerator } from "./concerns/id.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
@@ -36,6 +36,7 @@ class Resource extends EventEmitter {
    * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
    * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
    * @param {Object} [config.hooks={}] - Custom hooks
+   * @param {Object} [config.options={}] - Additional options
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -70,7 +71,7 @@ class Resource extends EventEmitter {
       throw new Error(`Invalid Resource configuration:\n${validation.errors.join('\n')}`);
     }
 
-    // Extract configuration with defaults
+    // Extrair configuração com defaults apenas do root
     const {
       name,
       client,
@@ -99,7 +100,15 @@ class Resource extends EventEmitter {
     this.passphrase = passphrase ?? 'secret';
 
     // Store configuration
-    this.config = config;
+    this.config = {
+      cache,
+      hooks,
+      paranoid,
+      timestamps,
+      partitions,
+      autoDecrypt,
+      allNestedObjectsOptional,
+    };
 
     // Initialize hooks system
     this.hooks = {
@@ -120,6 +129,10 @@ class Resource extends EventEmitter {
       this.attributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
+      if (!this.config.partitions) {
+        this.config.partitions = {};
+      }
+      
       if (!this.config.partitions.byCreatedDate) {
         this.config.partitions.byCreatedDate = {
           fields: {
@@ -148,11 +161,11 @@ class Resource extends EventEmitter {
       },
     });
 
-    // Validate partitions against current attributes
-    this.validatePartitions();
-
     // Setup automatic partition hooks if partitions are defined
     this.setupPartitionHooks();
+
+    // Validate partitions against current attributes (after all setup is complete)
+    this.validatePartitions();
 
     // Merge user-provided hooks (added last, after internal hooks)
     if (hooks) {
@@ -166,11 +179,25 @@ class Resource extends EventEmitter {
     }
   }
 
+  /**
+   * Get resource options (for backward compatibility with tests)
+   */
+  get options() {
+    return {
+      timestamps: this.config.timestamps,
+      partitions: this.config.partitions || {},
+      cache: this.config.cache,
+      autoDecrypt: this.config.autoDecrypt,
+      paranoid: this.config.paranoid,
+      allNestedObjectsOptional: this.config.allNestedObjectsOptional
+    };
+  }
+
   export() {
     const exported = this.schema.export();
     exported.behavior = this.behavior;
     exported.timestamps = this.config.timestamps;
-    exported.partitions = this.config.partitions;
+    exported.partitions = this.config.partitions || {};
     exported.paranoid = this.config.paranoid;
     exported.allNestedObjectsOptional = this.config.allNestedObjectsOptional;
     exported.autoDecrypt = this.config.autoDecrypt;
@@ -194,6 +221,10 @@ class Resource extends EventEmitter {
       newAttributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
+      if (!this.config.partitions) {
+        this.config.partitions = {};
+      }
+      
       if (!this.config.partitions.byCreatedDate) {
         this.config.partitions.byCreatedDate = {
           fields: {
@@ -222,11 +253,11 @@ class Resource extends EventEmitter {
       },
     });
 
+    // Setup automatic partition hooks if partitions are defined
+    this.setupPartitionHooks();
+
     // Validate partitions against new attributes
     this.validatePartitions();
-
-    // Re-setup partition hooks with new schema
-    this.setupPartitionHooks();
 
     return { oldAttributes, newAttributes };
   }
@@ -262,20 +293,29 @@ class Resource extends EventEmitter {
    * Setup automatic partition hooks
    */
   setupPartitionHooks() {
-    const partitions = this.config.partitions;
+    if (!this.config.partitions) {
+      return;
+    }
     
-    if (!partitions || Object.keys(partitions).length === 0) {
+    const partitions = this.config.partitions;
+    if (Object.keys(partitions).length === 0) {
       return;
     }
 
     // Add afterInsert hook to create partition references
-    this.addHook('afterInsert', async (data) => {
+    if (!this.hooks.afterInsert) {
+      this.hooks.afterInsert = [];
+    }
+    this.hooks.afterInsert.push(async (data) => {
       await this.createPartitionReferences(data);
       return data;
     });
 
     // Add afterDelete hook to clean up partition references
-    this.addHook('afterDelete', async (data) => {
+    if (!this.hooks.afterDelete) {
+      this.hooks.afterDelete = [];
+    }
+    this.hooks.afterDelete.push(async (data) => {
       await this.deletePartitionReferences(data);
       return data;
     });
@@ -305,8 +345,12 @@ class Resource extends EventEmitter {
    * @throws {Error} If partition fields don't exist in current schema
    */
   validatePartitions() {
+    if (!this.config.partitions) {
+      return; // No partitions to validate
+    }
+    
     const partitions = this.config.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
+    if (Object.keys(partitions).length === 0) {
       return; // No partitions to validate
     }
 
@@ -437,11 +481,11 @@ class Resource extends EventEmitter {
    * // Returns: null
    */
   getPartitionKey({ partitionName, id, data }) {
-    const partition = this.config.partitions[partitionName];
-    if (!partition) {
+    if (!this.config.partitions || !this.config.partitions[partitionName]) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
-
+    
+    const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
     
     // Process each field in the partition (sorted by field name for consistency)
@@ -525,7 +569,7 @@ class Resource extends EventEmitter {
     
     // Check for secret fields in attributes and generate passwords if not provided
     for (const [fieldName, fieldType] of Object.entries(this.attributes)) {
-      if (fieldType.includes('secret') && processedAttributes[fieldName] === undefined) {
+      if (typeof fieldType === 'string' && fieldType.includes('secret') && !(fieldName in processedAttributes)) {
         processedAttributes[fieldName] = passwordGenerator();
         console.log(`Auto-generated password for field '${fieldName}': ${processedAttributes[fieldName]}`);
       }
@@ -1109,10 +1153,11 @@ class Resource extends EventEmitter {
     
     if (partition && Object.keys(partitionValues).length > 0) {
       // List from specific partition
-      const partitionDef = this.config.partitions[partition];
-      if (!partitionDef) {
+      if (!this.config.partitions || !this.config.partitions[partition]) {
         throw new Error(`Partition '${partition}' not found`);
       }
+      
+      const partitionDef = this.config.partitions[partition];
       
       // Build partition segments (sorted by field name for consistency)
       const partitionSegments = [];
@@ -1230,10 +1275,11 @@ class Resource extends EventEmitter {
     }
 
     // Get partition definition
-    const partitionDef = this.config.partitions[partition];
-    if (!partitionDef) {
+    if (!this.config.partitions || !this.config.partitions[partition]) {
       throw new Error(`Partition '${partition}' not found`);
     }
+    
+    const partitionDef = this.config.partitions[partition];
     
     // Build partition prefix
     const partitionSegments = [];
@@ -1891,10 +1937,11 @@ class Resource extends EventEmitter {
    * });
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
-    const partition = this.config.partitions[partitionName];
-    if (!partition) {
+    if (!this.config.partitions || !this.config.partitions[partitionName]) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
+    
+    const partition = this.config.partitions[partitionName];
 
     // Build partition key using provided values
     const partitionSegments = [];
@@ -2061,6 +2108,13 @@ function validateResourceConfig(config) {
         } else {
           for (let i = 0; i < hooksArr.length; i++) {
             const hook = hooksArr[i];
+            // Skip validation for automatically added partition hooks
+            if (typeof hook === 'function' && hook.toString().includes('createPartitionReferences')) {
+              continue;
+            }
+            if (typeof hook === 'function' && hook.toString().includes('deletePartitionReferences')) {
+              continue;
+            }
             if (typeof hook !== 'function') {
               errors.push(`Resource 'hooks.${event}[${i}]' must be a function`);
             }
