@@ -96,11 +96,11 @@
 - [🚀 Quick Start](#-quick-start)
 - [💾 Installation](#-installation)
 - [🎯 Core Concepts](#-core-concepts)
+- [⚡ Advanced Features](#-advanced-features)
 - [📖 API Reference](#-api-reference)
 - [🎨 Examples](#-examples)
 - [🔐 Security](#-security)
 - [💰 Cost Analysis](#-cost-analysis)
-- [⚡ Advanced Features](#-advanced-features)
 - [🚨 Best Practices](#-best-practices)
 - [🧪 Testing](#-testing)
 - [🤝 Contributing](#-contributing)
@@ -308,6 +308,171 @@ const product = await products.insert({
   specifications: {
     battery: "30 hours",
     connectivity: "Bluetooth 5.0"
+  }
+});
+```
+
+---
+
+## ⚡ Advanced Features
+
+### 📦 Partitions
+
+Organize data efficiently with partitions for faster queries:
+
+```javascript
+const analytics = await s3db.createResource({
+  name: "analytics",
+  attributes: {
+    userId: "string",
+    event: "string",
+    timestamp: "date",
+    utm: {
+      source: "string",
+      medium: "string",
+      campaign: "string"
+    }
+  },
+  options: {
+    partitions: {
+      byDate: { fields: { timestamp: "date|maxlength:10" } },
+      byUtmSource: { fields: { "utm.source": "string" } },
+      byUserAndDate: { 
+        fields: { 
+          userId: "string", 
+          timestamp: "date|maxlength:10" 
+        } 
+      }
+    }
+  }
+});
+
+// Query by partition for better performance
+const googleEvents = await analytics.list({
+  partition: "byUtmSource",
+  partitionValues: { "utm.source": "google" }
+});
+
+const todayEvents = await analytics.count({
+  partition: "byDate",
+  partitionValues: { timestamp: "2024-01-15" }
+});
+```
+
+### 🎣 Hooks System
+
+Add custom logic with pre/post operation hooks:
+
+```javascript
+const products = await s3db.createResource({
+  name: "products",
+  attributes: {
+    name: "string",
+    price: "number",
+    category: "string"
+  },
+  options: {
+    hooks: {
+      preInsert: [
+        async (data) => {
+          // Auto-generate SKU
+          data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
+          return data;
+        }
+      ],
+      afterInsert: [
+        async (data) => {
+          console.log(`📦 Product ${data.name} created with SKU: ${data.sku}`);
+          // Send notification, update cache, etc.
+        }
+      ],
+      preUpdate: [
+        async (id, data) => {
+          // Log price changes
+          if (data.price) {
+            console.log(`💰 Price update for ${id}: $${data.price}`);
+          }
+          return data;
+        }
+      ]
+    }
+  }
+});
+```
+
+### 🔄 Streaming API
+
+Handle large datasets efficiently with streams:
+
+```javascript
+// Export all users to CSV
+const readableStream = await users.readable();
+const csvWriter = createObjectCsvWriter({
+  path: "users_export.csv",
+  header: [
+    { id: "id", title: "ID" },
+    { id: "name", title: "Name" },
+    { id: "email", title: "Email" }
+  ]
+});
+
+const records = [];
+readableStream.on("data", (user) => {
+  records.push(user);
+});
+
+readableStream.on("end", async () => {
+  await csvWriter.writeRecords(records);
+  console.log("✅ Export completed: users_export.csv");
+});
+
+// Bulk import from stream
+const writableStream = await users.writable();
+importData.forEach(userData => {
+  writableStream.write(userData);
+});
+writableStream.end();
+```
+
+### 🛡️ Document Behaviors
+
+Handle documents that exceed S3's 2KB metadata limit:
+
+```javascript
+// Preserve all data by storing overflow in S3 body
+const blogs = await s3db.createResource({
+  name: "blogs",
+  attributes: {
+    title: "string",
+    content: "string", // Can be very large
+    author: "string"
+  },
+  options: {
+    behavior: "body-overflow" // Handles large content automatically
+  }
+});
+
+// Strict validation - throws error if limit exceeded
+const settings = await s3db.createResource({
+  name: "settings",
+  attributes: {
+    key: "string",
+    value: "string"
+  },
+  options: {  
+    behavior: "enforce-limits" // Ensures data stays within 2KB
+  }
+});
+
+// Smart truncation - preserves structure, truncates content
+const summaries = await s3db.createResource({
+  name: "summaries",
+  attributes: {
+    title: "string",
+    description: "string"
+  },
+  options: {
+    behavior: "data-truncate" // Truncates to fit within limits
   }
 });
 ```
@@ -679,171 +844,6 @@ const s3db = new S3db({
 console.log("💰 Total cost:", s3db.client.costs.total.toFixed(4), "USD");
 console.log("📊 Requests made:", s3db.client.costs.requests.total);
 console.log("📈 Cost breakdown:", s3db.client.costs.breakdown);
-```
-
----
-
-## ⚡ Advanced Features
-
-### 📦 Partitions
-
-Organize data efficiently with partitions for faster queries:
-
-```javascript
-const analytics = await s3db.createResource({
-  name: "analytics",
-  attributes: {
-    userId: "string",
-    event: "string",
-    timestamp: "date",
-    utm: {
-      source: "string",
-      medium: "string",
-      campaign: "string"
-    }
-  },
-  options: {
-    partitions: {
-      byDate: { fields: { timestamp: "date|maxlength:10" } },
-      byUtmSource: { fields: { "utm.source": "string" } },
-      byUserAndDate: { 
-        fields: { 
-          userId: "string", 
-          timestamp: "date|maxlength:10" 
-        } 
-      }
-    }
-  }
-});
-
-// Query by partition for better performance
-const googleEvents = await analytics.list({
-  partition: "byUtmSource",
-  partitionValues: { "utm.source": "google" }
-});
-
-const todayEvents = await analytics.count({
-  partition: "byDate",
-  partitionValues: { timestamp: "2024-01-15" }
-});
-```
-
-### 🎣 Hooks System
-
-Add custom logic with pre/post operation hooks:
-
-```javascript
-const products = await s3db.createResource({
-  name: "products",
-  attributes: {
-    name: "string",
-    price: "number",
-    category: "string"
-  },
-  options: {
-    hooks: {
-      preInsert: [
-        async (data) => {
-          // Auto-generate SKU
-          data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
-          return data;
-        }
-      ],
-      afterInsert: [
-        async (data) => {
-          console.log(`📦 Product ${data.name} created with SKU: ${data.sku}`);
-          // Send notification, update cache, etc.
-        }
-      ],
-      preUpdate: [
-        async (id, data) => {
-          // Log price changes
-          if (data.price) {
-            console.log(`💰 Price update for ${id}: $${data.price}`);
-          }
-          return data;
-        }
-      ]
-    }
-  }
-});
-```
-
-### 🔄 Streaming API
-
-Handle large datasets efficiently with streams:
-
-```javascript
-// Export all users to CSV
-const readableStream = await users.readable();
-const csvWriter = createObjectCsvWriter({
-  path: "users_export.csv",
-  header: [
-    { id: "id", title: "ID" },
-    { id: "name", title: "Name" },
-    { id: "email", title: "Email" }
-  ]
-});
-
-const records = [];
-readableStream.on("data", (user) => {
-  records.push(user);
-});
-
-readableStream.on("end", async () => {
-  await csvWriter.writeRecords(records);
-  console.log("✅ Export completed: users_export.csv");
-});
-
-// Bulk import from stream
-const writableStream = await users.writable();
-importData.forEach(userData => {
-  writableStream.write(userData);
-});
-writableStream.end();
-```
-
-### 🛡️ Document Behaviors
-
-Handle documents that exceed S3's 2KB metadata limit:
-
-```javascript
-// Preserve all data by storing overflow in S3 body
-const blogs = await s3db.createResource({
-  name: "blogs",
-  attributes: {
-    title: "string",
-    content: "string", // Can be very large
-    author: "string"
-  },
-  options: {
-    behavior: "body-overflow" // Handles large content automatically
-  }
-});
-
-// Strict validation - throws error if limit exceeded
-const settings = await s3db.createResource({
-  name: "settings",
-  attributes: {
-    key: "string",
-    value: "string"
-  },
-  options: {  
-    behavior: "enforce-limits" // Ensures data stays within 2KB
-  }
-});
-
-// Smart truncation - preserves structure, truncates content
-const summaries = await s3db.createResource({
-  name: "summaries",
-  attributes: {
-    title: "string",
-    description: "string"
-  },
-  options: {
-    behavior: "data-truncate" // Truncates to fit within limits
-  }
-});
 ```
 
 ---
