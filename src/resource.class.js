@@ -1,5 +1,5 @@
 import { join } from "path";
-import { idGenerator } from "./concerns/id.js";
+import { idGenerator, passwordGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { createHash } from "crypto";
 import { PromisePool } from "@supercharge/promise-pool";
@@ -448,15 +448,33 @@ class Resource extends EventEmitter {
    *   name: 'Jane Smith',
    *   email: 'jane@example.com'
    * });
+   * 
+   * // Insert with auto-generated password for secret field
+   * const user = await resource.insert({
+   *   name: 'John Doe',
+   *   email: 'john@example.com',
+   *   // password will be auto-generated if not provided
+   * });
    */
   async insert({ id, ...attributes }) {
+    // Generate passwords for secret fields that weren't provided
+    const processedAttributes = { ...attributes };
+    
+    // Check for secret fields in attributes and generate passwords if not provided
+    for (const [fieldName, fieldType] of Object.entries(this.attributes)) {
+      if (fieldType.includes('secret') && processedAttributes[fieldName] === undefined) {
+        processedAttributes[fieldName] = passwordGenerator();
+        console.log(`Auto-generated password for field '${fieldName}': ${processedAttributes[fieldName]}`);
+      }
+    }
+
     if (this.options.timestamps) {
-      attributes.createdAt = new Date().toISOString();
-      attributes.updatedAt = new Date().toISOString();
+      processedAttributes.createdAt = new Date().toISOString();
+      processedAttributes.updatedAt = new Date().toISOString();
     }
 
     // Execute preInsert hooks
-    const preProcessedData = await this.executeHooks('preInsert', attributes);
+    const preProcessedData = await this.executeHooks('preInsert', processedAttributes);
 
     const {
       errors,
