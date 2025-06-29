@@ -25,8 +25,8 @@ export class ConnectionString {
 
   defineS3(uri) {
     this.bucket = uri.hostname;
-    this.accessKeyId = uri.username;
-    this.secretAccessKey = uri.password;
+    this.accessKeyId = decodeURIComponent(uri.username);
+    this.secretAccessKey = decodeURIComponent(uri.password);
     this.endpoint = S3_DEFAULT_ENDPOINT;
 
     if (["/", "", null].includes(uri.pathname)) {
@@ -41,8 +41,8 @@ export class ConnectionString {
     this.forcePathStyle = true;
     
     this.endpoint = uri.origin;
-    this.accessKeyId = uri.username;
-    this.secretAccessKey = uri.password;
+    this.accessKeyId = decodeURIComponent(uri.username);
+    this.secretAccessKey = decodeURIComponent(uri.password);
 
     if (["/", "", null].includes(uri.pathname)) {
       this.bucket = "s3db";
