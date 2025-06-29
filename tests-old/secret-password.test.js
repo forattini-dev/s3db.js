@@ -12,7 +12,7 @@ describe('Secret Password Generation Tests', () => {
       connectionString: process.env.BUCKET_CONNECTION_STRING
         .replace('USER', process.env.MINIO_USER)
         .replace('PASSWORD', process.env.MINIO_PASSWORD)
-        + `/${testPrefix}`,
+        + `/s3db/${testPrefix}`,
       passphrase: 'test-secret-passphrase-123'
     });
 
