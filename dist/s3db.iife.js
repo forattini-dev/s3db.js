@@ -9261,6 +9261,58 @@ ${JSON.stringify(validation, null, 2)}`
         this.emit("get", data);
         return data;
       } catch (error) {
+        if (error.message.includes("Cipher job failed") || error.message.includes("OperationError") || error.originalError?.message?.includes("Cipher job failed")) {
+          try {
+            console.warn(`Decryption failed for resource ${id}, attempting to get raw metadata`);
+            const request = await this.client.headObject(key);
+            const objectVersion = this.extractVersionFromKey(key) || this.version;
+            const tempSchema = new Schema({
+              name: this.name,
+              attributes: this.attributes,
+              passphrase: this.passphrase,
+              version: objectVersion,
+              options: {
+                ...this.options,
+                autoDecrypt: false,
+                // Disable decryption
+                autoEncrypt: false
+                // Disable encryption
+              }
+            });
+            let metadata = await tempSchema.unmapper(request.Metadata);
+            const behaviorImpl = getBehavior(this.behavior);
+            let body = "";
+            if (request.ContentLength > 0) {
+              try {
+                const fullObject = await this.client.getObject(key);
+                body = await streamToString(fullObject.Body);
+              } catch (bodyError) {
+                console.warn(`Failed to read body for resource ${id}:`, bodyError.message);
+                body = "";
+              }
+            }
+            const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+              resource: this,
+              metadata,
+              body
+            });
+            let data = processedMetadata;
+            data.id = id;
+            data._contentLength = request.ContentLength;
+            data._lastModified = request.LastModified;
+            data._hasContent = request.ContentLength > 0;
+            data._mimeType = request.ContentType || null;
+            data._version = objectVersion;
+            data._decryptionFailed = true;
+            if (request.VersionId) data._versionId = request.VersionId;
+            if (request.Expiration) data._expiresAt = request.Expiration;
+            data._definitionHash = this.getDefinitionHash();
+            this.emit("get", data);
+            return data;
+          } catch (fallbackError) {
+            console.error(`Fallback attempt also failed for resource ${id}:`, fallbackError.message);
+          }
+        }
         const enhancedError = new Error(`Failed to get resource with id '${id}': ${error.message}`);
         enhancedError.originalError = error;
         enhancedError.resourceId = id;
@@ -9650,11 +9702,27 @@ ${JSON.stringify(validation, null, 2)}`
         if (limit) {
           filteredIds2 = filteredIds2.slice(0, limit);
         }
-        const { results: results2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).process(async (id) => {
-          return await this.get(id);
+        const { results: results2, errors: errors2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).handleError(async (error, id) => {
+          console.warn(`Failed to get resource ${id}:`, error.message);
+          return null;
+        }).process(async (id) => {
+          try {
+            return await this.get(id);
+          } catch (error) {
+            if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+              console.warn(`Decryption failed for ${id}, returning basic info`);
+              return {
+                id,
+                _decryptionFailed: true,
+                _error: error.message
+              };
+            }
+            throw error;
+          }
         });
-        this.emit("list", { partition, partitionValues, count: results2.length });
-        return results2;
+        const validResults2 = results2.filter((item) => item !== null);
+        this.emit("list", { partition, partitionValues, count: validResults2.length, errors: errors2.length });
+        return validResults2;
       }
       const partitionDef = this.options.partitions[partition];
       if (!partitionDef) {
@@ -9685,11 +9753,29 @@ ${JSON.stringify(validation, null, 2)}`
       if (limit) {
         filteredIds = filteredIds.slice(0, limit);
       }
-      const { results } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).process(async (id) => {
-        return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+      const { results, errors } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).handleError(async (error, id) => {
+        console.warn(`Failed to get partition resource ${id}:`, error.message);
+        return null;
+      }).process(async (id) => {
+        try {
+          return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+        } catch (error) {
+          if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+            console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
+            return {
+              id,
+              _partition: partition,
+              _partitionValues: partitionValues,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error;
+        }
       });
-      this.emit("list", { partition, partitionValues, count: results.length });
-      return results;
+      const validResults = results.filter((item) => item !== null);
+      this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
+      return validResults;
     }
     /**
      * Get multiple resources by their IDs
@@ -9700,11 +9786,30 @@ ${JSON.stringify(validation, null, 2)}`
      * users.forEach(user => console.log(user.name));
      */
     async getMany(ids) {
-      const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
+      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
+        console.warn(`Failed to get resource ${id}:`, error.message);
+        return {
+          id,
+          _error: error.message,
+          _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
+        };
+      }).process(async (id) => {
         this.emit("id", id);
-        const data = await this.get(id);
-        this.emit("data", data);
-        return data;
+        try {
+          const data = await this.get(id);
+          this.emit("data", data);
+          return data;
+        } catch (error) {
+          if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+            console.warn(`Decryption failed for ${id}, returning basic info`);
+            return {
+              id,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error;
+        }
       });
       this.emit("getMany", ids.length);
       return results;
@@ -9719,9 +9824,28 @@ ${JSON.stringify(validation, null, 2)}`
     async getAll() {
       let ids = await this.listIds();
       if (ids.length === 0) return [];
-      const { results } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).process(async (id) => {
-        const data = await this.get(id);
-        return data;
+      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
+        console.warn(`Failed to get resource ${id}:`, error.message);
+        return {
+          id,
+          _error: error.message,
+          _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
+        };
+      }).process(async (id) => {
+        try {
+          const data = await this.get(id);
+          return data;
+        } catch (error) {
+          if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+            console.warn(`Decryption failed for ${id}, returning basic info`);
+            return {
+              id,
+              _decryptionFailed: true,
+              _error: error.message
+            };
+          }
+          throw error;
+        }
       });
       this.emit("getAll", results.length);
       return results;
@@ -9936,7 +10060,27 @@ ${JSON.stringify(validation, null, 2)}`
      * @returns {Object} Schema object for the version
      */
     async getSchemaForVersion(version) {
-      return this.schema;
+      if (version === this.version) {
+        return this.schema;
+      }
+      try {
+        const compatibleSchema = new Schema({
+          name: this.name,
+          attributes: this.attributes,
+          passphrase: this.passphrase,
+          version,
+          options: {
+            ...this.options,
+            // For older versions, be more lenient with decryption
+            autoDecrypt: true,
+            autoEncrypt: true
+          }
+        });
+        return compatibleSchema;
+      } catch (error) {
+        console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, error.message);
+        return this.schema;
+      }
     }
     /**
      * Create partition references after insert
@@ -10180,7 +10324,7 @@ ${JSON.stringify(validation, null, 2)}`
       this.version = "1";
       this.s3dbVersion = (() => {
         try {
-          return true ? "4.1.7" : "latest";
+          return true ? "4.1.9" : "latest";
         } catch (e) {
           return "latest";
         }
