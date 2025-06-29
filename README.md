@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Transform AWS S3 into a powerful document database</strong><br>
-  <em>Zero-cost storage • Automatic encryption • TypeScript ready • ORM-like interface</em>
+  <em>Zero-cost storage • Automatic encryption • ORM-like interface • Streaming API</em>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   &nbsp;
   <a href="https://aws.amazon.com/s3/"><img src="https://img.shields.io/badge/Powered_by-AWS_S3-FF9900.svg?style=flat&logo=amazon-aws" alt="Powered by AWS S3"></a>
   &nbsp;
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-3178C6.svg?style=flat&logo=typescript" alt="TypeScript Ready"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Runtime-Node.js-339933.svg?style=flat&logo=node.js" alt="Node.js Runtime"></a>
 </p>
 
 <br>
@@ -53,8 +53,8 @@
 ### 🎯 **Database Operations**
 - **ORM-like Interface** - Familiar CRUD operations
 - **Schema Validation** - Automatic data validation
-- **TypeScript Support** - Full type safety
 - **Streaming API** - Handle large datasets efficiently
+- **Event System** - Real-time notifications
 
 </td>
 <td width="50%">
@@ -1050,5 +1050,5 @@ This means you can use, modify, and distribute this software for any purpose wit
 </p>
 
 <p align="center">
-  <sub>Built with Node.js • Powered by AWS S3 • TypeScript Ready</sub>
+  <sub>Built with Node.js • Powered by AWS S3 • Streaming Ready</sub>
 </p>
