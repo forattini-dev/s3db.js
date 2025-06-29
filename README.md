@@ -297,7 +297,7 @@ const users = await s3db.createResource({
 ```
 
 ### 🔍 Schema Validation
-Built-in validation using [fastest-validator](https://github.com/icebob/fastest-validator):
+Built-in validation using [@icebob/fastest-validator](https://github.com/icebob/fastest-validator) for resource creation and partition validation. This powerful validation engine provides comprehensive rule support, excellent performance, and detailed error reporting for all your data validation needs.
 
 ```javascript
 const product = await products.insert({
@@ -312,9 +312,18 @@ const product = await products.insert({
 });
 ```
 
+**Validation Features powered by fastest-validator:**
+- ✅ **Comprehensive Rules** - String, number, array, object, date validation
+- ✅ **Nested Objects** - Deep validation for complex data structures  
+- ✅ **Custom Rules** - Extend with your own validation logic
+- ✅ **Performance** - Optimized validation engine for speed
+- ✅ **Error Messages** - Detailed validation error reporting
+
 ---
 
 ## ⚡ Advanced Features
+
+s3db.js leverages [@icebob/fastest-validator](https://github.com/icebob/fastest-validator) as its core validation engine for both resource schemas and partition field validation, ensuring high-performance data validation with comprehensive rule support.
 
 ### 📦 Partitions
 
