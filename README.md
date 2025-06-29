@@ -263,74 +263,93 @@ const users = await s3db.createResource({
 });
 ```
 
-#### Nested Attributes
+#### List, ListIds, Count, Page, Query (Novo Formato)
 
-`s3db.js` fully supports nested object attributes, allowing you to create complex document structures:
+Todos os métodos de listagem, paginação e contagem agora recebem um único objeto de parâmetros:
 
-```javascript
+```js
+// Listar todos os usuários
+const allUsers = await users.list();
+
+// Listar usuários de uma partição
+const googleUsers = await users.list({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' }
+});
+
+// Listar IDs de uma partição
+const googleUserIds = await users.listIds({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' }
+});
+
+// Paginar resultados
+const page = await users.page({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' },
+  offset: 0,
+  size: 10
+});
+console.log(page.items); // Array de usuários
+console.log(page.totalItems, page.totalPages);
+
+// Contar documentos em uma partição
+const count = await users.count({
+  partition: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' }
+});
+
+// Query com filtro e paginação
+const filtered = await users.query(
+  { isActive: true },
+  { partition: 'byUtmSource', partitionValues: { 'utm.source': 'google' }, limit: 5, offset: 0 }
+);
+```
+
+#### Partições com Campos Aninhados
+
+Você pode usar dot notation para acessar campos aninhados em partições:
+
+```js
 const users = await s3db.createResource({
-  name: "users",
+  name: 'users',
   attributes: {
-    name: "string|required",
-    email: "email|required",
-    utm: {
-      source: "string|required",
-      medium: "string|required",
-      campaign: "string|required",
-      term: "string|optional",
-      content: "string|optional"
-    },
-    address: {
-      street: "string|required",
-      city: "string|required",
-      state: "string|required",
-      country: "string|required",
-      zipCode: "string|optional"
-    },
-    metadata: {
-      category: "string|required",
-      priority: "string|required",
-      settings: "object|optional"
+    name: 'string|required',
+    utm: { source: 'string|required', medium: 'string|required' },
+    address: { country: 'string|required', city: 'string|required' }
+  },
+  options: {
+    partitions: {
+      byUtmSource: { fields: { 'utm.source': 'string' } },
+      byCountry: { fields: { 'address.country': 'string' } }
     }
   }
 });
 
-// Insert data with nested objects
-const user = await users.insert({
-  name: "John Doe",
-  email: "john@example.com",
-  utm: {
-    source: "google",
-    medium: "cpc",
-    campaign: "brand_awareness",
-    term: "search term"
-  },
-  address: {
-    street: "123 Main St",
-    city: "San Francisco",
-    state: "California",
-    country: "US",
-    zipCode: "94105"
-  },
-  metadata: {
-    category: "premium",
-    priority: "high",
-    settings: { theme: "dark", notifications: true }
-  }
+// Listar por campo aninhado
+const usUsers = await users.list({
+  partition: 'byCountry',
+  partitionValues: { 'address.country': 'US' }
 });
-
-// Access nested data
-console.log(user.utm.source); // "google"
-console.log(user.address.city); // "San Francisco"
-console.log(user.metadata.category); // "premium"
 ```
 
-**Key features of nested attributes:**
-- **Deep nesting**: Support for multiple levels of nested objects
-- **Validation**: Each nested field can have its own validation rules
-- **Optional fields**: Nested objects can contain optional fields
-- **Mixed types**: Combine simple types, arrays, and nested objects
-- **Partition support**: Use dot notation for partitions on nested fields (e.g., `"utm.source"`, `"address.country"`)
+#### getPartitionKey e getFromPartition
+
+```js
+// Gerar chave de partição
+const key = users.getPartitionKey({
+  partitionName: 'byUtmSource',
+  id: 'user-123',
+  data: { utm: { source: 'google' } }
+});
+
+// Buscar diretamente de uma partição
+const user = await users.getFromPartition({
+  id: 'user-123',
+  partitionName: 'byUtmSource',
+  partitionValues: { 'utm.source': 'google' }
+});
+```
 
 #### Automatic Timestamps
 

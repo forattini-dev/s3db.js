@@ -527,28 +527,30 @@ describe('Calculator Tests', () => {
     test('should handle getSizeBreakdown with empty object', () => {
       const breakdown = getSizeBreakdown({});
       expect(breakdown.total).toBe(0);
-      expect(breakdown.sizes).toEqual({});
+      expect(breakdown.sizes).toBeUndefined();
       expect(breakdown.breakdown).toEqual([]);
     });
 
     test('should handle getSizeBreakdown with single attribute', () => {
       const breakdown = getSizeBreakdown({ name: 'John' });
-      expect(breakdown.total).toBe(4); // "John" = 4 bytes
-      expect(breakdown.sizes).toEqual({ name: 4 });
+      expect(breakdown.total).toBe(8); // "John" = 4 bytes, "name" = 4 bytes
+      expect(breakdown.sizes).toBeUndefined();
+      expect(breakdown.namesSize).toBe(4);
       expect(breakdown.breakdown).toEqual([
-        { attribute: 'name', size: 4, percentage: '100.00%' }
+        { attribute: 'name', size: 4, percentage: '50.00%' }
       ]);
     });
 
     test('should handle getSizeBreakdown with equal sizes', () => {
       const breakdown = getSizeBreakdown({ a: 'x', b: 'y', c: 'z' });
-      expect(breakdown.total).toBe(3); // Each is 1 byte
-      expect(breakdown.sizes).toEqual({ a: 1, b: 1, c: 1 });
+      expect(breakdown.total).toBe(6); // 3 valores + 3 nomes = 6 bytes
+      expect(breakdown.sizes).toBeUndefined();
+      expect(breakdown.namesSize).toBe(3);
       expect(breakdown.breakdown.length).toBe(3);
       // All should have same percentage
-      expect(breakdown.breakdown[0].percentage).toBe('33.33%');
-      expect(breakdown.breakdown[1].percentage).toBe('33.33%');
-      expect(breakdown.breakdown[2].percentage).toBe('33.33%');
+      expect(breakdown.breakdown[0].percentage).toBe('16.67%');
+      expect(breakdown.breakdown[1].percentage).toBe('16.67%');
+      expect(breakdown.breakdown[2].percentage).toBe('16.67%');
     });
 
     test('should handle exotic types in transformValue', () => {
