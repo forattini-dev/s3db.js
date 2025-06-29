@@ -467,9 +467,14 @@ describe('Schema Journey Tests - Data Mapping and Validation', () => {
       expect(passwordField).toBeDefined();
       
       // Verificar que arrays foram transformados
-      const socialLinksField = Object.values(mapped).find(value => 
-        typeof value === 'string' && value.includes('github.com')
-      );
+      const socialLinksField = Object.values(mapped).find(value => {
+        try {
+          const url = new URL(value);
+          return url.host === 'github.com';
+        } catch {
+          return false;
+        }
+      });
       expect(socialLinksField).toContain('|');
 
       // Fazer unmapping e verificar descriptografia
