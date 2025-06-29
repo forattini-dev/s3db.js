@@ -18,37 +18,88 @@ import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
 class Resource extends EventEmitter {
-  constructor({
-    name,
-    client,
-    version = '1',
-    options = {},
-    attributes = {},
-    parallelism = 10,
-    passphrase = 'secret',
-    observers = [],
-    behavior = DEFAULT_BEHAVIOR,
-  }) {
+  /**
+   * Create a new Resource instance
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.client - S3 client instance
+   * @param {string} [config.version='v0'] - Resource version
+   * @param {Object} [config.attributes={}] - Resource attributes schema
+   * @param {string} [config.behavior='user-management'] - Resource behavior strategy
+   * @param {string} [config.passphrase='secret'] - Encryption passphrase
+   * @param {number} [config.parallelism=10] - Parallelism for bulk operations
+   * @param {Array} [config.observers=[]] - Observer instances
+   * @param {boolean} [config.cache=false] - Enable caching
+   * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
+   * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
+   * @param {Object} [config.partitions={}] - Partition definitions
+   * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
+   * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
+   * @param {Object} [config.hooks={}] - Custom hooks
+   * @example
+   * const users = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: {
+   *     name: 'string|required',
+   *     email: 'string|required',
+   *     password: 'secret|required'
+   *   },
+   *   behavior: 'user-management',
+   *   passphrase: 'my-secret-key',
+   *   timestamps: true,
+   *   partitions: {
+   *     byRegion: {
+   *       fields: { region: 'string' }
+   *     }
+   *   },
+   *   hooks: {
+   *     preInsert: [async (data) => {
+   *       console.log('Pre-insert hook:', data);
+   *       return data;
+   *     }]
+   *   }
+   * });
+   */
+  constructor(config) {
     super();
 
+    // Validate configuration
+    const validation = validateResourceConfig(config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid Resource configuration:\n${validation.errors.join('\n')}`);
+    }
+
+    // Extract configuration with defaults
+    const {
+      name,
+      client,
+      version = 'v0',
+      attributes = {},
+      behavior = DEFAULT_BEHAVIOR,
+      passphrase = 'secret',
+      parallelism = 10,
+      observers = [],
+      cache = false,
+      autoDecrypt = true,
+      timestamps = false,
+      partitions = {},
+      paranoid = true,
+      allNestedObjectsOptional = true,
+      hooks = {}
+    } = config;
+
+    // Set instance properties
     this.name = name;
     this.client = client;
     this.version = version;
     this.behavior = behavior;
-    
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
 
-    this.options = {
-      cache: false,
-      autoDecrypt: true,
-      timestamps: false,
-      partitions: {},
-      paranoid: true,  // Security flag for dangerous operations
-      allNestedObjectsOptional: options.allNestedObjectsOptional ?? false,
-      ...options,
-    };
+    // Store configuration
+    this.config = config;
 
     // Initialize hooks system
     this.hooks = {
@@ -60,23 +111,24 @@ class Resource extends EventEmitter {
       afterDelete: []
     };
 
-    // Store attributes first
+    // Store attributes
     this.attributes = attributes || {};
 
-    if (options.timestamps) {
+    // Handle timestamps
+    if (timestamps) {
       this.attributes.createdAt = 'string|optional';
       this.attributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
+      if (!this.config.partitions.byCreatedDate) {
+        this.config.partitions.byCreatedDate = {
           fields: {
             createdAt: 'date|maxlength:10'
           }
         };
       }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
+      if (!this.config.partitions.byUpdatedDate) {
+        this.config.partitions.byUpdatedDate = {
           fields: {
             updatedAt: 'date|maxlength:10'
           }
@@ -84,14 +136,15 @@ class Resource extends EventEmitter {
       }
     }
 
+    // Create schema
     this.schema = new Schema({
       name,
       attributes: this.attributes,
       passphrase,
       version: this.version,
       options: {
-        ...this.options,
-        allNestedObjectsOptional: this.options.allNestedObjectsOptional ?? false
+        autoDecrypt: this.config.autoDecrypt,
+        allNestedObjectsOptional: this.config.allNestedObjectsOptional
       },
     });
 
@@ -102,8 +155,8 @@ class Resource extends EventEmitter {
     this.setupPartitionHooks();
 
     // Merge user-provided hooks (added last, after internal hooks)
-    if (options.hooks) {
-      for (const [event, hooksArr] of Object.entries(options.hooks)) {
+    if (hooks) {
+      for (const [event, hooksArr] of Object.entries(hooks)) {
         if (Array.isArray(hooksArr) && this.hooks[event]) {
           for (const fn of hooksArr) {
             this.hooks[event].push(fn.bind(this));
@@ -116,6 +169,13 @@ class Resource extends EventEmitter {
   export() {
     const exported = this.schema.export();
     exported.behavior = this.behavior;
+    exported.timestamps = this.config.timestamps;
+    exported.partitions = this.config.partitions;
+    exported.paranoid = this.config.paranoid;
+    exported.allNestedObjectsOptional = this.config.allNestedObjectsOptional;
+    exported.autoDecrypt = this.config.autoDecrypt;
+    exported.cache = this.config.cache;
+    exported.hooks = this.hooks;
     return exported;
   }
 
@@ -129,20 +189,20 @@ class Resource extends EventEmitter {
     this.attributes = newAttributes;
 
     // Add timestamp attributes if enabled
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       newAttributes.createdAt = 'string|optional';
       newAttributes.updatedAt = 'string|optional';
       
       // Automatically add timestamp partitions for date-based organization
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
+      if (!this.config.partitions.byCreatedDate) {
+        this.config.partitions.byCreatedDate = {
           fields: {
             createdAt: 'date|maxlength:10'
           }
         };
       }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
+      if (!this.config.partitions.byUpdatedDate) {
+        this.config.partitions.byUpdatedDate = {
           fields: {
             updatedAt: 'date|maxlength:10'
           }
@@ -156,7 +216,10 @@ class Resource extends EventEmitter {
       attributes: newAttributes,
       passphrase: this.passphrase,
       version: this.version,
-      options: this.options,
+      options: {
+        autoDecrypt: this.config.autoDecrypt,
+        allNestedObjectsOptional: this.config.allNestedObjectsOptional
+      },
     });
 
     // Validate partitions against new attributes
@@ -199,7 +262,7 @@ class Resource extends EventEmitter {
    * Setup automatic partition hooks
    */
   setupPartitionHooks() {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
@@ -242,7 +305,7 @@ class Resource extends EventEmitter {
    * @throws {Error} If partition fields don't exist in current schema
    */
   validatePartitions() {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return; // No partitions to validate
     }
@@ -374,7 +437,7 @@ class Resource extends EventEmitter {
    * // Returns: null
    */
   getPartitionKey({ partitionName, id, data }) {
-    const partition = this.options.partitions[partitionName];
+    const partition = this.config.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
@@ -468,7 +531,7 @@ class Resource extends EventEmitter {
       }
     }
 
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       processedAttributes.createdAt = new Date().toISOString();
       processedAttributes.updatedAt = new Date().toISOString();
     }
@@ -598,7 +661,7 @@ class Resource extends EventEmitter {
             passphrase: this.passphrase,
             version: objectVersion,
             options: {
-              ...this.options,
+              ...this.config,
               autoDecrypt: false, // Disable decryption
               autoEncrypt: false  // Disable encryption
             }
@@ -698,7 +761,7 @@ class Resource extends EventEmitter {
   async update(id, attributes) {
     const live = await this.get(id);
 
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       attributes.updatedAt = new Date().toISOString();
     }
 
@@ -860,7 +923,7 @@ class Resource extends EventEmitter {
     
     if (partition && Object.keys(partitionValues).length > 0) {
       // Count in specific partition
-      const partitionDef = this.options.partitions[partition];
+      const partitionDef = this.config.partitions[partition];
       if (!partitionDef) {
         throw new Error(`Partition '${partition}' not found`);
       }
@@ -967,10 +1030,10 @@ class Resource extends EventEmitter {
 
   async deleteAll() {
     // Security check: only allow if paranoid mode is disabled
-    if (this.options.paranoid !== false) {
+    if (this.config.paranoid !== false) {
       throw new Error(
         `deleteAll() is a dangerous operation and requires paranoid: false option. ` +
-        `Current paranoid setting: ${this.options.paranoid}`
+        `Current paranoid setting: ${this.config.paranoid}`
       );
     }
 
@@ -993,10 +1056,10 @@ class Resource extends EventEmitter {
    */
   async deleteAllData() {
     // Security check: only allow if paranoid mode is disabled
-    if (this.options.paranoid !== false) {
+    if (this.config.paranoid !== false) {
       throw new Error(
         `deleteAllData() is a dangerous operation and requires paranoid: false option. ` +
-        `Current paranoid setting: ${this.options.paranoid}`
+        `Current paranoid setting: ${this.config.paranoid}`
       );
     }
 
@@ -1046,7 +1109,7 @@ class Resource extends EventEmitter {
     
     if (partition && Object.keys(partitionValues).length > 0) {
       // List from specific partition
-      const partitionDef = this.options.partitions[partition];
+      const partitionDef = this.config.partitions[partition];
       if (!partitionDef) {
         throw new Error(`Partition '${partition}' not found`);
       }
@@ -1167,7 +1230,7 @@ class Resource extends EventEmitter {
     }
 
     // Get partition definition
-    const partitionDef = this.options.partitions[partition];
+    const partitionDef = this.config.partitions[partition];
     if (!partitionDef) {
       throw new Error(`Partition '${partition}' not found`);
     }
@@ -1542,23 +1605,17 @@ class Resource extends EventEmitter {
 
   /**
    * Generate definition hash for this resource
-   * @returns {string} SHA256 hash of the schema definition
+   * @returns {string} SHA256 hash of the resource definition (name + attributes)
    */
   getDefinitionHash() {
-    // Extract only the attributes for hashing (exclude name, version, options, etc.)
-    const attributes = this.schema.export().attributes;
+    // Create a stable object with only name and attributes
+    const definition = {
+      name: this.name,
+      attributes: this.attributes
+    };
     
-    // Create a stable version for hashing by excluding dynamic fields
-    const stableAttributes = { ...attributes };
-    
-    // Remove timestamp fields if they were added automatically
-    if (this.options.timestamps) {
-      delete stableAttributes.createdAt;
-      delete stableAttributes.updatedAt;
-    }
-    
-    // Use jsonStableStringify to ensure consistent ordering
-    const stableString = jsonStableStringify(stableAttributes);
+    // Use jsonStableStringify to ensure consistent ordering regardless of input order
+    const stableString = jsonStableStringify(definition);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
   }
 
@@ -1593,7 +1650,7 @@ class Resource extends EventEmitter {
         passphrase: this.passphrase,
         version: version,
         options: {
-          ...this.options,
+          ...this.config,
           // For older versions, be more lenient with decryption
           autoDecrypt: true,
           autoEncrypt: true
@@ -1612,7 +1669,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Inserted object data
    */
   async createPartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -1654,7 +1711,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Deleted object data
    */
   async deletePartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -1767,7 +1824,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -1834,7 +1891,7 @@ class Resource extends EventEmitter {
    * });
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
-    const partition = this.options.partitions[partitionName];
+    const partition = this.config.partitions[partitionName];
     if (!partition) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
@@ -1902,6 +1959,121 @@ class Resource extends EventEmitter {
     return data;
   }
 
+}
+
+/**
+ * Validate Resource configuration object
+ * @param {Object} config - Configuration object to validate
+ * @returns {Object} Validation result with isValid flag and errors array
+ */
+function validateResourceConfig(config) {
+  const errors = [];
+  
+  // Validate required fields
+  if (!config.name) {
+    errors.push("Resource 'name' is required");
+  } else if (typeof config.name !== 'string') {
+    errors.push("Resource 'name' must be a string");
+  } else if (config.name.trim() === '') {
+    errors.push("Resource 'name' cannot be empty");
+  }
+  
+  if (!config.client) {
+    errors.push("S3 'client' is required");
+  }
+  
+  // Validate attributes
+  if (!config.attributes) {
+    errors.push("Resource 'attributes' are required");
+  } else if (typeof config.attributes !== 'object' || Array.isArray(config.attributes)) {
+    errors.push("Resource 'attributes' must be an object");
+  } else if (Object.keys(config.attributes).length === 0) {
+    errors.push("Resource 'attributes' cannot be empty");
+  }
+  
+  // Validate optional fields with type checking
+  if (config.version !== undefined && typeof config.version !== 'string') {
+    errors.push("Resource 'version' must be a string");
+  }
+  
+  if (config.behavior !== undefined && typeof config.behavior !== 'string') {
+    errors.push("Resource 'behavior' must be a string");
+  }
+  
+  if (config.passphrase !== undefined && typeof config.passphrase !== 'string') {
+    errors.push("Resource 'passphrase' must be a string");
+  }
+  
+  if (config.parallelism !== undefined) {
+    if (typeof config.parallelism !== 'number' || !Number.isInteger(config.parallelism)) {
+      errors.push("Resource 'parallelism' must be an integer");
+    } else if (config.parallelism < 1) {
+      errors.push("Resource 'parallelism' must be greater than 0");
+    }
+  }
+  
+  if (config.observers !== undefined && !Array.isArray(config.observers)) {
+    errors.push("Resource 'observers' must be an array");
+  }
+  
+  // Validate boolean fields
+  const booleanFields = ['cache', 'autoDecrypt', 'timestamps', 'paranoid', 'allNestedObjectsOptional'];
+  for (const field of booleanFields) {
+    if (config[field] !== undefined && typeof config[field] !== 'boolean') {
+      errors.push(`Resource '${field}' must be a boolean`);
+    }
+  }
+  
+  // Validate partitions
+  if (config.partitions !== undefined) {
+    if (typeof config.partitions !== 'object' || Array.isArray(config.partitions)) {
+      errors.push("Resource 'partitions' must be an object");
+    } else {
+      for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
+        if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
+          errors.push(`Partition '${partitionName}' must be an object`);
+        } else if (!partitionDef.fields) {
+          errors.push(`Partition '${partitionName}' must have a 'fields' property`);
+        } else if (typeof partitionDef.fields !== 'object' || Array.isArray(partitionDef.fields)) {
+          errors.push(`Partition '${partitionName}.fields' must be an object`);
+        } else {
+          for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
+            if (typeof fieldType !== 'string') {
+              errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Validate hooks
+  if (config.hooks !== undefined) {
+    if (typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
+      errors.push("Resource 'hooks' must be an object");
+    } else {
+      const validHookEvents = ['preInsert', 'afterInsert', 'preUpdate', 'afterUpdate', 'preDelete', 'afterDelete'];
+      for (const [event, hooksArr] of Object.entries(config.hooks)) {
+        if (!validHookEvents.includes(event)) {
+          errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(', ')}`);
+        } else if (!Array.isArray(hooksArr)) {
+          errors.push(`Resource 'hooks.${event}' must be an array`);
+        } else {
+          for (let i = 0; i < hooksArr.length; i++) {
+            const hook = hooksArr[i];
+            if (typeof hook !== 'function') {
+              errors.push(`Resource 'hooks.${event}[${i}]' must be a function`);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
 }
 
 export default Resource;
