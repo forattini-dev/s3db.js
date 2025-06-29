@@ -2,6 +2,7 @@ name: pipeline
 
 on:
   push:
+    branches: [ main, develop ]
   deployment:
   release:
     types: [created]
@@ -19,7 +20,7 @@ jobs:
     
     services:
       minio:
-        image: minio/minio:latest
+        image: bitnami/minio:latest
         ports:
           - 9000:9000
           - 9001:9001
@@ -27,13 +28,14 @@ jobs:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
           MINIO_DEFAULT_BUCKETS: s3db
+          MINIO_BROWSER: "on"
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 30s
           --health-timeout 10s
           --health-retries 5
         volumes:
-          - /tmp/minio-data:/data
+          - /tmp/minio-data:/bitnami/minio/data
     
     steps:
       - name: Checkout code
@@ -51,12 +53,22 @@ jobs:
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
       
+      - name: Set MinIO data directory permissions
+        run: |
+          # Create MinIO data directory with proper permissions for non-root user (UID 1001)
+          sudo mkdir -p /tmp/minio-data
+          sudo chown -R 1001:1001 /tmp/minio-data
+          sudo chmod -R 755 /tmp/minio-data
+      
       - name: Setup MinIO bucket
         run: |
-          # Install MinIO client
+          # Install MinIO client (mc)
           wget https://dl.min.io/client/mc/release/linux-amd64/mc
           chmod +x mc
           sudo mv mc /usr/local/bin/
+          
+          # Wait a bit more for MinIO to be fully ready
+          sleep 5
           
           # Configure MinIO client
           mc alias set testminio http://localhost:9000 minioadmin minioadmin123
@@ -95,7 +107,7 @@ jobs:
     
     services:
       minio:
-        image: minio/minio:latest
+        image: bitnami/minio:latest
         ports:
           - 9000:9000
           - 9001:9001
@@ -103,13 +115,14 @@ jobs:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
           MINIO_DEFAULT_BUCKETS: s3db
+          MINIO_BROWSER: "on"
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 30s
           --health-timeout 10s
           --health-retries 5
         volumes:
-          - /tmp/minio-data:/data
+          - /tmp/minio-data:/bitnami/minio/data
     
     steps:
       - name: Checkout code
@@ -127,12 +140,22 @@ jobs:
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
       
+      - name: Set MinIO data directory permissions
+        run: |
+          # Create MinIO data directory with proper permissions for non-root user (UID 1001)
+          sudo mkdir -p /tmp/minio-data
+          sudo chown -R 1001:1001 /tmp/minio-data
+          sudo chmod -R 755 /tmp/minio-data
+      
       - name: Setup MinIO bucket
         run: |
-          # Install MinIO client
+          # Install MinIO client (mc)
           wget https://dl.min.io/client/mc/release/linux-amd64/mc
           chmod +x mc
           sudo mv mc /usr/local/bin/
+          
+          # Wait a bit more for MinIO to be fully ready
+          sleep 5
           
           # Configure MinIO client
           mc alias set testminio http://localhost:9000 minioadmin minioadmin123
