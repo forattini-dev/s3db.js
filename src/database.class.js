@@ -69,15 +69,18 @@ export class Database extends EventEmitter {
           name,
           client: this.client,
           version: currentVersion,
-          options: {
-            ...versionData.options,
-            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
-          },
           attributes: versionData.attributes,
           behavior: versionData.behavior || 'user-management',
           parallelism: this.parallelism,
           passphrase: this.passphrase,
           observers: [this],
+          cache: this.cache,
+          timestamps: versionData.options?.timestamps || false,
+          partitions: resourceMetadata.partitions || versionData.options?.partitions || {},
+          paranoid: versionData.options?.paranoid !== false,
+          allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
+          autoDecrypt: versionData.options?.autoDecrypt !== false,
+          hooks: versionData.options?.hooks || {}
         });
       }
     }
@@ -161,7 +164,7 @@ export class Database extends EventEmitter {
     // Create a stable version for hashing by excluding dynamic fields
     const stableAttributes = { ...attributes };
     // Remove timestamp fields if they were added automatically
-    if (definition.options?.timestamps) {
+    if (definition.timestamps) {
       delete stableAttributes.createdAt;
       delete stableAttributes.updatedAt;
     }
@@ -245,13 +248,21 @@ export class Database extends EventEmitter {
 
       metadata.resources[name] = {
         currentVersion: version,
-        partitions: resourceDef.options?.partitions || {},
+        partitions: resource.config.partitions || {},
         versions: {
           ...existingResource?.versions, // Preserve previous versions
           [version]: {
             hash: definitionHash,
             attributes: resourceDef.attributes,
-            options: resourceDef.options,
+            options: {
+              timestamps: resource.config.timestamps,
+              partitions: resource.config.partitions,
+              paranoid: resource.config.paranoid,
+              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
+              autoDecrypt: resource.config.autoDecrypt,
+              cache: resource.config.cache,
+              hooks: resourceDef.hooks || {}
+            },
             behavior: resourceDef.behavior || 'user-management',
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
           }
@@ -313,10 +324,9 @@ export class Database extends EventEmitter {
       observers: [],
       client: this.client,
       version: 'temp',
-      options: {
-        cache: this.cache,
-        ...options,
-      },
+      passphrase: this.passphrase,
+      cache: this.cache,
+      ...options,
     });
     const newHash = this.generateDefinitionHash(tempResource.export(), behavior);
     const existingHash = this.generateDefinitionHash(this.resources[name].export(), this.resources[name].behavior);
@@ -360,7 +370,8 @@ export class Database extends EventEmitter {
   async createResource({ name, attributes, options = {}, behavior = 'user-management' }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
-      Object.assign(existingResource.options, {
+      // Update configuration
+      Object.assign(existingResource.config, {
         cache: this.cache,
         ...options,
       });
@@ -389,10 +400,8 @@ export class Database extends EventEmitter {
       client: this.client,
       version,
       passphrase: this.passphrase,
-      options: {
-        cache: this.cache,
-        ...options,
-      },
+      cache: this.cache,
+      ...options,
     });
     this.resources[name] = resource;
     await this.uploadMetadataFile();
