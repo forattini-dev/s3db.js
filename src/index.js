@@ -13,3 +13,4 @@ export * from './stream/index.js'
 
 // default
 export { default as S3db } from './database.class.js'
+export { S3db as default } from './database.class.js'
