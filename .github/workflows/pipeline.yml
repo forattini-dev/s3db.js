@@ -34,8 +34,6 @@ jobs:
           --health-interval 30s
           --health-timeout 10s
           --health-retries 5
-        volumes:
-          - /tmp/minio-data:/bitnami/minio/data
     
     steps:
       - name: Checkout code
@@ -52,13 +50,6 @@ jobs:
           echo "Waiting for MinIO to be ready..."
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
-      
-      - name: Set MinIO data directory permissions
-        run: |
-          # Create MinIO data directory with proper permissions for non-root user (UID 1001)
-          sudo mkdir -p /tmp/minio-data
-          sudo chown -R 1001:1001 /tmp/minio-data
-          sudo chmod -R 755 /tmp/minio-data
       
       - name: Setup MinIO bucket
         run: |
@@ -121,8 +112,6 @@ jobs:
           --health-interval 30s
           --health-timeout 10s
           --health-retries 5
-        volumes:
-          - /tmp/minio-data:/bitnami/minio/data
     
     steps:
       - name: Checkout code
@@ -139,13 +128,6 @@ jobs:
           echo "Waiting for MinIO to be ready..."
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
-      
-      - name: Set MinIO data directory permissions
-        run: |
-          # Create MinIO data directory with proper permissions for non-root user (UID 1001)
-          sudo mkdir -p /tmp/minio-data
-          sudo chown -R 1001:1001 /tmp/minio-data
-          sudo chmod -R 755 /tmp/minio-data
       
       - name: Setup MinIO bucket
         run: |
