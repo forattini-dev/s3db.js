@@ -9234,36 +9234,45 @@ class Resource extends EventEmitter {
    */
   async get(id) {
     const key = this.getResourceKey(id);
-    const request = await this.client.headObject(key);
-    const objectVersion = this.extractVersionFromKey(key) || this.version;
-    const schema = await this.getSchemaForVersion(objectVersion);
-    let metadata = await schema.unmapper(request.Metadata);
-    const behaviorImpl = getBehavior(this.behavior);
-    let body = "";
-    if (request.ContentLength > 0) {
-      try {
-        const fullObject = await this.client.getObject(key);
-        body = await streamToString(fullObject.Body);
-      } catch (error) {
-        body = "";
+    try {
+      const request = await this.client.headObject(key);
+      const objectVersion = this.extractVersionFromKey(key) || this.version;
+      const schema = await this.getSchemaForVersion(objectVersion);
+      let metadata = await schema.unmapper(request.Metadata);
+      const behaviorImpl = getBehavior(this.behavior);
+      let body = "";
+      if (request.ContentLength > 0) {
+        try {
+          const fullObject = await this.client.getObject(key);
+          body = await streamToString(fullObject.Body);
+        } catch (error) {
+          console.warn(`Failed to read body for resource ${id}:`, error.message);
+          body = "";
+        }
       }
+      const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+        resource: this,
+        metadata,
+        body
+      });
+      let data = processedMetadata;
+      data.id = id;
+      data._contentLength = request.ContentLength;
+      data._lastModified = request.LastModified;
+      data._hasContent = request.ContentLength > 0;
+      data._mimeType = request.ContentType || null;
+      if (request.VersionId) data._versionId = request.VersionId;
+      if (request.Expiration) data._expiresAt = request.Expiration;
+      data._definitionHash = this.getDefinitionHash();
+      this.emit("get", data);
+      return data;
+    } catch (error) {
+      const enhancedError = new Error(`Failed to get resource with id '${id}': ${error.message}`);
+      enhancedError.originalError = error;
+      enhancedError.resourceId = id;
+      enhancedError.resourceKey = key;
+      throw enhancedError;
     }
-    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-      resource: this,
-      metadata,
-      body
-    });
-    let data = processedMetadata;
-    data.id = id;
-    data._contentLength = request.ContentLength;
-    data._lastModified = request.LastModified;
-    data._hasContent = request.ContentLength > 0;
-    data._mimeType = request.ContentType || null;
-    if (request.VersionId) data._versionId = request.VersionId;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-    data._definitionHash = this.getDefinitionHash();
-    this.emit("get", data);
-    return data;
   }
   /**
    * Check if a resource exists by ID
@@ -9545,14 +9554,20 @@ class Resource extends EventEmitter {
     return { deletedCount, resource: this.name };
   }
   /**
-   * List resource IDs with optional partition filtering
+   * List resource IDs with optional partition filtering and pagination
    * @param {Object} [params] - List parameters
    * @param {string} [params.partition] - Partition name to list from
    * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @param {number} [params.limit] - Maximum number of results to return
+   * @param {number} [params.offset=0] - Offset for pagination
    * @returns {Promise<string[]>} Array of resource IDs (strings)
    * @example
    * // List all IDs
    * const allIds = await resource.listIds();
+   * 
+   * // List IDs with pagination
+   * const firstPageIds = await resource.listIds({ limit: 10, offset: 0 });
+   * const secondPageIds = await resource.listIds({ limit: 10, offset: 10 });
    * 
    * // List IDs from specific partition
    * const googleUserIds = await resource.listIds({
@@ -9566,7 +9581,7 @@ class Resource extends EventEmitter {
    *   partitionValues: { category: 'electronics', region: 'US' }
    * });
    */
-  async listIds({ partition = null, partitionValues = {} } = {}) {
+  async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
       const partitionDef = this.options.partitions[partition];
@@ -9590,8 +9605,11 @@ class Resource extends EventEmitter {
     } else {
       prefix = `resource=${this.name}/v=${this.version}`;
     }
-    const keys = await this.client.getAllKeys({
-      prefix
+    const keys = await this.client.getKeysPage({
+      prefix,
+      offset,
+      amount: limit || 1e3
+      // Default to 1000 if no limit specified
     });
     const ids = keys.map((key) => {
       const parts = key.split("/");
@@ -9721,6 +9739,7 @@ class Resource extends EventEmitter {
    * @param {number} [params.size=100] - Page size
    * @param {string} [params.partition] - Partition name to page from
    * @param {Object} [params.partitionValues] - Partition field values to filter by
+   * @param {boolean} [params.skipCount=false] - Skip total count for performance (useful for large collections)
    * @returns {Promise<Object>} Page result with items and pagination info
    * @example
    * // Get first page of all resources
@@ -9735,22 +9754,43 @@ class Resource extends EventEmitter {
    *   offset: 0,
    *   size: 5
    * });
+   * 
+   * // Skip count for performance in large collections
+   * const fastPage = await resource.page({ 
+   *   offset: 0, 
+   *   size: 100, 
+   *   skipCount: true 
+   * });
+   * console.log(`Got ${fastPage.items.length} items`); // totalItems will be null
    */
-  async page({ offset = 0, size = 100, partition = null, partitionValues = {} } = {}) {
-    const ids = await this.listIds({ partition, partitionValues });
-    const totalItems = ids.length;
-    const totalPages = Math.ceil(totalItems / size);
+  async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
+    let totalItems = null;
+    let totalPages = null;
+    if (!skipCount) {
+      totalItems = await this.count({ partition, partitionValues });
+      totalPages = Math.ceil(totalItems / size);
+    }
     const page = Math.floor(offset / size);
-    const pageIds = ids.slice(offset, offset + size);
-    const items = await Promise.all(
-      pageIds.map((id) => this.get(id))
-    );
+    const items = await this.list({
+      partition,
+      partitionValues,
+      limit: size,
+      offset
+    });
     const result = {
       items,
       totalItems,
       page,
       pageSize: size,
-      totalPages
+      totalPages,
+      // Add additional metadata for debugging
+      _debug: {
+        requestedSize: size,
+        requestedOffset: offset,
+        actualItemsReturned: items.length,
+        skipCount,
+        hasTotalItems: totalItems !== null
+      }
     };
     this.emit("page", result);
     return result;
@@ -10146,7 +10186,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.6" : "latest";
+        return true ? "4.1.7" : "latest";
       } catch (e) {
         return "latest";
       }
