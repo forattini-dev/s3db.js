@@ -10635,7 +10635,7 @@ ${validation.errors.join("\n")}`);
             paranoid: versionData.options?.paranoid !== false,
             allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
             autoDecrypt: versionData.options?.autoDecrypt !== false,
-            hooks: versionData.options?.hooks || {}
+            hooks: {}
           });
         }
       }
@@ -10779,8 +10779,7 @@ ${validation.errors.join("\n")}`);
                 paranoid: resource.config.paranoid,
                 allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
                 autoDecrypt: resource.config.autoDecrypt,
-                cache: resource.config.cache,
-                hooks: resourceDef.hooks || {}
+                cache: resource.config.cache
               },
               behavior: resourceDef.behavior || "user-management",
               createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt

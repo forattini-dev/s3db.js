@@ -94,7 +94,7 @@ export class Database extends EventEmitter {
           paranoid: versionData.options?.paranoid !== false,
           allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
           autoDecrypt: versionData.options?.autoDecrypt !== false,
-          hooks: versionData.options?.hooks || {}
+          hooks: {}
         });
       }
     }
@@ -275,7 +275,6 @@ export class Database extends EventEmitter {
               allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
               autoDecrypt: resource.config.autoDecrypt,
               cache: resource.config.cache,
-              hooks: resourceDef.hooks || {}
             },
             behavior: resourceDef.behavior || 'user-management',
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
