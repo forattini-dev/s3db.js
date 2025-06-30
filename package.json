@@ -43,7 +43,7 @@
     "test-builds": "node examples/test-builds.js",
     "coverage": "coveralls < coverage/lcov.info",
     "coverage:serve": "npx http-server ./coverage/lcov-report",
-    "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles -- ./tests/*",
+    "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
     "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watch --detectOpenHandles",
     "test:dist": "node --no-warnings --experimental-vm-modules ./tests/dist.js"
   },

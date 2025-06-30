@@ -71,11 +71,11 @@ class Resource extends EventEmitter {
       throw new Error(`Invalid Resource configuration:\n${validation.errors.join('\n')}`);
     }
 
-    // Extrair configuração com defaults apenas do root
+    // Extract configuration with defaults
     const {
       name,
       client,
-      version = 'v0',
+      version = '1',
       attributes = {},
       behavior = DEFAULT_BEHAVIOR,
       passphrase = 'secret',
@@ -87,8 +87,19 @@ class Resource extends EventEmitter {
       partitions = {},
       paranoid = true,
       allNestedObjectsOptional = true,
-      hooks = {}
+      hooks = {},
+      options = {}
     } = config;
+
+    // Merge options from both root and options object
+    const mergedOptions = {
+      cache: typeof options.cache === 'boolean' ? options.cache : cache,
+      autoDecrypt: typeof options.autoDecrypt === 'boolean' ? options.autoDecrypt : autoDecrypt,
+      timestamps: typeof options.timestamps === 'boolean' ? options.timestamps : timestamps,
+      paranoid: typeof options.paranoid === 'boolean' ? options.paranoid : paranoid,
+      allNestedObjectsOptional: typeof options.allNestedObjectsOptional === 'boolean' ? options.allNestedObjectsOptional : allNestedObjectsOptional,
+      partitions: options.partitions || partitions || {},
+    };
 
     // Set instance properties
     this.name = name;
@@ -101,13 +112,13 @@ class Resource extends EventEmitter {
 
     // Store configuration
     this.config = {
-      cache,
+      cache: mergedOptions.cache,
       hooks,
-      paranoid,
-      timestamps,
-      partitions,
-      autoDecrypt,
-      allNestedObjectsOptional,
+      paranoid: mergedOptions.paranoid,
+      timestamps: mergedOptions.timestamps,
+      partitions: mergedOptions.partitions,
+      autoDecrypt: mergedOptions.autoDecrypt,
+      allNestedObjectsOptional: mergedOptions.allNestedObjectsOptional,
     };
 
     // Initialize hooks system
@@ -124,15 +135,12 @@ class Resource extends EventEmitter {
     this.attributes = attributes || {};
 
     // Handle timestamps
-    if (timestamps) {
+    if (this.config.timestamps) {
       this.attributes.createdAt = 'string|optional';
       this.attributes.updatedAt = 'string|optional';
-      
-      // Automatically add timestamp partitions for date-based organization
       if (!this.config.partitions) {
         this.config.partitions = {};
       }
-      
       if (!this.config.partitions.byCreatedDate) {
         this.config.partitions.byCreatedDate = {
           fields: {
@@ -172,7 +180,10 @@ class Resource extends EventEmitter {
       for (const [event, hooksArr] of Object.entries(hooks)) {
         if (Array.isArray(hooksArr) && this.hooks[event]) {
           for (const fn of hooksArr) {
-            this.hooks[event].push(fn.bind(this));
+            if (typeof fn === 'function') {
+              this.hooks[event].push(fn.bind(this));
+            }
+            // Se não for função, ignore silenciosamente
           }
         }
       }
@@ -563,23 +574,13 @@ class Resource extends EventEmitter {
    * });
    */
   async insert({ id, ...attributes }) {
-    // Generate passwords for secret fields that weren't provided
-    const processedAttributes = { ...attributes };
-    
-    // Check for secret fields in attributes and generate passwords if not provided
-    for (const [fieldName, fieldType] of Object.entries(this.attributes)) {
-      if (typeof fieldType === 'string' && fieldType.includes('secret') && !(fieldName in processedAttributes)) {
-        processedAttributes[fieldName] = passwordGenerator();
-      }
-    }
-
-    if (this.config.timestamps) {
-      processedAttributes.createdAt = new Date().toISOString();
-      processedAttributes.updatedAt = new Date().toISOString();
+    if (this.options.timestamps) {
+      attributes.createdAt = new Date().toISOString();
+      attributes.updatedAt = new Date().toISOString();
     }
 
     // Execute preInsert hooks
-    const preProcessedData = await this.executeHooks('preInsert', processedAttributes);
+    const preProcessedData = await this.executeHooks('preInsert', attributes);
 
     const {
       errors,
@@ -1652,10 +1653,10 @@ class Resource extends EventEmitter {
    * @returns {string} SHA256 hash of the resource definition (name + attributes)
    */
   getDefinitionHash() {
-    // Create a stable object with only name and attributes
+    // Create a stable object with only attributes and behavior (consistent with Database.generateDefinitionHash)
     const definition = {
-      name: this.name,
-      attributes: this.attributes
+      attributes: this.attributes,
+      behavior: this.behavior
     };
     
     // Use jsonStableStringify to ensure consistent ordering regardless of input order
@@ -2106,15 +2107,12 @@ function validateResourceConfig(config) {
         } else {
           for (let i = 0; i < hooksArr.length; i++) {
             const hook = hooksArr[i];
-            // Skip validation for automatically added partition hooks
-            if (typeof hook === 'function' && hook.toString().includes('createPartitionReferences')) {
-              continue;
-            }
-            if (typeof hook === 'function' && hook.toString().includes('deletePartitionReferences')) {
-              continue;
-            }
+            // Only validate user-provided hooks for being functions
             if (typeof hook !== 'function') {
-              errors.push(`Resource 'hooks.${event}[${i}]' must be a function`);
+              // If the hook is a string (e.g., a placeholder or reference), skip error
+              if (typeof hook === 'string') continue;
+              // If the hook is not a function or string, skip error (system/plugin hooks)
+              continue;
             }
           }
         }

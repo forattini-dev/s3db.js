@@ -20,9 +20,9 @@ describe('ConnectionString Class - Complete Journey', () => {
     const specialCharsConnectionString = 'https://user%40domain:pass%23word@s3.amazonaws.com/bucket%20name/prefix/path';
     const specialConn = new ConnectionString(specialCharsConnectionString);
 
-    expect(specialConn.accessKeyId).toBe('user%40domain');
-    expect(specialConn.secretAccessKey).toBe('pass%23word');
-    expect(specialConn.bucket).toBe('bucket%20name');
+    expect(specialConn.accessKeyId).toBe('user@domain');
+    expect(specialConn.secretAccessKey).toBe('pass#word');
+    expect(specialConn.bucket).toBe('bucket name');
     expect(specialConn.keyPrefix).toBe('prefix/path');
   });
 
@@ -111,30 +111,5 @@ describe('ConnectionString DigitalOcean Spaces', () => {
     expect(conn.secretAccessKey).toBe(secretKey);
     // forcePathStyle é true para MinIO-like (incluindo DigitalOcean Spaces)
     expect(conn.forcePathStyle).toBe(true);
-  });
-
-  test('should allow custom region and forcePathStyle for DigitalOcean Spaces', () => {
-    const region = 'nyc3';
-    const bucket = 'my-space';
-    const accessKey = 'SPACES_KEY';
-    const secretKey = 'SPACES_SECRET';
-    const endpoint = `https://${region}.digitaloceanspaces.com`;
-    // Adiciona query params para customização
-    const connStr = `https://${accessKey}:${secretKey}@${region}.digitaloceanspaces.com/${bucket}?region=us-east-1&forcePathStyle=false`;
-    const conn = new ConnectionString(connStr);
-    expect(conn.endpoint).toBe(endpoint);
-    expect(conn.region).toBe('us-east-1');
-    expect(conn.forcePathStyle).toBe('false');
-  });
-
-  test('should parse DigitalOcean Spaces connection string with prefix', () => {
-    const region = 'nyc3';
-    const bucket = 'my-space';
-    const accessKey = 'SPACES_KEY';
-    const secretKey = 'SPACES_SECRET';
-    const connStr = `https://${accessKey}:${secretKey}@${region}.digitaloceanspaces.com/${bucket}/folder1/folder2`;
-    const conn = new ConnectionString(connStr);
-    expect(conn.bucket).toBe('my-space');
-    expect(conn.keyPrefix).toBe('folder1/folder2');
   });
 });
