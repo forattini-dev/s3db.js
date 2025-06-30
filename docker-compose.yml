@@ -5,8 +5,8 @@ services:
     volumes:
       - minio_data:/bitnami/minio/data 
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9010:9000"
+      - "9011:9001"
     environment:
       MINIO_FORCE_NEW_KEYS: yes
       MINIO_SCHEME: http
