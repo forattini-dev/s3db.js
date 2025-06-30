@@ -10582,7 +10582,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.10" : "latest";
+        return true ? "4.1.12" : "latest";
       } catch (e) {
         return "latest";
       }
