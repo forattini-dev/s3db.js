@@ -24,7 +24,7 @@ export class ConnectionString {
   }
 
   defineS3(uri) {
-    this.bucket = uri.hostname;
+    this.bucket = decodeURIComponent(uri.hostname);
     this.accessKeyId = decodeURIComponent(uri.username);
     this.secretAccessKey = decodeURIComponent(uri.password);
     this.endpoint = S3_DEFAULT_ENDPOINT;
@@ -50,7 +50,7 @@ export class ConnectionString {
     } else {
       let [, bucket, ...subpath] = uri.pathname.split("/");
       
-      this.bucket = bucket;
+      this.bucket = decodeURIComponent(bucket);
       this.keyPrefix = [...(subpath || [])].join("/");
     }
   }

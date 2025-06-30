@@ -35,7 +35,7 @@ describe('Validator Class - Complete Journey', () => {
 
     database = new Database({ client });
     resource = new Resource({
-      database,
+      client,
       name: 'validator-test',
       attributes: {
         name: 'string|required',

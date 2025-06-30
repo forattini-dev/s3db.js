@@ -242,6 +242,8 @@ var substr = 'ab'.substr(-1) === 'b' ?
 ;
 
 const idGenerator = customAlphabet(urlAlphabet, 22);
+const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+customAlphabet(passwordAlphabet, 12);
 
 var domain;
 
@@ -742,42 +744,85 @@ ${JSON.stringify(rest, null, 2)}`;
     return `${this.name} | ${this.message}`;
   }
 }
-class NoSuchBucket extends BaseError {
-  constructor({ bucket, ...rest }) {
-    super({ ...rest, bucket, message: `Bucket does not exists [bucket:${bucket}]` });
+class S3DBError extends BaseError {
+  constructor(message, details = {}) {
+    super({ message, ...details });
   }
 }
-class NoSuchKey extends BaseError {
+class DatabaseError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class ValidationError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class AuthenticationError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class PermissionError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class EncryptionError extends S3DBError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class ResourceNotFound extends S3DBError {
+  constructor({ bucket, resourceName, id, ...rest }) {
+    super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
+      bucket,
+      resourceName,
+      id,
+      ...rest
+    });
+  }
+}
+class NoSuchBucket extends S3DBError {
+  constructor({ bucket, ...rest }) {
+    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, ...rest });
+  }
+}
+class NoSuchKey extends S3DBError {
   constructor({ bucket, key, ...rest }) {
-    super({ ...rest, bucket, message: `Key [${key}] does not exists [bucket:${bucket}/${key}]` });
-    this.key = key;
+    super(`Key [${key}] does not exists [bucket:${bucket}/${key}]`, { bucket, key, ...rest });
   }
 }
 class NotFound extends NoSuchKey {
 }
-class MissingMetadata extends BaseError {
+class MissingMetadata extends S3DBError {
   constructor({ bucket, ...rest }) {
-    super({ ...rest, bucket, message: `Missing metadata for bucket [bucket:${bucket}]` });
+    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, ...rest });
   }
 }
-class InvalidResourceItem extends BaseError {
+class InvalidResourceItem extends S3DBError {
   constructor({
     bucket,
     resourceName,
     attributes,
     validation
   }) {
-    super({
+    super(`This item is not valid. Resource=${resourceName} [bucket:${bucket}].
+${JSON.stringify(validation, null, 2)}`, {
       bucket,
-      message: `This item is not valid. Resource=${resourceName} [bucket:${bucket}].
-${JSON.stringify(validation, null, 2)}`
+      resourceName,
+      attributes,
+      validation
     });
-    this.resourceName = resourceName;
-    this.attributes = attributes;
-    this.validation = validation;
   }
 }
-class UnknownError extends BaseError {
+class UnknownError extends S3DBError {
 }
 const ErrorMap = {
   "NotFound": NotFound,
@@ -806,9 +851,9 @@ class ConnectionString {
     }
   }
   defineS3(uri) {
-    this.bucket = uri.hostname;
-    this.accessKeyId = uri.username;
-    this.secretAccessKey = uri.password;
+    this.bucket = decodeURIComponent(uri.hostname);
+    this.accessKeyId = decodeURIComponent(uri.username);
+    this.secretAccessKey = decodeURIComponent(uri.password);
     this.endpoint = S3_DEFAULT_ENDPOINT;
     if (["/", "", null].includes(uri.pathname)) {
       this.keyPrefix = "";
@@ -820,14 +865,14 @@ class ConnectionString {
   defineMinio(uri) {
     this.forcePathStyle = true;
     this.endpoint = uri.origin;
-    this.accessKeyId = uri.username;
-    this.secretAccessKey = uri.password;
+    this.accessKeyId = decodeURIComponent(uri.username);
+    this.secretAccessKey = decodeURIComponent(uri.password);
     if (["/", "", null].includes(uri.pathname)) {
       this.bucket = "s3db";
       this.keyPrefix = "";
     } else {
       let [, bucket, ...subpath] = uri.pathname.split("/");
-      this.bucket = bucket;
+      this.bucket = decodeURIComponent(bucket);
       this.keyPrefix = [...subpath || []].join("/");
     }
   }
@@ -8836,18 +8881,83 @@ function getBehavior(behaviorName) {
 const DEFAULT_BEHAVIOR = "user-management";
 
 class Resource extends EventEmitter {
-  constructor({
-    name,
-    client,
-    version = "1",
-    options = {},
-    attributes = {},
-    parallelism = 10,
-    passphrase = "secret",
-    observers = [],
-    behavior = DEFAULT_BEHAVIOR
-  }) {
+  /**
+   * Create a new Resource instance
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.client - S3 client instance
+   * @param {string} [config.version='v0'] - Resource version
+   * @param {Object} [config.attributes={}] - Resource attributes schema
+   * @param {string} [config.behavior='user-management'] - Resource behavior strategy
+   * @param {string} [config.passphrase='secret'] - Encryption passphrase
+   * @param {number} [config.parallelism=10] - Parallelism for bulk operations
+   * @param {Array} [config.observers=[]] - Observer instances
+   * @param {boolean} [config.cache=false] - Enable caching
+   * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
+   * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
+   * @param {Object} [config.partitions={}] - Partition definitions
+   * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
+   * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
+   * @param {Object} [config.hooks={}] - Custom hooks
+   * @param {Object} [config.options={}] - Additional options
+   * @example
+   * const users = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: {
+   *     name: 'string|required',
+   *     email: 'string|required',
+   *     password: 'secret|required'
+   *   },
+   *   behavior: 'user-management',
+   *   passphrase: 'my-secret-key',
+   *   timestamps: true,
+   *   partitions: {
+   *     byRegion: {
+   *       fields: { region: 'string' }
+   *     }
+   *   },
+   *   hooks: {
+   *     preInsert: [async (data) => {
+   *       console.log('Pre-insert hook:', data);
+   *       return data;
+   *     }]
+   *   }
+   * });
+   */
+  constructor(config) {
     super();
+    const validation = validateResourceConfig(config);
+    if (!validation.isValid) {
+      throw new Error(`Invalid Resource configuration:
+${validation.errors.join("\n")}`);
+    }
+    const {
+      name,
+      client,
+      version = "1",
+      attributes = {},
+      behavior = DEFAULT_BEHAVIOR,
+      passphrase = "secret",
+      parallelism = 10,
+      observers = [],
+      cache = false,
+      autoDecrypt = true,
+      timestamps = false,
+      partitions = {},
+      paranoid = true,
+      allNestedObjectsOptional = true,
+      hooks = {},
+      options = {}
+    } = config;
+    const mergedOptions = {
+      cache: typeof options.cache === "boolean" ? options.cache : cache,
+      autoDecrypt: typeof options.autoDecrypt === "boolean" ? options.autoDecrypt : autoDecrypt,
+      timestamps: typeof options.timestamps === "boolean" ? options.timestamps : timestamps,
+      paranoid: typeof options.paranoid === "boolean" ? options.paranoid : paranoid,
+      allNestedObjectsOptional: typeof options.allNestedObjectsOptional === "boolean" ? options.allNestedObjectsOptional : allNestedObjectsOptional,
+      partitions: options.partitions || partitions || {}
+    };
     this.name = name;
     this.client = client;
     this.version = version;
@@ -8855,15 +8965,14 @@ class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
-    this.options = {
-      cache: false,
-      autoDecrypt: true,
-      timestamps: false,
-      partitions: {},
-      paranoid: true,
-      // Security flag for dangerous operations
-      allNestedObjectsOptional: options.allNestedObjectsOptional ?? false,
-      ...options
+    this.config = {
+      cache: mergedOptions.cache,
+      hooks,
+      paranoid: mergedOptions.paranoid,
+      timestamps: mergedOptions.timestamps,
+      partitions: mergedOptions.partitions,
+      autoDecrypt: mergedOptions.autoDecrypt,
+      allNestedObjectsOptional: mergedOptions.allNestedObjectsOptional
     };
     this.hooks = {
       preInsert: [],
@@ -8874,18 +8983,21 @@ class Resource extends EventEmitter {
       afterDelete: []
     };
     this.attributes = attributes || {};
-    if (options.timestamps) {
+    if (this.config.timestamps) {
       this.attributes.createdAt = "string|optional";
       this.attributes.updatedAt = "string|optional";
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
+      if (!this.config.partitions) {
+        this.config.partitions = {};
+      }
+      if (!this.config.partitions.byCreatedDate) {
+        this.config.partitions.byCreatedDate = {
           fields: {
             createdAt: "date|maxlength:10"
           }
         };
       }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
+      if (!this.config.partitions.byUpdatedDate) {
+        this.config.partitions.byUpdatedDate = {
           fields: {
             updatedAt: "date|maxlength:10"
           }
@@ -8898,25 +9010,47 @@ class Resource extends EventEmitter {
       passphrase,
       version: this.version,
       options: {
-        ...this.options,
-        allNestedObjectsOptional: this.options.allNestedObjectsOptional ?? false
+        autoDecrypt: this.config.autoDecrypt,
+        allNestedObjectsOptional: this.config.allNestedObjectsOptional
       }
     });
-    this.validatePartitions();
     this.setupPartitionHooks();
-    if (options.hooks) {
-      for (const [event, hooksArr] of Object.entries(options.hooks)) {
+    this.validatePartitions();
+    if (hooks) {
+      for (const [event, hooksArr] of Object.entries(hooks)) {
         if (Array.isArray(hooksArr) && this.hooks[event]) {
           for (const fn of hooksArr) {
-            this.hooks[event].push(fn.bind(this));
+            if (typeof fn === "function") {
+              this.hooks[event].push(fn.bind(this));
+            }
           }
         }
       }
     }
   }
+  /**
+   * Get resource options (for backward compatibility with tests)
+   */
+  get options() {
+    return {
+      timestamps: this.config.timestamps,
+      partitions: this.config.partitions || {},
+      cache: this.config.cache,
+      autoDecrypt: this.config.autoDecrypt,
+      paranoid: this.config.paranoid,
+      allNestedObjectsOptional: this.config.allNestedObjectsOptional
+    };
+  }
   export() {
     const exported = this.schema.export();
     exported.behavior = this.behavior;
+    exported.timestamps = this.config.timestamps;
+    exported.partitions = this.config.partitions || {};
+    exported.paranoid = this.config.paranoid;
+    exported.allNestedObjectsOptional = this.config.allNestedObjectsOptional;
+    exported.autoDecrypt = this.config.autoDecrypt;
+    exported.cache = this.config.cache;
+    exported.hooks = this.hooks;
     return exported;
   }
   /**
@@ -8926,18 +9060,21 @@ class Resource extends EventEmitter {
   updateAttributes(newAttributes) {
     const oldAttributes = this.attributes;
     this.attributes = newAttributes;
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       newAttributes.createdAt = "string|optional";
       newAttributes.updatedAt = "string|optional";
-      if (!this.options.partitions.byCreatedDate) {
-        this.options.partitions.byCreatedDate = {
+      if (!this.config.partitions) {
+        this.config.partitions = {};
+      }
+      if (!this.config.partitions.byCreatedDate) {
+        this.config.partitions.byCreatedDate = {
           fields: {
             createdAt: "date|maxlength:10"
           }
         };
       }
-      if (!this.options.partitions.byUpdatedDate) {
-        this.options.partitions.byUpdatedDate = {
+      if (!this.config.partitions.byUpdatedDate) {
+        this.config.partitions.byUpdatedDate = {
           fields: {
             updatedAt: "date|maxlength:10"
           }
@@ -8949,10 +9086,13 @@ class Resource extends EventEmitter {
       attributes: newAttributes,
       passphrase: this.passphrase,
       version: this.version,
-      options: this.options
+      options: {
+        autoDecrypt: this.config.autoDecrypt,
+        allNestedObjectsOptional: this.config.allNestedObjectsOptional
+      }
     });
-    this.validatePartitions();
     this.setupPartitionHooks();
+    this.validatePartitions();
     return { oldAttributes, newAttributes };
   }
   /**
@@ -8983,15 +9123,24 @@ class Resource extends EventEmitter {
    * Setup automatic partition hooks
    */
   setupPartitionHooks() {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
+    if (!this.config.partitions) {
       return;
     }
-    this.addHook("afterInsert", async (data) => {
+    const partitions = this.config.partitions;
+    if (Object.keys(partitions).length === 0) {
+      return;
+    }
+    if (!this.hooks.afterInsert) {
+      this.hooks.afterInsert = [];
+    }
+    this.hooks.afterInsert.push(async (data) => {
       await this.createPartitionReferences(data);
       return data;
     });
-    this.addHook("afterDelete", async (data) => {
+    if (!this.hooks.afterDelete) {
+      this.hooks.afterDelete = [];
+    }
+    this.hooks.afterDelete.push(async (data) => {
       await this.deletePartitionReferences(data);
       return data;
     });
@@ -9016,8 +9165,11 @@ class Resource extends EventEmitter {
    * @throws {Error} If partition fields don't exist in current schema
    */
   validatePartitions() {
-    const partitions = this.options.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
+    if (!this.config.partitions) {
+      return;
+    }
+    const partitions = this.config.partitions;
+    if (Object.keys(partitions).length === 0) {
       return;
     }
     const currentAttributes = Object.keys(this.attributes || {});
@@ -9124,10 +9276,10 @@ class Resource extends EventEmitter {
    * // Returns: null
    */
   getPartitionKey({ partitionName, id, data }) {
-    const partition = this.options.partitions[partitionName];
-    if (!partition) {
+    if (!this.config.partitions || !this.config.partitions[partitionName]) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
+    const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
     const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, rule] of sortedFields) {
@@ -9182,6 +9334,12 @@ class Resource extends EventEmitter {
    *   id: 'custom-id-123',
    *   name: 'Jane Smith',
    *   email: 'jane@example.com'
+   * });
+   * 
+   * // Insert with auto-generated password for secret field
+   * const user = await resource.insert({
+   *   name: 'John Doe',
+   *   email: 'john@example.com',
    * });
    */
   async insert({ id, ...attributes }) {
@@ -9278,7 +9436,7 @@ class Resource extends EventEmitter {
             passphrase: this.passphrase,
             version: objectVersion,
             options: {
-              ...this.options,
+              ...this.config,
               autoDecrypt: false,
               // Disable decryption
               autoEncrypt: false
@@ -9365,7 +9523,7 @@ class Resource extends EventEmitter {
    */
   async update(id, attributes) {
     const live = await this.get(id);
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const preProcessedData = await this.executeHooks("preUpdate", attributes);
@@ -9487,7 +9645,7 @@ class Resource extends EventEmitter {
   async count({ partition = null, partitionValues = {} } = {}) {
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
-      const partitionDef = this.options.partitions[partition];
+      const partitionDef = this.config.partitions[partition];
       if (!partitionDef) {
         throw new Error(`Partition '${partition}' not found`);
       }
@@ -9572,9 +9730,9 @@ class Resource extends EventEmitter {
     return results;
   }
   async deleteAll() {
-    if (this.options.paranoid !== false) {
+    if (this.config.paranoid !== false) {
       throw new Error(
-        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.config.paranoid}`
       );
     }
     const prefix = `resource=${this.name}/v=${this.version}`;
@@ -9591,9 +9749,9 @@ class Resource extends EventEmitter {
    * @returns {Promise<Object>} Deletion report
    */
   async deleteAllData() {
-    if (this.options.paranoid !== false) {
+    if (this.config.paranoid !== false) {
       throw new Error(
-        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.options.paranoid}`
+        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.config.paranoid}`
       );
     }
     const prefix = `resource=${this.name}`;
@@ -9636,10 +9794,10 @@ class Resource extends EventEmitter {
   async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
-      const partitionDef = this.options.partitions[partition];
-      if (!partitionDef) {
+      if (!this.config.partitions || !this.config.partitions[partition]) {
         throw new Error(`Partition '${partition}' not found`);
       }
+      const partitionDef = this.config.partitions[partition];
       const partitionSegments = [];
       const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
       for (const [fieldName, rule] of sortedFields) {
@@ -9730,10 +9888,10 @@ class Resource extends EventEmitter {
       this.emit("list", { partition, partitionValues, count: validResults2.length, errors: errors2.length });
       return validResults2;
     }
-    const partitionDef = this.options.partitions[partition];
-    if (!partitionDef) {
+    if (!this.config.partitions || !this.config.partitions[partition]) {
       throw new Error(`Partition '${partition}' not found`);
     }
+    const partitionDef = this.config.partitions[partition];
     const partitionSegments = [];
     const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, rule] of sortedFields) {
@@ -10038,16 +10196,14 @@ class Resource extends EventEmitter {
   }
   /**
    * Generate definition hash for this resource
-   * @returns {string} SHA256 hash of the schema definition
+   * @returns {string} SHA256 hash of the resource definition (name + attributes)
    */
   getDefinitionHash() {
-    const attributes = this.schema.export().attributes;
-    const stableAttributes = { ...attributes };
-    if (this.options.timestamps) {
-      delete stableAttributes.createdAt;
-      delete stableAttributes.updatedAt;
-    }
-    const stableString = jsonStableStringify(stableAttributes);
+    const definition = {
+      attributes: this.attributes,
+      behavior: this.behavior
+    };
+    const stableString = jsonStableStringify(definition);
     return `sha256:${createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
@@ -10076,7 +10232,7 @@ class Resource extends EventEmitter {
         passphrase: this.passphrase,
         version,
         options: {
-          ...this.options,
+          ...this.config,
           // For older versions, be more lenient with decryption
           autoDecrypt: true,
           autoEncrypt: true
@@ -10093,7 +10249,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Inserted object data
    */
   async createPartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -10124,7 +10280,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Deleted object data
    */
   async deletePartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -10216,7 +10372,7 @@ class Resource extends EventEmitter {
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
-    const partitions = this.options.partitions;
+    const partitions = this.config.partitions;
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
@@ -10272,10 +10428,10 @@ class Resource extends EventEmitter {
    * });
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
-    const partition = this.options.partitions[partitionName];
-    if (!partition) {
+    if (!this.config.partitions || !this.config.partitions[partitionName]) {
       throw new Error(`Partition '${partitionName}' not found`);
     }
+    const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
     const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, rule] of sortedFields) {
@@ -10323,6 +10479,98 @@ class Resource extends EventEmitter {
     return data;
   }
 }
+function validateResourceConfig(config) {
+  const errors = [];
+  if (!config.name) {
+    errors.push("Resource 'name' is required");
+  } else if (typeof config.name !== "string") {
+    errors.push("Resource 'name' must be a string");
+  } else if (config.name.trim() === "") {
+    errors.push("Resource 'name' cannot be empty");
+  }
+  if (!config.client) {
+    errors.push("S3 'client' is required");
+  }
+  if (!config.attributes) {
+    errors.push("Resource 'attributes' are required");
+  } else if (typeof config.attributes !== "object" || Array.isArray(config.attributes)) {
+    errors.push("Resource 'attributes' must be an object");
+  } else if (Object.keys(config.attributes).length === 0) {
+    errors.push("Resource 'attributes' cannot be empty");
+  }
+  if (config.version !== void 0 && typeof config.version !== "string") {
+    errors.push("Resource 'version' must be a string");
+  }
+  if (config.behavior !== void 0 && typeof config.behavior !== "string") {
+    errors.push("Resource 'behavior' must be a string");
+  }
+  if (config.passphrase !== void 0 && typeof config.passphrase !== "string") {
+    errors.push("Resource 'passphrase' must be a string");
+  }
+  if (config.parallelism !== void 0) {
+    if (typeof config.parallelism !== "number" || !Number.isInteger(config.parallelism)) {
+      errors.push("Resource 'parallelism' must be an integer");
+    } else if (config.parallelism < 1) {
+      errors.push("Resource 'parallelism' must be greater than 0");
+    }
+  }
+  if (config.observers !== void 0 && !Array.isArray(config.observers)) {
+    errors.push("Resource 'observers' must be an array");
+  }
+  const booleanFields = ["cache", "autoDecrypt", "timestamps", "paranoid", "allNestedObjectsOptional"];
+  for (const field of booleanFields) {
+    if (config[field] !== void 0 && typeof config[field] !== "boolean") {
+      errors.push(`Resource '${field}' must be a boolean`);
+    }
+  }
+  if (config.partitions !== void 0) {
+    if (typeof config.partitions !== "object" || Array.isArray(config.partitions)) {
+      errors.push("Resource 'partitions' must be an object");
+    } else {
+      for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
+        if (typeof partitionDef !== "object" || Array.isArray(partitionDef)) {
+          errors.push(`Partition '${partitionName}' must be an object`);
+        } else if (!partitionDef.fields) {
+          errors.push(`Partition '${partitionName}' must have a 'fields' property`);
+        } else if (typeof partitionDef.fields !== "object" || Array.isArray(partitionDef.fields)) {
+          errors.push(`Partition '${partitionName}.fields' must be an object`);
+        } else {
+          for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
+            if (typeof fieldType !== "string") {
+              errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (config.hooks !== void 0) {
+    if (typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
+      errors.push("Resource 'hooks' must be an object");
+    } else {
+      const validHookEvents = ["preInsert", "afterInsert", "preUpdate", "afterUpdate", "preDelete", "afterDelete"];
+      for (const [event, hooksArr] of Object.entries(config.hooks)) {
+        if (!validHookEvents.includes(event)) {
+          errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(", ")}`);
+        } else if (!Array.isArray(hooksArr)) {
+          errors.push(`Resource 'hooks.${event}' must be an array`);
+        } else {
+          for (let i = 0; i < hooksArr.length; i++) {
+            const hook = hooksArr[i];
+            if (typeof hook !== "function") {
+              if (typeof hook === "string") continue;
+              continue;
+            }
+          }
+        }
+      }
+    }
+  }
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+}
 
 class Database extends EventEmitter {
   constructor(options) {
@@ -10330,7 +10578,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.9" : "latest";
+        return true ? "4.1.10" : "latest";
       } catch (e) {
         return "latest";
       }
@@ -10343,10 +10591,21 @@ class Database extends EventEmitter {
     this.plugins = options.plugins || [];
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
+    let connectionString = options.connectionString;
+    if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
+      connectionString = ConnectionString.buildFromParams({
+        bucket: options.bucket,
+        region: options.region,
+        accessKeyId: options.accessKeyId,
+        secretAccessKey: options.secretAccessKey,
+        endpoint: options.endpoint,
+        forcePathStyle: options.forcePathStyle
+      });
+    }
     this.client = options.client || new Client({
       verbose: this.verbose,
       parallelism: this.parallelism,
-      connectionString: options.connectionString
+      connectionString
     });
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
@@ -10371,15 +10630,18 @@ class Database extends EventEmitter {
           name,
           client: this.client,
           version: currentVersion,
-          options: {
-            ...versionData.options,
-            partitions: resourceMetadata.partitions || versionData.options?.partitions || {}
-          },
           attributes: versionData.attributes,
           behavior: versionData.behavior || "user-management",
           parallelism: this.parallelism,
           passphrase: this.passphrase,
-          observers: [this]
+          observers: [this],
+          cache: this.cache,
+          timestamps: versionData.options?.timestamps || false,
+          partitions: resourceMetadata.partitions || versionData.options?.partitions || {},
+          paranoid: versionData.options?.paranoid !== false,
+          allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
+          autoDecrypt: versionData.options?.autoDecrypt !== false,
+          hooks: versionData.options?.hooks || {}
         });
       }
     }
@@ -10448,7 +10710,7 @@ class Database extends EventEmitter {
   generateDefinitionHash(definition, behavior = void 0) {
     const attributes = definition.attributes;
     const stableAttributes = { ...attributes };
-    if (definition.options?.timestamps) {
+    if (definition.timestamps) {
       delete stableAttributes.createdAt;
       delete stableAttributes.updatedAt;
     }
@@ -10510,14 +10772,22 @@ class Database extends EventEmitter {
       }
       metadata.resources[name] = {
         currentVersion: version,
-        partitions: resourceDef.options?.partitions || {},
+        partitions: resource.config.partitions || {},
         versions: {
           ...existingResource?.versions,
           // Preserve previous versions
           [version]: {
             hash: definitionHash,
             attributes: resourceDef.attributes,
-            options: resourceDef.options,
+            options: {
+              timestamps: resource.config.timestamps,
+              partitions: resource.config.partitions,
+              paranoid: resource.config.paranoid,
+              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
+              autoDecrypt: resource.config.autoDecrypt,
+              cache: resource.config.cache,
+              hooks: resourceDef.hooks || {}
+            },
             behavior: resourceDef.behavior || "user-management",
             createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
           }
@@ -10570,10 +10840,9 @@ class Database extends EventEmitter {
       observers: [],
       client: this.client,
       version: "temp",
-      options: {
-        cache: this.cache,
-        ...options
-      }
+      passphrase: this.passphrase,
+      cache: this.cache,
+      ...options
     });
     const newHash = this.generateDefinitionHash(tempResource.export(), behavior);
     const existingHash = this.generateDefinitionHash(this.resources[name].export(), this.resources[name].behavior);
@@ -10613,7 +10882,7 @@ class Database extends EventEmitter {
   async createResource({ name, attributes, options = {}, behavior = "user-management" }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
-      Object.assign(existingResource.options, {
+      Object.assign(existingResource.config, {
         cache: this.cache,
         ...options
       });
@@ -10640,10 +10909,9 @@ class Database extends EventEmitter {
       observers: [this],
       client: this.client,
       version,
-      options: {
-        cache: this.cache,
-        ...options
-      }
+      passphrase: this.passphrase,
+      cache: this.cache,
+      ...options
     });
     this.resources[name] = resource;
     await this.uploadMetadataFile();
@@ -17345,4 +17613,4 @@ class CachePlugin extends Plugin {
   }
 }
 
-export { BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, Database, ErrorMap, InvalidResourceItem, MemoryCache, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, Plugin, PluginObject, ResourceIdsPageReader, ResourceIdsReader, ResourceReader, ResourceWriter, S3Cache, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, UnknownError, Validator, ValidatorManager, decrypt, encrypt, sha256, streamToString };
+export { AuthenticationError, BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, Database, DatabaseError, EncryptionError, ErrorMap, InvalidResourceItem, MemoryCache, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PermissionError, Plugin, PluginObject, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceNotFound as ResourceNotFoundError, ResourceReader, ResourceWriter, S3Cache, S3db as S3DB, S3DBError, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, S3DBError as S3dbError, UnknownError, ValidationError, Validator, ValidatorManager, decrypt, S3db as default, encrypt, sha256, streamToString };
