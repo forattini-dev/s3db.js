@@ -10,7 +10,7 @@ const config = {
 async function testSecretPasswordGeneration() {
   console.log("Testing secret password generation...");
   
-  const db = new S3DB(config);
+  const db = await setupDatabase();
   const users = db.resource("users", {
     attributes: {
       name: "string|required",
@@ -140,8 +140,171 @@ async function testSecretPasswordGeneration() {
   } catch (error) {
     console.error("Test failed:", error.message);
     console.error("Stack:", error.stack);
+  }  } finally {
+    await teardownDatabase();
   }
 }
 
 // Run the test
-testSecretPasswordGeneration().catch(console.error); 
+testSecretPasswordGeneration().catch(console.error);
+
+async function testUserListingWithDecryptionErrors() {
+  console.log("Testing user listing with decryption error handling...");
+  
+  const db = new S3DB(config);
+  
+  // Create the users resource with the same configuration as your system
+  await db.createResource({
+    name: 'users',
+    behavior: 'body-overflow',
+    timestamps: true,
+    attributes: {
+      costCenter: 'string',
+      team: 'string',
+      scopes: 'string|optional',
+      isActive: 'boolean|optional|default:true',
+      apiToken: 'secret',
+      webpush: {
+        $$type: 'object|optional',
+        enabled: 'boolean|optional|default:false',
+        endpoint: 'string|optional',
+        p256dh: 'string|optional',
+        auth: 'string|optional',
+      },
+      metadata: 'string|optional',
+    },
+    partitions: {
+      byCostCenter: {
+        fields: { costCenter: 'string' }
+      },
+      byTeam: {
+        fields: { team: 'string' }
+      }
+    }
+  });
+
+  const users = db.resource('users');
+
+  try {
+    // Simulate the exact scenario from your logs
+    console.log("\n1. Testing page method (your exact use case)...");
+    
+    const { offset, size } = { offset: 0, size: 100 }; // Simulate getPaginationParams
+    
+    try {
+      const result = await users.page({ offset, size });
+      
+      console.log("Page result:", {
+        items: result.items.length,
+        totalItems: result.totalItems,
+        page: result.page,
+        pageSize: result.pageSize,
+        totalPages: result.totalPages,
+        debug: result._debug
+      });
+
+      // Check for decryption errors
+      const decryptionErrors = result.items.filter(item => item._decryptionFailed);
+      if (decryptionErrors.length > 0) {
+        console.log(`⚠️  Found ${decryptionErrors.length} items with decryption errors:`);
+        decryptionErrors.forEach(item => {
+          console.log(`   - ID: ${item.id}, Error: ${item._error}`);
+        });
+      }
+
+      // Filter out items with decryption errors for your API response
+      const validItems = result.items.filter(item => !item._decryptionFailed);
+      console.log(`✅ Valid items for API response: ${validItems.length}`);
+
+      // Simulate your API response processing
+      const apiResponse = {
+        items: validItems.map(item => {
+          // Remove internal fields starting with _
+          const cleanItem = {};
+          Object.keys(item).forEach(key => {
+            if (!key.startsWith('_')) {
+              cleanItem[key] = item[key];
+            }
+          });
+          return cleanItem;
+        }),
+        totalItems: result.totalItems,
+        page: result.page,
+        pageSize: result.pageSize,
+        totalPages: result.totalPages,
+        decryptionErrors: decryptionErrors.length
+      };
+
+      console.log("API Response:", {
+        itemsCount: apiResponse.items.length,
+        totalItems: apiResponse.totalItems,
+        decryptionErrors: apiResponse.decryptionErrors
+      });
+
+    } catch (pageError) {
+      console.error("❌ Page method failed:", pageError.message);
+      
+      // Fallback response
+      const fallbackResponse = {
+        items: [],
+        totalItems: null,
+        page: Math.floor(offset / size),
+        pageSize: size,
+        totalPages: null,
+        error: pageError.message
+      };
+      
+      console.log("Fallback response:", fallbackResponse);
+    }
+
+    // Test with skipCount for better performance
+    console.log("\n2. Testing with skipCount for performance...");
+    try {
+      const fastResult = await users.page({ 
+        offset: 0, 
+        size: 100,
+        skipCount: true 
+      });
+      
+      console.log("Fast page result:", {
+        items: fastResult.items.length,
+        totalItems: fastResult.totalItems, // null when skipCount is true
+        page: fastResult.page,
+        debug: fastResult._debug
+      });
+    } catch (fastError) {
+      console.error("❌ Fast page method failed:", fastError.message);
+    }
+
+    // Test list method as alternative
+    console.log("\n3. Testing list method as alternative...");
+    try {
+      const listResult = await users.list({ 
+        limit: 100, 
+        offset: 0 
+      });
+      
+      console.log("List result:", {
+        count: listResult.length,
+        decryptionErrors: listResult.filter(item => item._decryptionFailed).length
+      });
+    } catch (listError) {
+      console.error("❌ List method failed:", listError.message);
+    }
+
+    // Test count method separately
+    console.log("\n4. Testing count method separately...");
+    try {
+      const count = await users.count();
+      console.log("Count result:", count);
+    } catch (countError) {
+      console.error("❌ Count method failed:", countError.message);
+    }
+
+  } catch (error) {
+    console.error("❌ Test failed:", error.message);
+  }
+}
+
+// Run the test
+testUserListingWithDecryptionErrors().catch(console.error); 

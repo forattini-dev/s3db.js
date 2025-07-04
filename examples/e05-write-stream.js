@@ -1,25 +1,18 @@
-const { ENV, S3db, CostsPlugin } = require("./concerns");
+import { setupDatabase, teardownDatabase } from './database.js';
+import { ENV, S3db, CostsPlugin } from './concerns.js';
 
 const Multiprogress = require("multi-progress");
 const { pipeline } = require("stream");
 
 async function main() {
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING,
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-    plugins: [CostsPlugin],
-  });
-
-  await s3db.connect();
-
-  if (!s3db.resources.copyLeads) {
+  const s3db = await setupDatabase());if (!s3db.resources.copyLeads) {
     await s3db.createResource({
       name: "copy-leads",
       attributes: {
         name: "string",
         email: "string",
-        token: "secret",
+        token: "secret",  await teardownDatabase();
+
       },
     });
   }

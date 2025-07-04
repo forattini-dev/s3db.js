@@ -1,10 +1,8 @@
 import { S3db } from "../src/index.js";
+import { setupDatabase, teardownDatabase } from './database.js';
 
 // Create S3DB instance
-const db = new S3db({
-  connectionString: "s3://test-bucket",
-  passphrase: "test-passphrase"
-});
+const db = await setupDatabase());
 
 // Define attributes in different orders
 const attributes1 = {

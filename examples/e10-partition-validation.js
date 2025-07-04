@@ -1,4 +1,4 @@
-const s3db = require('../src/index.js');
+import s3db from '../src/index.js';
 
 (async () => {
   try {
@@ -11,11 +11,7 @@ const s3db = require('../src/index.js');
       endpoint: 'http://localhost:4566',
       forcePathStyle: true,
       autoCreateBucket: true
-    });
-
-    await db.connect();
-
-    console.log('🔍 1. Testing Partition Validation\n');
+    });console.log('🔍 1. Testing Partition Validation\n');
 
     // This should work - all partition fields exist
     console.log('✅ Creating resource with valid partitions...');
@@ -114,7 +110,9 @@ const s3db = require('../src/index.js');
       },
       options: {
         paranoid: false  // Explicitly disable security
-      }
+      }  } finally {
+    await teardownDatabase();
+  }
     });
 
     // Insert some temp data
