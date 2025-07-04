@@ -6,7 +6,6 @@ import { createHash } from "crypto";
 import Client from "./client.class.js";
 import Resource from "./resource.class.js";
 import { streamToString } from "./stream/index.js";
-import { ConnectionString } from "./connection-string.class.js";
 
 export class Database extends EventEmitter {
   constructor(options) {
@@ -490,5 +489,5 @@ export class Database extends EventEmitter {
   }
 }
 
-export class S3db extends Database { }
+export class S3db extends Database {}
 export default S3db;
