@@ -247,7 +247,7 @@ var substr = 'ab'.substr(-1) === 'b' ?
 
 const idGenerator = nanoid.customAlphabet(nanoid.urlAlphabet, 22);
 const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-nanoid.customAlphabet(passwordAlphabet, 12);
+const passwordGenerator = nanoid.customAlphabet(passwordAlphabet, 12);
 
 var domain;
 
@@ -3450,6 +3450,19 @@ const ValidatorManager = new Proxy(Validator, {
   }
 });
 
+function toBase36(num) {
+  return num.toString(36);
+}
+function generateBase36Mapping(keys) {
+  const mapping = {};
+  const reversedMapping = {};
+  keys.forEach((key, index) => {
+    const base36Key = toBase36(index);
+    mapping[key] = base36Key;
+    reversedMapping[base36Key] = key;
+  });
+  return { mapping, reversedMapping };
+}
 const SchemaActions = {
   trim: (value) => value.trim(),
   encrypt: (value, { passphrase }) => encrypt(value, passphrase),
@@ -3552,8 +3565,9 @@ class Schema {
       const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
       const objectKeys = this.extractObjectKeys(this.attributes);
       const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-      this.reversedMap = { ...allKeys };
-      this.map = lodashEs.invert(this.reversedMap);
+      const { mapping, reversedMapping } = generateBase36Mapping(allKeys);
+      this.map = mapping;
+      this.reversedMap = reversedMapping;
     }
   }
   defaultOptions() {
@@ -8669,6 +8683,30 @@ function calculateTotalSize(mappedObject) {
   const namesSize = calculateAttributeNamesSize(mappedObject);
   return valueTotal + namesSize;
 }
+function getSizeBreakdown(mappedObject) {
+  const valueSizes = calculateAttributeSizes(mappedObject);
+  const namesSize = calculateAttributeNamesSize(mappedObject);
+  const valueTotal = Object.values(valueSizes).reduce((sum, size) => sum + size, 0);
+  const total = valueTotal + namesSize;
+  const sortedAttributes = Object.entries(valueSizes).sort(([, a], [, b]) => b - a).map(([key, size]) => ({
+    attribute: key,
+    size,
+    percentage: (size / total * 100).toFixed(2) + "%"
+  }));
+  return {
+    total,
+    valueSizes,
+    namesSize,
+    valueTotal,
+    breakdown: sortedAttributes,
+    // Add detailed breakdown including names
+    detailedBreakdown: {
+      values: valueTotal,
+      names: namesSize,
+      total
+    }
+  };
+}
 
 const S3_METADATA_LIMIT_BYTES = 2048;
 async function handleInsert$3({ resource, data, mappedData }) {
@@ -8889,6 +8927,7 @@ function getBehavior(behaviorName) {
   }
   return behavior;
 }
+const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
 const DEFAULT_BEHAVIOR = "user-management";
 
 class Resource extends EventEmitter {
@@ -9097,7 +9136,6 @@ ${validation.errors.join("\n")}`);
     let result = data;
     for (const hook of this.hooks[event]) {
       result = await hook(result);
-      console.log(this.name + ": " + event + ": result", result);
     }
     return result;
   }
@@ -9330,7 +9368,6 @@ ${validation.errors.join("\n")}`);
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const preProcessedData = await this.executeHooks("preInsert", attributes);
-    console.log(this.name + ": preInsert: result", preProcessedData);
     const {
       errors,
       isValid,
@@ -9556,7 +9593,7 @@ ${validation.errors.join("\n")}`);
     });
     validated.id = id;
     await this.executeHooks("afterUpdate", validated);
-    await this.updatePartitionReferences(validated);
+    await this.handlePartitionReferenceUpdates(live, validated);
     this.emit("update", preProcessedData, validated);
     return validated;
   }
@@ -10400,7 +10437,90 @@ ${validation.errors.join("\n")}`);
     return results.slice(0, limit);
   }
   /**
-   * Update partition objects to keep them in sync
+   * Handle partition reference updates with change detection
+   * @param {Object} oldData - Original object data before update
+   * @param {Object} newData - Updated object data
+   */
+  async handlePartitionReferenceUpdates(oldData, newData) {
+    const partitions = this.config.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      try {
+        await this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData);
+      } catch (error) {
+        console.warn(`Failed to update partition references for ${partitionName}:`, error.message);
+      }
+    }
+  }
+  /**
+   * Handle partition reference update for a specific partition
+   * @param {string} partitionName - Name of the partition
+   * @param {Object} partition - Partition definition
+   * @param {Object} oldData - Original object data before update
+   * @param {Object} newData - Updated object data
+   */
+  async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
+    const oldPartitionKey = this.getPartitionKey({ partitionName, id: newData.id, data: oldData });
+    const newPartitionKey = this.getPartitionKey({ partitionName, id: newData.id, data: newData });
+    if (oldPartitionKey !== newPartitionKey) {
+      if (oldPartitionKey) {
+        try {
+          await this.client.deleteObject(oldPartitionKey);
+        } catch (error) {
+          console.warn(`Old partition object could not be deleted for ${partitionName}:`, error.message);
+        }
+      }
+      if (newPartitionKey) {
+        try {
+          const mappedData = await this.schema.mapper(newData);
+          const behaviorImpl = getBehavior(this.behavior);
+          const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+            resource: this,
+            id: newData.id,
+            data: newData,
+            mappedData
+          });
+          const partitionMetadata = {
+            ...processedMetadata,
+            _version: this.version
+          };
+          await this.client.putObject({
+            key: newPartitionKey,
+            metadata: partitionMetadata,
+            body
+          });
+        } catch (error) {
+          console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
+        }
+      }
+    } else if (newPartitionKey) {
+      try {
+        const mappedData = await this.schema.mapper(newData);
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+          resource: this,
+          id: newData.id,
+          data: newData,
+          mappedData
+        });
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
+        };
+        await this.client.putObject({
+          key: newPartitionKey,
+          metadata: partitionMetadata,
+          body
+        });
+      } catch (error) {
+        console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+      }
+    }
+  }
+  /**
+   * Update partition objects to keep them in sync (legacy method for backward compatibility)
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
@@ -10867,7 +10987,7 @@ class Database extends EventEmitter {
    * @param {string} config.name - Resource name
    * @param {Object} config.attributes - Resource attributes
    * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options
+   * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
   resourceExistsWithSameHash({ name, attributes, behavior = "user-management", options = {} }) {
@@ -10892,27 +11012,6 @@ class Database extends EventEmitter {
       hash: newHash,
       existingHash
     };
-  }
-  /**
-   * Create a resource only if it doesn't exist or has a different hash
-   * @param {Object} config - Resource configuration
-   * @param {string} config.name - Resource name
-   * @param {Object} config.attributes - Resource attributes
-   * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options
-   * @returns {Object} Result with created/updated resource and action taken
-   */
-  async createResourceIfNotExists({ name, attributes, behavior = "user-management", options = {} }) {
-    const hashCheck = this.resourceExistsWithSameHash({ name, attributes, behavior, options });
-    if (!hashCheck.exists) {
-      const resource = await this.createResource({ name, attributes, behavior, ...options });
-      return { resource, action: "created", hash: hashCheck.hash };
-    }
-    if (!hashCheck.sameHash) {
-      const resource = await this.createResource({ name, attributes, behavior, ...options });
-      return { resource, action: "updated", hash: hashCheck.hash, previousHash: hashCheck.existingHash };
-    }
-    return { resource: this.resources[name], action: "unchanged", hash: hashCheck.hash };
   }
   async createResource({ name, attributes, behavior = "user-management", ...config }) {
     if (this.resources[name]) {
@@ -17648,6 +17747,7 @@ class CachePlugin extends Plugin {
   }
 }
 
+exports.AVAILABLE_BEHAVIORS = AVAILABLE_BEHAVIORS;
 exports.AuthenticationError = AuthenticationError;
 exports.BaseError = BaseError;
 exports.Cache = Cache;
@@ -17655,6 +17755,7 @@ exports.CachePlugin = CachePlugin;
 exports.Client = Client;
 exports.ConnectionString = ConnectionString;
 exports.CostsPlugin = CostsPlugin;
+exports.DEFAULT_BEHAVIOR = DEFAULT_BEHAVIOR;
 exports.Database = Database;
 exports.DatabaseError = DatabaseError;
 exports.EncryptionError = EncryptionError;
@@ -17668,25 +17769,35 @@ exports.NotFound = NotFound;
 exports.PermissionError = PermissionError;
 exports.Plugin = Plugin;
 exports.PluginObject = PluginObject;
+exports.Resource = Resource;
 exports.ResourceIdsPageReader = ResourceIdsPageReader;
 exports.ResourceIdsReader = ResourceIdsReader;
 exports.ResourceNotFound = ResourceNotFound;
-exports.ResourceNotFoundError = ResourceNotFound;
 exports.ResourceReader = ResourceReader;
 exports.ResourceWriter = ResourceWriter;
 exports.S3Cache = S3Cache;
-exports.S3DB = S3db;
 exports.S3DBError = S3DBError;
 exports.S3_DEFAULT_ENDPOINT = S3_DEFAULT_ENDPOINT;
 exports.S3_DEFAULT_REGION = S3_DEFAULT_REGION;
 exports.S3db = S3db;
-exports.S3dbError = S3DBError;
+exports.Schema = Schema;
+exports.SchemaActions = SchemaActions;
 exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;
 exports.ValidatorManager = ValidatorManager;
+exports.behaviors = behaviors;
+exports.calculateAttributeNamesSize = calculateAttributeNamesSize;
+exports.calculateAttributeSizes = calculateAttributeSizes;
+exports.calculateTotalSize = calculateTotalSize;
+exports.calculateUTF8Bytes = calculateUTF8Bytes;
 exports.decrypt = decrypt;
 exports.default = S3db;
 exports.encrypt = encrypt;
+exports.getBehavior = getBehavior;
+exports.getSizeBreakdown = getSizeBreakdown;
+exports.idGenerator = idGenerator;
+exports.passwordGenerator = passwordGenerator;
 exports.sha256 = sha256;
 exports.streamToString = streamToString;
+exports.transformValue = transformValue;

@@ -5,7 +5,7 @@ import Client from '../src/client.class.js';
 import Resource from '../src/resource.class.js';
 import { MemoryCache, S3Cache } from '../src/cache/index.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'cache-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'cache-' + Date.now());
 
 describe('Cache System - Complete Journey', () => {
   let client;

@@ -6,7 +6,7 @@ import Database from '../src/database.class.js';
 import Resource from '../src/resource.class.js';
 import { streamToString } from '../src/stream/index.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'database-' + Date.now());
 
 describe('Database Class - Complete Journey', () => {
   let database;
@@ -33,10 +33,8 @@ describe('Database Class - Complete Journey', () => {
         age: 'number|optional',
         active: 'boolean|default:true'
       },
-      options: {
-        timestamps: true,
-        paranoid: false
-      }
+      timestamps: true,
+      paranoid: false
     });
 
     expect(usersResource).toBeDefined();
@@ -157,9 +155,9 @@ describe('Database Class - Complete Journey', () => {
       client: database.client,
       name: 'users',
       attributes: usersResource.attributes,
-      options: { paranoid: false }
+      paranoid: false
     });
-    await cleanupResource.deleteAll({ paranoid: false });
+    await cleanupResource.deleteAll();
   });
 
   test('Database Resource Management Journey', async () => {
@@ -172,9 +170,7 @@ describe('Database Class - Complete Journey', () => {
         authorId: 'string|required',
         published: 'boolean|default:false'
       },
-      options: {
-        timestamps: true
-      }
+      timestamps: true
     });
 
     const commentsResource = await database.createResource({
@@ -184,9 +180,7 @@ describe('Database Class - Complete Journey', () => {
         postId: 'string|required',
         authorId: 'string|required'
       },
-      options: {
-        timestamps: true
-      }
+      timestamps: true
     });
     
     expect(postsResource).toBeDefined();
@@ -211,9 +205,7 @@ describe('Database Class - Complete Journey', () => {
         title: 'string|required',
         content: 'string|required'
       },
-      options: {
-        paranoid: false
-      }
+      paranoid: false
     });
 
     const commentsResourceNonParanoid = new Resource({
@@ -223,13 +215,11 @@ describe('Database Class - Complete Journey', () => {
         content: 'string|required',
         postId: 'string|required'
       },
-      options: {
-        paranoid: false
-      }
+      paranoid: false
     });
 
-    await postsResourceNonParanoid.deleteAll({ paranoid: false });
-    await commentsResourceNonParanoid.deleteAll({ paranoid: false });
+    await postsResourceNonParanoid.deleteAll();
+    await commentsResourceNonParanoid.deleteAll();
   });
 
   test('Database Error Handling Journey', async () => {

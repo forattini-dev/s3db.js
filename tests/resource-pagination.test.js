@@ -2,7 +2,7 @@ import { S3db as S3DB } from '../src/index.js';
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { join } from 'path';
 
-const globalTestPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'pagination-' + Date.now());
+const globalTestPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-pagination-' + Date.now());
 
 describe('Pagination Logic', () => {
   let db;
