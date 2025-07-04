@@ -1,19 +1,13 @@
-const { ENV, S3db } = require("./concerns");
-
-const fs = require("fs");
-const zlib = require("node:zlib");
-const ProgressBar = require("progress");
-const { Transform } = require("node:stream");
-const { pipeline } = require("node:stream/promises");
+import { setupDatabase, teardownDatabase } from './database.js';
+import { ENV, S3db, CostsPlugin } from './concerns.js';
+import fs from 'fs';
+import zlib from 'node:zlib';
+import ProgressBar from 'progress';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 async function main() {
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING,
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-  });
-
-  await s3db.connect();
+  const s3db = await setupDatabase();
   const total = await s3db.resource("leads").count();
 
   console.log(`reading ${total} leads.`);
@@ -51,6 +45,8 @@ async function main() {
   });
 
   pipeline(stream, transformer, zlib.createGzip(), streamWrite);
+  
+  await teardownDatabase();
 }
 
 main();

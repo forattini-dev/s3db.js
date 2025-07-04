@@ -1,3 +1,4 @@
+import { setupDatabase, teardownDatabase } from './database.js';
 "use strict";
 /* istanbul ignore file */
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -61,5 +62,7 @@ module.exports = {
             });
             this.started = true;
         });
-    }
+    }  } finally {
+    await teardownDatabase();
+  }
 };

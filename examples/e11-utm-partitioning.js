@@ -1,4 +1,5 @@
 import { S3db } from "../src/index.js";
+import { setupDatabase, teardownDatabase } from './database.js';
 
 /**
  * UTM Tracking with Nested Field Partitions
@@ -12,15 +13,7 @@ async function main() {
   console.log("🚀 UTM Tracking with Nested Field Partitions Example\n");
 
   // Initialize S3db
-  const s3db = new S3db({
-    uri: process.env.BUCKET_CONNECTION_STRING
-      .replace('USER', process.env.MINIO_USER)
-      .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + "/examples/utm-tracking"
-  });
-
-  await s3db.connect();
-  console.log("✅ Connected to S3 database");
+  const s3db = await setupDatabase());console.log("✅ Connected to S3 database");
 
   // Create users resource with UTM tracking
   const users = await s3db.createResource({
@@ -53,7 +46,8 @@ async function main() {
         byUtmSource: {
           fields: {
             "utm.source": "string"
-          }
+          }  await teardownDatabase();
+
         },
         byUtmMedium: {
           fields: {

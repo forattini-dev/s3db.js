@@ -1,4 +1,4 @@
-const { ENV, S3db } = require("./concerns");
+import { setupDatabase, teardownDatabase } from './database.js';
 
 const jwt = require("jsonwebtoken");
 const { idGenerator } = require("../src/concerns/id.js");
@@ -64,20 +64,14 @@ const Token = {
       return [null, { decoded, savedToken }];
     } catch (error) {
       return [error];
-    }
+    }  } finally {
+    await teardownDatabase();
+  }
   },
 };
 
 async function main() {
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING + Date.now(),
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-  });
-
-  await s3db.connect();
-
-  await s3db.createResource({
+  const s3db = await setupDatabase());await s3db.createResource({
     name: "users",
     attributes: {
       name: "string",

@@ -11,6 +11,7 @@
  */
 
 import { Database } from '../src/index.js';
+import { setupDatabase, teardownDatabase } from './database.js';
 
 const connectionString = process.env.BUCKET_CONNECTION_STRING || 's3://localhost:9000/test?accessKeyId=minioadmin&secretAccessKey=minioadmin&forcePathStyle=true';
 
@@ -25,11 +26,7 @@ async function main() {
   // Listen for definition changes
   db.on('definitionChanges', (changes) => {
     console.log('📋 Definition changes detected:', changes);
-  });
-
-  await db.connect();
-
-  // 1. Binary Content Storage
+  });// 1. Binary Content Storage
   console.log('📁 Binary Content Storage');
   console.log('=========================');
 
@@ -39,7 +36,8 @@ async function main() {
       title: 'string',
       author: 'string',
       size: 'number|optional'
-    }
+    }  await teardownDatabase();
+
   });
 
   const doc = await documents.insert({

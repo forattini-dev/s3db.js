@@ -12,6 +12,7 @@
  */
 
 import { Database } from '../src/index.js';
+import { setupDatabase, teardownDatabase } from './database.js';
 
 const connectionString = process.env.BUCKET_CONNECTION_STRING || 's3://s3db:thisissecret@localhost:9000/s3db?forcePathStyle=true';
 
@@ -29,11 +30,7 @@ async function main() {
     event.changes.forEach(change => {
       console.log(`  - ${change.type}: ${change.resourceName} (${change.fromVersion || 'new'} → ${change.toVersion || 'deleted'})`);
     });
-  });
-
-  await db.connect();
-
-  // =====================================================
+  });// =====================================================
   // 1. Create Resource with Versioning & Hooks
   // =====================================================
   console.log('1. Creating resource with versioning and hooks...');
@@ -52,7 +49,8 @@ async function main() {
         region: 'string|maxlength:2',
         status: 'string'
         // createdAt and updatedAt automatically added
-      }
+      }  await teardownDatabase();
+
     }
   });
 

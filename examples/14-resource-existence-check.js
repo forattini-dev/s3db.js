@@ -2,14 +2,7 @@ import S3db from "../src/index.js";
 
 // Example demonstrating resource existence checking and conditional creation
 async function main() {
-  const db = new S3db({
-    connectionString: "s3://test-bucket",
-    verbose: true,
-  });
-
-  await db.connect();
-
-  const userAttributes = {
+  const db = await setupDatabase());const userAttributes = {
     name: "string|required",
     email: "string|required|email",
     age: "number|optional"
@@ -21,7 +14,8 @@ async function main() {
       byAge: {
         fields: {
           age: "number|maxlength:2"
-        }
+        }  await teardownDatabase();
+
       }
     }
   };
