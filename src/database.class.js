@@ -338,7 +338,7 @@ export class Database extends EventEmitter {
    * @param {string} config.name - Resource name
    * @param {Object} config.attributes - Resource attributes
    * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options
+   * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
   resourceExistsWithSameHash({ name, attributes, behavior = 'user-management', options = {} }) {
@@ -370,33 +370,7 @@ export class Database extends EventEmitter {
     };
   }
 
-  /**
-   * Create a resource only if it doesn't exist or has a different hash
-   * @param {Object} config - Resource configuration
-   * @param {string} config.name - Resource name
-   * @param {Object} config.attributes - Resource attributes
-   * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options
-   * @returns {Object} Result with created/updated resource and action taken
-   */
-  async createResourceIfNotExists({ name, attributes, behavior = 'user-management', options = {} }) {
-    const hashCheck = this.resourceExistsWithSameHash({ name, attributes, behavior, options });
-    
-    if (!hashCheck.exists) {
-      // Resource doesn't exist, create it
-      const resource = await this.createResource({ name, attributes, behavior, ...options });
-      return { resource, action: 'created', hash: hashCheck.hash };
-    }
-    
-    if (!hashCheck.sameHash) {
-      // Resource exists but has different hash, update it
-      const resource = await this.createResource({ name, attributes, behavior, ...options });
-      return { resource, action: 'updated', hash: hashCheck.hash, previousHash: hashCheck.existingHash };
-    }
-    
-    // Resource exists with same hash, return existing resource
-    return { resource: this.resources[name], action: 'unchanged', hash: hashCheck.hash };
-  }
+
 
   async createResource({ name, attributes, behavior = 'user-management', ...config }) {
     if (this.resources[name]) {

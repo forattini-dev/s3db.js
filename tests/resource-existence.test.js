@@ -100,21 +100,19 @@ describe('Resource Existence Methods', () => {
       expect(result.hash).not.toBe(result.existingHash);
     });
 
-    test('should handle different options correctly', async () => {
+    test('should handle different behavior correctly', async () => {
       const attributes = { name: 'string|required' };
-      const options1 = { timestamps: false };
-      const options2 = { timestamps: true };
       
       await db.createResource({
         name: 'test-resource',
         attributes,
-        options: options1
+        behavior: 'user-management'
       });
 
       const result = db.resourceExistsWithSameHash({
         name: 'test-resource',
         attributes,
-        options: options2
+        behavior: 'body-overflow'
       });
 
       expect(result.exists).toBe(true);
@@ -141,61 +139,37 @@ describe('Resource Existence Methods', () => {
     });
   });
 
-  describe('createResourceIfNotExists', () => {
+  describe('createResource integration', () => {
     test('should create new resource when it does not exist', async () => {
       const attributes = { name: 'string|required' };
       // Limpar resource antes do teste
       delete db.resources['new-resource'];
-      const result = await db.createResourceIfNotExists({
+      const resource = await db.createResource({
         name: 'new-resource',
         attributes
       });
-      expect(result.created).toBe(true);
-      expect(result.reason).toBe('New resource created');
-      expect(result.resource).toBeDefined();
+      expect(resource).toBeDefined();
       expect(db.resourceExists('new-resource')).toBe(true);
     });
 
-    test('should not create resource when it exists with same hash', async () => {
-      const attributes = { name: 'string|required', email: 'string|required' };
-      // Limpar resource antes do teste
-      delete db.resources['test-resource'];
-      // Create resource first time
-      const result1 = await db.createResourceIfNotExists({
-        name: 'test-resource',
-        attributes
-      });
-      expect(result1.created).toBe(true);
-      // Try to create same resource again
-      const result2 = await db.createResourceIfNotExists({
-        name: 'test-resource',
-        attributes
-      });
-      expect(result2.created).toBe(false);
-      expect(result2.reason).toBe('Resource already exists with same definition hash');
-      expect(result2.resource).toBe(result1.resource);
-    });
-
-    test('should update resource when hash is different', async () => {
+    test('should update resource when it exists with different attributes', async () => {
       const originalAttributes = { name: 'string|required' };
       
       // Create resource first time
-      await db.createResourceIfNotExists({
+      await db.createResource({
         name: 'test-resource',
         attributes: originalAttributes
       });
 
       const modifiedAttributes = { name: 'string|required', email: 'string|required' };
       
-      // Try to create with different attributes
-      const result = await db.createResourceIfNotExists({
+      // Update with different attributes
+      const resource = await db.createResource({
         name: 'test-resource',
         attributes: modifiedAttributes
       });
 
-      expect(result.created).toBe(false);
-      expect(result.reason).toBe('Resource updated with new definition');
-      expect(result.resource).toBeDefined();
+      expect(resource).toBeDefined();
       
       // Verify attributes were updated
       const hashCheck = db.resourceExistsWithSameHash({
@@ -209,22 +183,21 @@ describe('Resource Existence Methods', () => {
       const attributes = { name: 'string|required' };
       
       // Create with basic options
-      await db.createResourceIfNotExists({
+      await db.createResource({
         name: 'test-resource',
         attributes,
-        options: { timestamps: false }
+        timestamps: false
       });
 
-      // Try to create with different options
-      const result = await db.createResourceIfNotExists({
+      // Update with different options
+      const resource = await db.createResource({
         name: 'test-resource',
         attributes,
-        options: { timestamps: true },
+        timestamps: true,
         behavior: 'body-overflow'
       });
 
-      expect(result.created).toBe(false);
-      expect(result.reason).toBe('Resource updated with new definition');
+      expect(resource).toBeDefined();
     });
   });
 

@@ -484,7 +484,13 @@ export class Resource extends EventEmitter {
       return null;
     }
 
-    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+    // Ensure id is never undefined
+    const finalId = id || data?.id;
+    if (!finalId) {
+      return null; // Cannot create partition key without id
+    }
+    
+    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
   }
 
   /**
@@ -769,7 +775,8 @@ export class Resource extends EventEmitter {
    * console.log(updatedUser.updatedAt); // ISO timestamp
    */
   async update(id, attributes) {
-    const live = await this.get(id);
+    // Get original data before any processing to ensure we have the correct old state
+    const originalData = await this.get(id);
 
     if (this.config.timestamps) {
       attributes.updatedAt = new Date().toISOString();
@@ -778,7 +785,7 @@ export class Resource extends EventEmitter {
     // Execute preUpdate hooks
     const preProcessedData = await this.executeHooks('preUpdate', attributes);
 
-    const attrs = merge(live, preProcessedData);
+    const attrs = merge(originalData, preProcessedData);
     delete attrs.id;
 
     const { isValid, errors, data: validated } = await this.validate(attrs);
@@ -791,6 +798,13 @@ export class Resource extends EventEmitter {
         validation: errors,
       })
     }
+
+    // Ensure both oldData and newData have the correct id
+    const oldData = { ...originalData, id };
+    const newData = { ...validated, id };
+
+    // Handle partition reference updates BEFORE saving the main object
+    await this.handlePartitionReferenceUpdates(oldData, newData);
 
     const mappedData = await this.schema.mapper(validated);
     
@@ -843,9 +857,6 @@ export class Resource extends EventEmitter {
 
     // Execute afterUpdate hooks
     await this.executeHooks('afterUpdate', validated);
-
-    // Update partition objects to keep them in sync
-    await this.updatePartitionReferences(validated);
 
     this.emit("update", preProcessedData, validated);
     return validated;
@@ -1249,7 +1260,10 @@ export class Resource extends EventEmitter {
 
       // Get partition definition
       if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new Error(`Partition '${partition}' not found`);
+        // This is an expected error, not a critical one
+        console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
+        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+        return [];
       }
       
       const partitionDef = this.config.partitions[partition];
@@ -1303,7 +1317,26 @@ export class Resource extends EventEmitter {
         })
         .process(async (id) => {
           try {
-            return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+            // Extract the actual partition values from the key for this specific ID
+            const keyForId = keys.find(key => key.includes(`id=${id}`));
+            if (!keyForId) {
+              throw new Error(`Partition key not found for ID ${id}`);
+            }
+            
+            // Extract partition values from the key
+            const keyParts = keyForId.split('/');
+            const actualPartitionValues = {};
+            
+            for (const [fieldName, rule] of sortedFields) {
+              const fieldPart = keyParts.find(part => part.startsWith(`${fieldName}=`));
+              if (fieldPart) {
+                const value = fieldPart.replace(`${fieldName}=`, '');
+                // Reverse the partition rule transformation to get original value
+                actualPartitionValues[fieldName] = value;
+              }
+            }
+            
+            return await this.getFromPartition({ id, partitionName: partition, partitionValues: actualPartitionValues });
           } catch (error) {
             // If it's a decryption error, try to get basic info
             if (error.message.includes('Cipher job failed') || 
@@ -1327,6 +1360,13 @@ export class Resource extends EventEmitter {
       this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
       return validResults;
     } catch (error) {
+      // Only log as critical error if it's not a partition-related error
+      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
+        console.warn(`Partition error in list method:`, error.message);
+        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+        return [];
+      }
+      
       // Final fallback - return empty array if everything fails
       console.error(`Critical error in list method:`, error.message);
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
@@ -1886,7 +1926,147 @@ export class Resource extends EventEmitter {
   }
 
   /**
-   * Update partition objects to keep them in sync
+   * Handle partition reference updates with change detection
+   * @param {Object} oldData - Original object data before update
+   * @param {Object} newData - Updated object data
+   */
+  async handlePartitionReferenceUpdates(oldData, newData) {
+    const partitions = this.config.partitions;
+    if (!partitions || Object.keys(partitions).length === 0) {
+      return;
+    }
+
+    // Process each partition to detect changes and update references
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      try {
+        await this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData);
+      } catch (error) {
+        // Log but don't fail if partition update fails
+        console.warn(`Failed to update partition references for ${partitionName}:`, error.message);
+      }
+    }
+
+    // Aggressive cleanup: remove any stale partition references for this id
+    const id = newData.id || oldData.id;
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const prefix = `resource=${this.name}/partition=${partitionName}`;
+      let allKeys = [];
+      try {
+        allKeys = await this.client.getAllKeys({ prefix });
+      } catch (error) {
+        // Log but don't fail if listing keys fails
+        console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, error.message);
+        continue;
+      }
+      const validKey = this.getPartitionKey({ partitionName, id, data: newData });
+      for (const key of allKeys) {
+        if (key.endsWith(`/id=${id}`) && key !== validKey) {
+          try {
+            await this.client.deleteObject(key);
+          } catch (error) {
+            // Log but don't fail if old partition object doesn't exist
+            console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, error.message);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle partition reference update for a specific partition
+   * @param {string} partitionName - Name of the partition
+   * @param {Object} partition - Partition definition
+   * @param {Object} oldData - Original object data before update
+   * @param {Object} newData - Updated object data
+   */
+  async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
+    // Ensure we have the correct id
+    const id = newData.id || oldData.id;
+    
+    // Get old and new partition keys
+    const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
+    const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
+
+    // If partition keys are different, we need to move the reference
+    if (oldPartitionKey !== newPartitionKey) {
+      // Delete old partition reference if it exists
+      if (oldPartitionKey) {
+        try {
+          await this.client.deleteObject(oldPartitionKey);
+        } catch (error) {
+          // Log but don't fail if old partition object doesn't exist
+          console.warn(`Old partition object could not be deleted for ${partitionName}:`, error.message);
+        }
+      }
+
+      // Create new partition reference if new key exists
+      if (newPartitionKey) {
+        try {
+          // Store the updated resource data in the new partition path
+          const mappedData = await this.schema.mapper(newData);
+          // Remove any accidental 'undefined' key
+          if (mappedData.undefined !== undefined) delete mappedData.undefined;
+          // Apply behavior strategy for partition storage
+          const behaviorImpl = getBehavior(this.behavior);
+          const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+            resource: this,
+            id,
+            data: newData,
+            mappedData
+          });
+          // Remove any accidental 'undefined' key
+          if (processedMetadata.undefined !== undefined) delete processedMetadata.undefined;
+          // Add version metadata for consistency
+          const partitionMetadata = {
+            ...processedMetadata,
+            _version: this.version
+          };
+          if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
+          await this.client.putObject({
+            key: newPartitionKey,
+            metadata: partitionMetadata,
+            body,
+          });
+        } catch (error) {
+          // Log but don't fail if new partition object creation fails
+          console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
+        }
+      }
+    } else if (newPartitionKey) {
+      // If partition keys are the same, just update the existing reference
+      try {
+        // Store the updated resource data in the partition path
+        const mappedData = await this.schema.mapper(newData);
+        if (mappedData.undefined !== undefined) delete mappedData.undefined;
+        // Apply behavior strategy for partition storage
+        const behaviorImpl = getBehavior(this.behavior);
+        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+          resource: this,
+          id,
+          data: newData,
+          mappedData
+        });
+        if (processedMetadata.undefined !== undefined) delete processedMetadata.undefined;
+        // Add version metadata for consistency
+        const partitionMetadata = {
+          ...processedMetadata,
+          _version: this.version
+        };
+        if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
+        await this.client.putObject({
+          key: newPartitionKey,
+          metadata: partitionMetadata,
+          body,
+        });
+      } catch (error) {
+        // Log but don't fail if partition object update fails
+        console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * Update partition objects to keep them in sync (legacy method for backward compatibility)
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
@@ -1897,6 +2077,12 @@ export class Resource extends EventEmitter {
 
     // Update each partition object
     for (const [partitionName, partition] of Object.entries(partitions)) {
+      // Validate that the partition exists and has the required structure
+      if (!partition || !partition.fields || typeof partition.fields !== 'object') {
+        console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
+        continue;
+      }
+      
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       
       if (partitionKey) {
@@ -2021,6 +2207,9 @@ export class Resource extends EventEmitter {
     if (request.Expiration) data._expiresAt = request.Expiration;
 
     data._definitionHash = this.getDefinitionHash();
+
+    // Remove any accidental 'undefined' key
+    if (data.undefined !== undefined) delete data.undefined;
 
     this.emit("getFromPartition", data);
     return data;

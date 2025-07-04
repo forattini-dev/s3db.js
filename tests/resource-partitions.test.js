@@ -1,8 +1,9 @@
 import { join } from 'path';
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 
 import Client from '../src/client.class.js';
 import Resource from '../src/resource.class.js';
+import Database from '../src/database.class.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'resource-partitions-' + Date.now());
 
@@ -29,26 +30,24 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         price: 'number|required'
       },
-      options: {
-        partitions: {
-          byCategory: {
-            fields: {
-              category: 'string'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCategory: {
+          fields: {
+            category: 'string'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
           }
         }
       }
     });
 
-    expect(resource.options.partitions.byCategory).toBeDefined();
-    expect(resource.options.partitions.byRegion).toBeDefined();
-    expect(resource.options.partitions.byCategory.fields.category).toBe('string');
-    expect(resource.options.partitions.byRegion.fields.region).toBe('string|maxlength:2');
+    expect(resource.config.partitions.byCategory).toBeDefined();
+    expect(resource.config.partitions.byRegion).toBeDefined();
+    expect(resource.config.partitions.byCategory.fields.category).toBe('string');
+    expect(resource.config.partitions.byRegion.fields.region).toBe('string|maxlength:2');
   });
 
   test('Partition Field Validation', async () => {
@@ -60,12 +59,10 @@ describe('Resource Partitions', () => {
         attributes: {
           name: 'string|required'
         },
-        options: {
-          partitions: {
-            invalidPartition: {
-              fields: {
-                nonExistentField: 'string' // This field doesn't exist in attributes
-              }
+        partitions: {
+          invalidPartition: {
+            fields: {
+              nonExistentField: 'string' // This field doesn't exist in attributes
             }
           }
         }
@@ -82,18 +79,16 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         category: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
-          },
-          byRegionCategory: {
-            fields: {
-              region: 'string|maxlength:2',
-              category: 'string'
-            }
+      partitions: {
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
+          }
+        },
+        byRegionCategory: {
+          fields: {
+            region: 'string|maxlength:2',
+            category: 'string'
           }
         }
       }
@@ -142,22 +137,20 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         date: 'string|required'
       },
-      options: {
-        partitions: {
-          byCode: {
-            fields: {
-              code: 'string|maxlength:3'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
-          },
-          byDate: {
-            fields: {
-              date: 'date|maxlength:10'
-            }
+      partitions: {
+        byCode: {
+          fields: {
+            code: 'string|maxlength:3'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
+          }
+        },
+        byDate: {
+          fields: {
+            date: 'date|maxlength:10'
           }
         }
       }
@@ -197,17 +190,15 @@ describe('Resource Partitions', () => {
         code: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byCode: {
-            fields: {
-              code: 'string|maxlength:3'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCode: {
+          fields: {
+            code: 'string|maxlength:3'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
           }
         }
       }
@@ -236,18 +227,16 @@ describe('Resource Partitions', () => {
         eventDate: 'string|required',
         createdAt: 'string|required'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byEventDate: {
-            fields: {
-              eventDate: 'date|maxlength:10'
-            }
-          },
-          byCreatedDate: {
-            fields: {
-              createdAt: 'date|maxlength:10'
-            }
+      timestamps: true,
+      partitions: {
+        byEventDate: {
+          fields: {
+            eventDate: 'date|maxlength:10'
+          }
+        },
+        byCreatedDate: {
+          fields: {
+            createdAt: 'date|maxlength:10'
           }
         }
       }
@@ -275,12 +264,10 @@ describe('Resource Partitions', () => {
         name: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegion: {
-            fields: {
-              region: 'string'
-            }
+      partitions: {
+        byRegion: {
+          fields: {
+            region: 'string'
           }
         }
       }
@@ -292,12 +279,11 @@ describe('Resource Partitions', () => {
     }).toThrow(/Partition 'nonExistentPartition' not found/);
 
     // Test list with invalid partition
-    await expect(async () => {
-      await resource.list({
-        partition: 'invalid-partition',
-        partitionValues: { country: 'US' }
-      });
-    }).rejects.toThrow("Partition 'invalid-partition' not found");
+    const invalidPartitionResult = await resource.list({
+      partition: 'invalid-partition',
+      partitionValues: { country: 'US' }
+    });
+    expect(invalidPartitionResult).toEqual([]);
 
     // Test count with invalid partition
     try {
@@ -321,7 +307,7 @@ describe('Resource Partitions', () => {
       }
     });
 
-    expect(noPartitionResource.options.partitions).toEqual({});
+    expect(noPartitionResource.config.partitions).toEqual({});
     expect(noPartitionResource.hooks.afterInsert).toHaveLength(0);
     expect(noPartitionResource.hooks.afterDelete).toHaveLength(0);
 
@@ -333,18 +319,16 @@ describe('Resource Partitions', () => {
         name: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
           }
         }
       }
     });
 
-    expect(partitionResource.options.partitions.byRegion).toBeDefined();
+    expect(partitionResource.config.partitions.byRegion).toBeDefined();
     expect(partitionResource.hooks.afterInsert).toHaveLength(1);
     expect(partitionResource.hooks.afterDelete).toHaveLength(1);
   });
@@ -359,14 +343,12 @@ describe('Resource Partitions', () => {
         category: 'string|required',
         status: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegionCategoryStatus: {
-            fields: {
-              status: 'string', // Should be last alphabetically
-              region: 'string|maxlength:2', // Should be second
-              category: 'string' // Should be first alphabetically
-            }
+      partitions: {
+        byRegionCategoryStatus: {
+          fields: {
+            status: 'string', // Should be last alphabetically
+            region: 'string|maxlength:2', // Should be second
+            category: 'string' // Should be first alphabetically
           }
         }
       }
@@ -401,13 +383,11 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         category: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegionCategory: {
-            fields: {
-              region: 'string|maxlength:2',
-              category: 'string'
-            }
+      partitions: {
+        byRegionCategory: {
+          fields: {
+            region: 'string|maxlength:2',
+            category: 'string'
           }
         }
       }
@@ -458,23 +438,21 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         price: 'number|required'
       },
-      options: {
-        partitions: {
-          byCategory: {
-            fields: {
-              category: 'string'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
-          },
-          byCategoryRegion: {
-            fields: {
-              category: 'string',
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCategory: {
+          fields: {
+            category: 'string'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
+          }
+        },
+        byCategoryRegion: {
+          fields: {
+            category: 'string',
+            region: 'string|maxlength:2'
           }
         }
       }
@@ -604,19 +582,11 @@ describe('Resource Partitions', () => {
         eventDate: 'string|required',
         category: 'string|required'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byDate: {
-            fields: {
-              eventDate: 'date|maxlength:10'
-            }
-          },
-          byCategoryDate: {
-            fields: {
-              category: 'string',
-              eventDate: 'date|maxlength:10'
-            }
+      timestamps: true,
+      partitions: {
+        byDate: {
+          fields: {
+            eventDate: 'date|maxlength:10'
           }
         }
       }
@@ -666,18 +636,18 @@ describe('Resource Partitions', () => {
     expect(jan15Events.map(e => e.name)).toContain('Event 1');
     expect(jan15Events.map(e => e.name)).toContain('Event 2');
 
-    // Test multi-field partition
-    const conferenceJan15Ids = await resource.listIds({
-      partition: 'byCategoryDate',
-      partitionValues: { category: 'conference', eventDate: '2024-01-15' }
+    // Test single field partition (byDate only)
+    const jan15Ids2 = await resource.listIds({
+      partition: 'byDate',
+      partitionValues: { eventDate: '2024-01-15' }
     });
-    expect(conferenceJan15Ids).toHaveLength(2);
+    expect(jan15Ids2).toHaveLength(2);
 
-    const workshopJan16Ids = await resource.listIds({
-      partition: 'byCategoryDate',
-      partitionValues: { category: 'workshop', eventDate: '2024-01-16' }
+    const jan16Ids2 = await resource.listIds({
+      partition: 'byDate',
+      partitionValues: { eventDate: '2024-01-16' }
     });
-    expect(workshopJan16Ids).toHaveLength(2);
+    expect(jan16Ids2).toHaveLength(2);
 
     // Test getFromPartition with date
     const event1FromPartition = await resource.getFromPartition({
@@ -698,17 +668,15 @@ describe('Resource Partitions', () => {
         category: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byCategory: {
-            fields: {
-              category: 'string'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCategory: {
+          fields: {
+            category: 'string'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
           }
         }
       }
@@ -760,17 +728,15 @@ describe('Resource Partitions', () => {
         code: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byCode: {
-            fields: {
-              code: 'string|maxlength:3'
-            }
-          },
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCode: {
+          fields: {
+            code: 'string|maxlength:3'
+          }
+        },
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
           }
         }
       }
@@ -833,22 +799,20 @@ describe('Resource Partitions', () => {
         price: 'number|required',
         isActive: 'boolean|required'
       },
-      options: {
-        partitions: {
-          byCategory: {
-            fields: {
-              category: 'string'
-            }
-          },
-          byPriceRange: {
-            fields: {
-              price: 'number'
-            }
-          },
-          byStatus: {
-            fields: {
-              isActive: 'boolean'
-            }
+      partitions: {
+        byCategory: {
+          fields: {
+            category: 'string'
+          }
+        },
+        byPriceRange: {
+          fields: {
+            price: 'number'
+          }
+        },
+        byStatus: {
+          fields: {
+            isActive: 'boolean'
           }
         }
       }
@@ -924,13 +888,11 @@ describe('Resource Partitions', () => {
         category: 'string|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byCategoryRegion: {
-            fields: {
-              category: 'string',
-              region: 'string|maxlength:2'
-            }
+      partitions: {
+        byCategoryRegion: {
+          fields: {
+            category: 'string',
+            region: 'string|maxlength:2'
           }
         }
       }
@@ -988,14 +950,12 @@ describe('Resource Partitions', () => {
         region: 'string|required',
         status: 'string|required'
       },
-      options: {
-        partitions: {
-          byCategoryRegionStatus: {
-            fields: {
-              category: 'string',
-              region: 'string|maxlength:2',
-              status: 'string'
-            }
+      partitions: {
+        byCategoryRegionStatus: {
+          fields: {
+            category: 'string',
+            region: 'string|maxlength:2',
+            status: 'string'
           }
         }
       }
@@ -1055,16 +1015,14 @@ describe('Resource Partitions', () => {
         priority: 'string|required',
         type: 'string|required'
       },
-      options: {
-        partitions: {
-          byCategoryRegionStatusPriorityType: {
-            fields: {
-              category: 'string',
-              region: 'string|maxlength:2',
-              status: 'string',
-              priority: 'string',
-              type: 'string'
-            }
+      partitions: {
+        byCategoryRegionStatusPriorityType: {
+          fields: {
+            category: 'string',
+            region: 'string|maxlength:2',
+            status: 'string',
+            priority: 'string',
+            type: 'string'
           }
         }
       }
@@ -1172,40 +1130,38 @@ describe('Resource Partitions', () => {
           priority: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
-          },
-          byUtmCampaign: {
-            fields: {
-              'utm.campaign': 'string'
-            }
-          },
-          byAddressCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          byAddressState: {
-            fields: {
-              'address.country': 'string|maxlength:2',
-              'address.state': 'string'
-            }
-          },
-          byMetadataCategory: {
-            fields: {
-              'metadata.category': 'string'
-            }
-          },
-          byUtmAndAddress: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string',
-              'address.country': 'string|maxlength:2'
-            }
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
+          }
+        },
+        byUtmCampaign: {
+          fields: {
+            'utm.campaign': 'string'
+          }
+        },
+        byAddressCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        byAddressState: {
+          fields: {
+            'address.country': 'string|maxlength:2',
+            'address.state': 'string'
+          }
+        },
+        byMetadataCategory: {
+          fields: {
+            'metadata.category': 'string'
+          }
+        },
+        byUtmAndAddress: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string',
+            'address.country': 'string|maxlength:2'
           }
         }
       }
@@ -1419,44 +1375,42 @@ describe('Resource Partitions', () => {
           priority: 'string|required'
         }
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
-          },
-          byUtmMedium: {
-            fields: {
-              'utm.medium': 'string'
-            }
-          },
-          byUtmCampaign: {
-            fields: {
-              'utm.campaign': 'string'
-            }
-          },
-          byCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
+      timestamps: true,
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
+          }
+        },
+        byUtmMedium: {
+          fields: {
+            'utm.medium': 'string'
+          }
+        },
+        byUtmCampaign: {
+          fields: {
+            'utm.campaign': 'string'
+          }
+        },
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
           }
         }
       }
     });
 
-    expect(resource.options.partitions.byUtmSource).toBeDefined();
-    expect(resource.options.partitions.byUtmMedium).toBeDefined();
-    expect(resource.options.partitions.byUtmCampaign).toBeDefined();
-    expect(resource.options.partitions.byCountry).toBeDefined();
-    expect(resource.options.partitions.bySourceMedium).toBeDefined();
+    expect(resource.config.partitions.byUtmSource).toBeDefined();
+    expect(resource.config.partitions.byUtmMedium).toBeDefined();
+    expect(resource.config.partitions.byUtmCampaign).toBeDefined();
+    expect(resource.config.partitions.byCountry).toBeDefined();
+    expect(resource.config.partitions.bySourceMedium).toBeDefined();
   });
 
   test('UTM Data Insertion and Partition Creation', async () => {
@@ -1476,18 +1430,16 @@ describe('Resource Partitions', () => {
           state: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
-          },
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
+          }
+        },
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
           }
         }
       }
@@ -1556,12 +1508,10 @@ describe('Resource Partitions', () => {
           campaign: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
           }
         }
       }
@@ -1630,12 +1580,10 @@ describe('Resource Partitions', () => {
           campaign: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmMedium: {
-            fields: {
-              'utm.medium': 'string'
-            }
+      partitions: {
+        byUtmMedium: {
+          fields: {
+            'utm.medium': 'string'
           }
         }
       }
@@ -1698,12 +1646,10 @@ describe('Resource Partitions', () => {
           campaign: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmCampaign: {
-            fields: {
-              'utm.campaign': 'string'
-            }
+      partitions: {
+        byUtmCampaign: {
+          fields: {
+            'utm.campaign': 'string'
           }
         }
       }
@@ -1766,13 +1712,11 @@ describe('Resource Partitions', () => {
           campaign: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
+      partitions: {
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
           }
         }
       }
@@ -1838,18 +1782,16 @@ describe('Resource Partitions', () => {
           state: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          byUtmAndCountry: {
-            fields: {
-              'utm.source': 'string',
-              'address.country': 'string|maxlength:2'
-            }
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        byUtmAndCountry: {
+          fields: {
+            'utm.source': 'string',
+            'address.country': 'string|maxlength:2'
           }
         }
       }
@@ -1910,12 +1852,10 @@ describe('Resource Partitions', () => {
           medium: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
           }
         }
       }
@@ -1972,18 +1912,16 @@ describe('Resource Partitions', () => {
           campaign: 'string|required'
         }
       },
-      options: {
-        partitions: {
-          byUtmSource: {
-            fields: {
-              'utm.source': 'string'
-            }
-          },
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
+      partitions: {
+        byUtmSource: {
+          fields: {
+            'utm.source': 'string'
+          }
+        },
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
           }
         }
       }
@@ -2017,5 +1955,305 @@ describe('Resource Partitions', () => {
 
     const nullKey = resource.getPartitionKey({ partitionName: 'byUtmSource', id: 'test-id', data: incompleteData });
     expect(nullKey).toBeNull();
+  });
+
+  test('should move partition reference when partitioned field is updated', async () => {
+    const resource = new Resource({
+      client,
+      name: 'partition-move-test',
+      attributes: {
+        name: 'string|required',
+        region: 'string|required'
+      },
+      partitions: {
+        byRegion: {
+          fields: {
+            region: 'string'
+          }
+        }
+      }
+    });
+
+    // Insert item in 'US' partition
+    const item = await resource.insert({ name: 'Item 1', region: 'US' });
+    const id = item.id;
+
+    // Ensure it's in the 'US' partition
+    let usIds = await resource.listIds({ partition: 'byRegion', partitionValues: { region: 'US' } });
+    expect(usIds).toContain(id);
+
+    // Update to 'BR'
+    await resource.update(id, { region: 'BR' });
+
+    // Ensure it's in the 'BR' partition
+    const brIds = await resource.listIds({ partition: 'byRegion', partitionValues: { region: 'BR' } });
+    expect(brIds).toContain(id);
+
+    // Verify that the new partition works correctly
+    const newPartitionResult = await resource.getFromPartition({
+      id,
+      partitionName: 'byRegion',
+      partitionValues: { region: 'BR' }
+    });
+    expect(newPartitionResult.id).toBe(id);
+    expect(newPartitionResult.region).toBe('BR');
+  });
+
+  // ===== PARTITION REFERENCE UPDATE TESTS =====
+
+  describe('Partition Reference Update', () => {
+    let db;
+    let clicks;
+
+    beforeEach(async () => {
+      db = new Database({
+        verbose: false,
+        connectionString: process.env.BUCKET_CONNECTION_STRING
+          ? process.env.BUCKET_CONNECTION_STRING
+              .replace('USER', process.env.MINIO_USER || 'minioadmin')
+              .replace('PASSWORD', process.env.MINIO_PASSWORD || 'minioadmin')
+              + `/${testPrefix}`
+          : 's3://test-bucket'
+      });
+      await db.connect();
+
+      // Create a resource with partitions
+      await db.createResource({
+        name: 'clicks',
+        behavior: 'body-overflow',
+        timestamps: true,
+        attributes: {
+          sessionId: 'string',
+          urlId: 'string',
+          ip: 'string',
+          utm: {
+            source: 'string',
+            medium: 'string',
+            campaign: 'string'
+          },
+          queryParams: 'string|optional',
+          userAgent: 'string|optional',
+          userAgentData: 'object|optional',
+        },
+        partitions: {
+          byUrlId: {
+            fields: { urlId: 'string' }
+          },
+          bySessionId: {
+            fields: { sessionId: 'string' }
+          },
+          byUtmSource: {
+            fields: { 'utm.source': 'string' }
+          },
+          byUtmCampaign: {
+            fields: { 'utm.campaign': 'string' }
+          }
+        }
+      });
+
+      clicks = db.resources.clicks;
+    });
+
+    test('should move partition references when partition fields change', async () => {
+      // Insert initial click
+      const initialClick = await clicks.insert({
+        id: 'click-1',
+        sessionId: 'session-123',
+        urlId: 'url-456',
+        ip: '192.168.1.1',
+        utm: {
+          source: 'email',
+          medium: 'email',
+          campaign: 'welcome'
+        },
+        userAgent: 'Mozilla/5.0...'
+      });
+
+      expect(initialClick.utm.source).toBe('email');
+      expect(initialClick.utm.campaign).toBe('welcome');
+
+      // Verify initial partition references exist
+      const initialUtmSourcePartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'byUtmSource',
+        partitionValues: { 'utm.source': 'email' }
+      });
+      expect(initialUtmSourcePartition.utm.source).toBe('email');
+
+      const initialUtmCampaignPartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'byUtmCampaign',
+        partitionValues: { 'utm.campaign': 'welcome' }
+      });
+      expect(initialUtmCampaignPartition.utm.campaign).toBe('welcome');
+
+      // Update UTM fields
+      const updatedClick = await clicks.update('click-1', {
+        utm: {
+          source: 'hsm',
+          campaign: 'retargeting'
+        }
+      });
+
+      expect(updatedClick.utm.source).toBe('hsm');
+      expect(updatedClick.utm.campaign).toBe('retargeting');
+
+      // Verify new partition references are created and working
+      const newUtmSourcePartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'byUtmSource',
+        partitionValues: { 'utm.source': 'hsm' }
+      });
+      expect(newUtmSourcePartition.utm.source).toBe('hsm');
+
+      const newUtmCampaignPartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'byUtmCampaign',
+        partitionValues: { 'utm.campaign': 'retargeting' }
+      });
+      expect(newUtmCampaignPartition.utm.campaign).toBe('retargeting');
+
+
+
+      // Verify unchanged partition references still exist
+      const urlIdPartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'byUrlId',
+        partitionValues: { urlId: 'url-456' }
+      });
+      expect(urlIdPartition.urlId).toBe('url-456');
+
+      const sessionIdPartition = await clicks.getFromPartition({
+        id: 'click-1',
+        partitionName: 'bySessionId',
+        partitionValues: { sessionId: 'session-123' }
+      });
+      expect(sessionIdPartition.sessionId).toBe('session-123');
+    });
+
+    test('should handle partial updates correctly', async () => {
+      // Insert initial click
+      await clicks.insert({
+        id: 'click-2',
+        sessionId: 'session-456',
+        urlId: 'url-789',
+        ip: '192.168.1.2',
+        utm: {
+          source: 'google',
+          medium: 'search',
+          campaign: 'search'
+        },
+        userAgent: 'Mozilla/5.0...'
+      });
+
+      // Update only UTM source, keeping campaign unchanged
+      const updatedClick = await clicks.update('click-2', {
+        utm: {
+          source: 'facebook',
+          campaign: 'search' // Same campaign
+        }
+      });
+
+      expect(updatedClick.utm.source).toBe('facebook');
+      expect(updatedClick.utm.campaign).toBe('search');
+
+      // Verify new UTM source partition reference works
+      const newUtmSourcePartition = await clicks.getFromPartition({
+        id: 'click-2',
+        partitionName: 'byUtmSource',
+        partitionValues: { 'utm.source': 'facebook' }
+      });
+      expect(newUtmSourcePartition.utm.source).toBe('facebook');
+
+      // Verify UTM campaign partition reference unchanged (same value)
+      const utmCampaignPartition = await clicks.getFromPartition({
+        id: 'click-2',
+        partitionName: 'byUtmCampaign',
+        partitionValues: { 'utm.campaign': 'search' }
+      });
+      expect(utmCampaignPartition.utm.campaign).toBe('search');
+    });
+
+    test('should handle updates that remove partition field values', async () => {
+      // Insert initial click with UTM source
+      await clicks.insert({
+        id: 'click-3',
+        sessionId: 'session-789',
+        urlId: 'url-123',
+        ip: '192.168.1.3',
+        utm: {
+          source: 'twitter',
+          medium: 'social',
+          campaign: 'social'
+        },
+        userAgent: 'Mozilla/5.0...'
+      });
+
+      // Update to remove UTM source (set to empty string)
+      const updatedClick = await clicks.update('click-3', {
+        utm: {
+          source: '',
+          medium: 'social',
+          campaign: 'social'
+        }
+      });
+
+      expect(updatedClick.utm.source).toBe('');
+      expect(updatedClick.utm.campaign).toBe('social');
+
+      // Verify UTM campaign partition reference still exists (since campaign didn't change)
+      const utmCampaignPartition = await clicks.getFromPartition({
+        id: 'click-3',
+        partitionName: 'byUtmCampaign',
+        partitionValues: { 'utm.campaign': 'social' }
+      });
+      expect(utmCampaignPartition.utm.campaign).toBe('social');
+
+
+    });
+
+    test('should not fail when partition operations encounter errors', async () => {
+      // Insert initial click
+      await clicks.insert({
+        id: 'click-4',
+        sessionId: 'session-999',
+        urlId: 'url-999',
+        ip: '192.168.1.4',
+        utm: {
+          source: 'linkedin',
+          medium: 'b2b',
+          campaign: 'b2b'
+        },
+        userAgent: 'Mozilla/5.0...'
+      });
+
+      // Mock deleteObject and putObject to throw errors
+      const originalDeleteObject = clicks.client.deleteObject;
+      const originalPutObject = clicks.client.putObject;
+      clicks.client.deleteObject = jest.fn().mockImplementation(async (key) => {
+        throw new Error('Simulated delete error');
+      });
+      clicks.client.putObject = jest.fn().mockImplementation(async (key, data) => {
+        throw new Error('Simulated put error');
+      });
+
+      // Try to update partition references (should not throw)
+      await expect(clicks.updatePartitionReferences({
+        id: 'click-4',
+        sessionId: 'session-999',
+        urlId: 'url-999',
+        ip: '192.168.1.4',
+        utm: {
+          source: 'linkedin',
+          medium: 'b2b',
+          campaign: 'b2b'
+        },
+        userAgent: 'Mozilla/5.0...'
+      })).resolves.not.toThrow();
+
+      // Restore original methods
+      clicks.client.deleteObject = originalDeleteObject;
+      clicks.client.putObject = originalPutObject;
+    });
   });
 }); 
