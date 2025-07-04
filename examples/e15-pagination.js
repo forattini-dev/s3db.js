@@ -10,7 +10,7 @@ const config = {
 async function paginationDebugExample() {
   console.log("Testing pagination with debug info...");
   
-  const db = new S3DB(config);
+  const db = await setupDatabase();
   const users = db.resource("users", {
     attributes: {
       name: "string",
@@ -71,6 +71,8 @@ async function paginationDebugExample() {
 
   } catch (error) {
     console.error("Test failed:", error.message);
+  }  } finally {
+    await teardownDatabase();
   }
 }
 

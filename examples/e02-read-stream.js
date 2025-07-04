@@ -1,16 +1,13 @@
-const { ENV, CostsPlugin, S3db } = require("./concerns");
-
-const Multiprogress = require("multi-progress");
+import { setupDatabase, teardownDatabase } from './database.js';
+import { ENV, S3db, CostsPlugin } from './concerns.js';
+import Multiprogress from 'multi-progress';
 
 async function main() {
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING,
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-    plugins: [CostsPlugin],
-  });
+  const s3db = await setupDatabase();
   
-  await s3db.connect();
+  // Add costs plugin
+  s3db.use(CostsPlugin);
+  
   const total = await s3db.resource("leads").count();
 
   console.log(`reading ${total} leads.`);
@@ -56,6 +53,8 @@ async function main() {
     process.stdout.write("\n\n");
     console.log("Total cost:", s3db.client.costs.total.toFixed(4), "USD");
   });
+  
+  await teardownDatabase();
 }
 
 main();

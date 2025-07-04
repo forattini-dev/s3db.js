@@ -1,4 +1,4 @@
-const s3db = require('../src/index.js');
+import s3db from '../src/index.js';
 
 (async () => {
   try {
@@ -12,11 +12,7 @@ const s3db = require('../src/index.js');
       endpoint: 'http://localhost:4566',
       forcePathStyle: true,
       autoCreateBucket: true
-    });
-
-    await db.connect();
-
-    // Define a users resource with multi-field partitions
+    });// Define a users resource with multi-field partitions
     const users = await db.createResource({
       name: 'users',
       attributes: {
@@ -223,5 +219,7 @@ const s3db = require('../src/index.js');
   } catch (error) {
     console.error('\n❌ Error:', error.message);
     console.error(error.stack);
+  }  } finally {
+    await teardownDatabase();
   }
 })();

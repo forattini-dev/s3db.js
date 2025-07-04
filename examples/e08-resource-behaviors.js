@@ -5,14 +5,7 @@ async function demonstrateBehaviors() {
   console.log('🚀 S3DB.js Resource Behaviors Demo\n');
 
   // Initialize database
-  const db = new S3db({
-    connectionString: process.env.S3DB_CONNECTION_STRING || 'http://localhost:9000/s3db-test',
-    verbose: true
-  });
-
-  await db.connect();
-
-  // Sample large data that exceeds 2KB
+  const db = await setupDatabase());// Sample large data that exceeds 2KB
   const largeData = {
     name: 'João Silva',
     email: 'joao@example.com',
@@ -79,7 +72,9 @@ async function demonstrateBehaviors() {
       notes: 'string|optional',
       tags: 'array|optional',
       metadata: 'object|optional'
-    }
+    }  } finally {
+    await teardownDatabase();
+  }
   });
 
   try {

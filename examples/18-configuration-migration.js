@@ -10,7 +10,7 @@ const config = {
 async function testNewConfigurationStructure() {
   console.log("Testing new configuration structure...");
   
-  const db = new S3DB(config);
+  const db = await setupDatabase();
   
   // Test 1: Create resource with new configuration structure
   console.log("\n1. Creating resource with new configuration structure...");
@@ -27,7 +27,8 @@ async function testNewConfigurationStructure() {
     timestamps: true,
     partitions: {
       byRegion: {
-        fields: { region: "string" }
+        fields: { region: "string" }  await teardownDatabase();
+
       }
     },
     paranoid: true,

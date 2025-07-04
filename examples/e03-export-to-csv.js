@@ -1,17 +1,12 @@
-const { ENV, S3db } = require("./concerns");
-
-const fs = require("fs");
-const ProgressBar = require("progress");
-const { Transform } = require("stream");
+import { setupDatabase, teardownDatabase } from './database.js';
+import { ENV, S3db } from './concerns.js';
+import fs from 'fs';
+import ProgressBar from 'progress';
+import { Transform } from 'stream';
 
 async function main() {
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING,
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-  });
-
-  await s3db.connect();
+  const s3db = await setupDatabase();
+  
   const total = await s3db.resource("leads").count();
 
   console.log(`reading ${total} leads.`);
@@ -52,6 +47,8 @@ async function main() {
   });
 
   stream.pipe(transformer).pipe(streamWrite);
+  
+  await teardownDatabase();
 }
 
 main();

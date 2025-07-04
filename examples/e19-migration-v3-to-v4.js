@@ -16,6 +16,7 @@
  */
 
 import { S3Client } from '@aws-sdk/client-s3';
+import { setupDatabase, teardownDatabase } from './database.js';
 
 // You'll need to install both versions:
 // npm install s3db.js@3.3.2  # Old version (for reading)
@@ -75,6 +76,8 @@ async function backupV3Data(client, resourceName) {
   } catch (error) {
     console.error(`❌ Backup failed for ${resourceName}:`, error);
     throw error;
+  }  } finally {
+    await teardownDatabase();
   }
 }
 
@@ -256,10 +259,8 @@ async function migrateDatabase() {
   });
   
   // Initialize v4 database
-  // const v4db = new S3db({ uri: MIGRATION_CONFIG.connectionString });
-  // await v4db.connect();
-  
-  const migrationResults = [];
+  // const v4db = await setupDatabase());
+  //const migrationResults = [];
   
   for (const resourceName of MIGRATION_CONFIG.resources) {
     console.log(`\n📁 Processing resource: ${resourceName}`);

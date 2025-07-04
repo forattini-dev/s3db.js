@@ -1,25 +1,21 @@
-const { ENV, CostsPlugin, S3db } = require("./concerns");
-
-const { idGenerator } = require("../src/concerns/id.js");
-const Fakerator = require("fakerator");
-const ProgressBar = require("progress");
+import { setupDatabase, teardownDatabase } from './database.js';
+import { idGenerator } from '../src/concerns/id.js';
+import Fakerator from 'fakerator';
+import ProgressBar from 'progress';
+import { CostsPlugin } from '../src/plugins/costs.plugin.js';
 
 const TOTAL = 100
 
 async function main() {
   const fake = Fakerator();
 
-  const s3db = new S3db({
-    uri: ENV.CONNECTION_STRING,
-    passphrase: ENV.PASSPRHASE,
-    parallelism: ENV.PARALLELISM,
-    plugins: [CostsPlugin],
-  });
+  const s3db = await setupDatabase();
+  
+  // Add costs plugin
+  s3db.use(CostsPlugin);
 
   console.log(`creating ${TOTAL} leads.`);
-  console.log(`parallelism of ${ENV.PARALLELISM} requests.\n`);
-
-  await s3db.connect();
+  console.log(`parallelism of ${s3db.config.parallelism || 10} requests.\n`);
 
   const barItem = new ProgressBar(
     "bulk-writing  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds) [:requests requests]",
@@ -59,6 +55,8 @@ async function main() {
   console.timeEnd("bulk-writing");
   process.stdout.write("\n\n");
   console.log("Total cost:", s3db.client.costs.total.toFixed(4), "USD");
+  
+  await teardownDatabase();
 }
 
 main();
