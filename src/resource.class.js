@@ -71,7 +71,7 @@ class Resource extends EventEmitter {
       throw new Error(`Invalid Resource configuration:\n${validation.errors.join('\n')}`);
     }
 
-    // Extract configuration with defaults
+    // Extract configuration with defaults - all at root level
     const {
       name,
       client,
@@ -87,19 +87,8 @@ class Resource extends EventEmitter {
       partitions = {},
       paranoid = true,
       allNestedObjectsOptional = true,
-      hooks = {},
-      options = {}
+      hooks = {}
     } = config;
-
-    // Merge options from both root and options object
-    const mergedOptions = {
-      cache: typeof options.cache === 'boolean' ? options.cache : cache,
-      autoDecrypt: typeof options.autoDecrypt === 'boolean' ? options.autoDecrypt : autoDecrypt,
-      timestamps: typeof options.timestamps === 'boolean' ? options.timestamps : timestamps,
-      paranoid: typeof options.paranoid === 'boolean' ? options.paranoid : paranoid,
-      allNestedObjectsOptional: typeof options.allNestedObjectsOptional === 'boolean' ? options.allNestedObjectsOptional : allNestedObjectsOptional,
-      partitions: options.partitions || partitions || {},
-    };
 
     // Set instance properties
     this.name = name;
@@ -110,15 +99,15 @@ class Resource extends EventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
 
-    // Store configuration
+    // Store configuration - all at root level
     this.config = {
-      cache: mergedOptions.cache,
+      cache,
       hooks,
-      paranoid: mergedOptions.paranoid,
-      timestamps: mergedOptions.timestamps,
-      partitions: mergedOptions.partitions,
-      autoDecrypt: mergedOptions.autoDecrypt,
-      allNestedObjectsOptional: mergedOptions.allNestedObjectsOptional,
+      paranoid,
+      timestamps,
+      partitions,
+      autoDecrypt,
+      allNestedObjectsOptional,
     };
 
     // Initialize hooks system
@@ -134,46 +123,8 @@ class Resource extends EventEmitter {
     // Store attributes
     this.attributes = attributes || {};
 
-    // Handle timestamps
-    if (this.config.timestamps) {
-      this.attributes.createdAt = 'string|optional';
-      this.attributes.updatedAt = 'string|optional';
-      if (!this.config.partitions) {
-        this.config.partitions = {};
-      }
-      if (!this.config.partitions.byCreatedDate) {
-        this.config.partitions.byCreatedDate = {
-          fields: {
-            createdAt: 'date|maxlength:10'
-          }
-        };
-      }
-      if (!this.config.partitions.byUpdatedDate) {
-        this.config.partitions.byUpdatedDate = {
-          fields: {
-            updatedAt: 'date|maxlength:10'
-          }
-        };
-      }
-    }
-
-    // Create schema
-    this.schema = new Schema({
-      name,
-      attributes: this.attributes,
-      passphrase,
-      version: this.version,
-      options: {
-        autoDecrypt: this.config.autoDecrypt,
-        allNestedObjectsOptional: this.config.allNestedObjectsOptional
-      },
-    });
-
-    // Setup automatic partition hooks if partitions are defined
-    this.setupPartitionHooks();
-
-    // Validate partitions against current attributes (after all setup is complete)
-    this.validatePartitions();
+    // Apply configuration settings (timestamps, partitions, hooks)
+    this.applyConfiguration();
 
     // Merge user-provided hooks (added last, after internal hooks)
     if (hooks) {
@@ -206,6 +157,7 @@ class Resource extends EventEmitter {
 
   export() {
     const exported = this.schema.export();
+    // Add all configuration at root level
     exported.behavior = this.behavior;
     exported.timestamps = this.config.timestamps;
     exported.partitions = this.config.partitions || {};
@@ -218,24 +170,26 @@ class Resource extends EventEmitter {
   }
 
   /**
-   * Update resource attributes and rebuild schema
-   * @param {Object} newAttributes - New attributes definition
+   * Apply configuration settings (timestamps, partitions, hooks)
+   * This method ensures that all configuration-dependent features are properly set up
    */
-  updateAttributes(newAttributes) {
-    // Store old attributes for comparison
-    const oldAttributes = this.attributes;
-    this.attributes = newAttributes;
-
-    // Add timestamp attributes if enabled
+  applyConfiguration() {
+    // Handle timestamps configuration
     if (this.config.timestamps) {
-      newAttributes.createdAt = 'string|optional';
-      newAttributes.updatedAt = 'string|optional';
+      // Add timestamp attributes if they don't exist
+      if (!this.attributes.createdAt) {
+        this.attributes.createdAt = 'string|optional';
+      }
+      if (!this.attributes.updatedAt) {
+        this.attributes.updatedAt = 'string|optional';
+      }
       
-      // Automatically add timestamp partitions for date-based organization
+      // Ensure partitions object exists
       if (!this.config.partitions) {
         this.config.partitions = {};
       }
       
+      // Add timestamp partitions if they don't exist
       if (!this.config.partitions.byCreatedDate) {
         this.config.partitions.byCreatedDate = {
           fields: {
@@ -252,10 +206,13 @@ class Resource extends EventEmitter {
       }
     }
 
-    // Rebuild schema with new attributes
+    // Setup automatic partition hooks
+    this.setupPartitionHooks();
+
+    // Rebuild schema with current attributes
     this.schema = new Schema({
       name: this.name,
-      attributes: newAttributes,
+      attributes: this.attributes,
       passphrase: this.passphrase,
       version: this.version,
       options: {
@@ -264,11 +221,21 @@ class Resource extends EventEmitter {
       },
     });
 
-    // Setup automatic partition hooks if partitions are defined
-    this.setupPartitionHooks();
-
-    // Validate partitions against new attributes
+    // Validate partitions against current attributes
     this.validatePartitions();
+  }
+
+  /**
+   * Update resource attributes and rebuild schema
+   * @param {Object} newAttributes - New attributes definition
+   */
+  updateAttributes(newAttributes) {
+    // Store old attributes for comparison
+    const oldAttributes = this.attributes;
+    this.attributes = newAttributes;
+
+    // Apply configuration to ensure timestamps and hooks are set up
+    this.applyConfiguration();
 
     return { oldAttributes, newAttributes };
   }
@@ -297,6 +264,7 @@ class Resource extends EventEmitter {
     for (const hook of this.hooks[event]) {
       result = await hook(result);
     }
+
     return result;
   }
 
@@ -375,9 +343,8 @@ class Resource extends EventEmitter {
       for (const fieldName of Object.keys(partitionDef.fields)) {
         if (!this.fieldExistsInAttributes(fieldName)) {
           throw new Error(
-            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. ` +
-            `Available fields: ${currentAttributes.join(', ')}. ` +
-            `This version of resource does not have support for this partition.`
+            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. ` +
+            `Available fields: ${currentAttributes.join(', ')}.`
           );
         }
       }
@@ -1230,34 +1197,122 @@ class Resource extends EventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    if (!partition) {
-      // Fallback to main resource listing
-      const ids = await this.listIds({ partition, partitionValues });
+    try {
+      if (!partition) {
+        // Fallback to main resource listing
+        let ids = [];
+        try {
+          ids = await this.listIds({ partition, partitionValues });
+        } catch (listIdsError) {
+          console.warn(`Failed to get list IDs:`, listIdsError.message);
+          return [];
+        }
+        
+        // Apply offset and limit
+        let filteredIds = ids.slice(offset);
+        if (limit) {
+          filteredIds = filteredIds.slice(0, limit);
+        }
+
+        // Get full data for each ID with error handling
+        const { results, errors } = await PromisePool.for(filteredIds)
+          .withConcurrency(this.parallelism)
+          .handleError(async (error, id) => {
+            console.warn(`Failed to get resource ${id}:`, error.message);
+            // Return null for failed items so we can filter them out
+            return null;
+          })
+          .process(async (id) => {
+            try {
+              return await this.get(id);
+            } catch (error) {
+              // If it's a decryption error, try to get basic info
+              if (error.message.includes('Cipher job failed') || 
+                  error.message.includes('OperationError')) {
+                console.warn(`Decryption failed for ${id}, returning basic info`);
+                return {
+                  id,
+                  _decryptionFailed: true,
+                  _error: error.message
+                };
+              }
+              throw error; // Re-throw other errors
+            }
+          });
+
+        // Filter out null results (failed items)
+        const validResults = results.filter(item => item !== null);
+
+        this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
+        return validResults;
+      }
+
+      // Get partition definition
+      if (!this.config.partitions || !this.config.partitions[partition]) {
+        throw new Error(`Partition '${partition}' not found`);
+      }
       
+      const partitionDef = this.config.partitions[partition];
+      
+      // Build partition prefix
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== undefined && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      
+      let prefix;
+      if (partitionSegments.length > 0) {
+        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
+      } else {
+        prefix = `resource=${this.name}/partition=${partition}`;
+      }
+
+      // Get all keys in the partition
+      let keys = [];
+      try {
+        keys = await this.client.getAllKeys({ prefix });
+      } catch (getKeysError) {
+        console.warn(`Failed to get partition keys:`, getKeysError.message);
+        return [];
+      }
+      
+      // Extract IDs and apply pagination
+      const ids = keys.map((key) => {
+        const parts = key.split('/');
+        const idPart = parts.find(part => part.startsWith('id='));
+        return idPart ? idPart.replace('id=', '') : null;
+      }).filter(Boolean);
+
       // Apply offset and limit
       let filteredIds = ids.slice(offset);
       if (limit) {
         filteredIds = filteredIds.slice(0, limit);
       }
 
-      // Get full data for each ID with error handling
+      // Get full data directly from partition objects with error handling
       const { results, errors } = await PromisePool.for(filteredIds)
         .withConcurrency(this.parallelism)
         .handleError(async (error, id) => {
-          console.warn(`Failed to get resource ${id}:`, error.message);
-          // Return null for failed items so we can filter them out
+          console.warn(`Failed to get partition resource ${id}:`, error.message);
           return null;
         })
         .process(async (id) => {
           try {
-            return await this.get(id);
+            return await this.getFromPartition({ id, partitionName: partition, partitionValues });
           } catch (error) {
             // If it's a decryption error, try to get basic info
             if (error.message.includes('Cipher job failed') || 
                 error.message.includes('OperationError')) {
-              console.warn(`Decryption failed for ${id}, returning basic info`);
+              console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
               return {
                 id,
+                _partition: partition,
+                _partitionValues: partitionValues,
                 _decryptionFailed: true,
                 _error: error.message
               };
@@ -1271,81 +1326,12 @@ class Resource extends EventEmitter {
 
       this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
       return validResults;
+    } catch (error) {
+      // Final fallback - return empty array if everything fails
+      console.error(`Critical error in list method:`, error.message);
+      this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+      return [];
     }
-
-    // Get partition definition
-    if (!this.config.partitions || !this.config.partitions[partition]) {
-      throw new Error(`Partition '${partition}' not found`);
-    }
-    
-    const partitionDef = this.config.partitions[partition];
-    
-    // Build partition prefix
-    const partitionSegments = [];
-    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-    for (const [fieldName, rule] of sortedFields) {
-      const value = partitionValues[fieldName];
-      if (value !== undefined && value !== null) {
-        const transformedValue = this.applyPartitionRule(value, rule);
-        partitionSegments.push(`${fieldName}=${transformedValue}`);
-      }
-    }
-    
-    let prefix;
-    if (partitionSegments.length > 0) {
-      prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
-    } else {
-      prefix = `resource=${this.name}/partition=${partition}`;
-    }
-
-    // Get all keys in the partition
-    const keys = await this.client.getAllKeys({ prefix });
-    
-    // Extract IDs and apply pagination
-    const ids = keys.map((key) => {
-      const parts = key.split('/');
-      const idPart = parts.find(part => part.startsWith('id='));
-      return idPart ? idPart.replace('id=', '') : null;
-    }).filter(Boolean);
-
-    // Apply offset and limit
-    let filteredIds = ids.slice(offset);
-    if (limit) {
-      filteredIds = filteredIds.slice(0, limit);
-    }
-
-    // Get full data directly from partition objects with error handling
-    const { results, errors } = await PromisePool.for(filteredIds)
-      .withConcurrency(this.parallelism)
-      .handleError(async (error, id) => {
-        console.warn(`Failed to get partition resource ${id}:`, error.message);
-        return null;
-      })
-      .process(async (id) => {
-        try {
-          return await this.getFromPartition({ id, partitionName: partition, partitionValues });
-        } catch (error) {
-          // If it's a decryption error, try to get basic info
-          if (error.message.includes('Cipher job failed') || 
-              error.message.includes('OperationError')) {
-            console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
-            return {
-              id,
-              _partition: partition,
-              _partitionValues: partitionValues,
-              _decryptionFailed: true,
-              _error: error.message
-            };
-          }
-          throw error; // Re-throw other errors
-        }
-      });
-
-    // Filter out null results (failed items)
-    const validResults = results.filter(item => item !== null);
-
-    this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
-    return validResults;
   }
 
   /**
@@ -1470,43 +1456,78 @@ class Resource extends EventEmitter {
    * console.log(`Got ${fastPage.items.length} items`); // totalItems will be null
    */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    // Get total count only if not skipped (for performance)
-    let totalItems = null;
-    let totalPages = null;
-    
-    if (!skipCount) {
-      totalItems = await this.count({ partition, partitionValues });
-      totalPages = Math.ceil(totalItems / size);
-    }
-    
-    const page = Math.floor(offset / size);
-    
-    // Use the existing list() method which already has pagination implemented
-    const items = await this.list({ 
-      partition, 
-      partitionValues,
-      limit: size,
-      offset: offset
-    });
-    
-    const result = {
-      items,
-      totalItems,
-      page,
-      pageSize: size,
-      totalPages,
-      // Add additional metadata for debugging
-      _debug: {
-        requestedSize: size,
-        requestedOffset: offset,
-        actualItemsReturned: items.length,
-        skipCount: skipCount,
-        hasTotalItems: totalItems !== null
+    try {
+      // Get total count only if not skipped (for performance)
+      let totalItems = null;
+      let totalPages = null;
+      
+      if (!skipCount) {
+        try {
+          totalItems = await this.count({ partition, partitionValues });
+          totalPages = Math.ceil(totalItems / size);
+        } catch (countError) {
+          console.warn(`Failed to get count for page:`, countError.message);
+          // Continue without count if it fails
+          totalItems = null;
+          totalPages = null;
+        }
       }
-    };
-    
-    this.emit("page", result);
-    return result;
+      
+      const page = Math.floor(offset / size);
+      
+      // Use the existing list() method which already has pagination implemented
+      let items = [];
+      try {
+        items = await this.list({ 
+          partition, 
+          partitionValues,
+          limit: size,
+          offset: offset
+        });
+      } catch (listError) {
+        console.warn(`Failed to get items for page:`, listError.message);
+        // Return empty items array if list fails
+        items = [];
+      }
+      
+      const result = {
+        items,
+        totalItems,
+        page,
+        pageSize: size,
+        totalPages,
+        // Add additional metadata for debugging
+        _debug: {
+          requestedSize: size,
+          requestedOffset: offset,
+          actualItemsReturned: items.length,
+          skipCount: skipCount,
+          hasTotalItems: totalItems !== null
+        }
+      };
+      
+      this.emit("page", result);
+      return result;
+    } catch (error) {
+      // Final fallback - return a safe result even if everything fails
+      console.error(`Critical error in page method:`, error.message);
+      
+      return {
+        items: [],
+        totalItems: null,
+        page: Math.floor(offset / size),
+        pageSize: size,
+        totalPages: null,
+        _debug: {
+          requestedSize: size,
+          requestedOffset: offset,
+          actualItemsReturned: 0,
+          skipCount: skipCount,
+          hasTotalItems: false,
+          error: error.message
+        }
+      };
+    }
   }
 
   readable() {

@@ -3443,7 +3443,15 @@ ${JSON.stringify(validation, null, 2)}`, {
   const SchemaActions = {
     trim: (value) => value.trim(),
     encrypt: (value, { passphrase }) => encrypt(value, passphrase),
-    decrypt: (value, { passphrase }) => decrypt(value, passphrase),
+    decrypt: async (value, { passphrase }) => {
+      try {
+        const raw = await decrypt(value, passphrase);
+        return raw;
+      } catch (error) {
+        console.warn(`Schema decrypt error: ${error}`, error);
+        return value;
+      }
+    },
     toString: (value) => String(value),
     fromArray: (value, { separator }) => {
       if (value === null || value === void 0 || !Array.isArray(value)) {
@@ -8608,7 +8616,6 @@ ${JSON.stringify(validation, null, 2)}`, {
   function calculateAttributeNamesSize(mappedObject) {
     let totalSize = 0;
     for (const key of Object.keys(mappedObject)) {
-      if (key === "_v") continue;
       totalSize += calculateUTF8Bytes(key);
     }
     return totalSize;
@@ -8941,17 +8948,8 @@ ${validation.errors.join("\n")}`);
         partitions = {},
         paranoid = true,
         allNestedObjectsOptional = true,
-        hooks = {},
-        options = {}
+        hooks = {}
       } = config;
-      const mergedOptions = {
-        cache: typeof options.cache === "boolean" ? options.cache : cache,
-        autoDecrypt: typeof options.autoDecrypt === "boolean" ? options.autoDecrypt : autoDecrypt,
-        timestamps: typeof options.timestamps === "boolean" ? options.timestamps : timestamps,
-        paranoid: typeof options.paranoid === "boolean" ? options.paranoid : paranoid,
-        allNestedObjectsOptional: typeof options.allNestedObjectsOptional === "boolean" ? options.allNestedObjectsOptional : allNestedObjectsOptional,
-        partitions: options.partitions || partitions || {}
-      };
       this.name = name;
       this.client = client;
       this.version = version;
@@ -8960,13 +8958,13 @@ ${validation.errors.join("\n")}`);
       this.parallelism = parallelism;
       this.passphrase = passphrase ?? "secret";
       this.config = {
-        cache: mergedOptions.cache,
+        cache,
         hooks,
-        paranoid: mergedOptions.paranoid,
-        timestamps: mergedOptions.timestamps,
-        partitions: mergedOptions.partitions,
-        autoDecrypt: mergedOptions.autoDecrypt,
-        allNestedObjectsOptional: mergedOptions.allNestedObjectsOptional
+        paranoid,
+        timestamps,
+        partitions,
+        autoDecrypt,
+        allNestedObjectsOptional
       };
       this.hooks = {
         preInsert: [],
@@ -8977,39 +8975,7 @@ ${validation.errors.join("\n")}`);
         afterDelete: []
       };
       this.attributes = attributes || {};
-      if (this.config.timestamps) {
-        this.attributes.createdAt = "string|optional";
-        this.attributes.updatedAt = "string|optional";
-        if (!this.config.partitions) {
-          this.config.partitions = {};
-        }
-        if (!this.config.partitions.byCreatedDate) {
-          this.config.partitions.byCreatedDate = {
-            fields: {
-              createdAt: "date|maxlength:10"
-            }
-          };
-        }
-        if (!this.config.partitions.byUpdatedDate) {
-          this.config.partitions.byUpdatedDate = {
-            fields: {
-              updatedAt: "date|maxlength:10"
-            }
-          };
-        }
-      }
-      this.schema = new Schema({
-        name,
-        attributes: this.attributes,
-        passphrase,
-        version: this.version,
-        options: {
-          autoDecrypt: this.config.autoDecrypt,
-          allNestedObjectsOptional: this.config.allNestedObjectsOptional
-        }
-      });
-      this.setupPartitionHooks();
-      this.validatePartitions();
+      this.applyConfiguration();
       if (hooks) {
         for (const [event, hooksArr] of Object.entries(hooks)) {
           if (Array.isArray(hooksArr) && this.hooks[event]) {
@@ -9048,15 +9014,17 @@ ${validation.errors.join("\n")}`);
       return exported;
     }
     /**
-     * Update resource attributes and rebuild schema
-     * @param {Object} newAttributes - New attributes definition
+     * Apply configuration settings (timestamps, partitions, hooks)
+     * This method ensures that all configuration-dependent features are properly set up
      */
-    updateAttributes(newAttributes) {
-      const oldAttributes = this.attributes;
-      this.attributes = newAttributes;
+    applyConfiguration() {
       if (this.config.timestamps) {
-        newAttributes.createdAt = "string|optional";
-        newAttributes.updatedAt = "string|optional";
+        if (!this.attributes.createdAt) {
+          this.attributes.createdAt = "string|optional";
+        }
+        if (!this.attributes.updatedAt) {
+          this.attributes.updatedAt = "string|optional";
+        }
         if (!this.config.partitions) {
           this.config.partitions = {};
         }
@@ -9075,9 +9043,10 @@ ${validation.errors.join("\n")}`);
           };
         }
       }
+      this.setupPartitionHooks();
       this.schema = new Schema({
         name: this.name,
-        attributes: newAttributes,
+        attributes: this.attributes,
         passphrase: this.passphrase,
         version: this.version,
         options: {
@@ -9085,8 +9054,16 @@ ${validation.errors.join("\n")}`);
           allNestedObjectsOptional: this.config.allNestedObjectsOptional
         }
       });
-      this.setupPartitionHooks();
       this.validatePartitions();
+    }
+    /**
+     * Update resource attributes and rebuild schema
+     * @param {Object} newAttributes - New attributes definition
+     */
+    updateAttributes(newAttributes) {
+      const oldAttributes = this.attributes;
+      this.attributes = newAttributes;
+      this.applyConfiguration();
       return { oldAttributes, newAttributes };
     }
     /**
@@ -9110,6 +9087,7 @@ ${validation.errors.join("\n")}`);
       let result = data;
       for (const hook of this.hooks[event]) {
         result = await hook(result);
+        console.log(this.name + ": " + event + ": result", result);
       }
       return result;
     }
@@ -9174,7 +9152,7 @@ ${validation.errors.join("\n")}`);
         for (const fieldName of Object.keys(partitionDef.fields)) {
           if (!this.fieldExistsInAttributes(fieldName)) {
             throw new Error(
-              `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource version '${this.version}'. Available fields: ${currentAttributes.join(", ")}. This version of resource does not have support for this partition.`
+              `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(", ")}.`
             );
           }
         }
@@ -9342,6 +9320,7 @@ ${validation.errors.join("\n")}`);
         attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
       }
       const preProcessedData = await this.executeHooks("preInsert", attributes);
+      console.log(this.name + ": preInsert: result", preProcessedData);
       const {
         errors,
         isValid,
@@ -9854,23 +9833,89 @@ ${validation.errors.join("\n")}`);
      * });
      */
     async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-      if (!partition) {
-        const ids2 = await this.listIds({ partition, partitionValues });
-        let filteredIds2 = ids2.slice(offset);
-        if (limit) {
-          filteredIds2 = filteredIds2.slice(0, limit);
+      try {
+        if (!partition) {
+          let ids2 = [];
+          try {
+            ids2 = await this.listIds({ partition, partitionValues });
+          } catch (listIdsError) {
+            console.warn(`Failed to get list IDs:`, listIdsError.message);
+            return [];
+          }
+          let filteredIds2 = ids2.slice(offset);
+          if (limit) {
+            filteredIds2 = filteredIds2.slice(0, limit);
+          }
+          const { results: results2, errors: errors2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).handleError(async (error, id) => {
+            console.warn(`Failed to get resource ${id}:`, error.message);
+            return null;
+          }).process(async (id) => {
+            try {
+              return await this.get(id);
+            } catch (error) {
+              if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+                console.warn(`Decryption failed for ${id}, returning basic info`);
+                return {
+                  id,
+                  _decryptionFailed: true,
+                  _error: error.message
+                };
+              }
+              throw error;
+            }
+          });
+          const validResults2 = results2.filter((item) => item !== null);
+          this.emit("list", { partition, partitionValues, count: validResults2.length, errors: errors2.length });
+          return validResults2;
         }
-        const { results: results2, errors: errors2 } = await promisePool.PromisePool.for(filteredIds2).withConcurrency(this.parallelism).handleError(async (error, id) => {
-          console.warn(`Failed to get resource ${id}:`, error.message);
+        if (!this.config.partitions || !this.config.partitions[partition]) {
+          throw new Error(`Partition '${partition}' not found`);
+        }
+        const partitionDef = this.config.partitions[partition];
+        const partitionSegments = [];
+        const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+        for (const [fieldName, rule] of sortedFields) {
+          const value = partitionValues[fieldName];
+          if (value !== void 0 && value !== null) {
+            const transformedValue = this.applyPartitionRule(value, rule);
+            partitionSegments.push(`${fieldName}=${transformedValue}`);
+          }
+        }
+        let prefix;
+        if (partitionSegments.length > 0) {
+          prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+        } else {
+          prefix = `resource=${this.name}/partition=${partition}`;
+        }
+        let keys = [];
+        try {
+          keys = await this.client.getAllKeys({ prefix });
+        } catch (getKeysError) {
+          console.warn(`Failed to get partition keys:`, getKeysError.message);
+          return [];
+        }
+        const ids = keys.map((key) => {
+          const parts = key.split("/");
+          const idPart = parts.find((part) => part.startsWith("id="));
+          return idPart ? idPart.replace("id=", "") : null;
+        }).filter(Boolean);
+        let filteredIds = ids.slice(offset);
+        if (limit) {
+          filteredIds = filteredIds.slice(0, limit);
+        }
+        const { results, errors } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).handleError(async (error, id) => {
+          console.warn(`Failed to get partition resource ${id}:`, error.message);
           return null;
         }).process(async (id) => {
           try {
-            return await this.get(id);
+            return await this.getFromPartition({ id, partitionName: partition, partitionValues });
           } catch (error) {
             if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-              console.warn(`Decryption failed for ${id}, returning basic info`);
+              console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
               return {
                 id,
+                _partition: partition,
+                _partitionValues: partitionValues,
                 _decryptionFailed: true,
                 _error: error.message
               };
@@ -9878,62 +9923,14 @@ ${validation.errors.join("\n")}`);
             throw error;
           }
         });
-        const validResults2 = results2.filter((item) => item !== null);
-        this.emit("list", { partition, partitionValues, count: validResults2.length, errors: errors2.length });
-        return validResults2;
+        const validResults = results.filter((item) => item !== null);
+        this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
+        return validResults;
+      } catch (error) {
+        console.error(`Critical error in list method:`, error.message);
+        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+        return [];
       }
-      if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new Error(`Partition '${partition}' not found`);
-      }
-      const partitionDef = this.config.partitions[partition];
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      let prefix;
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
-      const keys = await this.client.getAllKeys({ prefix });
-      const ids = keys.map((key) => {
-        const parts = key.split("/");
-        const idPart = parts.find((part) => part.startsWith("id="));
-        return idPart ? idPart.replace("id=", "") : null;
-      }).filter(Boolean);
-      let filteredIds = ids.slice(offset);
-      if (limit) {
-        filteredIds = filteredIds.slice(0, limit);
-      }
-      const { results, errors } = await promisePool.PromisePool.for(filteredIds).withConcurrency(this.parallelism).handleError(async (error, id) => {
-        console.warn(`Failed to get partition resource ${id}:`, error.message);
-        return null;
-      }).process(async (id) => {
-        try {
-          return await this.getFromPartition({ id, partitionName: partition, partitionValues });
-        } catch (error) {
-          if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-            console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
-            return {
-              id,
-              _partition: partition,
-              _partitionValues: partitionValues,
-              _decryptionFailed: true,
-              _error: error.message
-            };
-          }
-          throw error;
-        }
-      });
-      const validResults = results.filter((item) => item !== null);
-      this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
-      return validResults;
     }
     /**
      * Get multiple resources by their IDs
@@ -10040,36 +10037,67 @@ ${validation.errors.join("\n")}`);
      * console.log(`Got ${fastPage.items.length} items`); // totalItems will be null
      */
     async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-      let totalItems = null;
-      let totalPages = null;
-      if (!skipCount) {
-        totalItems = await this.count({ partition, partitionValues });
-        totalPages = Math.ceil(totalItems / size);
-      }
-      const page = Math.floor(offset / size);
-      const items = await this.list({
-        partition,
-        partitionValues,
-        limit: size,
-        offset
-      });
-      const result = {
-        items,
-        totalItems,
-        page,
-        pageSize: size,
-        totalPages,
-        // Add additional metadata for debugging
-        _debug: {
-          requestedSize: size,
-          requestedOffset: offset,
-          actualItemsReturned: items.length,
-          skipCount,
-          hasTotalItems: totalItems !== null
+      try {
+        let totalItems = null;
+        let totalPages = null;
+        if (!skipCount) {
+          try {
+            totalItems = await this.count({ partition, partitionValues });
+            totalPages = Math.ceil(totalItems / size);
+          } catch (countError) {
+            console.warn(`Failed to get count for page:`, countError.message);
+            totalItems = null;
+            totalPages = null;
+          }
         }
-      };
-      this.emit("page", result);
-      return result;
+        const page = Math.floor(offset / size);
+        let items = [];
+        try {
+          items = await this.list({
+            partition,
+            partitionValues,
+            limit: size,
+            offset
+          });
+        } catch (listError) {
+          console.warn(`Failed to get items for page:`, listError.message);
+          items = [];
+        }
+        const result = {
+          items,
+          totalItems,
+          page,
+          pageSize: size,
+          totalPages,
+          // Add additional metadata for debugging
+          _debug: {
+            requestedSize: size,
+            requestedOffset: offset,
+            actualItemsReturned: items.length,
+            skipCount,
+            hasTotalItems: totalItems !== null
+          }
+        };
+        this.emit("page", result);
+        return result;
+      } catch (error) {
+        console.error(`Critical error in page method:`, error.message);
+        return {
+          items: [],
+          totalItems: null,
+          page: Math.floor(offset / size),
+          pageSize: size,
+          totalPages: null,
+          _debug: {
+            requestedSize: size,
+            requestedOffset: offset,
+            actualItemsReturned: 0,
+            skipCount,
+            hasTotalItems: false,
+            error: error.message
+          }
+        };
+      }
     }
     readable() {
       const stream = new ResourceReader({ resource: this });
@@ -10572,7 +10600,7 @@ ${validation.errors.join("\n")}`);
       this.version = "1";
       this.s3dbVersion = (() => {
         try {
-          return true ? "4.1.10" : "latest";
+          return true ? "4.1.14" : "latest";
         } catch (e) {
           return "latest";
         }
@@ -10587,14 +10615,24 @@ ${validation.errors.join("\n")}`);
       this.passphrase = options.passphrase || "secret";
       let connectionString = options.connectionString;
       if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
-        connectionString = ConnectionString.buildFromParams({
-          bucket: options.bucket,
-          region: options.region,
-          accessKeyId: options.accessKeyId,
-          secretAccessKey: options.secretAccessKey,
-          endpoint: options.endpoint,
-          forcePathStyle: options.forcePathStyle
-        });
+        const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
+        if (endpoint) {
+          const url = new URL(endpoint);
+          if (accessKeyId) url.username = encodeURIComponent(accessKeyId);
+          if (secretAccessKey) url.password = encodeURIComponent(secretAccessKey);
+          url.pathname = `/${bucket || "s3db"}`;
+          if (forcePathStyle) {
+            url.searchParams.set("forcePathStyle", "true");
+          }
+          connectionString = url.toString();
+        } else if (accessKeyId && secretAccessKey) {
+          const params = new URLSearchParams();
+          params.set("region", region || "us-east-1");
+          if (forcePathStyle) {
+            params.set("forcePathStyle", "true");
+          }
+          connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || "s3db"}?${params.toString()}`;
+        }
       }
       this.client = options.client || new Client({
         verbose: this.verbose,
@@ -10630,12 +10668,12 @@ ${validation.errors.join("\n")}`);
             passphrase: this.passphrase,
             observers: [this],
             cache: this.cache,
-            timestamps: versionData.options?.timestamps || false,
-            partitions: resourceMetadata.partitions || versionData.options?.partitions || {},
-            paranoid: versionData.options?.paranoid !== false,
-            allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
-            autoDecrypt: versionData.options?.autoDecrypt !== false,
-            hooks: {}
+            timestamps: versionData.timestamps !== void 0 ? versionData.timestamps : false,
+            partitions: resourceMetadata.partitions || versionData.partitions || {},
+            paranoid: versionData.paranoid !== void 0 ? versionData.paranoid : true,
+            allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
+            autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
+            hooks: versionData.hooks || {}
           });
         }
       }
@@ -10773,15 +10811,14 @@ ${validation.errors.join("\n")}`);
             [version]: {
               hash: definitionHash,
               attributes: resourceDef.attributes,
-              options: {
-                timestamps: resource.config.timestamps,
-                partitions: resource.config.partitions,
-                paranoid: resource.config.paranoid,
-                allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
-                autoDecrypt: resource.config.autoDecrypt,
-                cache: resource.config.cache
-              },
               behavior: resourceDef.behavior || "user-management",
+              timestamps: resource.config.timestamps,
+              partitions: resource.config.partitions,
+              paranoid: resource.config.paranoid,
+              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
+              autoDecrypt: resource.config.autoDecrypt,
+              cache: resource.config.cache,
+              hooks: resource.config.hooks,
               createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
             }
           }
@@ -10816,68 +10853,63 @@ ${validation.errors.join("\n")}`);
     }
     /**
      * Check if a resource exists with the same definition hash
-     * @param {string} name - Resource name
-     * @param {Object} attributes - Resource attributes
-     * @param {Object} options - Resource options
-     * @param {string} behavior - Resource behavior
-     * @returns {Object} Object with exists flag and hash information
+     * @param {Object} config - Resource configuration
+     * @param {string} config.name - Resource name
+     * @param {Object} config.attributes - Resource attributes
+     * @param {string} [config.behavior] - Resource behavior
+     * @param {Object} [config.options] - Resource options
+     * @returns {Object} Result with exists and hash information
      */
-    resourceExistsWithSameHash({ name, attributes, options = {}, behavior = "user-management" }) {
+    resourceExistsWithSameHash({ name, attributes, behavior = "user-management", options = {} }) {
       if (!this.resources[name]) {
         return { exists: false, sameHash: false, hash: null };
       }
-      const tempResource = new Resource({
+      const existingResource = this.resources[name];
+      const existingHash = this.generateDefinitionHash(existingResource.export());
+      const mockResource = new Resource({
         name,
         attributes,
         behavior,
-        observers: [],
         client: this.client,
-        version: "temp",
+        version: existingResource.version,
         passphrase: this.passphrase,
-        cache: this.cache,
         ...options
       });
-      const newHash = this.generateDefinitionHash(tempResource.export(), behavior);
-      const existingHash = this.generateDefinitionHash(this.resources[name].export(), this.resources[name].behavior);
+      const newHash = this.generateDefinitionHash(mockResource.export());
       return {
         exists: true,
-        sameHash: newHash === existingHash,
+        sameHash: existingHash === newHash,
         hash: newHash,
         existingHash
       };
     }
     /**
-     * Create a resource only if it doesn't exist with the same definition hash
-     * @param {Object} params - Resource parameters
-     * @param {string} params.name - Resource name
-     * @param {Object} params.attributes - Resource attributes
-     * @param {Object} params.options - Resource options
-     * @param {string} params.behavior - Resource behavior
-     * @returns {Object} Object with resource and created flag
+     * Create a resource only if it doesn't exist or has a different hash
+     * @param {Object} config - Resource configuration
+     * @param {string} config.name - Resource name
+     * @param {Object} config.attributes - Resource attributes
+     * @param {string} [config.behavior] - Resource behavior
+     * @param {Object} [config.options] - Resource options
+     * @returns {Object} Result with created/updated resource and action taken
      */
-    async createResourceIfNotExists({ name, attributes, options = {}, behavior = "user-management" }) {
-      const alreadyExists = !!this.resources[name];
-      const hashCheck = this.resourceExistsWithSameHash({ name, attributes, options, behavior });
-      if (hashCheck.exists && hashCheck.sameHash) {
-        return {
-          resource: this.resources[name],
-          created: false,
-          reason: "Resource already exists with same definition hash"
-        };
+    async createResourceIfNotExists({ name, attributes, behavior = "user-management", options = {} }) {
+      const hashCheck = this.resourceExistsWithSameHash({ name, attributes, behavior, options });
+      if (!hashCheck.exists) {
+        const resource = await this.createResource({ name, attributes, behavior, ...options });
+        return { resource, action: "created", hash: hashCheck.hash };
       }
-      const resource = await this.createResource({ name, attributes, options, behavior });
-      return {
-        resource,
-        created: !alreadyExists,
-        reason: alreadyExists ? "Resource updated with new definition" : "New resource created"
-      };
+      if (!hashCheck.sameHash) {
+        const resource = await this.createResource({ name, attributes, behavior, ...options });
+        return { resource, action: "updated", hash: hashCheck.hash, previousHash: hashCheck.existingHash };
+      }
+      return { resource: this.resources[name], action: "unchanged", hash: hashCheck.hash };
     }
-    async createResource({ name, attributes, options = {}, behavior = "user-management" }) {
+    async createResource({ name, attributes, behavior = "user-management", ...config }) {
       if (this.resources[name]) {
         const existingResource = this.resources[name];
         Object.assign(existingResource.config, {
           cache: this.cache,
-          ...options
+          ...config
         });
         if (behavior) {
           existingResource.behavior = behavior;
@@ -10904,7 +10936,7 @@ ${validation.errors.join("\n")}`);
         version,
         passphrase: this.passphrase,
         cache: this.cache,
-        ...options
+        ...config
       });
       this.resources[name] = resource;
       await this.uploadMetadataFile();
