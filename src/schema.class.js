@@ -14,6 +14,42 @@ import {
 import { encrypt, decrypt } from "./crypto.js";
 import { ValidatorManager } from "./validator.class.js";
 
+/**
+ * Convert a number to base36 string
+ * @param {number} num - Number to convert
+ * @returns {string} Base36 representation
+ */
+function toBase36(num) {
+  return num.toString(36);
+}
+
+/**
+ * Convert a base36 string back to number
+ * @param {string} str - Base36 string to convert
+ * @returns {number} Number representation
+ */
+function fromBase36(str) {
+  return parseInt(str, 36);
+}
+
+/**
+ * Generate base36 mapping for attributes
+ * @param {string[]} keys - Array of attribute keys
+ * @returns {Object} Mapping object with base36 keys
+ */
+function generateBase36Mapping(keys) {
+  const mapping = {};
+  const reversedMapping = {};
+  
+  keys.forEach((key, index) => {
+    const base36Key = toBase36(index);
+    mapping[key] = base36Key;
+    reversedMapping[base36Key] = key;
+  });
+  
+  return { mapping, reversedMapping };
+}
+
 export const SchemaActions = {
   trim: (value) => value.trim(),
 
@@ -159,8 +195,10 @@ export class Schema {
       // Combine leaf keys and object keys, removing duplicates
       const allKeys = [...new Set([...leafKeys, ...objectKeys])];
       
-      this.reversedMap = { ...allKeys }
-      this.map = invert(this.reversedMap);
+      // Generate base36 mapping instead of sequential numbers
+      const { mapping, reversedMapping } = generateBase36Mapping(allKeys);
+      this.map = mapping;
+      this.reversedMap = reversedMapping;
     }
   }
 

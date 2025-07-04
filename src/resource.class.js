@@ -17,7 +17,7 @@ import { idGenerator, passwordGenerator } from "./concerns/id.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
-class Resource extends EventEmitter {
+export class Resource extends EventEmitter {
   /**
    * Create a new Resource instance
    * @param {Object} config - Resource configuration
