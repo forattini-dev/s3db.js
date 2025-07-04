@@ -372,7 +372,7 @@ export class Database extends EventEmitter {
 
 
 
-  async createResource({ name, attributes, behavior = 'user-management', ...config }) {
+  async createResource({ name, attributes, behavior = 'user-management', hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
       // Update configuration
@@ -384,6 +384,18 @@ export class Database extends EventEmitter {
         existingResource.behavior = behavior;
       }
       existingResource.updateAttributes(attributes);
+      // NOVO: Mescla hooks se fornecidos (append ao final)
+      if (hooks) {
+        for (const [event, hooksArr] of Object.entries(hooks)) {
+          if (Array.isArray(hooksArr) && existingResource.hooks[event]) {
+            for (const fn of hooksArr) {
+              if (typeof fn === 'function') {
+                existingResource.hooks[event].push(fn.bind(existingResource));
+              }
+            }
+          }
+        }
+      }
       // Only upload metadata if hash actually changed
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -407,6 +419,7 @@ export class Database extends EventEmitter {
       version,
       passphrase: this.passphrase,
       cache: this.cache,
+      hooks,
       ...config,
     });
     this.resources[name] = resource;
