@@ -5,7 +5,6 @@ import {
   calculateUTF8Bytes, 
   transformValue 
 } from '../src/concerns/calculator.js';
-import * as calculator from '../src/concerns/calculator.js';
 
 describe('Calculator Tests', () => {
   
@@ -410,8 +409,8 @@ describe('Calculator Tests', () => {
       const breakdown = getSizeBreakdown(mappedObject);
       
       expect(sizes['_v']).toBe(1);
-      expect(total).toBe(1);
-      expect(breakdown.total).toBe(1);
+      expect(total).toBe(3); // 1 for value + 2 for attribute name '_v'
+      expect(breakdown.total).toBe(3);
       expect(breakdown.breakdown.length).toBe(1);
     });
 

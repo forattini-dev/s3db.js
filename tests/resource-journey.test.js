@@ -34,18 +34,16 @@ describe('Resource Journey', () => {
         region: 'string|optional',
         ageGroup: 'string|optional'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byRegion: {
-            fields: {
-              region: 'string|maxlength:2'
-            }
-          },
-          byAgeGroup: {
-            fields: {
-              ageGroup: 'string'
-            }
+      timestamps: true,
+      partitions: {
+        byRegion: {
+          fields: {
+            region: 'string|maxlength:2'
+          }
+        },
+        byAgeGroup: {
+          fields: {
+            ageGroup: 'string'
           }
         }
       }
@@ -55,10 +53,10 @@ describe('Resource Journey', () => {
     expect(resource.name).toBe('users');
     expect(resource.attributes.name).toBe('string|required');
     expect(resource.attributes.email).toBe('email|required');
-    expect(resource.options.timestamps).toBe(true);
-    expect(resource.options.partitions).toBeDefined();
-    expect(resource.options.partitions.byRegion).toBeDefined();
-    expect(resource.options.partitions.byAgeGroup).toBeDefined();
+    expect(resource.config.timestamps).toBe(true);
+    expect(resource.config.partitions).toBeDefined();
+    expect(resource.config.partitions.byRegion).toBeDefined();
+    expect(resource.config.partitions.byAgeGroup).toBeDefined();
 
     // 3. Verify schema was created
     expect(resource.schema).toBeDefined();
@@ -191,9 +189,7 @@ describe('Resource Journey', () => {
         title: 'string|required',
         description: 'string|optional'
       },
-      options: {
-        timestamps: true
-      }
+      timestamps: true
     });
 
     // 1. Verify timestamp attributes were added
@@ -201,10 +197,10 @@ describe('Resource Journey', () => {
     expect(resource.attributes.updatedAt).toBe('string|optional');
 
     // 2. Verify timestamp partitions were automatically created
-    expect(resource.options.partitions.byCreatedDate).toBeDefined();
-    expect(resource.options.partitions.byUpdatedDate).toBeDefined();
-    expect(resource.options.partitions.byCreatedDate.fields.createdAt).toBe('date|maxlength:10');
-    expect(resource.options.partitions.byUpdatedDate.fields.updatedAt).toBe('date|maxlength:10');
+    expect(resource.config.partitions.byCreatedDate).toBeDefined();
+    expect(resource.config.partitions.byUpdatedDate).toBeDefined();
+    expect(resource.config.partitions.byCreatedDate.fields.createdAt).toBe('date|maxlength:10');
+    expect(resource.config.partitions.byUpdatedDate.fields.updatedAt).toBe('date|maxlength:10');
 
     // 3. Test data with timestamps
     const testData = {
@@ -316,12 +312,10 @@ describe('Resource Journey', () => {
         attributes: {
           name: 'string|required'
         },
-        options: {
-          partitions: {
-            invalidPartition: {
-              fields: {
-                nonExistentField: 'string'
-              }
+        partitions: {
+          invalidPartition: {
+            fields: {
+              nonExistentField: 'string'
             }
           }
         }
@@ -348,9 +342,7 @@ describe('Resource Journey', () => {
       attributes: {
         name: 'string|required'
       },
-      options: {
-        paranoid: false
-      }
+      paranoid: false
     });
 
     // This should work
@@ -372,11 +364,11 @@ describe('Resource Journey', () => {
       }
     });
 
-    expect(defaultResource.options.cache).toBe(false);
-    expect(defaultResource.options.autoDecrypt).toBe(true);
-    expect(defaultResource.options.timestamps).toBe(false);
-    expect(defaultResource.options.partitions).toEqual({});
-    expect(defaultResource.options.paranoid).toBe(true);
+    expect(defaultResource.config.cache).toBe(false);
+    expect(defaultResource.config.autoDecrypt).toBe(true);
+    expect(defaultResource.config.timestamps).toBe(false);
+    expect(defaultResource.config.partitions).toEqual({});
+    expect(defaultResource.config.paranoid).toBe(true);
 
     // 2. Test custom options
     const customResource = new Resource({
@@ -385,30 +377,28 @@ describe('Resource Journey', () => {
       attributes: {
         name: 'string|required'
       },
-      options: {
-        cache: true,
-        autoDecrypt: false,
-        timestamps: true,
-        paranoid: false,
-        partitions: {
-          byName: {
-            fields: {
-              name: 'string|maxlength:10'
-            }
+      cache: true,
+      autoDecrypt: false,
+      timestamps: true,
+      paranoid: false,
+      partitions: {
+        byName: {
+          fields: {
+            name: 'string|maxlength:10'
           }
         }
       }
     });
 
-    expect(customResource.options.cache).toBe(true);
-    expect(customResource.options.autoDecrypt).toBe(false);
-    expect(customResource.options.timestamps).toBe(true);
-    expect(customResource.options.paranoid).toBe(false);
-    expect(customResource.options.partitions.byName).toBeDefined();
+    expect(customResource.config.cache).toBe(true);
+    expect(customResource.config.autoDecrypt).toBe(false);
+    expect(customResource.config.timestamps).toBe(true);
+    expect(customResource.config.paranoid).toBe(false);
+    expect(customResource.config.partitions.byName).toBeDefined();
 
     // 3. Test that timestamps automatically add partitions
-    expect(customResource.options.partitions.byCreatedDate).toBeDefined();
-    expect(customResource.options.partitions.byUpdatedDate).toBeDefined();
+    expect(customResource.config.partitions.byCreatedDate).toBeDefined();
+    expect(customResource.config.partitions.byUpdatedDate).toBeDefined();
   });
 
   test('Resource Schema Integration Journey', async () => {
@@ -471,12 +461,10 @@ describe('Resource Journey', () => {
         email: 'email|required',
         age: 'number|optional'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byEmail: {
-            fields: { email: 'string' }
-          }
+      timestamps: true,
+      partitions: {
+        byEmail: {
+          fields: { email: 'string' }
         }
       }
     };
@@ -484,7 +472,7 @@ describe('Resource Journey', () => {
     const r2 = new Resource({ ...def, client });
     expect(r1.getDefinitionHash()).toBe(r2.getDefinitionHash());
 
-    // Mudando um atributo, o hash deve mudar
+    // Changing an attribute, the hash should change
     const r3 = new Resource({
       ...def,
       attributes: { ...def.attributes, extra: 'string|optional' },

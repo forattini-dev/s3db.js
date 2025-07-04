@@ -6,7 +6,7 @@ import Client from '../src/client.class.js';
 import Resource from '../src/resource.class.js';
 import { ResourceReader, ResourceWriter } from '../src/stream/index.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'streams-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'streams-' + Date.now());
 
 describe('Streams - Complete Journey', () => {
   let client;

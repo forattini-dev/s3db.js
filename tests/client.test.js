@@ -3,7 +3,7 @@ import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 
 import Client from '../src/client.class.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'client-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'client-' + Date.now());
 
 describe('Client Class - Complete Journey', () => {
   let client;
@@ -157,7 +157,7 @@ describe('Client Class - Coverage', () => {
     client.config.secretAccessKey = 'b';
     client.config.forcePathStyle = true;
     client.config.region = 'us-east-1';
-    client.config.endpoint = 'http://localhost:9000';
+    client.config.endpoint = 'http://localhost:9998';
     const s3 = client.createClient();
     expect(s3).toBeDefined();
   });

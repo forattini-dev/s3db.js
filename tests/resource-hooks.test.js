@@ -234,8 +234,7 @@ describe('Resource Hooks', () => {
         region: 'string|required',
         category: 'string|required'
       },
-      options: {
-        partitions: {
+              partitions: {
           byRegion: {
             fields: {
               region: 'string|maxlength:2'
@@ -247,7 +246,6 @@ describe('Resource Hooks', () => {
             }
           }
         }
-      }
     });
 
     // Verify that partition hooks were automatically added
