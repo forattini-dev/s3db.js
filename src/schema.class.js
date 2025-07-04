@@ -18,7 +18,16 @@ export const SchemaActions = {
   trim: (value) => value.trim(),
 
   encrypt: (value, { passphrase }) => encrypt(value, passphrase),
-  decrypt: (value, { passphrase }) => decrypt(value, passphrase),
+  decrypt: async (value, { passphrase }) => {
+    try {
+      const raw = await decrypt(value, passphrase)
+      return raw;
+    } catch (error) {
+      console.warn(`Schema decrypt error: ${error}`, error)
+      return value;
+
+    }
+  },
 
   toString: (value) => String(value),
 
