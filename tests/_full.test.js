@@ -1,6 +1,5 @@
 import { join } from 'path';
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
-import { EventEmitter } from 'events';
+import { describe, expect, test, beforeEach } from '@jest/globals';
 
 import Database from '../src/database.class.js';
 import Resource from '../src/resource.class.js';
@@ -8,7 +7,6 @@ import { Schema } from '../src/schema.class.js';
 import { streamToString } from '../src/stream/index.js';
 
 const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'full-' + Date.now());
-
 
 describe('Full Complex Resource Test Suite', () => {
   let database;
@@ -95,31 +93,29 @@ describe('Full Complex Resource Test Suite', () => {
           version: 'string|optional|max:20'
         }
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          // Partition 1: Single attribute
-          byCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          
-          // Partition 2: Two attributes
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
-          },
-          
-          // Partition 3: Three attributes
-          byLocationCategory: {
-            fields: {
-              'address.country': 'string|maxlength:2',
-              'address.state': 'string',
-              'metadata.category': 'string'
-            }
+      timestamps: true,
+      partitions: {
+        // Partition 1: Single attribute
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        
+        // Partition 2: Two attributes
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
+          }
+        },
+        
+        // Partition 3: Three attributes
+        byLocationCategory: {
+          fields: {
+            'address.country': 'string|maxlength:2',
+            'address.state': 'string',
+            'metadata.category': 'string'
           }
         }
       }
@@ -130,7 +126,7 @@ describe('Full Complex Resource Test Suite', () => {
     expect(complexResource.behavior).toBe('user-management');
     
     // Check that we have our 3 custom partitions plus 2 automatic timestamp partitions
-    const partitionKeys = Object.keys(complexResource.options.partitions);
+    const partitionKeys = Object.keys(complexResource.config.partitions);
     expect(partitionKeys).toContain('byCountry');
     expect(partitionKeys).toContain('bySourceMedium');
     expect(partitionKeys).toContain('byLocationCategory');
@@ -342,26 +338,24 @@ describe('Full Complex Resource Test Suite', () => {
           tags: 'array|optional'
         }
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          bySourceMedium: {
-            fields: {
-              'utm.source': 'string',
-              'utm.medium': 'string'
-            }
-          },
-          byLocationCategory: {
-            fields: {
-              'address.country': 'string|maxlength:2',
-              'address.state': 'string',
-              'metadata.category': 'string'
-            }
+      timestamps: true,
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        bySourceMedium: {
+          fields: {
+            'utm.source': 'string',
+            'utm.medium': 'string'
+          }
+        },
+        byLocationCategory: {
+          fields: {
+            'address.country': 'string|maxlength:2',
+            'address.state': 'string',
+            'metadata.category': 'string'
           }
         }
       }
@@ -405,8 +399,8 @@ describe('Full Complex Resource Test Suite', () => {
     database.resources['study_resource'] = studyResource;
   });
 
-  test('Exporta e importa s3db.json mantendo atributos aninhados como objetos', async () => {
-    // Cria uma resource complexa
+  test('Export and import s3db.json maintaining nested attributes as objects', async () => {
+    // Create a complex resource
     const resource = new Resource({
       name: 'complex_export',
       client: database.client,
@@ -424,42 +418,40 @@ describe('Full Complex Resource Test Suite', () => {
           country: 'string'
         }
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byCountry: {
-            fields: {
-              'address.country': 'string'
-            }
+      timestamps: true,
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string'
           }
         }
       }
     });
 
-    // Exporta o schema
+    // Export the schema
     const exported = resource.export();
     
-    // Verifica que os atributos aninhados permanecem como objetos
+    // Verify that nested attributes remain as objects
     expect(typeof exported.attributes.profile).toBe('object');
     expect(typeof exported.attributes.profile.social).toBe('object');
     expect(typeof exported.attributes.address).toBe('object');
     
-    // Verifica que os atributos aninhados não foram serializados como string
+    // Verify that nested attributes were not serialized as strings
     expect(exported.attributes.profile.bio).toBe('string|optional');
     expect(exported.attributes.profile.social.twitter).toBe('string|optional');
     expect(exported.attributes.profile.social.github).toBe('string|optional');
     expect(exported.attributes.address.city).toBe('string');
     expect(exported.attributes.address.country).toBe('string');
 
-    // Importa o schema de volta
+    // Import the schema back
     const importedSchema = Schema.import(exported);
     
-    // Verifica que os atributos aninhados continuam como objetos após importação
+    // Verify that nested attributes continue as objects after import
     expect(typeof importedSchema.attributes.profile).toBe('object');
     expect(typeof importedSchema.attributes.profile.social).toBe('object');
     expect(typeof importedSchema.attributes.address).toBe('object');
     
-    // Verifica que os valores foram preservados corretamente
+    // Verify that values were preserved correctly
     expect(importedSchema.attributes.profile.bio).toBe('string|optional');
     expect(importedSchema.attributes.profile.social.twitter).toBe('string|optional');
     expect(importedSchema.attributes.profile.social.github).toBe('string|optional');
@@ -470,10 +462,10 @@ describe('Full Complex Resource Test Suite', () => {
     database.resources['complex_export'] = resource;
   });
 
-  test('Verifica que o resource foi adicionado ao database', async () => {
-    // Garante que database.resources está inicializado corretamente
+  test('Verify that the resource was added to the database', async () => {
+    // Ensure that database.resources is properly initialized
     database.resources = {};
-    // Adiciona os resources ao database.resources manualmente
+    // Add resources to database.resources manually
     const resource1 = new Resource({
       name: 'complex_users',
       client: database.client,
@@ -516,7 +508,7 @@ describe('Full Complex Resource Test Suite', () => {
     });
     database.resources['complex_export'] = resource6;
 
-    // Verifica que os resources foram adicionados ao database
+    // Verify that resources were added to the database
     const resourceNames = Object.keys(database.resources);
     expect(resourceNames).toContain('complex_users');
     expect(resourceNames).toContain('complex_users_enforce_limits');
@@ -536,13 +528,11 @@ describe('Full Complex Resource Test Suite', () => {
         email: 'email|required|unique',
         age: 'number|optional'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byAge: {
-            fields: {
-              'age': 'number'
-            }
+      timestamps: true,
+      partitions: {
+        byAge: {
+          fields: {
+            'age': 'number'
           }
         }
       },
@@ -560,13 +550,11 @@ describe('Full Complex Resource Test Suite', () => {
         email: 'email|required|unique',
         age: 'number|optional'
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byAge: {
-            fields: {
-              'age': 'number'
-            }
+      timestamps: true,
+      partitions: {
+        byAge: {
+          fields: {
+            'age': 'number'
           }
         }
       },
@@ -589,13 +577,11 @@ describe('Full Complex Resource Test Suite', () => {
         age: 'number|optional',
         extra: 'string|optional' // Different attribute
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byAge: {
-            fields: {
-              'age': 'number'
-            }
+      timestamps: true,
+      partitions: {
+        byAge: {
+          fields: {
+            'age': 'number'
           }
         }
       },
@@ -606,8 +592,179 @@ describe('Full Complex Resource Test Suite', () => {
     expect(hash3).not.toBe(hash1);
   });
 
-  test('Verifica qualidade do s3db.json gerado', async () => {
-    // Adiciona resources complexos ao database para gerar um s3db.json rico
+  test('Verify that changing a partitioned attribute moves reference to new partition', async () => {
+    // Create a resource with country partition using the database
+    await database.createResource({
+      name: 'partition_update_test',
+      behavior: 'user-management',
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        address: {
+          country: 'string|required|max:2',
+          state: 'string|required|max:50'
+        }
+      },
+      timestamps: true,
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        }
+      }
+    });
+
+    const partitionResource = database.resources['partition_update_test'];
+
+    // Create a user with country BR
+    const userId = 'user-123';
+    const userData = {
+      name: 'João Silva',
+      email: 'joao@example.com',
+      address: {
+        country: 'BR',
+        state: 'SP'
+      }
+    };
+
+    // Insert the user
+    await partitionResource.insert({ id: userId, ...userData });
+
+    // Verify that the user exists in the main resource
+    const retrievedUserMain = await partitionResource.get(userId);
+
+    // Verify that the user is in the BR partition
+    const usersInBR = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'BR' } });
+    expect(usersInBR).toHaveLength(1);
+    expect(usersInBR[0].id).toBe(userId);
+
+    // Verify using the client that the key exists in the BR partition
+    const brPartitionKey = partitionResource.getPartitionKey({ 
+      partitionName: 'byCountry', 
+      id: userId, 
+      data: userData 
+    });
+    const brKeyExists = await database.client.exists(brPartitionKey);
+    expect(brKeyExists).toBe(true);
+
+    // Update the user to country US
+    const updatedUserData = {
+      ...userData,
+      address: {
+        ...userData.address,
+        country: 'US',
+        state: 'CA'
+      }
+    };
+
+    await partitionResource.update(userId, updatedUserData);
+
+    // Verify that the user is NO LONGER in the BR partition (method 1: list using partition)
+    const usersInBRAfterUpdate = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'BR' } });
+    expect(usersInBRAfterUpdate).toHaveLength(0);
+
+    // Verify that the user is in the US partition (method 1: list using partition)
+    const usersInUS = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'US' } });
+    expect(usersInUS).toHaveLength(1);
+    expect(usersInUS[0].id).toBe(userId);
+
+    // Verify using the client that the key NO LONGER exists in the BR partition (method 2: client.exists)
+    const brKeyExistsAfterUpdate = await database.client.exists(brPartitionKey);
+    expect(brKeyExistsAfterUpdate).toBe(false);
+
+    // Verify using the client that the key exists in the US partition (method 2: client.exists)
+    const usPartitionKey = partitionResource.getPartitionKey({ 
+      partitionName: 'byCountry', 
+      id: userId, 
+      data: updatedUserData 
+    });
+    const usKeyExists = await database.client.exists(usPartitionKey);
+    expect(usKeyExists).toBe(true);
+
+    // Verify that the keys are different
+    expect(brPartitionKey).not.toBe(usPartitionKey);
+    expect(brPartitionKey).toContain('address.country=BR');
+    expect(usPartitionKey).toContain('address.country=US');
+
+    // Verify that the user can be retrieved normally
+    const retrievedUser = await partitionResource.get(userId);
+    expect(retrievedUser).toBeDefined();
+    expect(retrievedUser.address.country).toBe('US');
+  });
+
+  test('Verify that changing a partitioned attribute via upsert moves reference to new partition', async () => {
+    // Create a resource with country partition using the database
+    await database.createResource({
+      name: 'partition_upsert_test',
+      behavior: 'user-management',
+      attributes: {
+        name: 'string|required|max:100',
+        email: 'email|required|unique',
+        address: {
+          country: 'string|required|max:2',
+          state: 'string|required|max:50'
+        }
+      },
+      timestamps: true,
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        }
+      }
+    });
+
+    const partitionResource = database.resources['partition_upsert_test'];
+
+    // Create a user with country BR
+    const userId = 'user-upsert-1';
+    const userData = {
+      name: 'Maria Souza',
+      email: 'maria@example.com',
+      address: {
+        country: 'BR',
+        state: 'SP'
+      }
+    };
+
+    // Insert the user via upsert
+    await partitionResource.upsert({ id: userId, ...userData });
+
+    // Verify that the user is in the BR partition
+    const usersInBR = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'BR' } });
+    expect(usersInBR).toHaveLength(1);
+    expect(usersInBR[0].id).toBe(userId);
+
+    // Update the user to country US via upsert
+    const updatedUserData = {
+      ...userData,
+      address: {
+        ...userData.address,
+        country: 'US',
+        state: 'CA'
+      }
+    };
+    await partitionResource.upsert({ id: userId, ...updatedUserData });
+
+    // Verify that the user is NO LONGER in the BR partition
+    const usersInBRAfterUpdate = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'BR' } });
+    expect(usersInBRAfterUpdate).toHaveLength(0);
+
+    // Verify that the user is in the US partition
+    const usersInUS = await partitionResource.list({ partition: 'byCountry', partitionValues: { 'address.country': 'US' } });
+    expect(usersInUS).toHaveLength(1);
+    expect(usersInUS[0].id).toBe(userId);
+
+    // Verify that the user can be retrieved normally
+    const retrievedUser = await partitionResource.get(userId);
+    expect(retrievedUser).toBeDefined();
+    expect(retrievedUser.address.country).toBe('US');
+  });
+
+  test('Verify quality of generated s3db.json', async () => {
+    // Add complex resources to the database to generate a rich s3db.json
     database.resources = {};
     
     const complexResource = new Resource({
@@ -633,18 +790,16 @@ describe('Full Complex Resource Test Suite', () => {
           tags: 'array|optional'
         }
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byCountry: {
-            fields: {
-              'address.country': 'string|maxlength:2'
-            }
-          },
-          byCategory: {
-            fields: {
-              'metadata.category': 'string'
-            }
+      timestamps: true,
+      partitions: {
+        byCountry: {
+          fields: {
+            'address.country': 'string|maxlength:2'
+          }
+        },
+        byCategory: {
+          fields: {
+            'metadata.category': 'string'
           }
         }
       }
@@ -652,24 +807,24 @@ describe('Full Complex Resource Test Suite', () => {
 
     database.resources['quality_test_resource'] = complexResource;
 
-    // Chama o método que gera o s3db.json
+    // Call the method that generates s3db.json
     await database.uploadMetadataFile();
 
-    // Verifica que o s3db.json foi criado no bucket
+    // Verify that s3db.json was created in the bucket
     const s3dbExists = await database.client.exists('s3db.json');
     expect(s3dbExists).toBe(true);
     
-    // Obtém o conteúdo do s3db.json
+    // Get the content of s3db.json
     const s3dbRequest = await database.client.getObject('s3db.json');
     const s3dbContent = JSON.parse(await streamToString(s3dbRequest.Body));
     
-    // Verifica estrutura básica
+    // Verify basic structure
     expect(s3dbContent).toHaveProperty('version');
     expect(s3dbContent).toHaveProperty('s3dbVersion');
     expect(s3dbContent).toHaveProperty('lastUpdated');
     expect(s3dbContent).toHaveProperty('resources');
     
-    // Verifica que o resource foi incluído
+    // Verify that the resource was included
     expect(s3dbContent.resources).toHaveProperty('quality_test_resource');
     
     const resourceMeta = s3dbContent.resources['quality_test_resource'];
@@ -697,7 +852,6 @@ describe('Full Complex Resource Test Suite', () => {
     // Verifica dados da versão
     expect(versionData).toHaveProperty('hash');
     expect(versionData).toHaveProperty('attributes');
-    expect(versionData).toHaveProperty('options');
     expect(versionData).toHaveProperty('behavior');
     expect(versionData).toHaveProperty('createdAt');
     

@@ -22,7 +22,7 @@ jest.unstable_mockModule('../src/crypto.js', () => ({
   sha256: mockCrypto.sha256
 }));
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'plugins-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'plugins-' + Date.now());
 
 describe('Costs', () => {
   test('complete', async () => {

@@ -16,7 +16,7 @@ jest.unstable_mockModule('../src/crypto.js', () => mockCrypto);
 
 import Validator, { ValidatorManager } from '../src/validator.class.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'validator-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'validator-' + Date.now());
 
 describe('Validator Class - Complete Journey', () => {
   let client;

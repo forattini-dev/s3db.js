@@ -6,7 +6,7 @@ import Client from '../src/client.class.js';
 import Schema, { SchemaActions } from '../src/schema.class.js';
 import Resource from '../src/resource.class.js';
 
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'schema-journey-' + Date.now());
+const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'schema-' + Date.now());
 
 describe('Schema Class - Complete Journey', () => {
   let client;
@@ -459,7 +459,7 @@ describe('Schema Class - Complete Journey', () => {
     expect(opts).toHaveProperty('hooks');
   });
 
-  test('Export/import de atributos aninhados mantém objetos', () => {
+  test('Export/import of nested attributes maintains objects', () => {
     const attrs = {
       name: 'string|required',
       profile: {
@@ -484,13 +484,13 @@ describe('Schema Class - Complete Journey', () => {
     expect(typeof impAttrs.profile.social.twitter).toBe('string');
     expect(typeof impAttrs.address).toBe('object');
     expect(typeof impAttrs.address.city).toBe('string');
-    // Não deve ser possível dar JSON.parse em objetos
+    // Should not be possible to JSON.parse objects
     expect(() => JSON.parse(impAttrs.profile)).toThrow();
     expect(() => JSON.parse(impAttrs.profile.social)).toThrow();
   });
 
   test('extractObjectKeys covers nested and $$type', () => {
-    // Testar método isoladamente sem inicializar Validator
+    // Test method in isolation without initializing Validator
     const schema = Object.create(Schema.prototype);
     const attributes = {
       foo: { bar: { baz: { qux: 'string' } } },
@@ -498,7 +498,7 @@ describe('Schema Class - Complete Journey', () => {
     };
     const keys = schema.extractObjectKeys(attributes);
     expect(keys).toContain('foo');
-    expect(keys).not.toContain('simple'); // simple é string, não objeto
+    expect(keys).not.toContain('simple'); // simple is string, not object
     expect(keys).not.toContain('foo.bar');
     expect(keys).not.toContain('foo.bar.baz');
     expect(keys).not.toContain('$$meta');
@@ -570,6 +570,95 @@ describe('Schema Class - Complete Journey', () => {
     expect(processed.optionalObject.optional).toBe(true);
   });
 
+  test('Schema base36 mapping functionality', () => {
+    const attributes = {
+      name: 'string|required',
+      email: 'string|required',
+      age: 'number|optional',
+      active: 'boolean|optional',
+      password: 'secret|required'
+    };
+
+    const schema = new Schema({
+      name: 'base36-test',
+      attributes,
+      passphrase: 'secret'
+    });
+
+    // Verify that mapping was created
+    expect(schema.map).toBeDefined();
+    expect(schema.reversedMap).toBeDefined();
+
+    // Verify that keys are base36 (0-9, a-z)
+    const mappedKeys = Object.values(schema.map);
+    mappedKeys.forEach(key => {
+      expect(key).toMatch(/^[0-9a-z]+$/);
+    });
+
+    // Verify that first attribute maps to '0' (base36)
+    expect(schema.map['name']).toBe('0');
+    
+    // Verify that second attribute maps to '1' (base36)
+    expect(schema.map['email']).toBe('1');
+    
+    // Verify that third attribute maps to '2' (base36)
+    expect(schema.map['age']).toBe('2');
+
+    // Verify that reversedMap works correctly
+    expect(schema.reversedMap['0']).toBe('name');
+    expect(schema.reversedMap['1']).toBe('email');
+    expect(schema.reversedMap['2']).toBe('age');
+
+    // Verify that all attributes are mapped
+    const attributeKeys = Object.keys(attributes);
+    attributeKeys.forEach(key => {
+      expect(schema.map[key]).toBeDefined();
+      expect(schema.reversedMap[schema.map[key]]).toBe(key);
+    });
+  });
+
+  test('Schema base36 mapping with many attributes', () => {
+    // Create many attributes to test if base36 works correctly
+    const attributes = {};
+    for (let i = 0; i < 50; i++) {
+      attributes[`field${i}`] = 'string|optional';
+    }
+
+    const schema = new Schema({
+      name: 'many-fields-test',
+      attributes,
+      passphrase: 'secret'
+    });
+
+    // Verify that mapping was created
+    expect(schema.map).toBeDefined();
+    expect(schema.reversedMap).toBeDefined();
+
+    // Verify that keys are valid base36
+    const mappedKeys = Object.values(schema.map);
+    mappedKeys.forEach(key => {
+      expect(key).toMatch(/^[0-9a-z]+$/);
+    });
+
+    // Verify that first attribute maps to '0'
+    expect(schema.map['field0']).toBe('0');
+    
+    // Verify that 10th attribute maps to 'a' (base36)
+    expect(schema.map['field9']).toBe('9');
+    expect(schema.map['field10']).toBe('a');
+    
+    // Verify that 36th attribute maps to '10' (base36)
+    expect(schema.map['field35']).toBe('z');
+    expect(schema.map['field36']).toBe('10');
+
+    // Verify that all attributes are mapped correctly
+    Object.keys(attributes).forEach(key => {
+      const mappedKey = schema.map[key];
+      expect(mappedKey).toBeDefined();
+      expect(schema.reversedMap[mappedKey]).toBe(key);
+    });
+  });
+
   test('Schema validation with optional nested objects', async () => {
     const attributes = {
       costCenter: 'string',
@@ -624,7 +713,7 @@ describe('Schema Class - Complete Journey', () => {
   });
 
   test('Resource with optional nested objects - full integration', async () => {
-    // Criar um resource com objetos opcionais
+    // Create a resource with optional objects
     const resource = new Resource({
       client,
       name: 'users_v1',
@@ -656,27 +745,27 @@ describe('Schema Class - Complete Journey', () => {
       }
     });
 
-    // Verificar se o resource foi criado corretamente
+    // Verify that the resource was created correctly
     expect(resource.name).toBe('users_v1');
     expect(resource.attributes.webpush).toBeDefined();
     expect(resource.attributes.webpush.$$type).toBe('object|optional');
 
-    // Testar validação de dados sem o campo webpush (incluindo apiToken obrigatório)
+    // Test validation of data without webpush field (including required apiToken)
     const dataWithoutWebpush = {
       costCenter: '860290021',
       team: 'dp-martech-growth',
-      apiToken: 'test-token' // Campo obrigatório
+      apiToken: 'test-token' // Required field
     };
 
     const validationResult = await resource.validate(dataWithoutWebpush);
     expect(validationResult.isValid).toBe(true);
     expect(validationResult.errors).toHaveLength(0);
 
-    // Testar validação de dados com o campo webpush
+    // Test validation of data with webpush field
     const dataWithWebpush = {
       costCenter: '860290021',
       team: 'dp-martech-growth',
-      apiToken: 'test-token', // Campo obrigatório
+      apiToken: 'test-token', // Required field
       webpush: {
         enabled: true,
         endpoint: 'https://example.com/push'
@@ -756,5 +845,33 @@ describe('Schema Utility Functions', () => {
     expect(keys).not.toContain('foo.bar.baz');
     expect(keys).not.toContain('$$meta');
   });
+});
+
+  test('Simple resource with 50 attributes does base36 mapping correctly', () => {
+  const attrs = {};
+  for (let i = 0; i < 50; i++) {
+    attrs[`campo${i}`] = 'string|optional';
+  }
+  const schema = new Schema({
+    name: 'base36-simple',
+    attributes: attrs
+  });
+      // The mapping should be base36: 0, 1, ..., 9, a, b, ..., z, 10, 11, ...
+    const mappedKeys = Object.values(schema.map);
+    // All mappedKeys should be valid base36
+    mappedKeys.forEach(key => {
+      expect(key).toMatch(/^[0-9a-z]+$/);
+    });
+    // Check some expected values
+    expect(schema.map['campo0']).toBe('0');
+    expect(schema.map['campo9']).toBe('9');
+    expect(schema.map['campo10']).toBe('a');
+    expect(schema.map['campo35']).toBe('z');
+    expect(schema.map['campo36']).toBe('10');
+    expect(schema.map['campo49']).toBe('1d'); // 49 in base36
+    // The reversedMap should work
+    expect(schema.reversedMap['0']).toBe('campo0');
+    expect(schema.reversedMap['a']).toBe('campo10');
+    expect(schema.reversedMap['1d']).toBe('campo49');
 });
 
