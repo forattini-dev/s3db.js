@@ -35,14 +35,31 @@ export class Database extends EventEmitter {
     // Handle both connection string and individual parameters
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
-      connectionString = ConnectionString.buildFromParams({
-        bucket: options.bucket,
-        region: options.region,
-        accessKeyId: options.accessKeyId,
-        secretAccessKey: options.secretAccessKey,
-        endpoint: options.endpoint,
-        forcePathStyle: options.forcePathStyle
-      });
+      // Build connection string manually
+      const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
+      
+      // If endpoint is provided, assume it's MinIO or Digital Ocean
+      if (endpoint) {
+        const url = new URL(endpoint);
+        if (accessKeyId) url.username = encodeURIComponent(accessKeyId);
+        if (secretAccessKey) url.password = encodeURIComponent(secretAccessKey);
+        url.pathname = `/${bucket || 's3db'}`;
+        
+        // Add forcePathStyle parameter if specified
+        if (forcePathStyle) {
+          url.searchParams.set('forcePathStyle', 'true');
+        }
+        
+        connectionString = url.toString();
+      } else if (accessKeyId && secretAccessKey) {
+        // Otherwise, build S3 connection string only if credentials are provided
+        const params = new URLSearchParams();
+        params.set('region', region || 'us-east-1');
+        if (forcePathStyle) {
+          params.set('forcePathStyle', 'true');
+        }
+        connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || 's3db'}?${params.toString()}`;
+      }
     }
 
     this.client = options.client || new Client({
@@ -79,6 +96,7 @@ export class Database extends EventEmitter {
       const versionData = resourceMetadata.versions?.[currentVersion];
       
       if (versionData) {
+        // Extract configuration from version data at root level
         this.resources[name] = new Resource({
           name,
           client: this.client,
@@ -89,12 +107,12 @@ export class Database extends EventEmitter {
           passphrase: this.passphrase,
           observers: [this],
           cache: this.cache,
-          timestamps: versionData.options?.timestamps || false,
-          partitions: resourceMetadata.partitions || versionData.options?.partitions || {},
-          paranoid: versionData.options?.paranoid !== false,
-          allNestedObjectsOptional: versionData.options?.allNestedObjectsOptional || false,
-          autoDecrypt: versionData.options?.autoDecrypt !== false,
-          hooks: {}
+          timestamps: versionData.timestamps !== undefined ? versionData.timestamps : false,
+          partitions: resourceMetadata.partitions || versionData.partitions || {},
+          paranoid: versionData.paranoid !== undefined ? versionData.paranoid : true,
+          allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
+          autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
+          hooks: versionData.hooks || {}
         });
       }
     }
@@ -268,15 +286,14 @@ export class Database extends EventEmitter {
           [version]: {
             hash: definitionHash,
             attributes: resourceDef.attributes,
-            options: {
-              timestamps: resource.config.timestamps,
-              partitions: resource.config.partitions,
-              paranoid: resource.config.paranoid,
-              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
-              autoDecrypt: resource.config.autoDecrypt,
-              cache: resource.config.cache,
-            },
             behavior: resourceDef.behavior || 'user-management',
+            timestamps: resource.config.timestamps,
+            partitions: resource.config.partitions,
+            paranoid: resource.config.paranoid,
+            allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
+            autoDecrypt: resource.config.autoDecrypt,
+            cache: resource.config.cache,
+            hooks: resource.config.hooks,
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
           }
         }
@@ -318,75 +335,77 @@ export class Database extends EventEmitter {
 
   /**
    * Check if a resource exists with the same definition hash
-   * @param {string} name - Resource name
-   * @param {Object} attributes - Resource attributes
-   * @param {Object} options - Resource options
-   * @param {string} behavior - Resource behavior
-   * @returns {Object} Object with exists flag and hash information
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.attributes - Resource attributes
+   * @param {string} [config.behavior] - Resource behavior
+   * @param {Object} [config.options] - Resource options
+   * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, options = {}, behavior = 'user-management' }) {
-    // Check if resource exists in memory
+  resourceExistsWithSameHash({ name, attributes, behavior = 'user-management', options = {} }) {
     if (!this.resources[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
-    // Create a temporary resource to generate hash
-    const tempResource = new Resource({
+
+    const existingResource = this.resources[name];
+    const existingHash = this.generateDefinitionHash(existingResource.export());
+    
+    // Create a mock resource to calculate the new hash
+    const mockResource = new Resource({
       name,
       attributes,
       behavior,
-      observers: [],
       client: this.client,
-      version: 'temp',
+      version: existingResource.version,
       passphrase: this.passphrase,
-      cache: this.cache,
-      ...options,
+      ...options
     });
-    const newHash = this.generateDefinitionHash(tempResource.export(), behavior);
-    const existingHash = this.generateDefinitionHash(this.resources[name].export(), this.resources[name].behavior);
+    
+    const newHash = this.generateDefinitionHash(mockResource.export());
+    
     return {
       exists: true,
-      sameHash: newHash === existingHash,
+      sameHash: existingHash === newHash,
       hash: newHash,
       existingHash
     };
   }
 
   /**
-   * Create a resource only if it doesn't exist with the same definition hash
-   * @param {Object} params - Resource parameters
-   * @param {string} params.name - Resource name
-   * @param {Object} params.attributes - Resource attributes
-   * @param {Object} params.options - Resource options
-   * @param {string} params.behavior - Resource behavior
-   * @returns {Object} Object with resource and created flag
+   * Create a resource only if it doesn't exist or has a different hash
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.attributes - Resource attributes
+   * @param {string} [config.behavior] - Resource behavior
+   * @param {Object} [config.options] - Resource options
+   * @returns {Object} Result with created/updated resource and action taken
    */
-  async createResourceIfNotExists({ name, attributes, options = {}, behavior = 'user-management' }) {
-    const alreadyExists = !!this.resources[name];
-    const hashCheck = this.resourceExistsWithSameHash({ name, attributes, options, behavior });
-    if (hashCheck.exists && hashCheck.sameHash) {
-      // Resource exists with same hash, return existing resource
-      return {
-        resource: this.resources[name],
-        created: false,
-        reason: 'Resource already exists with same definition hash'
-      };
+  async createResourceIfNotExists({ name, attributes, behavior = 'user-management', options = {} }) {
+    const hashCheck = this.resourceExistsWithSameHash({ name, attributes, behavior, options });
+    
+    if (!hashCheck.exists) {
+      // Resource doesn't exist, create it
+      const resource = await this.createResource({ name, attributes, behavior, ...options });
+      return { resource, action: 'created', hash: hashCheck.hash };
     }
-    // Create or update resource
-    const resource = await this.createResource({ name, attributes, options, behavior });
-    return {
-      resource,
-      created: !alreadyExists,
-      reason: alreadyExists ? 'Resource updated with new definition' : 'New resource created'
-    };
+    
+    if (!hashCheck.sameHash) {
+      // Resource exists but has different hash, update it
+      const resource = await this.createResource({ name, attributes, behavior, ...options });
+      return { resource, action: 'updated', hash: hashCheck.hash, previousHash: hashCheck.existingHash };
+    }
+    
+    // Resource exists with same hash, return existing resource
+    return { resource: this.resources[name], action: 'unchanged', hash: hashCheck.hash };
   }
 
-  async createResource({ name, attributes, options = {}, behavior = 'user-management' }) {
+  async createResource({ name, attributes, behavior = 'user-management', ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
       // Update configuration
       Object.assign(existingResource.config, {
         cache: this.cache,
-        ...options,
+        ...config,
       });
       if (behavior) {
         existingResource.behavior = behavior;
@@ -405,6 +424,7 @@ export class Database extends EventEmitter {
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || 'v0';
+    
     const resource = new Resource({
       name,
       attributes,
@@ -414,7 +434,7 @@ export class Database extends EventEmitter {
       version,
       passphrase: this.passphrase,
       cache: this.cache,
-      ...options,
+      ...config,
     });
     this.resources[name] = resource;
     await this.uploadMetadataFile();

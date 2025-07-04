@@ -43,10 +43,6 @@ export function calculateAttributeNamesSize(mappedObject) {
   let totalSize = 0;
   
   for (const key of Object.keys(mappedObject)) {
-    // Skip the version field as it's not a mapped attribute
-    if (key === '_v') continue;
-    
-    // Calculate size of the attribute name (digit)
     totalSize += calculateUTF8Bytes(key);
   }
   
