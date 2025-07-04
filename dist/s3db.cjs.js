@@ -9313,7 +9313,11 @@ ${validation.errors.join("\n")}`);
     if (partitionSegments.length === 0) {
       return null;
     }
-    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+    const finalId = id || data?.id;
+    if (!finalId) {
+      return null;
+    }
+    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
   }
   /**
    * Get nested field value from data object using dot notation
@@ -9542,12 +9546,12 @@ ${validation.errors.join("\n")}`);
    * console.log(updatedUser.updatedAt); // ISO timestamp
    */
   async update(id, attributes) {
-    const live = await this.get(id);
+    const originalData = await this.get(id);
     if (this.config.timestamps) {
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const preProcessedData = await this.executeHooks("preUpdate", attributes);
-    const attrs = lodashEs.merge(live, preProcessedData);
+    const attrs = lodashEs.merge(originalData, preProcessedData);
     delete attrs.id;
     const { isValid, errors, data: validated } = await this.validate(attrs);
     if (!isValid) {
@@ -9558,6 +9562,9 @@ ${validation.errors.join("\n")}`);
         validation: errors
       });
     }
+    const oldData = { ...originalData, id };
+    const newData = { ...validated, id };
+    await this.handlePartitionReferenceUpdates(oldData, newData);
     const mappedData = await this.schema.mapper(validated);
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
@@ -9593,7 +9600,6 @@ ${validation.errors.join("\n")}`);
     });
     validated.id = id;
     await this.executeHooks("afterUpdate", validated);
-    await this.handlePartitionReferenceUpdates(live, validated);
     this.emit("update", preProcessedData, validated);
     return validated;
   }
@@ -9916,7 +9922,9 @@ ${validation.errors.join("\n")}`);
         return validResults2;
       }
       if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new Error(`Partition '${partition}' not found`);
+        console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
+        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+        return [];
       }
       const partitionDef = this.config.partitions[partition];
       const partitionSegments = [];
@@ -9955,7 +9963,20 @@ ${validation.errors.join("\n")}`);
         return null;
       }).process(async (id) => {
         try {
-          return await this.getFromPartition({ id, partitionName: partition, partitionValues });
+          const keyForId = keys.find((key) => key.includes(`id=${id}`));
+          if (!keyForId) {
+            throw new Error(`Partition key not found for ID ${id}`);
+          }
+          const keyParts = keyForId.split("/");
+          const actualPartitionValues = {};
+          for (const [fieldName, rule] of sortedFields) {
+            const fieldPart = keyParts.find((part) => part.startsWith(`${fieldName}=`));
+            if (fieldPart) {
+              const value = fieldPart.replace(`${fieldName}=`, "");
+              actualPartitionValues[fieldName] = value;
+            }
+          }
+          return await this.getFromPartition({ id, partitionName: partition, partitionValues: actualPartitionValues });
         } catch (error) {
           if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
             console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
@@ -9974,6 +9995,11 @@ ${validation.errors.join("\n")}`);
       this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
       return validResults;
     } catch (error) {
+      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
+        console.warn(`Partition error in list method:`, error.message);
+        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+        return [];
+      }
       console.error(`Critical error in list method:`, error.message);
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
@@ -10453,6 +10479,27 @@ ${validation.errors.join("\n")}`);
         console.warn(`Failed to update partition references for ${partitionName}:`, error.message);
       }
     }
+    const id = newData.id || oldData.id;
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const prefix = `resource=${this.name}/partition=${partitionName}`;
+      let allKeys = [];
+      try {
+        allKeys = await this.client.getAllKeys({ prefix });
+      } catch (error) {
+        console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, error.message);
+        continue;
+      }
+      const validKey = this.getPartitionKey({ partitionName, id, data: newData });
+      for (const key of allKeys) {
+        if (key.endsWith(`/id=${id}`) && key !== validKey) {
+          try {
+            await this.client.deleteObject(key);
+          } catch (error) {
+            console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, error.message);
+          }
+        }
+      }
+    }
   }
   /**
    * Handle partition reference update for a specific partition
@@ -10462,8 +10509,9 @@ ${validation.errors.join("\n")}`);
    * @param {Object} newData - Updated object data
    */
   async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
-    const oldPartitionKey = this.getPartitionKey({ partitionName, id: newData.id, data: oldData });
-    const newPartitionKey = this.getPartitionKey({ partitionName, id: newData.id, data: newData });
+    const id = newData.id || oldData.id;
+    const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
+    const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
     if (oldPartitionKey !== newPartitionKey) {
       if (oldPartitionKey) {
         try {
@@ -10475,17 +10523,20 @@ ${validation.errors.join("\n")}`);
       if (newPartitionKey) {
         try {
           const mappedData = await this.schema.mapper(newData);
+          if (mappedData.undefined !== void 0) delete mappedData.undefined;
           const behaviorImpl = getBehavior(this.behavior);
           const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
             resource: this,
-            id: newData.id,
+            id,
             data: newData,
             mappedData
           });
+          if (processedMetadata.undefined !== void 0) delete processedMetadata.undefined;
           const partitionMetadata = {
             ...processedMetadata,
             _version: this.version
           };
+          if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
           await this.client.putObject({
             key: newPartitionKey,
             metadata: partitionMetadata,
@@ -10498,17 +10549,20 @@ ${validation.errors.join("\n")}`);
     } else if (newPartitionKey) {
       try {
         const mappedData = await this.schema.mapper(newData);
+        if (mappedData.undefined !== void 0) delete mappedData.undefined;
         const behaviorImpl = getBehavior(this.behavior);
         const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
           resource: this,
-          id: newData.id,
+          id,
           data: newData,
           mappedData
         });
+        if (processedMetadata.undefined !== void 0) delete processedMetadata.undefined;
         const partitionMetadata = {
           ...processedMetadata,
           _version: this.version
         };
+        if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
         await this.client.putObject({
           key: newPartitionKey,
           metadata: partitionMetadata,
@@ -10529,6 +10583,10 @@ ${validation.errors.join("\n")}`);
       return;
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
+      if (!partition || !partition.fields || typeof partition.fields !== "object") {
+        console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
+        continue;
+      }
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         const mappedData = await this.schema.mapper(data);
@@ -10627,6 +10685,7 @@ ${validation.errors.join("\n")}`);
     if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
     data._definitionHash = this.getDefinitionHash();
+    if (data.undefined !== void 0) delete data.undefined;
     this.emit("getFromPartition", data);
     return data;
   }
@@ -10730,7 +10789,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "4.1.14" : "latest";
+        return true ? "5.0.0" : "latest";
       } catch (e) {
         return "latest";
       }
@@ -11013,7 +11072,7 @@ class Database extends EventEmitter {
       existingHash
     };
   }
-  async createResource({ name, attributes, behavior = "user-management", ...config }) {
+  async createResource({ name, attributes, behavior = "user-management", hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
       Object.assign(existingResource.config, {
@@ -11024,6 +11083,17 @@ class Database extends EventEmitter {
         existingResource.behavior = behavior;
       }
       existingResource.updateAttributes(attributes);
+      if (hooks) {
+        for (const [event, hooksArr] of Object.entries(hooks)) {
+          if (Array.isArray(hooksArr) && existingResource.hooks[event]) {
+            for (const fn of hooksArr) {
+              if (typeof fn === "function") {
+                existingResource.hooks[event].push(fn.bind(existingResource));
+              }
+            }
+          }
+        }
+      }
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata2 = this.savedMetadata?.resources?.[name];
       const currentVersion = existingMetadata2?.currentVersion || "v0";
@@ -11045,6 +11115,7 @@ class Database extends EventEmitter {
       version,
       passphrase: this.passphrase,
       cache: this.cache,
+      hooks,
       ...config
     });
     this.resources[name] = resource;
