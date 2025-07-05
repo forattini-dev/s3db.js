@@ -3382,7 +3382,7 @@ ${JSON.stringify(validation, null, 2)}`, {
   var jsonStableStringifyExports = requireJsonStableStringify();
   var jsonStableStringify = /*@__PURE__*/getDefaultExportFromCjs(jsonStableStringifyExports);
 
-  async function custom(actual, errors, schema) {
+  async function secretHandler(actual, errors, schema) {
     if (!this.passphrase) {
       errors.push({ actual, type: "encryptionKeyMissing" });
       return actual;
@@ -3394,6 +3394,10 @@ ${JSON.stringify(validation, null, 2)}`, {
       errors.push({ actual, type: "encryptionProblem", error });
     }
     return actual;
+  }
+  async function jsonHandler(actual, errors, schema) {
+    if (lodashEs.isString(actual)) return actual;
+    return JSON.stringify(actual);
   }
   class Validator extends FastestValidator {
     constructor({ options, passphrase, autoEncrypt = true } = {}) {
@@ -3416,7 +3420,7 @@ ${JSON.stringify(validation, null, 2)}`, {
       this.autoEncrypt = autoEncrypt;
       this.alias("secret", {
         type: "string",
-        custom: this.autoEncrypt ? custom : void 0,
+        custom: this.autoEncrypt ? secretHandler : void 0,
         messages: {
           string: "The '{field}' field must be a string.",
           stringMin: "This secret '{field}' field length must be at least {expected} long."
@@ -3424,11 +3428,15 @@ ${JSON.stringify(validation, null, 2)}`, {
       });
       this.alias("secretAny", {
         type: "any",
-        custom: this.autoEncrypt ? custom : void 0
+        custom: this.autoEncrypt ? secretHandler : void 0
       });
       this.alias("secretNumber", {
         type: "number",
-        custom: this.autoEncrypt ? custom : void 0
+        custom: this.autoEncrypt ? secretHandler : void 0
+      });
+      this.alias("json", {
+        type: "any",
+        custom: this.autoEncrypt ? jsonHandler : void 0
       });
     }
   }
@@ -3598,23 +3606,26 @@ ${JSON.stringify(validation, null, 2)}`, {
         if (definition.includes("array")) {
           this.addHook("beforeMap", name, "fromArray");
           this.addHook("afterUnmap", name, "toArray");
-        } else {
-          if (definition.includes("secret")) {
-            if (this.options.autoEncrypt) {
-              this.addHook("beforeMap", name, "encrypt");
-            }
-            if (this.options.autoDecrypt) {
-              this.addHook("afterUnmap", name, "decrypt");
-            }
+        }
+        if (definition.includes("secret")) {
+          if (this.options.autoEncrypt) {
+            this.addHook("beforeMap", name, "encrypt");
           }
-          if (definition.includes("number")) {
-            this.addHook("beforeMap", name, "toString");
-            this.addHook("afterUnmap", name, "toNumber");
+          if (this.options.autoDecrypt) {
+            this.addHook("afterUnmap", name, "decrypt");
           }
-          if (definition.includes("boolean")) {
-            this.addHook("beforeMap", name, "fromBool");
-            this.addHook("afterUnmap", name, "toBool");
-          }
+        }
+        if (definition.includes("number")) {
+          this.addHook("beforeMap", name, "toString");
+          this.addHook("afterUnmap", name, "toNumber");
+        }
+        if (definition.includes("boolean")) {
+          this.addHook("beforeMap", name, "fromBool");
+          this.addHook("afterUnmap", name, "toBool");
+        }
+        if (definition.includes("json")) {
+          this.addHook("beforeMap", name, "toJSON");
+          this.addHook("afterUnmap", name, "fromJSON");
         }
       }
     }
