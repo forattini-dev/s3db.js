@@ -1,9 +1,9 @@
-import { merge } from "lodash-es";
+import { merge, isString } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
 import { encrypt } from "./crypto.js";
 
-async function custom (actual, errors, schema) {
+async function secretHandler (actual, errors, schema) {
   if (!this.passphrase) {
     errors.push({ actual, type: "encryptionKeyMissing" })
     return actual
@@ -17,6 +17,11 @@ async function custom (actual, errors, schema) {
   }
 
   return actual
+}
+
+async function jsonHandler (actual, errors, schema) {
+  if (isString(actual)) return actual
+  return JSON.stringify(actual)
 }
 
 export class Validator extends FastestValidator {
@@ -44,7 +49,7 @@ export class Validator extends FastestValidator {
 
     this.alias('secret', {
       type: "string",
-      custom: this.autoEncrypt ? custom : undefined,
+      custom: this.autoEncrypt ? secretHandler : undefined,
       messages: {
         string: "The '{field}' field must be a string.",
         stringMin: "This secret '{field}' field length must be at least {expected} long.",
@@ -53,12 +58,17 @@ export class Validator extends FastestValidator {
 
     this.alias('secretAny', { 
       type: "any" ,
-      custom: this.autoEncrypt ? custom : undefined,
+      custom: this.autoEncrypt ? secretHandler : undefined,
     })
 
     this.alias('secretNumber', { 
       type: "number",
-      custom: this.autoEncrypt ? custom : undefined,
+      custom: this.autoEncrypt ? secretHandler : undefined,
+    })
+
+    this.alias('json', {
+      type: "any",
+      custom: this.autoEncrypt ? jsonHandler : undefined,
     })
   }
 }
