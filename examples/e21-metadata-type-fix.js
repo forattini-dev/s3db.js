@@ -18,7 +18,7 @@ async function main() {
   });
 
   // Define a resource with various data types
-  const urls = db.resource('urls', {
+  const urls = db.createResource('urls', {
     link: 'string|required',
     getFingerprints: 'boolean|optional',
     webpush: 'object|optional',

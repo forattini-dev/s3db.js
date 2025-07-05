@@ -17,6 +17,17 @@ import { idGenerator, passwordGenerator } from "./concerns/id.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 
+import { customAlphabet, urlAlphabet } from 'nanoid';
+
+/**
+ * Create an ID generator with custom size
+ * @param {number} size - Size of the generated ID
+ * @returns {Function} ID generator function
+ */
+function createIdGeneratorWithSize(size) {
+  return customAlphabet(urlAlphabet, size);
+}
+
 export class Resource extends EventEmitter {
   /**
    * Create a new Resource instance
@@ -37,6 +48,8 @@ export class Resource extends EventEmitter {
    * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
    * @param {Object} [config.hooks={}] - Custom hooks
    * @param {Object} [config.options={}] - Additional options
+   * @param {Function} [config.idGenerator] - Custom ID generator function
+   * @param {number} [config.idSize=22] - Size for auto-generated IDs
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -60,6 +73,30 @@ export class Resource extends EventEmitter {
    *       return data;
    *     }]
    *   }
+   * });
+   * 
+   * // With custom ID size
+   * const shortIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idSize: 8 // Generate 8-character IDs
+   * });
+   * 
+   * // With custom ID generator function
+   * const customIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idGenerator: () => `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+   * });
+   * 
+   * // With custom ID generator using size parameter
+   * const longIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
    * });
    */
   constructor(config) {
@@ -87,7 +124,9 @@ export class Resource extends EventEmitter {
       partitions = {},
       paranoid = true,
       allNestedObjectsOptional = true,
-      hooks = {}
+      hooks = {},
+      idGenerator: customIdGenerator,
+      idSize = 22
     } = config;
 
     // Set instance properties
@@ -98,6 +137,9 @@ export class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+
+    // Configure ID generator
+    this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
 
     // Store configuration - all at root level
     this.config = {
@@ -139,6 +181,33 @@ export class Resource extends EventEmitter {
         }
       }
     }
+  }
+
+  /**
+   * Configure ID generator based on provided options
+   * @param {Function|number} customIdGenerator - Custom ID generator function or size
+   * @param {number} idSize - Size for auto-generated IDs
+   * @returns {Function} Configured ID generator function
+   * @private
+   */
+  configureIdGenerator(customIdGenerator, idSize) {
+    // If a custom function is provided, use it
+    if (typeof customIdGenerator === 'function') {
+      return customIdGenerator;
+    }
+    
+    // If customIdGenerator is a number (size), create a generator with that size
+    if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
+      return createIdGeneratorWithSize(customIdGenerator);
+    }
+    
+    // If idSize is provided, create a generator with that size
+    if (typeof idSize === 'number' && idSize > 0) {
+      return createIdGeneratorWithSize(idSize);
+    }
+    
+    // Default to the standard idGenerator
+    return idGenerator;
   }
 
   /**
@@ -570,7 +639,7 @@ export class Resource extends EventEmitter {
       })
     }
 
-    if (!id && id !== 0) id = idGenerator();
+    if (!id && id !== 0) id = this.idGenerator();
 
     const mappedData = await this.schema.mapper(validated);
     
@@ -2277,6 +2346,24 @@ function validateResourceConfig(config) {
   for (const field of booleanFields) {
     if (config[field] !== undefined && typeof config[field] !== 'boolean') {
       errors.push(`Resource '${field}' must be a boolean`);
+    }
+  }
+  
+  // Validate idGenerator
+  if (config.idGenerator !== undefined) {
+    if (typeof config.idGenerator !== 'function' && typeof config.idGenerator !== 'number') {
+      errors.push("Resource 'idGenerator' must be a function or a number (size)");
+    } else if (typeof config.idGenerator === 'number' && config.idGenerator <= 0) {
+      errors.push("Resource 'idGenerator' size must be greater than 0");
+    }
+  }
+  
+  // Validate idSize
+  if (config.idSize !== undefined) {
+    if (typeof config.idSize !== 'number' || !Number.isInteger(config.idSize)) {
+      errors.push("Resource 'idSize' must be an integer");
+    } else if (config.idSize <= 0) {
+      errors.push("Resource 'idSize' must be greater than 0");
     }
   }
   
