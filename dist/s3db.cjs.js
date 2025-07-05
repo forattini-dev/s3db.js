@@ -8941,6 +8941,9 @@ function getBehavior(behaviorName) {
 const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
 const DEFAULT_BEHAVIOR = "user-management";
 
+function createIdGeneratorWithSize(size) {
+  return nanoid.customAlphabet(nanoid.urlAlphabet, size);
+}
 class Resource extends EventEmitter {
   /**
    * Create a new Resource instance
@@ -8961,6 +8964,8 @@ class Resource extends EventEmitter {
    * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
    * @param {Object} [config.hooks={}] - Custom hooks
    * @param {Object} [config.options={}] - Additional options
+   * @param {Function} [config.idGenerator] - Custom ID generator function
+   * @param {number} [config.idSize=22] - Size for auto-generated IDs
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -8985,6 +8990,30 @@ class Resource extends EventEmitter {
    *     }]
    *   }
    * });
+   * 
+   * // With custom ID size
+   * const shortIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idSize: 8 // Generate 8-character IDs
+   * });
+   * 
+   * // With custom ID generator function
+   * const customIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idGenerator: () => `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+   * });
+   * 
+   * // With custom ID generator using size parameter
+   * const longIdUsers = new Resource({
+   *   name: 'users',
+   *   client: s3Client,
+   *   attributes: { name: 'string|required' },
+   *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
+   * });
    */
   constructor(config) {
     super();
@@ -9008,7 +9037,9 @@ ${validation.errors.join("\n")}`);
       partitions = {},
       paranoid = true,
       allNestedObjectsOptional = true,
-      hooks = {}
+      hooks = {},
+      idGenerator: customIdGenerator,
+      idSize = 22
     } = config;
     this.name = name;
     this.client = client;
@@ -9017,6 +9048,7 @@ ${validation.errors.join("\n")}`);
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
+    this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
     this.config = {
       cache,
       hooks,
@@ -9047,6 +9079,25 @@ ${validation.errors.join("\n")}`);
         }
       }
     }
+  }
+  /**
+   * Configure ID generator based on provided options
+   * @param {Function|number} customIdGenerator - Custom ID generator function or size
+   * @param {number} idSize - Size for auto-generated IDs
+   * @returns {Function} Configured ID generator function
+   * @private
+   */
+  configureIdGenerator(customIdGenerator, idSize) {
+    if (typeof customIdGenerator === "function") {
+      return customIdGenerator;
+    }
+    if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
+      return createIdGeneratorWithSize(customIdGenerator);
+    }
+    if (typeof idSize === "number" && idSize > 0) {
+      return createIdGeneratorWithSize(idSize);
+    }
+    return idGenerator;
   }
   /**
    * Get resource options (for backward compatibility with tests)
@@ -9396,7 +9447,7 @@ ${validation.errors.join("\n")}`);
         validation: errors
       });
     }
-    if (!id && id !== 0) id = idGenerator();
+    if (!id && id !== 0) id = this.idGenerator();
     const mappedData = await this.schema.mapper(validated);
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
@@ -9405,10 +9456,19 @@ ${validation.errors.join("\n")}`);
       mappedData
     });
     const key = this.getResourceKey(id);
+    let contentType = void 0;
+    if (body && body !== "") {
+      try {
+        JSON.parse(body);
+        contentType = "application/json";
+      } catch {
+      }
+    }
     await this.client.putObject({
       metadata: processedMetadata,
       key,
-      body
+      body,
+      contentType
     });
     const final = lodashEs.merge({ id }, validated);
     await this.executeHooks("afterInsert", final);
@@ -9603,10 +9663,18 @@ ${validation.errors.join("\n")}`);
       } catch (error) {
       }
     }
+    let finalContentType = existingContentType;
+    if (finalBody && finalBody !== "" && !finalContentType) {
+      try {
+        JSON.parse(finalBody);
+        finalContentType = "application/json";
+      } catch {
+      }
+    }
     await this.client.putObject({
       key,
       body: finalBody,
-      contentType: existingContentType,
+      contentType: finalContentType,
       metadata: processedMetadata
     });
     validated.id = id;
@@ -10373,10 +10441,19 @@ ${validation.errors.join("\n")}`);
           ...processedMetadata,
           _version: this.version
         };
+        let contentType = void 0;
+        if (body && body !== "") {
+          try {
+            JSON.parse(body);
+            contentType = "application/json";
+          } catch {
+          }
+        }
         await this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
-          body
+          body,
+          contentType
         });
       }
     }
@@ -10548,10 +10625,19 @@ ${validation.errors.join("\n")}`);
             _version: this.version
           };
           if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
+          let contentType = void 0;
+          if (body && body !== "") {
+            try {
+              JSON.parse(body);
+              contentType = "application/json";
+            } catch {
+            }
+          }
           await this.client.putObject({
             key: newPartitionKey,
             metadata: partitionMetadata,
-            body
+            body,
+            contentType
           });
         } catch (error) {
           console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
@@ -10574,10 +10660,19 @@ ${validation.errors.join("\n")}`);
           _version: this.version
         };
         if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
+        let contentType = void 0;
+        if (body && body !== "") {
+          try {
+            JSON.parse(body);
+            contentType = "application/json";
+          } catch {
+          }
+        }
         await this.client.putObject({
           key: newPartitionKey,
           metadata: partitionMetadata,
-          body
+          body,
+          contentType
         });
       } catch (error) {
         console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
@@ -10612,11 +10707,20 @@ ${validation.errors.join("\n")}`);
           ...processedMetadata,
           _version: this.version
         };
+        let contentType = void 0;
+        if (body && body !== "") {
+          try {
+            JSON.parse(body);
+            contentType = "application/json";
+          } catch {
+          }
+        }
         try {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
-            body
+            body,
+            contentType
           });
         } catch (error) {
           console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
@@ -10745,6 +10849,20 @@ function validateResourceConfig(config) {
       errors.push(`Resource '${field}' must be a boolean`);
     }
   }
+  if (config.idGenerator !== void 0) {
+    if (typeof config.idGenerator !== "function" && typeof config.idGenerator !== "number") {
+      errors.push("Resource 'idGenerator' must be a function or a number (size)");
+    } else if (typeof config.idGenerator === "number" && config.idGenerator <= 0) {
+      errors.push("Resource 'idGenerator' size must be greater than 0");
+    }
+  }
+  if (config.idSize !== void 0) {
+    if (typeof config.idSize !== "number" || !Number.isInteger(config.idSize)) {
+      errors.push("Resource 'idSize' must be an integer");
+    } else if (config.idSize <= 0) {
+      errors.push("Resource 'idSize' must be greater than 0");
+    }
+  }
   if (config.partitions !== void 0) {
     if (typeof config.partitions !== "object" || Array.isArray(config.partitions)) {
       errors.push("Resource 'partitions' must be an object");
@@ -10800,7 +10918,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "5.0.0" : "latest";
+        return true ? "5.2.0" : "latest";
       } catch (e) {
         return "latest";
       }

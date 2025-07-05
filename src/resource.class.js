@@ -653,10 +653,23 @@ export class Resource extends EventEmitter {
 
     const key = this.getResourceKey(id);
 
+    // Determine content type based on body content
+    let contentType = undefined;
+    if (body && body !== "") {
+      // If body contains JSON data, set content type to application/json
+      try {
+        JSON.parse(body);
+        contentType = 'application/json';
+      } catch {
+        // Not valid JSON, keep contentType undefined (will use S3 default)
+      }
+    }
+
     await this.client.putObject({
       metadata: processedMetadata,
       key,
       body,
+      contentType,
     });
 
     const final = merge({ id }, validated);
@@ -915,10 +928,22 @@ export class Resource extends EventEmitter {
       }
     }
 
+    // Determine content type based on body content
+    let finalContentType = existingContentType;
+    if (finalBody && finalBody !== "" && !finalContentType) {
+      // If body contains JSON data and no existing content type, set to application/json
+      try {
+        JSON.parse(finalBody);
+        finalContentType = 'application/json';
+      } catch {
+        // Not valid JSON, keep contentType undefined (will use S3 default)
+      }
+    }
+
     await this.client.putObject({
       key,
       body: finalBody,
-      contentType: existingContentType,
+      contentType: finalContentType,
       metadata: processedMetadata,
     });
 
@@ -1872,10 +1897,23 @@ export class Resource extends EventEmitter {
           _version: this.version
         };
         
+        // Determine content type based on body content
+        let contentType = undefined;
+        if (body && body !== "") {
+          // If body contains JSON data, set content type to application/json
+          try {
+            JSON.parse(body);
+            contentType = 'application/json';
+          } catch {
+            // Not valid JSON, keep contentType undefined (will use S3 default)
+          }
+        }
+
         await this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
           body,
+          contentType,
         });
       }
     }
@@ -2091,10 +2129,23 @@ export class Resource extends EventEmitter {
             _version: this.version
           };
           if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
+          // Determine content type based on body content
+          let contentType = undefined;
+          if (body && body !== "") {
+            // If body contains JSON data, set content type to application/json
+            try {
+              JSON.parse(body);
+              contentType = 'application/json';
+            } catch {
+              // Not valid JSON, keep contentType undefined (will use S3 default)
+            }
+          }
+
           await this.client.putObject({
             key: newPartitionKey,
             metadata: partitionMetadata,
             body,
+            contentType,
           });
         } catch (error) {
           // Log but don't fail if new partition object creation fails
@@ -2122,10 +2173,23 @@ export class Resource extends EventEmitter {
           _version: this.version
         };
         if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
+        // Determine content type based on body content
+        let contentType = undefined;
+        if (body && body !== "") {
+          // If body contains JSON data, set content type to application/json
+          try {
+            JSON.parse(body);
+            contentType = 'application/json';
+          } catch {
+            // Not valid JSON, keep contentType undefined (will use S3 default)
+          }
+        }
+
         await this.client.putObject({
           key: newPartitionKey,
           metadata: partitionMetadata,
           body,
+          contentType,
         });
       } catch (error) {
         // Log but don't fail if partition object update fails
@@ -2173,11 +2237,24 @@ export class Resource extends EventEmitter {
           _version: this.version
         };
         
+        // Determine content type based on body content
+        let contentType = undefined;
+        if (body && body !== "") {
+          // If body contains JSON data, set content type to application/json
+          try {
+            JSON.parse(body);
+            contentType = 'application/json';
+          } catch {
+            // Not valid JSON, keep contentType undefined (will use S3 default)
+          }
+        }
+
         try {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
             body,
+            contentType,
           });
         } catch (error) {
           // Log but don't fail if partition object doesn't exist
