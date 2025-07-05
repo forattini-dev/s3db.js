@@ -253,26 +253,31 @@ export class Schema {
       if (definition.includes("array")) {
         this.addHook("beforeMap", name, "fromArray");
         this.addHook("afterUnmap", name, "toArray");
-      } else {
-        if (definition.includes("secret")) {
-          if (this.options.autoEncrypt) {
-            this.addHook("beforeMap", name, "encrypt");
-          }
+      } 
 
-          if (this.options.autoDecrypt) {
-            this.addHook("afterUnmap", name, "decrypt");
-          }
+      if (definition.includes("secret")) {
+        if (this.options.autoEncrypt) {
+          this.addHook("beforeMap", name, "encrypt");
         }
 
-        if (definition.includes("number")) {
-          this.addHook("beforeMap", name, "toString");
-          this.addHook("afterUnmap", name, "toNumber");
+        if (this.options.autoDecrypt) {
+          this.addHook("afterUnmap", name, "decrypt");
         }
+      }
 
-        if (definition.includes("boolean")) {
-          this.addHook("beforeMap", name, "fromBool");
-          this.addHook("afterUnmap", name, "toBool");
-        }
+      if (definition.includes("number")) {
+        this.addHook("beforeMap", name, "toString");
+        this.addHook("afterUnmap", name, "toNumber");
+      }
+
+      if (definition.includes("boolean")) {
+        this.addHook("beforeMap", name, "fromBool");
+        this.addHook("afterUnmap", name, "toBool");
+      }
+
+      if (definition.includes("json")) {
+        this.addHook("beforeMap", name, "toJSON");
+        this.addHook("afterUnmap", name, "fromJSON");
       }
     }
   }
