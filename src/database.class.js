@@ -113,7 +113,7 @@ export class Database extends EventEmitter {
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
           hooks: versionData.hooks || {},
-          database: this
+          versioningEnabled: this.versioningEnabled
         });
       }
     }
@@ -359,6 +359,7 @@ export class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
+      versioningEnabled: this.versioningEnabled,
       ...options
     });
     
@@ -385,8 +386,8 @@ export class Database extends EventEmitter {
       if (behavior) {
         existingResource.behavior = behavior;
       }
-      // Ensure database reference is set
-      existingResource.database = this;
+      // Ensure versioning configuration is set
+      existingResource.versioningEnabled = this.versioningEnabled;
       existingResource.updateAttributes(attributes);
       // NOVO: Mescla hooks se fornecidos (append ao final)
       if (hooks) {
@@ -424,7 +425,7 @@ export class Database extends EventEmitter {
       passphrase: this.passphrase,
       cache: this.cache,
       hooks,
-      database: this,
+      versioningEnabled: this.versioningEnabled,
       ...config,
     });
     this.resources[name] = resource;

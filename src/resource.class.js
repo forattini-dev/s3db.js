@@ -50,6 +50,7 @@ export class Resource extends EventEmitter {
    * @param {Object} [config.options={}] - Additional options
    * @param {Function} [config.idGenerator] - Custom ID generator function
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -127,7 +128,7 @@ export class Resource extends EventEmitter {
       hooks = {},
       idGenerator: customIdGenerator,
       idSize = 22,
-      database = null
+      versioningEnabled = false
     } = config;
 
     // Set instance properties
@@ -138,7 +139,7 @@ export class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
-    this.database = database;
+    this.versioningEnabled = versioningEnabled;
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
@@ -281,7 +282,7 @@ export class Resource extends EventEmitter {
     this.setupPartitionHooks();
 
     // Add automatic "byVersion" partition if versioning is enabled
-    if (this.database?.versioningEnabled) {
+    if (this.versioningEnabled) {
       if (!this.config.partitions.byVersion) {
         this.config.partitions.byVersion = {
           fields: {
@@ -972,7 +973,7 @@ export class Resource extends EventEmitter {
     }
 
     // Store historical version if versioning is enabled
-    if (this.database?.versioningEnabled && originalData._v !== this.version) {
+    if (this.versioningEnabled && originalData._v !== this.version) {
       await this.createHistoricalVersion(id, originalData);
     }
 
