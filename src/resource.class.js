@@ -440,6 +440,11 @@ export class Resource extends EventEmitter {
    * @returns {boolean} True if field exists
    */
   fieldExistsInAttributes(fieldName) {
+    // Allow system metadata fields (those starting with _)
+    if (fieldName.startsWith('_')) {
+      return true;
+    }
+
     // Handle simple field names (no dots)
     if (!fieldName.includes('.')) {
       return Object.keys(this.attributes || {}).includes(fieldName);
