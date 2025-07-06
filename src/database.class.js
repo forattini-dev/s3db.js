@@ -30,6 +30,7 @@ export class Database extends EventEmitter {
     this.plugins = options.plugins || [];
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
+    this.versioningEnabled = options.versioningEnabled || false;
 
     // Handle both connection string and individual parameters
     let connectionString = options.connectionString;
@@ -111,7 +112,8 @@ export class Database extends EventEmitter {
           paranoid: versionData.paranoid !== undefined ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
-          hooks: versionData.hooks || {}
+          hooks: versionData.hooks || {},
+          database: this
         });
       }
     }
@@ -383,6 +385,8 @@ export class Database extends EventEmitter {
       if (behavior) {
         existingResource.behavior = behavior;
       }
+      // Ensure database reference is set
+      existingResource.database = this;
       existingResource.updateAttributes(attributes);
       // NOVO: Mescla hooks se fornecidos (append ao final)
       if (hooks) {
@@ -420,6 +424,7 @@ export class Database extends EventEmitter {
       passphrase: this.passphrase,
       cache: this.cache,
       hooks,
+      database: this,
       ...config,
     });
     this.resources[name] = resource;

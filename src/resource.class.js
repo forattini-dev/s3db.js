@@ -126,7 +126,8 @@ export class Resource extends EventEmitter {
       allNestedObjectsOptional = true,
       hooks = {},
       idGenerator: customIdGenerator,
-      idSize = 22
+      idSize = 22,
+      database = null
     } = config;
 
     // Set instance properties
@@ -137,6 +138,7 @@ export class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+    this.database = database;
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
@@ -277,6 +279,17 @@ export class Resource extends EventEmitter {
 
     // Setup automatic partition hooks
     this.setupPartitionHooks();
+
+    // Add automatic "byVersion" partition if versioning is enabled
+    if (this.database?.versioningEnabled) {
+      if (!this.config.partitions.byVersion) {
+        this.config.partitions.byVersion = {
+          fields: {
+            _v: 'string'
+          }
+        };
+      }
+    }
 
     // Rebuild schema with current attributes
     this.schema = new Schema({
@@ -495,13 +508,13 @@ export class Resource extends EventEmitter {
   }
 
   /**
-   * Get the main resource key (always versioned path)
+   * Get the main resource key (new format without version in path)
    * @param {string} id - Resource ID
    * @returns {string} The main S3 key path
    */
   getResourceKey(id) {
-    // ALWAYS use versioned path for main object
-    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+    // NEW FORMAT: use data directory instead of version in path
+    return join(`resource=${this.name}`, `data`, `id=${id}`);
   }
 
   /**
@@ -651,6 +664,12 @@ export class Resource extends EventEmitter {
       mappedData
     });
 
+    // Add version metadata (required for all objects)
+    const finalMetadata = {
+      ...processedMetadata,
+      _v: this.version
+    };
+
     const key = this.getResourceKey(id);
 
     // Determine content type based on body content
@@ -666,7 +685,7 @@ export class Resource extends EventEmitter {
     }
 
     await this.client.putObject({
-      metadata: processedMetadata,
+      metadata: finalMetadata,
       key,
       body,
       contentType,
@@ -697,8 +716,8 @@ export class Resource extends EventEmitter {
     try {
       const request = await this.client.headObject(key);
 
-      // Get the correct schema version for unmapping
-      const objectVersion = this.extractVersionFromKey(key) || this.version;
+      // Get the correct schema version for unmapping (from _v metadata)
+      const objectVersion = request.Metadata?._v || this.version;
       const schema = await this.getSchemaForVersion(objectVersion);
 
       let metadata = await schema.unmapper(request.Metadata);
@@ -731,11 +750,17 @@ export class Resource extends EventEmitter {
       data._lastModified = request.LastModified;
       data._hasContent = request.ContentLength > 0;
       data._mimeType = request.ContentType || null;
+      data._v = objectVersion; // Add version info to returned data
 
       if (request.VersionId) data._versionId = request.VersionId;
       if (request.Expiration) data._expiresAt = request.Expiration;
 
       data._definitionHash = this.getDefinitionHash();
+
+      // Apply version mapping if object is from a different version
+      if (objectVersion !== this.version) {
+        data = await this.applyVersionMapping(data, objectVersion, this.version);
+      }
 
       this.emit("get", data);
       return data;
@@ -899,6 +924,12 @@ export class Resource extends EventEmitter {
       mappedData
     });
 
+    // Add version metadata (required for all objects)
+    const finalMetadata = {
+      ...processedMetadata,
+      _v: this.version
+    };
+
     const key = this.getResourceKey(id);
 
     // Check if object has existing content (non-behavior content)
@@ -940,11 +971,16 @@ export class Resource extends EventEmitter {
       }
     }
 
+    // Store historical version if versioning is enabled
+    if (this.database?.versioningEnabled && originalData._v !== this.version) {
+      await this.createHistoricalVersion(id, originalData);
+    }
+
     await this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
-      metadata: processedMetadata,
+      metadata: finalMetadata,
     });
 
     validated.id = id;
@@ -1060,8 +1096,8 @@ export class Resource extends EventEmitter {
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      // Count all in main resource
-      prefix = `resource=${this.name}/v=${this.version}`;
+      // Count all in main resource (new format)
+      prefix = `resource=${this.name}/data`;
     }
 
     const count = await this.client.count({ prefix });
@@ -1150,8 +1186,8 @@ export class Resource extends EventEmitter {
       );
     }
 
-    // Use deleteAll to efficiently delete all objects for current version
-    const prefix = `resource=${this.name}/v=${this.version}`;
+    // Use deleteAll to efficiently delete all objects (new format)
+    const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
     
     this.emit("deleteAll", { 
@@ -1245,8 +1281,8 @@ export class Resource extends EventEmitter {
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      // List from main resource
-      prefix = `resource=${this.name}/v=${this.version}`;
+      // List from main resource (new format)
+      prefix = `resource=${this.name}/data`;
     }
 
     // Use getKeysPage for real pagination support
@@ -1892,7 +1928,7 @@ export class Resource extends EventEmitter {
         // Add version metadata for consistency
         const partitionMetadata = {
           ...processedMetadata,
-          _version: this.version
+          _v: this.version
         };
         
         // Determine content type based on body content
@@ -2124,7 +2160,7 @@ export class Resource extends EventEmitter {
           // Add version metadata for consistency
           const partitionMetadata = {
             ...processedMetadata,
-            _version: this.version
+            _v: this.version
           };
           if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
           // Determine content type based on body content
@@ -2168,7 +2204,7 @@ export class Resource extends EventEmitter {
         // Add version metadata for consistency
         const partitionMetadata = {
           ...processedMetadata,
-          _version: this.version
+          _v: this.version
         };
         if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
         // Determine content type based on body content
@@ -2232,7 +2268,7 @@ export class Resource extends EventEmitter {
         // Add version metadata for consistency
         const partitionMetadata = {
           ...processedMetadata,
-          _version: this.version
+          _v: this.version
         };
         
         // Determine content type based on body content
@@ -2313,7 +2349,7 @@ export class Resource extends EventEmitter {
     const request = await this.client.headObject(partitionKey);
 
     // Get the correct schema version for unmapping
-    const objectVersion = request.Metadata?._version || this.version;
+    const objectVersion = request.Metadata?._v || this.version;
     const schema = await this.getSchemaForVersion(objectVersion);
 
     let metadata = await schema.unmapper(request.Metadata);
@@ -2357,6 +2393,92 @@ export class Resource extends EventEmitter {
 
     this.emit("getFromPartition", data);
     return data;
+  }
+
+  /**
+   * Create a historical version of an object
+   * @param {string} id - Resource ID
+   * @param {Object} data - Object data to store historically
+   */
+  async createHistoricalVersion(id, data) {
+    const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
+    
+    // Ensure the historical object has the _v metadata
+    const historicalData = {
+      ...data,
+      _v: data._v || this.version,
+      _historicalTimestamp: new Date().toISOString()
+    };
+    
+    const mappedData = await this.schema.mapper(historicalData);
+    
+    // Apply behavior strategy for historical storage
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: historicalData,
+      mappedData
+    });
+    
+    // Add version metadata for consistency
+    const finalMetadata = {
+      ...processedMetadata,
+      _v: data._v || this.version,
+      _historicalTimestamp: historicalData._historicalTimestamp
+    };
+    
+    // Determine content type based on body content
+    let contentType = undefined;
+    if (body && body !== "") {
+      try {
+        JSON.parse(body);
+        contentType = 'application/json';
+      } catch {
+        // Not valid JSON, keep contentType undefined
+      }
+    }
+    
+    await this.client.putObject({
+      key: historicalKey,
+      metadata: finalMetadata,
+      body,
+      contentType,
+    });
+  }
+
+  /**
+   * Apply version mapping to convert an object from one version to another
+   * @param {Object} data - Object data to map
+   * @param {string} fromVersion - Source version
+   * @param {string} toVersion - Target version
+   * @returns {Object} Mapped object data
+   */
+  async applyVersionMapping(data, fromVersion, toVersion) {
+    // If versions are the same, no mapping needed
+    if (fromVersion === toVersion) {
+      return data;
+    }
+    
+    // For now, we'll implement a simple mapping strategy
+    // In a full implementation, this would use sophisticated version mappers
+    // based on the schema evolution history
+    
+    // Add version info to the returned data
+    const mappedData = {
+      ...data,
+      _v: toVersion,
+      _originalVersion: fromVersion,
+      _versionMapped: true
+    };
+    
+    // TODO: Implement sophisticated version mapping logic here
+    // This could involve:
+    // 1. Field renames
+    // 2. Field type changes
+    // 3. Default values for new fields
+    // 4. Data transformations
+    
+    return mappedData;
   }
 
 }
