@@ -9771,9 +9771,7 @@ ${validation.errors.join("\n")}`);
     } else {
       prefix = `resource=${this.name}/v=${this.version}`;
     }
-    const count = await this.client.count({
-      prefix
-    });
+    const count = await this.client.count({ prefix });
     this.emit("count", count);
     return count;
   }
