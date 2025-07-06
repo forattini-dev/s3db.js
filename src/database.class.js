@@ -27,7 +27,8 @@ export class Database extends EventEmitter {
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
+    this.pluginConfigs = options.plugins || [];
+    this.plugins = []; // Store instantiated plugins
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
 
@@ -227,18 +228,19 @@ export class Database extends EventEmitter {
   async startPlugins() {
     const db = this
 
-    if (!isEmpty(this.plugins)) {
-      const plugins = this.plugins.map(p => isFunction(p) ? new p(this) : p)
+    if (!isEmpty(this.pluginConfigs)) {
+      // Instantiate plugins and store them
+      this.plugins = this.pluginConfigs.map(p => isFunction(p) ? new p(this) : p);
 
-      const setupProms = plugins.map(async (plugin) => {
+      const setupProms = this.plugins.map(async (plugin) => {
         if (plugin.beforeSetup) await plugin.beforeSetup()
-          await plugin.setup(db)
+        await plugin.setup(db)
         if (plugin.afterSetup) await plugin.afterSetup()
-        });
+      });
       
       await Promise.all(setupProms);
 
-      const startProms = plugins.map(async (plugin) => {
+      const startProms = this.plugins.map(async (plugin) => {
         if (plugin.beforeStart) await plugin.beforeStart()
         await plugin.start()
         if (plugin.afterStart) await plugin.afterStart()

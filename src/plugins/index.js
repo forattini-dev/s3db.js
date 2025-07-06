@@ -5,3 +5,4 @@ export { default as Plugin } from './plugin.class.js'
 // plugins:
 export * from './costs.plugin.js'
 export * from './cache.plugin.js'
+export * from './logging.plugin.js'
