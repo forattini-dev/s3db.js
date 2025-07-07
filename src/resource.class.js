@@ -36,7 +36,7 @@ export class Resource extends EventEmitter {
    * @param {Object} config.client - S3 client instance
    * @param {string} [config.version='v0'] - Resource version
    * @param {Object} [config.attributes={}] - Resource attributes schema
-   * @param {string} [config.behavior='user-management'] - Resource behavior strategy
+   * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase
    * @param {number} [config.parallelism=10] - Parallelism for bulk operations
    * @param {Array} [config.observers=[]] - Observer instances
@@ -60,7 +60,7 @@ export class Resource extends EventEmitter {
    *     email: 'string|required',
    *     password: 'secret|required'
    *   },
-   *   behavior: 'user-management',
+   *   behavior: 'user-managed',
    *   passphrase: 'my-secret-key',
    *   timestamps: true,
    *   partitions: {
@@ -608,11 +608,23 @@ export class Resource extends EventEmitter {
   }
 
   /**
+   * Calculate estimated content length for body data
+   * @param {string|Buffer} body - Body content
+   * @returns {number} Estimated content length in bytes
+   */
+  calculateContentLength(body) {
+    if (!body) return 0;
+    if (Buffer.isBuffer(body)) return body.length;
+    if (typeof body === 'string') return Buffer.byteLength(body, 'utf8');
+    if (typeof body === 'object') return Buffer.byteLength(JSON.stringify(body), 'utf8');
+    return Buffer.byteLength(String(body), 'utf8');
+  }
+
+  /**
    * Insert a new resource object
-   * @param {Object} params - Insert parameters
-   * @param {string} [params.id] - Resource ID (auto-generated if not provided)
-   * @param {...Object} params - Resource attributes (any additional properties)
-   * @returns {Promise<Object>} The inserted resource object with all attributes and generated ID
+   * @param {Object} attributes - Resource attributes
+   * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
+   * @returns {Promise<Object>} The created resource object with all attributes
    * @example
    * // Insert with auto-generated ID
    * const user = await resource.insert({
@@ -620,18 +632,13 @@ export class Resource extends EventEmitter {
    *   email: 'john@example.com',
    *   age: 30
    * });
+   * console.log(user.id); // Auto-generated ID
    * 
    * // Insert with custom ID
    * const user = await resource.insert({
-   *   id: 'custom-id-123',
-   *   name: 'Jane Smith',
-   *   email: 'jane@example.com'
-   * });
-   * 
-   * // Insert with auto-generated password for secret field
-   * const user = await resource.insert({
+   *   id: 'user-123',
    *   name: 'John Doe',
-   *   email: 'john@example.com',
+   *   email: 'john@example.com'
    * });
    */
   async insert({ id, ...attributes }) {
@@ -640,8 +647,11 @@ export class Resource extends EventEmitter {
       attributes.updatedAt = new Date().toISOString();
     }
 
+    // Reconstruct the complete data for validation
+    const completeData = { id, ...attributes };
+
     // Execute preInsert hooks
-    const preProcessedData = await this.executeHooks('preInsert', attributes);
+    const preProcessedData = await this.executeHooks('preInsert', completeData);
 
     const {
       errors,
@@ -658,9 +668,11 @@ export class Resource extends EventEmitter {
       })
     }
 
-    if (!id && id !== 0) id = this.idGenerator();
+    // Extract id and attributes from validated data
+    const { id: validatedId, ...validatedAttributes } = validated;
+    const finalId = validatedId || id || this.idGenerator();
 
-    const mappedData = await this.schema.mapper(validated);
+    const mappedData = await this.schema.mapper(validatedAttributes);
     // Adicionar _v ao mappedData antes do behavior
     mappedData._v = String(this.version);
     
@@ -668,14 +680,14 @@ export class Resource extends EventEmitter {
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
       resource: this,
-      data: validated,
+      data: validatedAttributes,
       mappedData
     });
 
     // Add version metadata (required for all objects)
     const finalMetadata = processedMetadata;
 
-    const key = this.getResourceKey(id);
+    const key = this.getResourceKey(finalId);
 
     // Determine content type based on body content
     let contentType = undefined;
@@ -694,9 +706,10 @@ export class Resource extends EventEmitter {
       key,
       body,
       contentType,
+      contentLength: this.calculateContentLength(body),
     });
 
-    const final = merge({ id }, validated);
+    const final = merge({ id: finalId }, validatedAttributes);
 
     // Execute afterInsert hooks
     await this.executeHooks('afterInsert', final);
@@ -898,28 +911,31 @@ export class Resource extends EventEmitter {
     // Execute preUpdate hooks
     const preProcessedData = await this.executeHooks('preUpdate', attributes);
 
-    const attrs = merge(originalData, preProcessedData);
-    delete attrs.id;
+    // Merge original data with new attributes and ensure id is included
+    const completeData = { ...originalData, ...preProcessedData, id };
 
-    const { isValid, errors, data: validated } = await this.validate(attrs);
+    const { isValid, errors, data: validated } = await this.validate(completeData);
 
     if (!isValid) {
       throw new InvalidResourceItem({
-        bucket: this.client.bucket,
+        bucket: this.client.config.bucket,
         resourceName: this.name,
         attributes: preProcessedData,
         validation: errors,
       })
     }
 
+    // Extract attributes without id for processing
+    const { id: validatedId, ...validatedAttributes } = validated;
+
     // Ensure both oldData and newData have the correct id
     const oldData = { ...originalData, id };
-    const newData = { ...validated, id };
+    const newData = { ...validatedAttributes, id };
 
     // Handle partition reference updates BEFORE saving the main object
     await this.handlePartitionReferenceUpdates(oldData, newData);
 
-    const mappedData = await this.schema.mapper(validated);
+    const mappedData = await this.schema.mapper(validatedAttributes);
     // Adicionar _v ao mappedData antes do behavior
     mappedData._v = String(this.version);
     
@@ -928,7 +944,7 @@ export class Resource extends EventEmitter {
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
       resource: this,
       id,
-      data: validated,
+      data: validatedAttributes,
       mappedData
     });
 
@@ -988,13 +1004,13 @@ export class Resource extends EventEmitter {
       metadata: finalMetadata,
     });
 
-    validated.id = id;
+    validatedAttributes.id = id;
 
     // Execute afterUpdate hooks
-    await this.executeHooks('afterUpdate', validated);
+    await this.executeHooks('afterUpdate', validatedAttributes);
 
-    this.emit("update", preProcessedData, validated);
-    return validated;
+    this.emit("update", preProcessedData, validatedAttributes);
+    return validatedAttributes;
   }
 
   /**

@@ -27,7 +27,8 @@ export class Database extends EventEmitter {
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
+    this.plugins = options.plugins || []; // Initialize plugins array
+    this.pluginList = options.plugins || []; // Keep the list for backward compatibility
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
@@ -102,7 +103,7 @@ export class Database extends EventEmitter {
           client: this.client,
           version: currentVersion,
           attributes: versionData.attributes,
-          behavior: versionData.behavior || 'user-management',
+          behavior: versionData.behavior || 'user-managed',
           parallelism: this.parallelism,
           passphrase: this.passphrase,
           observers: [this],
@@ -204,7 +205,7 @@ export class Database extends EventEmitter {
     // Include behavior in the hash
     const hashObj = {
       attributes: stableAttributes,
-      behavior: behavior || definition.behavior || 'user-management',
+      behavior: behavior || definition.behavior || 'user-managed',
     };
     // Use jsonStableStringify to ensure consistent ordering
     const stableString = jsonStableStringify(hashObj);
@@ -229,8 +230,8 @@ export class Database extends EventEmitter {
   async startPlugins() {
     const db = this
 
-    if (!isEmpty(this.plugins)) {
-      const plugins = this.plugins.map(p => isFunction(p) ? new p(this) : p)
+    if (!isEmpty(this.pluginList)) {
+      const plugins = this.pluginList.map(p => isFunction(p) ? new p(this) : p)
 
       const setupProms = plugins.map(async (plugin) => {
         if (plugin.beforeSetup) await plugin.beforeSetup()
@@ -248,6 +249,26 @@ export class Database extends EventEmitter {
 
       await Promise.all(startProms);
     }
+  }
+
+  /**
+   * Register and setup a plugin
+   * @param {Plugin} plugin - Plugin instance to register
+   * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
+   */
+  async usePlugin(plugin, name = null) {
+    const pluginName = name || plugin.constructor.name.replace('Plugin', '').toLowerCase();
+    
+    // Register the plugin
+    this.plugins[pluginName] = plugin;
+    
+    // Setup the plugin if database is connected
+    if (this.isConnected()) {
+      await plugin.setup(this);
+      await plugin.start();
+    }
+    
+    return plugin;
   }
 
   async uploadMetadataFile() {
@@ -287,7 +308,7 @@ export class Database extends EventEmitter {
           [version]: {
             hash: definitionHash,
             attributes: resourceDef.attributes,
-            behavior: resourceDef.behavior || 'user-management',
+            behavior: resourceDef.behavior || 'user-managed',
             timestamps: resource.config.timestamps,
             partitions: resource.config.partitions,
             paranoid: resource.config.paranoid,
@@ -343,7 +364,7 @@ export class Database extends EventEmitter {
    * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = 'user-management', options = {} }) {
+  resourceExistsWithSameHash({ name, attributes, behavior = 'user-managed', options = {} }) {
     if (!this.resources[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
@@ -375,7 +396,7 @@ export class Database extends EventEmitter {
 
 
 
-  async createResource({ name, attributes, behavior = 'user-management', hooks, ...config }) {
+  async createResource({ name, attributes, behavior = 'user-managed', hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
       // Update configuration

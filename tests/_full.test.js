@@ -29,7 +29,7 @@ describe('Full Complex Resource Test Suite', () => {
     const complexResource = new Resource({
       name: 'complex_users',
       client: database.client,
-      behavior: 'user-management',
+      behavior: 'user-managed',
       attributes: {
         // Basic fields
         name: 'string|required|max:100',
@@ -123,7 +123,7 @@ describe('Full Complex Resource Test Suite', () => {
 
     expect(complexResource).toBeDefined();
     expect(complexResource.name).toBe('complex_users');
-    expect(complexResource.behavior).toBe('user-management');
+    expect(complexResource.behavior).toBe('user-managed');
     
     // Check that we have our 3 custom partitions plus 2 automatic timestamp partitions
     const partitionKeys = Object.keys(complexResource.config.partitions);
@@ -313,7 +313,7 @@ describe('Full Complex Resource Test Suite', () => {
     const studyResource = new Resource({
       name: 'study_resource',
       client: database.client,
-      behavior: 'user-management',
+      behavior: 'user-managed',
       attributes: {
         name: 'string|required|max:100',
         email: 'email|required|unique',
@@ -362,7 +362,7 @@ describe('Full Complex Resource Test Suite', () => {
     });
 
     expect(studyResource).toBeDefined();
-    expect(studyResource.behavior).toBe('user-management');
+    expect(studyResource.behavior).toBe('user-managed');
     expect(studyResource.name).toBe('study_resource');
 
     // Test partition key generation
@@ -596,7 +596,7 @@ describe('Full Complex Resource Test Suite', () => {
     // Create a resource with country partition using the database
     await database.createResource({
       name: 'partition_update_test',
-      behavior: 'user-management',
+      behavior: 'user-managed',
       attributes: {
         name: 'string|required|max:100',
         email: 'email|required|unique',
@@ -697,7 +697,7 @@ describe('Full Complex Resource Test Suite', () => {
     // Create a resource with country partition using the database
     await database.createResource({
       name: 'partition_upsert_test',
-      behavior: 'user-management',
+      behavior: 'user-managed',
       attributes: {
         name: 'string|required|max:100',
         email: 'email|required|unique',
@@ -770,7 +770,7 @@ describe('Full Complex Resource Test Suite', () => {
     const complexResource = new Resource({
       name: 'quality_test_resource',
       client: database.client,
-      behavior: 'user-management',
+      behavior: 'user-managed',
       attributes: {
         name: 'string|required|max:100',
         email: 'email|required|unique',
@@ -866,7 +866,7 @@ describe('Full Complex Resource Test Suite', () => {
     expect(versionData.attributes.metadata.category).toBe('string|required|max:50');
     
     // Verifica que o behavior foi preservado
-    expect(versionData.behavior).toBe('user-management');
+    expect(versionData.behavior).toBe('user-managed');
     
     // Verifica que o hash é válido
     expect(versionData.hash).toMatch(/^sha256:[a-f0-9]{64}$/);

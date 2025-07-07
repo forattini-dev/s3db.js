@@ -96,16 +96,29 @@ export class Client extends EventEmitter {
     return error;
   }
 
-  async putObject({ key, metadata, contentType, body, contentEncoding }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+    
+    // Ensure all metadata values are strings and keys are valid
+    const stringMetadata = {};
+    if (metadata) {
+      for (const [k, v] of Object.entries(metadata)) {
+        // Ensure key is a valid string and value is a string
+        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
+        stringMetadata[validKey] = String(v);
+      }
+    }
+    
     const options = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
-      Metadata: { ...metadata },
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      Metadata: stringMetadata,
       Body: body || Buffer.alloc(0),
     };
     
     if (contentType !== undefined) options.ContentType = contentType
     if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding
+    if (contentLength !== undefined) options.ContentLength = contentLength
 
     try {
       const response = await this.sendCommand(new PutObjectCommand(options));
@@ -120,9 +133,10 @@ export class Client extends EventEmitter {
   }
 
   async getObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const options = {
       Bucket: this.config.bucket,
-      Key: path.join(this.config.keyPrefix, key),
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
     try {
@@ -138,9 +152,10 @@ export class Client extends EventEmitter {
   }
 
   async headObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const options = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
     try {
@@ -188,9 +203,10 @@ export class Client extends EventEmitter {
   }
 
   async deleteObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const options = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
     try {
@@ -206,6 +222,7 @@ export class Client extends EventEmitter {
   }
 
   async deleteObjects(keys) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const packages = chunk(keys, 1000);
 
     const { results, errors } = await PromisePool.for(packages)
@@ -215,9 +232,7 @@ export class Client extends EventEmitter {
           Bucket: this.config.bucket,
           Delete: {
             Objects: keys.map((key) => ({
-              Key: this.config.keyPrefix
-                ? path.join(this.config.keyPrefix, key)
-                : key,
+              Key: keyPrefix ? path.join(keyPrefix, key) : key,
             })),
           },
         };
@@ -249,13 +264,14 @@ export class Client extends EventEmitter {
    * @returns {Promise<number>} Number of objects deleted
    */
   async deleteAll({ prefix } = {}) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     let continuationToken;
     let totalDeleted = 0;
 
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix) : prefix,
+        Prefix: keyPrefix ? path.join(keyPrefix, prefix) : prefix,
         ContinuationToken: continuationToken,
       });
 
