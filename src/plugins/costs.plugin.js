@@ -1,11 +1,15 @@
 export const CostsPlugin = {
   async setup (db) {
+    if (!db || !db.client) {
+      return; // Handle null/invalid database gracefully
+    }
+
     this.client = db.client
 
     this.map = {
       PutObjectCommand: 'put',
       GetObjectCommand: 'get',
-      HeadObjectCommand: 'get',
+      HeadObjectCommand: 'head',
       DeleteObjectCommand: 'delete',
       DeleteObjectsCommand: 'delete',
       ListObjectsV2Command: 'list',
@@ -21,6 +25,7 @@ export const CostsPlugin = {
         get: 0.0004 / 1000,
         select: 0.0004 / 1000,
         delete: 0.0004 / 1000,
+        head: 0.0004 / 1000,
       },
       requests: {
         total: 0,
@@ -31,6 +36,7 @@ export const CostsPlugin = {
         get: 0,
         select: 0,
         delete: 0,
+        head: 0,
       },
       events: {
         total: 0,
@@ -47,21 +53,28 @@ export const CostsPlugin = {
   },
   
   async start () {
-    this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+    if (this.client) {
+      this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+      this.client.on("command.error", (name) => this.addRequest(name, this.map[name]));
+    }
   },
 
   addRequest (name, method) {
+    if (!method) return; // Skip if no mapping found
+    
     this.costs.events[name]++;
     this.costs.events.total++;
     this.costs.requests.total++;
     this.costs.requests[method]++;
     this.costs.total += this.costs.prices[method];
 
-    this.client.costs.events[name]++;
-    this.client.costs.events.total++;
-    this.client.costs.requests.total++;
-    this.client.costs.requests[method]++;      
-    this.client.costs.total += this.client.costs.prices[method];
+    if (this.client && this.client.costs) {
+      this.client.costs.events[name]++;
+      this.client.costs.events.total++;
+      this.client.costs.requests.total++;
+      this.client.costs.requests[method]++;      
+      this.client.costs.total += this.client.costs.prices[method];
+    }
   },
 }
 

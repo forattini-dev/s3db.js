@@ -104,10 +104,6 @@ describe('Resource Versioning with Partitions', () => {
       status: 'inactive'
     });
 
-    // Verify objects have version (may be undefined in mocked environment)
-    // In a real environment, this would be the current resource version
-    console.log('Product1 _v:', product1._v);
-    console.log('Product2 _v:', product2._v);
 
     // Step 2: Update resource definition with new attributes
     // Adding attributes at different positions (beginning, middle, end)

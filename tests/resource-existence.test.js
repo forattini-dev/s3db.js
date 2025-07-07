@@ -106,7 +106,7 @@ describe('Resource Existence Methods', () => {
       await db.createResource({
         name: 'test-resource',
         attributes,
-        behavior: 'user-management'
+        behavior: 'user-managed'
       });
 
       const result = db.resourceExistsWithSameHash({
@@ -125,7 +125,7 @@ describe('Resource Existence Methods', () => {
       await db.createResource({
         name: 'test-resource',
         attributes,
-        behavior: 'user-management'
+        behavior: 'user-managed'
       });
 
       const result = db.resourceExistsWithSameHash({
