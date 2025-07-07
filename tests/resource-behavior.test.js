@@ -10,13 +10,13 @@ describe('Resource Behaviors', () => {
   describe('Behavior System Structure', () => {
     test('should export all required behaviors', () => {
       expect(AVAILABLE_BEHAVIORS).toEqual([
-        'user-management',
+        'user-managed',
         'enforce-limits', 
         'data-truncate',
         'body-overflow',
         'body-only'
       ]);
-      expect(DEFAULT_BEHAVIOR).toBe('user-management');
+      expect(DEFAULT_BEHAVIOR).toBe('user-managed');
     });
 
     test('should load all behaviors successfully', () => {
@@ -39,15 +39,15 @@ describe('Resource Behaviors', () => {
     });
   });
 
-  describe('User Management Behavior', () => {
+  describe('User Managed Behavior', () => {
     let behavior;
     let mockResource;
 
     beforeEach(() => {
-      behavior = getBehavior('user-management');
+      behavior = getBehavior('user-managed');
       mockResource = {
         emit: jest.fn(),
-        behavior: 'user-management'
+        behavior: 'user-managed'
       };
     });
 
@@ -498,7 +498,7 @@ describe('Resource Behaviors', () => {
       resource = new Resource({
         name: 'test-resource',
         client: mockClient,
-        behavior: 'user-management',
+        behavior: 'user-managed',
         attributes: { name: 'string', bio: 'string' }
       });
 
@@ -509,7 +509,7 @@ describe('Resource Behaviors', () => {
         bio: 'A'.repeat(3000) // Large data
       });
 
-      // Should emit warning from user-management behavior
+      // Should emit warning from user-managed behavior
       expect(emitSpy).toHaveBeenCalledWith('exceedsLimit', expect.any(Object));
       
       // Should still call putObject

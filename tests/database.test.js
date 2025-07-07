@@ -703,7 +703,7 @@ describe('Database Metadata and File Operations', () => {
               hash: 'old-hash',
               attributes: { name: 'string|required' },
               options: {},
-              behavior: 'user-management',
+              behavior: 'user-managed',
               createdAt: '2024-01-01T00:00:00Z'
             }
           }

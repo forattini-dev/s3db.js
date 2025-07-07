@@ -2091,6 +2091,7 @@ describe('Resource Partitions', () => {
       const updatedClick = await clicks.update('click-1', {
         utm: {
           source: 'hsm',
+          medium: 'email', // Keep the same medium
           campaign: 'retargeting'
         }
       });
@@ -2150,6 +2151,7 @@ describe('Resource Partitions', () => {
       const updatedClick = await clicks.update('click-2', {
         utm: {
           source: 'facebook',
+          medium: 'search', // Keep the same medium
           campaign: 'search' // Same campaign
         }
       });
