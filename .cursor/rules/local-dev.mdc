@@ -1,0 +1,6 @@
+---
+alwaysApply: true
+---
+- by the end of each sprint, always run a full test.
+- always use pnpm to manage dependencies
+- do not create mocks, always use a valid client, you can copy from other tests

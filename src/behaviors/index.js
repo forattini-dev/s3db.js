@@ -2,6 +2,7 @@ import * as userManagement from './user-management.js';
 import * as enforceLimits from './enforce-limits.js';
 import * as dataTruncate from './data-truncate.js';
 import * as bodyOverflow from './body-overflow.js';
+import * as bodyOnly from './body-only.js';
 
 /**
  * Available behaviors for Resource metadata handling
@@ -10,7 +11,8 @@ export const behaviors = {
   'user-management': userManagement,
   'enforce-limits': enforceLimits,
   'data-truncate': dataTruncate,
-  'body-overflow': bodyOverflow
+  'body-overflow': bodyOverflow,
+  'body-only': bodyOnly
 };
 
 /**

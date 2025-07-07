@@ -124,7 +124,7 @@ describe('Resource Journey', () => {
     // 10. Test resource key generation
     const resourceKey = resource.getResourceKey('test-id');
     expect(resourceKey).toContain('resource=users');
-    expect(resourceKey).toContain('v=1');
+    expect(resourceKey).toContain('data');
     expect(resourceKey).toContain('id=test-id');
   });
 
@@ -351,7 +351,7 @@ describe('Resource Journey', () => {
     // 5. Test content validation
     await expect(
       resource.setContent({ id: 'test-id', buffer: 'not a buffer', contentType: 'text/plain' })
-    ).rejects.toThrow('Key [resource=test/v=1/id=test-id] does not exists');
+    ).rejects.toThrow('Key [resource=test/data/id=test-id] does not exists');
   });
 
   test('Resource Configuration Options Journey', async () => {
