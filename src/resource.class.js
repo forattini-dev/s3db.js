@@ -50,6 +50,7 @@ export class Resource extends EventEmitter {
    * @param {Object} [config.options={}] - Additional options
    * @param {Function} [config.idGenerator] - Custom ID generator function
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -126,7 +127,8 @@ export class Resource extends EventEmitter {
       allNestedObjectsOptional = true,
       hooks = {},
       idGenerator: customIdGenerator,
-      idSize = 22
+      idSize = 22,
+      versioningEnabled = false
     } = config;
 
     // Set instance properties
@@ -137,6 +139,7 @@ export class Resource extends EventEmitter {
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
+    this.versioningEnabled = versioningEnabled;
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
@@ -277,6 +280,17 @@ export class Resource extends EventEmitter {
 
     // Setup automatic partition hooks
     this.setupPartitionHooks();
+
+    // Add automatic "byVersion" partition if versioning is enabled
+    if (this.versioningEnabled) {
+      if (!this.config.partitions.byVersion) {
+        this.config.partitions.byVersion = {
+          fields: {
+            _v: 'string'
+          }
+        };
+      }
+    }
 
     // Rebuild schema with current attributes
     this.schema = new Schema({
@@ -426,6 +440,11 @@ export class Resource extends EventEmitter {
    * @returns {boolean} True if field exists
    */
   fieldExistsInAttributes(fieldName) {
+    // Allow system metadata fields (those starting with _)
+    if (fieldName.startsWith('_')) {
+      return true;
+    }
+
     // Handle simple field names (no dots)
     if (!fieldName.includes('.')) {
       return Object.keys(this.attributes || {}).includes(fieldName);
@@ -495,13 +514,13 @@ export class Resource extends EventEmitter {
   }
 
   /**
-   * Get the main resource key (always versioned path)
+   * Get the main resource key (new format without version in path)
    * @param {string} id - Resource ID
    * @returns {string} The main S3 key path
    */
   getResourceKey(id) {
-    // ALWAYS use versioned path for main object
-    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+    // NEW FORMAT: use data directory instead of version in path
+    return join(`resource=${this.name}`, `data`, `id=${id}`);
   }
 
   /**
@@ -642,6 +661,8 @@ export class Resource extends EventEmitter {
     if (!id && id !== 0) id = this.idGenerator();
 
     const mappedData = await this.schema.mapper(validated);
+    // Adicionar _v ao mappedData antes do behavior
+    mappedData._v = String(this.version);
     
     // Apply behavior strategy
     const behaviorImpl = getBehavior(this.behavior);
@@ -650,6 +671,9 @@ export class Resource extends EventEmitter {
       data: validated,
       mappedData
     });
+
+    // Add version metadata (required for all objects)
+    const finalMetadata = processedMetadata;
 
     const key = this.getResourceKey(id);
 
@@ -666,7 +690,7 @@ export class Resource extends EventEmitter {
     }
 
     await this.client.putObject({
-      metadata: processedMetadata,
+      metadata: finalMetadata,
       key,
       body,
       contentType,
@@ -697,8 +721,9 @@ export class Resource extends EventEmitter {
     try {
       const request = await this.client.headObject(key);
 
-      // Get the correct schema version for unmapping
-      const objectVersion = this.extractVersionFromKey(key) || this.version;
+      // Get the correct schema version for unmapping (from _v metadata)
+      const objectVersionRaw = request.Metadata?._v || this.version;
+      const objectVersion = typeof objectVersionRaw === 'string' && objectVersionRaw.startsWith('v') ? objectVersionRaw.slice(1) : objectVersionRaw;
       const schema = await this.getSchemaForVersion(objectVersion);
 
       let metadata = await schema.unmapper(request.Metadata);
@@ -731,11 +756,17 @@ export class Resource extends EventEmitter {
       data._lastModified = request.LastModified;
       data._hasContent = request.ContentLength > 0;
       data._mimeType = request.ContentType || null;
+      data._v = objectVersion; // Add version info to returned data
 
       if (request.VersionId) data._versionId = request.VersionId;
       if (request.Expiration) data._expiresAt = request.Expiration;
 
       data._definitionHash = this.getDefinitionHash();
+
+      // Apply version mapping if object is from a different version
+      if (objectVersion !== this.version) {
+        data = await this.applyVersionMapping(data, objectVersion, this.version);
+      }
 
       this.emit("get", data);
       return data;
@@ -889,6 +920,8 @@ export class Resource extends EventEmitter {
     await this.handlePartitionReferenceUpdates(oldData, newData);
 
     const mappedData = await this.schema.mapper(validated);
+    // Adicionar _v ao mappedData antes do behavior
+    mappedData._v = String(this.version);
     
     // Apply behavior strategy
     const behaviorImpl = getBehavior(this.behavior);
@@ -898,6 +931,9 @@ export class Resource extends EventEmitter {
       data: validated,
       mappedData
     });
+
+    // Add version metadata (required for all objects)
+    const finalMetadata = processedMetadata;
 
     const key = this.getResourceKey(id);
 
@@ -940,11 +976,16 @@ export class Resource extends EventEmitter {
       }
     }
 
+    // Store historical version if versioning is enabled
+    if (this.versioningEnabled && originalData._v !== this.version) {
+      await this.createHistoricalVersion(id, originalData);
+    }
+
     await this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
-      metadata: processedMetadata,
+      metadata: finalMetadata,
     });
 
     validated.id = id;
@@ -1060,8 +1101,8 @@ export class Resource extends EventEmitter {
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      // Count all in main resource
-      prefix = `resource=${this.name}/v=${this.version}`;
+      // Count all in main resource (new format)
+      prefix = `resource=${this.name}/data`;
     }
 
     const count = await this.client.count({ prefix });
@@ -1150,8 +1191,8 @@ export class Resource extends EventEmitter {
       );
     }
 
-    // Use deleteAll to efficiently delete all objects for current version
-    const prefix = `resource=${this.name}/v=${this.version}`;
+    // Use deleteAll to efficiently delete all objects (new format)
+    const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
     
     this.emit("deleteAll", { 
@@ -1245,8 +1286,8 @@ export class Resource extends EventEmitter {
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      // List from main resource
-      prefix = `resource=${this.name}/v=${this.version}`;
+      // List from main resource (new format)
+      prefix = `resource=${this.name}/data`;
     }
 
     // Use getKeysPage for real pagination support
@@ -1270,200 +1311,218 @@ export class Resource extends EventEmitter {
   }
 
   /**
-   * List resource objects with optional partition filtering and pagination
+   * List resources with optional partition filtering and pagination
    * @param {Object} [params] - List parameters
    * @param {string} [params.partition] - Partition name to list from
    * @param {Object} [params.partitionValues] - Partition field values to filter by
-   * @param {number} [params.limit] - Maximum number of results to return
-   * @param {number} [params.offset=0] - Offset for pagination
-   * @returns {Promise<Object[]>} Array of resource objects with all attributes
+   * @param {number} [params.limit] - Maximum number of results
+   * @param {number} [params.offset=0] - Number of results to skip
+   * @returns {Promise<Object[]>} Array of resource objects
    * @example
    * // List all resources
    * const allUsers = await resource.list();
    * 
    * // List with pagination
-   * const firstPage = await resource.list({ limit: 10, offset: 0 });
-   * const secondPage = await resource.list({ limit: 10, offset: 10 });
+   * const first10 = await resource.list({ limit: 10, offset: 0 });
    * 
    * // List from specific partition
-   * const googleUsers = await resource.list({
-   *   partition: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' }
-   * });
-   * 
-   * // List from partition with pagination
-   * const googleUsersPage = await resource.list({
-   *   partition: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' },
-   *   limit: 5,
-   *   offset: 0
+   * const usUsers = await resource.list({
+   *   partition: 'byCountry',
+   *   partitionValues: { 'profile.country': 'US' }
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     try {
       if (!partition) {
-        // Fallback to main resource listing
-        let ids = [];
-        try {
-          ids = await this.listIds({ partition, partitionValues });
-        } catch (listIdsError) {
-          console.warn(`Failed to get list IDs:`, listIdsError.message);
-          return [];
-        }
-        
-        // Apply offset and limit
-        let filteredIds = ids.slice(offset);
-        if (limit) {
-          filteredIds = filteredIds.slice(0, limit);
-        }
-
-        // Get full data for each ID with error handling
-        const { results, errors } = await PromisePool.for(filteredIds)
-          .withConcurrency(this.parallelism)
-          .handleError(async (error, id) => {
-            console.warn(`Failed to get resource ${id}:`, error.message);
-            // Return null for failed items so we can filter them out
-            return null;
-          })
-          .process(async (id) => {
-            try {
-              return await this.get(id);
-            } catch (error) {
-              // If it's a decryption error, try to get basic info
-              if (error.message.includes('Cipher job failed') || 
-                  error.message.includes('OperationError')) {
-                console.warn(`Decryption failed for ${id}, returning basic info`);
-                return {
-                  id,
-                  _decryptionFailed: true,
-                  _error: error.message
-                };
-              }
-              throw error; // Re-throw other errors
-            }
-          });
-
-        // Filter out null results (failed items)
-        const validResults = results.filter(item => item !== null);
-
-        this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
-        return validResults;
-      }
-
-      // Get partition definition
-      if (!this.config.partitions || !this.config.partitions[partition]) {
-        // This is an expected error, not a critical one
-        console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
-        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
-        return [];
+        return await this.listMain({ limit, offset });
       }
       
-      const partitionDef = this.config.partitions[partition];
-      
-      // Build partition prefix
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== undefined && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      
-      let prefix;
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
+      return await this.listPartition({ partition, partitionValues, limit, offset });
+    } catch (error) {
+      return this.handleListError(error, { partition, partitionValues });
+    }
+  }
 
-      // Get all keys in the partition
-      let keys = [];
-      try {
-        keys = await this.client.getAllKeys({ prefix });
-      } catch (getKeysError) {
-        console.warn(`Failed to get partition keys:`, getKeysError.message);
-        return [];
+  /**
+   * List resources from main resource (no partition)
+   */
+  async listMain({ limit, offset = 0 }) {
+    // Get IDs with pagination
+    const ids = await this.listIds({ limit, offset });
+    
+    // Get full data for each ID
+    const results = await this.processListResults(ids, 'main');
+    
+    this.emit("list", { count: results.length, errors: 0 });
+    return results;
+  }
+
+  /**
+   * List resources from specific partition
+   */
+  async listPartition({ partition, partitionValues, limit, offset = 0 }) {
+    // Validate partition exists
+    if (!this.config.partitions?.[partition]) {
+      console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
+      this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+      return [];
+    }
+    
+    const partitionDef = this.config.partitions[partition];
+    
+    // Build partition prefix
+    const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
+    
+    // Get all keys in the partition
+    const keys = await this.client.getAllKeys({ prefix });
+    
+    // Extract IDs and apply pagination
+    const ids = this.extractIdsFromKeys(keys).slice(offset);
+    const filteredIds = limit ? ids.slice(0, limit) : ids;
+    
+    // Get full data from partition objects
+    const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
+    
+    this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
+    return results;
+  }
+
+  /**
+   * Build partition prefix from partition definition and values
+   */
+  buildPartitionPrefix(partition, partitionDef, partitionValues) {
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== undefined && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
       }
-      
-      // Extract IDs and apply pagination
-      const ids = keys.map((key) => {
+    }
+    
+    if (partitionSegments.length > 0) {
+      return `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
+    }
+    
+    return `resource=${this.name}/partition=${partition}`;
+  }
+
+  /**
+   * Extract IDs from S3 keys
+   */
+  extractIdsFromKeys(keys) {
+    return keys
+      .map(key => {
         const parts = key.split('/');
         const idPart = parts.find(part => part.startsWith('id='));
         return idPart ? idPart.replace('id=', '') : null;
-      }).filter(Boolean);
+      })
+      .filter(Boolean);
+  }
 
-      // Apply offset and limit
-      let filteredIds = ids.slice(offset);
-      if (limit) {
-        filteredIds = filteredIds.slice(0, limit);
+  /**
+   * Process list results with error handling
+   */
+  async processListResults(ids, context = 'main') {
+    const { results, errors } = await PromisePool.for(ids)
+      .withConcurrency(this.parallelism)
+      .handleError(async (error, id) => {
+        console.warn(`Failed to get ${context} resource ${id}:`, error.message);
+        return null;
+      })
+      .process(async (id) => {
+        try {
+          return await this.get(id);
+        } catch (error) {
+          return this.handleResourceError(error, id, context);
+        }
+      });
+
+    return results.filter(item => item !== null);
+  }
+
+  /**
+   * Process partition results with error handling
+   */
+  async processPartitionResults(ids, partition, partitionDef, keys) {
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    
+    const { results, errors } = await PromisePool.for(ids)
+      .withConcurrency(this.parallelism)
+      .handleError(async (error, id) => {
+        console.warn(`Failed to get partition resource ${id}:`, error.message);
+        return null;
+      })
+      .process(async (id) => {
+        try {
+          const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
+          return await this.getFromPartition({ 
+            id, 
+            partitionName: partition, 
+            partitionValues: actualPartitionValues 
+          });
+        } catch (error) {
+          return this.handleResourceError(error, id, 'partition');
+        }
+      });
+
+    return results.filter(item => item !== null);
+  }
+
+  /**
+   * Extract partition values from S3 key for specific ID
+   */
+  extractPartitionValuesFromKey(id, keys, sortedFields) {
+    const keyForId = keys.find(key => key.includes(`id=${id}`));
+    if (!keyForId) {
+      throw new Error(`Partition key not found for ID ${id}`);
+    }
+    
+    const keyParts = keyForId.split('/');
+    const actualPartitionValues = {};
+    
+    for (const [fieldName] of sortedFields) {
+      const fieldPart = keyParts.find(part => part.startsWith(`${fieldName}=`));
+      if (fieldPart) {
+        const value = fieldPart.replace(`${fieldName}=`, '');
+        actualPartitionValues[fieldName] = value;
       }
+    }
+    
+    return actualPartitionValues;
+  }
 
-      // Get full data directly from partition objects with error handling
-      const { results, errors } = await PromisePool.for(filteredIds)
-        .withConcurrency(this.parallelism)
-        .handleError(async (error, id) => {
-          console.warn(`Failed to get partition resource ${id}:`, error.message);
-          return null;
-        })
-        .process(async (id) => {
-          try {
-            // Extract the actual partition values from the key for this specific ID
-            const keyForId = keys.find(key => key.includes(`id=${id}`));
-            if (!keyForId) {
-              throw new Error(`Partition key not found for ID ${id}`);
-            }
-            
-            // Extract partition values from the key
-            const keyParts = keyForId.split('/');
-            const actualPartitionValues = {};
-            
-            for (const [fieldName, rule] of sortedFields) {
-              const fieldPart = keyParts.find(part => part.startsWith(`${fieldName}=`));
-              if (fieldPart) {
-                const value = fieldPart.replace(`${fieldName}=`, '');
-                // Reverse the partition rule transformation to get original value
-                actualPartitionValues[fieldName] = value;
-              }
-            }
-            
-            return await this.getFromPartition({ id, partitionName: partition, partitionValues: actualPartitionValues });
-          } catch (error) {
-            // If it's a decryption error, try to get basic info
-            if (error.message.includes('Cipher job failed') || 
-                error.message.includes('OperationError')) {
-              console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
-              return {
-                id,
-                _partition: partition,
-                _partitionValues: partitionValues,
-                _decryptionFailed: true,
-                _error: error.message
-              };
-            }
-            throw error; // Re-throw other errors
-          }
-        });
+  /**
+   * Handle resource-specific errors
+   */
+  handleResourceError(error, id, context) {
+    if (error.message.includes('Cipher job failed') || error.message.includes('OperationError')) {
+      console.warn(`Decryption failed for ${context} resource ${id}, returning basic info`);
+      return {
+        id,
+        _decryptionFailed: true,
+        _error: error.message,
+        ...(context === 'partition' && { _partition: context })
+      };
+    }
+    throw error;
+  }
 
-      // Filter out null results (failed items)
-      const validResults = results.filter(item => item !== null);
-
-      this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
-      return validResults;
-    } catch (error) {
-      // Only log as critical error if it's not a partition-related error
-      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-        console.warn(`Partition error in list method:`, error.message);
-        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
-        return [];
-      }
-      
-      // Final fallback - return empty array if everything fails
-      console.error(`Critical error in list method:`, error.message);
+  /**
+   * Handle list method errors
+   */
+  handleListError(error, { partition, partitionValues }) {
+    if (error.message.includes("Partition '") && error.message.includes("' not found")) {
+      console.warn(`Partition error in list method:`, error.message);
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
+    
+    console.error(`Critical error in list method:`, error.message);
+    this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+    return [];
   }
 
   /**
@@ -1875,43 +1934,16 @@ export class Resource extends EventEmitter {
     // Create reference in each partition
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      
       if (partitionKey) {
-        // Store the actual resource data in the partition path
-        // This creates a direct copy with the same ID as the main resource
-        const mappedData = await this.schema.mapper(data);
-        
-        // Apply behavior strategy for partition storage
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
-          resource: this,
-          data: data,
-          mappedData
-        });
-        
-        // Add version metadata for consistency
+        // Salvar apenas a versão como metadado, nunca atributos do objeto
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        
-        // Determine content type based on body content
-        let contentType = undefined;
-        if (body && body !== "") {
-          // If body contains JSON data, set content type to application/json
-          try {
-            JSON.parse(body);
-            contentType = 'application/json';
-          } catch {
-            // Not valid JSON, keep contentType undefined (will use S3 default)
-          }
-        }
-
         await this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
-          body,
-          contentType,
+          body: '',
+          contentType: undefined,
         });
       }
     }
@@ -2107,43 +2139,15 @@ export class Resource extends EventEmitter {
       // Create new partition reference if new key exists
       if (newPartitionKey) {
         try {
-          // Store the updated resource data in the new partition path
-          const mappedData = await this.schema.mapper(newData);
-          // Remove any accidental 'undefined' key
-          if (mappedData.undefined !== undefined) delete mappedData.undefined;
-          // Apply behavior strategy for partition storage
-          const behaviorImpl = getBehavior(this.behavior);
-          const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-            resource: this,
-            id,
-            data: newData,
-            mappedData
-          });
-          // Remove any accidental 'undefined' key
-          if (processedMetadata.undefined !== undefined) delete processedMetadata.undefined;
-          // Add version metadata for consistency
+          // Salvar apenas a versão como metadado
           const partitionMetadata = {
-            ...processedMetadata,
-            _version: this.version
+            _v: String(this.version)
           };
-          if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
-          // Determine content type based on body content
-          let contentType = undefined;
-          if (body && body !== "") {
-            // If body contains JSON data, set content type to application/json
-            try {
-              JSON.parse(body);
-              contentType = 'application/json';
-            } catch {
-              // Not valid JSON, keep contentType undefined (will use S3 default)
-            }
-          }
-
           await this.client.putObject({
             key: newPartitionKey,
             metadata: partitionMetadata,
-            body,
-            contentType,
+            body: '',
+            contentType: undefined,
           });
         } catch (error) {
           // Log but don't fail if new partition object creation fails
@@ -2153,41 +2157,15 @@ export class Resource extends EventEmitter {
     } else if (newPartitionKey) {
       // If partition keys are the same, just update the existing reference
       try {
-        // Store the updated resource data in the partition path
-        const mappedData = await this.schema.mapper(newData);
-        if (mappedData.undefined !== undefined) delete mappedData.undefined;
-        // Apply behavior strategy for partition storage
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-          resource: this,
-          id,
-          data: newData,
-          mappedData
-        });
-        if (processedMetadata.undefined !== undefined) delete processedMetadata.undefined;
-        // Add version metadata for consistency
+        // Salvar apenas a versão como metadado
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        if (partitionMetadata.undefined !== undefined) delete partitionMetadata.undefined;
-        // Determine content type based on body content
-        let contentType = undefined;
-        if (body && body !== "") {
-          // If body contains JSON data, set content type to application/json
-          try {
-            JSON.parse(body);
-            contentType = 'application/json';
-          } catch {
-            // Not valid JSON, keep contentType undefined (will use S3 default)
-          }
-        }
-
         await this.client.putObject({
           key: newPartitionKey,
           metadata: partitionMetadata,
-          body,
-          contentType,
+          body: '',
+          contentType: undefined,
         });
       } catch (error) {
         // Log but don't fail if partition object update fails
@@ -2213,46 +2191,18 @@ export class Resource extends EventEmitter {
         console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
         continue;
       }
-      
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      
       if (partitionKey) {
-        // Store the updated resource data in the partition path
-        const mappedData = await this.schema.mapper(data);
-        
-        // Apply behavior strategy for partition storage
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-          resource: this,
-          id: data.id,
-          data: data,
-          mappedData
-        });
-        
-        // Add version metadata for consistency
+        // Salvar apenas a versão como metadado
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        
-        // Determine content type based on body content
-        let contentType = undefined;
-        if (body && body !== "") {
-          // If body contains JSON data, set content type to application/json
-          try {
-            JSON.parse(body);
-            contentType = 'application/json';
-          } catch {
-            // Not valid JSON, keep contentType undefined (will use S3 default)
-          }
-        }
-
         try {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
-            body,
-            contentType,
+            body: '',
+            contentType: undefined,
           });
         } catch (error) {
           // Log but don't fail if partition object doesn't exist
@@ -2310,53 +2260,108 @@ export class Resource extends EventEmitter {
 
     const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
     
-    const request = await this.client.headObject(partitionKey);
-
-    // Get the correct schema version for unmapping
-    const objectVersion = request.Metadata?._version || this.version;
-    const schema = await this.getSchemaForVersion(objectVersion);
-
-    let metadata = await schema.unmapper(request.Metadata);
-    
-    // Apply behavior strategy for reading
-    const behaviorImpl = getBehavior(this.behavior);
-    let body = "";
-    
-    // Get body content if needed
-    if (request.ContentLength > 0) {
-      try {
-        const fullObject = await this.client.getObject(partitionKey);
-        body = await streamToString(fullObject.Body);
-      } catch (error) {
-        body = "";
-      }
+    // Verify partition reference exists
+    try {
+      await this.client.headObject(partitionKey);
+    } catch (error) {
+      throw new Error(`Resource with id '${id}' not found in partition '${partitionName}'`);
     }
-    
-    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-      resource: this,
-      metadata,
-      body
-    });
 
-    let data = processedMetadata;
-    data.id = id;
-    data._contentLength = request.ContentLength;
-    data._lastModified = request.LastModified;
-    data._hasContent = request.ContentLength > 0;
-    data._mimeType = request.ContentType || null;
+    // Get the actual data from the main resource object
+    const data = await this.get(id);
+    
+    // Add partition metadata
     data._partition = partitionName;
     data._partitionValues = partitionValues;
 
-    if (request.VersionId) data._versionId = request.VersionId;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-
-    data._definitionHash = this.getDefinitionHash();
-
-    // Remove any accidental 'undefined' key
-    if (data.undefined !== undefined) delete data.undefined;
-
     this.emit("getFromPartition", data);
     return data;
+  }
+
+  /**
+   * Create a historical version of an object
+   * @param {string} id - Resource ID
+   * @param {Object} data - Object data to store historically
+   */
+  async createHistoricalVersion(id, data) {
+    const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
+    
+    // Ensure the historical object has the _v metadata
+    const historicalData = {
+      ...data,
+      _v: data._v || this.version,
+      _historicalTimestamp: new Date().toISOString()
+    };
+    
+    const mappedData = await this.schema.mapper(historicalData);
+    
+    // Apply behavior strategy for historical storage
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: historicalData,
+      mappedData
+    });
+    
+    // Add version metadata for consistency
+    const finalMetadata = {
+      ...processedMetadata,
+      _v: data._v || this.version,
+      _historicalTimestamp: historicalData._historicalTimestamp
+    };
+    
+    // Determine content type based on body content
+    let contentType = undefined;
+    if (body && body !== "") {
+      try {
+        JSON.parse(body);
+        contentType = 'application/json';
+      } catch {
+        // Not valid JSON, keep contentType undefined
+      }
+    }
+    
+    await this.client.putObject({
+      key: historicalKey,
+      metadata: finalMetadata,
+      body,
+      contentType,
+    });
+  }
+
+  /**
+   * Apply version mapping to convert an object from one version to another
+   * @param {Object} data - Object data to map
+   * @param {string} fromVersion - Source version
+   * @param {string} toVersion - Target version
+   * @returns {Object} Mapped object data
+   */
+  async applyVersionMapping(data, fromVersion, toVersion) {
+    // If versions are the same, no mapping needed
+    if (fromVersion === toVersion) {
+      return data;
+    }
+    
+    // For now, we'll implement a simple mapping strategy
+    // In a full implementation, this would use sophisticated version mappers
+    // based on the schema evolution history
+    
+    // Add version info to the returned data
+    const mappedData = {
+      ...data,
+      _v: toVersion,
+      _originalVersion: fromVersion,
+      _versionMapped: true
+    };
+    
+    // TODO: Implement sophisticated version mapping logic here
+    // This could involve:
+    // 1. Field renames
+    // 2. Field type changes
+    // 3. Default values for new fields
+    // 4. Data transformations
+    
+    return mappedData;
   }
 
 }
