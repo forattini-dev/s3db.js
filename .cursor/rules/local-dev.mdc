@@ -1,6 +1,8 @@
 ---
 alwaysApply: true
 ---
-- by the end of each sprint, always run a full test.
+- use english, always. for code, comments, tests, examples, etc.
+- by the end of each sprint, always run a full test with `pnpm run test`.
 - always use pnpm to manage dependencies
 - do not create mocks, always use a valid client, you can copy from other tests
+- if you want to create an example at `./examples`, please use the `./examples/database.js` functions

@@ -1,6 +1,5 @@
-/* istanbul ignore file */
 import { customAlphabet, urlAlphabet } from 'nanoid';
-import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get as get$1, set, isFunction as isFunction$1 } from 'lodash-es';
+import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get as get$1, set, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
 import { PromisePool } from '@supercharge/promise-pool';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { createHash } from 'crypto';
@@ -939,15 +938,24 @@ class Client extends EventEmitter {
     if (errorClass) return new errorClass(data);
     return error;
   }
-  async putObject({ key, metadata, contentType, body, contentEncoding }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    const stringMetadata = {};
+    if (metadata) {
+      for (const [k, v] of Object.entries(metadata)) {
+        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
+        stringMetadata[validKey] = String(v);
+      }
+    }
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key,
-      Metadata: { ...metadata },
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      Metadata: stringMetadata,
       Body: body || Buffer.alloc(0)
     };
     if (contentType !== void 0) options2.ContentType = contentType;
     if (contentEncoding !== void 0) options2.ContentEncoding = contentEncoding;
+    if (contentLength !== void 0) options2.ContentLength = contentLength;
     try {
       const response = await this.sendCommand(new PutObjectCommand(options2));
       this.emit("putObject", response, options2);
@@ -960,9 +968,10 @@ class Client extends EventEmitter {
     }
   }
   async getObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const options2 = {
       Bucket: this.config.bucket,
-      Key: path.join(this.config.keyPrefix, key)
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
     try {
       const response = await this.sendCommand(new GetObjectCommand(options2));
@@ -976,9 +985,10 @@ class Client extends EventEmitter {
     }
   }
   async headObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
     try {
       const response = await this.sendCommand(new HeadObjectCommand(options2));
@@ -1020,9 +1030,10 @@ class Client extends EventEmitter {
     }
   }
   async deleteObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const options2 = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
     try {
       const response = await this.sendCommand(new DeleteObjectCommand(options2));
@@ -1036,13 +1047,14 @@ class Client extends EventEmitter {
     }
   }
   async deleteObjects(keys) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const packages = chunk(keys, 1e3);
     const { results, errors } = await PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
       const options2 = {
         Bucket: this.config.bucket,
         Delete: {
           Objects: keys2.map((key) => ({
-            Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, key) : key
+            Key: keyPrefix ? path.join(keyPrefix, key) : key
           }))
         }
       };
@@ -1070,12 +1082,13 @@ class Client extends EventEmitter {
    * @returns {Promise<number>} Number of objects deleted
    */
   async deleteAll({ prefix } = {}) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     let continuationToken;
     let totalDeleted = 0;
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix) : prefix,
+        Prefix: keyPrefix ? path.join(keyPrefix, prefix) : prefix,
         ContinuationToken: continuationToken
       });
       const listResponse = await this.client.send(listCommand);
@@ -1217,6 +1230,10 @@ class Client extends EventEmitter {
         prefix,
         offset
       });
+      if (!continuationToken) {
+        this.emit("getKeysPage", [], params);
+        return [];
+      }
     }
     while (truncated) {
       const options2 = {
@@ -1229,8 +1246,8 @@ class Client extends EventEmitter {
       }
       truncated = res.IsTruncated || false;
       continuationToken = res.NextContinuationToken;
-      if (keys.length > amount) {
-        keys = keys.splice(0, amount);
+      if (keys.length >= amount) {
+        keys = keys.slice(0, amount);
         break;
       }
     }
@@ -6002,6 +6019,16 @@ if (typeof Object.create === 'function'){
   };
 }
 
+var getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors ||
+  function getOwnPropertyDescriptors(obj) {
+    var keys = Object.keys(obj);
+    var descriptors = {};
+    for (var i = 0; i < keys.length; i++) {
+      descriptors[keys[i]] = Object.getOwnPropertyDescriptor(obj, keys[i]);
+    }
+    return descriptors;
+  };
+
 var formatRegExp = /%[sdj%]/g;
 function format(f) {
   if (!isString(f)) {
@@ -6486,6 +6513,64 @@ function _extend(origin, add) {
 function hasOwnProperty(obj, prop) {
   return Object.prototype.hasOwnProperty.call(obj, prop);
 }
+
+var kCustomPromisifiedSymbol = typeof Symbol !== 'undefined' ? Symbol('util.promisify.custom') : undefined;
+
+function promisify(original) {
+  if (typeof original !== 'function')
+    throw new TypeError('The "original" argument must be of type Function');
+
+  if (kCustomPromisifiedSymbol && original[kCustomPromisifiedSymbol]) {
+    var fn = original[kCustomPromisifiedSymbol];
+    if (typeof fn !== 'function') {
+      throw new TypeError('The "util.promisify.custom" argument must be of type Function');
+    }
+    Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+      value: fn, enumerable: false, writable: false, configurable: true
+    });
+    return fn;
+  }
+
+  function fn() {
+    var promiseResolve, promiseReject;
+    var promise = new Promise(function (resolve, reject) {
+      promiseResolve = resolve;
+      promiseReject = reject;
+    });
+
+    var args = [];
+    for (var i = 0; i < arguments.length; i++) {
+      args.push(arguments[i]);
+    }
+    args.push(function (err, value) {
+      if (err) {
+        promiseReject(err);
+      } else {
+        promiseResolve(value);
+      }
+    });
+
+    try {
+      original.apply(this, args);
+    } catch (err) {
+      promiseReject(err);
+    }
+
+    return promise;
+  }
+
+  Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
+
+  if (kCustomPromisifiedSymbol) Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+    value: fn, enumerable: false, writable: false, configurable: true
+  });
+  return Object.defineProperties(
+    fn,
+    getOwnPropertyDescriptors(original)
+  );
+}
+
+promisify.custom = kCustomPromisifiedSymbol;
 
 function BufferList() {
   this.head = null;
@@ -8716,41 +8801,41 @@ function getSizeBreakdown(mappedObject) {
 }
 
 const S3_METADATA_LIMIT_BYTES = 2048;
-async function handleInsert$3({ resource, data, mappedData }) {
+async function handleInsert$4({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
-async function handleUpdate$3({ resource, id, data, mappedData }) {
+async function handleUpdate$4({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
-async function handleUpsert$3({ resource, id, data, mappedData }) {
+async function handleUpsert$4({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
-async function handleGet$3({ resource, metadata, body }) {
+async function handleGet$4({ resource, metadata, body }) {
   return { metadata, body };
 }
 
 var enforceLimits = /*#__PURE__*/Object.freeze({
   __proto__: null,
   S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
-  handleGet: handleGet$3,
-  handleInsert: handleInsert$3,
-  handleUpdate: handleUpdate$3,
-  handleUpsert: handleUpsert$3
+  handleGet: handleGet$4,
+  handleInsert: handleInsert$4,
+  handleUpdate: handleUpdate$4,
+  handleUpsert: handleUpsert$4
 });
 
-async function handleInsert$2({ resource, data, mappedData }) {
+async function handleInsert$3({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit("exceedsLimit", {
@@ -8763,7 +8848,7 @@ async function handleInsert$2({ resource, data, mappedData }) {
   }
   return { mappedData, body: "" };
 }
-async function handleUpdate$2({ resource, id, data, mappedData }) {
+async function handleUpdate$3({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit("exceedsLimit", {
@@ -8777,7 +8862,7 @@ async function handleUpdate$2({ resource, id, data, mappedData }) {
   }
   return { mappedData, body: "" };
 }
-async function handleUpsert$2({ resource, id, data, mappedData }) {
+async function handleUpsert$3({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit("exceedsLimit", {
@@ -8791,30 +8876,30 @@ async function handleUpsert$2({ resource, id, data, mappedData }) {
   }
   return { mappedData, body: "" };
 }
-async function handleGet$2({ resource, metadata, body }) {
+async function handleGet$3({ resource, metadata, body }) {
   return { metadata, body };
 }
 
-var userManagement = /*#__PURE__*/Object.freeze({
+var userManaged = /*#__PURE__*/Object.freeze({
   __proto__: null,
-  handleGet: handleGet$2,
-  handleInsert: handleInsert$2,
-  handleUpdate: handleUpdate$2,
-  handleUpsert: handleUpsert$2
+  handleGet: handleGet$3,
+  handleInsert: handleInsert$3,
+  handleUpdate: handleUpdate$3,
+  handleUpsert: handleUpsert$3
 });
 
 const TRUNCATE_SUFFIX = "...";
 const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
-async function handleInsert$1({ resource, data, mappedData }) {
+async function handleInsert$2({ resource, data, mappedData }) {
   return handleTruncate({ resource, data, mappedData });
 }
-async function handleUpdate$1({ resource, id, data, mappedData }) {
+async function handleUpdate$2({ resource, id, data, mappedData }) {
   return handleTruncate({ resource, data, mappedData });
 }
-async function handleUpsert$1({ resource, id, data, mappedData }) {
+async function handleUpsert$2({ resource, id, data, mappedData }) {
   return handleTruncate({ resource, data, mappedData });
 }
-async function handleGet$1({ resource, metadata, body }) {
+async function handleGet$2({ resource, metadata, body }) {
   return { metadata, body };
 }
 function handleTruncate({ resource, data, mappedData }) {
@@ -8854,25 +8939,25 @@ function handleTruncate({ resource, data, mappedData }) {
 
 var dataTruncate = /*#__PURE__*/Object.freeze({
   __proto__: null,
-  handleGet: handleGet$1,
-  handleInsert: handleInsert$1,
-  handleUpdate: handleUpdate$1,
-  handleUpsert: handleUpsert$1
+  handleGet: handleGet$2,
+  handleInsert: handleInsert$2,
+  handleUpdate: handleUpdate$2,
+  handleUpsert: handleUpsert$2
 });
 
 const OVERFLOW_FLAG = "$overflow";
 const OVERFLOW_FLAG_VALUE = "true";
 const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
-async function handleInsert({ resource, data, mappedData }) {
+async function handleInsert$1({ resource, data, mappedData }) {
   return handleOverflow({ resource, data, mappedData });
 }
-async function handleUpdate({ resource, id, data, mappedData }) {
+async function handleUpdate$1({ resource, id, data, mappedData }) {
   return handleOverflow({ resource, data, mappedData });
 }
-async function handleUpsert({ resource, id, data, mappedData }) {
+async function handleUpsert$1({ resource, id, data, mappedData }) {
   return handleOverflow({ resource, data, mappedData });
 }
-async function handleGet({ resource, metadata, body }) {
+async function handleGet$1({ resource, metadata, body }) {
   if (metadata[OVERFLOW_FLAG] === OVERFLOW_FLAG_VALUE) {
     try {
       const bodyData = body ? JSON.parse(body) : {};
@@ -8915,6 +9000,51 @@ function handleOverflow({ resource, data, mappedData }) {
 
 var bodyOverflow = /*#__PURE__*/Object.freeze({
   __proto__: null,
+  handleGet: handleGet$1,
+  handleInsert: handleInsert$1,
+  handleUpdate: handleUpdate$1,
+  handleUpsert: handleUpsert$1
+});
+
+async function handleInsert({ resource, data, mappedData }) {
+  const bodyContent = JSON.stringify(mappedData);
+  return {
+    mappedData: {},
+    body: bodyContent
+  };
+}
+async function handleUpdate({ resource, id, data, mappedData }) {
+  const bodyContent = JSON.stringify(mappedData);
+  return {
+    mappedData: {},
+    body: bodyContent
+  };
+}
+async function handleUpsert({ resource, id, data, mappedData }) {
+  const bodyContent = JSON.stringify(mappedData);
+  return {
+    mappedData: {},
+    body: bodyContent
+  };
+}
+async function handleGet({ resource, metadata, body }) {
+  try {
+    const bodyData = body ? JSON.parse(body) : {};
+    return {
+      metadata: bodyData,
+      body: ""
+    };
+  } catch (error) {
+    console.warn(`Failed to parse body-only content:`, error.message);
+    return {
+      metadata,
+      body: ""
+    };
+  }
+}
+
+var bodyOnly = /*#__PURE__*/Object.freeze({
+  __proto__: null,
   handleGet: handleGet,
   handleInsert: handleInsert,
   handleUpdate: handleUpdate,
@@ -8922,10 +9052,11 @@ var bodyOverflow = /*#__PURE__*/Object.freeze({
 });
 
 const behaviors = {
-  "user-management": userManagement,
+  "user-managed": userManaged,
   "enforce-limits": enforceLimits,
   "data-truncate": dataTruncate,
-  "body-overflow": bodyOverflow
+  "body-overflow": bodyOverflow,
+  "body-only": bodyOnly
 };
 function getBehavior(behaviorName) {
   const behavior = behaviors[behaviorName];
@@ -8935,7 +9066,7 @@ function getBehavior(behaviorName) {
   return behavior;
 }
 const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
-const DEFAULT_BEHAVIOR = "user-management";
+const DEFAULT_BEHAVIOR = "user-managed";
 
 function createIdGeneratorWithSize(size) {
   return customAlphabet(urlAlphabet, size);
@@ -8948,7 +9079,7 @@ class Resource extends EventEmitter {
    * @param {Object} config.client - S3 client instance
    * @param {string} [config.version='v0'] - Resource version
    * @param {Object} [config.attributes={}] - Resource attributes schema
-   * @param {string} [config.behavior='user-management'] - Resource behavior strategy
+   * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase
    * @param {number} [config.parallelism=10] - Parallelism for bulk operations
    * @param {Array} [config.observers=[]] - Observer instances
@@ -8962,6 +9093,7 @@ class Resource extends EventEmitter {
    * @param {Object} [config.options={}] - Additional options
    * @param {Function} [config.idGenerator] - Custom ID generator function
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -8971,7 +9103,7 @@ class Resource extends EventEmitter {
    *     email: 'string|required',
    *     password: 'secret|required'
    *   },
-   *   behavior: 'user-management',
+   *   behavior: 'user-managed',
    *   passphrase: 'my-secret-key',
    *   timestamps: true,
    *   partitions: {
@@ -9035,7 +9167,8 @@ ${validation.errors.join("\n")}`);
       allNestedObjectsOptional = true,
       hooks = {},
       idGenerator: customIdGenerator,
-      idSize = 22
+      idSize = 22,
+      versioningEnabled = false
     } = config;
     this.name = name;
     this.client = client;
@@ -9044,6 +9177,7 @@ ${validation.errors.join("\n")}`);
     this.observers = observers;
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
+    this.versioningEnabled = versioningEnabled;
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
     this.config = {
       cache,
@@ -9151,6 +9285,15 @@ ${validation.errors.join("\n")}`);
       }
     }
     this.setupPartitionHooks();
+    if (this.versioningEnabled) {
+      if (!this.config.partitions.byVersion) {
+        this.config.partitions.byVersion = {
+          fields: {
+            _v: "string"
+          }
+        };
+      }
+    }
     this.schema = new Schema({
       name: this.name,
       attributes: this.attributes,
@@ -9270,6 +9413,9 @@ ${validation.errors.join("\n")}`);
    * @returns {boolean} True if field exists
    */
   fieldExistsInAttributes(fieldName) {
+    if (fieldName.startsWith("_")) {
+      return true;
+    }
     if (!fieldName.includes(".")) {
       return Object.keys(this.attributes || {}).includes(fieldName);
     }
@@ -9323,12 +9469,12 @@ ${validation.errors.join("\n")}`);
     return transformedValue;
   }
   /**
-   * Get the main resource key (always versioned path)
+   * Get the main resource key (new format without version in path)
    * @param {string} id - Resource ID
    * @returns {string} The main S3 key path
    */
   getResourceKey(id) {
-    return join(`resource=${this.name}`, `v=${this.version}`, `id=${id}`);
+    return join(`resource=${this.name}`, `data`, `id=${id}`);
   }
   /**
    * Generate partition key for a resource in a specific partition
@@ -9398,11 +9544,22 @@ ${validation.errors.join("\n")}`);
     return currentLevel;
   }
   /**
+   * Calculate estimated content length for body data
+   * @param {string|Buffer} body - Body content
+   * @returns {number} Estimated content length in bytes
+   */
+  calculateContentLength(body) {
+    if (!body) return 0;
+    if (Buffer.isBuffer(body)) return body.length;
+    if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+    if (typeof body === "object") return Buffer.byteLength(JSON.stringify(body), "utf8");
+    return Buffer.byteLength(String(body), "utf8");
+  }
+  /**
    * Insert a new resource object
-   * @param {Object} params - Insert parameters
-   * @param {string} [params.id] - Resource ID (auto-generated if not provided)
-   * @param {...Object} params - Resource attributes (any additional properties)
-   * @returns {Promise<Object>} The inserted resource object with all attributes and generated ID
+   * @param {Object} attributes - Resource attributes
+   * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
+   * @returns {Promise<Object>} The created resource object with all attributes
    * @example
    * // Insert with auto-generated ID
    * const user = await resource.insert({
@@ -9410,18 +9567,13 @@ ${validation.errors.join("\n")}`);
    *   email: 'john@example.com',
    *   age: 30
    * });
+   * console.log(user.id); // Auto-generated ID
    * 
    * // Insert with custom ID
    * const user = await resource.insert({
-   *   id: 'custom-id-123',
-   *   name: 'Jane Smith',
-   *   email: 'jane@example.com'
-   * });
-   * 
-   * // Insert with auto-generated password for secret field
-   * const user = await resource.insert({
+   *   id: 'user-123',
    *   name: 'John Doe',
-   *   email: 'john@example.com',
+   *   email: 'john@example.com'
    * });
    */
   async insert({ id, ...attributes }) {
@@ -9429,7 +9581,8 @@ ${validation.errors.join("\n")}`);
       attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
-    const preProcessedData = await this.executeHooks("preInsert", attributes);
+    const completeData = { id, ...attributes };
+    const preProcessedData = await this.executeHooks("preInsert", completeData);
     const {
       errors,
       isValid,
@@ -9443,15 +9596,18 @@ ${validation.errors.join("\n")}`);
         validation: errors
       });
     }
-    if (!id && id !== 0) id = this.idGenerator();
-    const mappedData = await this.schema.mapper(validated);
+    const { id: validatedId, ...validatedAttributes } = validated;
+    const finalId = validatedId || id || this.idGenerator();
+    const mappedData = await this.schema.mapper(validatedAttributes);
+    mappedData._v = String(this.version);
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
       resource: this,
-      data: validated,
+      data: validatedAttributes,
       mappedData
     });
-    const key = this.getResourceKey(id);
+    const finalMetadata = processedMetadata;
+    const key = this.getResourceKey(finalId);
     let contentType = void 0;
     if (body && body !== "") {
       try {
@@ -9461,12 +9617,13 @@ ${validation.errors.join("\n")}`);
       }
     }
     await this.client.putObject({
-      metadata: processedMetadata,
+      metadata: finalMetadata,
       key,
       body,
-      contentType
+      contentType,
+      contentLength: this.calculateContentLength(body)
     });
-    const final = merge({ id }, validated);
+    const final = merge({ id: finalId }, validatedAttributes);
     await this.executeHooks("afterInsert", final);
     this.emit("insert", final);
     return final;
@@ -9485,7 +9642,8 @@ ${validation.errors.join("\n")}`);
     const key = this.getResourceKey(id);
     try {
       const request = await this.client.headObject(key);
-      const objectVersion = this.extractVersionFromKey(key) || this.version;
+      const objectVersionRaw = request.Metadata?._v || this.version;
+      const objectVersion = typeof objectVersionRaw === "string" && objectVersionRaw.startsWith("v") ? objectVersionRaw.slice(1) : objectVersionRaw;
       const schema = await this.getSchemaForVersion(objectVersion);
       let metadata = await schema.unmapper(request.Metadata);
       const behaviorImpl = getBehavior(this.behavior);
@@ -9510,9 +9668,13 @@ ${validation.errors.join("\n")}`);
       data._lastModified = request.LastModified;
       data._hasContent = request.ContentLength > 0;
       data._mimeType = request.ContentType || null;
+      data._v = objectVersion;
       if (request.VersionId) data._versionId = request.VersionId;
       if (request.Expiration) data._expiresAt = request.Expiration;
       data._definitionHash = this.getDefinitionHash();
+      if (objectVersion !== this.version) {
+        data = await this.applyVersionMapping(data, objectVersion, this.version);
+      }
       this.emit("get", data);
       return data;
     } catch (error) {
@@ -9618,28 +9780,30 @@ ${validation.errors.join("\n")}`);
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const preProcessedData = await this.executeHooks("preUpdate", attributes);
-    const attrs = merge(originalData, preProcessedData);
-    delete attrs.id;
-    const { isValid, errors, data: validated } = await this.validate(attrs);
+    const completeData = { ...originalData, ...preProcessedData, id };
+    const { isValid, errors, data: validated } = await this.validate(completeData);
     if (!isValid) {
       throw new InvalidResourceItem({
-        bucket: this.client.bucket,
+        bucket: this.client.config.bucket,
         resourceName: this.name,
         attributes: preProcessedData,
         validation: errors
       });
     }
+    const { id: validatedId, ...validatedAttributes } = validated;
     const oldData = { ...originalData, id };
-    const newData = { ...validated, id };
+    const newData = { ...validatedAttributes, id };
     await this.handlePartitionReferenceUpdates(oldData, newData);
-    const mappedData = await this.schema.mapper(validated);
+    const mappedData = await this.schema.mapper(validatedAttributes);
+    mappedData._v = String(this.version);
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
       resource: this,
       id,
-      data: validated,
+      data: validatedAttributes,
       mappedData
     });
+    const finalMetadata = processedMetadata;
     const key = this.getResourceKey(id);
     let existingContentType = void 0;
     let finalBody = body;
@@ -9667,16 +9831,19 @@ ${validation.errors.join("\n")}`);
       } catch {
       }
     }
+    if (this.versioningEnabled && originalData._v !== this.version) {
+      await this.createHistoricalVersion(id, originalData);
+    }
     await this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
-      metadata: processedMetadata
+      metadata: finalMetadata
     });
-    validated.id = id;
-    await this.executeHooks("afterUpdate", validated);
-    this.emit("update", preProcessedData, validated);
-    return validated;
+    validatedAttributes.id = id;
+    await this.executeHooks("afterUpdate", validatedAttributes);
+    this.emit("update", preProcessedData, validatedAttributes);
+    return validatedAttributes;
   }
   /**
    * Delete a resource object by ID
@@ -9765,7 +9932,7 @@ ${validation.errors.join("\n")}`);
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      prefix = `resource=${this.name}/v=${this.version}`;
+      prefix = `resource=${this.name}/data`;
     }
     const count = await this.client.count({ prefix });
     this.emit("count", count);
@@ -9834,7 +10001,7 @@ ${validation.errors.join("\n")}`);
         `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.config.paranoid}`
       );
     }
-    const prefix = `resource=${this.name}/v=${this.version}`;
+    const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
     this.emit("deleteAll", {
       version: this.version,
@@ -9912,7 +10079,7 @@ ${validation.errors.join("\n")}`);
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      prefix = `resource=${this.name}/v=${this.version}`;
+      prefix = `resource=${this.name}/data`;
     }
     const keys = await this.client.getKeysPage({
       prefix,
@@ -9929,154 +10096,175 @@ ${validation.errors.join("\n")}`);
     return ids;
   }
   /**
-   * List resource objects with optional partition filtering and pagination
+   * List resources with optional partition filtering and pagination
    * @param {Object} [params] - List parameters
    * @param {string} [params.partition] - Partition name to list from
    * @param {Object} [params.partitionValues] - Partition field values to filter by
-   * @param {number} [params.limit] - Maximum number of results to return
-   * @param {number} [params.offset=0] - Offset for pagination
-   * @returns {Promise<Object[]>} Array of resource objects with all attributes
+   * @param {number} [params.limit] - Maximum number of results
+   * @param {number} [params.offset=0] - Number of results to skip
+   * @returns {Promise<Object[]>} Array of resource objects
    * @example
    * // List all resources
    * const allUsers = await resource.list();
    * 
    * // List with pagination
-   * const firstPage = await resource.list({ limit: 10, offset: 0 });
-   * const secondPage = await resource.list({ limit: 10, offset: 10 });
+   * const first10 = await resource.list({ limit: 10, offset: 0 });
    * 
    * // List from specific partition
-   * const googleUsers = await resource.list({
-   *   partition: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' }
-   * });
-   * 
-   * // List from partition with pagination
-   * const googleUsersPage = await resource.list({
-   *   partition: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' },
-   *   limit: 5,
-   *   offset: 0
+   * const usUsers = await resource.list({
+   *   partition: 'byCountry',
+   *   partitionValues: { 'profile.country': 'US' }
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
     try {
       if (!partition) {
-        let ids2 = [];
-        try {
-          ids2 = await this.listIds({ partition, partitionValues });
-        } catch (listIdsError) {
-          console.warn(`Failed to get list IDs:`, listIdsError.message);
-          return [];
-        }
-        let filteredIds2 = ids2.slice(offset);
-        if (limit) {
-          filteredIds2 = filteredIds2.slice(0, limit);
-        }
-        const { results: results2, errors: errors2 } = await PromisePool.for(filteredIds2).withConcurrency(this.parallelism).handleError(async (error, id) => {
-          console.warn(`Failed to get resource ${id}:`, error.message);
-          return null;
-        }).process(async (id) => {
-          try {
-            return await this.get(id);
-          } catch (error) {
-            if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-              console.warn(`Decryption failed for ${id}, returning basic info`);
-              return {
-                id,
-                _decryptionFailed: true,
-                _error: error.message
-              };
-            }
-            throw error;
-          }
-        });
-        const validResults2 = results2.filter((item) => item !== null);
-        this.emit("list", { partition, partitionValues, count: validResults2.length, errors: errors2.length });
-        return validResults2;
+        return await this.listMain({ limit, offset });
       }
-      if (!this.config.partitions || !this.config.partitions[partition]) {
-        console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
-        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
-        return [];
-      }
-      const partitionDef = this.config.partitions[partition];
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      let prefix;
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
-      let keys = [];
-      try {
-        keys = await this.client.getAllKeys({ prefix });
-      } catch (getKeysError) {
-        console.warn(`Failed to get partition keys:`, getKeysError.message);
-        return [];
-      }
-      const ids = keys.map((key) => {
-        const parts = key.split("/");
-        const idPart = parts.find((part) => part.startsWith("id="));
-        return idPart ? idPart.replace("id=", "") : null;
-      }).filter(Boolean);
-      let filteredIds = ids.slice(offset);
-      if (limit) {
-        filteredIds = filteredIds.slice(0, limit);
-      }
-      const { results, errors } = await PromisePool.for(filteredIds).withConcurrency(this.parallelism).handleError(async (error, id) => {
-        console.warn(`Failed to get partition resource ${id}:`, error.message);
-        return null;
-      }).process(async (id) => {
-        try {
-          const keyForId = keys.find((key) => key.includes(`id=${id}`));
-          if (!keyForId) {
-            throw new Error(`Partition key not found for ID ${id}`);
-          }
-          const keyParts = keyForId.split("/");
-          const actualPartitionValues = {};
-          for (const [fieldName, rule] of sortedFields) {
-            const fieldPart = keyParts.find((part) => part.startsWith(`${fieldName}=`));
-            if (fieldPart) {
-              const value = fieldPart.replace(`${fieldName}=`, "");
-              actualPartitionValues[fieldName] = value;
-            }
-          }
-          return await this.getFromPartition({ id, partitionName: partition, partitionValues: actualPartitionValues });
-        } catch (error) {
-          if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-            console.warn(`Decryption failed for partition resource ${id}, returning basic info`);
-            return {
-              id,
-              _partition: partition,
-              _partitionValues: partitionValues,
-              _decryptionFailed: true,
-              _error: error.message
-            };
-          }
-          throw error;
-        }
-      });
-      const validResults = results.filter((item) => item !== null);
-      this.emit("list", { partition, partitionValues, count: validResults.length, errors: errors.length });
-      return validResults;
+      return await this.listPartition({ partition, partitionValues, limit, offset });
     } catch (error) {
-      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-        console.warn(`Partition error in list method:`, error.message);
-        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
-        return [];
+      return this.handleListError(error, { partition, partitionValues });
+    }
+  }
+  /**
+   * List resources from main resource (no partition)
+   */
+  async listMain({ limit, offset = 0 }) {
+    const ids = await this.listIds({ limit, offset });
+    const results = await this.processListResults(ids, "main");
+    this.emit("list", { count: results.length, errors: 0 });
+    return results;
+  }
+  /**
+   * List resources from specific partition
+   */
+  async listPartition({ partition, partitionValues, limit, offset = 0 }) {
+    if (!this.config.partitions?.[partition]) {
+      console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
+      this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+      return [];
+    }
+    const partitionDef = this.config.partitions[partition];
+    const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
+    const keys = await this.client.getAllKeys({ prefix });
+    const ids = this.extractIdsFromKeys(keys).slice(offset);
+    const filteredIds = limit ? ids.slice(0, limit) : ids;
+    const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
+    this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
+    return results;
+  }
+  /**
+   * Build partition prefix from partition definition and values
+   */
+  buildPartitionPrefix(partition, partitionDef, partitionValues) {
+    const partitionSegments = [];
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    for (const [fieldName, rule] of sortedFields) {
+      const value = partitionValues[fieldName];
+      if (value !== void 0 && value !== null) {
+        const transformedValue = this.applyPartitionRule(value, rule);
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
       }
-      console.error(`Critical error in list method:`, error.message);
+    }
+    if (partitionSegments.length > 0) {
+      return `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+    }
+    return `resource=${this.name}/partition=${partition}`;
+  }
+  /**
+   * Extract IDs from S3 keys
+   */
+  extractIdsFromKeys(keys) {
+    return keys.map((key) => {
+      const parts = key.split("/");
+      const idPart = parts.find((part) => part.startsWith("id="));
+      return idPart ? idPart.replace("id=", "") : null;
+    }).filter(Boolean);
+  }
+  /**
+   * Process list results with error handling
+   */
+  async processListResults(ids, context = "main") {
+    const { results, errors } = await PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
+      console.warn(`Failed to get ${context} resource ${id}:`, error.message);
+      return null;
+    }).process(async (id) => {
+      try {
+        return await this.get(id);
+      } catch (error) {
+        return this.handleResourceError(error, id, context);
+      }
+    });
+    return results.filter((item) => item !== null);
+  }
+  /**
+   * Process partition results with error handling
+   */
+  async processPartitionResults(ids, partition, partitionDef, keys) {
+    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+    const { results, errors } = await PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
+      console.warn(`Failed to get partition resource ${id}:`, error.message);
+      return null;
+    }).process(async (id) => {
+      try {
+        const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
+        return await this.getFromPartition({
+          id,
+          partitionName: partition,
+          partitionValues: actualPartitionValues
+        });
+      } catch (error) {
+        return this.handleResourceError(error, id, "partition");
+      }
+    });
+    return results.filter((item) => item !== null);
+  }
+  /**
+   * Extract partition values from S3 key for specific ID
+   */
+  extractPartitionValuesFromKey(id, keys, sortedFields) {
+    const keyForId = keys.find((key) => key.includes(`id=${id}`));
+    if (!keyForId) {
+      throw new Error(`Partition key not found for ID ${id}`);
+    }
+    const keyParts = keyForId.split("/");
+    const actualPartitionValues = {};
+    for (const [fieldName] of sortedFields) {
+      const fieldPart = keyParts.find((part) => part.startsWith(`${fieldName}=`));
+      if (fieldPart) {
+        const value = fieldPart.replace(`${fieldName}=`, "");
+        actualPartitionValues[fieldName] = value;
+      }
+    }
+    return actualPartitionValues;
+  }
+  /**
+   * Handle resource-specific errors
+   */
+  handleResourceError(error, id, context) {
+    if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+      console.warn(`Decryption failed for ${context} resource ${id}, returning basic info`);
+      return {
+        id,
+        _decryptionFailed: true,
+        _error: error.message,
+        ...context === "partition" && { _partition: context }
+      };
+    }
+    throw error;
+  }
+  /**
+   * Handle list method errors
+   */
+  handleListError(error, { partition, partitionValues }) {
+    if (error.message.includes("Partition '") && error.message.includes("' not found")) {
+      console.warn(`Partition error in list method:`, error.message);
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
+    console.error(`Critical error in list method:`, error.message);
+    this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+    return [];
   }
   /**
    * Get multiple resources by their IDs
@@ -10424,30 +10612,14 @@ ${validation.errors.join("\n")}`);
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
-        const mappedData = await this.schema.mapper(data);
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
-          resource: this,
-          data,
-          mappedData
-        });
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        let contentType = void 0;
-        if (body && body !== "") {
-          try {
-            JSON.parse(body);
-            contentType = "application/json";
-          } catch {
-          }
-        }
         await this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
-          body,
-          contentType
+          body: "",
+          contentType: void 0
         });
       }
     }
@@ -10604,34 +10776,14 @@ ${validation.errors.join("\n")}`);
       }
       if (newPartitionKey) {
         try {
-          const mappedData = await this.schema.mapper(newData);
-          if (mappedData.undefined !== void 0) delete mappedData.undefined;
-          const behaviorImpl = getBehavior(this.behavior);
-          const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-            resource: this,
-            id,
-            data: newData,
-            mappedData
-          });
-          if (processedMetadata.undefined !== void 0) delete processedMetadata.undefined;
           const partitionMetadata = {
-            ...processedMetadata,
-            _version: this.version
+            _v: String(this.version)
           };
-          if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
-          let contentType = void 0;
-          if (body && body !== "") {
-            try {
-              JSON.parse(body);
-              contentType = "application/json";
-            } catch {
-            }
-          }
           await this.client.putObject({
             key: newPartitionKey,
             metadata: partitionMetadata,
-            body,
-            contentType
+            body: "",
+            contentType: void 0
           });
         } catch (error) {
           console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
@@ -10639,34 +10791,14 @@ ${validation.errors.join("\n")}`);
       }
     } else if (newPartitionKey) {
       try {
-        const mappedData = await this.schema.mapper(newData);
-        if (mappedData.undefined !== void 0) delete mappedData.undefined;
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-          resource: this,
-          id,
-          data: newData,
-          mappedData
-        });
-        if (processedMetadata.undefined !== void 0) delete processedMetadata.undefined;
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        if (partitionMetadata.undefined !== void 0) delete partitionMetadata.undefined;
-        let contentType = void 0;
-        if (body && body !== "") {
-          try {
-            JSON.parse(body);
-            contentType = "application/json";
-          } catch {
-          }
-        }
         await this.client.putObject({
           key: newPartitionKey,
           metadata: partitionMetadata,
-          body,
-          contentType
+          body: "",
+          contentType: void 0
         });
       } catch (error) {
         console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
@@ -10689,32 +10821,15 @@ ${validation.errors.join("\n")}`);
       }
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
-        const mappedData = await this.schema.mapper(data);
-        const behaviorImpl = getBehavior(this.behavior);
-        const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-          resource: this,
-          id: data.id,
-          data,
-          mappedData
-        });
         const partitionMetadata = {
-          ...processedMetadata,
-          _version: this.version
+          _v: String(this.version)
         };
-        let contentType = void 0;
-        if (body && body !== "") {
-          try {
-            JSON.parse(body);
-            contentType = "application/json";
-          } catch {
-          }
-        }
         try {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
-            body,
-            contentType
+            body: "",
+            contentType: void 0
           });
         } catch (error) {
           console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
@@ -10764,39 +10879,74 @@ ${validation.errors.join("\n")}`);
       throw new Error(`No partition values provided for partition '${partitionName}'`);
     }
     const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-    const request = await this.client.headObject(partitionKey);
-    const objectVersion = request.Metadata?._version || this.version;
-    const schema = await this.getSchemaForVersion(objectVersion);
-    let metadata = await schema.unmapper(request.Metadata);
-    const behaviorImpl = getBehavior(this.behavior);
-    let body = "";
-    if (request.ContentLength > 0) {
-      try {
-        const fullObject = await this.client.getObject(partitionKey);
-        body = await streamToString(fullObject.Body);
-      } catch (error) {
-        body = "";
-      }
+    try {
+      await this.client.headObject(partitionKey);
+    } catch (error) {
+      throw new Error(`Resource with id '${id}' not found in partition '${partitionName}'`);
     }
-    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-      resource: this,
-      metadata,
-      body
-    });
-    let data = processedMetadata;
-    data.id = id;
-    data._contentLength = request.ContentLength;
-    data._lastModified = request.LastModified;
-    data._hasContent = request.ContentLength > 0;
-    data._mimeType = request.ContentType || null;
+    const data = await this.get(id);
     data._partition = partitionName;
     data._partitionValues = partitionValues;
-    if (request.VersionId) data._versionId = request.VersionId;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-    data._definitionHash = this.getDefinitionHash();
-    if (data.undefined !== void 0) delete data.undefined;
     this.emit("getFromPartition", data);
     return data;
+  }
+  /**
+   * Create a historical version of an object
+   * @param {string} id - Resource ID
+   * @param {Object} data - Object data to store historically
+   */
+  async createHistoricalVersion(id, data) {
+    const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
+    const historicalData = {
+      ...data,
+      _v: data._v || this.version,
+      _historicalTimestamp: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    const mappedData = await this.schema.mapper(historicalData);
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: historicalData,
+      mappedData
+    });
+    const finalMetadata = {
+      ...processedMetadata,
+      _v: data._v || this.version,
+      _historicalTimestamp: historicalData._historicalTimestamp
+    };
+    let contentType = void 0;
+    if (body && body !== "") {
+      try {
+        JSON.parse(body);
+        contentType = "application/json";
+      } catch {
+      }
+    }
+    await this.client.putObject({
+      key: historicalKey,
+      metadata: finalMetadata,
+      body,
+      contentType
+    });
+  }
+  /**
+   * Apply version mapping to convert an object from one version to another
+   * @param {Object} data - Object data to map
+   * @param {string} fromVersion - Source version
+   * @param {string} toVersion - Target version
+   * @returns {Object} Mapped object data
+   */
+  async applyVersionMapping(data, fromVersion, toVersion) {
+    if (fromVersion === toVersion) {
+      return data;
+    }
+    const mappedData = {
+      ...data,
+      _v: toVersion,
+      _originalVersion: fromVersion,
+      _versionMapped: true
+    };
+    return mappedData;
   }
 }
 function validateResourceConfig(config) {
@@ -10912,7 +11062,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "5.2.0" : "latest";
+        return true ? "6.0.0" : "latest";
       } catch (e) {
         return "latest";
       }
@@ -10925,6 +11075,7 @@ class Database extends EventEmitter {
     this.plugins = options.plugins || [];
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
+    this.versioningEnabled = options.versioningEnabled || false;
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
       const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
@@ -10975,7 +11126,7 @@ class Database extends EventEmitter {
           client: this.client,
           version: currentVersion,
           attributes: versionData.attributes,
-          behavior: versionData.behavior || "user-management",
+          behavior: versionData.behavior || "user-managed",
           parallelism: this.parallelism,
           passphrase: this.passphrase,
           observers: [this],
@@ -10985,7 +11136,8 @@ class Database extends EventEmitter {
           paranoid: versionData.paranoid !== void 0 ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
-          hooks: versionData.hooks || {}
+          hooks: versionData.hooks || {},
+          versioningEnabled: this.versioningEnabled
         });
       }
     }
@@ -11060,7 +11212,7 @@ class Database extends EventEmitter {
     }
     const hashObj = {
       attributes: stableAttributes,
-      behavior: behavior || definition.behavior || "user-management"
+      behavior: behavior || definition.behavior || "user-managed"
     };
     const stableString = jsonStableStringify(hashObj);
     return `sha256:${createHash("sha256").update(stableString).digest("hex")}`;
@@ -11123,7 +11275,7 @@ class Database extends EventEmitter {
           [version]: {
             hash: definitionHash,
             attributes: resourceDef.attributes,
-            behavior: resourceDef.behavior || "user-management",
+            behavior: resourceDef.behavior || "user-managed",
             timestamps: resource.config.timestamps,
             partitions: resource.config.partitions,
             paranoid: resource.config.paranoid,
@@ -11172,7 +11324,7 @@ class Database extends EventEmitter {
    * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = "user-management", options = {} }) {
+  resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", options = {} }) {
     if (!this.resources[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
@@ -11185,6 +11337,7 @@ class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
+      versioningEnabled: this.versioningEnabled,
       ...options
     });
     const newHash = this.generateDefinitionHash(mockResource.export());
@@ -11195,7 +11348,7 @@ class Database extends EventEmitter {
       existingHash
     };
   }
-  async createResource({ name, attributes, behavior = "user-management", hooks, ...config }) {
+  async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
       Object.assign(existingResource.config, {
@@ -11205,6 +11358,7 @@ class Database extends EventEmitter {
       if (behavior) {
         existingResource.behavior = behavior;
       }
+      existingResource.versioningEnabled = this.versioningEnabled;
       existingResource.updateAttributes(attributes);
       if (hooks) {
         for (const [event, hooksArr] of Object.entries(hooks)) {
@@ -11239,6 +11393,7 @@ class Database extends EventEmitter {
       passphrase: this.passphrase,
       cache: this.cache,
       hooks,
+      versioningEnabled: this.versioningEnabled,
       ...config
     });
     this.resources[name] = resource;
@@ -17705,12 +17860,117 @@ class S3Cache extends Cache {
 }
 
 class Plugin extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.name = this.constructor.name;
+    this.options = options;
+    this.hooks = /* @__PURE__ */ new Map();
+  }
   async setup(database) {
+    this.database = database;
+    this.beforeSetup();
+    await this.onSetup();
+    this.afterSetup();
   }
   async start() {
+    this.beforeStart();
+    await this.onStart();
+    this.afterStart();
   }
   async stop() {
+    this.beforeStop();
+    await this.onStop();
+    this.afterStop();
   }
+  // Override these methods in subclasses
+  async onSetup() {
+  }
+  async onStart() {
+  }
+  async onStop() {
+  }
+  // Hook management methods
+  addHook(resource, event, handler) {
+    if (!this.hooks.has(resource)) {
+      this.hooks.set(resource, /* @__PURE__ */ new Map());
+    }
+    const resourceHooks = this.hooks.get(resource);
+    if (!resourceHooks.has(event)) {
+      resourceHooks.set(event, []);
+    }
+    resourceHooks.get(event).push(handler);
+  }
+  removeHook(resource, event, handler) {
+    const resourceHooks = this.hooks.get(resource);
+    if (resourceHooks && resourceHooks.has(event)) {
+      const handlers = resourceHooks.get(event);
+      const index = handlers.indexOf(handler);
+      if (index > -1) {
+        handlers.splice(index, 1);
+      }
+    }
+  }
+  // Enhanced resource method wrapping that supports multiple plugins
+  wrapResourceMethod(resource, methodName, wrapper) {
+    const originalMethod = resource[methodName];
+    if (!resource._pluginWrappers) {
+      resource._pluginWrappers = /* @__PURE__ */ new Map();
+    }
+    if (!resource._pluginWrappers.has(methodName)) {
+      resource._pluginWrappers.set(methodName, []);
+    }
+    resource._pluginWrappers.get(methodName).push(wrapper);
+    if (!resource[`_wrapped_${methodName}`]) {
+      resource[`_wrapped_${methodName}`] = originalMethod;
+      const isJestMock = originalMethod && originalMethod._isMockFunction;
+      resource[methodName] = async function(...args) {
+        let result = await resource[`_wrapped_${methodName}`](...args);
+        for (const wrapper2 of resource._pluginWrappers.get(methodName)) {
+          result = await wrapper2.call(this, result, args, methodName);
+        }
+        return result;
+      };
+      if (isJestMock) {
+        Object.setPrototypeOf(resource[methodName], Object.getPrototypeOf(originalMethod));
+        Object.assign(resource[methodName], originalMethod);
+      }
+    }
+  }
+  // Partition-aware helper methods
+  getPartitionValues(data, resource) {
+    if (!resource.config?.partitions) return {};
+    const partitionValues = {};
+    for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+      if (partitionDef.fields) {
+        partitionValues[partitionName] = {};
+        for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+          const value = this.getNestedFieldValue(data, fieldName);
+          if (value !== null && value !== void 0) {
+            partitionValues[partitionName][fieldName] = resource.applyPartitionRule(value, rule);
+          }
+        }
+      } else {
+        partitionValues[partitionName] = {};
+      }
+    }
+    return partitionValues;
+  }
+  getNestedFieldValue(data, fieldPath) {
+    if (!fieldPath.includes(".")) {
+      return data[fieldPath] ?? null;
+    }
+    const keys = fieldPath.split(".");
+    let value = data;
+    for (const key of keys) {
+      if (value && typeof value === "object" && key in value) {
+        value = value[key];
+      } else {
+        return null;
+      }
+    }
+    return value ?? null;
+  }
+  // Event emission methods
   beforeSetup() {
     this.emit("plugin.beforeSetup", /* @__PURE__ */ new Date());
   }
@@ -17740,13 +18000,633 @@ const PluginObject = {
   }
 };
 
+class AuditPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.auditResource = null;
+    this.config = {
+      enabled: options.enabled !== false,
+      includeData: options.includeData !== false,
+      includePartitions: options.includePartitions !== false,
+      maxDataSize: options.maxDataSize || 1e4,
+      // 10KB limit
+      ...options
+    };
+  }
+  async onSetup() {
+    if (!this.config.enabled) {
+      this.auditResource = null;
+      return;
+    }
+    try {
+      this.auditResource = await this.database.createResource({
+        name: "audits",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          recordId: "string|required",
+          userId: "string|optional",
+          timestamp: "string|required",
+          oldData: "string|optional",
+          newData: "string|optional",
+          partition: "string|optional",
+          partitionValues: "string|optional",
+          metadata: "string|optional"
+        }
+      });
+    } catch (error) {
+      try {
+        this.auditResource = this.database.resources.audits;
+      } catch (innerError) {
+        this.auditResource = null;
+        return;
+      }
+    }
+    this.installDatabaseProxy();
+    this.installResourceHooks();
+  }
+  async onStart() {
+  }
+  async onStop() {
+  }
+  installDatabaseProxy() {
+    if (this.database._auditProxyInstalled) {
+      return;
+    }
+    const installResourceHooksForResource = this.installResourceHooksForResource.bind(this);
+    this.database._originalCreateResource = this.database.createResource;
+    this.database.createResource = async function(...args) {
+      const resource = await this._originalCreateResource(...args);
+      if (resource.name !== "audit_logs") {
+        installResourceHooksForResource(resource);
+      }
+      return resource;
+    };
+    this.database._auditProxyInstalled = true;
+  }
+  installResourceHooks() {
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.name === "audits") continue;
+      this.installResourceHooksForResource(resource);
+    }
+  }
+  installResourceHooksForResource(resource) {
+    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
+      const [data] = args;
+      const recordId = data.id || result.id || "auto-generated";
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
+      const auditRecord = {
+        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        resourceName: resource.name,
+        operation: "insert",
+        recordId,
+        userId: this.getCurrentUserId?.() || "system",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        oldData: null,
+        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
+        partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+        metadata: JSON.stringify({
+          source: "audit-plugin",
+          version: "2.0"
+        })
+      };
+      this.logAudit(auditRecord).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
+      const [id, data] = args;
+      let oldData = null;
+      if (this.config.includeData) {
+        try {
+          oldData = await resource.get(id);
+        } catch (error) {
+        }
+      }
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(result, resource) : null;
+      const auditRecord = {
+        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        resourceName: resource.name,
+        operation: "update",
+        recordId: id,
+        userId: this.getCurrentUserId?.() || "system",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
+        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(result)),
+        partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+        metadata: JSON.stringify({
+          source: "audit-plugin",
+          version: "2.0"
+        })
+      };
+      this.logAudit(auditRecord).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
+      const [id] = args;
+      let oldData = null;
+      if (this.config.includeData) {
+        try {
+          oldData = await resource.get(id);
+        } catch (error) {
+        }
+      }
+      const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
+      const auditRecord = {
+        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        resourceName: resource.name,
+        operation: "delete",
+        recordId: id,
+        userId: this.getCurrentUserId?.() || "system",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
+        newData: null,
+        partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+        metadata: JSON.stringify({
+          source: "audit-plugin",
+          version: "2.0"
+        })
+      };
+      this.logAudit(auditRecord).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
+      const [ids] = args;
+      const auditRecords = [];
+      if (this.config.includeData) {
+        for (const id of ids) {
+          try {
+            const oldData = await resource.get(id);
+            const partitionValues = this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
+            auditRecords.push({
+              id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              resourceName: resource.name,
+              operation: "delete",
+              recordId: id,
+              userId: this.getCurrentUserId?.() || "system",
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
+              newData: null,
+              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+              partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+              metadata: JSON.stringify({
+                source: "audit-plugin",
+                version: "2.0",
+                batchOperation: true
+              })
+            });
+          } catch (error) {
+          }
+        }
+      }
+      for (const auditRecord of auditRecords) {
+        this.logAudit(auditRecord).catch(console.error);
+      }
+      return result;
+    });
+  }
+  getPartitionValues(data, resource) {
+    const partitions = resource.config?.partitions || {};
+    const partitionValues = {};
+    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+      if (partitionDef.fields) {
+        const partitionData = {};
+        for (const [fieldName, fieldRule] of Object.entries(partitionDef.fields)) {
+          const fieldValue = this.getNestedFieldValue(data, fieldName);
+          if (fieldValue !== void 0 && fieldValue !== null) {
+            partitionData[fieldName] = fieldValue;
+          }
+        }
+        if (Object.keys(partitionData).length > 0) {
+          partitionValues[partitionName] = partitionData;
+        }
+      }
+    }
+    return partitionValues;
+  }
+  getNestedFieldValue(data, fieldPath) {
+    if (!fieldPath.includes(".")) {
+      return data[fieldPath];
+    }
+    const keys = fieldPath.split(".");
+    let currentLevel = data;
+    for (const key of keys) {
+      if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+        return void 0;
+      }
+      currentLevel = currentLevel[key];
+    }
+    return currentLevel;
+  }
+  getPrimaryPartition(partitionValues) {
+    if (!partitionValues) return null;
+    const partitionNames = Object.keys(partitionValues);
+    return partitionNames.length > 0 ? partitionNames[0] : null;
+  }
+  async logAudit(auditRecord) {
+    if (!this.auditResource) return;
+    try {
+      await this.auditResource.insert(auditRecord);
+    } catch (error) {
+      console.error("Failed to log audit record:", error);
+      if (error && error.stack) console.error(error.stack);
+    }
+  }
+  truncateData(data) {
+    if (!data) return data;
+    const dataStr = JSON.stringify(data);
+    if (dataStr.length <= this.config.maxDataSize) {
+      return data;
+    }
+    return {
+      ...data,
+      _truncated: true,
+      _originalSize: dataStr.length,
+      _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  // Utility methods for querying audit logs
+  async getAuditLogs(options = {}) {
+    if (!this.auditResource) return [];
+    try {
+      const {
+        resourceName,
+        operation,
+        recordId,
+        userId,
+        partition,
+        startDate,
+        endDate,
+        limit = 100,
+        offset = 0
+      } = options;
+      const allAudits = await this.auditResource.getAll();
+      let filtered = allAudits.filter((audit) => {
+        if (resourceName && audit.resourceName !== resourceName) return false;
+        if (operation && audit.operation !== operation) return false;
+        if (recordId && audit.recordId !== recordId) return false;
+        if (userId && audit.userId !== userId) return false;
+        if (partition && audit.partition !== partition) return false;
+        if (startDate && new Date(audit.timestamp) < new Date(startDate)) return false;
+        if (endDate && new Date(audit.timestamp) > new Date(endDate)) return false;
+        return true;
+      });
+      filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      const deserialized = filtered.slice(offset, offset + limit).map((audit) => ({
+        ...audit,
+        oldData: audit.oldData ? JSON.parse(audit.oldData) : null,
+        newData: audit.newData ? JSON.parse(audit.newData) : null,
+        partitionValues: audit.partitionValues ? JSON.parse(audit.partitionValues) : null,
+        metadata: audit.metadata ? JSON.parse(audit.metadata) : null
+      }));
+      return deserialized;
+    } catch (error) {
+      console.error("Failed to get audit logs:", error);
+      if (error && error.stack) console.error(error.stack);
+      return [];
+    }
+  }
+  async getRecordHistory(resourceName, recordId) {
+    return this.getAuditLogs({
+      resourceName,
+      recordId,
+      limit: 1e3
+    });
+  }
+  async getPartitionHistory(resourceName, partitionName, partitionValues) {
+    return this.getAuditLogs({
+      resourceName,
+      partition: partitionName,
+      limit: 1e3
+    });
+  }
+  async getAuditStats(options = {}) {
+    const {
+      resourceName,
+      startDate,
+      endDate
+    } = options;
+    const allAudits = await this.getAuditLogs({
+      resourceName,
+      startDate,
+      endDate,
+      limit: 1e4
+    });
+    const stats = {
+      total: allAudits.length,
+      byOperation: {},
+      byResource: {},
+      byPartition: {},
+      byUser: {},
+      timeline: {}
+    };
+    for (const audit of allAudits) {
+      stats.byOperation[audit.operation] = (stats.byOperation[audit.operation] || 0) + 1;
+      stats.byResource[audit.resourceName] = (stats.byResource[audit.resourceName] || 0) + 1;
+      if (audit.partition) {
+        stats.byPartition[audit.partition] = (stats.byPartition[audit.partition] || 0) + 1;
+      }
+      stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
+      const day = audit.timestamp.split("T")[0];
+      stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+    }
+    return stats;
+  }
+}
+
+class CachePlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.driver = options.driver;
+    this.config = {
+      enabled: options.enabled !== false,
+      includePartitions: options.includePartitions !== false,
+      ...options
+    };
+  }
+  async setup(database) {
+    if (!this.config.enabled) {
+      return;
+    }
+    await super.setup(database);
+  }
+  async onSetup() {
+    if (this.config.driver) {
+      this.driver = this.config.driver;
+    } else if (this.config.driverType === "memory") {
+      this.driver = new MemoryCache(this.config.memoryOptions || {});
+    } else {
+      this.driver = new S3Cache(this.config.s3Options || {});
+    }
+    this.installDatabaseProxy();
+    this.installResourceHooks();
+  }
+  async onStart() {
+  }
+  async onStop() {
+  }
+  installDatabaseProxy() {
+    if (this.database._cacheProxyInstalled) {
+      return;
+    }
+    const installResourceHooks = this.installResourceHooks.bind(this);
+    this.database._originalCreateResourceForCache = this.database.createResource;
+    this.database.createResource = async function(...args) {
+      const resource = await this._originalCreateResourceForCache(...args);
+      installResourceHooks(resource);
+      return resource;
+    };
+    this.database._cacheProxyInstalled = true;
+  }
+  installResourceHooks() {
+    for (const resource of Object.values(this.database.resources)) {
+      this.installResourceHooksForResource(resource);
+    }
+  }
+  installResourceHooksForResource(resource) {
+    if (!this.driver) return;
+    resource.cache = this.driver;
+    resource.cacheKeyFor = async (options = {}) => {
+      const { action, params = {}, partition, partitionValues } = options;
+      return this.generateCacheKey(resource, action, params, partition, partitionValues);
+    };
+    resource._originalCount = resource.count;
+    resource._originalListIds = resource.listIds;
+    resource._originalGetMany = resource.getMany;
+    resource._originalGetAll = resource.getAll;
+    resource._originalPage = resource.page;
+    resource._originalList = resource.list;
+    resource.count = async function(options = {}) {
+      const { partition, partitionValues } = options;
+      const key = await resource.cacheKeyFor({
+        action: "count",
+        partition,
+        partitionValues
+      });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalCount(options);
+      await resource.cache.set(key, result);
+      return result;
+    };
+    resource.listIds = async function(options = {}) {
+      const { partition, partitionValues } = options;
+      const key = await resource.cacheKeyFor({
+        action: "listIds",
+        partition,
+        partitionValues
+      });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalListIds(options);
+      await resource.cache.set(key, result);
+      return result;
+    };
+    resource.getMany = async function(ids) {
+      const key = await resource.cacheKeyFor({
+        action: "getMany",
+        params: { ids }
+      });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalGetMany(ids);
+      await resource.cache.set(key, result);
+      return result;
+    };
+    resource.getAll = async function() {
+      const key = await resource.cacheKeyFor({ action: "getAll" });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalGetAll();
+      await resource.cache.set(key, result);
+      return result;
+    };
+    resource.page = async function({ offset, size, partition, partitionValues } = {}) {
+      const key = await resource.cacheKeyFor({
+        action: "page",
+        params: { offset, size },
+        partition,
+        partitionValues
+      });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalPage({ offset, size, partition, partitionValues });
+      await resource.cache.set(key, result);
+      return result;
+    };
+    resource.list = async function(options = {}) {
+      const { partition, partitionValues } = options;
+      const key = await resource.cacheKeyFor({
+        action: "list",
+        partition,
+        partitionValues
+      });
+      try {
+        const cached = await resource.cache.get(key);
+        if (cached !== null && cached !== void 0) return cached;
+      } catch (err) {
+        if (err.name !== "NoSuchKey") throw err;
+      }
+      const result = await resource._originalList(options);
+      await resource.cache.set(key, result);
+      return result;
+    };
+    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
+      const [data] = args;
+      await this.clearCacheForResource(resource, data);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
+      const [id, data] = args;
+      await this.clearCacheForResource(resource, { id, ...data });
+      return result;
+    });
+    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
+      const [id] = args;
+      let data = { id };
+      if (typeof resource.get === "function") {
+        try {
+          const full = await resource.get(id);
+          if (full) data = full;
+        } catch {
+        }
+      }
+      await this.clearCacheForResource(resource, data);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
+      const [ids] = args;
+      for (const id of ids) {
+        let data = { id };
+        if (typeof resource.get === "function") {
+          try {
+            const full = await resource.get(id);
+            if (full) data = full;
+          } catch {
+          }
+        }
+        await this.clearCacheForResource(resource, data);
+      }
+      return result;
+    });
+  }
+  async clearCacheForResource(resource, data) {
+    if (!resource.cache) return;
+    const keyPrefix = `resource=${resource.name}`;
+    await resource.cache.clear(keyPrefix);
+    if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
+      const partitionValues = this.getPartitionValues(data, resource);
+      for (const [partitionName, values] of Object.entries(partitionValues)) {
+        if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
+          const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+          await resource.cache.clear(partitionKeyPrefix);
+        }
+      }
+    }
+  }
+  async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
+    const keyParts = [
+      `resource=${resource.name}`,
+      `action=${action}`
+    ];
+    if (partition && partitionValues && Object.keys(partitionValues).length > 0) {
+      keyParts.push(`partition:${partition}`);
+      for (const [field, value] of Object.entries(partitionValues)) {
+        if (value !== null && value !== void 0) {
+          keyParts.push(`${field}:${value}`);
+        }
+      }
+    }
+    if (Object.keys(params).length > 0) {
+      const paramsHash = await this.hashParams(params);
+      keyParts.push(paramsHash);
+    }
+    return join(...keyParts) + ".json.gz";
+  }
+  async hashParams(params) {
+    const sortedParams = Object.keys(params).sort().map((key) => `${key}:${params[key]}`).join("|") || "empty";
+    return await sha256(sortedParams);
+  }
+  // Utility methods
+  async getCacheStats() {
+    if (!this.driver) return null;
+    return {
+      size: await this.driver.size(),
+      keys: await this.driver.keys(),
+      driver: this.driver.constructor.name
+    };
+  }
+  async clearAllCache() {
+    if (!this.driver) return;
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.cache) {
+        const keyPrefix = `resource=${resource.name}`;
+        await resource.cache.clear(keyPrefix);
+      }
+    }
+  }
+  async warmCache(resourceName, options = {}) {
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    const { includePartitions = true } = options;
+    await resource.getAll();
+    if (includePartitions && resource.config.partitions) {
+      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+        if (partitionDef.fields) {
+          const allRecords = await resource.getAll();
+          const recordsArray = Array.isArray(allRecords) ? allRecords : [];
+          const partitionValues = /* @__PURE__ */ new Set();
+          for (const record of recordsArray.slice(0, 10)) {
+            const values = this.getPartitionValues(record, resource);
+            if (values[partitionName]) {
+              partitionValues.add(JSON.stringify(values[partitionName]));
+            }
+          }
+          for (const partitionValueStr of partitionValues) {
+            const partitionValues2 = JSON.parse(partitionValueStr);
+            await resource.list({ partition: partitionName, partitionValues: partitionValues2 });
+          }
+        }
+      }
+    }
+  }
+}
+
 const CostsPlugin = {
   async setup(db) {
+    if (!db || !db.client) {
+      return;
+    }
     this.client = db.client;
     this.map = {
       PutObjectCommand: "put",
       GetObjectCommand: "get",
-      HeadObjectCommand: "get",
+      HeadObjectCommand: "head",
       DeleteObjectCommand: "delete",
       DeleteObjectsCommand: "delete",
       ListObjectsV2Command: "list"
@@ -17760,7 +18640,8 @@ const CostsPlugin = {
         post: 5e-3 / 1e3,
         get: 4e-4 / 1e3,
         select: 4e-4 / 1e3,
-        delete: 4e-4 / 1e3
+        delete: 4e-4 / 1e3,
+        head: 4e-4 / 1e3
       },
       requests: {
         total: 0,
@@ -17770,7 +18651,8 @@ const CostsPlugin = {
         list: 0,
         get: 0,
         select: 0,
-        delete: 0
+        delete: 0,
+        head: 0
       },
       events: {
         total: 0,
@@ -17785,160 +18667,2200 @@ const CostsPlugin = {
     this.client.costs = JSON.parse(JSON.stringify(this.costs));
   },
   async start() {
-    this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+    if (this.client) {
+      this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+      this.client.on("command.error", (name) => this.addRequest(name, this.map[name]));
+    }
   },
   addRequest(name, method) {
+    if (!method) return;
     this.costs.events[name]++;
     this.costs.events.total++;
     this.costs.requests.total++;
     this.costs.requests[method]++;
     this.costs.total += this.costs.prices[method];
-    this.client.costs.events[name]++;
-    this.client.costs.events.total++;
-    this.client.costs.requests.total++;
-    this.client.costs.requests[method]++;
-    this.client.costs.total += this.client.costs.prices[method];
+    if (this.client && this.client.costs) {
+      this.client.costs.events[name]++;
+      this.client.costs.events.total++;
+      this.client.costs.requests.total++;
+      this.client.costs.requests[method]++;
+      this.client.costs.total += this.client.costs.prices[method];
+    }
   }
 };
 
-class CachePlugin extends Plugin {
+class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    this.driver = options.driver;
+    this.indexResource = null;
+    this.config = {
+      enabled: options.enabled !== false,
+      minWordLength: options.minWordLength || 3,
+      maxResults: options.maxResults || 100,
+      ...options
+    };
+    this.indexes = /* @__PURE__ */ new Map();
   }
   async setup(database) {
     this.database = database;
-    if (!this.driver) this.driver = new S3Cache({
-      keyPrefix: "cache",
-      client: database.client
+    if (!this.config.enabled) return;
+    try {
+      this.indexResource = await database.createResource({
+        name: "fulltext_indexes",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          fieldName: "string|required",
+          word: "string|required",
+          recordIds: "json|required",
+          // Array of record IDs containing this word
+          count: "number|required",
+          lastUpdated: "string|required"
+        }
+      });
+    } catch (error) {
+      this.indexResource = database.resources.fulltext_indexes;
+    }
+    await this.loadIndexes();
+    this.installIndexingHooks();
+  }
+  async start() {
+  }
+  async stop() {
+    await this.saveIndexes();
+  }
+  async loadIndexes() {
+    if (!this.indexResource) return;
+    try {
+      const allIndexes = await this.indexResource.getAll();
+      for (const indexRecord of allIndexes) {
+        const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
+        this.indexes.set(key, {
+          recordIds: indexRecord.recordIds || [],
+          count: indexRecord.count || 0
+        });
+      }
+    } catch (error) {
+      console.warn("Failed to load existing indexes:", error.message);
+    }
+  }
+  async saveIndexes() {
+    if (!this.indexResource) return;
+    try {
+      const existingIndexes = await this.indexResource.getAll();
+      for (const index of existingIndexes) {
+        await this.indexResource.delete(index.id);
+      }
+      for (const [key, data] of this.indexes.entries()) {
+        const [resourceName, fieldName, word] = key.split(":");
+        await this.indexResource.insert({
+          id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          resourceName,
+          fieldName,
+          word,
+          recordIds: data.recordIds,
+          count: data.count,
+          lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save indexes:", error);
+    }
+  }
+  installIndexingHooks() {
+    if (!this.database.plugins) {
+      this.database.plugins = {};
+    }
+    this.database.plugins.fulltext = this;
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.name === "fulltext_indexes") continue;
+      this.installResourceHooks(resource);
+    }
+    if (!this.database._fulltextProxyInstalled) {
+      this.database._previousCreateResourceForFullText = this.database.createResource;
+      this.database.createResource = async function(...args) {
+        const resource = await this._previousCreateResourceForFullText(...args);
+        if (this.plugins?.fulltext && resource.name !== "fulltext_indexes") {
+          this.plugins.fulltext.installResourceHooks(resource);
+        }
+        return resource;
+      };
+      this.database._fulltextProxyInstalled = true;
+    }
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.name !== "fulltext_indexes") {
+        this.installResourceHooks(resource);
+      }
+    }
+  }
+  installResourceHooks(resource) {
+    resource._insert = resource.insert;
+    resource._update = resource.update;
+    resource._delete = resource.delete;
+    resource._deleteMany = resource.deleteMany;
+    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
+      const [data] = args;
+      this.indexRecord(resource.name, result.id, data).catch(console.error);
+      return result;
     });
-    this.installDatabaseProxy();
-    for (const resource of Object.values(database.resources)) {
-      this.installResourcesProxies(resource);
+    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
+      const [id, data] = args;
+      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      this.indexRecord(resource.name, id, result).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
+      const [id] = args;
+      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
+      const [ids] = args;
+      for (const id of ids) {
+        this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      }
+      return result;
+    });
+  }
+  async indexRecord(resourceName, recordId, data) {
+    const indexedFields = this.getIndexedFields(resourceName);
+    if (!indexedFields || indexedFields.length === 0) return;
+    for (const fieldName of indexedFields) {
+      const fieldValue = this.getFieldValue(data, fieldName);
+      if (!fieldValue) continue;
+      const words = this.tokenize(fieldValue);
+      for (const word of words) {
+        if (word.length < this.config.minWordLength) continue;
+        const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
+        const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
+        if (!existing.recordIds.includes(recordId)) {
+          existing.recordIds.push(recordId);
+          existing.count = existing.recordIds.length;
+        }
+        this.indexes.set(key, existing);
+      }
+    }
+  }
+  async removeRecordFromIndex(resourceName, recordId) {
+    for (const [key, data] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        const index = data.recordIds.indexOf(recordId);
+        if (index > -1) {
+          data.recordIds.splice(index, 1);
+          data.count = data.recordIds.length;
+          if (data.recordIds.length === 0) {
+            this.indexes.delete(key);
+          } else {
+            this.indexes.set(key, data);
+          }
+        }
+      }
+    }
+  }
+  getFieldValue(data, fieldPath) {
+    if (!fieldPath.includes(".")) {
+      return data[fieldPath];
+    }
+    const keys = fieldPath.split(".");
+    let value = data;
+    for (const key of keys) {
+      if (value && typeof value === "object" && key in value) {
+        value = value[key];
+      } else {
+        return null;
+      }
+    }
+    return value;
+  }
+  tokenize(text) {
+    if (!text) return [];
+    const str = String(text).toLowerCase();
+    return str.replace(/[^\w\s\u00C0-\u017F]/g, " ").split(/\s+/).filter((word) => word.length > 0);
+  }
+  getIndexedFields(resourceName) {
+    if (this.config.fields) {
+      return this.config.fields;
+    }
+    const fieldMappings = {
+      users: ["name", "email"],
+      products: ["name", "description"],
+      articles: ["title", "content"]
+      // Add more mappings as needed
+    };
+    return fieldMappings[resourceName] || [];
+  }
+  // Main search method
+  async search(resourceName, query, options = {}) {
+    const {
+      fields = null,
+      // Specific fields to search in
+      limit = this.config.maxResults,
+      offset = 0,
+      exactMatch = false
+    } = options;
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+    const searchWords = this.tokenize(query);
+    const results = /* @__PURE__ */ new Map();
+    const searchFields = fields || this.getIndexedFields(resourceName);
+    if (searchFields.length === 0) {
+      return [];
+    }
+    for (const word of searchWords) {
+      if (word.length < this.config.minWordLength) continue;
+      for (const fieldName of searchFields) {
+        if (exactMatch) {
+          const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
+          const indexData = this.indexes.get(key);
+          if (indexData) {
+            for (const recordId of indexData.recordIds) {
+              const currentScore = results.get(recordId) || 0;
+              results.set(recordId, currentScore + 1);
+            }
+          }
+        } else {
+          for (const [key, indexData] of this.indexes.entries()) {
+            if (key.startsWith(`${resourceName}:${fieldName}:${word.toLowerCase()}`)) {
+              for (const recordId of indexData.recordIds) {
+                const currentScore = results.get(recordId) || 0;
+                results.set(recordId, currentScore + 1);
+              }
+            }
+          }
+        }
+      }
+    }
+    const sortedResults = Array.from(results.entries()).map(([recordId, score]) => ({ recordId, score })).sort((a, b) => b.score - a.score).slice(offset, offset + limit);
+    return sortedResults;
+  }
+  // Search and return full records
+  async searchRecords(resourceName, query, options = {}) {
+    const searchResults = await this.search(resourceName, query, options);
+    if (searchResults.length === 0) {
+      return [];
+    }
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    const recordIds = searchResults.map((result) => result.recordId);
+    const records = await resource.getMany(recordIds);
+    return records.map((record) => {
+      const searchResult = searchResults.find((sr) => sr.recordId === record.id);
+      return {
+        ...record,
+        _searchScore: searchResult ? searchResult.score : 0
+      };
+    }).sort((a, b) => b._searchScore - a._searchScore);
+  }
+  // Utility methods
+  async rebuildIndex(resourceName) {
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    for (const [key] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        this.indexes.delete(key);
+      }
+    }
+    const allRecords = await resource.getAll();
+    const batchSize = 100;
+    for (let i = 0; i < allRecords.length; i += batchSize) {
+      const batch = allRecords.slice(i, i + batchSize);
+      for (const record of batch) {
+        await this.indexRecord(resourceName, record.id, record);
+      }
+    }
+    await this.saveIndexes();
+  }
+  async getIndexStats() {
+    const stats = {
+      totalIndexes: this.indexes.size,
+      resources: {},
+      totalWords: 0
+    };
+    for (const [key, data] of this.indexes.entries()) {
+      const [resourceName, fieldName] = key.split(":");
+      if (!stats.resources[resourceName]) {
+        stats.resources[resourceName] = {
+          fields: {},
+          totalRecords: /* @__PURE__ */ new Set(),
+          totalWords: 0
+        };
+      }
+      if (!stats.resources[resourceName].fields[fieldName]) {
+        stats.resources[resourceName].fields[fieldName] = {
+          words: 0,
+          totalOccurrences: 0
+        };
+      }
+      stats.resources[resourceName].fields[fieldName].words++;
+      stats.resources[resourceName].fields[fieldName].totalOccurrences += data.count;
+      stats.resources[resourceName].totalWords++;
+      for (const recordId of data.recordIds) {
+        stats.resources[resourceName].totalRecords.add(recordId);
+      }
+      stats.totalWords++;
+    }
+    for (const resourceName in stats.resources) {
+      stats.resources[resourceName].totalRecords = stats.resources[resourceName].totalRecords.size;
+    }
+    return stats;
+  }
+  async rebuildAllIndexes({ timeout } = {}) {
+    if (timeout) {
+      return Promise.race([
+        this._rebuildAllIndexesInternal(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
+      ]);
+    }
+    return this._rebuildAllIndexesInternal();
+  }
+  async _rebuildAllIndexesInternal() {
+    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
+    for (const resourceName of resourceNames) {
+      try {
+        await this.rebuildIndex(resourceName);
+      } catch (error) {
+        console.warn(`Failed to rebuild index for resource ${resourceName}:`, error.message);
+      }
+    }
+  }
+  async clearIndex(resourceName) {
+    for (const [key] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        this.indexes.delete(key);
+      }
+    }
+    await this.saveIndexes();
+  }
+  async clearAllIndexes() {
+    this.indexes.clear();
+    await this.saveIndexes();
+  }
+}
+
+class MetricsPlugin extends Plugin {
+  constructor(options = {}) {
+    super();
+    this.config = {
+      enabled: options.enabled !== false,
+      collectPerformance: options.collectPerformance !== false,
+      collectErrors: options.collectErrors !== false,
+      collectUsage: options.collectUsage !== false,
+      retentionDays: options.retentionDays || 30,
+      flushInterval: options.flushInterval || 6e4,
+      // 1 minute
+      ...options
+    };
+    this.metrics = {
+      operations: {
+        insert: { count: 0, totalTime: 0, errors: 0 },
+        update: { count: 0, totalTime: 0, errors: 0 },
+        delete: { count: 0, totalTime: 0, errors: 0 },
+        get: { count: 0, totalTime: 0, errors: 0 },
+        list: { count: 0, totalTime: 0, errors: 0 },
+        count: { count: 0, totalTime: 0, errors: 0 }
+      },
+      resources: {},
+      errors: [],
+      performance: [],
+      startTime: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.flushTimer = null;
+  }
+  async setup(database) {
+    this.database = database;
+    if (!this.config.enabled || process.env.NODE_ENV === "test") return;
+    try {
+      this.metricsResource = await database.createResource({
+        name: "metrics",
+        attributes: {
+          id: "string|required",
+          type: "string|required",
+          // 'operation', 'error', 'performance'
+          resourceName: "string",
+          operation: "string",
+          count: "number|required",
+          totalTime: "number|required",
+          errors: "number|required",
+          avgTime: "number|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      });
+      this.errorsResource = await database.createResource({
+        name: "error_logs",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          error: "string|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      });
+      this.performanceResource = await database.createResource({
+        name: "performance_logs",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          duration: "number|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      });
+    } catch (error) {
+      this.metricsResource = database.resources.metrics;
+      this.errorsResource = database.resources.error_logs;
+      this.performanceResource = database.resources.performance_logs;
+    }
+    this.installMetricsHooks();
+    if (process.env.NODE_ENV !== "test") {
+      this.startFlushTimer();
     }
   }
   async start() {
   }
   async stop() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (process.env.NODE_ENV !== "test") {
+      await this.flushMetrics();
+    }
   }
-  installDatabaseProxy() {
-    const installResourcesProxies = this.installResourcesProxies.bind(this);
+  installMetricsHooks() {
+    for (const resource of Object.values(this.database.resources)) {
+      if (["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+        continue;
+      }
+      this.installResourceHooks(resource);
+    }
     this.database._createResource = this.database.createResource;
     this.database.createResource = async function(...args) {
       const resource = await this._createResource(...args);
-      installResourcesProxies(resource);
+      if (this.plugins?.metrics && !["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+        this.plugins.metrics.installResourceHooks(resource);
+      }
       return resource;
     };
   }
-  installResourcesProxies(resource) {
-    resource.cache = this.driver;
-    let keyPrefix = `resource=${resource.name}`;
-    if (this.driver.keyPrefix) this.driver.keyPrefix = join(this.driver.keyPrefix, keyPrefix);
-    resource.cacheKeyFor = async function({
-      params = {},
-      action = "list"
-    }) {
-      let key = Object.keys(params).sort().map((x) => `${x}:${params[x]}`).join("|") || "empty";
-      key = await sha256(key);
-      key = join(keyPrefix, `action=${action}`, `${key}.json.gz`);
-      return key;
-    };
-    resource._count = resource.count;
-    resource._listIds = resource.listIds;
-    resource._getMany = resource.getMany;
-    resource._getAll = resource.getAll;
-    resource._page = resource.page;
-    resource.count = async function() {
-      const key = await this.cacheKeyFor({ action: "count" });
-      try {
-        const cached = await this.cache.get(key);
-        if (cached) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const data = await resource._count();
-      await this.cache.set(key, data);
-      return data;
-    };
-    resource.listIds = async function() {
-      const key = await this.cacheKeyFor({ action: "listIds" });
-      try {
-        const cached = await this.cache.get(key);
-        if (cached) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const data = await resource._listIds();
-      await this.cache.set(key, data);
-      return data;
-    };
-    resource.getMany = async function(ids) {
-      const key = await this.cacheKeyFor({
-        action: "getMany",
-        params: { ids }
-      });
-      try {
-        const cached = await this.cache.get(key);
-        if (cached) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const data = await resource._getMany(ids);
-      await this.cache.set(key, data);
-      return data;
-    };
-    resource.getAll = async function() {
-      const key = await this.cacheKeyFor({ action: "getAll" });
-      try {
-        const cached = await this.cache.get(key);
-        if (cached) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const data = await resource._getAll();
-      await this.cache.set(key, data);
-      return data;
-    };
-    resource.page = async function({ offset, size }) {
-      const key = await this.cacheKeyFor({
-        action: "page",
-        params: { offset, size }
-      });
-      try {
-        const cached = await this.cache.get(key);
-        if (cached) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const data = await resource._page({ offset, size });
-      await this.cache.set(key, data);
-      return data;
-    };
+  installResourceHooks(resource) {
     resource._insert = resource.insert;
     resource._update = resource.update;
     resource._delete = resource.delete;
     resource._deleteMany = resource.deleteMany;
+    resource._get = resource.get;
+    resource._getMany = resource.getMany;
+    resource._getAll = resource.getAll;
+    resource._list = resource.list;
+    resource._listIds = resource.listIds;
+    resource._count = resource.count;
+    resource._page = resource.page;
     resource.insert = async function(...args) {
-      const data = await resource._insert(...args);
-      await this.cache.clear(keyPrefix);
-      return data;
-    };
+      const startTime = Date.now();
+      try {
+        const result = await resource._insert(...args);
+        this.recordOperation(resource.name, "insert", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "insert", Date.now() - startTime, true);
+        this.recordError(resource.name, "insert", error);
+        throw error;
+      }
+    }.bind(this);
     resource.update = async function(...args) {
-      const data = await resource._update(...args);
-      await this.cache.clear(keyPrefix);
-      return data;
-    };
+      const startTime = Date.now();
+      try {
+        const result = await resource._update(...args);
+        this.recordOperation(resource.name, "update", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "update", Date.now() - startTime, true);
+        this.recordError(resource.name, "update", error);
+        throw error;
+      }
+    }.bind(this);
     resource.delete = async function(...args) {
-      const data = await resource._delete(...args);
-      await this.cache.clear(keyPrefix);
-      return data;
-    };
+      const startTime = Date.now();
+      try {
+        const result = await resource._delete(...args);
+        this.recordOperation(resource.name, "delete", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "delete", Date.now() - startTime, true);
+        this.recordError(resource.name, "delete", error);
+        throw error;
+      }
+    }.bind(this);
     resource.deleteMany = async function(...args) {
-      const data = await resource._deleteMany(...args);
-      await this.cache.clear(keyPrefix);
-      return data;
+      const startTime = Date.now();
+      try {
+        const result = await resource._deleteMany(...args);
+        this.recordOperation(resource.name, "delete", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "delete", Date.now() - startTime, true);
+        this.recordError(resource.name, "delete", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.get = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._get(...args);
+        this.recordOperation(resource.name, "get", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "get", Date.now() - startTime, true);
+        this.recordError(resource.name, "get", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.getMany = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._getMany(...args);
+        this.recordOperation(resource.name, "get", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "get", Date.now() - startTime, true);
+        this.recordError(resource.name, "get", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.getAll = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._getAll(...args);
+        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
+        this.recordError(resource.name, "list", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.list = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._list(...args);
+        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
+        this.recordError(resource.name, "list", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.listIds = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._listIds(...args);
+        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
+        this.recordError(resource.name, "list", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.count = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._count(...args);
+        this.recordOperation(resource.name, "count", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "count", Date.now() - startTime, true);
+        this.recordError(resource.name, "count", error);
+        throw error;
+      }
+    }.bind(this);
+    resource.page = async function(...args) {
+      const startTime = Date.now();
+      try {
+        const result = await resource._page(...args);
+        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
+        return result;
+      } catch (error) {
+        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
+        this.recordError(resource.name, "list", error);
+        throw error;
+      }
+    }.bind(this);
+  }
+  recordOperation(resourceName, operation, duration, isError) {
+    if (this.metrics.operations[operation]) {
+      this.metrics.operations[operation].count++;
+      this.metrics.operations[operation].totalTime += duration;
+      if (isError) {
+        this.metrics.operations[operation].errors++;
+      }
+    }
+    if (!this.metrics.resources[resourceName]) {
+      this.metrics.resources[resourceName] = {
+        insert: { count: 0, totalTime: 0, errors: 0 },
+        update: { count: 0, totalTime: 0, errors: 0 },
+        delete: { count: 0, totalTime: 0, errors: 0 },
+        get: { count: 0, totalTime: 0, errors: 0 },
+        list: { count: 0, totalTime: 0, errors: 0 },
+        count: { count: 0, totalTime: 0, errors: 0 }
+      };
+    }
+    if (this.metrics.resources[resourceName][operation]) {
+      this.metrics.resources[resourceName][operation].count++;
+      this.metrics.resources[resourceName][operation].totalTime += duration;
+      if (isError) {
+        this.metrics.resources[resourceName][operation].errors++;
+      }
+    }
+    if (this.config.collectPerformance) {
+      this.metrics.performance.push({
+        resourceName,
+        operation,
+        duration,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+  }
+  recordError(resourceName, operation, error) {
+    if (!this.config.collectErrors) return;
+    this.metrics.errors.push({
+      resourceName,
+      operation,
+      error: error.message,
+      stack: error.stack,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  startFlushTimer() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+    }
+    if (this.config.flushInterval > 0) {
+      this.flushTimer = setInterval(() => {
+        this.flushMetrics().catch(console.error);
+      }, this.config.flushInterval);
+    }
+  }
+  async flushMetrics() {
+    if (!this.metricsResource) return;
+    try {
+      const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
+      const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
+      const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
+      const resourceMetadata = process.env.NODE_ENV === "test" ? {} : { resource: "true" };
+      for (const [operation, data] of Object.entries(this.metrics.operations)) {
+        if (data.count > 0) {
+          await this.metricsResource.insert({
+            id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: "operation",
+            resourceName: "global",
+            operation,
+            count: data.count,
+            totalTime: data.totalTime,
+            errors: data.errors,
+            avgTime: data.count > 0 ? data.totalTime / data.count : 0,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            metadata
+          });
+        }
+      }
+      for (const [resourceName, operations] of Object.entries(this.metrics.resources)) {
+        for (const [operation, data] of Object.entries(operations)) {
+          if (data.count > 0) {
+            await this.metricsResource.insert({
+              id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: "operation",
+              resourceName,
+              operation,
+              count: data.count,
+              totalTime: data.totalTime,
+              errors: data.errors,
+              avgTime: data.count > 0 ? data.totalTime / data.count : 0,
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              metadata: resourceMetadata
+            });
+          }
+        }
+      }
+      if (this.config.collectPerformance && this.metrics.performance.length > 0) {
+        for (const perf of this.metrics.performance) {
+          await this.performanceResource.insert({
+            id: `perf-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName: perf.resourceName,
+            operation: perf.operation,
+            duration: perf.duration,
+            timestamp: perf.timestamp,
+            metadata: perfMetadata
+          });
+        }
+      }
+      if (this.config.collectErrors && this.metrics.errors.length > 0) {
+        for (const error of this.metrics.errors) {
+          await this.errorsResource.insert({
+            id: `error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName: error.resourceName,
+            operation: error.operation,
+            error: error.error,
+            stack: error.stack,
+            timestamp: error.timestamp,
+            metadata: errorMetadata
+          });
+        }
+      }
+      this.resetMetrics();
+    } catch (error) {
+      console.error("Failed to flush metrics:", error);
+    }
+  }
+  resetMetrics() {
+    for (const operation of Object.keys(this.metrics.operations)) {
+      this.metrics.operations[operation] = { count: 0, totalTime: 0, errors: 0 };
+    }
+    for (const resourceName of Object.keys(this.metrics.resources)) {
+      for (const operation of Object.keys(this.metrics.resources[resourceName])) {
+        this.metrics.resources[resourceName][operation] = { count: 0, totalTime: 0, errors: 0 };
+      }
+    }
+    this.metrics.performance = [];
+    this.metrics.errors = [];
+  }
+  // Utility methods
+  async getMetrics(options = {}) {
+    const {
+      type = "operation",
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    if (!this.metricsResource) return [];
+    const allMetrics = await this.metricsResource.getAll();
+    let filtered = allMetrics.filter((metric) => {
+      if (type && metric.type !== type) return false;
+      if (resourceName && metric.resourceName !== resourceName) return false;
+      if (operation && metric.operation !== operation) return false;
+      if (startDate && new Date(metric.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(metric.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getErrorLogs(options = {}) {
+    if (!this.errorsResource) return [];
+    const {
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    const allErrors = await this.errorsResource.getAll();
+    let filtered = allErrors.filter((error) => {
+      if (resourceName && error.resourceName !== resourceName) return false;
+      if (operation && error.operation !== operation) return false;
+      if (startDate && new Date(error.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(error.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getPerformanceLogs(options = {}) {
+    if (!this.performanceResource) return [];
+    const {
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    const allPerformance = await this.performanceResource.getAll();
+    let filtered = allPerformance.filter((perf) => {
+      if (resourceName && perf.resourceName !== resourceName) return false;
+      if (operation && perf.operation !== operation) return false;
+      if (startDate && new Date(perf.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(perf.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getStats() {
+    const now = /* @__PURE__ */ new Date();
+    const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
+    const [metrics, errors, performance] = await Promise.all([
+      this.getMetrics({ startDate: startDate.toISOString() }),
+      this.getErrorLogs({ startDate: startDate.toISOString() }),
+      this.getPerformanceLogs({ startDate: startDate.toISOString() })
+    ]);
+    const stats = {
+      period: "24h",
+      totalOperations: 0,
+      totalErrors: errors.length,
+      avgResponseTime: 0,
+      operationsByType: {},
+      resources: {},
+      uptime: {
+        startTime: this.metrics.startTime,
+        duration: now.getTime() - new Date(this.metrics.startTime).getTime()
+      }
     };
+    for (const metric of metrics) {
+      if (metric.type === "operation") {
+        stats.totalOperations += metric.count;
+        if (!stats.operationsByType[metric.operation]) {
+          stats.operationsByType[metric.operation] = {
+            count: 0,
+            errors: 0,
+            avgTime: 0
+          };
+        }
+        stats.operationsByType[metric.operation].count += metric.count;
+        stats.operationsByType[metric.operation].errors += metric.errors;
+        const current = stats.operationsByType[metric.operation];
+        const totalCount2 = current.count;
+        const newAvg = (current.avgTime * (totalCount2 - metric.count) + metric.totalTime) / totalCount2;
+        current.avgTime = newAvg;
+      }
+    }
+    const totalTime = metrics.reduce((sum, m) => sum + m.totalTime, 0);
+    const totalCount = metrics.reduce((sum, m) => sum + m.count, 0);
+    stats.avgResponseTime = totalCount > 0 ? totalTime / totalCount : 0;
+    return stats;
+  }
+  async cleanupOldData() {
+    const cutoffDate = /* @__PURE__ */ new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
+    if (this.metricsResource) {
+      const oldMetrics = await this.getMetrics({ endDate: cutoffDate.toISOString() });
+      for (const metric of oldMetrics) {
+        await this.metricsResource.delete(metric.id);
+      }
+    }
+    if (this.errorsResource) {
+      const oldErrors = await this.getErrorLogs({ endDate: cutoffDate.toISOString() });
+      for (const error of oldErrors) {
+        await this.errorsResource.delete(error.id);
+      }
+    }
+    if (this.performanceResource) {
+      const oldPerformance = await this.getPerformanceLogs({ endDate: cutoffDate.toISOString() });
+      for (const perf of oldPerformance) {
+        await this.performanceResource.delete(perf.id);
+      }
+    }
+    console.log(`Cleaned up data older than ${this.config.retentionDays} days`);
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AuthenticationError, BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, InvalidResourceItem, MemoryCache, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PermissionError, Plugin, PluginObject, Resource, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3Cache, S3DBError, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, Schema, SchemaActions, UnknownError, ValidationError, Validator, ValidatorManager, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateTotalSize, calculateUTF8Bytes, decrypt, S3db as default, encrypt, getBehavior, getSizeBreakdown, idGenerator, passwordGenerator, sha256, streamToString, transformValue };
+class BaseReplicator extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.config = config;
+    this.name = this.constructor.name;
+    this.enabled = config.enabled !== false;
+  }
+  /**
+   * Initialize the replicator
+   * @param {Object} database - The s3db database instance
+   * @returns {Promise<void>}
+   */
+  async initialize(database) {
+    this.database = database;
+    this.emit("initialized", { replicator: this.name });
+  }
+  /**
+   * Replicate data to the target
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {string} operation - Operation type (insert, update, delete)
+   * @param {Object} data - The data to replicate
+   * @param {string} id - Record ID
+   * @returns {Promise<Object>} Replication result
+   */
+  async replicate(resourceName, operation, data, id) {
+    throw new Error(`replicate() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Replicate multiple records in batch
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {Array} records - Array of records to replicate
+   * @returns {Promise<Object>} Batch replication result
+   */
+  async replicateBatch(resourceName, records) {
+    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Test the connection to the target
+   * @returns {Promise<boolean>} True if connection is successful
+   */
+  async testConnection() {
+    throw new Error(`testConnection() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Get replicator status and statistics
+   * @returns {Promise<Object>} Status information
+   */
+  async getStatus() {
+    return {
+      name: this.name,
+      enabled: this.enabled,
+      config: this.config,
+      connected: false
+    };
+  }
+  /**
+   * Cleanup resources
+   * @returns {Promise<void>}
+   */
+  async cleanup() {
+    this.emit("cleanup", { replicator: this.name });
+  }
+  /**
+   * Validate replicator configuration
+   * @returns {Object} Validation result
+   */
+  validateConfig() {
+    return { isValid: true, errors: [] };
+  }
+}
+
+class S3dbReplicator extends BaseReplicator {
+  constructor(config = {}, resources = []) {
+    super(config);
+    this.resources = resources;
+    this.connectionString = config.connectionString;
+    this.region = config.region;
+    this.bucket = config.bucket;
+    this.keyPrefix = config.keyPrefix;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.connectionString && !this.bucket) {
+      errors.push("Either connectionString or bucket must be provided");
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const targetConfig = {
+      connectionString: this.connectionString,
+      region: this.region,
+      bucket: this.bucket,
+      keyPrefix: this.keyPrefix,
+      verbose: this.config.verbose || false
+    };
+    this.targetDatabase = new S3db(targetConfig);
+    await this.targetDatabase.connect();
+    this.emit("connected", {
+      replicator: this.name,
+      target: this.connectionString || this.bucket
+    });
+  }
+  async replicate(resourceName, operation, data, id) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      let result;
+      switch (operation) {
+        case "insert":
+          result = await this.targetDatabase.resources[resourceName]?.insert(data);
+          break;
+        case "update":
+          result = await this.targetDatabase.resources[resourceName]?.update(id, data);
+          break;
+        case "delete":
+          result = await this.targetDatabase.resources[resourceName]?.delete(id);
+          break;
+        default:
+          throw new Error(`Unsupported operation: ${operation}`);
+      }
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        success: true
+      });
+      return { success: true, result };
+    } catch (error) {
+      this.emit("replication_error", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async replicateBatch(resourceName, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      const results = [];
+      const errors = [];
+      for (const record of records) {
+        try {
+          const result = await this.replicate(
+            resourceName,
+            record.operation,
+            record.data,
+            record.id
+          );
+          results.push(result);
+        } catch (error) {
+          errors.push({ id: record.id, error: error.message });
+        }
+      }
+      this.emit("batch_replicated", {
+        replicator: this.name,
+        resourceName,
+        total: records.length,
+        successful: results.filter((r) => r.success).length,
+        errors: errors.length
+      });
+      return {
+        success: errors.length === 0,
+        results,
+        errors,
+        total: records.length
+      };
+    } catch (error) {
+      this.emit("batch_replication_error", {
+        replicator: this.name,
+        resourceName,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async testConnection() {
+    try {
+      if (!this.targetDatabase) {
+        await this.initialize(this.database);
+      }
+      await this.targetDatabase.listResources();
+      return true;
+    } catch (error) {
+      this.emit("connection_error", {
+        replicator: this.name,
+        error: error.message
+      });
+      return false;
+    }
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.targetDatabase,
+      targetDatabase: this.connectionString || this.bucket,
+      resources: this.resources,
+      totalReplications: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replication_error")
+    };
+  }
+  async cleanup() {
+    if (this.targetDatabase) {
+      this.targetDatabase.removeAllListeners();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.length === 0 || this.resources.includes(resourceName);
+  }
+}
+
+class SqsReplicator extends BaseReplicator {
+  constructor(config = {}, resources = []) {
+    super(config);
+    this.resources = resources;
+    this.queueUrl = config.queueUrl;
+    this.queues = config.queues || {};
+    this.defaultQueueUrl = config.defaultQueueUrl;
+    this.region = config.region || "us-east-1";
+    this.sqsClient = null;
+    this.messageGroupId = config.messageGroupId;
+    this.deduplicationId = config.deduplicationId;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueueUrl) {
+      errors.push("Either queueUrl, queues object, or defaultQueueUrl must be provided");
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  /**
+   * Get the appropriate queue URL for a resource
+   */
+  getQueueUrlForResource(resourceName) {
+    if (this.queues[resourceName]) {
+      return this.queues[resourceName];
+    }
+    if (this.queueUrl) {
+      return this.queueUrl;
+    }
+    if (this.defaultQueueUrl) {
+      return this.defaultQueueUrl;
+    }
+    throw new Error(`No queue URL found for resource '${resourceName}'`);
+  }
+  /**
+   * Create standardized message structure
+   */
+  createMessage(resourceName, operation, data, id, beforeData = null) {
+    const baseMessage = {
+      resource: resourceName,
+      action: operation,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "s3db-replication"
+    };
+    switch (operation) {
+      case "insert":
+        return {
+          ...baseMessage,
+          data
+        };
+      case "update":
+        return {
+          ...baseMessage,
+          before: beforeData,
+          data
+        };
+      case "delete":
+        return {
+          ...baseMessage,
+          data
+        };
+      default:
+        return {
+          ...baseMessage,
+          data
+        };
+    }
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    try {
+      const { SQSClient, SendMessageCommand, SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
+      this.sqsClient = new SQSClient({
+        region: this.region,
+        credentials: this.config.credentials
+      });
+      this.emit("initialized", {
+        replicator: this.name,
+        queueUrl: this.queueUrl,
+        queues: this.queues,
+        defaultQueueUrl: this.defaultQueueUrl
+      });
+    } catch (error) {
+      this.emit("initialization_error", {
+        replicator: this.name,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrl = this.getQueueUrlForResource(resourceName);
+      const message = this.createMessage(resourceName, operation, data, id, beforeData);
+      const command = new SendMessageCommand({
+        QueueUrl: queueUrl,
+        MessageBody: JSON.stringify(message),
+        MessageGroupId: this.messageGroupId,
+        MessageDeduplicationId: this.deduplicationId ? `${resourceName}:${operation}:${id}` : void 0
+      });
+      const result = await this.sqsClient.send(command);
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        queueUrl,
+        messageId: result.MessageId,
+        success: true
+      });
+      return { success: true, messageId: result.MessageId, queueUrl };
+    } catch (error) {
+      this.emit("replication_error", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async replicateBatch(resourceName, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrl = this.getQueueUrlForResource(resourceName);
+      const batchSize = 10;
+      const batches = [];
+      for (let i = 0; i < records.length; i += batchSize) {
+        batches.push(records.slice(i, i + batchSize));
+      }
+      const results = [];
+      const errors = [];
+      for (const batch of batches) {
+        try {
+          const entries = batch.map((record, index) => ({
+            Id: `${record.id}-${index}`,
+            MessageBody: JSON.stringify(this.createMessage(
+              resourceName,
+              record.operation,
+              record.data,
+              record.id,
+              record.beforeData
+            )),
+            MessageGroupId: this.messageGroupId,
+            MessageDeduplicationId: this.deduplicationId ? `${resourceName}:${record.operation}:${record.id}` : void 0
+          }));
+          const command = new SendMessageBatchCommand({
+            QueueUrl: queueUrl,
+            Entries: entries
+          });
+          const result = await this.sqsClient.send(command);
+          results.push(result);
+        } catch (error) {
+          errors.push({ batch: batch.length, error: error.message });
+        }
+      }
+      this.emit("batch_replicated", {
+        replicator: this.name,
+        resourceName,
+        queueUrl,
+        total: records.length,
+        successful: results.length,
+        errors: errors.length
+      });
+      return {
+        success: errors.length === 0,
+        results,
+        errors,
+        total: records.length,
+        queueUrl
+      };
+    } catch (error) {
+      this.emit("batch_replication_error", {
+        replicator: this.name,
+        resourceName,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async testConnection() {
+    try {
+      if (!this.sqsClient) {
+        await this.initialize(this.database);
+      }
+      const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
+      const command = new GetQueueAttributesCommand({
+        QueueUrl: this.queueUrl,
+        AttributeNames: ["QueueArn"]
+      });
+      await this.sqsClient.send(command);
+      return true;
+    } catch (error) {
+      this.emit("connection_error", {
+        replicator: this.name,
+        error: error.message
+      });
+      return false;
+    }
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.sqsClient,
+      queueUrl: this.queueUrl,
+      region: this.region,
+      resources: this.resources,
+      totalReplications: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replication_error")
+    };
+  }
+  async cleanup() {
+    if (this.sqsClient) {
+      this.sqsClient.destroy();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.length === 0 || this.resources.includes(resourceName);
+  }
+}
+
+class BigqueryReplicator extends BaseReplicator {
+  constructor(config = {}, resources = []) {
+    super(config);
+    this.resources = resources;
+    this.projectId = config.projectId;
+    this.datasetId = config.datasetId;
+    this.tableId = config.tableId;
+    this.tableMap = config.tableMap || {};
+    this.bigqueryClient = null;
+    this.credentials = config.credentials;
+    this.location = config.location || "US";
+    this.logOperations = config.logOperations !== false;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.projectId) errors.push("projectId is required");
+    if (!this.datasetId) errors.push("datasetId is required");
+    if (!this.tableId) errors.push("tableId is required");
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    try {
+      const { BigQuery } = await import('@google-cloud/bigquery');
+      this.bigqueryClient = new BigQuery({
+        projectId: this.projectId,
+        credentials: this.credentials,
+        location: this.location
+      });
+      this.emit("initialized", {
+        replicator: this.name,
+        projectId: this.projectId,
+        datasetId: this.datasetId,
+        tableId: this.tableId
+      });
+    } catch (error) {
+      this.emit("initialization_error", { replicator: this.name, error: error.message });
+      throw error;
+    }
+  }
+  getTableForResource(resourceName) {
+    return this.tableMap[resourceName] || this.tableId;
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      const tableId = this.getTableForResource(resourceName);
+      const table = dataset.table(tableId);
+      let job;
+      if (operation === "insert") {
+        const row = { ...data };
+        job = await table.insert([row]);
+      } else if (operation === "update") {
+        const keys = Object.keys(data).filter((k) => k !== "id");
+        const setClause = keys.map((k) => `
+          ${k}=@${k}
+        `).join(", ");
+        const params = { id };
+        keys.forEach((k) => {
+          params[k] = data[k];
+        });
+        const query = `UPDATE           \`${this.projectId}.${this.datasetId}.${tableId}\`
+        SET ${setClause}
+        WHERE id=@id`;
+        const [updateJob] = await this.bigqueryClient.createQueryJob({
+          query,
+          params
+        });
+        await updateJob.getQueryResults();
+        job = [updateJob];
+      } else if (operation === "delete") {
+        const query = `DELETE FROM           \`${this.projectId}.${this.datasetId}.${tableId}\`
+        WHERE id=@id`;
+        const [deleteJob] = await this.bigqueryClient.createQueryJob({
+          query,
+          params: { id }
+        });
+        await deleteJob.getQueryResults();
+        job = [deleteJob];
+      } else {
+        throw new Error(`Unsupported operation: ${operation}`);
+      }
+      if (this.logOperations) {
+        const logTable = dataset.table(this.tableId);
+        await logTable.insert([{
+          resource_name: resourceName,
+          operation,
+          record_id: id,
+          data: JSON.stringify(data),
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          source: "s3db-replication"
+        }]);
+      }
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        jobId: job[0]?.id,
+        success: true
+      });
+      return { success: true, jobId: job[0]?.id };
+    } catch (error) {
+      this.emit("replication_error", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      try {
+        const res = await this.replicate(resourceName, record.operation, record.data, record.id, record.beforeData);
+        results.push(res);
+      } catch (err) {
+        errors.push({ id: record.id, error: err.message });
+      }
+    }
+    return { success: errors.length === 0, results, errors };
+  }
+  async testConnection() {
+    try {
+      if (!this.bigqueryClient) await this.initialize();
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      await dataset.getMetadata();
+      return true;
+    } catch (error) {
+      this.emit("connection_error", { replicator: this.name, error: error.message });
+      return false;
+    }
+  }
+  async cleanup() {
+  }
+  shouldReplicateResource(resourceName) {
+    if (!this.resources || this.resources.length === 0) return true;
+    return this.resources.includes(resourceName);
+  }
+}
+
+class PostgresReplicator extends BaseReplicator {
+  constructor(config = {}, resources = []) {
+    super(config);
+    this.resources = resources;
+    this.connectionString = config.connectionString;
+    this.host = config.host;
+    this.port = config.port || 5432;
+    this.database = config.database;
+    this.user = config.user;
+    this.password = config.password;
+    this.tableName = config.tableName || "s3db_replication";
+    this.tableMap = config.tableMap || {};
+    this.client = null;
+    this.ssl = config.ssl;
+    this.logOperations = config.logOperations !== false;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.connectionString && (!this.host || !this.database)) {
+      errors.push("Either connectionString or host+database must be provided");
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    try {
+      const { Client } = await import('pg');
+      const config = this.connectionString ? {
+        connectionString: this.connectionString,
+        ssl: this.ssl
+      } : {
+        host: this.host,
+        port: this.port,
+        database: this.database,
+        user: this.user,
+        password: this.password,
+        ssl: this.ssl
+      };
+      this.client = new Client(config);
+      await this.client.connect();
+      if (this.logOperations) await this.createTableIfNotExists();
+      this.emit("initialized", {
+        replicator: this.name,
+        database: this.database || "postgres",
+        table: this.tableName
+      });
+    } catch (error) {
+      this.emit("initialization_error", {
+        replicator: this.name,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+  async createTableIfNotExists() {
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS ${this.tableName} (
+        id SERIAL PRIMARY KEY,
+        resource_name VARCHAR(255) NOT NULL,
+        operation VARCHAR(50) NOT NULL,
+        record_id VARCHAR(255) NOT NULL,
+        data JSONB,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        source VARCHAR(100) DEFAULT 's3db-replication',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_resource_name ON ${this.tableName}(resource_name);
+      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_operation ON ${this.tableName}(operation);
+      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_record_id ON ${this.tableName}(record_id);
+      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_timestamp ON ${this.tableName}(timestamp);
+    `;
+    await this.client.query(createTableQuery);
+  }
+  getTableForResource(resourceName) {
+    return this.tableMap[resourceName] || resourceName;
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    try {
+      const table = this.getTableForResource(resourceName);
+      let result;
+      if (operation === "insert") {
+        const keys = Object.keys(data);
+        const values = keys.map((k) => data[k]);
+        const columns = keys.map((k) => `"${k}"`).join(", ");
+        const params = keys.map((_, i) => `$${i + 1}`).join(", ");
+        const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
+        result = await this.client.query(sql, values);
+      } else if (operation === "update") {
+        const keys = Object.keys(data).filter((k) => k !== "id");
+        const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
+        const values = keys.map((k) => data[k]);
+        values.push(id);
+        const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
+        result = await this.client.query(sql, values);
+      } else if (operation === "delete") {
+        const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
+        result = await this.client.query(sql, [id]);
+      } else {
+        throw new Error(`Unsupported operation: ${operation}`);
+      }
+      if (this.logOperations) {
+        await this.client.query(
+          `INSERT INTO ${this.tableName} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replication"]
+        );
+      }
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        result: result.rows,
+        success: true
+      });
+      return { success: true, rows: result.rows };
+    } catch (error) {
+      this.emit("replication_error", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        error: error.message
+      });
+      return { success: false, error: error.message };
+    }
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      try {
+        const res = await this.replicate(resourceName, record.operation, record.data, record.id, record.beforeData);
+        results.push(res);
+      } catch (err) {
+        errors.push({ id: record.id, error: err.message });
+      }
+    }
+    return { success: errors.length === 0, results, errors };
+  }
+  async testConnection() {
+    try {
+      if (!this.client) await this.initialize();
+      await this.client.query("SELECT 1");
+      return true;
+    } catch (error) {
+      this.emit("connection_error", { replicator: this.name, error: error.message });
+      return false;
+    }
+  }
+  async cleanup() {
+    if (this.client) await this.client.end();
+  }
+  shouldReplicateResource(resourceName) {
+    if (!this.resources || this.resources.length === 0) return true;
+    return this.resources.includes(resourceName);
+  }
+}
+
+const REPLICATOR_DRIVERS = {
+  s3db: S3dbReplicator,
+  sqs: SqsReplicator,
+  bigquery: BigqueryReplicator,
+  postgres: PostgresReplicator
+};
+function createReplicator(driver, config = {}, resources = []) {
+  const ReplicatorClass = REPLICATOR_DRIVERS[driver];
+  if (!ReplicatorClass) {
+    throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
+  }
+  return new ReplicatorClass(config, resources);
+}
+function validateReplicatorConfig(driver, config, resources = []) {
+  const replicator = createReplicator(driver, config, resources);
+  return replicator.validateConfig();
+}
+
+const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
+class ReplicationPlugin extends Plugin {
+  constructor(options = {}) {
+    super();
+    this.config = {
+      enabled: options.enabled !== false,
+      replicators: options.replicators || [],
+      syncMode: options.syncMode || "async",
+      // 'sync' or 'async'
+      retryAttempts: options.retryAttempts || 3,
+      retryDelay: options.retryDelay || 1e3,
+      // ms
+      batchSize: options.batchSize || 10,
+      compression: options.compression || false,
+      // Enable compression
+      compressionLevel: options.compressionLevel || 6,
+      // 0-9
+      ...options
+    };
+    this.replicators = [];
+    this.queue = [];
+    this.isProcessing = false;
+    this.stats = {
+      totalOperations: 0,
+      successfulOperations: 0,
+      failedOperations: 0,
+      lastSync: null
+    };
+  }
+  /**
+   * Process data according to replication mode
+   */
+  processDataForReplication(data, metadata = {}) {
+    switch (this.config.replicationMode) {
+      case "exact-copy":
+        return {
+          body: data,
+          metadata
+        };
+      case "just-metadata":
+        return {
+          body: null,
+          metadata
+        };
+      case "all-in-body":
+        return {
+          body: {
+            data,
+            metadata,
+            replicationMode: this.config.replicationMode,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString()
+          },
+          metadata: {
+            replicationMode: this.config.replicationMode,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString()
+          }
+        };
+      default:
+        return {
+          body: data,
+          metadata
+        };
+    }
+  }
+  /**
+   * Compress data if compression is enabled
+   */
+  async compressData(data) {
+    if (!this.config.compression || !data) {
+      return data;
+    }
+    try {
+      const jsonString = JSON.stringify(data);
+      const compressed = await gzipAsync(jsonString, { level: this.config.compressionLevel });
+      return compressed.toString("base64");
+    } catch (error) {
+      this.emit("replication.compression.failed", { error, data });
+      return data;
+    }
+  }
+  /**
+   * Decompress data if it was compressed
+   */
+  async decompressData(data) {
+    if (!this.config.compression || !data) {
+      return data;
+    }
+    try {
+      if (typeof data === "string" && data.startsWith("H4sI")) {
+        const buffer = Buffer.from(data, "base64");
+        const decompressed = await gunzipAsync(buffer);
+        return JSON.parse(decompressed.toString());
+      }
+      return data;
+    } catch (error) {
+      this.emit("replication.decompression.failed", { error, data });
+      return data;
+    }
+  }
+  async setup(database) {
+    this.database = database;
+    if (!this.config.enabled) {
+      return;
+    }
+    if (this.config.replicators && this.config.replicators.length > 0) {
+      await this.initializeReplicators();
+    }
+    if (!database.resources.replication_logs) {
+      this.replicationLog = await database.createResource({
+        name: "replication_logs",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          recordId: "string|required",
+          replicatorId: "string|required",
+          status: "string|required",
+          attempts: "number|required",
+          lastAttempt: "string|required",
+          error: "string|required",
+          data: "object|required",
+          timestamp: "string|required"
+        }
+      });
+    } else {
+      this.replicationLog = database.resources.replication_logs;
+    }
+    for (const resourceName in database.resources) {
+      if (resourceName !== "replication_logs") {
+        this.installHooks(database.resources[resourceName]);
+      }
+    }
+    const originalCreateResource = database.createResource.bind(database);
+    database.createResource = async (config) => {
+      const resource = await originalCreateResource(config);
+      if (resource && resource.name !== "replication_logs") {
+        this.installHooks(resource);
+      }
+      return resource;
+    };
+    this.startQueueProcessor();
+  }
+  async initializeReplicators() {
+    for (const replicatorConfig of this.config.replicators) {
+      try {
+        const { driver, config: replicatorConfigData, resources = [] } = replicatorConfig;
+        const validation = validateReplicatorConfig(driver, replicatorConfigData, resources);
+        if (!validation.isValid) {
+          this.emit("replicator.validation.failed", {
+            driver,
+            errors: validation.errors
+          });
+          continue;
+        }
+        const replicator = createReplicator(driver, replicatorConfigData, resources);
+        await replicator.initialize(this.database);
+        replicator.on("replicated", (data) => {
+          this.emit("replication.success", data);
+        });
+        replicator.on("replication_error", (data) => {
+          this.emit("replication.failed", data);
+        });
+        this.replicators.push({
+          id: `${driver}-${Date.now()}`,
+          driver,
+          config: replicatorConfigData,
+          resources,
+          instance: replicator
+        });
+        this.emit("replicator.initialized", {
+          driver,
+          config: replicatorConfigData,
+          resources
+        });
+      } catch (error) {
+        this.emit("replicator.initialization.failed", {
+          driver: replicatorConfig.driver,
+          error: error.message
+        });
+      }
+    }
+  }
+  async start() {
+  }
+  async stop() {
+    this.isProcessing = false;
+    await this.processQueue();
+  }
+  installHooks(resource) {
+    if (!resource || resource.name === "replication_logs") return;
+    const originalDataMap = /* @__PURE__ */ new Map();
+    resource.addHook("afterInsert", async (data) => {
+      await this.queueReplication(resource.name, "insert", data.id, data);
+      return data;
+    });
+    resource.addHook("preUpdate", async (data) => {
+      if (data.id) {
+        try {
+          const originalData = await resource.get(data.id);
+          originalDataMap.set(data.id, originalData);
+        } catch (error) {
+          originalDataMap.set(data.id, { id: data.id });
+        }
+      }
+      return data;
+    });
+    resource.addHook("afterUpdate", async (data) => {
+      const beforeData = originalDataMap.get(data.id);
+      await this.queueReplication(resource.name, "update", data.id, data, beforeData);
+      originalDataMap.delete(data.id);
+      return data;
+    });
+    resource.addHook("afterDelete", async (data) => {
+      await this.queueReplication(resource.name, "delete", data.id, data);
+      return data;
+    });
+    const originalDeleteMany = resource.deleteMany.bind(resource);
+    resource.deleteMany = async (ids) => {
+      const result = await originalDeleteMany(ids);
+      if (result && result.length > 0) {
+        for (const id of ids) {
+          await this.queueReplication(resource.name, "delete", id, { id });
+        }
+      }
+      return result;
+    };
+  }
+  async queueReplication(resourceName, operation, recordId, data, beforeData = null) {
+    if (!this.config.enabled) {
+      return;
+    }
+    if (this.replicators.length === 0) {
+      return;
+    }
+    const applicableReplicators = this.replicators.filter(
+      (replicator) => replicator.instance.shouldReplicateResource(resourceName)
+    );
+    if (applicableReplicators.length === 0) {
+      return;
+    }
+    const item = {
+      id: `repl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      resourceName,
+      operation,
+      recordId,
+      data: isPlainObject(data) ? data : { raw: data },
+      beforeData: beforeData ? isPlainObject(beforeData) ? beforeData : { raw: beforeData } : null,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      attempts: 0
+    };
+    const logId = await this.logReplication(item);
+    if (this.config.syncMode === "sync") {
+      try {
+        const result = await this.processReplicationItem(item);
+        if (logId) {
+          await this.updateReplicationLog(logId, {
+            status: result.success ? "success" : "failed",
+            attempts: 1,
+            error: result.success ? "" : JSON.stringify(result.results)
+          });
+        }
+        this.stats.totalOperations++;
+        if (result.success) {
+          this.stats.successfulOperations++;
+        } else {
+          this.stats.failedOperations++;
+        }
+      } catch (error) {
+        if (logId) {
+          await this.updateReplicationLog(logId, {
+            status: "failed",
+            attempts: 1,
+            error: error.message
+          });
+        }
+        this.stats.failedOperations++;
+      }
+    } else {
+      this.queue.push(item);
+      this.emit("replication.queued", { item, queueLength: this.queue.length });
+    }
+  }
+  async processReplicationItem(item) {
+    const { resourceName, operation, recordId, data, beforeData } = item;
+    const applicableReplicators = this.replicators.filter(
+      (replicator) => replicator.instance.shouldReplicateResource(resourceName)
+    );
+    if (applicableReplicators.length === 0) {
+      return { success: true, skipped: true, reason: "no_applicable_replicators" };
+    }
+    const results = [];
+    for (const replicator of applicableReplicators) {
+      try {
+        const result = await replicator.instance.replicate(resourceName, operation, data, recordId, beforeData);
+        results.push({
+          replicatorId: replicator.id,
+          driver: replicator.driver,
+          success: result.success,
+          error: result.error,
+          skipped: result.skipped
+        });
+      } catch (error) {
+        results.push({
+          replicatorId: replicator.id,
+          driver: replicator.driver,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+    return {
+      success: results.every((r) => r.success || r.skipped),
+      results
+    };
+  }
+  async logReplication(item) {
+    if (!this.replicationLog) return;
+    try {
+      const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      await this.replicationLog.insert({
+        id: logId,
+        resourceName: item.resourceName,
+        operation: item.operation,
+        recordId: item.recordId,
+        replicatorId: "all",
+        // Will be updated with specific replicator results
+        status: "queued",
+        attempts: 0,
+        lastAttempt: (/* @__PURE__ */ new Date()).toISOString(),
+        error: "",
+        data: isPlainObject(item.data) ? item.data : { raw: item.data },
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return logId;
+    } catch (error) {
+      this.emit("replication.log.failed", { error: error.message, item });
+      return null;
+    }
+  }
+  async updateReplicationLog(logId, updates) {
+    if (!this.replicationLog) return;
+    try {
+      await this.replicationLog.update(logId, {
+        ...updates,
+        lastAttempt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    } catch (error) {
+      this.emit("replication.updateLog.failed", { error: error.message, logId, updates });
+    }
+  }
+  startQueueProcessor() {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+    this.processQueueLoop();
+  }
+  async processQueueLoop() {
+    while (this.isProcessing) {
+      if (this.queue.length > 0) {
+        const batch = this.queue.splice(0, this.config.batchSize);
+        for (const item of batch) {
+          await this.processReplicationItem(item);
+        }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 1e3));
+      }
+    }
+  }
+  async processQueue() {
+    if (this.queue.length === 0) return;
+    const item = this.queue.shift();
+    let attempts = 0;
+    let lastError = null;
+    while (attempts < this.config.retryAttempts) {
+      try {
+        attempts++;
+        this.emit("replication.retry.started", {
+          item,
+          attempt: attempts,
+          maxAttempts: this.config.retryAttempts
+        });
+        const result = await this.processReplicationItem(item);
+        if (result.success) {
+          this.stats.successfulOperations++;
+          this.emit("replication.success", {
+            item,
+            attempts,
+            results: result.results,
+            stats: this.stats
+          });
+          return;
+        } else {
+          lastError = result.results;
+          if (attempts < this.config.retryAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, this.config.retryDelay * attempts));
+          }
+        }
+      } catch (error) {
+        lastError = error.message;
+        if (attempts < this.config.retryAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, this.config.retryDelay * attempts));
+        } else {
+          this.emit("replication.retry.exhausted", {
+            attempts,
+            lastError,
+            item
+          });
+        }
+      }
+    }
+    this.stats.failedOperations++;
+    this.emit("replication.failed", {
+      attempts,
+      lastError,
+      item,
+      stats: this.stats
+    });
+  }
+  // Utility methods
+  async getReplicationStats() {
+    const replicatorStats = await Promise.all(
+      this.replicators.map(async (replicator) => {
+        const status = await replicator.instance.getStatus();
+        return {
+          id: replicator.id,
+          driver: replicator.driver,
+          config: replicator.config,
+          status
+        };
+      })
+    );
+    return {
+      enabled: this.config.enabled,
+      replicators: replicatorStats,
+      queue: {
+        length: this.queue.length,
+        isProcessing: this.isProcessing
+      },
+      stats: this.stats,
+      lastSync: this.stats.lastSync
+    };
+  }
+  async getReplicationLogs(options = {}) {
+    if (!this.replicationLog) {
+      return [];
+    }
+    const {
+      resourceName,
+      operation,
+      status,
+      limit = 100,
+      offset = 0
+    } = options;
+    let query = {};
+    if (resourceName) {
+      query.resourceName = resourceName;
+    }
+    if (operation) {
+      query.operation = operation;
+    }
+    if (status) {
+      query.status = status;
+    }
+    const logs = await this.replicationLog.list(query);
+    return logs.slice(offset, offset + limit);
+  }
+  async retryFailedReplications() {
+    if (!this.replicationLog) {
+      return { retried: 0 };
+    }
+    const failedLogs = await this.replicationLog.list({
+      status: "failed"
+    });
+    let retried = 0;
+    for (const log of failedLogs) {
+      try {
+        await this.queueReplication(
+          log.resourceName,
+          log.operation,
+          log.recordId,
+          log.data
+        );
+        retried++;
+      } catch (error) {
+        console.error("Failed to retry replication:", error);
+      }
+    }
+    return { retried };
+  }
+  async syncAllData(replicatorId) {
+    const replicator = this.replicators.find((r) => r.id === replicatorId);
+    if (!replicator) {
+      throw new Error(`Replicator not found: ${replicatorId}`);
+    }
+    this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
+    for (const resourceName in this.database.resources) {
+      if (resourceName === "replication_logs") continue;
+      if (replicator.instance.shouldReplicateResource(resourceName)) {
+        this.emit("replication.sync.resource", { resourceName, replicatorId });
+        const resource = this.database.resources[resourceName];
+        const allRecords = await resource.getAll();
+        for (const record of allRecords) {
+          await replicator.instance.replicate(resourceName, "insert", record, record.id);
+        }
+      }
+    }
+    this.emit("replication.sync.completed", { replicatorId, stats: this.stats });
+  }
+}
+
+export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, FullTextPlugin, InvalidResourceItem, MemoryCache, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PermissionError, Plugin, PluginObject, ReplicationPlugin, Resource, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3Cache, S3DBError, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, Schema, SchemaActions, UnknownError, ValidationError, Validator, ValidatorManager, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateTotalSize, calculateUTF8Bytes, decrypt, S3db as default, encrypt, getBehavior, getSizeBreakdown, idGenerator, passwordGenerator, sha256, streamToString, transformValue };
