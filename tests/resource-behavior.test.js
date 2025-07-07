@@ -4,6 +4,7 @@ import { calculateTotalSize } from '../src/concerns/calculator.js';
 import Resource from '../src/resource.class.js';
 import { Database } from '../src/database.class.js';
 import Client from '../src/client.class.js';
+import S3db from '../src/database.class.js';
 
 describe('Resource Behaviors', () => {
   describe('Behavior System Structure', () => {
@@ -12,7 +13,8 @@ describe('Resource Behaviors', () => {
         'user-management',
         'enforce-limits', 
         'data-truncate',
-        'body-overflow'
+        'body-overflow',
+        'body-only'
       ]);
       expect(DEFAULT_BEHAVIOR).toBe('user-management');
     });
@@ -654,6 +656,146 @@ describe('Resource Behaviors', () => {
       if (result.body) {
         expect(() => JSON.parse(result.body)).not.toThrow();
       }
+    });
+  });
+
+  describe('Body Only Behavior', () => {
+    let behavior;
+    let mockResource;
+
+    beforeEach(() => {
+      behavior = getBehavior('body-only');
+      mockResource = { behavior: 'body-only' };
+    });
+
+    test('should store all data in body as JSON', async () => {
+      const data = {
+        name: 'Test',
+        email: 'test@example.com',
+        bio: 'A'.repeat(1000)
+      };
+      const mappedData = {
+        name: 'Test',
+        email: 'test@example.com',
+        bio: 'A'.repeat(1000)
+      };
+
+      const result = await behavior.handleInsert({
+        resource: mockResource,
+        data: data,
+        mappedData: mappedData
+      });
+
+      expect(result.mappedData).toEqual({});
+      expect(result.body).toBe(JSON.stringify(mappedData));
+    });
+
+    test('should parse body content on get', async () => {
+      const bodyData = {
+        name: 'Test',
+        email: 'test@example.com',
+        bio: 'A'.repeat(1000)
+      };
+      const metadata = { _v: 'v1' };
+      const body = JSON.stringify(bodyData);
+
+      const result = await behavior.handleGet({
+        resource: mockResource,
+        metadata: metadata,
+        body: body
+      });
+
+      expect(result.metadata).toEqual(bodyData);
+      expect(result.body).toBe("");
+    });
+
+    test('should handle large data without limits', async () => {
+      const data = {
+        name: 'Test',
+        email: 'test@example.com',
+        bio: 'A'.repeat(5000) // Much larger than 2KB
+      };
+      const mappedData = {
+        name: 'Test',
+        email: 'test@example.com',
+        bio: 'A'.repeat(5000)
+      };
+
+      const result = await behavior.handleInsert({
+        resource: mockResource,
+        data: data,
+        mappedData: mappedData
+      });
+
+      expect(result.mappedData).toEqual({});
+      expect(result.body).toBe(JSON.stringify(mappedData));
+    });
+
+    test('should handle malformed body gracefully', async () => {
+      const metadata = { _v: 'v1' };
+      const body = "invalid json";
+
+      const result = await behavior.handleGet({
+        resource: mockResource,
+        metadata: metadata,
+        body: body
+      });
+
+      expect(result.metadata).toEqual(metadata);
+      expect(result.body).toBe("");
+    });
+
+    test('should work with Resource class integration', async () => {
+      // Mock the S3db and Resource classes for integration test
+      const mockClient = {
+        putObject: jest.fn().mockResolvedValue({}),
+        getObject: jest.fn().mockResolvedValue({
+          Body: JSON.stringify({
+            name: "John Doe",
+            email: "john@example.com",
+            bio: "A".repeat(3000)
+          }),
+          Metadata: { _v: '0' }
+        }),
+        listObjects: jest.fn().mockResolvedValue({ Contents: [] })
+      };
+
+      const mockDatabase = {
+        client: mockClient,
+        version: 0,
+        emit: jest.fn()
+      };
+
+      const resource = new Resource({
+        name: "users",
+        client: mockClient,
+        attributes: {
+          name: "string",
+          email: "string",
+          bio: "string"
+        },
+        behavior: "body-only"
+      });
+
+      // Test insert with body-only behavior
+      const user = await resource.insert({
+        name: "John Doe",
+        email: "john@example.com",
+        bio: "A".repeat(3000) // Large data that would exceed 2KB
+      });
+
+      expect(user.name).toBe("John Doe");
+      expect(user.email).toBe("john@example.com");
+      expect(user.bio).toBe("A".repeat(3000));
+
+      // Verify that putObject was called with body content
+      expect(mockClient.putObject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining("John Doe"),
+          body: expect.stringContaining("john@example.com"),
+          body: expect.stringContaining("A".repeat(3000))
+        })
+      );
     });
   });
 });

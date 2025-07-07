@@ -8,7 +8,6 @@ import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
  */
 export async function handleInsert({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit('exceedsLimit', {
       operation: 'insert',
@@ -18,13 +17,11 @@ export async function handleInsert({ resource, data, mappedData }) {
       data
     });
   }
-  
   return { mappedData, body: "" };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit('exceedsLimit', {
       operation: 'update',
@@ -35,13 +32,11 @@ export async function handleUpdate({ resource, id, data, mappedData }) {
       data
     });
   }
-  
   return { mappedData, body: "" };
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  
   if (totalSize > S3_METADATA_LIMIT_BYTES) {
     resource.emit('exceedsLimit', {
       operation: 'upsert',
@@ -52,7 +47,6 @@ export async function handleUpsert({ resource, id, data, mappedData }) {
       data
     });
   }
-  
   return { mappedData, body: "" };
 }
 

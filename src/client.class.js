@@ -441,6 +441,12 @@ export class Client extends EventEmitter {
         prefix,
         offset,
       });
+      
+      // If no continuation token is returned, it means we've reached the end
+      if (!continuationToken) {
+        this.emit("getKeysPage", [], params);
+        return [];
+      }
     }
 
     while (truncated) {
@@ -458,8 +464,8 @@ export class Client extends EventEmitter {
       truncated = res.IsTruncated || false;
       continuationToken = res.NextContinuationToken;
 
-      if (keys.length > amount) {
-        keys = keys.splice(0, amount);
+      if (keys.length >= amount) {
+        keys = keys.slice(0, amount);
         break;
       }
     }
