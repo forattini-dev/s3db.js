@@ -540,8 +540,8 @@ export class ReplicationPlugin extends Plugin {
             lastError, 
             item 
           });
-        }
       }
+    }
     }
 
     this.stats.failedOperations++;
@@ -648,17 +648,17 @@ export class ReplicationPlugin extends Plugin {
     }
 
     this.stats.lastSync = new Date().toISOString();
-    
+
     for (const resourceName in this.database.resources) {
       if (resourceName === 'replication_logs') continue;
-      
+
       if (replicator.instance.shouldReplicateResource(resourceName)) {
         this.emit('replication.sync.resource', { resourceName, replicatorId });
         
         const resource = this.database.resources[resourceName];
-        const allRecords = await resource.getAll();
-        
-        for (const record of allRecords) {
+      const allRecords = await resource.getAll();
+      
+      for (const record of allRecords) {
           await replicator.instance.replicate(resourceName, 'insert', record, record.id);
         }
       }
