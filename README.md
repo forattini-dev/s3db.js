@@ -93,6 +93,8 @@
 
 ## 📋 Table of Contents
 
+- [🚀 What is s3db.js?](#-what-is-s3dbjs)
+- [✨ Key Features](#-key-features)
 - [🚀 Quick Start](#-quick-start)
 - [💾 Installation](#-installation)
 - [🎯 Core Concepts](#-core-concepts)
@@ -100,22 +102,13 @@
 - [🔄 Resource Versioning System](#-resource-versioning-system)
 - [🆔 Custom ID Generation](#-custom-id-generation)
 - [🔌 Plugin System](#-plugin-system)
-- [🎛️ Advanced Behaviors](#️-advanced-behaviors)
+- [🔄 Replicator System](#-replicator-system)
+- [🎛️ Resource Behaviors](#️-resource-behaviors)
 - [🔄 Advanced Streaming API](#-advanced-streaming-api)
 - [📁 Binary Content Management](#-binary-content-management)
 - [🗂️ Advanced Partitioning](#️-advanced-partitioning)
 - [🎣 Advanced Hooks System](#-advanced-hooks-system)
 - [📖 API Reference](#-api-reference)
-- [🎨 Examples](#-examples)
-- [🔐 Security](#-security)
-- [⚙️ Advanced Configuration Options](#️-advanced-configuration-options)
-- [📡 Events and Emitters](#-events-and-emitters)
-- [🔧 Troubleshooting](#-troubleshooting)
-- [💰 Cost Analysis](#-cost-analysis)
-- [🚨 Best Practices](#-best-practices)
-- [🧪 Testing](#-testing)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
 
 ---
 
@@ -545,7 +538,6 @@ The Replication Plugin now supports a flexible driver-based system for replicati
   resources: ['users', 'products'], // <-- root level
   config: {
     connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup",
-    region: 'us-west-2'
   }
 }
 ```
@@ -611,32 +603,6 @@ The Replication Plugin now supports a flexible driver-based system for replicati
 - **Error Handling**: Comprehensive error handling and retry logic
 - **Status Monitoring**: Get detailed status and statistics for each replicator
 
-#### Dependencies
-
-The replicators use optional peer dependencies. Install only what you need:
-
-```bash
-# For SQS replicator
-npm install @aws-sdk/client-sqs
-# or
-yarn add @aws-sdk/client-sqs
-# or
-pnpm add @aws-sdk/client-sqs
-
-# For BigQuery replicator
-npm install @google-cloud/bigquery
-# or
-yarn add @google-cloud/bigquery
-# or
-pnpm add @google-cloud/bigquery
-
-# For PostgreSQL replicator
-npm install pg
-# or
-yarn add pg
-# or
-pnpm add pg
-```
 
 **⚠️ Important:** These dependencies are marked as `peerDependencies` in the package.json, which means they are not automatically installed with s3db.js. You must install them manually if you plan to use the corresponding replicators. If you don't install the required dependency, the replicator will throw an error when trying to initialize.
 
@@ -657,8 +623,6 @@ See `examples/e34-replicators.js` for a complete example using all four replicat
 # Install all replication dependencies for the full example
 npm install @aws-sdk/client-sqs @google-cloud/bigquery pg
 ```
-
-#### 🔄 Cache Plugin
 
 #### 🔄 Cache Plugin
 Intelligent caching to reduce API calls and improve performance:
@@ -877,6 +841,7 @@ const s3db = new S3db({
 
 // Data is automatically replicated to all configured targets
 await users.insert({ name: "John" }); // Synced to all replicators
+```
 
 **SQS Message Structure:**
 
@@ -917,7 +882,6 @@ The SQS replicator sends standardized messages with the following structure:
 - Unspecified resources use the default queue
 - FIFO queues supported with deduplication
 - Messages are automatically routed to the appropriate queue
-```
 
 #### 📝 Audit Plugin
 Log all operations for compliance and traceability:
@@ -945,7 +909,7 @@ const logs = await s3db.plugins.audit.getAuditLogs({
 console.log(logs); // Audit trail
 ```
 
-### 🎛️ Advanced Behaviors
+### 🎛️ Resource Behaviors
 
 Choose the right behavior strategy for your use case:
 
