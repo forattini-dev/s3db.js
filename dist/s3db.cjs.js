@@ -11066,7 +11066,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "6.0.0" : "latest";
+        return true ? "6.1.0" : "latest";
       } catch (e) {
         return "latest";
       }
@@ -20043,23 +20043,63 @@ class SqsReplicator extends BaseReplicator {
 }
 
 class BigqueryReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
+  constructor(config = {}, resources = {}) {
     super(config);
-    this.resources = resources;
     this.projectId = config.projectId;
     this.datasetId = config.datasetId;
-    this.tableId = config.tableId;
-    this.tableMap = config.tableMap || {};
     this.bigqueryClient = null;
     this.credentials = config.credentials;
     this.location = config.location || "US";
-    this.logOperations = config.logOperations !== false;
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
   }
   validateConfig() {
     const errors = [];
     if (!this.projectId) errors.push("projectId is required");
     if (!this.datasetId) errors.push("datasetId is required");
-    if (!this.tableId) errors.push("tableId is required");
+    if (Object.keys(this.resources).length === 0) errors.push("At least one resource must be configured");
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+      }
+    }
     return { isValid: errors.length === 0, errors };
   }
   async initialize(database) {
@@ -20075,78 +20115,117 @@ class BigqueryReplicator extends BaseReplicator {
         replicator: this.name,
         projectId: this.projectId,
         datasetId: this.datasetId,
-        tableId: this.tableId
+        resources: Object.keys(this.resources)
       });
     } catch (error) {
       this.emit("initialization_error", { replicator: this.name, error: error.message });
       throw error;
     }
   }
-  getTableForResource(resourceName) {
-    return this.tableMap[resourceName] || this.tableId;
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
   }
   async replicate(resourceName, operation, data, id, beforeData = null) {
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
       return { skipped: true, reason: "resource_not_included" };
     }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
     try {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
-      const tableId = this.getTableForResource(resourceName);
-      const table = dataset.table(tableId);
-      let job;
-      if (operation === "insert") {
-        const row = { ...data };
-        job = await table.insert([row]);
-      } else if (operation === "update") {
-        const keys = Object.keys(data).filter((k) => k !== "id");
-        const setClause = keys.map((k) => `
-          ${k}=@${k}
-        `).join(", ");
-        const params = { id };
-        keys.forEach((k) => {
-          params[k] = data[k];
-        });
-        const query = `UPDATE           \`${this.projectId}.${this.datasetId}.${tableId}\`
-        SET ${setClause}
-        WHERE id=@id`;
-        const [updateJob] = await this.bigqueryClient.createQueryJob({
-          query,
-          params
-        });
-        await updateJob.getQueryResults();
-        job = [updateJob];
-      } else if (operation === "delete") {
-        const query = `DELETE FROM           \`${this.projectId}.${this.datasetId}.${tableId}\`
-        WHERE id=@id`;
-        const [deleteJob] = await this.bigqueryClient.createQueryJob({
-          query,
-          params: { id }
-        });
-        await deleteJob.getQueryResults();
-        job = [deleteJob];
-      } else {
-        throw new Error(`Unsupported operation: ${operation}`);
+      for (const tableId of tables) {
+        try {
+          const table = dataset.table(tableId);
+          let job;
+          if (operation === "insert") {
+            const row = { ...data };
+            job = await table.insert([row]);
+          } else if (operation === "update") {
+            const keys = Object.keys(data).filter((k) => k !== "id");
+            const setClause = keys.map((k) => `${k}=@${k}`).join(", ");
+            const params = { id };
+            keys.forEach((k) => {
+              params[k] = data[k];
+            });
+            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
+            const [updateJob] = await this.bigqueryClient.createQueryJob({
+              query,
+              params
+            });
+            await updateJob.getQueryResults();
+            job = [updateJob];
+          } else if (operation === "delete") {
+            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableId}\` WHERE id=@id`;
+            const [deleteJob] = await this.bigqueryClient.createQueryJob({
+              query,
+              params: { id }
+            });
+            await deleteJob.getQueryResults();
+            job = [deleteJob];
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table: tableId,
+            success: true,
+            jobId: job[0]?.id
+          });
+        } catch (error) {
+          errors.push({
+            table: tableId,
+            error: error.message
+          });
+        }
       }
-      if (this.logOperations) {
-        const logTable = dataset.table(this.tableId);
-        await logTable.insert([{
-          resource_name: resourceName,
-          operation,
-          record_id: id,
-          data: JSON.stringify(data),
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          source: "s3db-replication"
-        }]);
+      if (this.logTable) {
+        try {
+          const logTable = dataset.table(this.logTable);
+          await logTable.insert([{
+            resource_name: resourceName,
+            operation,
+            record_id: id,
+            data: JSON.stringify(data),
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            source: "s3db-replication"
+          }]);
+        } catch (error) {
+          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
+        }
       }
+      const success = errors.length === 0;
       this.emit("replicated", {
         replicator: this.name,
         resourceName,
         operation,
         id,
-        jobId: job[0]?.id,
-        success: true
+        tables,
+        results,
+        errors,
+        success
       });
-      return { success: true, jobId: job[0]?.id };
+      return {
+        success,
+        results,
+        errors,
+        tables
+      };
     } catch (error) {
       this.emit("replication_error", {
         replicator: this.name,
@@ -20163,13 +20242,23 @@ class BigqueryReplicator extends BaseReplicator {
     const errors = [];
     for (const record of records) {
       try {
-        const res = await this.replicate(resourceName, record.operation, record.data, record.id, record.beforeData);
+        const res = await this.replicate(
+          resourceName,
+          record.operation,
+          record.data,
+          record.id,
+          record.beforeData
+        );
         results.push(res);
       } catch (err) {
         errors.push({ id: record.id, error: err.message });
       }
     }
-    return { success: errors.length === 0, results, errors };
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
   }
   async testConnection() {
     try {
@@ -20184,37 +20273,82 @@ class BigqueryReplicator extends BaseReplicator {
   }
   async cleanup() {
   }
-  shouldReplicateResource(resourceName) {
-    if (!this.resources || this.resources.length === 0) return true;
-    return this.resources.includes(resourceName);
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: this.resources,
+      logTable: this.logTable
+    };
   }
 }
 
 class PostgresReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
+  constructor(config = {}, resources = {}) {
     super(config);
-    this.resources = resources;
     this.connectionString = config.connectionString;
     this.host = config.host;
     this.port = config.port || 5432;
     this.database = config.database;
     this.user = config.user;
     this.password = config.password;
-    this.tableName = config.tableName || "s3db_replication";
-    this.tableMap = config.tableMap || {};
     this.client = null;
     this.ssl = config.ssl;
-    this.logOperations = config.logOperations !== false;
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
   }
   validateConfig() {
     const errors = [];
     if (!this.connectionString && (!this.host || !this.database)) {
       errors.push("Either connectionString or host+database must be provided");
     }
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
   }
   async initialize(database) {
     await super.initialize(database);
@@ -20233,11 +20367,13 @@ class PostgresReplicator extends BaseReplicator {
       };
       this.client = new Client(config);
       await this.client.connect();
-      if (this.logOperations) await this.createTableIfNotExists();
+      if (this.logTable) {
+        await this.createLogTableIfNotExists();
+      }
       this.emit("initialized", {
         replicator: this.name,
         database: this.database || "postgres",
-        table: this.tableName
+        resources: Object.keys(this.resources)
       });
     } catch (error) {
       this.emit("initialization_error", {
@@ -20247,9 +20383,9 @@ class PostgresReplicator extends BaseReplicator {
       throw error;
     }
   }
-  async createTableIfNotExists() {
+  async createLogTableIfNotExists() {
     const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS ${this.tableName} (
+      CREATE TABLE IF NOT EXISTS ${this.logTable} (
         id SERIAL PRIMARY KEY,
         resource_name VARCHAR(255) NOT NULL,
         operation VARCHAR(50) NOT NULL,
@@ -20259,58 +20395,103 @@ class PostgresReplicator extends BaseReplicator {
         source VARCHAR(100) DEFAULT 's3db-replication',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_resource_name ON ${this.tableName}(resource_name);
-      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_operation ON ${this.tableName}(operation);
-      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_record_id ON ${this.tableName}(record_id);
-      CREATE INDEX IF NOT EXISTS idx_${this.tableName}_timestamp ON ${this.tableName}(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_operation ON ${this.logTable}(operation);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_record_id ON ${this.logTable}(record_id);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
     `;
     await this.client.query(createTableQuery);
   }
-  getTableForResource(resourceName) {
-    return this.tableMap[resourceName] || resourceName;
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
   }
   async replicate(resourceName, operation, data, id, beforeData = null) {
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
       return { skipped: true, reason: "resource_not_included" };
     }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
     try {
-      const table = this.getTableForResource(resourceName);
-      let result;
-      if (operation === "insert") {
-        const keys = Object.keys(data);
-        const values = keys.map((k) => data[k]);
-        const columns = keys.map((k) => `"${k}"`).join(", ");
-        const params = keys.map((_, i) => `$${i + 1}`).join(", ");
-        const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
-        result = await this.client.query(sql, values);
-      } else if (operation === "update") {
-        const keys = Object.keys(data).filter((k) => k !== "id");
-        const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
-        const values = keys.map((k) => data[k]);
-        values.push(id);
-        const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
-        result = await this.client.query(sql, values);
-      } else if (operation === "delete") {
-        const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
-        result = await this.client.query(sql, [id]);
-      } else {
-        throw new Error(`Unsupported operation: ${operation}`);
+      for (const table of tables) {
+        try {
+          let result;
+          if (operation === "insert") {
+            const keys = Object.keys(data);
+            const values = keys.map((k) => data[k]);
+            const columns = keys.map((k) => `"${k}"`).join(", ");
+            const params = keys.map((_, i) => `$${i + 1}`).join(", ");
+            const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
+            result = await this.client.query(sql, values);
+          } else if (operation === "update") {
+            const keys = Object.keys(data).filter((k) => k !== "id");
+            const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
+            const values = keys.map((k) => data[k]);
+            values.push(id);
+            const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
+            result = await this.client.query(sql, values);
+          } else if (operation === "delete") {
+            const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
+            result = await this.client.query(sql, [id]);
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table,
+            success: true,
+            rows: result.rows,
+            rowCount: result.rowCount
+          });
+        } catch (error) {
+          errors.push({
+            table,
+            error: error.message
+          });
+        }
       }
-      if (this.logOperations) {
-        await this.client.query(
-          `INSERT INTO ${this.tableName} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-          [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replication"]
-        );
+      if (this.logTable) {
+        try {
+          await this.client.query(
+            `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replication"]
+          );
+        } catch (error) {
+          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
+        }
       }
+      const success = errors.length === 0;
       this.emit("replicated", {
         replicator: this.name,
         resourceName,
         operation,
         id,
-        result: result.rows,
-        success: true
+        tables,
+        results,
+        errors,
+        success
       });
-      return { success: true, rows: result.rows };
+      return {
+        success,
+        results,
+        errors,
+        tables
+      };
     } catch (error) {
       this.emit("replication_error", {
         replicator: this.name,
@@ -20327,13 +20508,23 @@ class PostgresReplicator extends BaseReplicator {
     const errors = [];
     for (const record of records) {
       try {
-        const res = await this.replicate(resourceName, record.operation, record.data, record.id, record.beforeData);
+        const res = await this.replicate(
+          resourceName,
+          record.operation,
+          record.data,
+          record.id,
+          record.beforeData
+        );
         results.push(res);
       } catch (err) {
         errors.push({ id: record.id, error: err.message });
       }
     }
-    return { success: errors.length === 0, results, errors };
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
   }
   async testConnection() {
     try {
@@ -20348,9 +20539,13 @@ class PostgresReplicator extends BaseReplicator {
   async cleanup() {
     if (this.client) await this.client.end();
   }
-  shouldReplicateResource(resourceName) {
-    if (!this.resources || this.resources.length === 0) return true;
-    return this.resources.includes(resourceName);
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      database: this.database || "postgres",
+      resources: this.resources,
+      logTable: this.logTable
+    };
   }
 }
 

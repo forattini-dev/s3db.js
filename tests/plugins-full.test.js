@@ -53,7 +53,7 @@ describe('Plugins Integration (All Plugins Together)', () => {
         await database.usePlugin(plugin);
       } else {
         // Static plugins like CostsPlugin
-        await plugin.setup(database);
+      await plugin.setup(database);
         // Register static plugins manually
         if (plugin.constructor.name === 'CostsPlugin') {
           database.plugins.costs = plugin;
