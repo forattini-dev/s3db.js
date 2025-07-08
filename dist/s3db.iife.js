@@ -11067,6 +11067,7 @@ ${validation.errors.join("\n")}`);
       this.verbose = options.verbose || false;
       this.parallelism = parseInt(options.parallelism + "") || 10;
       this.plugins = options.plugins || [];
+      this.pluginList = options.plugins || [];
       this.cache = options.cache;
       this.passphrase = options.passphrase || "secret";
       this.versioningEnabled = options.versioningEnabled || false;
@@ -11223,8 +11224,8 @@ ${validation.errors.join("\n")}`);
     }
     async startPlugins() {
       const db = this;
-      if (!lodashEs.isEmpty(this.plugins)) {
-        const plugins = this.plugins.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
+      if (!lodashEs.isEmpty(this.pluginList)) {
+        const plugins = this.pluginList.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
         const setupProms = plugins.map(async (plugin) => {
           if (plugin.beforeSetup) await plugin.beforeSetup();
           await plugin.setup(db);
@@ -11238,6 +11239,20 @@ ${validation.errors.join("\n")}`);
         });
         await Promise.all(startProms);
       }
+    }
+    /**
+     * Register and setup a plugin
+     * @param {Plugin} plugin - Plugin instance to register
+     * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
+     */
+    async usePlugin(plugin, name = null) {
+      const pluginName = name || plugin.constructor.name.replace("Plugin", "").toLowerCase();
+      this.plugins[pluginName] = plugin;
+      if (this.isConnected()) {
+        await plugin.setup(this);
+        await plugin.start();
+      }
+      return plugin;
     }
     async uploadMetadataFile() {
       const metadata = {
