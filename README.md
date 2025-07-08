@@ -560,17 +560,26 @@ The Replication Plugin now supports a flexible driver-based system for replicati
 ```javascript
 {
   driver: 'bigquery',
-  resources: ['users', 'orders'],
   config: {
     projectId: 'my-project',
     datasetId: 'analytics',
-    tableId: 's3db_replication',
     location: 'US',
+    logTable: 's3db_replication_log',
     credentials: {
       // Your Google Cloud service account credentials
       client_email: 'service-account@project.iam.gserviceaccount.com',
       private_key: '-----BEGIN PRIVATE KEY-----\n...'
     }
+  },
+  resources: {
+    users: [
+      { actions: ['insert', 'update', 'delete'], table: 'users_table' },
+    ],
+    orders: [
+      { actions: ['insert'], table: 'orders_table' },
+      { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
+    ],
+    products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
   }
 }
 ```
@@ -579,7 +588,6 @@ The Replication Plugin now supports a flexible driver-based system for replicati
 ```javascript
 {
   driver: 'postgres',
-  resources: ['users'],
   config: {
     connectionString: 'postgresql://user:pass@localhost:5432/analytics',
     // OR individual parameters:
@@ -588,8 +596,18 @@ The Replication Plugin now supports a flexible driver-based system for replicati
     // database: 'analytics',
     // user: 'user',
     // password: 'pass',
-    tableName: 's3db_replication',
-    ssl: false
+    ssl: false,
+    logTable: 's3db_replication_log'
+  },
+  resources: {
+    users: [
+      { actions: ['insert', 'update', 'delete'], table: 'users_table' },
+    ],
+    orders: [
+      { actions: ['insert'], table: 'orders_table' },
+      { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
+    ],
+    products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
   }
 }
 ```

@@ -58,28 +58,46 @@ async function main() {
         // BigQuery Replicator - Send data to Google BigQuery
         {
           driver: 'bigquery',
-          resources: ['users', 'orders'], // Replicate users and orders to BigQuery
           config: {
             projectId: 'my-analytics-project',
             datasetId: 's3db_data',
-            tableId: 'replication_log',
             location: 'US',
+            logTable: 'replication_log',
             credentials: {
               // Your Google Cloud credentials
               client_email: 'service-account@project.iam.gserviceaccount.com',
               private_key: '-----BEGIN PRIVATE KEY-----\n...'
             }
+          },
+          resources: {
+            users: [
+              { actions: ['insert', 'update', 'delete'], table: 'users_table' },
+            ],
+            orders: [
+              { actions: ['insert'], table: 'orders_table' },
+              { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
+            ],
+            products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
           }
         },
         
         // PostgreSQL Replicator - Send data to PostgreSQL database
         {
           driver: 'postgres',
-          resources: ['users'], // Only replicate users to PostgreSQL
           config: {
             connectionString: 'postgresql://user:password@localhost:5432/analytics',
-            tableName: 's3db_replication',
-            ssl: false
+            ssl: false,
+            logTable: 's3db_replication_log'
+          },
+          resources: {
+            users: [
+              { actions: ['insert', 'update', 'delete'], table: 'users_table' },
+            ],
+            orders: [
+              { actions: ['insert'], table: 'orders_table' },
+              { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
+            ],
+            products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
           }
         }
       ],

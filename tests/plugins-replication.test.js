@@ -993,7 +993,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['exact-copy-test']
           }
         }],
@@ -1020,7 +1020,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['metadata-only-test']
           }
         }],
@@ -1047,7 +1047,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['all-in-body-test']
           }
         }],
@@ -1107,7 +1107,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['compression-test']
           }
         }],
@@ -1143,7 +1143,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['compression-level-test']
           }
         }],
@@ -1171,7 +1171,7 @@ describe('Replication Plugin', () => {
         replicators: [{
           driver: 's3db',
           config: {
-            connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
+          connectionString: process.env.S3DB_CONNECTION_STRING || 's3://test-bucket',
             resources: ['compression-failure-test']
           }
         }],
