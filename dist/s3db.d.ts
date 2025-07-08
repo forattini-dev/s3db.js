@@ -3,40 +3,45 @@ declare module 's3db.js' {
   // CORE TYPES
   // ============================================================================
 
-  /** Main S3db configuration */
-  export interface S3dbConfig {
+  /** Main Database configuration */
+  export interface DatabaseConfig {
     connectionString?: string;
     region?: string;
     accessKeyId?: string;
     secretAccessKey?: string;
     sessionToken?: string;
     bucket?: string;
-    prefix?: string;
-    encryption?: boolean;
-    compression?: boolean;
-    cache?: boolean;
-    cacheTTL?: number;
-    maxConcurrency?: number;
-    retryAttempts?: number;
-    retryDelay?: number;
+    endpoint?: string;
+    forcePathStyle?: boolean;
+    verbose?: boolean;
+    parallelism?: number | string;
     passphrase?: string;
-    parallelism?: number;
-    timestamps?: boolean;
-    versioning?: boolean;
+    versioningEnabled?: boolean;
+    cache?: CacheConfig;
+    plugins?: Plugin[] | PluginFunction[];
+    client?: Client;
   }
 
   /** Resource configuration */
   export interface ResourceConfig {
     name: string;
+    client: Client;
+    version?: string;
     attributes?: Record<string, any>;
     behavior?: BehaviorName;
-    timestamps?: boolean;
-    partitions?: Record<string, PartitionConfig>;
-    hooks?: HookConfig;
-    options?: Record<string, any>;
     passphrase?: string;
     parallelism?: number;
-    versioning?: boolean;
+    observers?: any[];
+    cache?: boolean | CacheConfig;
+    autoDecrypt?: boolean;
+    timestamps?: boolean;
+    partitions?: Record<string, PartitionConfig>;
+    paranoid?: boolean;
+    allNestedObjectsOptional?: boolean;
+    hooks?: HookConfig;
+    idGenerator?: Function | number;
+    idSize?: number;
+    versioningEnabled?: boolean;
   }
 
   /** Partition configuration */
@@ -47,52 +52,56 @@ declare module 's3db.js' {
 
   /** Hook configuration */
   export interface HookConfig {
-    beforeInsert?: (data: any) => Promise<any> | any;
-    afterInsert?: (data: any, result: any) => Promise<void> | void;
-    beforeUpdate?: (id: string, data: any) => Promise<any> | any;
-    afterUpdate?: (id: string, data: any, result: any) => Promise<void> | void;
-    beforeDelete?: (id: string) => Promise<void> | void;
-    afterDelete?: (id: string) => Promise<void> | void;
+    preInsert?: Function[];
+    afterInsert?: Function[];
+    preUpdate?: Function[];
+    afterUpdate?: Function[];
+    preDelete?: Function[];
+    afterDelete?: Function[];
   }
 
   /** Query options */
   export interface QueryOptions {
     limit?: number;
     offset?: number;
-    sort?: string;
-    order?: 'asc' | 'desc';
-    filter?: any;
-    select?: string[];
     partition?: string;
     partitionValues?: Record<string, any>;
   }
 
   /** Insert options */
   export interface InsertOptions {
-    encryption?: boolean;
-    compression?: boolean;
-    cache?: boolean;
-    cacheTTL?: number;
-    partition?: string;
-    partitionValues?: Record<string, any>;
+    id?: string;
   }
 
   /** Update options */
-  export interface UpdateOptions extends InsertOptions {
-    upsert?: boolean;
+  export interface UpdateOptions {
+    id: string;
   }
 
   /** Delete options */
   export interface DeleteOptions {
-    cascade?: boolean;
-    partition?: string;
-    partitionValues?: Record<string, any>;
+    id: string;
   }
 
-  /** Stream options */
-  export interface StreamOptions {
-    batchSize?: number;
-    concurrency?: number;
+  /** Page options */
+  export interface PageOptions {
+    offset?: number;
+    size?: number;
+    partition?: string;
+    partitionValues?: Record<string, any>;
+    skipCount?: boolean;
+  }
+
+  /** List options */
+  export interface ListOptions {
+    partition?: string;
+    partitionValues?: Record<string, any>;
+    limit?: number;
+    offset?: number;
+  }
+
+  /** Count options */
+  export interface CountOptions {
     partition?: string;
     partitionValues?: Record<string, any>;
   }
@@ -218,6 +227,23 @@ declare module 's3db.js' {
   // ============================================================================
   // PLUGIN TYPES
   // ============================================================================
+
+  /** Plugin function type */
+  export type PluginFunction = (database: Database) => Plugin;
+
+  /** Plugin base interface */
+  export interface Plugin {
+    name?: string;
+    setup?: (database: Database) => Promise<void> | void;
+    start?: () => Promise<void> | void;
+    stop?: () => Promise<void> | void;
+    beforeSetup?: () => Promise<void> | void;
+    afterSetup?: () => Promise<void> | void;
+    beforeStart?: () => Promise<void> | void;
+    afterStart?: () => Promise<void> | void;
+    beforeStop?: () => Promise<void> | void;
+    afterStop?: () => Promise<void> | void;
+  }
 
   /** Plugin configuration base */
   export interface PluginConfig {
@@ -371,6 +397,16 @@ declare module 's3db.js' {
   // CACHE TYPES
   // ============================================================================
 
+  /** Cache configuration */
+  export interface CacheConfig {
+    type?: 'memory' | 's3';
+    ttl?: number;
+    maxSize?: number;
+    enableCompression?: boolean;
+    storageClass?: string;
+    enableEncryption?: boolean;
+  }
+
   /** Memory Cache config */
   export interface MemoryCacheConfig {
     maxSize?: number;
@@ -455,88 +491,262 @@ declare module 's3db.js' {
     data: any;
   }
 
+  /** Definition change event */
+  export interface DefinitionChangeEvent {
+    type: 'new' | 'changed' | 'deleted';
+    resourceName: string;
+    currentHash?: string;
+    savedHash?: string;
+    fromVersion?: string;
+    toVersion?: string;
+    deletedVersion?: string;
+  }
+
   // ============================================================================
   // MAIN CLASSES
   // ============================================================================
 
-  /** Main S3db class */
-  export class S3db {
-    constructor(config?: S3dbConfig);
+  /** Main Database class */
+  export class Database extends EventEmitter {
+    constructor(options?: DatabaseConfig);
+    
+    // Properties
+    version: string;
+    s3dbVersion: string;
+    resources: Record<string, Resource>;
+    savedMetadata: any;
+    options: DatabaseConfig;
+    verbose: boolean;
+    parallelism: number;
+    plugins: Plugin[];
+    pluginList: Plugin[];
+    cache: CacheConfig;
+    passphrase: string;
+    versioningEnabled: boolean;
+    client: Client;
+    bucket: string;
+    keyPrefix: string;
     
     // Connection methods
     connect(): Promise<void>;
-    disconnect(): Promise<void>;
     isConnected(): boolean;
     
     // Resource methods
     createResource(config: ResourceConfig): Promise<Resource>;
+    resource(name: string): Resource;
     getResource(name: string): Resource;
     listResources(): Promise<string[]>;
-    deleteResource(name: string, options?: DeleteOptions): Promise<void>;
     
     // Plugin methods
-    usePlugin(name: string, config?: PluginConfig): void;
-    getPlugin(name: string): any;
+    startPlugins(): Promise<void>;
+    usePlugin(plugin: Plugin | PluginFunction, name?: string): Promise<void>;
     
     // Utility methods
-    getVersion(): string;
-    getConfig(): S3dbConfig;
-    export(): any;
-    import(data: any): void;
+    generateDefinitionHash(definition: any, behavior?: string): string;
+    getNextVersion(versions?: Record<string, any>): string;
+    detectDefinitionChanges(savedMetadata: any): DefinitionChangeEvent[];
+    resourceExists(name: string): boolean;
+    resourceExistsWithSameHash(config: { name: string; attributes: any; behavior?: string; options?: any }): boolean;
+    uploadMetadataFile(): Promise<void>;
+    blankMetadataStructure(): any;
+    
+    // Configuration
+    get config(): DatabaseConfig;
+    
+    // Events
+    on(event: 'connected', handler: (date: Date) => void): this;
+    on(event: 'resourceDefinitionsChanged', handler: (data: { changes: DefinitionChangeEvent[]; metadata: any }) => void): this;
+    on(event: string, handler: (...args: any[]) => void): this;
   }
 
+  /** Main S3db class (alias for Database) */
+  export class S3db extends Database {}
+
   /** Resource class */
-  export class Resource {
+  export class Resource extends EventEmitter {
     constructor(config: ResourceConfig);
+    
+    // Properties
+    name: string;
+    client: Client;
+    version: string;
+    behavior: BehaviorName;
+    observers: any[];
+    parallelism: number;
+    passphrase: string;
+    versioningEnabled: boolean;
+    idGenerator: Function;
+    config: {
+      cache: boolean | CacheConfig;
+      hooks: HookConfig;
+      paranoid: boolean;
+      timestamps: boolean;
+      partitions: Record<string, PartitionConfig>;
+      autoDecrypt: boolean;
+      allNestedObjectsOptional: boolean;
+    };
+    hooks: {
+      preInsert: Function[];
+      afterInsert: Function[];
+      preUpdate: Function[];
+      afterUpdate: Function[];
+      preDelete: Function[];
+      afterDelete: Function[];
+    };
+    attributes: Record<string, any>;
     
     // CRUD operations
     insert(data: any, options?: InsertOptions): Promise<any>;
-    insertMany(data: any[], options?: InsertOptions): Promise<any[]>;
-    get(id: string, options?: QueryOptions): Promise<any>;
-    list(options?: QueryOptions): Promise<any[]>;
-    find(query?: any, options?: QueryOptions): Promise<any[]>;
-    findOne(query?: any, options?: QueryOptions): Promise<any | null>;
-    update(id: string, data: any, options?: UpdateOptions): Promise<any>;
-    upsert(data: any, options?: UpdateOptions): Promise<any>;
-    delete(id: string, options?: DeleteOptions): Promise<void>;
+    insertMany(objects: any[]): Promise<any[]>;
+    get(id: string): Promise<any>;
+    exists(id: string): Promise<boolean>;
+    update(id: string, attributes: any): Promise<any>;
+    upsert(data: any): Promise<any>;
+    delete(id: string): Promise<void>;
+    deleteMany(ids: string[]): Promise<void>;
+    deleteAll(): Promise<void>;
+    deleteAllData(): Promise<void>;
+    
+    // List and count operations
+    listIds(options?: ListOptions): Promise<string[]>;
+    list(options?: ListOptions): Promise<any[]>;
+    listMain(options?: { limit?: number; offset?: number }): Promise<any[]>;
+    listPartition(options: { partition: string; partitionValues: Record<string, any>; limit?: number; offset?: number }): Promise<any[]>;
+    count(options?: CountOptions): Promise<number>;
+    
+    // Batch operations
+    getMany(ids: string[]): Promise<any[]>;
+    getAll(): Promise<any[]>;
+    
+    // Pagination
+    page(options?: PageOptions): Promise<{ data: any[]; total?: number; offset: number; size: number; hasMore: boolean }>;
     
     // Stream operations
-    readable(options?: StreamOptions): Promise<NodeJS.ReadableStream>;
-    writable(options?: StreamOptions): Promise<NodeJS.WritableStream>;
+    readable(): Promise<NodeJS.ReadableStream>;
+    writable(): Promise<NodeJS.WritableStream>;
     
-    // Schema operations
-    getSchema(): any;
-    setSchema(schema: any): void;
-    validate(data: any): boolean;
+    // Content operations
+    setContent(options: { id: string; buffer: Buffer; contentType?: string }): Promise<void>;
+    content(id: string): Promise<Buffer>;
+    hasContent(id: string): Promise<boolean>;
+    deleteContent(id: string): Promise<void>;
+    
+    // Schema and validation
+    updateAttributes(newAttributes: Record<string, any>): void;
+    validate(data: any): Promise<boolean>;
+    validatePartitions(): void;
     
     // Partition operations
-    getPartitions(): string[];
     getPartitionKey(options: { partitionName: string; id: string; data: any }): string;
+    getFromPartition(options: { id: string; partitionName: string; partitionValues?: Record<string, any> }): Promise<any>;
     
-    // Behavior operations
-    getBehavior(): string;
-    setBehavior(behavior: BehaviorName): void;
+    // Query operations
+    query(filter?: any, options?: QueryOptions): Promise<any[]>;
     
-    // Event system
-    on(event: 'exceedsLimit', handler: (event: ExceedsLimitEvent) => void): void;
-    on(event: 'truncate', handler: (event: TruncateEvent) => void): void;
-    on(event: 'overflow', handler: (event: OverflowEvent) => void): void;
-    on(event: string, handler: (...args: any[]) => void): void;
+    // Versioning operations
+    createHistoricalVersion(id: string, data: any): Promise<void>;
+    applyVersionMapping(data: any, fromVersion: string, toVersion: string): any;
     
-    off(event: string, handler: (...args: any[]) => void): void;
-    emit(event: string, ...args: any[]): void;
+    // Hook operations
+    addHook(event: string, fn: Function): void;
+    executeHooks(event: string, data: any): Promise<any>;
     
     // Utility methods
-    getName(): string;
-    getConfig(): ResourceConfig;
+    getResourceKey(id: string): string;
+    getDefinitionHash(): string;
     export(): any;
+    get options(): any;
+    
+    // Events
+    on(event: 'exceedsLimit', handler: (event: ExceedsLimitEvent) => void): this;
+    on(event: 'truncate', handler: (event: TruncateEvent) => void): this;
+    on(event: 'overflow', handler: (event: OverflowEvent) => void): this;
+    on(event: string, handler: (...args: any[]) => void): this;
+  }
+
+  /** Client class */
+  export class Client extends EventEmitter {
+    constructor(config: {
+      verbose?: boolean;
+      id?: string;
+      AwsS3Client?: any;
+      connectionString: string;
+      parallelism?: number;
+    });
+    
+    // Properties
+    verbose: boolean;
+    id: string;
+    parallelism: number;
+    config: ConnectionString;
+    client: any;
+    
+    // S3 operations
+    putObject(options: { key: string; metadata?: Record<string, any>; contentType?: string; body?: Buffer; contentEncoding?: string; contentLength?: number }): Promise<any>;
+    getObject(key: string): Promise<any>;
+    headObject(key: string): Promise<any>;
+    copyObject(options: { from: string; to: string }): Promise<any>;
+    exists(key: string): Promise<boolean>;
+    deleteObject(key: string): Promise<any>;
+    deleteObjects(keys: string[]): Promise<any>;
+    deleteAll(options?: { prefix?: string }): Promise<any>;
+    moveObject(options: { from: string; to: string }): Promise<any>;
+    moveAllObjects(options: { prefixFrom: string; prefixTo: string }): Promise<any>;
+    
+    // List operations
+    listObjects(options?: { prefix?: string; maxKeys?: number; continuationToken?: string }): Promise<any>;
+    count(options?: { prefix?: string }): Promise<number>;
+    getAllKeys(options?: { prefix?: string }): Promise<string[]>;
+    getContinuationTokenAfterOffset(params?: { prefix?: string; offset?: number; maxKeys?: number; continuationToken?: string }): Promise<string | null>;
+    getKeysPage(params?: { prefix?: string; offset?: number; amount?: number; continuationToken?: string }): Promise<{ keys: string[]; continuationToken?: string }>;
+    
+    // Utility methods
+    createClient(): any;
+    sendCommand(command: any): Promise<any>;
+    errorProxy(error: any, data: any): Error;
+    
+    // Events
+    on(event: 'command.request', handler: (commandName: string, input: any) => void): this;
+    on(event: 'command.response', handler: (commandName: string, response: any, input: any) => void): this;
+    on(event: 'putObject', handler: (response: any, options: any) => void): this;
+    on(event: 'getObject', handler: (response: any, options: any) => void): this;
+    on(event: 'headObject', handler: (response: any, options: any) => void): this;
+    on(event: 'copyObject', handler: (response: any, options: any) => void): this;
+    on(event: string, handler: (...args: any[]) => void): this;
   }
 
   /** Connection String class */
   export class ConnectionString {
     constructor(connectionString: string);
-    parse(): S3dbConfig;
+    parse(): DatabaseConfig;
     toString(): string;
+    bucket: string;
+    region: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
+    endpoint?: string;
+    forcePathStyle?: boolean;
+    keyPrefix?: string;
+  }
+
+  /** Schema class */
+  export class Schema {
+    constructor(attributes?: Record<string, any>, options?: any);
+    validate(data: any, options?: any): boolean;
+    migrate(data: any, fromVersion: string, toVersion: string): any;
+    export(): any;
+    import(data: any): void;
+    applyHooksActions(data: any, action: string): any;
+    preprocessAttributesForValidation(attributes: any, options?: any): any;
+    toArray(value: any): string;
+    fromArray(value: string): any;
+    toJSON(value: any): string;
+    fromJSON(value: string): any;
+    toNumber(value: any): number;
+    toBool(value: any): boolean;
+    fromBool(value: any): boolean;
+    extractObjectKeys(obj: any): string[];
   }
 
   /** Validator class */
@@ -546,29 +756,190 @@ declare module 's3db.js' {
     getErrors(): string[];
   }
 
+  /** Cache base class */
+  export class Cache {
+    constructor(config?: any);
+    get(key: string): Promise<any>;
+    set(key: string, value: any, ttl?: number): Promise<void>;
+    delete(key: string): Promise<void>;
+    clear(): Promise<void>;
+    getStats(): any;
+  }
+
+  /** Memory Cache class */
+  export class MemoryCache extends Cache {
+    constructor(config?: MemoryCacheConfig);
+  }
+
+  /** S3 Cache class */
+  export class S3Cache extends Cache {
+    constructor(config?: S3CacheConfig);
+  }
+
+  // ============================================================================
+  // PLUGIN CLASSES
+  // ============================================================================
+
+  /** Plugin base class */
+  export class PluginBase extends EventEmitter implements Plugin {
+    constructor(options?: any);
+    name: string;
+    options: any;
+    database?: Database;
+    
+    setup(database: Database): Promise<void>;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    beforeSetup(): Promise<void>;
+    afterSetup(): Promise<void>;
+    beforeStart(): Promise<void>;
+    afterStart(): Promise<void>;
+    beforeStop(): Promise<void>;
+    afterStop(): Promise<void>;
+    
+    addHook(resourceName: string, event: string, fn: Function): void;
+    removeHook(resourceName: string, event: string, fn: Function): void;
+    wrapResourceMethod(resourceName: string, methodName: string, wrapper: Function): void;
+    
+    extractPartitionValues(data: any, resource: Resource): Record<string, any>;
+    getNestedFieldValue(data: any, fieldPath: string): any;
+  }
+
+  /** Audit Plugin */
+  export class AuditPlugin extends PluginBase {
+    constructor(config?: AuditPluginConfig);
+    logAudit(operation: string, resourceName: string, recordId: string, data?: any, oldData?: any): Promise<void>;
+    getAuditLogs(filters?: any): Promise<any[]>;
+    getAuditStats(filters?: any): Promise<any>;
+  }
+
+  /** Cache Plugin */
+  export class CachePlugin extends PluginBase {
+    constructor(config?: CachePluginConfig);
+    cacheKeyFor(action: string, params?: any): string;
+    getCacheStats(): any;
+    clearCache(): Promise<void>;
+    warmCache(resourceName: string): Promise<void>;
+  }
+
+  /** Costs Plugin */
+  export class CostsPlugin extends PluginBase {
+    constructor(config?: CostsPluginConfig);
+    trackOperation(operation: string, size: number, metadata?: any): void;
+    getCosts(): any;
+    resetCosts(): void;
+  }
+
+  /** Fulltext Plugin */
+  export class FulltextPlugin extends PluginBase {
+    constructor(config?: FulltextPluginConfig);
+    search(query: string, options?: any): Promise<any[]>;
+    indexResource(resourceName: string): Promise<void>;
+    clearIndex(resourceName?: string): Promise<void>;
+    getIndexStats(): any;
+  }
+
+  /** Metrics Plugin */
+  export class MetricsPlugin extends PluginBase {
+    constructor(config?: MetricsPluginConfig);
+    trackOperation(operation: string, duration: number, success: boolean): void;
+    getMetrics(): any;
+    getErrorLogs(): any[];
+    getPerformanceLogs(): any[];
+    getStats(): any;
+  }
+
+  /** Replication Plugin */
+  export class ReplicationPlugin extends PluginBase {
+    constructor(config?: ReplicationPluginConfig);
+    replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
+    getReplicationStats(): any;
+    getReplicationLogs(filters?: any): Promise<any[]>;
+    retryFailedReplications(): Promise<void>;
+    syncAllData(targetName: string): Promise<void>;
+  }
+
+  // ============================================================================
+  // STREAM CLASSES
+  // ============================================================================
+
+  /** Resource Reader Stream */
+  export class ResourceReader extends NodeJS.ReadableStream {
+    constructor(resource: Resource, options?: any);
+  }
+
+  /** Resource Writer Stream */
+  export class ResourceWriter extends NodeJS.WritableStream {
+    constructor(resource: Resource, options?: any);
+  }
+
+  /** Resource IDs Reader Stream */
+  export class ResourceIdsReader extends NodeJS.ReadableStream {
+    constructor(resource: Resource, options?: any);
+  }
+
+  /** Resource IDs Page Reader Stream */
+  export class ResourceIdsPageReader extends NodeJS.ReadableStream {
+    constructor(resource: Resource, options?: any);
+  }
+
   // ============================================================================
   // ERROR CLASSES
   // ============================================================================
 
   /** Base S3db error */
-  export class S3dbError extends Error {
+  export class BaseError extends Error {
     constructor(message: string, code?: string);
   }
 
-  /** Validation error */
-  export class ValidationError extends S3dbError {
-    constructor(message: string, errors?: string[]);
-  }
-
-  /** Connection error */
-  export class ConnectionError extends S3dbError {
+  /** Not Found error */
+  export class NotFound extends BaseError {
     constructor(message: string);
   }
 
-  /** Behavior error */
-  export class BehaviorError extends S3dbError {
+  /** No Such Key error */
+  export class NoSuchKey extends BaseError {
     constructor(message: string);
   }
+
+  /** No Such Bucket error */
+  export class NoSuchBucket extends BaseError {
+    constructor(message: string);
+  }
+
+  /** Unknown Error */
+  export class UnknownError extends BaseError {
+    constructor(message: string);
+  }
+
+  /** Missing Metadata error */
+  export class MissingMetadata extends BaseError {
+    constructor(message: string);
+  }
+
+  /** Invalid Resource Item error */
+  export class InvalidResourceItem extends BaseError {
+    constructor(message: string);
+  }
+
+  // ============================================================================
+  // UTILITY FUNCTIONS
+  // ============================================================================
+
+  /** Convert stream to string */
+  export function streamToString(stream: NodeJS.ReadableStream): Promise<string>;
+
+  /** Encrypt data */
+  export function encrypt(data: any, passphrase: string): Promise<string>;
+
+  /** Decrypt data */
+  export function decrypt(encryptedData: string, passphrase: string): Promise<any>;
+
+  /** Generate ID */
+  export function idGenerator(): string;
+
+  /** Generate password */
+  export function passwordGenerator(length?: number): string;
 
   // ============================================================================
   // CONSTANTS
@@ -579,6 +950,9 @@ declare module 's3db.js' {
   
   /** Default behavior name */
   export const DEFAULT_BEHAVIOR: BehaviorName;
+
+  /** Get behavior implementation */
+  export function getBehavior(behaviorName: BehaviorName): any;
 
   // ============================================================================
   // DEFAULT EXPORT
