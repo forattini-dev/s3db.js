@@ -8,11 +8,34 @@ services:
       - "9998:9000"
       - "9999:9001"
     environment:
-      MINIO_FORCE_NEW_KEYS: yes
-      MINIO_SCHEME: http
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
       MINIO_DEFAULT_BUCKETS: s3db
-      MINIO_ROOT_USER: s3db
-      MINIO_ROOT_PASSWORD: thisissecret
+
+  localstack:
+    image: localstack/localstack:latest
+    hostname: localstack
+    volumes:
+      - "localstack:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./tests/localstack.sh:/etc/localstack/init/ready.d/localstack.sh:ro,Z"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    ports:
+      - "4566:4566"
+    environment:
+      TZ: America/Sao_Paulo
+      DEBUG: 1
+      GATEWAY_LISTEN: 0.0.0.0:4566
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      PERSISTENCE: 1
+      LOCALSTACK_HOST: localstack
+      DOCKER_HOST: unix:///var/run/docker.sock
 
 volumes:
   minio_data: {}
+  localstack: {}

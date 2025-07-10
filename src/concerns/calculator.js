@@ -154,3 +154,51 @@ export function getSizeBreakdown(mappedObject) {
     }
   };
 }
+
+/**
+ * Calculates the minimum overhead required for system fields
+ * @param {Object} config - Configuration object
+ * @param {string} [config.version='1'] - Resource version
+ * @param {boolean} [config.timestamps=false] - Whether timestamps are enabled
+ * @param {string} [config.id=''] - Resource ID (if known)
+ * @returns {number} - Minimum overhead in bytes
+ */
+export function calculateSystemOverhead(config = {}) {
+  const { version = '1', timestamps = false, id = '' } = config;
+  
+  // System fields that are always present
+  const systemFields = {
+    '_v': String(version), // Version field (e.g., "1", "10", "100")
+  };
+  
+  // Optional system fields
+  if (timestamps) {
+    systemFields.createdAt = '2024-01-01T00:00:00.000Z'; // Example timestamp
+    systemFields.updatedAt = '2024-01-01T00:00:00.000Z'; // Example timestamp
+  }
+  
+  if (id) {
+    systemFields.id = id;
+  }
+  
+  // Calculate overhead for system fields
+  const overheadObject = {};
+  for (const [key, value] of Object.entries(systemFields)) {
+    overheadObject[key] = value;
+  }
+  
+  return calculateTotalSize(overheadObject);
+}
+
+/**
+ * Calculates the effective metadata limit considering system overhead
+ * @param {Object} config - Configuration object
+ * @param {number} [config.s3Limit=2048] - S3 metadata limit in bytes
+ * @param {Object} [config.systemConfig] - System configuration for overhead calculation
+ * @returns {number} - Effective limit in bytes
+ */
+export function calculateEffectiveLimit(config = {}) {
+  const { s3Limit = 2048, systemConfig = {} } = config;
+  const overhead = calculateSystemOverhead(systemConfig);
+  return s3Limit - overhead;
+}

@@ -2,8 +2,8 @@ import { join } from "path";
 
 import { sha256 } from "../crypto.js";
 import Plugin from "./plugin.class.js";
-import S3Cache from "../cache/s3-cache.class.js";
-import MemoryCache from "../cache/memory-cache.class.js";
+import S3Cache from "./cache/s3-cache.class.js";
+import MemoryCache from "./cache/memory-cache.class.js";
 
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
@@ -33,8 +33,8 @@ export class CachePlugin extends Plugin {
     } else if (this.config.driverType === 'memory') {
       this.driver = new MemoryCache(this.config.memoryOptions || {});
     } else {
-      // Default to S3Cache
-      this.driver = new S3Cache(this.config.s3Options || {});
+      // Default to S3Cache, sempre passa o client do database
+      this.driver = new S3Cache({ client: this.database.client, ...(this.config.s3Options || {}) });
     }
 
     // Install database proxy for new resources
@@ -83,179 +83,78 @@ export class CachePlugin extends Plugin {
     if (!this.driver) return;
 
     // Add cache methods to resource
-    resource.cache = this.driver;
+    Object.defineProperty(resource, 'cache', {
+      value: this.driver,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
     resource.cacheKeyFor = async (options = {}) => {
       const { action, params = {}, partition, partitionValues } = options;
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
 
-    // Store original methods
-    resource._originalCount = resource.count;
-    resource._originalListIds = resource.listIds;
-    resource._originalGetMany = resource.getMany;
-    resource._originalGetAll = resource.getAll;
-    resource._originalPage = resource.page;
-    resource._originalList = resource.list;
-
-    // Wrap read methods to cache results - check cache first, then call original
-    resource.count = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      
-      const key = await resource.cacheKeyFor({ 
-        action: "count",
-        partition,
-        partitionValues
-      });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalCount(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    resource.listIds = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      
-      const key = await resource.cacheKeyFor({ 
-        action: "listIds",
-        partition,
-        partitionValues
-      });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalListIds(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    resource.getMany = async function(ids) {
-      const key = await resource.cacheKeyFor({ 
-        action: "getMany", 
-        params: { ids }
-      });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalGetMany(ids);
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    resource.getAll = async function() {
-      const key = await resource.cacheKeyFor({ action: "getAll" });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalGetAll();
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    resource.page = async function({ offset, size, partition, partitionValues } = {}) {
-      const key = await resource.cacheKeyFor({ 
-        action: "page", 
-        params: { offset, size },
-        partition,
-        partitionValues
-      });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalPage({ offset, size, partition, partitionValues });
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    resource.list = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      
-      const key = await resource.cacheKeyFor({ 
-        action: "list",
-        partition,
-        partitionValues
-      });
-
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== undefined) return cached;
-      } catch (err) {
-        if (err.name !== 'NoSuchKey') throw err;
-      }
-
-      const result = await resource._originalList(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-
-    // Wrap write methods to clear cache
-    this.wrapResourceMethod(resource, 'insert', async (result, args, methodName) => {
-      const [data] = args;
-      await this.clearCacheForResource(resource, data);
-      return result;
-    });
-
-    this.wrapResourceMethod(resource, 'update', async (result, args, methodName) => {
-      const [id, data] = args;
-      await this.clearCacheForResource(resource, { id, ...data });
-      return result;
-    });
-
-    this.wrapResourceMethod(resource, 'delete', async (result, args, methodName) => {
-      const [id] = args;
-      // Fetch full record to get partition fields
-      let data = { id };
-      if (typeof resource.get === 'function') {
-        try {
-          const full = await resource.get(id);
-          if (full) data = full;
-        } catch {}
-      }
-      await this.clearCacheForResource(resource, data);
-      return result;
-    });
-
-    this.wrapResourceMethod(resource, 'deleteMany', async (result, args, methodName) => {
-      const [ids] = args;
-      // Clear cache for each deleted record
-      for (const id of ids) {
-        let data = { id };
-        if (typeof resource.get === 'function') {
-          try {
-            const full = await resource.get(id);
-            if (full) data = full;
-          } catch {}
+    // List of methods to cache
+    const cacheMethods = [
+      'count', 'listIds', 'getMany', 'getAll', 'page', 'list', 'get'
+    ];
+    for (const method of cacheMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        // Build cache key
+        let key;
+        if (method === 'getMany') {
+          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
+        } else if (method === 'page') {
+          const { offset, size, partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
+        } else if (method === 'list' || method === 'listIds' || method === 'count') {
+          const { partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+        } else if (method === 'getAll') {
+          key = await resource.cacheKeyFor({ action: method });
+        } else if (method === 'get') {
+          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
-        await this.clearCacheForResource(resource, data);
-      }
-      return result;
-    });
+        // Try cache
+        try {
+          const cached = await resource.cache.get(key);
+          if (cached !== null && cached !== undefined) return cached;
+        } catch (err) {
+          if (err.name !== 'NoSuchKey') throw err;
+        }
+        // Not cached, call next
+        const result = await next();
+        await resource.cache.set(key, result);
+        return result;
+      });
+    }
+
+    // List of methods to clear cache on write
+    const writeMethods = ['insert', 'update', 'delete', 'deleteMany'];
+    for (const method of writeMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        const result = await next();
+        // Determine which records to clear
+        if (method === 'insert') {
+          await this.clearCacheForResource(resource, ctx.args[0]);
+        } else if (method === 'update') {
+          await this.clearCacheForResource(resource, { id: ctx.args[0], ...ctx.args[1] });
+        } else if (method === 'delete') {
+          let data = { id: ctx.args[0] };
+          if (typeof resource.get === 'function') {
+            try {
+              const full = await resource.get(ctx.args[0]);
+              if (full) data = full;
+            } catch {}
+          }
+          await this.clearCacheForResource(resource, data);
+        } else if (method === 'deleteMany') {
+          // After all deletions, clear all aggregate and partition caches
+          await this.clearCacheForResource(resource);
+        }
+        return result;
+      });
+    }
   }
 
   async clearCacheForResource(resource, data) {
@@ -268,13 +167,20 @@ export class CachePlugin extends Plugin {
     
     // Only clear partition cache if partitions are enabled AND resource has partitions AND includePartitions is true
     if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
-      const partitionValues = this.getPartitionValues(data, resource);
-      
-      for (const [partitionName, values] of Object.entries(partitionValues)) {
-        // Only clear partition cache if there are actual values
-        if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
+      if (!data) {
+        // If no data, clear all partition caches
+        for (const partitionName of Object.keys(resource.config.partitions)) {
           const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
           await resource.cache.clear(partitionKeyPrefix);
+        }
+      } else {
+        const partitionValues = this.getPartitionValues(data, resource);
+        for (const [partitionName, values] of Object.entries(partitionValues)) {
+          // Only clear partition cache if there are actual values
+          if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
+            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+            await resource.cache.clear(partitionKeyPrefix);
+          }
         }
       }
     }

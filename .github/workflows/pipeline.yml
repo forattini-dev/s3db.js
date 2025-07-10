@@ -2,7 +2,7 @@ name: pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   deployment:
   release:
     types: [created]
@@ -17,28 +17,26 @@ jobs:
       matrix:
         node-version: [20, 22, 23, 24]
       fail-fast: false
-    
+
     services:
       minio:
         image: bitnami/minio:latest
         ports:
           - 9000:9000
-          - 9001:9001
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
           MINIO_DEFAULT_BUCKETS: s3db
-          MINIO_BROWSER: "on"
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-    
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -49,135 +47,32 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
-      
+
+      - name: Install dependencies
+        run: pnpm install
+
       - name: Wait for MinIO to be ready
         run: |
           echo "Waiting for MinIO to be ready..."
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
-      
-      - name: Setup MinIO bucket
-        run: |
-          # Install MinIO client (mc)
-          wget https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          sudo mv mc /usr/local/bin/
-          
-          # Wait a bit more for MinIO to be fully ready
-          sleep 5
-          
-          # Configure MinIO client
-          mc alias set testminio http://localhost:9000 minioadmin minioadmin123
-          
-          # Create test bucket if it doesn't exist
-          mc mb testminio/s3db --ignore-existing
-          
-          # Verify bucket exists
-          mc ls testminio/
-      
-      - name: Install dependencies
-        run: pnpm install
-      
+
       - name: Run tests
         run: pnpm test
         env:
-          # MinIO configuration for tests (as expected by test files)
-          MINIO_USER: minioadmin
-          MINIO_PASSWORD: minioadmin123
-          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db
-          # Additional AWS/S3 environment variables
           AWS_ACCESS_KEY_ID: minioadmin
           AWS_SECRET_ACCESS_KEY: minioadmin123
           AWS_ENDPOINT: http://localhost:9000
-          AWS_BUCKET: s3db
           AWS_REGION: us-east-1
+          AWS_BUCKET: s3db
           AWS_FORCE_PATH_STYLE: true
-      
+          BUCKET_CONNECTION_STRING: s3://minioadmin:minioadmin123@s3db
+
       - name: Run build
         run: pnpm run build
-
-  coverage:
-    name: Coverage Report
-    runs-on: ubuntu-latest
-    needs: test
-    
-    services:
-      minio:
-        image: bitnami/minio:latest
-        ports:
-          - 9000:9000
-          - 9001:9001
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin123
-          MINIO_DEFAULT_BUCKETS: s3db
-          MINIO_BROWSER: "on"
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-      
-      - name: Wait for MinIO to be ready
-        run: |
-          echo "Waiting for MinIO to be ready..."
-          timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
-          echo "MinIO is ready!"
-      
-      - name: Setup MinIO bucket
-        run: |
-          # Install MinIO client (mc)
-          wget https://dl.min.io/client/mc/release/linux-amd64/mc
-          chmod +x mc
-          sudo mv mc /usr/local/bin/
-          
-          # Wait a bit more for MinIO to be fully ready
-          sleep 5
-          
-          # Configure MinIO client
-          mc alias set testminio http://localhost:9000 minioadmin minioadmin123
-          
-          # Create test bucket if it doesn't exist
-          mc mb testminio/s3db --ignore-existing
-          
-          # Verify bucket exists
-          mc ls testminio/
-      
-      - name: Install dependencies
-        run: pnpm install
-      
-      - name: Run tests with coverage
-        run: pnpm test
-        env:
-          # MinIO configuration for tests (as expected by test files)
-          MINIO_USER: minioadmin
-          MINIO_PASSWORD: minioadmin123
-          BUCKET_CONNECTION_STRING: s3://USER:PASSWORD@s3db
-          # Additional AWS/S3 environment variables
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin123
-          AWS_ENDPOINT: http://localhost:9000
-          AWS_BUCKET: s3db
-          AWS_REGION: us-east-1
-          AWS_FORCE_PATH_STYLE: true
       
       - name: Upload coverage to Qlty
         uses: qltysh/qlty-action/coverage@v1
         with:
-          token: ${{secrets.QLTY_COVERAGE_TOKEN}}
+          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
           files: coverage/lcov.info

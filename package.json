@@ -17,6 +17,10 @@
       "default": "./dist/s3db.es.js"
     }
   },
+  "imports": {
+    "#src/*": "./src/*",
+    "#tests/*": "./tests/*"
+  },
   "files": [
     "dist"
   ],
@@ -43,7 +47,9 @@
     "coverage": "coveralls < coverage/lcov.info",
     "coverage:serve": "npx http-server ./coverage/lcov-report",
     "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:quiet": "QUIET=true node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:full": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
+    "test:full-quiet": "QUIET=true node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
     "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watch --detectOpenHandles"
   },
   "dependencies": {
@@ -52,6 +58,7 @@
     "avsc": "^5.7.8",
     "fastest-validator": "^1.19.1",
     "flat": "^6.0.1",
+    "hash-wasm": "^4.12.0",
     "json-stable-stringify": "^1.3.0",
     "lodash-es": "^4.17.21",
     "nanoid": "5.1.5",

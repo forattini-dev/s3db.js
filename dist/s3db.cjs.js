@@ -3654,6 +3654,10 @@ class Schema {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
       }
+      if (definition === "object") {
+        this.addHook("beforeMap", name, "toJSON");
+        this.addHook("afterUnmap", name, "fromJSON");
+      }
     }
   }
   static import(data) {
@@ -3748,10 +3752,11 @@ class Schema {
     return result;
   }
   async mapper(resourceItem) {
-    const obj = flat.flatten(lodashEs.cloneDeep(resourceItem), { safe: true });
+    const obj = lodashEs.cloneDeep(resourceItem);
     await this.applyHooksActions(obj, "beforeMap");
+    const flattenedObj = flat.flatten(obj, { safe: true });
     const rest = { "_v": this.version + "" };
-    for (const [key, value] of Object.entries(obj)) {
+    for (const [key, value] of Object.entries(flattenedObj)) {
       rest[this.map[key]] = value;
     }
     await this.applyHooksActions(rest, "afterMap");
@@ -9058,7 +9063,7 @@ var bodyOnly = /*#__PURE__*/Object.freeze({
 const behaviors = {
   "user-managed": userManaged,
   "enforce-limits": enforceLimits,
-  "data-truncate": dataTruncate,
+  "truncate-data": dataTruncate,
   "body-overflow": bodyOverflow,
   "body-only": bodyOnly
 };
@@ -9116,7 +9121,7 @@ class Resource extends EventEmitter {
    *     }
    *   },
    *   hooks: {
-   *     preInsert: [async (data) => {
+   *     beforeInsert: [async (data) => {
    *       console.log('Pre-insert hook:', data);
    *       return data;
    *     }]
@@ -9151,7 +9156,7 @@ class Resource extends EventEmitter {
     super();
     const validation = validateResourceConfig(config);
     if (!validation.isValid) {
-      throw new Error(`Invalid Resource configuration:
+      throw new Error(`Invalid Resource ${config.name} configuration:
 ${validation.errors.join("\n")}`);
     }
     const {
@@ -9193,11 +9198,11 @@ ${validation.errors.join("\n")}`);
       allNestedObjectsOptional
     };
     this.hooks = {
-      preInsert: [],
+      beforeInsert: [],
       afterInsert: [],
-      preUpdate: [],
+      beforeUpdate: [],
       afterUpdate: [],
-      preDelete: [],
+      beforeDelete: [],
       afterDelete: []
     };
     this.attributes = attributes || {};
@@ -9322,7 +9327,7 @@ ${validation.errors.join("\n")}`);
   }
   /**
    * Add a hook function for a specific event
-   * @param {string} event - Hook event (preInsert, afterInsert, etc.)
+   * @param {string} event - Hook event (beforeInsert, afterInsert, etc.)
    * @param {Function} fn - Hook function
    */
   addHook(event, fn) {
@@ -9586,7 +9591,7 @@ ${validation.errors.join("\n")}`);
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const completeData = { id, ...attributes };
-    const preProcessedData = await this.executeHooks("preInsert", completeData);
+    const preProcessedData = await this.executeHooks("beforeInsert", completeData);
     const {
       errors,
       isValid,
@@ -9627,10 +9632,15 @@ ${validation.errors.join("\n")}`);
       contentType,
       contentLength: this.calculateContentLength(body)
     });
-    const final = lodashEs.merge({ id: finalId }, validatedAttributes);
-    await this.executeHooks("afterInsert", final);
-    this.emit("insert", final);
-    return final;
+    const insertedData = await this.composeFullObjectFromWrite({
+      id: finalId,
+      metadata: finalMetadata,
+      body,
+      behavior: this.behavior
+    });
+    await this.executeHooks("afterInsert", insertedData);
+    this.emit("insert", insertedData);
+    return insertedData;
   }
   /**
    * Retrieve a resource object by ID
@@ -9783,7 +9793,7 @@ ${validation.errors.join("\n")}`);
     if (this.config.timestamps) {
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
-    const preProcessedData = await this.executeHooks("preUpdate", attributes);
+    const preProcessedData = await this.executeHooks("beforeUpdate", attributes);
     const completeData = { ...originalData, ...preProcessedData, id };
     const { isValid, errors, data: validated } = await this.validate(completeData);
     if (!isValid) {
@@ -9844,10 +9854,15 @@ ${validation.errors.join("\n")}`);
       contentType: finalContentType,
       metadata: finalMetadata
     });
-    validatedAttributes.id = id;
-    await this.executeHooks("afterUpdate", validatedAttributes);
-    this.emit("update", preProcessedData, validatedAttributes);
-    return validatedAttributes;
+    const updatedData = await this.composeFullObjectFromWrite({
+      id,
+      metadata: finalMetadata,
+      body: finalBody,
+      behavior: this.behavior
+    });
+    await this.executeHooks("afterUpdate", updatedData);
+    this.emit("update", originalData, updatedData);
+    return updatedData;
   }
   /**
    * Delete a resource object by ID
@@ -9864,11 +9879,11 @@ ${validation.errors.join("\n")}`);
     } catch (error) {
       objectData = { id };
     }
-    await this.executeHooks("preDelete", objectData);
+    await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
     const response = await this.client.deleteObject(key);
     await this.executeHooks("afterDelete", objectData);
-    this.emit("delete", id);
+    this.emit("delete", objectData);
     return response;
   }
   /**
@@ -10952,6 +10967,55 @@ ${validation.errors.join("\n")}`);
     };
     return mappedData;
   }
+  /**
+   * Compose the full object (metadata + body) as retornado por .get(),
+   * usando os dados em memória após insert/update, de acordo com o behavior
+   */
+  async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
+    let unmappedMetadata = {};
+    try {
+      unmappedMetadata = await this.schema.unmapper(metadata);
+    } catch (error) {
+      console.warn("Failed to unmap metadata, using as-is:", error.message);
+      unmappedMetadata = metadata;
+    }
+    const filterInternalFields = (obj) => {
+      if (!obj || typeof obj !== "object") return obj;
+      const filtered = {};
+      for (const [key, value] of Object.entries(obj)) {
+        if (!key.startsWith("_") && key !== "$overflow") {
+          filtered[key] = value;
+        }
+      }
+      return filtered;
+    };
+    if (behavior === "body-overflow") {
+      const hasOverflow = metadata && metadata["$overflow"] === "true";
+      let bodyData = {};
+      if (hasOverflow && body) {
+        try {
+          const parsedBody = JSON.parse(body);
+          bodyData = await this.schema.unmapper(parsedBody);
+        } catch {
+        }
+      }
+      const merged = { ...unmappedMetadata, ...bodyData, id };
+      return filterInternalFields(merged);
+    }
+    if (behavior === "body-only") {
+      try {
+        const parsedBody = body ? JSON.parse(body) : {};
+        const unmappedBody = await this.schema.unmapper(parsedBody);
+        const result2 = { ...unmappedBody, id };
+        return filterInternalFields(result2);
+      } catch (error) {
+        console.warn("Failed to parse/unmap body data:", error.message);
+        return { id };
+      }
+    }
+    const result = { ...unmappedMetadata, id };
+    return filterInternalFields(result);
+  }
 }
 function validateResourceConfig(config) {
   const errors = [];
@@ -11036,7 +11100,7 @@ function validateResourceConfig(config) {
     if (typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
       errors.push("Resource 'hooks' must be an object");
     } else {
-      const validHookEvents = ["preInsert", "afterInsert", "preUpdate", "afterUpdate", "preDelete", "afterDelete"];
+      const validHookEvents = ["beforeInsert", "afterInsert", "beforeUpdate", "afterUpdate", "beforeDelete", "afterDelete"];
       for (const [event, hooksArr] of Object.entries(config.hooks)) {
         if (!validHookEvents.includes(event)) {
           errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(", ")}`);
@@ -11066,7 +11130,7 @@ class Database extends EventEmitter {
     this.version = "1";
     this.s3dbVersion = (() => {
       try {
-        return true ? "6.1.0" : "latest";
+        return true ? "6.2.0" : "latest";
       } catch (e) {
         return "latest";
       }
@@ -18063,7 +18127,7 @@ class AuditPlugin extends Plugin {
       }
     }
     this.installDatabaseProxy();
-    this.installResourceHooks();
+    this.installEventListeners();
   }
   async onStart() {
   }
@@ -18073,30 +18137,29 @@ class AuditPlugin extends Plugin {
     if (this.database._auditProxyInstalled) {
       return;
     }
-    const installResourceHooksForResource = this.installResourceHooksForResource.bind(this);
+    const installEventListenersForResource = this.installEventListenersForResource.bind(this);
     this.database._originalCreateResource = this.database.createResource;
     this.database.createResource = async function(...args) {
       const resource = await this._originalCreateResource(...args);
-      if (resource.name !== "audit_logs") {
-        installResourceHooksForResource(resource);
+      if (resource.name !== "audits") {
+        installEventListenersForResource(resource);
       }
       return resource;
     };
     this.database._auditProxyInstalled = true;
   }
-  installResourceHooks() {
+  installEventListeners() {
     for (const resource of Object.values(this.database.resources)) {
       if (resource.name === "audits") continue;
-      this.installResourceHooksForResource(resource);
+      this.installEventListenersForResource(resource);
     }
   }
-  installResourceHooksForResource(resource) {
-    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
-      const [data] = args;
-      const recordId = data.id || result.id || "auto-generated";
+  installEventListenersForResource(resource) {
+    resource.on("insert", async (data) => {
+      const recordId = data.id || "auto-generated";
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: "insert",
         recordId,
@@ -18112,27 +18175,26 @@ class AuditPlugin extends Plugin {
         })
       };
       this.logAudit(auditRecord).catch(console.error);
-      return result;
     });
-    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
-      const [id, data] = args;
-      let oldData = null;
-      if (this.config.includeData) {
+    resource.on("update", async (data, beforeData) => {
+      const recordId = data.id;
+      let oldData = beforeData;
+      if (this.config.includeData && !oldData) {
         try {
-          oldData = await resource.get(id);
+          oldData = await resource.get(recordId);
         } catch (error) {
         }
       }
-      const partitionValues = this.config.includePartitions ? this.getPartitionValues(result, resource) : null;
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: "update",
-        recordId: id,
+        recordId,
         userId: this.getCurrentUserId?.() || "system",
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
         oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
-        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(result)),
+        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
         partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
         partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
         metadata: JSON.stringify({
@@ -18141,23 +18203,22 @@ class AuditPlugin extends Plugin {
         })
       };
       this.logAudit(auditRecord).catch(console.error);
-      return result;
     });
-    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
-      const [id] = args;
-      let oldData = null;
-      if (this.config.includeData) {
+    resource.on("delete", async (data) => {
+      const recordId = data.id;
+      let oldData = data;
+      if (this.config.includeData && !oldData) {
         try {
-          oldData = await resource.get(id);
+          oldData = await resource.get(recordId);
         } catch (error) {
         }
       }
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: "delete",
-        recordId: id,
+        recordId,
         userId: this.getCurrentUserId?.() || "system",
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
         oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
@@ -18170,18 +18231,17 @@ class AuditPlugin extends Plugin {
         })
       };
       this.logAudit(auditRecord).catch(console.error);
-      return result;
     });
-    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
-      const [ids] = args;
-      const auditRecords = [];
-      if (this.config.includeData) {
+    const originalDeleteMany = resource.deleteMany.bind(resource);
+    resource.deleteMany = async (ids) => {
+      const result = await originalDeleteMany(ids);
+      if (result && result.length > 0 && this.config.includeData) {
         for (const id of ids) {
           try {
             const oldData = await resource.get(id);
             const partitionValues = this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
-            auditRecords.push({
-              id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            const auditRecord = {
+              id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
               resourceName: resource.name,
               operation: "delete",
               recordId: id,
@@ -18196,16 +18256,14 @@ class AuditPlugin extends Plugin {
                 version: "2.0",
                 batchOperation: true
               })
-            });
+            };
+            this.logAudit(auditRecord).catch(console.error);
           } catch (error) {
           }
         }
       }
-      for (const auditRecord of auditRecords) {
-        this.logAudit(auditRecord).catch(console.error);
-      }
       return result;
-    });
+    };
   }
   getPartitionValues(data, resource) {
     const partitions = resource.config?.partitions || {};
@@ -18256,12 +18314,18 @@ class AuditPlugin extends Plugin {
   }
   truncateData(data) {
     if (!data) return data;
-    const dataStr = JSON.stringify(data);
+    const filteredData = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith("_") && key !== "$overflow") {
+        filteredData[key] = value;
+      }
+    }
+    const dataStr = JSON.stringify(filteredData);
     if (dataStr.length <= this.config.maxDataSize) {
-      return data;
+      return filteredData;
     }
     return {
-      ...data,
+      ...filteredData,
       _truncated: true,
       _originalSize: dataStr.length,
       _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -20667,12 +20731,40 @@ class ReplicationPlugin extends Plugin {
       return data;
     }
   }
+  installEventListeners(resource) {
+    if (!resource || resource.name === "replication_logs") return;
+    resource.on("insert", async (data) => {
+      const completeData = await this.getCompleteData(resource, data);
+      await this.queueReplication(resource.name, "insert", data.id, completeData);
+    });
+    resource.on("update", async (data, beforeData) => {
+      const completeData = await this.getCompleteData(resource, data);
+      const completeBeforeData = beforeData ? await this.getCompleteData(resource, beforeData) : null;
+      await this.queueReplication(resource.name, "update", data.id, completeData, completeBeforeData);
+    });
+    resource.on("delete", async (data) => {
+      const completeData = await this.getCompleteData(resource, data);
+      await this.queueReplication(resource.name, "delete", data.id, completeData);
+    });
+  }
+  /**
+   * Get complete data by always fetching the full record from the resource
+   * This ensures we always have the complete data regardless of behavior or data size
+   */
+  async getCompleteData(resource, data) {
+    try {
+      const completeRecord = await resource.get(data.id);
+      return completeRecord;
+    } catch (error) {
+      return data;
+    }
+  }
   async setup(database) {
     this.database = database;
     if (!this.config.enabled) {
       return;
     }
-    if (this.config.replicators && this.config.replicators.length > 0) {
+    if (this.config.replicators && this.config.replicators.length > 0 && this.replicators.length === 0) {
       await this.initializeReplicators();
     }
     if (!database.resources.replication_logs) {
@@ -20697,14 +20789,14 @@ class ReplicationPlugin extends Plugin {
     }
     for (const resourceName in database.resources) {
       if (resourceName !== "replication_logs") {
-        this.installHooks(database.resources[resourceName]);
+        this.installEventListeners(database.resources[resourceName]);
       }
     }
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
       const resource = await originalCreateResource(config);
       if (resource && resource.name !== "replication_logs") {
-        this.installHooks(resource);
+        this.installEventListeners(resource);
       }
       return resource;
     };
@@ -20755,45 +20847,6 @@ class ReplicationPlugin extends Plugin {
   async stop() {
     this.isProcessing = false;
     await this.processQueue();
-  }
-  installHooks(resource) {
-    if (!resource || resource.name === "replication_logs") return;
-    const originalDataMap = /* @__PURE__ */ new Map();
-    resource.addHook("afterInsert", async (data) => {
-      await this.queueReplication(resource.name, "insert", data.id, data);
-      return data;
-    });
-    resource.addHook("preUpdate", async (data) => {
-      if (data.id) {
-        try {
-          const originalData = await resource.get(data.id);
-          originalDataMap.set(data.id, originalData);
-        } catch (error) {
-          originalDataMap.set(data.id, { id: data.id });
-        }
-      }
-      return data;
-    });
-    resource.addHook("afterUpdate", async (data) => {
-      const beforeData = originalDataMap.get(data.id);
-      await this.queueReplication(resource.name, "update", data.id, data, beforeData);
-      originalDataMap.delete(data.id);
-      return data;
-    });
-    resource.addHook("afterDelete", async (data) => {
-      await this.queueReplication(resource.name, "delete", data.id, data);
-      return data;
-    });
-    const originalDeleteMany = resource.deleteMany.bind(resource);
-    resource.deleteMany = async (ids) => {
-      const result = await originalDeleteMany(ids);
-      if (result && result.length > 0) {
-        for (const id of ids) {
-          await this.queueReplication(resource.name, "delete", id, { id });
-        }
-      }
-      return result;
-    };
   }
   async queueReplication(resourceName, operation, recordId, data, beforeData = null) {
     if (!this.config.enabled) {

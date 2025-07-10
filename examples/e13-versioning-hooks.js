@@ -5,7 +5,7 @@
  * 
  * This example demonstrates the new advanced features:
  * 1. Versioned resource definitions with proper schema evolution
- * 2. Hook system (preInsert, afterInsert, preUpdate, afterUpdate, preDelete, afterDelete)
+ * 2. Hook system (beforeInsert, afterInsert, beforeUpdate, afterUpdate, beforeDelete, afterDelete)
  * 3. Automatic partition management through hooks
  * 4. Correct version-based unmapping
  * 5. New s3db.json structure with versions and partitions
@@ -62,9 +62,9 @@ async function main() {
   // =====================================================
   console.log('\n2. Adding custom hooks...');
 
-  // Add preInsert hook to validate and transform data
-  users.addHook('preInsert', async (data) => {
-    console.log(`🪝 preInsert: Processing user ${data.name}`);
+  // Add beforeInsert hook to validate and transform data
+  users.addHook('beforeInsert', async (data) => {
+    console.log(`🪝 beforeInsert: Processing user ${data.name}`);
     
     // Normalize email to lowercase
     if (data.email) {
@@ -86,9 +86,9 @@ async function main() {
     return data;
   });
 
-  // Add preUpdate hook to validate updates
-  users.addHook('preUpdate', async (data) => {
-    console.log(`🪝 preUpdate: Updating user data`);
+  // Add beforeUpdate hook to validate updates
+  users.addHook('beforeUpdate', async (data) => {
+    console.log(`🪝 beforeUpdate: Updating user data`);
     
     // Prevent email changes (business rule)
     if (data.email) {
@@ -114,7 +114,7 @@ async function main() {
     name: 'Alice Johnson',
     email: 'ALICE@EXAMPLE.COM', // Will be normalized to lowercase
     region: 'US-WEST', // Will be truncated to 'US' due to maxlength:2
-    // status will be set to 'active' by preInsert hook
+    // status will be set to 'active' by beforeInsert hook
   });
 
   const user2 = await users.insert({
@@ -178,7 +178,7 @@ async function main() {
 
   const updatedUser = await users.update(user1.id, {
     name: 'Alice Johnson-Smith',
-    email: 'newemail@example.com', // This will be removed by preUpdate hook
+    email: 'newemail@example.com', // This will be removed by beforeUpdate hook
     status: 'premium'
   }, originalPartition);
 
@@ -297,8 +297,8 @@ async function main() {
   console.log('\n10. Testing deletion with hooks...');
 
   // Add delete hooks
-  users.addHook('preDelete', async (data) => {
-    console.log(`🪝 preDelete: Preparing to delete user ${data.id}`);
+  users.addHook('beforeDelete', async (data) => {
+    console.log(`🪝 beforeDelete: Preparing to delete user ${data.id}`);
     return data;
   });
 
@@ -331,7 +331,7 @@ async function main() {
   const features = [
     '✅ Versioned resource definitions with hash tracking',
     '✅ Automatic partition management through hooks',
-    '✅ Custom hook system (preInsert, afterInsert, etc.)',
+    '✅ Custom hook system (beforeInsert, afterInsert, etc.)',
     '✅ Version-aware schema unmapping',
     '✅ New s3db.json structure with versions and partitions',
     '✅ Automatic timestamp partitions',

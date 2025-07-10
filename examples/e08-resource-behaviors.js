@@ -9,7 +9,7 @@ async function demonstrateBehaviors() {
   const largeData = {
     name: 'João Silva',
     email: 'joao@example.com',
-    bio: 'A'.repeat(1000), // 1KB of 'A's
+    bio: 'X'.repeat(1000), // 1KB of 'A's
     description: 'B'.repeat(1000), // 1KB of 'B's  
     notes: 'C'.repeat(500), // 500 bytes of 'C's
     tags: ['developer', 'javascript', 'node.js', 'aws', 's3', 'database'],
@@ -85,13 +85,13 @@ async function demonstrateBehaviors() {
     console.log(`❌ Insert failed: ${error.message}\n`);
   }
 
-  // 3. DATA-TRUNCATE BEHAVIOR
-  console.log('3️⃣  DATA-TRUNCATE BEHAVIOR');
+  // 3. truncate-data BEHAVIOR
+  console.log('3️⃣  truncate-data BEHAVIOR');
   console.log('   Truncates data to fit within 2KB limit\n');
 
   const dataTruncateResource = await db.createResource({
     name: 'users_data_truncate',
-    behavior: 'data-truncate',
+    behavior: 'truncate-data',
     attributes: {
       name: 'string',
       email: 'email',
@@ -192,7 +192,7 @@ async function demonstrateBehaviors() {
   console.log('\nBehavior Summary:');
   console.log('• user-management: Warns but allows operation');
   console.log('• enforce-limits: Throws error on size exceeded');
-  console.log('• data-truncate: Cuts data to fit in 2KB');
+  console.log('• truncate-data: Cuts data to fit in 2KB');
   console.log('• body-overflow: Uses S3 body for excess data');
 }
 

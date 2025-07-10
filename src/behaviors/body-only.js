@@ -1,137 +1,109 @@
+import { calculateTotalSize } from '../concerns/calculator.js';
+
 /**
- * Body-Only Behavior Configuration Documentation
- * 
- * This behavior ensures that only the body content of a resource is returned,
- * stripping away metadata like id, created_at, updated_at, and other system fields.
- * It's useful when you want to return clean data objects without internal fields.
- * 
+ * Body Only Behavior Configuration Documentation
+ *
+ * The `body-only` behavior stores all data in the S3 object body as JSON, keeping only
+ * the version field (`_v`) in metadata. This allows for unlimited data size since S3
+ * objects can be up to 5TB, but requires reading the full object body for any operation.
+ *
+ * ## Purpose & Use Cases
+ * - For large objects that exceed S3 metadata limits
+ * - When you need to store complex nested data structures
+ * - For objects that will be read infrequently (higher latency)
+ * - When you want to avoid metadata size constraints entirely
+ *
+ * ## How It Works
+ * - Keeps only the `_v` (version) field in S3 metadata
+ * - Serializes all other data as JSON in the object body
+ * - Requires full object read for any data access
+ * - No size limits on data (only S3 object size limit of 5TB)
+ *
+ * ## Performance Considerations
+ * - Higher latency for read operations (requires full object download)
+ * - Higher bandwidth usage for read operations
+ * - No metadata-based filtering or querying possible
+ * - Best for large, infrequently accessed data
+ *
+ * @example
+ * // Create a resource with body-only behavior
+ * const resource = await db.createResource({
+ *   name: 'large_documents',
+ *   attributes: { ... },
+ *   behavior: 'body-only'
+ * });
+ *
+ * // All data goes to body, only _v stays in metadata
+ * const doc = await resource.insert({
+ *   title: 'Large Document',
+ *   content: 'Very long content...',
+ *   metadata: { ... }
+ * });
+ *
+ * ## Comparison to Other Behaviors
+ * | Behavior         | Metadata Usage | Body Usage | Size Limits | Performance |
+ * |------------------|----------------|------------|-------------|-------------|
+ * | body-only        | Minimal (_v)   | All data   | 5TB         | Slower reads |
+ * | body-overflow    | Optimized      | Overflow   | 2KB metadata | Balanced     |
+ * | truncate-data    | All (truncated)| None       | 2KB metadata | Fast reads   |
+ * | enforce-limits   | All (limited)  | None       | 2KB metadata | Fast reads   |
+ * | user-managed     | All (unlimited)| None       | S3 limit    | Fast reads   |
+ *
  * @typedef {Object} BodyOnlyBehaviorConfig
  * @property {boolean} [enabled=true] - Whether the behavior is active
- * @property {string[]} [excludeFields] - Array of field names to exclude from the body-only output
- *   - Default excluded fields: ['id', 'created_at', 'updated_at', 'deleted_at', 'version', 'partition']
- *   - Additional fields can be specified here
- * @property {string[]} [includeFields] - Array of field names to include even when body-only is active
- *   - These fields will be preserved in the output even if they're in excludeFields
- * @property {boolean} [applyToRead=true] - Whether to apply body-only filtering to read operations
- * @property {boolean} [applyToList=true] - Whether to apply body-only filtering to list operations
- * @property {boolean} [applyToFind=true] - Whether to apply body-only filtering to find operations
- * @property {boolean} [applyToStream=true] - Whether to apply body-only filtering to stream operations
- * @property {boolean} [preserveArrays=true] - Whether to preserve array structure in nested objects
- * @property {boolean} [deepFilter=false] - Whether to recursively filter nested objects and arrays
- * @property {Function} [customFilter] - Custom function to apply additional filtering logic
- *   - Parameters: (data: any, context: Object) => any
- *   - Return: filtered data object
- * @property {boolean} [logFilteredFields=false] - Whether to log which fields are being filtered
- * @property {Object} [context] - Additional context passed to customFilter function
- * 
- * @example
- * // Basic configuration with default exclusions
- * {
- *   enabled: true,
- *   applyToRead: true,
- *   applyToList: true,
- *   logFilteredFields: true
- * }
- * 
- * @example
- * // Configuration with custom field exclusions
- * {
- *   enabled: true,
- *   excludeFields: ['id', 'created_at', 'updated_at', 'internal_flag', 'temp_data'],
- *   includeFields: ['id'], // Keep id even though it's in excludeFields
- *   applyToRead: true,
- *   applyToList: true,
- *   applyToFind: true,
- *   deepFilter: true
- * }
- * 
- * @example
- * // Configuration with custom filtering function
- * {
- *   enabled: true,
- *   customFilter: (data, context) => {
- *     // Remove sensitive fields
- *     const { password, secret_key, ...cleanData } = data;
- *     return cleanData;
- *   },
- *   context: {
- *     environment: 'production',
- *     userRole: 'admin'
- *   },
- *   logFilteredFields: true
- * }
- * 
- * @example
- * // Minimal configuration using defaults
- * {
- *   enabled: true
- * }
- * 
- * @notes
- * - Default excluded fields are: id, created_at, updated_at, deleted_at, version, partition
- * - includeFields takes precedence over excludeFields
- * - Custom filter functions receive the original data and context object
- * - Deep filtering recursively processes nested objects and arrays
- * - Array preservation maintains the original array structure
- * - Logging helps debug which fields are being filtered
- * - Context object is useful for conditional filtering logic
- * - Behavior can be selectively applied to different operation types
- * - Performance impact is minimal for most use cases
- * - Custom filters should handle edge cases (null, undefined, etc.)
- */
-/**
- * Body Only Behavior
- * Stores all data in S3 object body as JSON, keeping only version in metadata
- * This approach maximizes data size and simplifies metadata management
  */
 export async function handleInsert({ resource, data, mappedData }) {
-  // Store all data in body as JSON, keep only version in metadata
-  const bodyContent = JSON.stringify(mappedData);
-  
-  // Return empty metadata (version will be added by Resource class)
-  return { 
-    mappedData: {}, 
-    body: bodyContent 
+  // Keep only the version field in metadata
+  const metadataOnly = {
+    '_v': mappedData._v || String(resource.version)
   };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  
+  // Use o objeto original para o body
+  const body = JSON.stringify(mappedData);
+  
+  return { mappedData: metadataOnly, body };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData }) {
-  // Same logic as insert - store all data in body
-  const bodyContent = JSON.stringify(mappedData);
+  // For updates, we need to merge with existing data
+  // Since we can't easily read the existing body during update,
+  // we'll put the update data in the body and let the resource handle merging
   
-  return { 
-    mappedData: {}, 
-    body: bodyContent 
+  // Keep only the version field in metadata
+  const metadataOnly = {
+    '_v': mappedData._v || String(resource.version)
   };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  
+  // Use o objeto original para o body
+  const body = JSON.stringify(mappedData);
+  
+  return { mappedData: metadataOnly, body };
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {
-  // Same logic as insert - store all data in body
-  const bodyContent = JSON.stringify(mappedData);
-  
-  return { 
-    mappedData: {}, 
-    body: bodyContent 
-  };
+  // Same as insert for body-only behavior
+  return handleInsert({ resource, data, mappedData });
 }
 
 export async function handleGet({ resource, metadata, body }) {
-  try {
-    // Parse body content as JSON
-    const bodyData = body ? JSON.parse(body) : {};
-    
-    // Return body data as metadata (this is what the Resource class expects)
-    // The version from metadata will be merged by the Resource class
-    return { 
-      metadata: bodyData, 
-      body: "" 
-    };
-  } catch (error) {
-    // If body parsing fails, return metadata as-is and log warning
-    console.warn(`Failed to parse body-only content:`, error.message);
-    return { 
-      metadata, 
-      body: "" 
-    };
+  // Parse the body to get the actual data
+  let bodyData = {};
+  if (body && body.trim() !== '') {
+    try {
+      bodyData = JSON.parse(body);
+    } catch (error) {
+      console.warn('Failed to parse body data:', error.message);
+      bodyData = {};
+    }
   }
+  
+  // Merge metadata (which contains _v) with body data
+  const mergedData = {
+    ...bodyData,
+    ...metadata // metadata contains _v
+  };
+  
+  return { metadata: mergedData, body };
 } 

@@ -114,7 +114,7 @@ declare module 's3db.js' {
   export type BehaviorName =
     | 'user-managed'
     | 'enforce-limits'
-    | 'data-truncate'
+    | 'truncate-data'
     | 'body-overflow'
     | 'body-only';
 
