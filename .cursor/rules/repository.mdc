@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+---
+- If you're working on a complex topic, consider creating an example in `./examples` to demonstrate how to work with that domain.
+- When creating examples, use the helper functions provided in `./examples/database.js`.
+- Every time you make a significant change, remember to update te types in `./src/s3db.d.ts`.
+- Do not edit those test files: `./tests/database.js` and `./tests/jest.setup.js`
+- We are using ESM, so its a type=module project.

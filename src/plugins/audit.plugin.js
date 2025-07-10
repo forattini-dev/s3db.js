@@ -36,6 +36,7 @@ export class AuditPlugin extends Plugin {
           partitionValues: 'string|optional',
           metadata: 'string|optional'
         }
+        // keyPrefix removido
       });
     } catch (error) {
       // Resource might already exist
@@ -49,7 +50,7 @@ export class AuditPlugin extends Plugin {
     }
 
     this.installDatabaseProxy();
-    this.installResourceHooks();
+    this.installEventListeners();
   }
 
   async onStart() {
@@ -65,7 +66,7 @@ export class AuditPlugin extends Plugin {
       return; // Already installed
     }
     
-    const installResourceHooksForResource = this.installResourceHooksForResource.bind(this);
+    const installEventListenersForResource = this.installEventListenersForResource.bind(this);
     
     // Store original method
     this.database._originalCreateResource = this.database.createResource;
@@ -73,8 +74,8 @@ export class AuditPlugin extends Plugin {
     // Create new method that doesn't call itself
     this.database.createResource = async function (...args) {
       const resource = await this._originalCreateResource(...args);
-      if (resource.name !== 'audit_logs') {
-        installResourceHooksForResource(resource);
+      if (resource.name !== 'audits') {
+        installEventListenersForResource(resource);
       }
       return resource;
     };
@@ -83,24 +84,28 @@ export class AuditPlugin extends Plugin {
     this.database._auditProxyInstalled = true;
   }
 
-  installResourceHooks() {
+  installEventListeners() {
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === 'audits') continue; // Don't audit the audit resource
+      if (resource.name === 'audits') {
+        continue; // Don't audit the audit resource
+      }
       
-      this.installResourceHooksForResource(resource);
+      this.installEventListenersForResource(resource);
     }
   }
 
-  installResourceHooksForResource(resource) {
-    // Wrap insert operations
-    this.wrapResourceMethod(resource, 'insert', async (result, args, methodName) => {
-      const [data] = args;
-      const recordId = data.id || result.id || 'auto-generated';
+  installEventListenersForResource(resource) {
+    // Store original data for update operations
+    const originalDataMap = new Map();
+
+    // Insert event
+    resource.on('insert', async (data) => {
+      const recordId = data.id || 'auto-generated';
       
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: 'insert',
         recordId,
@@ -118,34 +123,32 @@ export class AuditPlugin extends Plugin {
 
       // Log audit asynchronously to avoid blocking
       this.logAudit(auditRecord).catch(console.error);
-      
-      return result;
     });
 
-    // Wrap update operations
-    this.wrapResourceMethod(resource, 'update', async (result, args, methodName) => {
-      const [id, data] = args;
-      let oldData = null;
+    // Update event
+    resource.on('update', async (data) => {
+      const recordId = data.id;
+      let oldData = data.$before;
       
-      if (this.config.includeData) {
+      if (this.config.includeData && !oldData) {
         try {
-          oldData = await resource.get(id);
+          oldData = await resource.get(recordId);
         } catch (error) {
           // Record might not exist or be inaccessible
         }
       }
 
-      const partitionValues = this.config.includePartitions ? this.getPartitionValues(result, resource) : null;
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
 
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: 'update',
-        recordId: id,
+        recordId,
         userId: this.getCurrentUserId?.() || 'system',
         timestamp: new Date().toISOString(),
         oldData: oldData && this.config.includeData === false ? null : (oldData ? JSON.stringify(this.truncateData(oldData)) : null),
-        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(result)),
+        newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
         partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
         partitionValues: this.config.includePartitions ? (partitionValues ? (Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null) : null) : null,
         metadata: JSON.stringify({
@@ -156,18 +159,16 @@ export class AuditPlugin extends Plugin {
 
       // Log audit asynchronously
       this.logAudit(auditRecord).catch(console.error);
-      
-      return result;
     });
 
-    // Wrap delete operations
-    this.wrapResourceMethod(resource, 'delete', async (result, args, methodName) => {
-      const [id] = args;
-      let oldData = null;
+    // Delete event
+    resource.on('delete', async (data) => {
+      const recordId = data.id;
+      let oldData = data;
       
-      if (this.config.includeData) {
+      if (this.config.includeData && !oldData) {
         try {
-          oldData = await resource.get(id);
+          oldData = await resource.get(recordId);
         } catch (error) {
           // Record might not exist or be inaccessible
         }
@@ -176,10 +177,10 @@ export class AuditPlugin extends Plugin {
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
 
       const auditRecord = {
-        id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
         resourceName: resource.name,
         operation: 'delete',
-        recordId: id,
+        recordId,
         userId: this.getCurrentUserId?.() || 'system',
         timestamp: new Date().toISOString(),
         oldData: oldData && this.config.includeData === false ? null : (oldData ? JSON.stringify(this.truncateData(oldData)) : null),
@@ -194,54 +195,55 @@ export class AuditPlugin extends Plugin {
 
       // Log audit asynchronously
       this.logAudit(auditRecord).catch(console.error);
-      
-      return result;
     });
 
-    // Wrap deleteMany operations
-    this.wrapResourceMethod(resource, 'deleteMany', async (result, args, methodName) => {
-      const [ids] = args;
-      const auditRecords = [];
-
+    // Remover monkey patch de deleteMany
+    // Adicionar middleware para deleteMany
+    resource.useMiddleware('deleteMany', async (ctx, next) => {
+      const ids = ctx.args[0];
+      // Captura os dados antes da deleção
+      const oldDataMap = {};
       if (this.config.includeData) {
         for (const id of ids) {
           try {
-            const oldData = await resource.get(id);
-            const partitionValues = this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
-
-            auditRecords.push({
-              id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              resourceName: resource.name,
-              operation: 'delete',
-              recordId: id,
-              userId: this.getCurrentUserId?.() || 'system',
-              timestamp: new Date().toISOString(),
-              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
-              newData: null,
-              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-              partitionValues: this.config.includePartitions ? (partitionValues ? (Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null) : null) : null,
-              metadata: JSON.stringify({
-                source: 'audit-plugin',
-                version: '2.0',
-                batchOperation: true
-              })
-            });
+            oldDataMap[id] = await resource.get(id);
           } catch (error) {
-            // Record might not exist
+            oldDataMap[id] = null;
           }
         }
       }
-
-      // Log all audit records asynchronously
-      for (const auditRecord of auditRecords) {
-        this.logAudit(auditRecord).catch(console.error);
+      const result = await next();
+      // Auditar depois
+      if (result && result.length > 0 && this.config.includeData) {
+        for (const id of ids) {
+          const oldData = oldDataMap[id];
+          const partitionValues = oldData ? (this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null) : null;
+          const auditRecord = {
+            id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+            resourceName: resource.name,
+            operation: 'delete',
+            recordId: id,
+            userId: this.getCurrentUserId?.() || 'system',
+            timestamp: new Date().toISOString(),
+            oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
+            newData: null,
+            partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+            partitionValues: this.config.includePartitions ? (partitionValues ? (Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null) : null) : null,
+            metadata: JSON.stringify({
+              source: 'audit-plugin',
+              version: '2.0',
+              batchOperation: true
+            })
+          };
+          this.logAudit(auditRecord).catch(console.error);
+        }
       }
-      
       return result;
     });
   }
 
   getPartitionValues(data, resource) {
+    if (!data) return null;
     const partitions = resource.config?.partitions || {};
     const partitionValues = {};
     
@@ -291,25 +293,31 @@ export class AuditPlugin extends Plugin {
   }
 
   async logAudit(auditRecord) {
-    if (!this.auditResource) return;
-    try {
-      await this.auditResource.insert(auditRecord);
-    } catch (error) {
-      console.error('Failed to log audit record:', error);
-      if (error && error.stack) console.error(error.stack);
+    if (!auditRecord.id) {
+      auditRecord.id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
+    const result = await this.auditResource.insert(auditRecord);
+    return result;
   }
 
   truncateData(data) {
     if (!data) return data;
     
-    const dataStr = JSON.stringify(data);
+    // Filter out internal S3DB fields (those starting with _)
+    const filteredData = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith('_') && key !== '$overflow') {
+        filteredData[key] = value;
+      }
+    }
+    
+    const dataStr = JSON.stringify(filteredData);
     if (dataStr.length <= this.config.maxDataSize) {
-      return data;
+      return filteredData;
     }
     
     return {
-      ...data,
+      ...filteredData,
       _truncated: true,
       _originalSize: dataStr.length,
       _truncatedAt: new Date().toISOString()
@@ -332,10 +340,7 @@ export class AuditPlugin extends Plugin {
         offset = 0
       } = options;
 
-      // Note: This is a simplified query - in a real implementation,
-      // you might want to use a more sophisticated querying mechanism
       const allAudits = await this.auditResource.getAll();
-      
       let filtered = allAudits.filter(audit => {
         if (resourceName && audit.resourceName !== resourceName) return false;
         if (operation && audit.operation !== operation) return false;
@@ -346,23 +351,16 @@ export class AuditPlugin extends Plugin {
         if (endDate && new Date(audit.timestamp) > new Date(endDate)) return false;
         return true;
       });
-
-      // Sort by timestamp descending (newest first)
       filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      
-      // Deserialize JSON fields
       const deserialized = filtered.slice(offset, offset + limit).map(audit => ({
         ...audit,
-        oldData: audit.oldData ? JSON.parse(audit.oldData) : null,
-        newData: audit.newData ? JSON.parse(audit.newData) : null,
-        partitionValues: audit.partitionValues ? JSON.parse(audit.partitionValues) : null,
-        metadata: audit.metadata ? JSON.parse(audit.metadata) : null
+        oldData: audit.oldData === null || audit.oldData === undefined || audit.oldData === 'null' ? null : (typeof audit.oldData === 'string' ? JSON.parse(audit.oldData) : audit.oldData),
+        newData: audit.newData === null || audit.newData === undefined || audit.newData === 'null' ? null : (typeof audit.newData === 'string' ? JSON.parse(audit.newData) : audit.newData),
+        partitionValues: audit.partitionValues && typeof audit.partitionValues === 'string' ? JSON.parse(audit.partitionValues) : audit.partitionValues,
+        metadata: audit.metadata && typeof audit.metadata === 'string' ? JSON.parse(audit.metadata) : audit.metadata
       }));
-      
       return deserialized;
     } catch (error) {
-      console.error('Failed to get audit logs:', error);
-      if (error && error.stack) console.error(error.stack);
       return [];
     }
   }
@@ -422,8 +420,10 @@ export class AuditPlugin extends Plugin {
       stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
       
       // Count by day
-      const day = audit.timestamp.split('T')[0];
-      stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+      if (audit.timestamp) {
+        const day = audit.timestamp.split('T')[0];
+        stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+      }
     }
 
     return stats;

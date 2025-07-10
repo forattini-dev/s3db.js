@@ -51,84 +51,65 @@ function generateBase36Mapping(keys) {
 }
 
 export const SchemaActions = {
-  trim: (value) => value.trim(),
+  trim: (value) => value == null ? value : value.trim(),
 
-  encrypt: (value, { passphrase }) => encrypt(value, passphrase),
+  encrypt: (value, { passphrase }) => {
+    if (value === null || value === undefined) return value;
+    return encrypt(value, passphrase);
+  },
   decrypt: async (value, { passphrase }) => {
+    if (value === null || value === undefined) return value;
     try {
       const raw = await decrypt(value, passphrase)
+      // Se o valor original era um tipo primitivo, tente restaurar
+      if (raw === 'null') return null;
+      if (raw === 'undefined') return undefined;
       return raw;
     } catch (error) {
-      console.warn(`Schema decrypt error: ${error}`, error)
       return value;
-
     }
   },
 
-  toString: (value) => String(value),
+  toString: (value) => value == null ? value : String(value),
 
   fromArray: (value, { separator }) => {
-    // Handle null, undefined, or non-array values
     if (value === null || value === undefined || !Array.isArray(value)) {
-      return value; // Preserve null/undefined, don't serialize non-arrays
+      return value;
     }
-    
-    // Handle empty arrays
     if (value.length === 0) {
-      return '[]'; // Special marker for empty arrays
+      return '';
     }
-    
-    // Escape separator characters in array items before joining
-    // First escape backslashes, then escape the separator
     const escapedItems = value.map(item => {
       if (typeof item === 'string') {
         return item
-          .replace(/\\/g, '\\\\') // Escape backslashes first
-          .replace(new RegExp(`\\${separator}`, 'g'), `\\${separator}`); // Then escape separator
+          .replace(/\\/g, '\\\\')
+          .replace(new RegExp(`\\${separator}`, 'g'), `\\${separator}`);
       }
       return String(item);
     });
-    
     return escapedItems.join(separator);
   },
 
   toArray: (value, { separator }) => {
-    // Handle null/undefined values - preserve them
+    if (Array.isArray(value)) {
+      return value;
+    }
     if (value === null || value === undefined) {
       return value;
     }
-    
-    // Handle empty array marker
-    if (value === '[]') {
-      return [];
-    }
-    
-    // Handle empty string (should also be empty array)
     if (value === '') {
       return [];
     }
-    
-    // Custom split that respects escaped separators
     const items = [];
     let current = '';
     let i = 0;
     const str = String(value);
-    
     while (i < str.length) {
       if (str[i] === '\\' && i + 1 < str.length) {
-        // Handle escaped characters
-        if (str[i + 1] === separator) {
-          current += separator; // Unescape separator
+        // If next char is separator or backslash, add it literally
+        current += str[i + 1];
           i += 2;
-        } else if (str[i + 1] === '\\') {
-          current += '\\'; // Unescape backslash
-          i += 2;
-        } else {
-          current += str[i]; // Keep backslash for other chars
-          i++;
-        }
       } else if (str[i] === separator) {
-        // Found unescaped separator
         items.push(current);
         current = '';
         i++;
@@ -137,20 +118,50 @@ export const SchemaActions = {
         i++;
       }
     }
-    
-    // Add the last item
     items.push(current);
-    
     return items;
   },
 
-  toJSON: (value) => JSON.stringify(value),
-  fromJSON: (value) => JSON.parse(value),
+  toJSON: (value) => {
+    if (value === null) return null;
+    if (value === undefined) return undefined;
+    if (typeof value === 'string') {
+      // Se já é um JSON válido, não serializa de novo
+      try {
+        const parsed = JSON.parse(value);
+        // Se for objeto/array, retorna string original
+        if (typeof parsed === 'object') return value;
+      } catch {}
+      // Se não for JSON válido, retorna string original
+      return value;
+    }
+    return JSON.stringify(value);
+  },
+  fromJSON: (value) => {
+    if (value === null) return null;
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string') return value;
+    if (value === '') return '';
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  },
 
   toNumber: (value) => isString(value) ? value.includes('.') ? parseFloat(value) : parseInt(value) : value,
 
   toBool: (value) => [true, 1, 'true', '1', 'yes', 'y'].includes(value),
   fromBool: (value) => [true, 1, 'true', '1', 'yes', 'y'].includes(value) ? '1' : '0',
+  fromBase36: (value) => {
+    if (value === null || value === undefined || value === '') return value;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const n = parseInt(value, 36);
+      return isNaN(n) ? undefined : n;
+    }
+    return undefined;
+  },
 }
 
 export class Schema {
@@ -199,6 +210,8 @@ export class Schema {
       const { mapping, reversedMapping } = generateBase36Mapping(allKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
+      
+
     }
   }
 
@@ -251,8 +264,10 @@ export class Schema {
 
     for (const [name, definition] of Object.entries(schema)) {
       if (definition.includes("array")) {
+        if (definition.includes('items:string')) {
         this.addHook("beforeMap", name, "fromArray");
         this.addHook("afterUnmap", name, "toArray");
+        }
       } 
 
       if (definition.includes("secret")) {
@@ -266,8 +281,8 @@ export class Schema {
       }
 
       if (definition.includes("number")) {
-        this.addHook("beforeMap", name, "toString");
-        this.addHook("afterUnmap", name, "toNumber");
+        this.addHook("beforeMap", name, "toBase36");
+        this.addHook("afterUnmap", name, "fromBase36");
       }
 
       if (definition.includes("boolean")) {
@@ -276,6 +291,12 @@ export class Schema {
       }
 
       if (definition.includes("json")) {
+        this.addHook("beforeMap", name, "toJSON");
+        this.addHook("afterUnmap", name, "fromJSON");
+      }
+
+      // Handle object fields - add JSON serialization hooks
+      if (definition === "object" || definition.includes("object")) {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
       }
@@ -364,17 +385,19 @@ export class Schema {
   }
 
   async applyHooksActions(resourceItem, hook) {
+    const cloned = cloneDeep(resourceItem);
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
       for (const action of actions) {
-        const value = get(resourceItem, attribute)
+        const value = get(cloned, attribute)
         if (value !== undefined && typeof SchemaActions[action] === 'function') {
-          set(resourceItem, attribute, await SchemaActions[action](value, {
+          set(cloned, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator,
           }))
         }
       }
     }
+    return cloned;
   }
 
   async validate(resourceItem, { mutateOriginal = false } = {}) {
@@ -384,32 +407,113 @@ export class Schema {
   }
 
   async mapper(resourceItem) {
-    const obj = flatten(cloneDeep(resourceItem), { safe: true });
-
-    await this.applyHooksActions(obj, "beforeMap");
-
-    const rest = { '_v': this.version + '' }
-    for (const [key, value] of Object.entries(obj)) {
-      rest[this.map[key]] = value;
+    let obj = cloneDeep(resourceItem);
+    // Always apply beforeMap hooks for all fields
+    obj = await this.applyHooksActions(obj, "beforeMap");
+    // Then flatten the object
+    const flattenedObj = flatten(obj, { safe: true });
+    const rest = { '_v': this.version + '' };
+    for (const [key, value] of Object.entries(flattenedObj)) {
+      const mappedKey = this.map[key] || key;
+      // Always map numbers to base36
+      const attrDef = this.getAttributeDefinition(key);
+      if (typeof value === 'number' && typeof attrDef === 'string' && attrDef.includes('number')) {
+        rest[mappedKey] = value.toString(36);
+      } else if (typeof value === 'string') {
+        if (value === '[object Object]') {
+          rest[mappedKey] = '{}';
+        } else if (value.startsWith('{') || value.startsWith('[')) {
+          rest[mappedKey] = value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+        rest[mappedKey] = JSON.stringify(value);
+      } else {
+        rest[mappedKey] = value;
+      }
     }
-    
     await this.applyHooksActions(rest, "afterMap");
     return rest;
   }
 
-  async unmapper(mappedResourceItem) {
-    const obj = cloneDeep(mappedResourceItem);
+  async unmapper(mappedResourceItem, mapOverride) {
+    let obj = cloneDeep(mappedResourceItem);
     delete obj._v;
-
-    await this.applyHooksActions(obj, "beforeUnmap");
-
-    const rest = {}
+    obj = await this.applyHooksActions(obj, "beforeUnmap");
+    const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
+    const rest = {};
     for (const [key, value] of Object.entries(obj)) {
-      rest[this.reversedMap[key]] = value;
+      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+      let parsedValue = value;
+      const attrDef = this.getAttributeDefinition(originalKey);
+      // Always unmap base36 strings to numbers for number fields
+      if (typeof attrDef === 'string' && attrDef.includes('number')) {
+        if (typeof parsedValue === 'string' && parsedValue !== '') {
+          parsedValue = parseInt(parsedValue, 36);
+        } else if (typeof parsedValue === 'number') {
+          // Already a number, do nothing
+        } else {
+          parsedValue = undefined;
+        }
+      } else if (typeof value === 'string') {
+        if (value === '[object Object]') {
+          parsedValue = {};
+        } else if (value.startsWith('{') || value.startsWith('[')) {
+          try {
+            parsedValue = JSON.parse(value);
+          } catch {}
+        }
+      }
+      // PATCH: ensure arrays are always arrays
+      if (this.attributes) {
+        if (typeof attrDef === 'string' && attrDef.includes('array')) {
+          if (Array.isArray(parsedValue)) {
+            // Already an array
+          } else if (typeof parsedValue === 'string' && parsedValue.trim().startsWith('[')) {
+            try {
+              const arr = JSON.parse(parsedValue);
+              if (Array.isArray(arr)) {
+                parsedValue = arr;
+              }
+            } catch {}
+          } else {
+            parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
+          }
+        }
+      }
+      // PATCH: apply afterUnmap hooks for type restoration
+      if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
+        for (const action of this.options.hooks.afterUnmap[originalKey]) {
+          if (typeof SchemaActions[action] === 'function') {
+            parsedValue = await SchemaActions[action](parsedValue, {
+              passphrase: this.passphrase,
+              separator: this.options.arraySeparator,
+            });
     }
-    
+        }
+      }
+      rest[originalKey] = parsedValue;
+    }
     await this.applyHooksActions(rest, "afterUnmap");
-    return unflatten(rest);
+    const result = unflatten(rest);
+    for (const [key, value] of Object.entries(mappedResourceItem)) {
+      if (key.startsWith('$')) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  // Helper to get attribute definition by dot notation key
+  getAttributeDefinition(key) {
+    const parts = key.split('.');
+    let def = this.attributes;
+    for (const part of parts) {
+      if (!def) return undefined;
+      def = def[part];
+    }
+    return def;
   }
 
   /**

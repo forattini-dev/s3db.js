@@ -10,9 +10,10 @@ export * from './validator.class.js'
 
 // directories
 export * from './behaviors/index.js'
-export * from './cache/index.js'
+export * from './plugins/cache/index.js'
 export * from './concerns/index.js'
 export * from './plugins/index.js'
+export * from './plugins/replicators/index.js'
 export * from './stream/index.js'
 
 // default

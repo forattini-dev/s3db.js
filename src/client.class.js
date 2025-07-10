@@ -1,8 +1,9 @@
 import path from "path";
-import { idGenerator } from "./concerns/id.js";
 import EventEmitter from "events";
 import { chunk } from "lodash-es";
 import { PromisePool } from "@supercharge/promise-pool";
+
+import { idGenerator } from "./concerns/id.js";
 
 import {
   S3Client,
@@ -14,6 +15,7 @@ import {
   DeleteObjectsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
+import { md5 } from 'hash-wasm';
 
 import { ErrorMap } from "./errors.js";
 import { ConnectionString } from "./connection-string.class.js";
@@ -49,34 +51,35 @@ export class Client extends EventEmitter {
       }
     }
 
-    return new S3Client(options)
+    const client = new S3Client(options);
+
+    // Adiciona middleware para Content-MD5 em DeleteObjectsCommand
+    client.middlewareStack.add(
+      (next, context) => async (args) => {
+        if (context.commandName === 'DeleteObjectsCommand') {
+          const body = args.request.body;
+          if (body && typeof body === 'string') {
+            const contentMd5 = Buffer.from(await md5(body), 'hex').toString('base64');
+            args.request.headers['Content-MD5'] = contentMd5;
+          }
+        }
+        return next(args);
+      },
+      {
+        step: 'build',
+        name: 'addContentMd5ForDeleteObjects',
+        priority: 'high',
+      }
+    );
+
+    return client;
   }
 
   async sendCommand(command) {
     this.emit("command.request", command.constructor.name, command.input);
 
-    // supress warning for unknown stream length
-    const originalWarn = console.warn;
-
-    try {
-      console.warn = (message) => {
-        if (!message.includes('Stream of unknown length')) {
-          originalWarn(message);
-        }
-      };
-    } catch (error) {
-      console.error(error);
-    }
-
     const response = await this.client.send(command);
     this.emit("command.response", command.constructor.name, response, command.input);
-
-    // return original console.warn
-    try {
-      console.warn = originalWarn;
-    } catch (error) {
-      console.error(error);
-    }
 
     return response;
   }
@@ -98,6 +101,7 @@ export class Client extends EventEmitter {
 
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+    const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
     
     // Ensure all metadata values are strings and keys are valid
     const stringMetadata = {};
@@ -204,6 +208,7 @@ export class Client extends EventEmitter {
 
   async deleteObject(key) {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
+    const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
     const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
@@ -228,6 +233,12 @@ export class Client extends EventEmitter {
     const { results, errors } = await PromisePool.for(packages)
       .withConcurrency(this.parallelism)
       .process(async (keys) => {
+        // Log existence before deletion
+        for (const key of keys) {
+          const resolvedKey = keyPrefix ? path.join(keyPrefix, key) : key;
+          const bucket = this.config.bucket;
+          const existsBefore = await this.exists(key);
+        }
         const options = {
           Bucket: this.config.bucket,
           Delete: {
@@ -237,15 +248,25 @@ export class Client extends EventEmitter {
           },
         };
 
+        // Debug log
+        let response;
         try {
-          const response = await this.sendCommand(new DeleteObjectsCommand(options));
-          return response;
+          response = await this.sendCommand(new DeleteObjectsCommand(options));
+          if (response && response.Errors && response.Errors.length > 0) {
+            console.error('[Client][ERROR] DeleteObjectsCommand errors:', response.Errors);
+          }
+          if (response && response.Deleted && response.Deleted.length !== keys.length) {
+            console.error('[Client][ERROR] Nem todos os objetos foram deletados:', response.Deleted, 'esperado:', keys);
+          }
         } catch (error) {
+          console.error('[Client][ERROR] Exception in DeleteObjectsCommand:', error);
           throw this.errorProxy(error, {
             keys,
             command: options,
           });
+        } finally {
         }
+        return response;
       });
 
     const report = {
@@ -271,7 +292,7 @@ export class Client extends EventEmitter {
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: keyPrefix ? path.join(keyPrefix, prefix) : prefix,
+        Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
         ContinuationToken: continuationToken,
       });
 

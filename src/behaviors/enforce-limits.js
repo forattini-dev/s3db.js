@@ -1,6 +1,7 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
+import { calculateEffectiveLimit } from '../concerns/calculator.js';
 
-export const S3_METADATA_LIMIT_BYTES = 2048;
+export const S3_METADATA_LIMIT_BYTES = 2047;
 
 /**
  * Enforce Limits Behavior Configuration Documentation
@@ -134,24 +135,57 @@ export const S3_METADATA_LIMIT_BYTES = 2048;
  */
 export async function handleInsert({ resource, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
