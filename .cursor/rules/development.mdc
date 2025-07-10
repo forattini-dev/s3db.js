@@ -1,0 +1,12 @@
+---
+alwaysApply: true
+---
+- Always use pnpm to manage dependencies.
+- At the end of each sprint, run the full test suite using `pnpm run test`.
+- We're using a MinIO container to simulate S3 behavior. You can view the logs with `docker compose logs minio --tail 30`
+- Be proactive and results-oriented at all times.
+- Test-Driven Development (TDD) is not required, but we expect at least 80% code coverage.
+- This is critical code—do not create mocks. Always use a valid client.
+- We’ve provided utility functions to help with database and client initialization.
+- Always reflect on what each test is actually validating.
+- Tests must be quick to run and easy to implement. No test file should take more than a few seconds to execute.

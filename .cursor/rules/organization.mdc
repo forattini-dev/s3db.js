@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+- Always use English. Write all code, tests, and examples in English.
+- We prefer not to add comments to our code—avoid them.
+- Instead of writing comments, improve code readability using clear variable names and well-named methods/functions.
+- Be as specific and precise as possible.
+- When working across multiple files, always create a to-do list outlining the steps needed to achieve your goal.
+- Learn and use efficient Linux commands to avoid repetitive manual changes—they can save you significant time.
+- JS > TS

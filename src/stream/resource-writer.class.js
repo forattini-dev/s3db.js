@@ -61,7 +61,10 @@ export class ResourceWriter extends EventEmitter {
             this.emit("error", error, content);
           })
           .process(async (item) => {
-            await this.resource.insert(item);
+            console.log('[RESOURCE_WRITER] Inserting item:', item);
+            const result = await this.resource.insert(item);
+            console.log('[RESOURCE_WRITER] Insert result:', result);
+            return result;
           });
       } catch (error) {
         this.emit('error', error);

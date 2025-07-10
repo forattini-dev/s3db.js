@@ -12,10 +12,7 @@ const setupDatabase = async () => {
   // Create database with real connection using test prefix
   database = new S3db({
     verbose: true,
-    connectionString: process.env.BUCKET_CONNECTION_STRING
-      .replace('USER', process.env.MINIO_USER)
-      .replace('PASSWORD', process.env.MINIO_PASSWORD)
-      + `/${createPrefix()}`
+    connectionString: process.env.BUCKET_CONNECTION_STRING + `/${createPrefix()}`
   });
 
   await database.connect();

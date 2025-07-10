@@ -113,7 +113,7 @@ async function main() {
   // Listen to replication events
   replicationPlugin.on('replication.success', (data) => {
     console.log('✅ Replication succeeded:', {
-      resource: data.item.resourceName,
+      resource: data.item.resource,
       operation: data.item.operation,
       recordId: data.item.recordId,
       attempts: data.attempts
@@ -122,7 +122,7 @@ async function main() {
 
   replicationPlugin.on('replication.failed', (data) => {
     console.log('❌ Replication failed:', {
-      resource: data.item.resourceName,
+      resource: data.item.resource,
       operation: data.item.operation,
       recordId: data.item.recordId,
       error: data.lastError

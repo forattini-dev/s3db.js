@@ -1,6 +1,7 @@
 export default {
   verbose: true,
   testEnvironment: 'node',
+  injectGlobals: true,
 
   setupFiles: [
     '<rootDir>/tests/jest.setup.js'

@@ -1,5 +1,5 @@
 import Plugin from "./plugin.class.js";
-import { createReplicator, validateReplicatorConfig } from "../replicators/index.js";
+import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
 import { gzip, gunzip } from 'zlib';
 import { promisify } from 'util';
 import { isPlainObject } from 'lodash-es';
@@ -158,16 +158,71 @@ export class ReplicationPlugin extends Plugin {
     }
   }
 
+  // Helper to filter out internal S3DB fields
+  filterInternalFields(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const filtered = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (!key.startsWith('_') && key !== '$overflow') {
+        filtered[key] = value;
+      }
+    }
+    return filtered;
+  }
+
+  installEventListeners(resource) {
+    if (!resource || resource.name === 'replication_logs') return;
+
+    // Insert event
+    resource.on('insert', async (data) => {
+      // Ensure we get complete data (metadata + body if body-overflow is active)
+      const completeData = await this.getCompleteData(resource, data);
+      await this.queueReplication(resource.name, 'insert', data.id, completeData);
+    });
+
+    // Update event
+    resource.on('update', async (data) => {
+      // Ensure we get complete data (metadata + body if body-overflow is active)
+      const completeData = await this.getCompleteData(resource, data);
+      const completeBeforeData = data.$before ? await this.getCompleteData(resource, data.$before) : null;
+      await this.queueReplication(resource.name, 'update', data.id, completeData, completeBeforeData);
+    });
+
+    // Delete event
+    resource.on('delete', async (data) => {
+      // Ensure we get complete data (metadata + body if body-overflow is active)
+      const completeData = await this.getCompleteData(resource, data);
+      await this.queueReplication(resource.name, 'delete', data.id, completeData);
+    });
+  }
+
+  /**
+   * Get complete data by always fetching the full record from the resource
+   * This ensures we always have the complete data regardless of behavior or data size
+   */
+  async getCompleteData(resource, data) {
+    // Always get the complete record from the resource to ensure we have all data
+    // This handles all behaviors: body-overflow, truncate-data, body-only, etc.
+    try {
+      const completeRecord = await resource.get(data.id);
+      return completeRecord;
+    } catch (error) {
+      // If we can't get the complete record (e.g., during delete operations),
+      // return the data as-is as fallback
+      return data;
+    }
+  }
+
   async setup(database) {
     this.database = database;
 
-    // Only create resources and install hooks if plugin is enabled
+    // Only create resources and install listeners if plugin is enabled
     if (!this.config.enabled) {
       return;
     }
 
-    // Initialize replicators if any are configured
-    if (this.config.replicators && this.config.replicators.length > 0) {
+    // Initialize replicators if any are configured and no replicators are already set
+    if (this.config.replicators && this.config.replicators.length > 0 && this.replicators.length === 0) {
       await this.initializeReplicators();
     }
 
@@ -193,19 +248,19 @@ export class ReplicationPlugin extends Plugin {
       this.replicationLog = database.resources.replication_logs;
     }
 
-    // Install hooks on existing resources
+    // Install event listeners on existing resources
     for (const resourceName in database.resources) {
       if (resourceName !== 'replication_logs') {
-        this.installHooks(database.resources[resourceName]);
+        this.installEventListeners(database.resources[resourceName]);
       }
     }
 
-    // Hook into database to install hooks on new resources
+    // Hook into database to install listeners on new resources
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
       const resource = await originalCreateResource(config);
       if (resource && resource.name !== 'replication_logs') {
-        this.installHooks(resource);
+        this.installEventListeners(resource);
       }
       return resource;
     };
@@ -269,58 +324,6 @@ export class ReplicationPlugin extends Plugin {
     await this.processQueue();
   }
 
-  installHooks(resource) {
-    if (!resource || resource.name === 'replication_logs') return;
-
-    // Store original data for update operations
-    const originalDataMap = new Map();
-
-    // Use native hooks instead of monkey patching
-    resource.addHook('afterInsert', async (data) => {
-      await this.queueReplication(resource.name, 'insert', data.id, data);
-      return data;
-    });
-
-    resource.addHook('preUpdate', async (data) => {
-      // Store original data before update
-      if (data.id) {
-        try {
-          const originalData = await resource.get(data.id);
-          originalDataMap.set(data.id, originalData);
-        } catch (error) {
-          // If get fails, use minimal data
-          originalDataMap.set(data.id, { id: data.id });
-        }
-      }
-      return data;
-    });
-
-    resource.addHook('afterUpdate', async (data) => {
-      const beforeData = originalDataMap.get(data.id);
-      await this.queueReplication(resource.name, 'update', data.id, data, beforeData);
-      originalDataMap.delete(data.id); // Clean up
-      return data;
-    });
-
-    resource.addHook('afterDelete', async (data) => {
-      await this.queueReplication(resource.name, 'delete', data.id, data);
-      return data;
-    });
-
-    // For deleteMany, we need to handle it differently since it doesn't have a native hook
-    // We'll keep the monkey patching only for deleteMany
-    const originalDeleteMany = resource.deleteMany.bind(resource);
-    resource.deleteMany = async (ids) => {
-      const result = await originalDeleteMany(ids);
-      if (result && result.length > 0) {
-        for (const id of ids) {
-          await this.queueReplication(resource.name, 'delete', id, { id });
-        }
-      }
-      return result;
-    };
-  }
-
   async queueReplication(resourceName, operation, recordId, data, beforeData = null) {
     if (!this.config.enabled) {
       return;
@@ -340,13 +343,17 @@ export class ReplicationPlugin extends Plugin {
       return;
     }
 
+    // Filtrar campos internos antes de replicar
+    const filteredData = this.filterInternalFields(isPlainObject(data) ? data : { raw: data });
+    const filteredBeforeData = beforeData ? this.filterInternalFields(isPlainObject(beforeData) ? beforeData : { raw: beforeData }) : null;
+
     const item = {
       id: `repl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       resourceName,
       operation,
       recordId,
-      data: isPlainObject(data) ? data : { raw: data },
-      beforeData: beforeData ? (isPlainObject(beforeData) ? beforeData : { raw: beforeData }) : null,
+      data: filteredData,
+      beforeData: filteredBeforeData,
       timestamp: new Date().toISOString(),
       attempts: 0
     };
@@ -392,6 +399,8 @@ export class ReplicationPlugin extends Plugin {
 
   async processReplicationItem(item) {
     const { resourceName, operation, recordId, data, beforeData } = item;
+    
+
     
     // Find applicable replicators for this resource
     const applicableReplicators = this.replicators.filter(replicator => 

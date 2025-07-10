@@ -101,6 +101,7 @@ export class Database extends EventEmitter {
         this.resources[name] = new Resource({
           name,
           client: this.client,
+          database: this, // garantir referência
           version: currentVersion,
           attributes: versionData.attributes,
           behavior: versionData.behavior || 'user-managed',
@@ -114,7 +115,8 @@ export class Database extends EventEmitter {
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
           hooks: versionData.hooks || {},
-          versioningEnabled: this.versioningEnabled
+          versioningEnabled: this.versioningEnabled,
+          map: versionData.map
         });
       }
     }
@@ -202,10 +204,11 @@ export class Database extends EventEmitter {
       delete stableAttributes.createdAt;
       delete stableAttributes.updatedAt;
     }
-    // Include behavior in the hash
+    // Include behavior and partitions in the hash
     const hashObj = {
       attributes: stableAttributes,
       behavior: behavior || definition.behavior || 'user-managed',
+      partitions: definition.partitions || {},
     };
     // Use jsonStableStringify to ensure consistent ordering
     const stableString = jsonStableStringify(hashObj);
@@ -364,7 +367,7 @@ export class Database extends EventEmitter {
    * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = 'user-managed', options = {} }) {
+  resourceExistsWithSameHash({ name, attributes, behavior = 'user-managed', partitions = {}, options = {} }) {
     if (!this.resources[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
@@ -377,6 +380,7 @@ export class Database extends EventEmitter {
       name,
       attributes,
       behavior,
+      partitions,
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
@@ -438,16 +442,25 @@ export class Database extends EventEmitter {
     
     const resource = new Resource({
       name,
+      client: this.client,
+      database: this, // garantir referência
+      version: config.version !== undefined ? config.version : version,
       attributes,
       behavior,
+      parallelism: this.parallelism,
+      passphrase: config.passphrase !== undefined ? config.passphrase : this.passphrase,
       observers: [this],
-      client: this.client,
-      version,
-      passphrase: this.passphrase,
-      cache: this.cache,
-      hooks,
+      cache: config.cache !== undefined ? config.cache : this.cache,
+      timestamps: config.timestamps !== undefined ? config.timestamps : false,
+      partitions: config.partitions || {},
+      paranoid: config.paranoid !== undefined ? config.paranoid : true,
+      allNestedObjectsOptional: config.allNestedObjectsOptional !== undefined ? config.allNestedObjectsOptional : true,
+      autoDecrypt: config.autoDecrypt !== undefined ? config.autoDecrypt : true,
+      hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
-      ...config,
+      map: config.map,
+      idGenerator: config.idGenerator,
+      idSize: config.idSize
     });
     this.resources[name] = resource;
     await this.uploadMetadataFile();
@@ -501,6 +514,8 @@ export class Database extends EventEmitter {
   isConnected() {
     return !!this.savedMetadata;
   }
+
+  async disconnect() {}
 }
 
 export class S3db extends Database {}
