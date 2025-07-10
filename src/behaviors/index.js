@@ -1,6 +1,6 @@
 import * as userManaged from './user-managed.js';
 import * as enforceLimits from './enforce-limits.js';
-import * as dataTruncate from './data-truncate.js';
+import * as dataTruncate from './truncate-data.js';
 import * as bodyOverflow from './body-overflow.js';
 import * as bodyOnly from './body-only.js';
 
@@ -10,7 +10,7 @@ import * as bodyOnly from './body-only.js';
 export const behaviors = {
   'user-managed': userManaged,
   'enforce-limits': enforceLimits,
-  'data-truncate': dataTruncate,
+  'truncate-data': dataTruncate,
   'body-overflow': bodyOverflow,
   'body-only': bodyOnly
 };

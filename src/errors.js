@@ -109,13 +109,17 @@ export class InvalidResourceItem extends S3DBError {
     resourceName,
     attributes,
     validation,
+    message
   }) {
-    super(`This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`, {
-      bucket,
-      resourceName,
-      attributes,
-      validation,
-    });
+    super(
+      message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].\n${JSON.stringify(validation, null, 2)}`,
+      {
+        bucket,
+        resourceName,
+        attributes,
+        validation,
+      }
+    );
   }
 }
 

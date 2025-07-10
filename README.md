@@ -390,7 +390,7 @@ const summaries = await s3db.createResource({
     title: "string",
     description: "string"
   },
-  behavior: "data-truncate" // Truncates to fit within limits
+  behavior: "truncate-data" // Truncates to fit within limits
 });
 ```
 
@@ -937,7 +937,7 @@ Choose the right behavior strategy for your use case:
 |------------------|-------------|-----------|----------------|-------------------------|
 | `user-managed`   | None        | Possible  | Warns          | Dev/Test/Advanced users |
 | `enforce-limits` | Strict      | No        | Throws         | Production              |
-| `data-truncate`  | Truncates   | Yes       | Warns          | Content Mgmt            |
+| `truncate-data`  | Truncates   | Yes       | Warns          | Content Mgmt            |
 | `body-overflow`  | Truncates/Splits | Yes   | Warns          | Large objects           |
 | `body-only`      | Unlimited   | No        | No             | Large JSON/Logs         |
 
@@ -988,10 +988,10 @@ await users.insert({
 **Best Practices & Warnings:**
 - Exceeding S3 metadata limits will cause silent data loss or errors at the storage layer.
 - Use this behavior only if you have custom logic to handle warnings and enforce limits.
-- For production, prefer `enforce-limits` or `data-truncate` to avoid data loss.
+- For production, prefer `enforce-limits` or `truncate-data` to avoid data loss.
 
 **Migration Tips:**
-- To migrate to a stricter behavior, change the resource's behavior to `enforce-limits` or `data-truncate`.
+- To migrate to a stricter behavior, change the resource's behavior to `enforce-limits` or `truncate-data`.
 - Review emitted warnings to identify resources at risk of exceeding S3 limits.
 
 #### Enforce Limits Behavior
@@ -1022,7 +1022,7 @@ const summaries = await s3db.createResource({
     description: "string",
     content: "string"
   },
-  behavior: "data-truncate"
+  behavior: "truncate-data"
 });
 
 // Automatically truncates to fit within 2KB

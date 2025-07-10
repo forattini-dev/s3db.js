@@ -177,16 +177,29 @@ export class FullTextPlugin extends Plugin {
 
   async indexRecord(resourceName, recordId, data) {
     const indexedFields = this.getIndexedFields(resourceName);
-    if (!indexedFields || indexedFields.length === 0) return;
+    if (!indexedFields || indexedFields.length === 0) {
+      console.log(`No indexed fields for resource: ${resourceName}`);
+      return;
+    }
+
+    console.log(`Indexing resource: ${resourceName}, fields: ${indexedFields.join(', ')}`);
 
     for (const fieldName of indexedFields) {
       const fieldValue = this.getFieldValue(data, fieldName);
-      if (!fieldValue) continue;
+      if (!fieldValue) {
+        console.log(`Field ${fieldName} is empty or null`);
+        continue;
+      }
 
+      console.log(`Indexing field ${fieldName}: ${fieldValue}`);
       const words = this.tokenize(fieldValue);
+      console.log(`Tokenized words: ${words.join(', ')}`);
       
       for (const word of words) {
-        if (word.length < this.config.minWordLength) continue;
+        if (word.length < this.config.minWordLength) {
+          console.log(`Skipping word "${word}" (length: ${word.length}, min: ${this.config.minWordLength})`);
+          continue;
+        }
         
         const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
         const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
@@ -197,6 +210,7 @@ export class FullTextPlugin extends Plugin {
         }
         
         this.indexes.set(key, existing);
+        console.log(`Added word "${word}" to index with key: ${key}`);
       }
     }
   }
@@ -221,7 +235,7 @@ export class FullTextPlugin extends Plugin {
 
   getFieldValue(data, fieldPath) {
     if (!fieldPath.includes('.')) {
-      return data[fieldPath];
+      return data && data[fieldPath] !== undefined ? data[fieldPath] : null;
     }
     
     const keys = fieldPath.split('.');
@@ -331,9 +345,12 @@ export class FullTextPlugin extends Plugin {
 
   // Search and return full records
   async searchRecords(resourceName, query, options = {}) {
+    console.log(`[FULLTEXT:searchRecords] Searching for "${query}" in resource "${resourceName}"`);
     const searchResults = await this.search(resourceName, query, options);
+    console.log(`[FULLTEXT:searchRecords] Search results:`, searchResults);
     
     if (searchResults.length === 0) {
+      console.log(`[FULLTEXT:searchRecords] No search results found`);
       return [];
     }
 
@@ -343,16 +360,23 @@ export class FullTextPlugin extends Plugin {
     }
 
     const recordIds = searchResults.map(result => result.recordId);
+    console.log(`[FULLTEXT:searchRecords] Record IDs to fetch:`, recordIds);
     const records = await resource.getMany(recordIds);
+    console.log(`[FULLTEXT:searchRecords] Retrieved records:`, records);
 
-    // Merge search scores with records
-    return records.map(record => {
-      const searchResult = searchResults.find(sr => sr.recordId === record.id);
-      return {
-        ...record,
-        _searchScore: searchResult ? searchResult.score : 0
-      };
-    }).sort((a, b) => b._searchScore - a._searchScore);
+    // Filter out undefined/null records (in case getMany returns missing records)
+    const result = records
+      .filter(record => record && typeof record === 'object')
+      .map(record => {
+        const searchResult = searchResults.find(sr => sr.recordId === record.id);
+        return {
+          ...record,
+          _searchScore: searchResult ? searchResult.score : 0
+        };
+      })
+      .sort((a, b) => b._searchScore - a._searchScore);
+    console.log(`[FULLTEXT:searchRecords] Final results:`, result);
+    return result;
   }
 
   // Utility methods

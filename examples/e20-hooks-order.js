@@ -57,14 +57,14 @@ async function testHooks() {
     }
   });
   // Adiciona hooks antigos manualmente
-  resource1.addHook('preInsert', (view) => {
-    oldOrder.push('old-preInsert-1');
-    console.log('🟦 old-preInsert-1');
+  resource1.addHook('beforeInsert', (view) => {
+    oldOrder.push('old-beforeInsert-1');
+    console.log('🟦 old-beforeInsert-1');
     return view;
   });
-  resource1.addHook('preInsert', (view) => {
-    oldOrder.push('old-preInsert-2');
-    console.log('🟦 old-preInsert-2');
+  resource1.addHook('beforeInsert', (view) => {
+    oldOrder.push('old-beforeInsert-2');
+    console.log('🟦 old-beforeInsert-2');
     return view;
   });
   await db1.disconnect?.();
@@ -116,15 +116,15 @@ async function testHooks() {
       }
     },
     hooks: {
-      preInsert: [
+      beforeInsert: [
         (view) => {
-          executionOrder.push('new-preInsert-1');
-          console.log('🟩 new-preInsert-1');
+          executionOrder.push('new-beforeInsert-1');
+          console.log('🟩 new-beforeInsert-1');
           return view;
         },
         (view) => {
-          executionOrder.push('new-preInsert-2');
-          console.log('🟩 new-preInsert-2');
+          executionOrder.push('new-beforeInsert-2');
+          console.log('🟩 new-beforeInsert-2');
           return view;
         }
       ]
@@ -143,7 +143,7 @@ async function testHooks() {
   executionOrder.length = 0;
   oldOrder.length = 0;
   await resource.insert(testData);
-  console.log('\nOrdem de execução dos hooks preInsert:', [...oldOrder, ...executionOrder]);
+  console.log('\nOrdem de execução dos hooks beforeInsert:', [...oldOrder, ...executionOrder]);
 
   await db2.disconnect?.();
   console.log('\n🧹 Cleanup completed');

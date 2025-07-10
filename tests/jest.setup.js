@@ -5,7 +5,12 @@ dotenv.config({
   debug: false, 
 });
 
-console.log = () => {};
-console.info = () => {};
+if (process.env.QUIET === 'true') {
+  console.log = () => {};
+  console.info = () => {};
+  console.warn = () => {};
+  console.error = () => {};
+}
+
 console.warn = () => {};
-console.error = () => {};
+

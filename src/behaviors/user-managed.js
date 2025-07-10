@@ -1,4 +1,5 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
+import { calculateEffectiveLimit } from '../concerns/calculator.js';
 import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
 
 /**
@@ -47,60 +48,93 @@ import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
  * |------------------|-------------|-----------|----------------|-------------------------|
  * | user-managed     | None        | Possible  | Warns          | Dev/Test/Advanced users |
  * | enforce-limits   | Strict      | No        | Throws         | Production              |
- * | data-truncate    | Truncates   | Yes       | Warns          | Content Mgmt            |
+ * | truncate-data    | Truncates   | Yes       | Warns          | Content Mgmt            |
  * | body-overflow    | Truncates/Splits | Yes   | Warns          | Large objects           |
  *
  * ## Best Practices & Warnings
  * - Exceeding S3 metadata limits will cause silent data loss or errors at the storage layer.
  * - Use this behavior only if you have custom logic to handle warnings and enforce limits.
- * - For production, prefer `enforce-limits` or `data-truncate` to avoid data loss.
+ * - For production, prefer `enforce-limits` or `truncate-data` to avoid data loss.
  *
  * ## Migration Tips
- * - To migrate to a stricter behavior, change the resource's behavior to `enforce-limits` or `data-truncate`.
+ * - To migrate to a stricter behavior, change the resource's behavior to `enforce-limits` or `truncate-data`.
  * - Review emitted warnings to identify resources at risk of exceeding S3 limits.
  *
  * @typedef {Object} UserManagedBehaviorConfig
  * @property {boolean} [enabled=true] - Whether the behavior is active
  */
-export async function handleInsert({ resource, data, mappedData }) {
+export async function handleInsert({ resource, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
     resource.emit('exceedsLimit', {
       operation: 'insert',
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
   return { mappedData, body: "" };
 }
 
-export async function handleUpdate({ resource, id, data, mappedData }) {
+export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
     resource.emit('exceedsLimit', {
       operation: 'update',
       id,
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
   return { mappedData, body: "" };
 }
 
-export async function handleUpsert({ resource, id, data, mappedData }) {
+export async function handleUpsert({ resource, id, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  
+  // Calculate effective limit considering system overhead
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  
+  if (totalSize > effectiveLimit) {
     resource.emit('exceedsLimit', {
       operation: 'upsert',
       id,
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
   return { mappedData, body: "" };
