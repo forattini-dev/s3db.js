@@ -85,7 +85,7 @@ export async function handleInsert({ resource, data, mappedData, originalData })
       data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
@@ -111,7 +111,7 @@ export async function handleUpdate({ resource, id, data, mappedData, originalDat
       data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
 
 export async function handleUpsert({ resource, id, data, mappedData, originalData }) {
@@ -137,7 +137,7 @@ export async function handleUpsert({ resource, id, data, mappedData, originalDat
       data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
 
 export async function handleGet({ resource, metadata, body }) {

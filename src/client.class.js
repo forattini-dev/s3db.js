@@ -4,6 +4,7 @@ import { chunk } from "lodash-es";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import { idGenerator } from "./concerns/id.js";
+import tryFn from "./concerns/try-fn.js";
 
 import {
   S3Client,
@@ -17,7 +18,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { md5 } from 'hash-wasm';
 
-import { ErrorMap } from "./errors.js";
+import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
 import { ConnectionString } from "./connection-string.class.js";
 
 export class Client extends EventEmitter {
@@ -77,26 +78,19 @@ export class Client extends EventEmitter {
 
   async sendCommand(command) {
     this.emit("command.request", command.constructor.name, command.input);
-
-    const response = await this.client.send(command);
-    this.emit("command.response", command.constructor.name, response, command.input);
-
-    return response;
-  }
-
-  errorProxy(error, data) {
-    if (this.verbose) {
-      data.bucket = this.config.bucket
-      data.config = this.config
-      data.verbose = this.verbose
+    const [ok, err, response] = await tryFn(() => this.client.send(command));
+    if (!ok) {
+      const bucket = this.config.bucket;
+      const key = command.input && command.input.Key;
+      throw mapAwsError(err, {
+        bucket,
+        key,
+        commandName: command.constructor.name,
+        commandInput: command.input,
+      });
     }
-
-    error.data = data;
-
-    const errorClass = ErrorMap[error.name];
-    if (errorClass) return new errorClass(data);
-
-    return error;
+    this.emit("command.response", command.constructor.name, response, command.input);
+    return response;
   }
 
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
@@ -124,15 +118,20 @@ export class Client extends EventEmitter {
     if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding
     if (contentLength !== undefined) options.ContentLength = contentLength
 
+    let response, error;
     try {
-      const response = await this.sendCommand(new PutObjectCommand(options));
-      this.emit("putObject", response, options);
+      response = await this.sendCommand(new PutObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options,
-      })
+        commandName: 'PutObjectCommand',
+        commandInput: options,
+      });
+    } finally {
+      this.emit('putObject', error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     }
   }
 
@@ -142,16 +141,20 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
-
+    let response, error;
     try {
-      const response = await this.sendCommand(new GetObjectCommand(options));
-      this.emit("getObject", response, options);
+      response = await this.sendCommand(new GetObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options,
+        commandName: 'GetObjectCommand',
+        commandInput: options,
       });
+    } finally {
+      this.emit('getObject', error || response, { key });
     }
   }
 
@@ -161,16 +164,20 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
-
+    let response, error;
     try {
-      const response = await this.sendCommand(new HeadObjectCommand(options));
-      this.emit("headObject", response, options);
+      response = await this.sendCommand(new HeadObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options,
+        commandName: 'HeadObjectCommand',
+        commandInput: options,
       });
+    } finally {
+      this.emit('headObject', error || response, { key });
     }
   }
 
@@ -181,29 +188,28 @@ export class Client extends EventEmitter {
       CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from),
     };
 
+    let response, error;
     try {
-      const response = await this.client.send(new CopyObjectCommand(options));
-      this.emit("copyObject", response, options);
+      response = await this.sendCommand(new CopyObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
-        from,
-        to,
-        command: options,
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key: to,
+        commandName: 'CopyObjectCommand',
+        commandInput: options,
       });
+    } finally {
+      this.emit('copyObject', error || response, { from, to });
     }
   }
 
   async exists(key) {
-    try {
-      await this.headObject(key);
-      return true
-    } catch (err) {
-      if (err.name === "NoSuchKey") return false;
-      else if (err.name === "NotFound") return false;
-
-      throw err
-    }
+    const [ok, err] = await tryFn(() => this.headObject(key));
+    if (ok) return true;
+    if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
+    throw err;
   }
 
   async deleteObject(key) {
@@ -214,15 +220,20 @@ export class Client extends EventEmitter {
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
+    let response, error;
     try {
-      const response = await this.sendCommand(new DeleteObjectCommand(options));
-      this.emit("deleteObject", response, options);
+      response = await this.sendCommand(new DeleteObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options,
+        commandName: 'DeleteObjectCommand',
+        commandInput: options,
       });
+    } finally {
+      this.emit('deleteObject', error || response, { key });
     }
   }
 
@@ -250,21 +261,14 @@ export class Client extends EventEmitter {
 
         // Debug log
         let response;
-        try {
-          response = await this.sendCommand(new DeleteObjectsCommand(options));
+        const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
+        if (!ok) throw err;
+        response = res;
           if (response && response.Errors && response.Errors.length > 0) {
-            console.error('[Client][ERROR] DeleteObjectsCommand errors:', response.Errors);
+            // console.error('[Client][ERROR] DeleteObjectsCommand errors:', response.Errors);
           }
           if (response && response.Deleted && response.Deleted.length !== keys.length) {
-            console.error('[Client][ERROR] Nem todos os objetos foram deletados:', response.Deleted, 'esperado:', keys);
-          }
-        } catch (error) {
-          console.error('[Client][ERROR] Exception in DeleteObjectsCommand:', error);
-          throw this.errorProxy(error, {
-            keys,
-            command: options,
-          });
-        } finally {
+            // console.error('[Client][ERROR] Nem todos os objetos foram deletados:', response.Deleted, 'esperado:', keys);
         }
         return response;
       });
@@ -329,17 +333,14 @@ export class Client extends EventEmitter {
   }
 
   async moveObject({ from, to }) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       await this.copyObject({ from, to });
       await this.deleteObject(from);
-      return true
-    } catch (error) {
-      throw this.errorProxy(error, {
-        from,
-        to,
-        command: options,
-      });
+    });
+    if (!ok) {
+      throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
     }
+    return true;
   }
 
   async listObjects({
@@ -355,34 +356,28 @@ export class Client extends EventEmitter {
         ? path.join(this.config.keyPrefix, prefix || "")
         : prefix || "",
     };
-
-    try {
-      const response = await this.sendCommand(new ListObjectsV2Command(options));
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
+    if (!ok) {
+      throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
+    }
       this.emit("listObjects", response, options);
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, { command: options });
-    }
   }
 
   async count({ prefix } = {}) {
     let count = 0;
     let truncated = true;
     let continuationToken;
-
     while (truncated) {
       const options = {
         prefix,
         continuationToken,
       };
-
       const response = await this.listObjects(options);
-
       count += response.KeyCount || 0;
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
-
     this.emit("count", count, { prefix });
     return count;
   }
@@ -391,29 +386,23 @@ export class Client extends EventEmitter {
     let keys = [];
     let truncated = true;
     let continuationToken;
-
     while (truncated) {
       const options = {
         prefix,
         continuationToken,
       };
-
       const response = await this.listObjects(options);
-
       if (response.Contents) {
         keys = keys.concat(response.Contents.map((x) => x.Key));
       }
-
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
-
     if (this.config.keyPrefix) {
       keys = keys
         .map((x) => x.replace(this.config.keyPrefix, ""))
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
-
     this.emit("getAllKeys", keys, { prefix });
     return keys;
   }
@@ -423,13 +412,10 @@ export class Client extends EventEmitter {
       prefix,
       offset = 1000,
     } = params
-
     if (offset === 0) return null;
-
     let truncated = true;
     let continuationToken;
     let skipped = 0;
-
     while (truncated) {
       let maxKeys =
         offset < 1000
@@ -437,27 +423,21 @@ export class Client extends EventEmitter {
           : offset - skipped > 1000
             ? 1000
             : offset - skipped;
-
       const options = {
         prefix,
         maxKeys,
         continuationToken,
       };
-
       const res = await this.listObjects(options);
-
       if (res.Contents) {
         skipped += res.Contents.length;
       }
-
       truncated = res.IsTruncated || false;
       continuationToken = res.NextContinuationToken;
-
       if (skipped >= offset) {
         break;
       }
     }
-
     this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
     return continuationToken || null;
   }
@@ -468,84 +448,66 @@ export class Client extends EventEmitter {
       offset = 0,
       amount = 100,
     } = params
-
     let keys = [];
     let truncated = true;
     let continuationToken;
-
     if (offset > 0) {
       continuationToken = await this.getContinuationTokenAfterOffset({
         prefix,
         offset,
       });
-      
-      // If no continuation token is returned, it means we've reached the end
       if (!continuationToken) {
         this.emit("getKeysPage", [], params);
         return [];
       }
     }
-
     while (truncated) {
       const options = {
         prefix,
         continuationToken,
       };
-
       const res = await this.listObjects(options);
-
       if (res.Contents) {
         keys = keys.concat(res.Contents.map((x) => x.Key));
       }
-
       truncated = res.IsTruncated || false;
       continuationToken = res.NextContinuationToken;
-
       if (keys.length >= amount) {
         keys = keys.slice(0, amount);
         break;
       }
     }
-
     if (this.config.keyPrefix) {
       keys = keys
         .map((x) => x.replace(this.config.keyPrefix, ""))
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
-
     this.emit("getKeysPage", keys, params);
     return keys;
   }
 
   async moveAllObjects({ prefixFrom, prefixTo }) {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
-
     const { results, errors } = await PromisePool
       .for(keys)
       .withConcurrency(this.parallelism)
       .process(async (key) => {
         const to = key.replace(prefixFrom, prefixTo)
-
-        try {
+        const [ok, err] = await tryFn(async () => {
           await this.moveObject({ 
             from: key, 
             to,
           });
-          return to;
-        } catch (error) {
-          throw this.errorProxy(error, {
-            from: key,
-            to,
           });
+        if (!ok) {
+          throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
         }
+        return to;
       });
-
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
-
     if (errors.length > 0) {
       throw new Error("Some objects could not be moved");
     }
-
     return results;
   }
 }

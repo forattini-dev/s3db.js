@@ -108,7 +108,8 @@ import zlib from "zlib";
 import { join } from "path";
 
 import { Cache } from "./cache.class.js"
-import { streamToString } from "../stream/index.js";
+import { streamToString } from "#src/stream/index.js";
+import tryFn from "../../concerns/try-fn.js";
 
 export class S3Cache extends Cache {
   constructor({ 
@@ -147,18 +148,16 @@ export class S3Cache extends Cache {
   }
 
   async _get(key) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const { Body } = await this.client.getObject(join(this.keyPrefix, key));
       let content = await streamToString(Body);
       content = Buffer.from(content, 'base64');
       content = zlib.unzipSync(content).toString();
       return JSON.parse(content);
-    } catch (error) {
-      if (error.name === 'NoSuchKey' || error.name === 'NotFound') {
-        return null;
-      }
-      throw error;
-    }
+    });
+    if (ok) return result;
+    if (err.name === 'NoSuchKey' || err.name === 'NotFound') return null;
+    throw err;
   }
 
   async _del(key) {

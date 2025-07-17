@@ -82,8 +82,6 @@ export default {
           
           copyFileSync(sourceFile, targetFile);
           console.log(`✅ Copied ${sourceFile} to ${targetFile}`);
-        } else {
-          console.warn(`⚠️  TypeScript definitions file not found: ${sourceFile}`);
         }
       }
     },

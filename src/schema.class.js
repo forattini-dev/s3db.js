@@ -13,61 +13,41 @@ import {
 
 import { encrypt, decrypt } from "./crypto.js";
 import { ValidatorManager } from "./validator.class.js";
+import { tryFn, tryFnSync } from "./concerns/try-fn.js";
+import { SchemaError } from "./errors.js";
+import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal } from "./concerns/base62.js";
 
 /**
- * Convert a number to base36 string
- * @param {number} num - Number to convert
- * @returns {string} Base36 representation
- */
-function toBase36(num) {
-  return num.toString(36);
-}
-
-/**
- * Convert a base36 string back to number
- * @param {string} str - Base36 string to convert
- * @returns {number} Number representation
- */
-function fromBase36(str) {
-  return parseInt(str, 36);
-}
-
-/**
- * Generate base36 mapping for attributes
+ * Generate base62 mapping for attributes
  * @param {string[]} keys - Array of attribute keys
- * @returns {Object} Mapping object with base36 keys
+ * @returns {Object} Mapping object with base62 keys
  */
-function generateBase36Mapping(keys) {
+function generateBase62Mapping(keys) {
   const mapping = {};
   const reversedMapping = {};
-  
   keys.forEach((key, index) => {
-    const base36Key = toBase36(index);
-    mapping[key] = base36Key;
-    reversedMapping[base36Key] = key;
+    const base62Key = toBase62(index);
+    mapping[key] = base62Key;
+    reversedMapping[base62Key] = key;
   });
-  
   return { mapping, reversedMapping };
 }
 
 export const SchemaActions = {
   trim: (value) => value == null ? value : value.trim(),
 
-  encrypt: (value, { passphrase }) => {
+  encrypt: async (value, { passphrase }) => {
     if (value === null || value === undefined) return value;
-    return encrypt(value, passphrase);
+    const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
+    return ok ? res : value;
   },
   decrypt: async (value, { passphrase }) => {
     if (value === null || value === undefined) return value;
-    try {
-      const raw = await decrypt(value, passphrase)
-      // Se o valor original era um tipo primitivo, tente restaurar
-      if (raw === 'null') return null;
-      if (raw === 'undefined') return undefined;
-      return raw;
-    } catch (error) {
-      return value;
-    }
+    const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
+    if (!ok) return value;
+    if (raw === 'null') return null;
+    if (raw === 'undefined') return undefined;
+    return raw;
   },
 
   toString: (value) => value == null ? value : String(value),
@@ -126,42 +106,175 @@ export const SchemaActions = {
     if (value === null) return null;
     if (value === undefined) return undefined;
     if (typeof value === 'string') {
-      // Se já é um JSON válido, não serializa de novo
-      try {
-        const parsed = JSON.parse(value);
-        // Se for objeto/array, retorna string original
-        if (typeof parsed === 'object') return value;
-      } catch {}
-      // Se não for JSON válido, retorna string original
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+      if (ok && typeof parsed === 'object') return value;
       return value;
     }
-    return JSON.stringify(value);
+    const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
+    return ok ? json : value;
   },
   fromJSON: (value) => {
     if (value === null) return null;
     if (value === undefined) return undefined;
     if (typeof value !== 'string') return value;
     if (value === '') return '';
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+    return ok ? parsed : value;
   },
 
   toNumber: (value) => isString(value) ? value.includes('.') ? parseFloat(value) : parseInt(value) : value,
 
   toBool: (value) => [true, 1, 'true', '1', 'yes', 'y'].includes(value),
   fromBool: (value) => [true, 1, 'true', '1', 'yes', 'y'].includes(value) ? '1' : '0',
-  fromBase36: (value) => {
+  fromBase62: (value) => {
     if (value === null || value === undefined || value === '') return value;
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {
-      const n = parseInt(value, 36);
+      const n = fromBase62(value);
       return isNaN(n) ? undefined : n;
     }
     return undefined;
   },
+  toBase62: (value) => {
+    if (value === null || value === undefined || value === '') return value;
+    if (typeof value === 'number') {
+      return toBase62(value);
+    }
+    if (typeof value === 'string') {
+      const n = Number(value);
+      return isNaN(n) ? value : toBase62(n);
+    }
+    return value;
+  },
+  fromBase62Decimal: (value) => {
+    if (value === null || value === undefined || value === '') return value;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const n = decodeDecimal(value);
+      return isNaN(n) ? undefined : n;
+    }
+    return undefined;
+  },
+  toBase62Decimal: (value) => {
+    if (value === null || value === undefined || value === '') return value;
+    if (typeof value === 'number') {
+      return encodeDecimal(value);
+    }
+    if (typeof value === 'string') {
+      const n = Number(value);
+      return isNaN(n) ? value : encodeDecimal(n);
+    }
+    return value;
+  },
+  fromArrayOfNumbers: (value, { separator }) => {
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return '';
+    }
+    const base62Items = value.map(item => {
+      if (typeof item === 'number' && !isNaN(item)) {
+        return toBase62(item);
+      }
+      // fallback: try to parse as number, else keep as is
+      const n = Number(item);
+      return isNaN(n) ? '' : toBase62(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfNumbers: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map(v => (typeof v === 'number' ? v : fromBase62(v)));
+    }
+    if (value === null || value === undefined) {
+      return value;
+    }
+    if (value === '') {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = '';
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map(v => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string' && v !== '') {
+        const n = fromBase62(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
+  fromArrayOfDecimals: (value, { separator }) => {
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return '';
+    }
+    const base62Items = value.map(item => {
+      if (typeof item === 'number' && !isNaN(item)) {
+        return encodeDecimal(item);
+      }
+      // fallback: try to parse as number, else keep as is
+      const n = Number(item);
+      return isNaN(n) ? '' : encodeDecimal(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfDecimals: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map(v => (typeof v === 'number' ? v : decodeDecimal(v)));
+    }
+    if (value === null || value === undefined) {
+      return value;
+    }
+    if (value === '') {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = '';
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map(v => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string' && v !== '') {
+        const n = decodeDecimal(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
+
 }
 
 export class Schema {
@@ -206,8 +319,8 @@ export class Schema {
       // Combine leaf keys and object keys, removing duplicates
       const allKeys = [...new Set([...leafKeys, ...objectKeys])];
       
-      // Generate base36 mapping instead of sequential numbers
-      const { mapping, reversedMapping } = generateBase36Mapping(allKeys);
+      // Generate base62 mapping instead of sequential numbers
+      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
       
@@ -263,42 +376,81 @@ export class Schema {
     const schema = flatten(cloneDeep(this.attributes), { safe: true });
 
     for (const [name, definition] of Object.entries(schema)) {
+      // Handle arrays first to avoid conflicts
       if (definition.includes("array")) {
         if (definition.includes('items:string')) {
-        this.addHook("beforeMap", name, "fromArray");
-        this.addHook("afterUnmap", name, "toArray");
+          this.addHook("beforeMap", name, "fromArray");
+          this.addHook("afterUnmap", name, "toArray");
+        } else if (definition.includes('items:number')) {
+          // Check if the array items should be treated as integers
+          const isIntegerArray = definition.includes("integer:true") || 
+                                definition.includes("|integer:") ||
+                                definition.includes("|integer");
+          
+          if (isIntegerArray) {
+            // Use standard base62 for arrays of integers
+            this.addHook("beforeMap", name, "fromArrayOfNumbers");
+            this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else {
+            // Use decimal-aware base62 for arrays of decimals
+            this.addHook("beforeMap", name, "fromArrayOfDecimals");
+            this.addHook("afterUnmap", name, "toArrayOfDecimals");
+          }
         }
-      } 
+        // Skip other processing for arrays to avoid conflicts
+        continue;
+      }
 
+      // Handle secrets
       if (definition.includes("secret")) {
         if (this.options.autoEncrypt) {
           this.addHook("beforeMap", name, "encrypt");
         }
-
         if (this.options.autoDecrypt) {
           this.addHook("afterUnmap", name, "decrypt");
         }
+        // Skip other processing for secrets
+        continue;
       }
 
+      // Handle numbers (only for non-array fields)
       if (definition.includes("number")) {
-        this.addHook("beforeMap", name, "toBase36");
-        this.addHook("afterUnmap", name, "fromBase36");
+        // Check if it's specifically an integer field
+        const isInteger = definition.includes("integer:true") || 
+                         definition.includes("|integer:") ||
+                         definition.includes("|integer");
+        
+        if (isInteger) {
+          // Use standard base62 for integers
+          this.addHook("beforeMap", name, "toBase62");
+          this.addHook("afterUnmap", name, "fromBase62");
+        } else {
+          // Use decimal-aware base62 for decimal numbers
+          this.addHook("beforeMap", name, "toBase62Decimal");
+          this.addHook("afterUnmap", name, "fromBase62Decimal");
+        }
+        continue;
       }
 
+      // Handle booleans
       if (definition.includes("boolean")) {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
+        continue;
       }
 
+      // Handle JSON fields
       if (definition.includes("json")) {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
+        continue;
       }
 
       // Handle object fields - add JSON serialization hooks
       if (definition === "object" || definition.includes("object")) {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
+        continue;
       }
     }
   }
@@ -313,7 +465,9 @@ export class Schema {
     } = isString(data) ? JSON.parse(data) : data;
 
     // Corrige atributos aninhados que possam ter sido serializados como string JSON
-    attributes = Schema._importAttributes(attributes);
+    const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
+    if (!ok) throw new SchemaError('Failed to import schema attributes', { original: err, input: attributes });
+    attributes = attrs;
 
     const schema = new Schema({
       map,
@@ -331,22 +485,25 @@ export class Schema {
   static _importAttributes(attrs) {
     if (typeof attrs === 'string') {
       // Tenta detectar se é um objeto serializado como string JSON
-      try {
-        const parsed = JSON.parse(attrs);
-        // Só retorna o parse se for objeto ou array
-        if (typeof parsed === 'object' && parsed !== null) {
-          return Schema._importAttributes(parsed);
-        }
-      } catch (e) {}
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
+      if (ok && typeof parsed === 'object' && parsed !== null) {
+        const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
+        if (!okNested) throw new SchemaError('Failed to parse nested schema attribute', { original: errNested, input: attrs });
+        return nested;
+      }
       return attrs;
     }
     if (Array.isArray(attrs)) {
-      return attrs.map(a => Schema._importAttributes(a));
+      const [okArr, errArr, arr] = tryFnSync(() => attrs.map(a => Schema._importAttributes(a)));
+      if (!okArr) throw new SchemaError('Failed to import array schema attributes', { original: errArr, input: attrs });
+      return arr;
     }
     if (typeof attrs === 'object' && attrs !== null) {
       const out = {};
       for (const [k, v] of Object.entries(attrs)) {
-        out[k] = Schema._importAttributes(v);
+        const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
+        if (!okObj) throw new SchemaError('Failed to import object schema attribute', { original: errObj, key: k, input: v });
+        out[k] = val;
       }
       return out;
     }
@@ -418,7 +575,7 @@ export class Schema {
       // Always map numbers to base36
       const attrDef = this.getAttributeDefinition(key);
       if (typeof value === 'number' && typeof attrDef === 'string' && attrDef.includes('number')) {
-        rest[mappedKey] = value.toString(36);
+        rest[mappedKey] = toBase62(value);
       } else if (typeof value === 'string') {
         if (value === '[object Object]') {
           rest[mappedKey] = '{}';
@@ -447,10 +604,10 @@ export class Schema {
       const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
-      // Always unmap base36 strings to numbers for number fields
-      if (typeof attrDef === 'string' && attrDef.includes('number')) {
+      // Always unmap base62 strings to numbers for number fields (but not array fields or decimal fields)
+      if (typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
         if (typeof parsedValue === 'string' && parsedValue !== '') {
-          parsedValue = parseInt(parsedValue, 36);
+          parsedValue = fromBase62(parsedValue);
         } else if (typeof parsedValue === 'number') {
           // Already a number, do nothing
         } else {
@@ -460,9 +617,8 @@ export class Schema {
         if (value === '[object Object]') {
           parsedValue = {};
         } else if (value.startsWith('{') || value.startsWith('[')) {
-          try {
-            parsedValue = JSON.parse(value);
-          } catch {}
+          const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+          if (ok) parsedValue = parsed;
         }
       }
       // PATCH: ensure arrays are always arrays
@@ -471,12 +627,10 @@ export class Schema {
           if (Array.isArray(parsedValue)) {
             // Already an array
           } else if (typeof parsedValue === 'string' && parsedValue.trim().startsWith('[')) {
-            try {
-              const arr = JSON.parse(parsedValue);
-              if (Array.isArray(arr)) {
-                parsedValue = arr;
-              }
-            } catch {}
+            const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
+            if (okArr && Array.isArray(arr)) {
+              parsedValue = arr;
+            }
           } else {
             parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
           }

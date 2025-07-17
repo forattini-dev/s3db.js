@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid';
 import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 
 import { createClientForTest } from '#tests/config.js';
@@ -119,23 +120,11 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle errorProxy with verbose and ErrorMap', () => {
-    client.verbose = true;
-    const error = new Error('fail');
-    error.name = 'NoSuchKey';
-    const data = { foo: 'bar' };
-    const proxied = client.errorProxy(error, data);
-    expect(proxied).toBeInstanceOf(Error);
-    expect(proxied.name).toBe('NoSuchKey');
+    // Removido: dependia de client.errorProxy
   });
 
   test('should handle errorProxy with unknown error', () => {
-    client.verbose = false;
-    const error = new Error('fail');
-    error.name = 'SomeRandomError';
-    const data = { foo: 'bar' };
-    const proxied = client.errorProxy(error, data);
-    expect(proxied).toBe(error);
-    expect(proxied.data).toEqual(data);
+    // Removido: dependia de client.errorProxy
   });
 
   test('should createClient with/without credentials and forcePathStyle', () => {
@@ -504,5 +493,219 @@ describe('Client Class - Coverage', () => {
 
     const keys = await client.getKeysPage({ prefix: 'p', amount: 100 });
     expect(keys).toEqual(['file1.txt']);
+  });
+});
+
+describe('Client Error Propagation - bucket field', () => {
+  const validConnectionString = process.env.BUCKET_CONNECTION_STRING || 's3://minioadmin:minioadmin@localhost:9000/test-bucket';
+  const invalidConnectionString = 's3://minioadmin:minioadmin@localhost:9000/bucket-inexistente';
+  const client = createClientForTest('client-error-bucket');
+  const invalidClient = new (client.constructor)({ connectionString: invalidConnectionString });
+  const bucket = client.config.bucket;
+  const invalidBucket = invalidClient.config.bucket;
+  const randomKey = `notfound-${nanoid()}`;
+
+  test('getObject error includes bucket', async () => {
+    try {
+      await client.getObject(randomKey);
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBeDefined();
+    }
+  });
+
+  test('headObject error includes bucket', async () => {
+    try {
+      await client.headObject(randomKey);
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBeDefined();
+    }
+  });
+
+  test('deleteObject error includes bucket', async () => {
+    try {
+      await client.deleteObject(randomKey);
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(bucket);
+    }
+  });
+
+  test('deleteObjects error includes bucket', async () => {
+    try {
+      await client.deleteObjects([randomKey]);
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(bucket);
+    }
+  });
+
+  test('listObjects error includes bucket (invalid bucket)', async () => {
+    try {
+      await invalidClient.listObjects({ prefix: 'x' });
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(invalidBucket);
+    }
+  });
+
+  test('putObject error includes bucket (invalid bucket)', async () => {
+    try {
+      await invalidClient.putObject({ key: 'x', body: 'abc' });
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(invalidBucket);
+    }
+  });
+
+  test('copyObject error includes bucket (invalid bucket)', async () => {
+    try {
+      await invalidClient.copyObject({ from: 'a', to: 'b' });
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(invalidBucket);
+    }
+  });
+
+  test('moveObject error includes bucket (invalid bucket)', async () => {
+    try {
+      await invalidClient.moveObject({ from: 'a', to: 'b' });
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect(err).toHaveProperty('data');
+      expect(err.data.bucket).toBe(invalidBucket);
+    }
+  });
+});
+
+describe('Client Error Simulation', () => {
+  let client;
+  beforeEach(() => {
+    client = createClientForTest('client-error-sim');
+  });
+
+  test('putObject error includes bucket', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.putObject({ key: 'k' })).rejects.toMatchObject({
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('getObject NoSuchKey error', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue({ name: 'NoSuchKey' });
+    await expect(client.getObject('k')).rejects.toMatchObject({
+      name: 'NoSuchKey',
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('getObject UnknownError', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.getObject('k')).rejects.toMatchObject({
+      name: 'UnknownError',
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('headObject NoSuchKey error', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue({ name: 'NoSuchKey' });
+    await expect(client.headObject('k')).rejects.toMatchObject({
+      name: 'NoSuchKey',
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('headObject UnknownError', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.headObject('k')).rejects.toMatchObject({
+      name: 'UnknownError',
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('copyObject error includes bucket', async () => {
+    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.copyObject({ from: 'a', to: 'b' })).rejects.toMatchObject({
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('deleteObject error includes bucket', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.deleteObject('k')).rejects.toMatchObject({
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('deleteObjects error includes bucket', async () => {
+    const customError = new Error('fail');
+    customError.data = { bucket: client.config.bucket };
+    client.exists = jest.fn().mockRejectedValue(customError);
+    const result = await client.deleteObjects(['k1', 'k2']);
+    expect(result).toHaveProperty('notFound');
+    expect(Array.isArray(result.notFound)).toBe(true);
+    expect(result.notFound.length).toBeGreaterThan(0);
+    const err = result.notFound[0];
+    const original = err.originalError || err;
+    if (original.data) {
+      expect(original.data.bucket).toBe(client.config.bucket);
+    } else {
+      expect(original).toBeInstanceOf(Error);
+    }
+  });
+
+  test('listObjects error includes bucket', async () => {
+    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.listObjects({ prefix: 'x' })).rejects.toMatchObject({
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('moveObject error includes bucket', async () => {
+    client.copyObject = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.moveObject({ from: 'a', to: 'b' })).rejects.toMatchObject({
+      data: expect.objectContaining({ bucket: client.config.bucket })
+    });
+  });
+
+  test('moveAllObjects error includes bucket', async () => {
+    client.getAllKeys = jest.fn().mockResolvedValue(['a', 'b']);
+    client.moveObject = jest.fn()
+      .mockResolvedValueOnce(true)
+      .mockRejectedValueOnce(new Error('fail'));
+    await expect(client.moveAllObjects({ prefixFrom: 'a', prefixTo: 'b' })).rejects.toThrow('Some objects could not be moved');
+  });
+
+  test('getAllKeys propagates error', async () => {
+    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.getAllKeys({ prefix: 'x' })).rejects.toBeDefined();
+  });
+
+  test('getKeysPage propagates error', async () => {
+    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.getKeysPage({ prefix: 'x', amount: 10 })).rejects.toBeDefined();
+  });
+
+  test('getContinuationTokenAfterOffset propagates error', async () => {
+    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.getContinuationTokenAfterOffset({ prefix: 'x', offset: 10 })).rejects.toBeDefined();
+  });
+
+  test('count propagates error', async () => {
+    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.count({ prefix: 'x' })).rejects.toBeDefined();
+  });
+
+  test('deleteAll propagates error', async () => {
+    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    await expect(client.deleteAll({ prefix: 'x' })).rejects.toBeDefined();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 
 import { createDatabaseForTest } from '#tests/config.js';
 
@@ -8,6 +8,12 @@ describe('Resource Existence Methods', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('resource-existence');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   describe('resourceExists', () => {

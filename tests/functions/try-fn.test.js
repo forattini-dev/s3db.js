@@ -1,4 +1,4 @@
-import { tryFn } from '../../src/concerns/try-fn.js';
+import { tryFn } from '#src/concerns/try-fn.js';
 
 describe('tryFn', () => {
   it('should handle sync function that returns value', () => {

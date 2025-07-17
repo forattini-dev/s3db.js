@@ -1,4 +1,5 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
+import { tryFn, tryFnSync } from '../concerns/try-fn.js';
 
 /**
  * Body Only Behavior Configuration Documentation
@@ -91,10 +92,10 @@ export async function handleGet({ resource, metadata, body }) {
   // Parse the body to get the actual data
   let bodyData = {};
   if (body && body.trim() !== '') {
-    try {
-      bodyData = JSON.parse(body);
-    } catch (error) {
-      console.warn('Failed to parse body data:', error.message);
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
+    } else {
       bodyData = {};
     }
   }
@@ -106,4 +107,4 @@ export async function handleGet({ resource, metadata, body }) {
   };
   
   return { metadata: mergedData, body };
-} 
+}

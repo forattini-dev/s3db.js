@@ -1,28 +1,21 @@
 import { join } from "path";
 import EventEmitter from "events";
 import { createHash } from "crypto";
-import { chunk, cloneDeep, merge } from "lodash-es";
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import jsonStableStringify from "json-stable-stringify";
 import { PromisePool } from "@supercharge/promise-pool";
+import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
 
 import Schema from "./schema.class.js";
-import { InvalidResourceItem } from "./errors.js";
+import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { streamToString } from "./stream/index.js";
+import { InvalidResourceItem, ResourceError, PartitionError } from "./errors.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 import { idGenerator as defaultIdGenerator } from "./concerns/id.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
+import { mapAwsError } from "./errors.js";
 
-
-/**
- * Create an ID generator with custom size
- * @param {number} size - Size of the generated ID
- * @returns {Function} ID generator function
- */
-function createIdGeneratorWithSize(size) {
-  return customAlphabet(urlAlphabet, size);
-}
 
 export class Resource extends EventEmitter {
   /**
@@ -66,8 +59,7 @@ export class Resource extends EventEmitter {
    *   },
    *   hooks: {
    *     beforeInsert: [async (data) => {
-   *       console.log('Pre-insert hook:', data);
-   *       return data;
+      *       return data;
    *     }]
    *   }
    * });
@@ -96,13 +88,14 @@ export class Resource extends EventEmitter {
    *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
    * });
    */
-  constructor(config) {
+  constructor(config = {}) {
     super();
+    this._instanceId = Math.random().toString(36).slice(2, 8);
 
     // Validate configuration
     const validation = validateResourceConfig(config);
     if (!validation.isValid) {
-      throw new Error(`Invalid Resource ${config.name} configuration:\n${validation.errors.join('\n')}`);
+      throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: 'constructor', suggestion: 'Check resource config and attributes.' });
     }
 
     // Extract configuration with defaults - all at root level
@@ -136,7 +129,6 @@ export class Resource extends EventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
     this.versioningEnabled = versioningEnabled;
-    this.database = config.database || null;
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
@@ -187,6 +179,10 @@ export class Resource extends EventEmitter {
 
     // --- MIDDLEWARE SYSTEM ---
     this._initMiddleware();
+    // Debug: print method names and typeof update at construction
+    const ownProps = Object.getOwnPropertyNames(this);
+    const proto = Object.getPrototypeOf(this);
+    const protoProps = Object.getOwnPropertyNames(proto);
   }
 
   /**
@@ -256,12 +252,12 @@ export class Resource extends EventEmitter {
       if (!this.attributes.updatedAt) {
         this.attributes.updatedAt = 'string|optional';
       }
-      
+
       // Ensure partitions object exists
       if (!this.config.partitions) {
         this.config.partitions = {};
       }
-      
+
       // Add timestamp partitions if they don't exist
       if (!this.config.partitions.byCreatedDate) {
         this.config.partitions.byCreatedDate = {
@@ -344,7 +340,7 @@ export class Resource extends EventEmitter {
    */
   async executeHooks(event, data) {
     if (!this.hooks[event]) return data;
-    
+
     let result = data;
     for (const hook of this.hooks[event]) {
       result = await hook(result);
@@ -360,7 +356,7 @@ export class Resource extends EventEmitter {
     if (!this.config.partitions) {
       return;
     }
-    
+
     const partitions = this.config.partitions;
     if (Object.keys(partitions).length === 0) {
       return;
@@ -412,14 +408,14 @@ export class Resource extends EventEmitter {
     if (!this.config.partitions) {
       return; // No partitions to validate
     }
-    
+
     const partitions = this.config.partitions;
     if (Object.keys(partitions).length === 0) {
       return; // No partitions to validate
     }
 
     const currentAttributes = Object.keys(this.attributes || {});
-    
+
     for (const [partitionName, partitionDef] of Object.entries(partitions)) {
       if (!partitionDef.fields) {
         continue; // Skip invalid partition definitions
@@ -427,10 +423,7 @@ export class Resource extends EventEmitter {
 
       for (const fieldName of Object.keys(partitionDef.fields)) {
         if (!this.fieldExistsInAttributes(fieldName)) {
-          throw new Error(
-            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. ` +
-            `Available fields: ${currentAttributes.join(', ')}.`
-          );
+          throw new PartitionError(`Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(', ')}.`, { resourceName: this.name, partitionName, fieldName, availableFields: currentAttributes, operation: 'validatePartitions' });
         }
       }
     }
@@ -455,14 +448,14 @@ export class Resource extends EventEmitter {
     // Handle nested field names using dot notation
     const keys = fieldName.split('.');
     let currentLevel = this.attributes || {};
-    
+
     for (const key of keys) {
       if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
         return false;
       }
       currentLevel = currentLevel[key];
     }
-    
+
     return true;
   }
 
@@ -495,19 +488,16 @@ export class Resource extends EventEmitter {
       if (transformedValue instanceof Date) {
         transformedValue = transformedValue.toISOString().split('T')[0]; // YYYY-MM-DD format
       } else if (typeof transformedValue === 'string') {
-        try {
-          // Handle ISO8601 timestamp strings (e.g., from timestamps)
-          if (transformedValue.includes('T') && transformedValue.includes('Z')) {
-            transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
-          } else {
-            // Try to parse as date
-            const date = new Date(transformedValue);
-            if (!isNaN(date.getTime())) {
-              transformedValue = date.toISOString().split('T')[0];
-            }
+        // Handle ISO8601 timestamp strings (e.g., from timestamps)
+        if (transformedValue.includes('T') && transformedValue.includes('Z')) {
+          transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
+        } else {
+          // Try to parse as date
+          const date = new Date(transformedValue);
+          if (!isNaN(date.getTime())) {
+            transformedValue = date.toISOString().split('T')[0];
           }
-        } catch (e) {
-          // Keep original value if not a valid date
+          // If parsing fails, keep original value
         }
       }
     }
@@ -521,8 +511,9 @@ export class Resource extends EventEmitter {
    * @returns {string} The main S3 key path
    */
   getResourceKey(id) {
-    // NEW FORMAT: use data directory instead of version in path
-    return join(`resource=${this.name}`, `data`, `id=${id}`);
+    const key = join('resource=' + this.name, 'data', `id=${id}`);
+    // eslint-disable-next-line no-console
+    return key;
   }
 
   /**
@@ -550,23 +541,23 @@ export class Resource extends EventEmitter {
    */
   getPartitionKey({ partitionName, id, data }) {
     if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new Error(`Partition '${partitionName}' not found`);
+      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: 'getPartitionKey' });
     }
-    
+
     const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
-    
+
     // Process each field in the partition (sorted by field name for consistency)
     const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, rule] of sortedFields) {
       // Handle nested fields using dot notation (e.g., "utm.source", "address.city")
       const fieldValue = this.getNestedFieldValue(data, fieldName);
       const transformedValue = this.applyPartitionRule(fieldValue, rule);
-      
+
       if (transformedValue === undefined || transformedValue === null) {
         return null; // Skip if any required field is missing
       }
-      
+
       partitionSegments.push(`${fieldName}=${transformedValue}`);
     }
 
@@ -579,7 +570,7 @@ export class Resource extends EventEmitter {
     if (!finalId) {
       return null; // Cannot create partition key without id
     }
-    
+
     return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
   }
 
@@ -598,14 +589,14 @@ export class Resource extends EventEmitter {
     // Handle nested field names using dot notation
     const keys = fieldPath.split('.');
     let currentLevel = data;
-    
+
     for (const key of keys) {
       if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
         return undefined;
       }
       currentLevel = currentLevel[key];
     }
-    
+
     return currentLevel;
   }
 
@@ -634,8 +625,7 @@ export class Resource extends EventEmitter {
    *   email: 'john@example.com',
    *   age: 30
    * });
-   * console.log(user.id); // Auto-generated ID
-   * 
+      * 
    * // Insert with custom ID
    * const user = await resource.insert({
    *   id: 'user-123',
@@ -644,6 +634,9 @@ export class Resource extends EventEmitter {
    * });
    */
   async insert({ id, ...attributes }) {
+    const exists = await this.exists(id);
+    if (exists) throw new Error(`Resource with id '${id}' already exists`);
+    const keyDebug = this.getResourceKey(id || '(auto)');
     if (this.options.timestamps) {
       attributes.createdAt = new Date().toISOString();
       attributes.updatedAt = new Date().toISOString();
@@ -689,7 +682,7 @@ export class Resource extends EventEmitter {
 
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
-    
+
     // Apply behavior strategy
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
@@ -698,29 +691,32 @@ export class Resource extends EventEmitter {
       mappedData,
       originalData: completeData
     });
-    
+
     // Add version metadata (required for all objects)
     const finalMetadata = processedMetadata;
     const key = this.getResourceKey(finalId);
-    
     // Determine content type based on body content
     let contentType = undefined;
     if (body && body !== "") {
-      try {
-        JSON.parse(body);
-        contentType = 'application/json';
-      } catch {}
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = 'application/json';
     }
-    
-    try {
-      await this.client.putObject({
-        key,
-        body,
-        contentType,
-        metadata: finalMetadata,
-      });
-    } catch (error) {
-      const msg = error && error.message ? error.message : '';
+    // LOG: body e contentType antes do putObject
+    // Only throw if behavior is 'body-only' and body is empty
+    if (this.behavior === 'body-only' && (!body || body === "")) {
+      throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
+    }
+    // For other behaviors, allow empty body (all data in metadata)
+    // Before putObject in insert
+    // eslint-disable-next-line no-console
+    const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
+      key,
+      body,
+      contentType,
+      metadata: finalMetadata,
+    }));
+    if (!okPut) {
+      const msg = errPut && errPut.message ? errPut.message : '';
       if (msg.includes('metadata headers exceed') || msg.includes('Insert failed')) {
         const totalSize = calculateTotalSize(finalMetadata);
         const effectiveLimit = calculateEffectiveLimit({
@@ -732,13 +728,19 @@ export class Resource extends EventEmitter {
           }
         });
         const excess = totalSize - effectiveLimit;
-        error.totalSize = totalSize;
-        error.limit = 2047;
-        error.effectiveLimit = effectiveLimit;
-        error.excess = excess;
-        throw new Error('metadata headers exceed');
+        errPut.totalSize = totalSize;
+        errPut.limit = 2047;
+        errPut.effectiveLimit = effectiveLimit;
+        errPut.excess = excess;
+        throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'insert', id: finalId, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
       }
-      throw error;
+      throw mapAwsError(errPut, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'insert',
+        id: finalId
+      });
     }
 
     // Compose the full object sem reinjetar extras
@@ -749,15 +751,14 @@ export class Resource extends EventEmitter {
       behavior: this.behavior
     });
 
+    // Execute afterInsert hooks
+    const finalResult = await this.executeHooks('afterInsert', insertedData);
     // Emit event com dados antes dos hooks afterInsert
     this.emit("insert", {
       ...insertedData,
       $before: { ...completeData },
-      $after: { ...insertedData }
+      $after: { ...finalResult }
     });
-
-    // Execute afterInsert hooks
-    const finalResult = await this.executeHooks('afterInsert', insertedData);
     return finalResult;
   }
 
@@ -767,169 +768,106 @@ export class Resource extends EventEmitter {
    * @returns {Promise<Object>} The resource object with all attributes and metadata
    * @example
    * const user = await resource.get('user-123');
-   * console.log(user.name); // 'John Doe'
-   * console.log(user._lastModified); // Date object
-   * console.log(user._hasContent); // boolean
-   */
+            */
   async get(id) {
-    const key = this.getResourceKey(id);
+    if (isObject(id)) throw new Error(`id cannot be an object`);
+    if (isEmpty(id)) throw new Error('id cannot be empty');
     
-    try {
-      const request = await this.client.headObject(key);
-
-      // Get the correct schema version for unmapping (from _v metadata)
-      const objectVersionRaw = request.Metadata?._v || this.version;
-      const objectVersion = typeof objectVersionRaw === 'string' && objectVersionRaw.startsWith('v') ? objectVersionRaw.slice(1) : objectVersionRaw;
-      const schema = await this.getSchemaForVersion(objectVersion);
-
-      let metadata = await schema.unmapper(request.Metadata);
-      
-      // Apply behavior strategy for reading (important for body-overflow)
-      const behaviorImpl = getBehavior(this.behavior);
-      let body = "";
-      
-      // Get body content if needed (for body-overflow behavior)
-      if (request.ContentLength > 0) {
-        try {
-          const fullObject = await this.client.getObject(key);
-          body = await streamToString(fullObject.Body);
-        } catch (error) {
-          // Body read failed, continue with metadata only
-          body = "";
-        }
-      }
-      
-      const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-        resource: this,
-        metadata,
-        body
+    const key = this.getResourceKey(id);
+    // LOG: início do get
+    // eslint-disable-next-line no-console
+    const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+    // LOG: resultado do headObject
+    // eslint-disable-next-line no-console
+    if (!ok) {
+      throw mapAwsError(err, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'get',
+        id
       });
-
-      // Use composeFullObjectFromWrite to ensure proper field preservation
-      let data = await this.composeFullObjectFromWrite({
-        id,
-        metadata: processedMetadata,
-        body,
-        behavior: this.behavior
-      });
-      
-      data._contentLength = request.ContentLength;
-      data._lastModified = request.LastModified;
-      data._hasContent = request.ContentLength > 0;
-      data._mimeType = request.ContentType || null;
-      data._v = objectVersion;
-      
-      // Add version info to returned data
-
-      if (request.VersionId) data._versionId = request.VersionId;
-      if (request.Expiration) data._expiresAt = request.Expiration;
-
-      data._definitionHash = this.getDefinitionHash();
-
-      // Apply version mapping if object is from a different version
-      if (objectVersion !== this.version) {
-        data = await this.applyVersionMapping(data, objectVersion, this.version);
-      }
-
-      this.emit("get", data);
-      return data;
-    } catch (error) {
-      // Check if this is a decryption error
-      if (error.message.includes('Cipher job failed') || 
-          error.message.includes('OperationError') ||
-          error.originalError?.message?.includes('Cipher job failed')) {
-        
-        // Try to get the object without decryption (raw metadata)
-        try {
-          // Create a temporary schema with autoDecrypt disabled
-          const tempSchema = new Schema({
-            name: this.name,
-            attributes: this.attributes,
-            passphrase: this.passphrase,
-            version: objectVersion,
-            options: {
-              ...this.config,
-              autoDecrypt: false, // Disable decryption
-              autoEncrypt: false  // Disable encryption
-            }
-          });
-          
-          let metadata = await tempSchema.unmapper(request.Metadata);
-          
-          // Apply behavior strategy for reading
-          const behaviorImpl = getBehavior(this.behavior);
-          let body = "";
-          
-          if (request.ContentLength > 0) {
-            try {
-              const fullObject = await this.client.getObject(key);
-              body = await streamToString(fullObject.Body);
-            } catch (bodyError) {
-              body = "";
-            }
-          }
-          
-          const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-            resource: this,
-            metadata,
-            body
-          });
-
-          // Use composeFullObjectFromWrite to ensure proper field preservation
-          let data = await this.composeFullObjectFromWrite({
-            id,
-            metadata: processedMetadata,
-            body,
-            behavior: this.behavior
-          });
-          
-          data._contentLength = request.ContentLength;
-          data._lastModified = request.LastModified;
-          data._hasContent = request.ContentLength > 0;
-          data._mimeType = request.ContentType || null;
-          data._version = objectVersion;
-          data._decryptionFailed = true; // Flag to indicate decryption failed
-
-          if (request.VersionId) data._versionId = request.VersionId;
-          if (request.Expiration) data._expiresAt = request.Expiration;
-
-          data._definitionHash = this.getDefinitionHash();
-
-          this.emit("get", data);
-          return data;
-          
-        } catch (fallbackError) {
-          console.error(`Fallback attempt also failed for resource ${id}:`, fallbackError.message);
-        }
-      }
-      
-      // Re-throw the error with more context
-      const enhancedError = new Error(`Failed to get resource with id '${id}': ${error.message}`);
-      enhancedError.originalError = error;
-      enhancedError.resourceId = id;
-      enhancedError.resourceKey = key;
-      throw enhancedError;
     }
+    // Se o objeto existe mas não tem conteúdo, lançar erro NoSuchKey
+    if (request.ContentLength === 0) {
+      const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
+      noContentErr.name = 'NoSuchKey';
+      throw mapAwsError(noContentErr, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'get',
+        id
+      });
+    }
+
+    // Get the correct schema version for unmapping (from _v metadata)
+    const objectVersionRaw = request.Metadata?._v || this.version;
+    const objectVersion = typeof objectVersionRaw === 'string' && objectVersionRaw.startsWith('v') ? objectVersionRaw.slice(1) : objectVersionRaw;
+    const schema = await this.getSchemaForVersion(objectVersion);
+
+    let metadata = await schema.unmapper(request.Metadata);
+
+    // Apply behavior strategy for reading (important for body-overflow)
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+
+    // Get body content if needed (for body-overflow behavior)
+    if (request.ContentLength > 0) {
+      const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
+      if (okBody) {
+        body = await streamToString(fullObject.Body);
+      } else {
+        // Body read failed, continue with metadata only
+        body = "";
+      }
+    }
+
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+
+    // Use composeFullObjectFromWrite to ensure proper field preservation
+    let data = await this.composeFullObjectFromWrite({
+      id,
+      metadata: processedMetadata,
+      body,
+      behavior: this.behavior
+    });
+
+    data._contentLength = request.ContentLength;
+    data._lastModified = request.LastModified;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
+    data._v = objectVersion;
+
+    // Add version info to returned data
+
+    if (request.VersionId) data._versionId = request.VersionId;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+
+    data._definitionHash = this.getDefinitionHash();
+
+    // Apply version mapping if object is from a different version
+    if (objectVersion !== this.version) {
+      data = await this.applyVersionMapping(data, objectVersion, this.version);
+    }
+
+    this.emit("get", data);
+    const value = data;
+    return value;
   }
 
   /**
    * Check if a resource exists by ID
-   * @param {string} id - Resource ID
    * @returns {Promise<boolean>} True if resource exists, false otherwise
-   * @example
-   * const exists = await resource.exists('user-123');
-   * if (exists) {
-   *   console.log('User exists');
-   * }
    */
   async exists(id) {
-    try {
-      const key = this.getResourceKey(id);
-      await this.client.headObject(key);
-      return true
-    } catch (error) {
-      return false
-    }
+    const key = this.getResourceKey(id);
+    const [ok, err] = await tryFn(() => this.client.headObject(key));
+    return ok;
   }
 
   /**
@@ -948,9 +886,16 @@ export class Resource extends EventEmitter {
    * const updatedUser = await resource.update('user-123', {
    *   email: 'newemail@example.com'
    * });
-   * console.log(updatedUser.updatedAt); // ISO timestamp
-   */
+      */
   async update(id, attributes) {
+    if (isEmpty(id)) {
+      throw new Error('id cannot be empty');
+    }
+    // Garante que o recurso existe antes de atualizar
+    const exists = await this.exists(id);
+    if (!exists) {
+      throw new Error(`Resource with id '${id}' does not exist`);
+    }
     const originalData = await this.get(id);
     const attributesClone = cloneDeep(attributes);
     let mergedData = cloneDeep(originalData);
@@ -971,6 +916,7 @@ export class Resource extends EventEmitter {
         mergedData[key] = cloneDeep(value);
       }
     }
+    // Debug: print mergedData and attributes
     if (this.config.timestamps) {
       const now = new Date().toISOString();
       mergedData.updatedAt = now;
@@ -989,10 +935,7 @@ export class Resource extends EventEmitter {
         message: 'validation: ' + ((errors && errors.length) ? JSON.stringify(errors) : 'unknown')
       });
     }
-    // Fix ReferenceError: use 'data' instead of 'validated'
     const mappedDataDebug = await this.schema.mapper(data);
-    // Only after validation, proceed with partition and S3 updates
-    // Apply behavior strategy early to emit events in hooks
     const earlyBehaviorImpl = getBehavior(this.behavior);
     const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
     tempMappedData._v = String(this.version);
@@ -1003,21 +946,12 @@ export class Resource extends EventEmitter {
       mappedData: tempMappedData,
       originalData: { ...attributesClone, id }
     });
-
-    // Extract attributes without id for processing
     const { id: validatedId, ...validatedAttributes } = data;
-
-    // Ensure both oldData and newData have the correct id
     const oldData = { ...originalData, id };
     const newData = { ...validatedAttributes, id };
-
-    // Handle partition reference updates BEFORE saving the main object
     await this.handlePartitionReferenceUpdates(oldData, newData);
-
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
-
-    // Apply behavior strategy
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
       resource: this,
@@ -1026,100 +960,84 @@ export class Resource extends EventEmitter {
       mappedData,
       originalData: { ...attributesClone, id }
     });
-
-    // Add version metadata (required for all objects)
     const finalMetadata = processedMetadata;
-
     const key = this.getResourceKey(id);
-
-    // Check if object has existing content (non-behavior content)
+    // eslint-disable-next-line no-console
     let existingContentType = undefined;
     let finalBody = body;
-
-    // For behaviors that don't use body, preserve existing content
     if (body === "" && this.behavior !== 'body-overflow') {
-      try {
-        const existingObject = await this.client.getObject(key);
-        if (existingObject.ContentLength > 0) {
-          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
-          const existingBodyString = existingBodyBuffer.toString();
-          try {
-            JSON.parse(existingBodyString);
-          } catch {
-            finalBody = existingBodyBuffer;
-            existingContentType = existingObject.ContentType;
-          }
+      // eslint-disable-next-line no-console
+      const [ok, err, existingObject] = await tryFn(() => this.client.getObject(key));
+      // eslint-disable-next-line no-console
+      if (ok && existingObject.ContentLength > 0) {
+        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+        const existingBodyString = existingBodyBuffer.toString();
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        if (!okParse) {
+          finalBody = existingBodyBuffer;
+          existingContentType = existingObject.ContentType;
         }
-      } catch (error) {}
+      }
     }
-
-    // Determine content type based on body content
     let finalContentType = existingContentType;
     if (finalBody && finalBody !== "" && !finalContentType) {
-      try {
-        JSON.parse(finalBody);
-        finalContentType = 'application/json';
-      } catch {}
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      if (okParse) finalContentType = 'application/json';
     }
-
-    // Store historical version if versioning is enabled
     if (this.versioningEnabled && originalData._v !== this.version) {
       await this.createHistoricalVersion(id, originalData);
     }
-
-    try {
-      await this.client.putObject({
-        key,
-        body: finalBody,
-        contentType: finalContentType,
-        metadata: finalMetadata,
+    const [ok, err] = await tryFn(() => this.client.putObject({
+      key,
+      body: finalBody,
+      contentType: finalContentType,
+      metadata: finalMetadata,
+    }));
+    if (!ok && err && err.message && err.message.includes('metadata headers exceed')) {
+      const totalSize = calculateTotalSize(finalMetadata);
+      const effectiveLimit = calculateEffectiveLimit({
+        s3Limit: 2047,
+        systemConfig: {
+          version: this.version,
+          timestamps: this.config.timestamps,
+          id: id
+        }
       });
-    } catch (error) {
-      if (error.message && error.message.includes('metadata headers exceed')) {
-        const totalSize = calculateTotalSize(finalMetadata);
-        const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
-          systemConfig: {
-            version: this.version,
-            timestamps: this.config.timestamps,
-            id: id
-          }
-        });
-        const excess = totalSize - effectiveLimit;
-        error.totalSize = totalSize;
-        error.limit = 2047;
-        error.effectiveLimit = effectiveLimit;
-        error.excess = excess;
-        this.emit('exceedsLimit', {
-          operation: 'update',
-          totalSize,
-          limit: 2047,
-          effectiveLimit,
-          excess,
-          data: validatedAttributes
-        });
-        throw new Error('metadata headers exceed');
-      }
-      throw error;
+      const excess = totalSize - effectiveLimit;
+      err.totalSize = totalSize;
+      err.limit = 2047;
+      err.effectiveLimit = effectiveLimit;
+      err.excess = excess;
+      this.emit('exceedsLimit', {
+        operation: 'update',
+        totalSize,
+        limit: 2047,
+        effectiveLimit,
+        excess,
+        data: validatedAttributes
+      });
+      throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'update', id, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
+    } else if (!ok) {
+      throw mapAwsError(err, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'update',
+        id
+      });
     }
-
-    // Compose the full object without extra request
     const updatedData = await this.composeFullObjectFromWrite({
       id,
       metadata: finalMetadata,
       body: finalBody,
       behavior: this.behavior
     });
-
-    // After update logic, before emit
-    this.emit("update", {
+    const finalResult = await this.executeHooks('afterUpdate', updatedData);
+    this.emit('update', {
       ...updatedData,
       $before: { ...originalData },
-      $after: { ...updatedData }
+      $after: { ...finalResult }
     });
-
-    // Execute afterUpdate hooks
-    const finalResult = await this.executeHooks('afterUpdate', updatedData);
     return finalResult;
   }
 
@@ -1129,34 +1047,54 @@ export class Resource extends EventEmitter {
    * @returns {Promise<Object>} S3 delete response
    * @example
    * await resource.delete('user-123');
-   * console.log('User deleted successfully');
    */
   async delete(id) {
-    // Get object data before deletion for hooks
-    let objectData;
-    try {
-      objectData = await this.get(id);
-    } catch (error) {
-      // Object doesn't exist, create minimal data for hooks
-      objectData = { id };
+    if (isEmpty(id)) {
+      throw new Error('id cannot be empty');
     }
-
-    // Execute beforeDelete hooks
-    await this.executeHooks('beforeDelete', objectData);
-
-    const key = this.getResourceKey(id);
-    const response = await this.client.deleteObject(key);
-
-    // Execute afterDelete hooks
-    const afterDeleteData = await this.executeHooks('afterDelete', objectData);
     
-    // After delete logic, before emit
+    let objectData;
+    let deleteError = null;
+    
+    // Try to get the object data first
+    const [ok, err, data] = await tryFn(() => this.get(id));
+    if (ok) {
+      objectData = data;
+    } else {
+      objectData = { id };
+      deleteError = err; // Store the error for later
+    }
+    
+    await this.executeHooks('beforeDelete', objectData);
+    const key = this.getResourceKey(id);
+    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+    
+    // Always emit delete event for audit purposes, even if delete fails
     this.emit("delete", {
-      ...afterDeleteData,
+      ...objectData,
       $before: { ...objectData },
       $after: null
     });
     
+    // If we had an error getting the object, throw it now (after emitting the event)
+    if (deleteError) {
+      throw mapAwsError(deleteError, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: 'delete',
+        id
+      });
+    }
+    
+    if (!ok2) throw mapAwsError(err2, {
+      key,
+      resourceName: this.name,
+      operation: 'delete',
+      id
+    });
+    
+    const afterDeleteData = await this.executeHooks('afterDelete', objectData);
     return response;
   }
 
@@ -1208,14 +1146,14 @@ export class Resource extends EventEmitter {
    */
   async count({ partition = null, partitionValues = {} } = {}) {
     let prefix;
-    
+
     if (partition && Object.keys(partitionValues).length > 0) {
       // Count in specific partition
       const partitionDef = this.config.partitions[partition];
       if (!partitionDef) {
-        throw new Error(`Partition '${partition}' not found`);
+        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: 'count' });
       }
-      
+
       // Build partition segments (sorted by field name for consistency)
       const partitionSegments = [];
       const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
@@ -1226,7 +1164,7 @@ export class Resource extends EventEmitter {
           partitionSegments.push(`${fieldName}=${transformedValue}`);
         }
       }
-      
+
       if (partitionSegments.length > 0) {
         prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
       } else {
@@ -1238,7 +1176,6 @@ export class Resource extends EventEmitter {
     }
 
     const count = await this.client.count({ prefix });
-    console.log('[Resource][DEBUG] count prefix:', prefix, 'count:', count);
     this.emit("count", count);
     return count;
   }
@@ -1254,8 +1191,7 @@ export class Resource extends EventEmitter {
    *   { name: 'Bob', email: 'bob@example.com' }
    * ];
    * const insertedUsers = await resource.insertMany(users);
-   * console.log(`Inserted ${insertedUsers.length} users`);
-   */
+      */
   async insertMany(objects) {
     const { results } = await PromisePool.for(objects)
       .withConcurrency(this.parallelism)
@@ -1279,8 +1215,7 @@ export class Resource extends EventEmitter {
    * @example
    * const deletedIds = ['user-1', 'user-2', 'user-3'];
    * const results = await resource.deleteMany(deletedIds);
-   * console.log(`Deleted ${deletedIds.length} users`);
-   */
+      */
   async deleteMany(ids) {
     const packages = chunk(
       ids.map((id) => this.getResourceKey(id)),
@@ -1289,7 +1224,6 @@ export class Resource extends EventEmitter {
 
     // Debug log: print all keys to be deleted
     const allKeys = ids.map((id) => this.getResourceKey(id));
-    console.log('[Resource][DEBUG] deleteMany keys:', allKeys);
 
     const { results } = await PromisePool.for(packages)
       .withConcurrency(this.parallelism)
@@ -1321,22 +1255,19 @@ export class Resource extends EventEmitter {
   async deleteAll() {
     // Security check: only allow if paranoid mode is disabled
     if (this.config.paranoid !== false) {
-      throw new Error(
-        `deleteAll() is a dangerous operation and requires paranoid: false option. ` +
-        `Current paranoid setting: ${this.config.paranoid}`
-      );
+      throw new ResourceError('deleteAll() is a dangerous operation and requires paranoid: false option.', { resourceName: this.name, operation: 'deleteAll', paranoid: this.config.paranoid, suggestion: 'Set paranoid: false to allow deleteAll.' });
     }
 
     // Use deleteAll to efficiently delete all objects (new format)
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    
-    this.emit("deleteAll", { 
-      version: this.version, 
-      prefix, 
-      deletedCount 
+
+    this.emit("deleteAll", {
+      version: this.version,
+      prefix,
+      deletedCount
     });
-    
+
     return { deletedCount, version: this.version };
   }
 
@@ -1347,22 +1278,19 @@ export class Resource extends EventEmitter {
   async deleteAllData() {
     // Security check: only allow if paranoid mode is disabled
     if (this.config.paranoid !== false) {
-      throw new Error(
-        `deleteAllData() is a dangerous operation and requires paranoid: false option. ` +
-        `Current paranoid setting: ${this.config.paranoid}`
-      );
+      throw new ResourceError('deleteAllData() is a dangerous operation and requires paranoid: false option.', { resourceName: this.name, operation: 'deleteAllData', paranoid: this.config.paranoid, suggestion: 'Set paranoid: false to allow deleteAllData.' });
     }
 
     // Use deleteAll to efficiently delete everything for this resource
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    
-    this.emit("deleteAllData", { 
-      resource: this.name, 
-      prefix, 
-      deletedCount 
+
+    this.emit("deleteAllData", {
+      resource: this.name,
+      prefix,
+      deletedCount
     });
-    
+
     return { deletedCount, resource: this.name };
   }
 
@@ -1399,7 +1327,7 @@ export class Resource extends EventEmitter {
     if (partition && Object.keys(partitionValues).length > 0) {
       // List from specific partition
       if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new Error(`Partition '${partition}' not found`);
+        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: 'listIds' });
       }
       const partitionDef = this.config.partitions[partition];
       // Build partition segments (sorted by field name for consistency)
@@ -1427,7 +1355,6 @@ export class Resource extends EventEmitter {
       offset: offset,
       amount: limit || 1000, // Default to 1000 if no limit specified
     });
-
     const ids = keys.map((key) => {
       // Extract ID from different path patterns:
       // /resource={name}/v={version}/id={id}
@@ -1436,7 +1363,6 @@ export class Resource extends EventEmitter {
       const idPart = parts.find(part => part.startsWith('id='));
       return idPart ? idPart.replace('id=', '') : null;
     }).filter(Boolean);
-
     this.emit("listIds", ids.length);
     return ids;
   }
@@ -1463,56 +1389,38 @@ export class Resource extends EventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
       }
-      
       return await this.listPartition({ partition, partitionValues, limit, offset });
-    } catch (error) {
-      return this.handleListError(error, { partition, partitionValues });
+    });
+    if (!ok) {
+      return this.handleListError(err, { partition, partitionValues });
     }
+    return result;
   }
 
-  /**
-   * List resources from main resource (no partition)
-   */
   async listMain({ limit, offset = 0 }) {
-    // Get IDs with pagination
-    const ids = await this.listIds({ limit, offset });
-    
-    // Get full data for each ID
+    const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
+    if (!ok) throw err;
     const results = await this.processListResults(ids, 'main');
-    
     this.emit("list", { count: results.length, errors: 0 });
     return results;
   }
 
-  /**
-   * List resources from specific partition
-   */
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
-    // Validate partition exists
     if (!this.config.partitions?.[partition]) {
       this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
-    
     const partitionDef = this.config.partitions[partition];
-    
-    // Build partition prefix
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    
-    // Get all keys in the partition
-    const keys = await this.client.getAllKeys({ prefix });
-    
-    // Extract IDs and apply pagination
+    const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+    if (!ok) throw err;
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
-    
-    // Get full data from partition objects
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    
     this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
@@ -1523,7 +1431,7 @@ export class Resource extends EventEmitter {
   buildPartitionPrefix(partition, partitionDef, partitionValues) {
     const partitionSegments = [];
     const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-    
+
     for (const [fieldName, rule] of sortedFields) {
       const value = partitionValues[fieldName];
       if (value !== undefined && value !== null) {
@@ -1531,11 +1439,11 @@ export class Resource extends EventEmitter {
         partitionSegments.push(`${fieldName}=${transformedValue}`);
       }
     }
-    
+
     if (partitionSegments.length > 0) {
       return `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
     }
-    
+
     return `resource=${this.name}/partition=${partition}`;
   }
 
@@ -1559,17 +1467,18 @@ export class Resource extends EventEmitter {
     const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.parallelism)
       .handleError(async (error, id) => {
-        return null;
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
       })
       .process(async (id) => {
-        try {
-          return await this.get(id);
-        } catch (error) {
-          return this.handleResourceError(error, id, context);
+        const [ok, err, result] = await tryFn(() => this.get(id));
+        if (ok) {
+          return result;
         }
+        return this.handleResourceError(err, id, context);
       });
-
-    return results.filter(item => item !== null);
+    this.emit("list", { count: results.length, errors: 0 });
+    return results;
   }
 
   /**
@@ -1577,25 +1486,24 @@ export class Resource extends EventEmitter {
    */
   async processPartitionResults(ids, partition, partitionDef, keys) {
     const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-    
     const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.parallelism)
       .handleError(async (error, id) => {
-        return null;
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
       })
       .process(async (id) => {
-        try {
+        const [ok, err, result] = await tryFn(async () => {
           const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
-          return await this.getFromPartition({ 
-            id, 
-            partitionName: partition, 
-            partitionValues: actualPartitionValues 
+          return await this.getFromPartition({
+            id,
+            partitionName: partition,
+            partitionValues: actualPartitionValues
           });
-        } catch (error) {
-          return this.handleResourceError(error, id, 'partition');
-        }
+        });
+        if (ok) return result;
+        return this.handleResourceError(err, id, 'partition');
       });
-
     return results.filter(item => item !== null);
   }
 
@@ -1605,12 +1513,12 @@ export class Resource extends EventEmitter {
   extractPartitionValuesFromKey(id, keys, sortedFields) {
     const keyForId = keys.find(key => key.includes(`id=${id}`));
     if (!keyForId) {
-      throw new Error(`Partition key not found for ID ${id}`);
+      throw new PartitionError(`Partition key not found for ID ${id}`, { resourceName: this.name, id, operation: 'extractPartitionValuesFromKey' });
     }
-    
+
     const keyParts = keyForId.split('/');
     const actualPartitionValues = {};
-    
+
     for (const [fieldName] of sortedFields) {
       const fieldPart = keyParts.find(part => part.startsWith(`${fieldName}=`));
       if (fieldPart) {
@@ -1618,7 +1526,7 @@ export class Resource extends EventEmitter {
         actualPartitionValues[fieldName] = value;
       }
     }
-    
+
     return actualPartitionValues;
   }
 
@@ -1645,8 +1553,7 @@ export class Resource extends EventEmitter {
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
-    
-    console.error(`Critical error in list method:`, error.message);
+
     this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
@@ -1657,12 +1564,13 @@ export class Resource extends EventEmitter {
    * @returns {Promise<Object[]>} Array of resource objects
    * @example
    * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
-   * users.forEach(user => console.log(user.name));
-   */
+      */
   async getMany(ids) {
     const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
       .handleError(async (error, id) => {
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
         return {
           id,
           _error: error.message,
@@ -1670,21 +1578,16 @@ export class Resource extends EventEmitter {
         };
       })
       .process(async (id) => {
-        try {
-          const data = await this.get(id);
-          return data;
-        } catch (error) {
-          // If it's a decryption error, return basic info
-          if (error.message.includes('Cipher job failed') || 
-              error.message.includes('OperationError')) {
-            return {
-              id,
-              _decryptionFailed: true,
-              _error: error.message
-            };
-          }
-          throw error; // Re-throw other errors
+        const [ok, err, data] = await tryFn(() => this.get(id));
+        if (ok) return data;
+        if (err.message.includes('Cipher job failed') || err.message.includes('OperationError')) {
+          return {
+            id,
+            _decryptionFailed: true,
+            _error: err.message
+          };
         }
+        throw err;
       });
 
     this.emit("getMany", ids.length);
@@ -1696,17 +1599,17 @@ export class Resource extends EventEmitter {
    * @returns {Promise<Object[]>} Array of all resource objects
    * @example
    * const allUsers = await resource.getAll();
-   * console.log(`Total users: ${allUsers.length}`);
-   */
+      */
   async getAll() {
-    const ids = await this.listIds();
+    const [ok, err, ids] = await tryFn(() => this.listIds());
+    if (!ok) throw err;
     const results = [];
     for (const id of ids) {
-      try {
-        const item = await this.get(id);
+      const [ok2, err2, item] = await tryFn(() => this.get(id));
+      if (ok2) {
         results.push(item);
-      } catch (error) {
-        console.error(`[RESOURCE:getAll] ${this.name} - get(${id}) ERROR`, error);
+      } else {
+        // Log error but continue
       }
     }
     return results;
@@ -1724,9 +1627,7 @@ export class Resource extends EventEmitter {
    * @example
    * // Get first page of all resources
    * const page = await resource.page({ offset: 0, size: 10 });
-   * console.log(`Page ${page.page + 1} of ${page.totalPages}`);
-   * console.log(`Showing ${page.items.length} of ${page.totalItems} total`);
-   * 
+         * 
    * // Get page from specific partition
    * const googlePage = await resource.page({
    *   partition: 'byUtmSource',
@@ -1741,46 +1642,30 @@ export class Resource extends EventEmitter {
    *   size: 100, 
    *   skipCount: true 
    * });
-   * console.log(`Got ${fastPage.items.length} items`); // totalItems will be null
-   */
+      */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       // Get total count only if not skipped (for performance)
       let totalItems = null;
       let totalPages = null;
-      
       if (!skipCount) {
-        try {
-          totalItems = await this.count({ partition, partitionValues });
+        const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+        if (okCount) {
+          totalItems = count;
           totalPages = Math.ceil(totalItems / size);
-        } catch (countError) {
-          // Continue without count if it fails
+        } else {
           totalItems = null;
           totalPages = null;
         }
       }
-      
       const page = Math.floor(offset / size);
-      
-      // Use the existing list() method which already has pagination implemented
       let items = [];
-      try {
-        // If size is 0 or negative, return empty array immediately
-        if (size <= 0) {
-          items = [];
-        } else {
-          items = await this.list({ 
-            partition, 
-            partitionValues,
-            limit: size,
-            offset: offset
-          });
-        }
-      } catch (listError) {
-        // Return empty items array if list fails
+      if (size <= 0) {
         items = [];
+      } else {
+        const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset: offset }));
+        items = okList ? listResult : [];
       }
-      
       const result = {
         items,
         totalItems,
@@ -1788,7 +1673,6 @@ export class Resource extends EventEmitter {
         pageSize: size,
         totalPages,
         hasMore: items.length === size && (offset + size) < (totalItems || Infinity),
-        // Add additional metadata for debugging
         _debug: {
           requestedSize: size,
           requestedOffset: offset,
@@ -1797,29 +1681,26 @@ export class Resource extends EventEmitter {
           hasTotalItems: totalItems !== null
         }
       };
-      
       this.emit("page", result);
       return result;
-    } catch (error) {
-      // Final fallback - return a safe result even if everything fails
-      console.error(`Critical error in page method:`, error.message);
-      
-      return {
-        items: [],
-        totalItems: null,
-        page: Math.floor(offset / size),
-        pageSize: size,
-        totalPages: null,
-        _debug: {
-          requestedSize: size,
-          requestedOffset: offset,
-          actualItemsReturned: 0,
-          skipCount: skipCount,
-          hasTotalItems: false,
-          error: error.message
-        }
-      };
-    }
+    });
+    if (ok) return result;
+    // Final fallback - return a safe result even if everything fails
+    return {
+      items: [],
+      totalItems: null,
+      page: Math.floor(offset / size),
+      pageSize: size,
+      totalPages: null,
+      _debug: {
+        requestedSize: size,
+        requestedOffset: offset,
+        actualItemsReturned: 0,
+        skipCount: skipCount,
+        hasTotalItems: false,
+        error: err.message
+      }
+    };
   }
 
   readable() {
@@ -1856,28 +1737,24 @@ export class Resource extends EventEmitter {
    * });
    */
   async setContent({ id, buffer, contentType = 'application/octet-stream' }) {
-    // Get current resource data
-    const currentData = await this.get(id);
-    if (!currentData) {
-      throw new Error(`Resource with id '${id}' not found`);
+    const [ok, err, currentData] = await tryFn(() => this.get(id));
+    if (!ok || !currentData) {
+      throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: 'setContent' });
     }
-
-    // Update with new content
     const updatedData = {
       ...currentData,
       _hasContent: true,
       _contentLength: buffer.length,
       _mimeType: contentType
     };
-
-    // Store the content in the main resource object
-    await this.client.putObject({
+    const mappedMetadata = await this.schema.mapper(updatedData);
+    const [ok2, err2] = await tryFn(() => this.client.putObject({
       key: this.getResourceKey(id),
-      metadata: await this.schema.mapper(updatedData),
+      metadata: mappedMetadata,
       body: buffer,
       contentType
-    });
-
+    }));
+    if (!ok2) throw err2;
     this.emit("setContent", { id, contentType, contentLength: buffer.length });
     return updatedData;
   }
@@ -1889,37 +1766,30 @@ export class Resource extends EventEmitter {
    * @example
    * const content = await resource.content('user-123');
    * if (content.buffer) {
-   *   console.log('Content type:', content.contentType);
-   *   console.log('Content size:', content.buffer.length);
-   *   // Save to file
+         *   // Save to file
    *   fs.writeFileSync('output.jpg', content.buffer);
    * } else {
-   *   console.log('No content found');
-   * }
+      * }
    */
   async content(id) {
     const key = this.getResourceKey(id);
-    
-    try {
-      const response = await this.client.getObject(key);
-      const buffer = Buffer.from(await response.Body.transformToByteArray());
-      const contentType = response.ContentType || null;
-
-      this.emit("content", id, buffer.length, contentType);
-      
-      return {
-        buffer,
-        contentType
-      };
-    } catch (error) {
-      if (error.name === "NoSuchKey") {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      if (err.name === "NoSuchKey") {
         return {
           buffer: null,
           contentType: null
         };
       }
-      throw error;
+      throw err;
     }
+    const buffer = Buffer.from(await response.Body.transformToByteArray());
+    const contentType = response.ContentType || null;
+    this.emit("content", id, buffer.length, contentType);
+    return {
+      buffer,
+      contentType
+    };
   }
 
   /**
@@ -1929,14 +1799,9 @@ export class Resource extends EventEmitter {
    */
   async hasContent(id) {
     const key = this.getResourceKey(id);
-    
-    try {
-      const response = await this.client.headObject(key);
-      // Check if object has actual content (not just metadata)
-      return response.ContentLength > 0;
-    } catch (error) {
-      return false;
-    }
+    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    if (!ok) return false;
+    return response.ContentLength > 0;
   }
 
   /**
@@ -1945,18 +1810,15 @@ export class Resource extends EventEmitter {
    */
   async deleteContent(id) {
     const key = this.getResourceKey(id);
-    
-    // Get existing metadata first
-    const existingObject = await this.client.headObject(key);
+    const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
+    if (!ok) throw err;
     const existingMetadata = existingObject.Metadata || {};
-    
-    // Recreate object with empty body but preserve metadata
-    const response = await this.client.putObject({
+    const [ok2, err2, response] = await tryFn(() => this.client.putObject({
       key,
       body: "",
       metadata: existingMetadata,
-    });
-    
+    }));
+    if (!ok2) throw err2;
     this.emit("deleteContent", id);
     return response;
   }
@@ -1971,7 +1833,7 @@ export class Resource extends EventEmitter {
       attributes: this.attributes,
       behavior: this.behavior
     };
-    
+
     // Use jsonStableStringify to ensure consistent ordering regardless of input order
     const stableString = jsonStableStringify(definition);
     return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
@@ -1998,28 +1860,22 @@ export class Resource extends EventEmitter {
     if (version === this.version) {
       return this.schema;
     }
-    
     // For different versions, try to create a compatible schema
     // This is especially important for v0 objects that might have different encryption
-    try {
-      const compatibleSchema = new Schema({
-        name: this.name,
-        attributes: this.attributes,
-        passphrase: this.passphrase,
-        version: version,
-        options: {
-          ...this.config,
-          // For older versions, be more lenient with decryption
-          autoDecrypt: true,
-          autoEncrypt: true
-        }
-      });
-      
-      return compatibleSchema;
-    } catch (error) {
-      console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, error.message);
-      return this.schema;
-    }
+    const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
+      name: this.name,
+      attributes: this.attributes,
+      passphrase: this.passphrase,
+      version: version,
+      options: {
+        ...this.config,
+        autoDecrypt: true,
+        autoEncrypt: true
+      }
+    })));
+    if (ok) return compatibleSchema;
+    // console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, err.message);
+    return this.schema;
   }
 
   /**
@@ -2059,24 +1915,17 @@ export class Resource extends EventEmitter {
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
-
-    // Collect all partition keys to delete
     const keysToDelete = [];
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      
       if (partitionKey) {
         keysToDelete.push(partitionKey);
       }
     }
-
-    // Delete all partition objects in a single batch operation
     if (keysToDelete.length > 0) {
-      try {
-        await this.client.deleteObjects(keysToDelete);
-      } catch (error) {
-        // Log but don't fail if some partition objects don't exist
-        console.warn('Some partition objects could not be deleted:', error.message);
+      const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
+      if (!ok) {
+        // console.warn('Some partition objects could not be deleted:', err.message);
       }
     }
   }
@@ -2128,37 +1977,37 @@ export class Resource extends EventEmitter {
     const results = [];
     let currentOffset = offset;
     const batchSize = Math.min(limit, 50); // Process in smaller batches
-    
+
     while (results.length < limit) {
       // Get a batch of objects
-      const batch = await this.list({ 
-        partition, 
-        partitionValues, 
-        limit: batchSize, 
-        offset: currentOffset 
+      const batch = await this.list({
+        partition,
+        partitionValues,
+        limit: batchSize,
+        offset: currentOffset
       });
-      
+
       if (batch.length === 0) {
         break; // No more data
       }
-      
+
       // Filter the batch
       const filteredBatch = batch.filter(doc => {
         return Object.entries(filter).every(([key, value]) => {
           return doc[key] === value;
         });
       });
-      
+
       // Add filtered results
       results.push(...filteredBatch);
       currentOffset += batchSize;
-      
+
       // If we got less than batchSize, we've reached the end
       if (batch.length < batchSize) {
         break;
       }
     }
-    
+
     // Return only up to the requested limit
     return results.slice(0, limit);
   }
@@ -2173,37 +2022,29 @@ export class Resource extends EventEmitter {
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
-
-    // Process each partition to detect changes and update references
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      try {
-        await this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData);
-      } catch (error) {
-        // Log but don't fail if partition update fails
-        console.warn(`Failed to update partition references for ${partitionName}:`, error.message);
+      const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
+      if (!ok) {
+        // console.warn(`Failed to update partition references for ${partitionName}:`, err.message);
       }
     }
-
-    // Aggressive cleanup: remove any stale partition references for this id
     const id = newData.id || oldData.id;
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
       let allKeys = [];
-      try {
-        allKeys = await this.client.getAllKeys({ prefix });
-      } catch (error) {
-        // Log but don't fail if listing keys fails
-        console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, error.message);
+      const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+      if (okKeys) {
+        allKeys = keys;
+      } else {
+        // console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, errKeys.message);
         continue;
       }
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
       for (const key of allKeys) {
         if (key.endsWith(`/id=${id}`) && key !== validKey) {
-          try {
-            await this.client.deleteObject(key);
-          } catch (error) {
-            // Log but don't fail if old partition object doesn't exist
-            console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, error.message);
+          const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
+          if (!okDel) {
+            // console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, errDel.message);
           }
         }
       }
@@ -2220,7 +2061,7 @@ export class Resource extends EventEmitter {
   async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
     // Ensure we have the correct id
     const id = newData.id || oldData.id;
-    
+
     // Get old and new partition keys
     const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
     const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
@@ -2229,17 +2070,18 @@ export class Resource extends EventEmitter {
     if (oldPartitionKey !== newPartitionKey) {
       // Delete old partition reference if it exists
       if (oldPartitionKey) {
-        try {
+        const [ok, err] = await tryFn(async () => {
           await this.client.deleteObject(oldPartitionKey);
-        } catch (error) {
+        });
+        if (!ok) {
           // Log but don't fail if old partition object doesn't exist
-          console.warn(`Old partition object could not be deleted for ${partitionName}:`, error.message);
+          // console.warn(`Old partition object could not be deleted for ${partitionName}:`, err.message);
         }
       }
 
       // Create new partition reference if new key exists
       if (newPartitionKey) {
-        try {
+        const [ok, err] = await tryFn(async () => {
           // Salvar apenas a versão como metadado
           const partitionMetadata = {
             _v: String(this.version)
@@ -2250,14 +2092,15 @@ export class Resource extends EventEmitter {
             body: '',
             contentType: undefined,
           });
-        } catch (error) {
+        });
+        if (!ok) {
           // Log but don't fail if new partition object creation fails
-          console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
+          // console.warn(`New partition object could not be created for ${partitionName}:`, err.message);
         }
       }
     } else if (newPartitionKey) {
       // If partition keys are the same, just update the existing reference
-      try {
+      const [ok, err] = await tryFn(async () => {
         // Salvar apenas a versão como metadado
         const partitionMetadata = {
           _v: String(this.version)
@@ -2268,9 +2111,10 @@ export class Resource extends EventEmitter {
           body: '',
           contentType: undefined,
         });
-      } catch (error) {
+      });
+      if (!ok) {
         // Log but don't fail if partition object update fails
-        console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+        // console.warn(`Partition object could not be updated for ${partitionName}:`, err.message);
       }
     }
   }
@@ -2289,7 +2133,7 @@ export class Resource extends EventEmitter {
     for (const [partitionName, partition] of Object.entries(partitions)) {
       // Validate that the partition exists and has the required structure
       if (!partition || !partition.fields || typeof partition.fields !== 'object') {
-        console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
+        // console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
         continue;
       }
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
@@ -2298,16 +2142,17 @@ export class Resource extends EventEmitter {
         const partitionMetadata = {
           _v: String(this.version)
         };
-        try {
+        const [ok, err] = await tryFn(async () => {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
             body: '',
             contentType: undefined,
           });
-        } catch (error) {
+        });
+        if (!ok) {
           // Log but don't fail if partition object doesn't exist
-          console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
+          // console.warn(`Partition object could not be updated for ${partitionName}:`, err.message);
         }
       }
     }
@@ -2327,9 +2172,7 @@ export class Resource extends EventEmitter {
    *   partitionName: 'byUtmSource',
    *   partitionValues: { 'utm.source': 'google' }
    * });
-   * console.log(user._partition); // 'byUtmSource'
-   * console.log(user._partitionValues); // { 'utm.source': 'google' }
-   * 
+         * 
    * // Get product from multi-field partition
    * const product = await resource.getFromPartition({
    *   id: 'product-456',
@@ -2339,9 +2182,9 @@ export class Resource extends EventEmitter {
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
     if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new Error(`Partition '${partitionName}' not found`);
+      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: 'getFromPartition' });
     }
-    
+
     const partition = this.config.partitions[partitionName];
 
     // Build partition key using provided values
@@ -2354,23 +2197,24 @@ export class Resource extends EventEmitter {
         partitionSegments.push(`${fieldName}=${transformedValue}`);
       }
     }
-    
+
     if (partitionSegments.length === 0) {
-      throw new Error(`No partition values provided for partition '${partitionName}'`);
+      throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: 'getFromPartition' });
     }
 
     const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-    
+
     // Verify partition reference exists
-    try {
+    const [ok, err] = await tryFn(async () => {
       await this.client.headObject(partitionKey);
-    } catch (error) {
-      throw new Error(`Resource with id '${id}' not found in partition '${partitionName}'`);
+    });
+    if (!ok) {
+      throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, { resourceName: this.name, id, partitionName, operation: 'getFromPartition' });
     }
 
     // Get the actual data from the main resource object
     const data = await this.get(id);
-    
+
     // Add partition metadata
     data._partition = partitionName;
     data._partitionValues = partitionValues;
@@ -2386,16 +2230,16 @@ export class Resource extends EventEmitter {
    */
   async createHistoricalVersion(id, data) {
     const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
-    
+
     // Ensure the historical object has the _v metadata
     const historicalData = {
       ...data,
       _v: data._v || this.version,
       _historicalTimestamp: new Date().toISOString()
     };
-    
+
     const mappedData = await this.schema.mapper(historicalData);
-    
+
     // Apply behavior strategy for historical storage
     const behaviorImpl = getBehavior(this.behavior);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
@@ -2403,25 +2247,21 @@ export class Resource extends EventEmitter {
       data: historicalData,
       mappedData
     });
-    
+
     // Add version metadata for consistency
     const finalMetadata = {
       ...processedMetadata,
       _v: data._v || this.version,
       _historicalTimestamp: historicalData._historicalTimestamp
     };
-    
+
     // Determine content type based on body content
     let contentType = undefined;
     if (body && body !== "") {
-      try {
-        JSON.parse(body);
-        contentType = 'application/json';
-      } catch {
-        // Not valid JSON, keep contentType undefined
-      }
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = 'application/json';
     }
-    
+
     await this.client.putObject({
       key: historicalKey,
       metadata: finalMetadata,
@@ -2442,11 +2282,11 @@ export class Resource extends EventEmitter {
     if (fromVersion === toVersion) {
       return data;
     }
-    
+
     // For now, we'll implement a simple mapping strategy
     // In a full implementation, this would use sophisticated version mappers
     // based on the schema evolution history
-    
+
     // Add version info to the returned data
     const mappedData = {
       ...data,
@@ -2454,14 +2294,14 @@ export class Resource extends EventEmitter {
       _originalVersion: fromVersion,
       _versionMapped: true
     };
-    
+
     // TODO: Implement sophisticated version mapping logic here
     // This could involve:
     // 1. Field renames
     // 2. Field type changes
     // 3. Default values for new fields
     // 4. Data transformations
-    
+
     return mappedData;
   }
 
@@ -2478,30 +2318,21 @@ export class Resource extends EventEmitter {
     if (metadata && metadata['$overflow'] === 'true') {
       behaviorFlags.$overflow = 'true';
     }
-    
     // Always unmap metadata first to get the correct field names
     let unmappedMetadata = {};
-    try {
-      unmappedMetadata = await this.schema.unmapper(metadata);
-    } catch (error) {
-      unmappedMetadata = metadata;
-    }
-    
+    const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
+    unmappedMetadata = ok ? unmapped : metadata;
     // Helper function to filter out internal S3DB fields
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== 'object') return obj;
       const filtered = {};
       for (const [key, value] of Object.entries(obj)) {
-        // Skip internal S3DB fields (those starting with _)
-        // But keep behavior-specific flags like $overflow, $truncated
         if (!key.startsWith('_')) {
           filtered[key] = value;
         }
       }
       return filtered;
     };
-    
-    // Helper para deserializar '[object Object]' e strings JSON
     const fixValue = (v) => {
       if (typeof v === 'object' && v !== null) {
         return v;
@@ -2509,64 +2340,47 @@ export class Resource extends EventEmitter {
       if (typeof v === 'string') {
         if (v === '[object Object]') return {};
         if ((v.startsWith('{') || v.startsWith('['))) {
-          try { return JSON.parse(v); } catch { return v; }
+          // Use tryFnSync for safe parse
+          const [ok, err, parsed] = tryFnSync(() => JSON.parse(v));
+          return ok ? parsed : v;
         }
         return v;
       }
       return v;
     };
-    
-    // Para behaviors que usam body-overflow
     if (behavior === 'body-overflow') {
       const hasOverflow = metadata && metadata['$overflow'] === 'true';
       let bodyData = {};
       if (hasOverflow && body) {
-        try { 
-          const parsedBody = JSON.parse(body);
-          // Unmap the body data as well
-          bodyData = await this.schema.unmapper(parsedBody);
-        } catch {}
+        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        if (okBody) {
+          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+          bodyData = okUnmap ? unmappedBody : {};
+        }
       }
-      // Merge unmapped metadata and body data, filtering internal fields
       const merged = { ...unmappedMetadata, ...bodyData, id };
-      // Corrigir todos os campos
       Object.keys(merged).forEach(k => { merged[k] = fixValue(merged[k]); });
       const result = filterInternalFields(merged);
-      // Preserve behavior flags
       if (hasOverflow) {
         result.$overflow = 'true';
       }
       return result;
     }
-    
-    // Para behaviors que usam body-only
     if (behavior === 'body-only') {
-      try {
-        const parsedBody = body ? JSON.parse(body) : {};
-        // Recuperar o map salvo no metadata
-        let mapFromMeta = this.schema.map;
-        if (metadata && metadata._map) {
-          try {
-            mapFromMeta = typeof metadata._map === 'string' ? JSON.parse(metadata._map) : metadata._map;
-          } catch {}
-        }
-        // Unmap the body data to get correct field names, passando o map correto
-        const unmappedBody = await (this.schema.unmapper.length === 2
-          ? this.schema.unmapper(parsedBody, mapFromMeta)
-          : this.schema.unmapper(parsedBody));
-        const result = { ...unmappedBody, id };
-        Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
-        return result;
-      } catch (error) {
-        return { id };
+      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
+      let mapFromMeta = this.schema.map;
+      if (metadata && metadata._map) {
+        const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === 'string' ? JSON.parse(metadata._map) : metadata._map));
+        mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
+      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+      const result = okUnmap ? { ...unmappedBody, id } : { id };
+      Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
+      return result;
     }
-    
-    // Para outros behaviors (user-managed, truncate-data), metadata + id
     const result = { ...unmappedMetadata, id };
     Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
     const filtered = filterInternalFields(result);
-    // Preserve behavior flags
     if (behaviorFlags.$truncated) {
       filtered.$truncated = behaviorFlags.$truncated;
     }
@@ -2577,31 +2391,37 @@ export class Resource extends EventEmitter {
   }
 
   emit(event, ...args) {
-    // Patch: ensure arrays of numbers are emitted as arrays of strings for event payloads
-    function deepStringifyArrays(obj) {
-      if (Array.isArray(obj)) {
-        // Only stringify if all elements are numbers
-        if (obj.every(x => typeof x === 'number')) {
-          return obj.map(x => String(x));
-        }
-        return obj.map(deepStringifyArrays);
-      } else if (obj && typeof obj === 'object') {
-        const out = {};
-        for (const k in obj) out[k] = deepStringifyArrays(obj[k]);
-        return out;
-      }
-      return obj;
-    }
-    if (args.length > 0 && typeof args[0] === 'object' && args[0] !== null) {
-      args[0] = deepStringifyArrays(args[0]);
-    }
     return super.emit(event, ...args);
   }
 
   async replace(id, attributes) {
     await this.delete(id);
-    const newAttributes = { ...attributes, id };
-    return this.insert(newAttributes);
+    await new Promise(r => setTimeout(r, 100));
+    // Polling para garantir que a key foi removida do S3
+    const maxWait = 5000;
+    const interval = 50;
+    const start = Date.now();
+    let waited = 0;
+    while (Date.now() - start < maxWait) {
+      const exists = await this.exists(id);
+      if (!exists) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, interval));
+      waited = Date.now() - start;
+    }
+    if (waited >= maxWait) {
+    }
+    try {
+      const result = await this.insert({ ...attributes, id });
+      return result;
+    } catch (err) {
+      if (err && err.message && err.message.includes('already exists')) {
+        const result = await this.update(id, attributes);
+        return result;
+      }
+      throw err;
+    }
   }
 
   // --- MIDDLEWARE SYSTEM ---
@@ -2640,7 +2460,7 @@ export class Resource extends EventEmitter {
 
   useMiddleware(method, fn) {
     if (!this._middlewares) this._initMiddleware();
-    if (!this._middlewares.has(method)) throw new Error(`No such method for middleware: ${method}`);
+    if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: 'useMiddleware', method });
     this._middlewares.get(method).push(fn);
   }
 
@@ -2673,7 +2493,7 @@ export class Resource extends EventEmitter {
  */
 function validateResourceConfig(config) {
   const errors = [];
-  
+
   // Validate required fields
   if (!config.name) {
     errors.push("Resource 'name' is required");
@@ -2682,11 +2502,11 @@ function validateResourceConfig(config) {
   } else if (config.name.trim() === '') {
     errors.push("Resource 'name' cannot be empty");
   }
-  
+
   if (!config.client) {
     errors.push("S3 'client' is required");
   }
-  
+
   // Validate attributes
   if (!config.attributes) {
     errors.push("Resource 'attributes' are required");
@@ -2695,20 +2515,20 @@ function validateResourceConfig(config) {
   } else if (Object.keys(config.attributes).length === 0) {
     errors.push("Resource 'attributes' cannot be empty");
   }
-  
+
   // Validate optional fields with type checking
   if (config.version !== undefined && typeof config.version !== 'string') {
     errors.push("Resource 'version' must be a string");
   }
-  
+
   if (config.behavior !== undefined && typeof config.behavior !== 'string') {
     errors.push("Resource 'behavior' must be a string");
   }
-  
+
   if (config.passphrase !== undefined && typeof config.passphrase !== 'string') {
     errors.push("Resource 'passphrase' must be a string");
   }
-  
+
   if (config.parallelism !== undefined) {
     if (typeof config.parallelism !== 'number' || !Number.isInteger(config.parallelism)) {
       errors.push("Resource 'parallelism' must be an integer");
@@ -2716,11 +2536,11 @@ function validateResourceConfig(config) {
       errors.push("Resource 'parallelism' must be greater than 0");
     }
   }
-  
+
   if (config.observers !== undefined && !Array.isArray(config.observers)) {
     errors.push("Resource 'observers' must be an array");
   }
-  
+
   // Validate boolean fields
   const booleanFields = ['cache', 'autoDecrypt', 'timestamps', 'paranoid', 'allNestedObjectsOptional'];
   for (const field of booleanFields) {
@@ -2728,7 +2548,7 @@ function validateResourceConfig(config) {
       errors.push(`Resource '${field}' must be a boolean`);
     }
   }
-  
+
   // Validate idGenerator
   if (config.idGenerator !== undefined) {
     if (typeof config.idGenerator !== 'function' && typeof config.idGenerator !== 'number') {
@@ -2737,7 +2557,7 @@ function validateResourceConfig(config) {
       errors.push("Resource 'idGenerator' size must be greater than 0");
     }
   }
-  
+
   // Validate idSize
   if (config.idSize !== undefined) {
     if (typeof config.idSize !== 'number' || !Number.isInteger(config.idSize)) {
@@ -2746,7 +2566,7 @@ function validateResourceConfig(config) {
       errors.push("Resource 'idSize' must be greater than 0");
     }
   }
-  
+
   // Validate partitions
   if (config.partitions !== undefined) {
     if (typeof config.partitions !== 'object' || Array.isArray(config.partitions)) {
@@ -2769,7 +2589,7 @@ function validateResourceConfig(config) {
       }
     }
   }
-  
+
   // Validate hooks
   if (config.hooks !== undefined) {
     if (typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
@@ -2796,7 +2616,7 @@ function validateResourceConfig(config) {
       }
     }
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors

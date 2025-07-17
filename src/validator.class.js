@@ -2,26 +2,35 @@ import { merge, isString } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
 import { encrypt } from "./crypto.js";
+import tryFn, { tryFnSync } from "./concerns/try-fn.js";
+import { ValidationError } from "./errors.js";
 
 async function secretHandler (actual, errors, schema) {
   if (!this.passphrase) {
-    errors.push({ actual, type: "encryptionKeyMissing" })
-    return actual
+    errors.push(new ValidationError("Missing configuration for secrets encryption.", {
+      actual,
+      type: "encryptionKeyMissing",
+      suggestion: "Provide a passphrase for secret encryption."
+    }));
+    return actual;
   }
 
-  try {
-    const res = await encrypt(String(actual), this.passphrase);
-    return res;
-  } catch (error) {
-    errors.push({ actual, type: "encryptionProblem", error })
-  }
-
-  return actual
+  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+  if (ok) return res;
+  errors.push(new ValidationError("Problem encrypting secret.", {
+    actual,
+    type: "encryptionProblem",
+    error: err,
+    suggestion: "Check the passphrase and input value."
+  }));
+  return actual;
 }
 
 async function jsonHandler (actual, errors, schema) {
-  if (isString(actual)) return actual
-  return JSON.stringify(actual)
+  if (isString(actual)) return actual;
+  const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
+  if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
+  return json;
 }
 
 export class Validator extends FastestValidator {
@@ -41,6 +50,9 @@ export class Validator extends FastestValidator {
         object: {
           strict: "remove",
         },
+        number: {
+          convert: true,
+        }
       },
     }, options))
 

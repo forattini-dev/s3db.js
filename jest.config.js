@@ -1,5 +1,5 @@
 export default {
-  verbose: true,
+  verbose: false,
   testEnvironment: 'node',
   injectGlobals: true,
 
@@ -12,7 +12,8 @@ export default {
   },
 
   moduleNameMapper: {
-    '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^#src/(.*)$': '<rootDir>/src/$1',
+    '^#tests/(.*)$': '<rootDir>/tests/$1',
   },
 
   globals: {

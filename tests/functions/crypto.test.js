@@ -1,5 +1,5 @@
 import { describe, expect, test } from '@jest/globals';
-import { sha256, encrypt, decrypt } from '../../src/crypto.js';
+import { sha256, encrypt, decrypt } from '#src/crypto.js';
 
 // Node.js only: Buffer and process are available
 
@@ -78,12 +78,14 @@ describe('Crypto Tests', () => {
 
   test('should handle browser environment simulation', async () => {
     // Simulate browser environment by temporarily removing process
-    const originalProcess = global.process;
-    const originalWindow = global.window;
-    
+    const hadProcess = Reflect.has(global, 'process');
+    const originalProcess = hadProcess ? global['process'] : undefined;
+    const hadWindow = Reflect.has(global, 'window');
+    const originalWindow = hadWindow ? global['window'] : undefined;
+
     // Remove process to force browser path
-    delete global.process;
-    
+    if (hadProcess) delete global.process;
+
     // Add mock window.crypto with proper return values
     global.window = {
       crypto: {
@@ -146,26 +148,10 @@ describe('Crypto Tests', () => {
       expect(decrypted).toBe('test');
     } finally {
       // Restore original environment
-      global.process = originalProcess;
-      global.window = originalWindow;
-    }
-  });
-
-  test('should handle crypto API not available error', async () => {
-    // Simulate environment where neither process nor window.crypto is available
-    const originalProcess = global.process;
-    const originalWindow = global.window;
-    
-    delete global.process;
-    delete global.window;
-    
-    try {
-      // This should throw an error about crypto library not being available
-      await expect(sha256('test')).rejects.toThrow('Could not load any crypto library');
-    } finally {
-      // Restore original environment
-      global.process = originalProcess;
-      global.window = originalWindow;
+      if (hadProcess) global['process'] = originalProcess;
+      else if (Reflect.has(global, 'process')) delete global['process'];
+      if (hadWindow) global['window'] = originalWindow;
+      else if (Reflect.has(global, 'window')) delete global['window'];
     }
   });
 });

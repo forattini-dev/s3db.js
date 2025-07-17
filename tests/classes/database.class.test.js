@@ -14,6 +14,12 @@ describe('Database Class - Complete Journey', () => {
     await database.connect();
   });
 
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
+  });
+
   test('Database Journey: Connect → Create Resource → Insert → Query → Update → Delete', async () => {
     // 1. Create a resource
     const usersResource = await database.createResource({
@@ -220,6 +226,7 @@ describe('Database Class - Complete Journey', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('Resource not found');
+      expect(error.message).not.toContain('[object');
     }
 
     // Test creating resource with invalid attributes
@@ -233,6 +240,7 @@ describe('Database Class - Complete Journey', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain("Invalid 'invalid-type' type in validator schema.");
+      expect(error.message).not.toContain('[object');
     }
   });
 

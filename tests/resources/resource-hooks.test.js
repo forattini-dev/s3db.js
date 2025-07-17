@@ -193,6 +193,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('Hook validation failed');
+      expect(error.message).not.toContain('[object');
     }
   });
 
@@ -359,6 +360,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('Invalid email format');
+      expect(error.message).not.toContain('[object');
     }
 
     // Test invalid age
@@ -372,6 +374,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('Invalid age');
+      expect(error.message).not.toContain('[object');
     }
   });
 
@@ -436,17 +439,19 @@ describe('Resource Hooks - Real Integration Tests', () => {
     // Verify events were emitted
     expect(emittedEvents).toHaveLength(5);
     
-    expect(emittedEvents[0].event).toBe('insert');
-    expect(emittedEvents[0].data.title).toBe('Test Event');
+    // Custom events are emitted during hook execution (before main events)
+    expect(emittedEvents[0].event).toBe('customInsert');
+    expect(emittedEvents[0].data.customData.title).toBe('Test Event');
     
-    expect(emittedEvents[1].event).toBe('customInsert');
-    expect(emittedEvents[1].data.customData.title).toBe('Test Event');
+    // Main events are emitted after hook execution
+    expect(emittedEvents[1].event).toBe('insert');
+    expect(emittedEvents[1].data.title).toBe('Test Event');
     
-    expect(emittedEvents[2].event).toBe('update');
-    expect(emittedEvents[2].$after.title).toBe('Updated Test Event');
+    expect(emittedEvents[2].event).toBe('customUpdate');
+    expect(emittedEvents[2].data.customData.title).toBe('Updated Test Event');
     
-    expect(emittedEvents[3].event).toBe('customUpdate');
-    expect(emittedEvents[3].data.customData.title).toBe('Updated Test Event');
+    expect(emittedEvents[3].event).toBe('update');
+    expect(emittedEvents[3].$after.title).toBe('Updated Test Event');
     
     expect(emittedEvents[4].event).toBe('delete');
     // Verificar id no objeto emitido

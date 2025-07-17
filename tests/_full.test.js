@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 
 import Resource from '#src/resource.class.js';
 import { Schema } from '#src/schema.class.js';
@@ -11,6 +11,12 @@ describe('Full Complex Resource Test Suite', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('full');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   test('Complex Resource Schema Definition with Multiple Partitions and Nested Attributes', async () => {

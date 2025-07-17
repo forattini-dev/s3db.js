@@ -1,10 +1,10 @@
 import { join } from 'path';
 import Database from '../src/database.class.js';
 import Client from '../src/client.class.js';
-import { ReplicationPlugin } from '../src/plugins/replication.plugin.js';
+import { ReplicatorPlugin } from '../src/plugins/replicator.plugin.js';
 
 /**
- * SQS Replication Example
+ * SQS replicator Example
  * 
  * This example demonstrates how to use the SQS replicator with resource-specific queues
  * and standardized message structure.
@@ -20,10 +20,7 @@ import { ReplicationPlugin } from '../src/plugins/replication.plugin.js';
  * ```
  */
 
-const testPrefix = join('s3db', 'examples', new Date().toISOString().substring(0, 10), 'sqs-replication-' + Date.now());
-
-console.log('🚀 SQS Replication Example');
-console.log('==========================\n');
+const testPrefix = join('s3db', 'examples', new Date().toISOString().substring(0, 10), 'sqs-replicator-' + Date.now());
 
 async function main() {
   // Initialize database
@@ -37,7 +34,7 @@ async function main() {
 
   const database = new Database({
     client,
-    name: 'sqs-replication-example'
+    name: 'sqs-replicator-example'
   });
 
   await database.connect();
@@ -76,10 +73,8 @@ async function main() {
     }
   });
 
-  console.log('📦 Resources created successfully\n');
-
-  // Configure SQS Replication Plugin with resource-specific queues
-  const replicationPlugin = new ReplicationPlugin({
+  // Configure SQS replicator Plugin with resource-specific queues
+  const ReplicatorPlugin = new ReplicatorPlugin({
     enabled: true,
     syncMode: 'sync', // Process immediately for demo
     replicators: [
@@ -95,7 +90,7 @@ async function main() {
           // Fallback queue for any other resources
           defaultQueueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/default-events.fifo',
           // FIFO queue settings
-          messageGroupId: 's3db-replication',
+          messageGroupId: 's3db-replicator',
           deduplicationId: true,
           region: 'us-east-1'
         },
@@ -105,14 +100,12 @@ async function main() {
   });
 
   // Setup plugin
-  await replicationPlugin.setup(database);
-  await replicationPlugin.start();
+  await ReplicatorPlugin.setup(database);
+  await ReplicatorPlugin.start();
 
-  console.log('🔧 SQS Replication Plugin configured with resource-specific queues\n');
-
-  // Listen to replication events
-  replicationPlugin.on('replication.success', (data) => {
-    console.log('✅ Replication succeeded:', {
+  // Listen to replicator events
+  ReplicatorPlugin.on('replicator.success', (data) => {
+    console.log('✅ replicator succeeded:', {
       resource: data.item.resource,
       operation: data.item.operation,
       recordId: data.item.recordId,
@@ -120,8 +113,8 @@ async function main() {
     });
   });
 
-  replicationPlugin.on('replication.failed', (data) => {
-    console.log('❌ Replication failed:', {
+  ReplicatorPlugin.on('replicator.failed', (data) => {
+    console.log('❌ replicator failed:', {
       resource: data.item.resource,
       operation: data.item.operation,
       recordId: data.item.recordId,
@@ -129,10 +122,7 @@ async function main() {
     });
   });
 
-  console.log('📝 Demonstrating SQS Message Structure\n');
-
   // Example 1: Insert operation
-  console.log('1️⃣ INSERT Operation:');
   const user = await usersResource.insert({
     id: 'user-001',
     name: 'João Silva',
@@ -141,37 +131,14 @@ async function main() {
     status: 'active'
   });
 
-  console.log('   Message structure:');
-  console.log('   {');
-  console.log('     resource: "users",');
-  console.log('     action: "insert",');
-  console.log('     data: { _v: 0, id: "user-001", name: "João Silva", ... },');
-  console.log('     timestamp: "2024-01-01T10:00:00.000Z",');
-  console.log('     source: "s3db-replication"');
-  console.log('   }');
-  console.log('   → Sent to: https://sqs.us-east-1.amazonaws.com/123456789012/users-events.fifo\n');
-
   // Example 2: Update operation
-  console.log('2️⃣ UPDATE Operation:');
   const updatedUser = await usersResource.update('user-001', {
     name: 'João Silva Santos',
     age: 31,
     status: 'verified'
   });
 
-  console.log('   Message structure:');
-  console.log('   {');
-  console.log('     resource: "users",');
-  console.log('     action: "update",');
-  console.log('     before: { _v: 0, id: "user-001", name: "João Silva", ... },');
-  console.log('     data: { _v: 1, id: "user-001", name: "João Silva Santos", ... },');
-  console.log('     timestamp: "2024-01-01T10:05:00.000Z",');
-  console.log('     source: "s3db-replication"');
-  console.log('   }');
-  console.log('   → Sent to: https://sqs.us-east-1.amazonaws.com/123456789012/users-events.fifo\n');
-
   // Example 3: Insert order
-  console.log('3️⃣ INSERT Order:');
   const order = await ordersResource.insert({
     id: 'order-001',
     userId: 'user-001',
@@ -180,18 +147,7 @@ async function main() {
     items: ['product-001', 'product-002']
   });
 
-  console.log('   Message structure:');
-  console.log('   {');
-  console.log('     resource: "orders",');
-  console.log('     action: "insert",');
-  console.log('     data: { _v: 0, id: "order-001", userId: "user-001", ... },');
-  console.log('     timestamp: "2024-01-01T10:10:00.000Z",');
-  console.log('     source: "s3db-replication"');
-  console.log('   }');
-  console.log('   → Sent to: https://sqs.us-east-1.amazonaws.com/123456789012/orders-events.fifo\n');
-
   // Example 4: Insert product
-  console.log('4️⃣ INSERT Product:');
   const product = await productsResource.insert({
     id: 'product-001',
     name: 'Laptop Dell XPS 13',
@@ -200,57 +156,28 @@ async function main() {
     stock: 50
   });
 
-  console.log('   Message structure:');
-  console.log('   {');
-  console.log('     resource: "products",');
-  console.log('     action: "insert",');
-  console.log('     data: { _v: 0, id: "product-001", name: "Laptop Dell XPS 13", ... },');
-  console.log('     timestamp: "2024-01-01T10:15:00.000Z",');
-  console.log('     source: "s3db-replication"');
-  console.log('   }');
-  console.log('   → Sent to: https://sqs.us-east-1.amazonaws.com/123456789012/products-events.fifo\n');
-
   // Example 5: Delete operation
-  console.log('5️⃣ DELETE Operation:');
   await usersResource.delete('user-001');
 
-  console.log('   Message structure:');
-  console.log('   {');
-  console.log('     resource: "users",');
-  console.log('     action: "delete",');
-  console.log('     data: { _v: 1, id: "user-001", name: "João Silva Santos", ... },');
-  console.log('     timestamp: "2024-01-01T10:20:00.000Z",');
-  console.log('     source: "s3db-replication"');
-  console.log('   }');
-  console.log('   → Sent to: https://sqs.us-east-1.amazonaws.com/123456789012/users-events.fifo\n');
-
   // Example 6: Batch operations
-  console.log('6️⃣ BATCH Operations:');
   const batchUsers = await usersResource.insertMany([
     { id: 'user-002', name: 'Maria Santos', email: 'maria@example.com', age: 25 },
     { id: 'user-003', name: 'Pedro Costa', email: 'pedro@example.com', age: 35 }
   ]);
 
-  console.log('   Each user generates a separate message to the users queue\n');
-
   // Example 7: DeleteMany operation
-  console.log('7️⃣ DELETE MANY Operation:');
   await usersResource.deleteMany(['user-002', 'user-003']);
 
-  console.log('   Each deletion generates a separate message to the users queue\n');
-
-  // Show replication stats
-  console.log('📊 Replication Statistics:');
-  const stats = await replicationPlugin.getReplicationStats();
+  // Show replicator stats
+  const stats = await ReplicatorPlugin.getreplicatorStats();
   console.log(JSON.stringify(stats, null, 2));
 
-  // Show replication logs
-  console.log('\n📋 Recent Replication Logs:');
-  const logs = await replicationPlugin.getReplicationLogs({ limit: 5 });
+  // Show replicator logs
+  const logs = await ReplicatorPlugin.getreplicatorLogs({ limit: 5 });
   console.log(JSON.stringify(logs, null, 2));
 
   // Cleanup
-  await replicationPlugin.stop();
+  await ReplicatorPlugin.stop();
   await database.disconnect();
 
   console.log('\n✨ Example completed successfully!');
