@@ -1,4 +1,5 @@
 import { setupDatabase, teardownDatabase } from './database.js';
+import { Plugin } from '../src/plugins/plugin.class.js';
 
 // Test if timestamps fix worked
 async function testTimestampsFix() {
@@ -23,6 +24,36 @@ async function testTimestampsFix() {
       }
     });
 
+    // --- Middleware Example ---
+    const plugin = new Plugin();
+    // Middleware 1: Block insert if name is 'Blocked User'
+    plugin.addMiddleware(testResource, 'insert', async (next, data) => {
+      if (data.name === 'Blocked User') {
+        console.log('🚫 Insert blocked by middleware!');
+        return null;
+      }
+      return await next(data);
+    });
+    // Middleware 2: Log every insert attempt (runs before or after block)
+    plugin.addMiddleware(testResource, 'insert', async (next, data) => {
+      console.log('📥 Middleware log: insert called with', data);
+      return await next(data);
+    });
+    // Middleware 1: Log all updates
+    plugin.addMiddleware(testResource, 'update', async (next, id, update) => {
+      console.log('📝 Middleware log: update called for id', id, 'with', update);
+      return await next(id, update);
+    });
+    // Middleware 2: Modify update payload (append ' [MW]' to name)
+    plugin.addMiddleware(testResource, 'update', async (next, id, update) => {
+      if (update.name) {
+        update.name += ' [MW]';
+        console.log('🔧 Middleware modified update name:', update.name);
+      }
+      return await next(id, update);
+    });
+    // --- End Middleware Example ---
+
     console.log('\n📋 Resource Configuration:');
     console.log('  - Name:', testResource.name);
     console.log('  - Behavior:', testResource.behavior);
@@ -40,6 +71,11 @@ async function testTimestampsFix() {
       name: 'John Doe',
       email: 'john@example.com'
     });
+    // Try blocked insert
+    await testResource.insert({
+      name: 'Blocked User',
+      email: 'blocked@example.com'
+    });
     
     console.log('✅ Insert successful:');
     console.log('  - ID:', testData.id);
@@ -52,6 +88,7 @@ async function testTimestampsFix() {
     });
     
     console.log('✅ Update successful:');
+    console.log('  - Name:', updatedData.name);
     console.log('  - Created at:', updatedData.createdAt);
     console.log('  - Updated at:', updatedData.updatedAt);
 

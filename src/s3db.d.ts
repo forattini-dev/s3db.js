@@ -297,8 +297,8 @@ declare module 's3db.js' {
     exportToCloudWatch?: boolean;
   }
 
-  /** Replication Plugin config */
-  export interface ReplicationPluginConfig extends PluginConfig {
+  /** replicator Plugin config */
+  export interface ReplicatorPluginConfig extends PluginConfig {
     replicators?: ReplicatorConfig[];
   }
 
@@ -849,13 +849,13 @@ declare module 's3db.js' {
     getStats(): any;
   }
 
-  /** Replication Plugin */
-  export class ReplicationPlugin extends PluginBase {
-    constructor(config?: ReplicationPluginConfig);
+  /** replicator Plugin */
+  export class ReplicatorPlugin extends PluginBase {
+    constructor(config?: ReplicatorPluginConfig);
     replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
-    getReplicationStats(): any;
-    getReplicationLogs(filters?: any): Promise<any[]>;
-    retryFailedReplications(): Promise<void>;
+    getreplicatorStats(): any;
+    getreplicatorLogs(filters?: any): Promise<any[]>;
+    retryFailedreplicators(): Promise<void>;
     syncAllData(targetName: string): Promise<void>;
   }
 

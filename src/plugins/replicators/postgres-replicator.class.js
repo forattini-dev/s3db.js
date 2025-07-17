@@ -3,7 +3,7 @@
  * 
  * This replicator executes real SQL operations (INSERT, UPDATE, DELETE) on PostgreSQL tables
  * using the official pg (node-postgres) library. It maps s3db resources to database tables
- * and performs actual database operations for each replication event.
+ * and performs actual database operations for each replicator event.
  * 
  * ⚠️  REQUIRED DEPENDENCY: You must install the PostgreSQL client library to use this replicator:
  * 
@@ -58,7 +58,7 @@
  * 
  * @notes
  * - Requires AWS credentials with RDS Data Service permissions
- * - Database tables must exist before replication starts
+ * - Database tables must exist before replicator starts
  * - For UPSERT operations, the conflict column must have a unique constraint
  * - All data is automatically converted to JSON format for storage
  * - Timestamps are stored as ISO strings in the database
@@ -66,6 +66,7 @@
  * - Operations are executed within database transactions for consistency
  */
 import BaseReplicator from './base-replicator.class.js';
+import tryFn from "../../concerns/try-fn.js";
 
 /**
  * PostgreSQL Replicator
@@ -101,7 +102,7 @@ import BaseReplicator from './base-replicator.class.js';
  * new PostgresReplicator({
  *   connectionString: 'postgresql://user:password@localhost:5432/analytics',
  *   ssl: false,
- *   logTable: 's3db_replication_log'
+ *   logTable: 's3db_replicator_log'
  * }, {
  *   users: [
  *     { actions: ['insert', 'update', 'delete'], table: 'users_table' },
@@ -200,39 +201,37 @@ class PostgresReplicator extends BaseReplicator {
 
   async initialize(database) {
     await super.initialize(database);
-    try {
-      const { Client } = await import('pg');
-      const config = this.connectionString ? {
-        connectionString: this.connectionString,
-        ssl: this.ssl
-      } : {
-        host: this.host,
-        port: this.port,
-        database: this.database,
-        user: this.user,
-        password: this.password,
-        ssl: this.ssl
-      };
-      this.client = new Client(config);
-      await this.client.connect();
-      
-      // Create log table if configured
-      if (this.logTable) {
-        await this.createLogTableIfNotExists();
-      }
-      
-      this.emit('initialized', {
-        replicator: this.name,
-        database: this.database || 'postgres',
-        resources: Object.keys(this.resources)
-      });
-    } catch (error) {
+    const [ok, err, sdk] = await tryFn(() => import('pg'));
+    if (!ok) {
       this.emit('initialization_error', {
         replicator: this.name,
-        error: error.message
+        error: err.message
       });
-      throw error;
+      throw err;
     }
+    const { Client } = sdk;
+    const config = this.connectionString ? {
+      connectionString: this.connectionString,
+      ssl: this.ssl
+    } : {
+      host: this.host,
+      port: this.port,
+      database: this.database,
+      user: this.user,
+      password: this.password,
+      ssl: this.ssl
+    };
+    this.client = new Client(config);
+    await this.client.connect();
+    // Create log table if configured
+    if (this.logTable) {
+      await this.createLogTableIfNotExists();
+    }
+    this.emit('initialized', {
+      replicator: this.name,
+      database: this.database || 'postgres',
+      resources: Object.keys(this.resources)
+    });
   }
 
   async createLogTableIfNotExists() {
@@ -244,7 +243,7 @@ class PostgresReplicator extends BaseReplicator {
         record_id VARCHAR(255) NOT NULL,
         data JSONB,
         timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        source VARCHAR(100) DEFAULT 's3db-replication',
+        source VARCHAR(100) DEFAULT 's3db-replicator',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
@@ -292,10 +291,10 @@ class PostgresReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
 
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       // Replicate to all applicable tables
       for (const table of tables) {
-        try {
+        const [okTable, errTable] = await tryFn(async () => {
           let result;
           
           if (operation === 'insert') {
@@ -328,27 +327,26 @@ class PostgresReplicator extends BaseReplicator {
             rows: result.rows,
             rowCount: result.rowCount
           });
-        } catch (error) {
+        });
+        if (!okTable) {
           errors.push({
             table,
-            error: error.message
+            error: errTable.message
           });
         }
       }
-
       // Log operation if logTable is configured
       if (this.logTable) {
-        try {
+        const [okLog, errLog] = await tryFn(async () => {
           await this.client.query(
             `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [resourceName, operation, id, JSON.stringify(data), new Date().toISOString(), 's3db-replication']
+            [resourceName, operation, id, JSON.stringify(data), new Date().toISOString(), 's3db-replicator']
           );
-        } catch (error) {
+        });
+        if (!okLog) {
           // Don't fail the main operation if logging fails
-          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
         }
       }
-
       const success = errors.length === 0;
       this.emit('replicated', {
         replicator: this.name,
@@ -360,23 +358,22 @@ class PostgresReplicator extends BaseReplicator {
         errors,
         success
       });
-
       return { 
         success, 
         results, 
         errors,
         tables 
       };
-    } catch (error) {
-      this.emit('replication_error', {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
+    });
+    if (ok) return result;
+    this.emit('replicator_error', {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
 
   async replicateBatch(resourceName, records) {
@@ -384,18 +381,15 @@ class PostgresReplicator extends BaseReplicator {
     const errors = [];
     
     for (const record of records) {
-      try {
-        const res = await this.replicate(
-          resourceName, 
-          record.operation, 
-          record.data, 
-          record.id, 
-          record.beforeData
-        );
-        results.push(res);
-      } catch (err) {
-        errors.push({ id: record.id, error: err.message });
-      }
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName, 
+        record.operation, 
+        record.data, 
+        record.id, 
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
     }
     
     return { 
@@ -406,14 +400,14 @@ class PostgresReplicator extends BaseReplicator {
   }
 
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.client) await this.initialize();
       await this.client.query('SELECT 1');
       return true;
-    } catch (error) {
-      this.emit('connection_error', { replicator: this.name, error: error.message });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit('connection_error', { replicator: this.name, error: err.message });
+    return false;
   }
 
   async cleanup() {

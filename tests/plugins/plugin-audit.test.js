@@ -66,8 +66,10 @@ describe('Audit Plugin', () => {
         id: 'string|required',
         name: 'string|required',
         email: 'string|required',
-        age: 'number'
-      }
+        age: 'number',
+        description: 'string|optional'
+      },
+      behavior: 'body-overflow'
     });
     // Forçar instalação dos listeners
     if (auditPlugin && auditPlugin.installEventListenersForResource) {
@@ -80,6 +82,12 @@ describe('Audit Plugin', () => {
       if (allLogs && allLogs.length > 0) {
         await auditPlugin.auditResource.deleteMany(allLogs.map(l => l.id));
       }
+    }
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
     }
   });
 
@@ -505,8 +513,8 @@ describe('Audit Plugin', () => {
       auditPlugin.config.maxDataSize = 100;
       await testResource.insert({ id: userId, name: 'Large Data User', email: 'large@example.com', age: 30, description: largeDescription });
       await new Promise(resolve => setTimeout(resolve, 2000));
-      const auditLog = (await auditPlugin.getAuditLogs({ resourceName: 'test_users', operation: 'insert' }))
-        .find(log => log.recordId === userId && log.newData && typeof log.newData === 'string' && log.newData.includes('_truncated'));
+      const allAuditLogs = await auditPlugin.getAuditLogs({ resourceName: 'test_users', operation: 'insert' });
+      const auditLog = allAuditLogs.find(log => log.recordId === userId && log.newData && log.newData._truncated === true);
       expect(auditLog).toBeTruthy();
       expect(auditLog.newData).toBeTruthy();
       const parsedNewData = typeof auditLog.newData === 'string' ? JSON.parse(auditLog.newData) : auditLog.newData;

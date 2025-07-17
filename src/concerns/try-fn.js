@@ -78,8 +78,18 @@ export function tryFn(fnOrPromise) {
         return result
           .then(data => [true, null, data])
           .catch(error => {
-            if (error && typeof error === 'object') {
-              error.stack = new Error().stack;
+            if (
+              error instanceof Error &&
+              Object.isExtensible(error)
+            ) {
+              const desc = Object.getOwnPropertyDescriptor(error, 'stack');
+              if (
+                desc && desc.writable && desc.configurable && error.hasOwnProperty('stack')
+              ) {
+                try {
+                  error.stack = new Error().stack;
+                } catch (_) {}
+              }
             }
             return [false, error, undefined];
           });
@@ -88,8 +98,18 @@ export function tryFn(fnOrPromise) {
       return [true, null, result];
 
     } catch (error) {
-      if (error && typeof error === 'object') {
-        error.stack = new Error().stack;
+      if (
+        error instanceof Error &&
+        Object.isExtensible(error)
+      ) {
+        const desc = Object.getOwnPropertyDescriptor(error, 'stack');
+        if (
+          desc && desc.writable && desc.configurable && error.hasOwnProperty('stack')
+        ) {
+          try {
+            error.stack = new Error().stack;
+          } catch (_) {}
+        }
       }
       return [false, error, undefined];
     }
@@ -99,14 +119,33 @@ export function tryFn(fnOrPromise) {
     return Promise.resolve(fnOrPromise)
       .then(data => [true, null, data])
       .catch(error => {
-        if (error && typeof error === 'object') {
-          error.stack = new Error().stack;
+        if (
+          error instanceof Error &&
+          Object.isExtensible(error)
+        ) {
+          const desc = Object.getOwnPropertyDescriptor(error, 'stack');
+          if (
+            desc && desc.writable && desc.configurable && error.hasOwnProperty('stack')
+          ) {
+            try {
+              error.stack = new Error().stack;
+            } catch (_) {}
+          }
         }
         return [false, error, undefined];
       });
   }
 
   return [true, null, fnOrPromise];
+}
+
+export function tryFnSync(fn) {
+  try {
+    const result = fn();
+    return [true, null, result];
+  } catch (err) {
+    return [false, err, null];
+  }
 }
 
 export default tryFn;

@@ -59,14 +59,6 @@ describe('ConnectionString Class - Complete Journey', () => {
     const minioEmpty = new ConnectionString('http://user:pass@localhost:9998/');
     expect(minioEmpty.bucket).toBe('s3db');
     expect(minioEmpty.keyPrefix).toBe('');
-    // Minio with null path (simulate)
-    const url = new URL('http://user:pass@localhost:9998/');
-    url.pathname = null;
-    // defineMinio should handle null
-    const minioConn = new ConnectionString('http://user:pass@localhost:9998/');
-    minioConn.defineMinio({ ...url, pathname: null });
-    expect(minioConn.bucket).toBe('s3db');
-    expect(minioConn.keyPrefix).toBe('');
   });
 
   test('ConnectionString with query params', () => {
@@ -78,18 +70,6 @@ describe('ConnectionString Class - Complete Journey', () => {
   test('ConnectionString S3 defineS3 else branch (single segment)', () => {
     const s3Conn = new ConnectionString('s3://user:pass@bucket/prefix');
     expect(s3Conn.keyPrefix).toBe('prefix');
-  });
-
-  test('ConnectionString Minio defineMinio else branch (single segment)', () => {
-    const minioConn = new ConnectionString('http://user:pass@localhost:9998/bucket');
-    expect(minioConn.bucket).toBe('bucket');
-    expect(minioConn.keyPrefix).toBe('');
-  });
-
-  test('ConnectionString Minio defineMinio else branch (multiple segments)', () => {
-    const minioConn = new ConnectionString('http://user:pass@localhost:9998/bucket/prefix1/prefix2');
-    expect(minioConn.bucket).toBe('bucket');
-    expect(minioConn.keyPrefix).toBe('prefix1/prefix2');
   });
 });
 

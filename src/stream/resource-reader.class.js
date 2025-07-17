@@ -3,6 +3,7 @@ import { Transform } from "stream";
 import { PromisePool } from "@supercharge/promise-pool";
 
 import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js"
+import tryFn from "../concerns/try-fn.js";
 
 export class ResourceReader extends EventEmitter {
   constructor({ resource, batchSize = 10, concurrency = 5 }) {
@@ -57,7 +58,7 @@ export class ResourceReader extends EventEmitter {
   }
 
   async _transform(chunk, encoding, callback) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       await PromisePool.for(chunk)
         .withConcurrency(this.concurrency)
         .handleError(async (error, content) => {
@@ -68,11 +69,8 @@ export class ResourceReader extends EventEmitter {
           this.push(data);
           return data;
         });
-      
-      callback();
-    } catch (error) {
-      callback(error);
-    }
+    });
+    callback(err);
   }
 
   resume() {

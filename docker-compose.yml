@@ -29,11 +29,11 @@ services:
     environment:
       TZ: America/Sao_Paulo
       DEBUG: 1
-      GATEWAY_LISTEN: 0.0.0.0:4566
-      SERVICES: sqs
-      AWS_DEFAULT_REGION: us-east-1
       PERSISTENCE: 1
+      SERVICES: sqs,s3
       LOCALSTACK_HOST: localstack
+      GATEWAY_LISTEN: 0.0.0.0:4566
+      AWS_DEFAULT_REGION: us-east-1
       DOCKER_HOST: unix:///var/run/docker.sock
 
 volumes:

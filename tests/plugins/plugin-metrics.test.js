@@ -42,7 +42,9 @@ describe('Metrics Plugin', () => {
     if (plugin) {
       await plugin.stop();
     }
-    // Não existe database.disconnect
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   describe('Constructor and Configuration', () => {

@@ -6,7 +6,7 @@ import {
   transformValue,
   calculateSystemOverhead,
   calculateEffectiveLimit
-} from '../../src/concerns/calculator.js';
+} from '#src/concerns/calculator.js';
 
 describe('Calculator Tests', () => {
   

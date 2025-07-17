@@ -1,4 +1,5 @@
 import { setupDatabase, teardownDatabase } from './database.js';
+import { createReplicator } from '../src/plugins/replicators/index.js';
 "use strict";
 /* istanbul ignore file */
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
@@ -62,7 +63,26 @@ module.exports = {
             });
             this.started = true;
         });
-    }  } finally {
-    await teardownDatabase();
-  }
+    }
 };
+
+// --- Example: SQS Replicator ---
+const sqsReplicator = createReplicator('sqs', {
+  region: 'us-east-1',
+  queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+  accessKeyId: '...',
+  secretAccessKey: '...',
+  maxRetries: 3,
+  retryDelay: 1000,
+});
+// await sqsReplicator.initialize(database);
+// await sqsReplicator.replicate('users', 'insert', { id: 'u1', name: 'A' }, 'u1');
+
+// --- Example: Postgres Replicator ---
+const pgReplicator = createReplicator('postgres', {
+  connectionString: 'postgresql://user:pass@localhost:5432/mydb',
+  logTable: 'replicator_log',
+  // ...outros parâmetros específicos do Postgres
+});
+// await pgReplicator.initialize(database);
+// await pgReplicator.replicate('users', 'insert', { id: 'u1', name: 'A' }, 'u1');

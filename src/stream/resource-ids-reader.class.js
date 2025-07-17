@@ -57,7 +57,6 @@ export class ResourceIdsReader extends EventEmitter {
   }
 
   _cancel(reason) {
-    console.warn("Stream cancelled", reason);
   }
 }
 

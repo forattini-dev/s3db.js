@@ -77,7 +77,6 @@ export const S3_METADATA_LIMIT_BYTES = 2047;
  *   customValidator: (data, limits, context) => {
  *     // Custom validation logic
  *     if (data.content && data.content.length > limits.maxBodySize) {
- *       console.warn(`Content exceeds limit: ${data.content.length} > ${limits.maxBodySize}`);
  *       return false;
  *     }
  *     return true;
@@ -133,7 +132,7 @@ export const S3_METADATA_LIMIT_BYTES = 2047;
  * Enforce Limits Behavior
  * Throws error when metadata exceeds 2KB limit
  */
-export async function handleInsert({ resource, data, mappedData }) {
+export async function handleInsert({ resource, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
   
   // Calculate effective limit considering system overhead
@@ -149,10 +148,10 @@ export async function handleInsert({ resource, data, mappedData }) {
   if (totalSize > effectiveLimit) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(mappedData) };
 }
 
-export async function handleUpdate({ resource, id, data, mappedData }) {
+export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
   
   // Calculate effective limit considering system overhead
@@ -168,7 +167,7 @@ export async function handleUpdate({ resource, id, data, mappedData }) {
   if (totalSize > effectiveLimit) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(mappedData) };
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {
