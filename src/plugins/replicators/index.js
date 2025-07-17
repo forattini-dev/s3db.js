@@ -22,14 +22,14 @@ export const REPLICATOR_DRIVERS = {
  * @param {Object} config - Replicator configuration
  * @returns {BaseReplicator} Replicator instance
  */
-export function createReplicator(driver, config = {}, resources = []) {
+export function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
   
   if (!ReplicatorClass) {
     throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(', ')}`);
   }
   
-  return new ReplicatorClass(config, resources);
+  return new ReplicatorClass(config, resources, client);
 }
 
 /**
@@ -38,7 +38,7 @@ export function createReplicator(driver, config = {}, resources = []) {
  * @param {Object} config - Configuration to validate
  * @returns {Object} Validation result
  */
-export function validateReplicatorConfig(driver, config, resources = []) {
-  const replicator = createReplicator(driver, config, resources);
+export function validateReplicatorConfig(driver, config, resources = [], client = null) {
+  const replicator = createReplicator(driver, config, resources, client);
   return replicator.validateConfig();
 } 

@@ -14,6 +14,12 @@ describe('Costs Plugin', () => {
     client = database.client;
   });
 
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
+  });
+
   describe('Setup and Initialization', () => {
     test('should setup costs tracking on database', async () => {
       await CostsPlugin.setup.call(CostsPlugin, database);

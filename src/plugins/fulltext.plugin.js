@@ -1,4 +1,5 @@
 import Plugin from "./plugin.class.js";
+import tryFn from "../concerns/try-fn.js";
 
 export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
@@ -19,8 +20,7 @@ export class FullTextPlugin extends Plugin {
     if (!this.config.enabled) return;
 
     // Create index resource if it doesn't exist
-    try {
-      this.indexResource = await database.createResource({
+    const [ok, err, indexResource] = await tryFn(() => database.createResource({
         name: 'fulltext_indexes',
         attributes: {
           id: 'string|required',
@@ -31,11 +31,8 @@ export class FullTextPlugin extends Plugin {
           count: 'number|required',
           lastUpdated: 'string|required'
         }
-      });
-    } catch (error) {
-      // Resource might already exist
-      this.indexResource = database.resources.fulltext_indexes;
-    }
+      }));
+    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
 
     // Load existing indexes
     await this.loadIndexes();
@@ -55,9 +52,8 @@ export class FullTextPlugin extends Plugin {
   async loadIndexes() {
     if (!this.indexResource) return;
     
-    try {
-      const allIndexes = await this.indexResource.getAll();
-      
+    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
+    if (ok) {
       for (const indexRecord of allIndexes) {
         const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
         this.indexes.set(key, {
@@ -65,25 +61,21 @@ export class FullTextPlugin extends Plugin {
           count: indexRecord.count || 0
         });
       }
-    } catch (error) {
-      console.warn('Failed to load existing indexes:', error.message);
     }
   }
 
   async saveIndexes() {
     if (!this.indexResource) return;
     
-    try {
+    const [ok, err] = await tryFn(async () => {
       // Clear existing indexes
       const existingIndexes = await this.indexResource.getAll();
       for (const index of existingIndexes) {
         await this.indexResource.delete(index.id);
       }
-      
       // Save current indexes
       for (const [key, data] of this.indexes.entries()) {
         const [resourceName, fieldName, word] = key.split(':');
-        
         await this.indexResource.insert({
           id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           resourceName,
@@ -94,9 +86,7 @@ export class FullTextPlugin extends Plugin {
           lastUpdated: new Date().toISOString()
         });
       }
-    } catch (error) {
-      console.error('Failed to save indexes:', error);
-    }
+    });
   }
 
   installIndexingHooks() {
@@ -178,26 +168,19 @@ export class FullTextPlugin extends Plugin {
   async indexRecord(resourceName, recordId, data) {
     const indexedFields = this.getIndexedFields(resourceName);
     if (!indexedFields || indexedFields.length === 0) {
-      console.log(`No indexed fields for resource: ${resourceName}`);
       return;
     }
-
-    console.log(`Indexing resource: ${resourceName}, fields: ${indexedFields.join(', ')}`);
 
     for (const fieldName of indexedFields) {
       const fieldValue = this.getFieldValue(data, fieldName);
       if (!fieldValue) {
-        console.log(`Field ${fieldName} is empty or null`);
         continue;
       }
 
-      console.log(`Indexing field ${fieldName}: ${fieldValue}`);
       const words = this.tokenize(fieldValue);
-      console.log(`Tokenized words: ${words.join(', ')}`);
       
       for (const word of words) {
         if (word.length < this.config.minWordLength) {
-          console.log(`Skipping word "${word}" (length: ${word.length}, min: ${this.config.minWordLength})`);
           continue;
         }
         
@@ -210,7 +193,6 @@ export class FullTextPlugin extends Plugin {
         }
         
         this.indexes.set(key, existing);
-        console.log(`Added word "${word}" to index with key: ${key}`);
       }
     }
   }
@@ -345,12 +327,9 @@ export class FullTextPlugin extends Plugin {
 
   // Search and return full records
   async searchRecords(resourceName, query, options = {}) {
-    console.log(`[FULLTEXT:searchRecords] Searching for "${query}" in resource "${resourceName}"`);
     const searchResults = await this.search(resourceName, query, options);
-    console.log(`[FULLTEXT:searchRecords] Search results:`, searchResults);
     
     if (searchResults.length === 0) {
-      console.log(`[FULLTEXT:searchRecords] No search results found`);
       return [];
     }
 
@@ -360,9 +339,7 @@ export class FullTextPlugin extends Plugin {
     }
 
     const recordIds = searchResults.map(result => result.recordId);
-    console.log(`[FULLTEXT:searchRecords] Record IDs to fetch:`, recordIds);
     const records = await resource.getMany(recordIds);
-    console.log(`[FULLTEXT:searchRecords] Retrieved records:`, records);
 
     // Filter out undefined/null records (in case getMany returns missing records)
     const result = records
@@ -375,7 +352,6 @@ export class FullTextPlugin extends Plugin {
         };
       })
       .sort((a, b) => b._searchScore - a._searchScore);
-    console.log(`[FULLTEXT:searchRecords] Final results:`, result);
     return result;
   }
 
@@ -401,7 +377,9 @@ export class FullTextPlugin extends Plugin {
       const batch = allRecords.slice(i, i + batchSize);
       // Process batch sequentially to avoid overwhelming the system
       for (const record of batch) {
-        await this.indexRecord(resourceName, record.id, record);
+        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
+        if (!ok) {
+        }
       }
     }
 
@@ -468,11 +446,8 @@ export class FullTextPlugin extends Plugin {
     
     // Process resources sequentially to avoid overwhelming the system
     for (const resourceName of resourceNames) {
-      try {
-        await this.rebuildIndex(resourceName);
-      } catch (error) {
-        console.warn(`Failed to rebuild index for resource ${resourceName}:`, error.message);
-        // Continue with other resources even if one fails
+      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
+      if (!ok) {
       }
     }
   }

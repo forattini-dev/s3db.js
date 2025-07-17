@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Journey - Real Integration Tests', () => {
@@ -7,6 +7,12 @@ describe('Resource Journey - Real Integration Tests', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('resource-journey');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   test('Resource Creation and Configuration Journey', async () => {
@@ -354,6 +360,7 @@ describe('Resource Journey - Real Integration Tests', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('paranoid');
+      expect(error.message).not.toContain('[object');
     }
 
     // Test with paranoid mode disabled
@@ -372,7 +379,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     // 5. Test content validation
     await expect(
       resource.setContent({ id: 'test-id', buffer: 'not a buffer', contentType: 'text/plain' })
-    ).rejects.toThrow('Key [resource=test/data/id=test-id] does not exists');
+    ).rejects.toThrow("Resource with id 'test-id' not found");
   });
 
   test('Resource Configuration Options Journey', async () => {
@@ -606,7 +613,8 @@ describe('Resource Journey - Real Integration Tests', () => {
       await resource.get('lifecycle1');
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
-      expect(error.message).toContain('does not exists');
+      expect(error.message).toContain('No such key');
+      expect(error.message).not.toContain('[object');
     }
   });
 }); 

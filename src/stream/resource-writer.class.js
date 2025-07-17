@@ -1,6 +1,7 @@
 import EventEmitter from "events";
 import { Writable } from 'stream';
 import { PromisePool } from '@supercharge/promise-pool';
+import tryFn from "../concerns/try-fn.js";
 
 export class ResourceWriter extends EventEmitter {
   constructor({ resource, batchSize = 10, concurrency = 5 }) {
@@ -54,20 +55,26 @@ export class ResourceWriter extends EventEmitter {
     this.writing = true;
     while (this.buffer.length > 0) {
       const batch = this.buffer.splice(0, this.batchSize);
-      try {
+      const [ok, err] = await tryFn(async () => {
         await PromisePool.for(batch)
           .withConcurrency(this.concurrency)
           .handleError(async (error, content) => {
             this.emit("error", error, content);
           })
           .process(async (item) => {
-            console.log('[RESOURCE_WRITER] Inserting item:', item);
-            const result = await this.resource.insert(item);
-            console.log('[RESOURCE_WRITER] Insert result:', result);
+            const [ok, err, result] = await tryFn(async () => {
+              const res = await this.resource.insert(item);
+              return res;
+            });
+            if (!ok) {
+              this.emit('error', err, item);
+              return null;
+            }
             return result;
           });
-      } catch (error) {
-        this.emit('error', error);
+      });
+      if (!ok) {
+        this.emit('error', err);
       }
     }
     this.writing = false;

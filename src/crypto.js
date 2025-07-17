@@ -1,28 +1,35 @@
+import tryFn, { tryFnSync } from "./concerns/try-fn.js";
+import { CryptoError } from "./errors.js";
+
 async function dynamicCrypto() {
-  let lib
+  let lib;
 
   if (typeof process !== 'undefined') {
-    try {
-      const { webcrypto } = await import('crypto')
-      lib = webcrypto
-    } catch (error) {
-      throw new Error('Crypto API not available')      
+    const [ok, err, result] = await tryFn(async () => {
+      const { webcrypto } = await import('crypto');
+      return webcrypto;
+    });
+    if (ok) {
+      lib = result;
+    } else {
+      throw new CryptoError('Crypto API not available', { original: err, context: 'dynamicCrypto' });
     }
   } else if (typeof window !== 'undefined') {
     lib = window.crypto;
   }
 
-  if (!lib) throw new Error('Could not load any crypto library');
-  
-  return lib
+  if (!lib) throw new CryptoError('Could not load any crypto library', { context: 'dynamicCrypto' });
+  return lib;
 }
 
 export async function sha256(message) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError('Crypto API not available', { original: errCrypto });
 
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
-  const hashBuffer = await cryptoLib.subtle.digest('SHA-256', data);
+  const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest('SHA-256', data));
+  if (!ok) throw new CryptoError('SHA-256 digest failed', { original: err, input: message });
 
   // Convert buffer to hex string
   const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -32,17 +39,20 @@ export async function sha256(message) {
 }
 
 export async function encrypt(content, passphrase) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError('Crypto API not available', { original: errCrypto });
 
   const salt = cryptoLib.getRandomValues(new Uint8Array(16)); // Generate a random salt
-  const key = await getKeyMaterial(passphrase, salt); // Derive key with salt
+  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  if (!okKey) throw new CryptoError('Key derivation failed', { original: errKey, passphrase, salt });
 
   const iv = cryptoLib.getRandomValues(new Uint8Array(12)); // 12-byte IV for AES-GCM
 
   const encoder = new TextEncoder();
   const encodedContent = encoder.encode(content);
 
-  const encryptedContent = await cryptoLib.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, encodedContent);
+  const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, encodedContent));
+  if (!okEnc) throw new CryptoError('Encryption failed', { original: errEnc, content });
 
   const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
   encryptedData.set(salt); // Prepend salt
@@ -53,7 +63,8 @@ export async function encrypt(content, passphrase) {
 }
 
 export async function decrypt(encryptedBase64, passphrase) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError('Crypto API not available', { original: errCrypto });
 
   const encryptedData = base64ToArrayBuffer(encryptedBase64);
 
@@ -61,30 +72,33 @@ export async function decrypt(encryptedBase64, passphrase) {
   const iv = encryptedData.slice(16, 28); // Extract IV (next 12 bytes)
   const encryptedContent = encryptedData.slice(28); // Remaining is the encrypted content
 
-  const key = await getKeyMaterial(passphrase, salt); // Derive key with extracted salt
+  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  if (!okKey) throw new CryptoError('Key derivation failed (decrypt)', { original: errKey, passphrase, salt });
 
-  const decryptedContent = await cryptoLib.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, encryptedContent);
+  const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, encryptedContent));
+  if (!okDec) throw new CryptoError('Decryption failed', { original: errDec, encryptedBase64 });
 
   const decoder = new TextDecoder();
   return decoder.decode(decryptedContent);
 }
 
 async function getKeyMaterial(passphrase, salt) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError('Crypto API not available', { original: errCrypto });
 
   const encoder = new TextEncoder();
   const keyMaterial = encoder.encode(passphrase); // Convert passphrase to bytes
 
-  const baseKey = await cryptoLib.subtle.importKey(
+  const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
     'raw',
     keyMaterial,
     { name: 'PBKDF2' },
     false,
     ['deriveKey']
-  );
+  ));
+  if (!okImport) throw new CryptoError('importKey failed', { original: errImport, passphrase });
 
-  // Derive a key of 256-bit length for AES-GCM using PBKDF2
-  return await cryptoLib.subtle.deriveKey(
+  const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: salt,
@@ -95,7 +109,9 @@ async function getKeyMaterial(passphrase, salt) {
     { name: 'AES-GCM', length: 256 },
     true,
     ['encrypt', 'decrypt']
-  );
+  ));
+  if (!okDerive) throw new CryptoError('deriveKey failed', { original: errDerive, passphrase, salt });
+  return derivedKey;
 }
 
 function arrayBufferToBase64(buffer) {
@@ -104,7 +120,8 @@ function arrayBufferToBase64(buffer) {
     return Buffer.from(buffer).toString('base64');
   } else {
     // Browser version
-    const binary = String.fromCharCode.apply(null, new Uint8Array(buffer));
+    const [ok, err, binary] = tryFnSync(() => String.fromCharCode.apply(null, new Uint8Array(buffer)));
+    if (!ok) throw new CryptoError('Failed to convert ArrayBuffer to base64 (browser)', { original: err });
     return window.btoa(binary);
   }
 }
@@ -113,7 +130,8 @@ function base64ToArrayBuffer(base64) {
   if (typeof process !== 'undefined') {
     return new Uint8Array(Buffer.from(base64, 'base64'));
   } else {
-    const binaryString = window.atob(base64);
+    const [ok, err, binaryString] = tryFnSync(() => window.atob(base64));
+    if (!ok) throw new CryptoError('Failed to decode base64 (browser)', { original: err });
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {

@@ -13,8 +13,10 @@ import Database from '../src/database.class.js';
 import { isString } from 'lodash-es';
 
 
-const s3Prefix = (testName) => join('s3db', 'tests', new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4));
-const sqsName = (testName) => ['s3db', 'tests', new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4)].join('-').replace('-','_')
+export const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const s3Prefix = (testName) => join('tests', 'day=' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4));
+const sqsName = (testName) => ['tests', 'day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4)].join('-').replace(/-/g,'_')
 
 export function createClientForTest(testName, options = {}) {
   if (!options.connectionString) {
@@ -52,15 +54,35 @@ export function createSqsClientForTest(testName, options = {}) {
     return response;
   }
 
+  sqsClient.quickGet = async function quickGet(queueUrl, n = 1) {
+    const { ReceiveMessageCommand } = await import('@aws-sdk/client-sqs');
+    const response = await sqsClient.send(new ReceiveMessageCommand({
+      QueueUrl: queueUrl,
+      MaxNumberOfMessages: n,
+      WaitTimeSeconds: 2
+    }));
+    return response;
+  }
+
+  sqsClient.quickCount = async function quickCount(queueUrl) {
+    const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
+    const response = await sqsClient.send(new GetQueueAttributesCommand({
+      QueueUrl: queueUrl,
+      AttributeNames: ['ApproximateNumberOfMessages']
+    }));
+    return Number(response.Attributes.ApproximateNumberOfMessages || 0);
+  }
+
   return sqsClient;
 }
 
 export async function createSqsQueueForTest(testName, options = {}) {
   const sqsClient = createSqsClientForTest(testName, options);
-  
+
   const command = new CreateQueueCommand({
     Attributes: {
       DelaySeconds: "0",
+      ReceiveMessageWaitTimeSeconds: "0",
     },
     ...options,
     QueueName: sqsName(testName),
@@ -69,5 +91,7 @@ export async function createSqsQueueForTest(testName, options = {}) {
   const response = await sqsClient.send(command);
   const queueUrl = response.QueueUrl.replace(/https?:\/\/[^/]+/, 'http://localhost:4566');
   
-  return queueUrl
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  return queueUrl;
 }

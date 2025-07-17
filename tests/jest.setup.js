@@ -1,9 +1,11 @@
-import dotenv from 'dotenv';
+import { config } from 'dotenv';
 
-dotenv.config({ 
-  quiet: true,
-  debug: false, 
+config({ 
+  quiet: true, 
+  debug: false,
 });
+
+process.env.NODE_ENV = 'test';
 
 if (process.env.QUIET === 'true') {
   console.log = () => {};
@@ -12,5 +14,10 @@ if (process.env.QUIET === 'true') {
   console.error = () => {};
 }
 
-console.warn = () => {};
-
+// Extra safety: clear timers and log on process exit
+process.on('exit', (code) => {
+  jest.clearAllTimers();
+  if (process.env.DEBUG) {
+    console.log('[JEST] Process exiting, timers cleared. Exit code:', code);
+  }
+});

@@ -4,6 +4,7 @@ import { sha256 } from "../crypto.js";
 import Plugin from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
+import tryFn from "../concerns/try-fn.js";
 
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
@@ -116,12 +117,9 @@ export class CachePlugin extends Plugin {
           key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
         // Try cache
-        try {
-          const cached = await resource.cache.get(key);
-          if (cached !== null && cached !== undefined) return cached;
-        } catch (err) {
-          if (err.name !== 'NoSuchKey') throw err;
-        }
+        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
+        if (ok && cached !== null && cached !== undefined) return cached;
+        if (!ok && err.name !== 'NoSuchKey') throw err;
         // Not cached, call next
         const result = await next();
         await resource.cache.set(key, result);
@@ -142,10 +140,8 @@ export class CachePlugin extends Plugin {
         } else if (method === 'delete') {
           let data = { id: ctx.args[0] };
           if (typeof resource.get === 'function') {
-            try {
-              const full = await resource.get(ctx.args[0]);
-              if (full) data = full;
-            } catch {}
+            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
+            if (ok && full) data = full;
           }
           await this.clearCacheForResource(resource, data);
         } else if (method === 'deleteMany') {

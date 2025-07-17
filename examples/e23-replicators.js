@@ -1,5 +1,5 @@
 import { S3db } from '../src/database.class.js';
-import { ReplicationPlugin } from '../src/plugins/replication.plugin.js';
+import { ReplicatorPlugin } from '../src/plugins/replicator.plugin.js';
 
 /**
  * Example: Using the new Replicator System
@@ -10,13 +10,13 @@ import { ReplicationPlugin } from '../src/plugins/replication.plugin.js';
  * ⚠️  REQUIRED DEPENDENCIES: Before running this example, install the required dependencies:
  * 
  * ```bash
- * # For SQS replication
+ * # For SQS replicator
  * npm install @aws-sdk/client-sqs
  * 
- * # For BigQuery replication  
+ * # For BigQuery replicator  
  * npm install @google-cloud/bigquery
  * 
- * # For PostgreSQL replication
+ * # For PostgreSQL replicator
  * npm install pg
  * 
  * # Or install all at once
@@ -25,12 +25,10 @@ import { ReplicationPlugin } from '../src/plugins/replication.plugin.js';
  */
 
 async function main() {
-  console.log('🚀 Starting Replicator System Example\n');
-
-  // Create database with replication plugin
+  // Create database with replicator plugin
   const s3db = new S3db({
     connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/replicator-demo",
-    plugins: [new ReplicationPlugin({
+    plugins: [new ReplicatorPlugin({
       enabled: true,
       replicators: [
         // S3DB Replicator - Replicate to another s3db instance
@@ -50,7 +48,7 @@ async function main() {
           config: {
             queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/s3db-events',
             region: 'us-east-1',
-            messageGroupId: 's3db-replication',
+            messageGroupId: 's3db-replicator',
             deduplicationId: true // Enable deduplication
           }
         },
@@ -62,7 +60,7 @@ async function main() {
             projectId: 'my-analytics-project',
             datasetId: 's3db_data',
             location: 'US',
-            logTable: 'replication_log',
+            logTable: 'replicator_log',
             credentials: {
               // Your Google Cloud credentials
               client_email: 'service-account@project.iam.gserviceaccount.com',
@@ -87,7 +85,7 @@ async function main() {
           config: {
             connectionString: 'postgresql://user:password@localhost:5432/analytics',
             ssl: false,
-            logTable: 's3db_replication_log'
+            logTable: 's3db_replicator_log'
           },
           resources: {
             users: [
@@ -101,14 +99,13 @@ async function main() {
           }
         }
       ],
-      syncMode: 'async', // Process replications asynchronously
+      syncMode: 'async', // Process replicators asynchronously
       retryAttempts: 3,
       retryDelay: 1000
     })]
   });
 
   await s3db.connect();
-  console.log('✅ Connected to S3DB with replication plugin\n');
 
   // Create resources
   const users = await s3db.createResource({
@@ -142,34 +139,27 @@ async function main() {
     }
   });
 
-  console.log('✅ Created resources: users, products, orders\n');
-
-  // Listen to replication events
-  const replicationPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicationPlugin');
+  // Listen to replicator events
+  const ReplicatorPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
   
-  replicationPlugin.on('replication.queued', (data) => {
-    console.log(`📤 Replication queued: ${data.item.resourceName} ${data.item.operation}`);
+  ReplicatorPlugin.on('replicator.queued', (data) => {
   });
 
-  replicationPlugin.on('replication.success', (data) => {
-    console.log(`✅ Replication succeeded: ${data.item.resourceName} ${data.item.operation} (${data.attempts} attempts)`);
+  ReplicatorPlugin.on('replicator.success', (data) => {
   });
 
-  replicationPlugin.on('replication.failed', (data) => {
-    console.log(`❌ Replication failed: ${data.item.resourceName} ${data.item.operation} - ${data.lastError}`);
+  ReplicatorPlugin.on('replicator.failed', (data) => {
   });
 
   // Listen to replicator-specific events
-  replicationPlugin.on('replicator.initialized', (data) => {
-    console.log(`🔧 Replicator initialized: ${data.driver}`);
+  ReplicatorPlugin.on('replicator.initialized', (data) => {
   });
 
-  replicationPlugin.on('replicator.validation.failed', (data) => {
-    console.log(`⚠️  Replicator validation failed: ${data.driver} - ${data.errors.join(', ')}`);
+  ReplicatorPlugin.on('replicator.validation.failed', (data) => {
   });
 
-  // Insert data - this will trigger replication to applicable targets
-  console.log('📝 Inserting test data...\n');
+  // Insert data - this will trigger replicator to applicable targets
+  // Insert data - this will trigger replicator to applicable targets
 
   const user1 = await users.insert({
     id: 'user-1',
@@ -177,7 +167,6 @@ async function main() {
     email: 'john@example.com',
     createdAt: new Date().toISOString()
   });
-  console.log('👤 Created user:', user1.id);
 
   const product1 = await products.insert({
     id: 'prod-1',
@@ -185,7 +174,6 @@ async function main() {
     price: 999.99,
     category: 'Electronics'
   });
-  console.log('💻 Created product:', product1.id);
 
   const order1 = await orders.insert({
     id: 'order-1',
@@ -194,50 +182,34 @@ async function main() {
     quantity: 1,
     total: 999.99
   });
-  console.log('🛒 Created order:', order1.id);
 
-  // Wait a bit for async replications to process
-  console.log('\n⏳ Waiting for replications to process...');
+  // Wait a bit for async replicators to process
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Get replication statistics
-  const stats = await replicationPlugin.getReplicationStats();
-  console.log('\n📊 Replication Statistics:');
-  console.log(JSON.stringify(stats, null, 2));
+  // Get replicator statistics
+  const stats = await ReplicatorPlugin.getreplicatorStats();
 
-  // Get replication logs
-  const logs = await replicationPlugin.getReplicationLogs({
+  // Get replicator logs
+  const logs = await ReplicatorPlugin.getreplicatorLogs({
     limit: 10
-  });
-  console.log('\n📋 Recent Replication Logs:');
-  logs.forEach(log => {
-    console.log(`- ${log.resourceName} ${log.operation} (${log.status}): ${log.recordId}`);
   });
 
   // Test connection to replicators
-  console.log('\n🔍 Testing replicator connections...');
-  for (const replicator of replicationPlugin.replicators) {
+  for (const replicator of ReplicatorPlugin.replicators) {
     try {
       const isConnected = await replicator.instance.testConnection();
-      console.log(`- ${replicator.driver}: ${isConnected ? '✅ Connected' : '❌ Failed'}`);
     } catch (error) {
-      console.log(`- ${replicator.driver}: ❌ Error - ${error.message}`);
     }
   }
 
   // Example: Sync all data to a specific replicator
-  console.log('\n🔄 Syncing all data to S3DB replicator...');
-  const s3dbReplicator = replicationPlugin.replicators.find(r => r.driver === 's3db');
+  const s3dbReplicator = ReplicatorPlugin.replicators.find(r => r.driver === 's3db');
   if (s3dbReplicator) {
-    await replicationPlugin.syncAllData(s3dbReplicator.id);
-    console.log('✅ Full sync completed');
+    await ReplicatorPlugin.syncAllData(s3dbReplicator.id);
   }
-
-  console.log('\n🎉 Replicator System Example Completed!');
 }
 
 // Error handling
 main().catch(error => {
-  console.error('❌ Error:', error);
   process.exit(1);
 }); 

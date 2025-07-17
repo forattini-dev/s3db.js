@@ -1,109 +1,147 @@
 /**
  * S3DB Replicator Configuration Documentation
  * 
- * This replicator copies data to another s3db instance, creating a complete replica
- * of the source database. It maintains the same structure, partitions, and metadata
- * in the target database.
+ * This replicator supports highly flexible resource mapping and transformer configuration. You can specify the resources to replicate using any of the following syntaxes:
+ *
+ * 1. Array of resource names (replicate resource to itself):
+ *    resources: ['users']
+ *    // Replicates 'users' to 'users' in the destination
+ *
+ * 2. Map: source resource → destination resource name:
+ *    resources: { users: 'people' }
+ *    // Replicates 'users' to 'people' in the destination
+ *
+ * 3. Map: source resource → array of destination resource names and/or transformers:
+ *    resources: { users: ['people', (el) => ({ ...el, fullName: el.name })] }
+ *    // Replicates 'users' to 'people' and also applies the transformer
+ *
+ * 4. Map: source resource → object with resource and transformer:
+ *    resources: { users: { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) } }
+ *    // Replicates 'users' to 'people' with a custom transformer
+ *
+ * 5. Map: source resource → array of objects with resource and transformer (multi-destination):
+ *    resources: { users: [ { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) } ] }
+ *    // Replicates 'users' to multiple destinations, each with its own transformer
+ *
+ * 6. Map: source resource → function (rare, but supported):
+ *    resources: { users: (el) => ... }
+ *    // Replicates 'users' to 'users' with a custom transformer
  * 
- * @typedef {Object} S3DBReplicatorConfig
- * @property {string} connectionString - The connection string for the target s3db instance
- *   Format: 's3://bucket-name/prefix?region=us-east-1&accessKeyId=xxx&secretAccessKey=xxx'
- * @property {string} [region] - AWS region for the target S3 bucket (if not in connection string)
- * @property {string} [accessKeyId] - AWS access key ID (if not in connection string)
- * @property {string} [secretAccessKey] - AWS secret access key (if not in connection string)
- * @property {string} [sessionToken] - AWS session token for temporary credentials
- * @property {boolean} [createResources=true] - Whether to automatically create resources in target if they don't exist
- * @property {boolean} [overwriteExisting=false] - Whether to overwrite existing data in target database
- * @property {boolean} [preservePartitions=true] - Whether to maintain the same partition structure in target
- * @property {boolean} [syncMetadata=true] - Whether to replicate metadata (schemas, behaviors, etc.)
- * @property {number} [batchSize=100] - Number of records to process in each batch during replication
- * @property {number} [maxConcurrency=5] - Maximum number of concurrent replication operations
- * @property {boolean} [logProgress=false] - Whether to log replication progress to console
- * @property {string} [targetPrefix] - Custom prefix for the target database (if different from source)
- * @property {Object.<string, string>} [resourceMapping] - Maps source resource names to target resource names
- *   - Key: source resource name (e.g., 'users')
- *   - Value: target resource name (e.g., 'backup_users')
- *   - If not provided, same names are used in target
- * @property {boolean} [validateData=true] - Whether to validate data integrity after replication
- * @property {number} [retryAttempts=3] - Number of retry attempts for failed replication operations
- * @property {number} [retryDelay=1000] - Delay in milliseconds between retry attempts
- * 
- * @example
- * // Basic configuration with custom target
- * {
- *   connectionString: 's3://my-backup-bucket/replica?region=us-west-2',
- *   accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
- *   secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
- *   createResources: true,
- *   preservePartitions: true,
- *   logProgress: true,
- *   batchSize: 50
- * }
- * 
- * @example
- * // Configuration with resource mapping and validation
- * {
- *   connectionString: 's3://analytics-bucket/data?region=eu-west-1',
- *   resourceMapping: {
- *     'users': 'analytics_users',
- *     'orders': 'processed_orders',
- *     'products': 'catalog_products'
- *   },
- *   validateData: true,
- *   overwriteExisting: false,
- *   maxConcurrency: 3
- * }
- * 
- * @example
- * // Minimal configuration using connection string with credentials
- * {
- *   connectionString: 's3://backup-bucket/replica?region=us-east-1&accessKeyId=xxx&secretAccessKey=xxx'
- * }
- * 
- * @notes
- * - Target s3db instance must have appropriate permissions to write to the specified bucket
- * - If createResources is false, target resources must exist before replication
- * - Resource mapping allows for flexible data organization in target database
- * - Partition preservation maintains data distribution and query performance
- * - Metadata sync ensures target database has same schemas and behaviors
- * - Batch processing optimizes performance for large datasets
- * - Data validation compares record counts and checksums between source and target
- * - Retry mechanism handles temporary network or permission issues
- * - Concurrent operations improve replication speed but may impact target performance
+ * All forms can be mixed and matched for different resources. The transformer is always available (default: identity function).
+ *
+ * Example:
+ *   resources: {
+ *     users: [
+ *       'people',
+ *       { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) },
+ *       (el) => ({ ...el, fullName: el.name })
+ *     ],
+ *     orders: 'orders_copy',
+ *     products: { resource: 'products_copy' }
+ *   }
+ *
+ * The replicator always uses the provided client as the destination.
+ *
+ * See tests/examples for all supported syntaxes.
  */
 import BaseReplicator from './base-replicator.class.js';
 import { S3db } from '../../database.class.js';
+import tryFn from "../../concerns/try-fn.js";
+
+function normalizeResourceName(name) {
+  return typeof name === 'string' ? name.trim().toLowerCase() : name;
+}
 
 /**
  * S3DB Replicator - Replicates data to another s3db instance
  */
 class S3dbReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
+  constructor(config = {}, resources = [], client = null) {
     super(config);
-    this.resources = resources;
-    this.connectionString = config.connectionString;
-    this.region = config.region;
-    this.bucket = config.bucket;
-    this.keyPrefix = config.keyPrefix;
+    this.instanceId = Math.random().toString(36).slice(2, 10);
+    this.client = client;
+    // Robustness: ensure object
+    let normalizedResources = resources;
+    if (!resources) normalizedResources = {};
+    else if (Array.isArray(resources)) {
+      normalizedResources = {};
+      for (const res of resources) {
+        if (typeof res === 'string') normalizedResources[normalizeResourceName(res)] = res;
+      }
+    } else if (typeof resources === 'string') {
+      normalizedResources[normalizeResourceName(resources)] = resources;
+    }
+    this.resourcesMap = this._normalizeResources(normalizedResources);
+  }
+
+  _normalizeResources(resources) {
+    // Suporta array, objeto, função, string
+    if (!resources) return {};
+    if (Array.isArray(resources)) {
+      const map = {};
+      for (const res of resources) {
+        if (typeof res === 'string') map[normalizeResourceName(res)] = res;
+        else if (Array.isArray(res) && typeof res[0] === 'string') map[normalizeResourceName(res[0])] = res;
+        else if (typeof res === 'object' && res.resource) {
+          // Array of objects with resource/action/transformer
+          map[normalizeResourceName(res.resource)] = { ...res };
+        }
+        // Do NOT set actions: ['insert'] or any default actions here
+      }
+      return map;
+    }
+    if (typeof resources === 'object') {
+      const map = {};
+      for (const [src, dest] of Object.entries(resources)) {
+        const normSrc = normalizeResourceName(src);
+        if (typeof dest === 'string') map[normSrc] = dest;
+        else if (Array.isArray(dest)) {
+          // Array of destinations/objects/transformers
+          map[normSrc] = dest.map(item => {
+            if (typeof item === 'string') return item;
+            if (typeof item === 'function') return item;
+            if (typeof item === 'object' && item.resource) {
+              // Copy all fields (resource, transformer, actions, etc.)
+              return { ...item };
+            }
+            return item;
+          });
+        } else if (typeof dest === 'function') map[normSrc] = dest;
+        else if (typeof dest === 'object' && dest.resource) {
+          // Copy all fields (resource, transformer, actions, etc.)
+          map[normSrc] = { ...dest };
+        }
+      }
+      return map;
+    }
+    if (typeof resources === 'function') {
+      return resources;
+    }
+    if (typeof resources === 'string') {
+      const map = { [normalizeResourceName(resources)]: resources };
+      return map;
+    }
+    return {};
   }
 
   validateConfig() {
     const errors = [];
-    
-    if (!this.connectionString && !this.bucket) {
-      errors.push('Either connectionString or bucket must be provided');
+    // Accept both arrays and objects for resources
+    if (!this.client && !this.connectionString) {
+      errors.push('You must provide a client or a connectionString');
     }
-    
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
+    if (!this.resources || (Array.isArray(this.resources) && this.resources.length === 0) || (typeof this.resources === 'object' && Object.keys(this.resources).length === 0)) {
+      errors.push('You must provide a resources map or array');
+    }
+    return { isValid: errors.length === 0, errors };
   }
 
   async initialize(database) {
+    try {
     await super.initialize(database);
-    
-    // Create target database connection
+      if (this.client) {
+        this.targetDatabase = this.client;
+      } else if (this.connectionString) {
     const targetConfig = {
       connectionString: this.connectionString,
       region: this.region,
@@ -111,58 +149,92 @@ class S3dbReplicator extends BaseReplicator {
       keyPrefix: this.keyPrefix,
       verbose: this.config.verbose || false
     };
-
     this.targetDatabase = new S3db(targetConfig);
     await this.targetDatabase.connect();
-    
+      } else {
+        throw new Error('S3dbReplicator: No client or connectionString provided');
+      }
     this.emit('connected', { 
       replicator: this.name, 
       target: this.connectionString || this.bucket 
     });
+    } catch (err) {
+      throw err;
+    }
   }
 
-  async replicate(resourceName, operation, data, id) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: 'resource_not_included' };
+  // Change signature to accept id
+  async replicate({ resource, operation, data, id: explicitId }) {
+    const normResource = normalizeResourceName(resource);
+    const destResource = this._resolveDestResource(normResource, data);
+    const destResourceObj = this._getDestResourceObj(destResource);
+    
+    // Apply transformer before replicating
+    const transformedData = this._applyTransformer(normResource, data);
+    
+    let result;
+    if (operation === 'insert') {
+      result = await destResourceObj.insert(transformedData);
+    } else if (operation === 'update') {
+      result = await destResourceObj.update(explicitId, transformedData);
+    } else if (operation === 'delete') {
+      result = await destResourceObj.delete(explicitId);
+    }
+    
+    return result;
+  }
+
+  _applyTransformer(resource, data) {
+    const normResource = normalizeResourceName(resource);
+    const entry = this.resourcesMap[normResource];
+    let result;
+    if (!entry) return data;
+    // Array: [resource, transformer]
+    if (Array.isArray(entry) && typeof entry[1] === 'function') {
+      result = entry[1](data);
+    } else if (typeof entry === 'function') {
+      result = entry(data);
+    } else if (typeof entry === 'object') {
+      if (typeof entry.transform === 'function') result = entry.transform(data);
+      else if (typeof entry.transformer === 'function') result = entry.transformer(data);
+    } else {
+      result = data;
+    }
+    // Garante que id sempre está presente
+    if (result && data && data.id && !result.id) result.id = data.id;
+    // Fallback: if transformer returns undefined/null, use original data
+    if (!result && data) result = data;
+    return result;
+  }
+
+  _resolveDestResource(resource, data) {
+    const normResource = normalizeResourceName(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return resource;
+    // Array: [resource, transformer]
+    if (Array.isArray(entry)) {
+      if (typeof entry[0] === 'string') return entry[0];
+      if (typeof entry[0] === 'object' && entry[0].resource) return entry[0].resource;
+      if (typeof entry[0] === 'function') return resource; // fallback
+    }
+    // String mapping
+    if (typeof entry === 'string') return entry;
+    // Função mapping
+    if (typeof entry === 'function') return resource;
+    // Objeto: { resource, transform }
+    if (typeof entry === 'object' && entry.resource) return entry.resource;
+    return resource;
     }
 
-    try {
-      let result;
-      
-      switch (operation) {
-        case 'insert':
-          result = await this.targetDatabase.resources[resourceName]?.insert(data);
-          break;
-        case 'update':
-          result = await this.targetDatabase.resources[resourceName]?.update(id, data);
-          break;
-        case 'delete':
-          result = await this.targetDatabase.resources[resourceName]?.delete(id);
-          break;
-        default:
-          throw new Error(`Unsupported operation: ${operation}`);
-      }
-
-      this.emit('replicated', {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        success: true
-      });
-
-      return { success: true, result };
-    } catch (error) {
-      this.emit('replication_error', {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-
-      return { success: false, error: error.message };
+  _getDestResourceObj(resource) {
+    if (!this.client || !this.client.resources) return null;
+    const available = Object.keys(this.client.resources);
+    const norm = normalizeResourceName(resource);
+    const found = available.find(r => normalizeResourceName(r) === norm);
+    if (!found) {
+      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(', ')}`);
     }
+    return this.client.resources[found];
   }
 
   async replicateBatch(resourceName, records) {
@@ -170,65 +242,52 @@ class S3dbReplicator extends BaseReplicator {
       return { skipped: true, reason: 'resource_not_included' };
     }
 
-    try {
-      const results = [];
-      const errors = [];
+    const results = [];
+    const errors = [];
 
-      for (const record of records) {
-        try {
-          const result = await this.replicate(
-            resourceName, 
-            record.operation, 
-            record.data, 
-            record.id
-          );
-          results.push(result);
-        } catch (error) {
-          errors.push({ id: record.id, error: error.message });
-        }
-      }
-
-      this.emit('batch_replicated', {
-        replicator: this.name,
-        resourceName,
-        total: records.length,
-        successful: results.filter(r => r.success).length,
-        errors: errors.length
-      });
-
-      return { 
-        success: errors.length === 0,
-        results,
-        errors,
-        total: records.length
-      };
-    } catch (error) {
-      this.emit('batch_replication_error', {
-        replicator: this.name,
-        resourceName,
-        error: error.message
-      });
-
-      return { success: false, error: error.message };
+    for (const record of records) {
+      const [ok, err, result] = await tryFn(() => this.replicate(
+        resourceName, 
+        record.operation, 
+        record.id, 
+        record.data, 
+        record.beforeData
+      ));
+      if (ok) results.push(result);
+      else errors.push({ id: record.id, error: err.message });
     }
+
+    this.emit('batch_replicated', {
+      replicator: this.name,
+      resourceName,
+      total: records.length,
+      successful: results.filter(r => r.success).length,
+      errors: errors.length
+    });
+
+    return { 
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
   }
 
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.targetDatabase) {
         await this.initialize(this.database);
       }
-      
       // Try to list resources to test connection
       await this.targetDatabase.listResources();
       return true;
-    } catch (error) {
-      this.emit('connection_error', {
-        replicator: this.name,
-        error: error.message
-      });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit('connection_error', {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
   }
 
   async getStatus() {
@@ -238,8 +297,8 @@ class S3dbReplicator extends BaseReplicator {
       connected: !!this.targetDatabase,
       targetDatabase: this.connectionString || this.bucket,
       resources: this.resources,
-      totalReplications: this.listenerCount('replicated'),
-      totalErrors: this.listenerCount('replication_error')
+      totalreplicators: this.listenerCount('replicated'),
+      totalErrors: this.listenerCount('replicator_error')
     };
   }
 
@@ -251,8 +310,36 @@ class S3dbReplicator extends BaseReplicator {
     await super.cleanup();
   }
 
-  shouldReplicateResource(resourceName) {
-    return this.resources.length === 0 || this.resources.includes(resourceName);
+  shouldReplicateResource(resource, action) {
+    const normResource = normalizeResourceName(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return false;
+    // Suporte a todos os estilos de configuração
+    // Se for array de objetos, checar actions
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (typeof item === 'object' && item.resource) {
+          if (item.actions && Array.isArray(item.actions)) {
+            if (item.actions.includes(action)) return true;
+          } else {
+            return true; // Se não há actions, aceita todas
+          }
+        } else if (typeof item === 'string' || typeof item === 'function') {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (typeof entry === 'object' && entry.resource) {
+      if (entry.actions && Array.isArray(entry.actions)) {
+        return entry.actions.includes(action);
+      }
+      return true;
+    }
+    if (typeof entry === 'string' || typeof entry === 'function') {
+      return true;
+    }
+    return false;
   }
 }
 

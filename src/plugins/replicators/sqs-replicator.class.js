@@ -1,7 +1,7 @@
 /**
  * SQS Replicator Configuration Documentation
  * 
- * This replicator sends replication events to Amazon SQS queues. It supports both
+ * This replicator sends replicator events to Amazon SQS queues. It supports both
  * resource-specific queues and a single queue for all events, with a flexible message
  * structure that includes operation details and data.
  * 
@@ -53,7 +53,7 @@
  *   logMessages: true,
  *   messageAttributes: {
  *     'environment': 'production',
- *     'source': 's3db-replication'
+ *     'source': 's3db-replicator'
  *   }
  * }
  * 
@@ -97,6 +97,7 @@
  * - SQS client options allow for custom endpoint, credentials, etc.
  */
 import BaseReplicator from './base-replicator.class.js';
+import tryFn from "../../concerns/try-fn.js";
 
 /**
  * SQS Replicator - Sends data to AWS SQS queues with support for resource-specific queues
@@ -125,55 +126,70 @@ import BaseReplicator from './base-replicator.class.js';
  * }
  */
 class SqsReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
+  constructor(config = {}, resources = [], client = null) {
     super(config);
     this.resources = resources;
-    
-    // Support both single queue and resource-specific queues
-    this.queueUrl = config.queueUrl; // Legacy single queue
-    this.queues = config.queues || {}; // Resource-specific queues
-    this.defaultQueueUrl = config.defaultQueueUrl; // Fallback queue
-    
+    this.client = client;
+    this.queueUrl = config.queueUrl;
+    this.queues = config.queues || {};
+    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
     this.region = config.region || 'us-east-1';
-    this.sqsClient = null;
+    this.sqsClient = client || null;
     this.messageGroupId = config.messageGroupId;
     this.deduplicationId = config.deduplicationId;
+    
+    // Build queues from resources configuration
+    if (resources && typeof resources === 'object') {
+      for (const [resourceName, resourceConfig] of Object.entries(resources)) {
+        if (resourceConfig.queueUrl) {
+          this.queues[resourceName] = resourceConfig.queueUrl;
+        }
+      }
+    }
   }
 
   validateConfig() {
     const errors = [];
-    
-    // Must have either queueUrl, queues, or defaultQueueUrl
-    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueueUrl) {
-      errors.push('Either queueUrl, queues object, or defaultQueueUrl must be provided');
+    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueue && !this.resourceQueueMap) {
+      errors.push('Either queueUrl, queues object, defaultQueue, or resourceQueueMap must be provided');
     }
-    
     return {
       isValid: errors.length === 0,
       errors
     };
   }
 
-  /**
-   * Get the appropriate queue URL for a resource
-   */
-  getQueueUrlForResource(resource) {
-    // First check resource-specific queue
+  getQueueUrlsForResource(resource) {
+    // Prefer resourceQueueMap if present
+    if (this.resourceQueueMap && this.resourceQueueMap[resource]) {
+      return this.resourceQueueMap[resource];
+    }
     if (this.queues[resource]) {
-      return this.queues[resource];
+      return [this.queues[resource]];
     }
-    
-    // Then check legacy single queue
     if (this.queueUrl) {
-      return this.queueUrl;
+      return [this.queueUrl];
     }
-    
-    // Finally check default queue
-    if (this.defaultQueueUrl) {
-      return this.defaultQueueUrl;
+    if (this.defaultQueue) {
+      return [this.defaultQueue];
     }
-    
     throw new Error(`No queue URL found for resource '${resource}'`);
+  }
+
+  _applyTransformer(resource, data) {
+    const entry = this.resources[resource];
+    let result = data;
+    
+    if (!entry) return data;
+    
+    // Check for transform function in resource config
+    if (typeof entry.transform === 'function') {
+      result = entry.transform(data);
+    } else if (typeof entry.transformer === 'function') {
+      result = entry.transformer(data);
+    }
+    
+    return result || data;
   }
 
   /**
@@ -184,7 +200,7 @@ class SqsReplicator extends BaseReplicator {
       resource: resource, // padronizado para 'resource'
       action: operation,
       timestamp: new Date().toISOString(),
-      source: 's3db-replication'
+      source: 's3db-replicator'
     };
 
     switch (operation) {
@@ -212,30 +228,28 @@ class SqsReplicator extends BaseReplicator {
     }
   }
 
-  async initialize(database) {
+  async initialize(database, client) {
     await super.initialize(database);
-    
-    // Initialize SQS client
-    try {
-      const { SQSClient, SendMessageCommand, SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
-      
-      this.sqsClient = new SQSClient({
+    if (!this.sqsClient) {
+      const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+      if (!ok) {
+        this.emit('initialization_error', {
+          replicator: this.name,
+          error: err.message
+        });
+        throw err;
+      }
+      const { SQSClient } = sdk;
+      this.sqsClient = client || new SQSClient({
         region: this.region,
         credentials: this.config.credentials
       });
-      
       this.emit('initialized', { 
         replicator: this.name, 
         queueUrl: this.queueUrl,
         queues: this.queues,
-        defaultQueueUrl: this.defaultQueueUrl
+        defaultQueue: this.defaultQueue
       });
-    } catch (error) {
-      this.emit('initialization_error', {
-        replicator: this.name,
-        error: error.message
-      });
-      throw error;
     }
   }
 
@@ -243,70 +257,62 @@ class SqsReplicator extends BaseReplicator {
     if (!this.enabled || !this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
-
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
-      
-      const queueUrl = this.getQueueUrlForResource(resource);
-      const message = this.createMessage(resource, operation, data, id, beforeData);
-
-      const command = new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify(message),
-        MessageGroupId: this.messageGroupId,
-        MessageDeduplicationId: this.deduplicationId ? 
-          `${resource}:${operation}:${id}` : undefined
-      });
-
-      const result = await this.sqsClient.send(command);
-
-      this.emit('replicated', {
-        replicator: this.name,
-        resource,
-        operation,
-        id,
-        queueUrl,
-        messageId: result.MessageId,
-        success: true
-      });
-
-      return { success: true, messageId: result.MessageId, queueUrl };
-    } catch (error) {
-      this.emit('replication_error', {
-        replicator: this.name,
-        resource,
-        operation,
-        id,
-        error: error.message
-      });
-
-      return { success: false, error: error.message };
-    }
+      const queueUrls = this.getQueueUrlsForResource(resource);
+      // Apply transformation before creating message
+      const transformedData = this._applyTransformer(resource, data);
+      const message = this.createMessage(resource, operation, transformedData, id, beforeData);
+      const results = [];
+      for (const queueUrl of queueUrls) {
+        const command = new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify(message),
+          MessageGroupId: this.messageGroupId,
+          MessageDeduplicationId: this.deduplicationId ? `${resource}:${operation}:${id}` : undefined
+        });
+        const result = await this.sqsClient.send(command);
+        results.push({ queueUrl, messageId: result.MessageId });
+        this.emit('replicated', {
+          replicator: this.name,
+          resource,
+          operation,
+          id,
+          queueUrl,
+          messageId: result.MessageId,
+          success: true
+        });
+      }
+      return { success: true, results };
+    });
+    if (ok) return result;
+    this.emit('replicator_error', {
+      replicator: this.name,
+      resource,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
 
   async replicateBatch(resource, records) {
     if (!this.enabled || !this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
-
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
-      
-      const queueUrl = this.getQueueUrlForResource(resource);
-      
+      const queueUrls = this.getQueueUrlsForResource(resource);
       // SQS batch limit is 10 messages
       const batchSize = 10;
       const batches = [];
-      
       for (let i = 0; i < records.length; i += batchSize) {
         batches.push(records.slice(i, i + batchSize));
       }
-
       const results = [];
       const errors = [];
-
       for (const batch of batches) {
-        try {
+        const [okBatch, errBatch] = await tryFn(async () => {
           const entries = batch.map((record, index) => ({
             Id: `${record.id}-${index}`,
             MessageBody: JSON.stringify(this.createMessage(
@@ -320,68 +326,60 @@ class SqsReplicator extends BaseReplicator {
             MessageDeduplicationId: this.deduplicationId ? 
               `${resource}:${record.operation}:${record.id}` : undefined
           }));
-
           const command = new SendMessageBatchCommand({
-            QueueUrl: queueUrl,
+            QueueUrl: queueUrls[0], // Assuming all queueUrls in a batch are the same for batching
             Entries: entries
           });
-
           const result = await this.sqsClient.send(command);
           results.push(result);
-        } catch (error) {
-          errors.push({ batch: batch.length, error: error.message });
-        }
+        });
+        if (!okBatch) errors.push({ batch: batch.length, error: errBatch.message });
       }
-
       this.emit('batch_replicated', {
         replicator: this.name,
         resource,
-        queueUrl,
+        queueUrl: queueUrls[0], // Assuming all queueUrls in a batch are the same for batching
         total: records.length,
         successful: results.length,
         errors: errors.length
       });
-
       return { 
         success: errors.length === 0,
         results,
         errors,
         total: records.length,
-        queueUrl
+        queueUrl: queueUrls[0] // Assuming all queueUrls in a batch are the same for batching
       };
-    } catch (error) {
-      this.emit('batch_replication_error', {
-        replicator: this.name,
-        resource,
-        error: error.message
-      });
-
-      return { success: false, error: error.message };
-    }
+    });
+    if (ok) return result;
+    this.emit('batch_replicator_error', {
+      replicator: this.name,
+      resource,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
 
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.sqsClient) {
         await this.initialize(this.database);
       }
-      
       // Try to get queue attributes to test connection
       const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
       const command = new GetQueueAttributesCommand({
         QueueUrl: this.queueUrl,
         AttributeNames: ['QueueArn']
       });
-      
       await this.sqsClient.send(command);
       return true;
-    } catch (error) {
-      this.emit('connection_error', {
-        replicator: this.name,
-        error: error.message
-      });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit('connection_error', {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
   }
 
   async getStatus() {
@@ -392,8 +390,8 @@ class SqsReplicator extends BaseReplicator {
       queueUrl: this.queueUrl,
       region: this.region,
       resources: this.resources,
-      totalReplications: this.listenerCount('replicated'),
-      totalErrors: this.listenerCount('replication_error')
+      totalreplicators: this.listenerCount('replicated'),
+      totalErrors: this.listenerCount('replicator_error')
     };
   }
 
@@ -405,7 +403,17 @@ class SqsReplicator extends BaseReplicator {
   }
 
   shouldReplicateResource(resource) {
-    return this.resources.length === 0 || this.resources.includes(resource);
+    // Return true if:
+    // 1. Resource has a specific queue mapping, OR
+    // 2. Resource has a queue in the queues object, OR  
+    // 3. A default queue is configured (accepts all resources), OR
+    // 4. Resource is in the resources list (if provided)
+    const result = (this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource))
+      || (this.queues && Object.keys(this.queues).includes(resource))
+      || (this.defaultQueue || this.queueUrl) // Default queue accepts all resources
+      || (this.resources && Object.keys(this.resources).includes(resource))
+      || false;
+    return result;
   }
 }
 

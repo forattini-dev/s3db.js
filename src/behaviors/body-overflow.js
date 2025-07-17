@@ -1,6 +1,7 @@
 import { calculateTotalSize, calculateAttributeSizes, calculateUTF8Bytes } from '../concerns/calculator.js';
 import { calculateEffectiveLimit } from '../concerns/calculator.js';
 import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
+import { tryFn, tryFnSync } from '../concerns/try-fn.js';
 
 const OVERFLOW_FLAG = '$overflow';
 const OVERFLOW_FLAG_VALUE = 'true';
@@ -64,7 +65,7 @@ const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Byt
  * @property {string[]} [priorityFields] - Fields that should be prioritized in metadata
  * @property {boolean} [preserveOrder=false] - Whether to preserve original field order
  */
-export async function handleInsert({ resource, data, mappedData }) {
+export async function handleInsert({ resource, data, mappedData, originalData }) {
   const effectiveLimit = calculateEffectiveLimit({
     s3Limit: S3_METADATA_LIMIT_BYTES,
     systemConfig: {
@@ -93,7 +94,6 @@ export async function handleInsert({ resource, data, mappedData }) {
   let reservedLimit = effectiveLimit;
   for (const [fieldName, size] of sortedFields) {
     if (fieldName === '_v') continue;
-    // Se já existe overflow, reserva espaço para a flag
     if (!willOverflow && (currentSize + size > effectiveLimit)) {
       reservedLimit -= OVERFLOW_FLAG_BYTES;
       willOverflow = true;
@@ -112,17 +112,16 @@ export async function handleInsert({ resource, data, mappedData }) {
   }
 
   const hasOverflow = Object.keys(bodyFields).length > 0;
-  const body = hasOverflow ? JSON.stringify(bodyFields) : "";
+  let body = hasOverflow ? JSON.stringify(bodyFields) : "";
+  if (!hasOverflow) body = '{}';
 
+  // FIX: Only return metadataFields as mappedData, not full mappedData
   return { mappedData: metadataFields, body };
 }
 
-export async function handleUpdate({ resource, id, data, mappedData }) {
-  // For updates, we need to consider existing data
-  // This is a simplified approach - in a full implementation,
-  // we'd read the existing object and merge intelligently
-
-  return handleInsert({ resource, data, mappedData });
+export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
+  // For updates, use the same logic as insert (split fields by size)
+  return handleInsert({ resource, data, mappedData, originalData });
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {
@@ -133,10 +132,10 @@ export async function handleGet({ resource, metadata, body }) {
   // Parse body content if it exists
   let bodyData = {};
   if (body && body.trim() !== '') {
-    try {
-      bodyData = JSON.parse(body);
-    } catch (error) {
-      console.warn('Failed to parse body data:', error.message);
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
+    } else {
       bodyData = {};
     }
   }

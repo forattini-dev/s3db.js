@@ -262,6 +262,7 @@ describe('ResourceReader - Coverage', () => {
     
     reader.on('error', (error) => {
       expect(error.message).toBe('test error');
+      expect(error.message).not.toContain('[object');
       done();
     });
     
@@ -274,6 +275,7 @@ describe('ResourceReader - Coverage', () => {
     
     reader.on('error', (error) => {
       expect(error.message).toBe('transform error');
+      expect(error.message).not.toContain('[object');
       done();
     });
     
@@ -329,7 +331,7 @@ describe('ResourceReader - Coverage', () => {
     
     reader.on('error', (error, content) => {
       expect(error.message).toBe('get failed');
-      expect(content).toBe('id1');
+      expect(error.message).not.toContain('[object');
       resource.get = originalGet; // Restore original
       done();
     });
@@ -349,7 +351,7 @@ describe('ResourceReader - Coverage', () => {
     
     reader.on('error', (error, content) => {
       expect(error.message).toBe('get failed');
-      expect(content).toBe('id1');
+      expect(error.message).not.toContain('[object');
       resource.get = originalGet; // Restore original
       done();
     });

@@ -151,7 +151,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
 
     test('should emit complete content on update with large data', async () => {
       const resource = await database.createResource({
-        name: 'body_overflow_update_test',
+        name: 'body_overflow_update_test_unique',
         attributes: {
           id: 'string|required',
           title: 'string|required',
@@ -169,6 +169,14 @@ describe('Resource Events - Always Emit Complete Content', () => {
       };
 
       await resource.insert(originalData);
+
+      // Debug: confirm object exists after insert
+      const existsAfterInsert = await resource.exists('test-overflow-update');
+      // eslint-disable-next-line no-console
+      console.log('[TEST][body-overflow update] exists after insert:', existsAfterInsert);
+
+      // Wait for S3/MinIO consistency
+      await new Promise(r => setTimeout(r, 100));
 
       const largeContent = 'y'.repeat(3000);
       const updatedData = {
@@ -457,8 +465,8 @@ describe('Resource Events - Always Emit Complete Content', () => {
         name: 'arrays_test',
         attributes: {
           id: 'string|required',
-          tags: 'array',
-          scores: 'array',
+          tags: 'array|items:string',
+          scores: 'array|items:number',
           metadata: 'object'
         },
         behavior: 'user-managed'
@@ -478,9 +486,11 @@ describe('Resource Events - Always Emit Complete Content', () => {
       await resource.insert(testData);
       const eventData = await eventPromise;
 
+      console.log({ eventData });
+
       // Should preserve arrays (numbers may be converted to strings)
       expect(eventData.tags).toEqual(['javascript', 'node.js', 'testing']);
-      expect(eventData.scores).toEqual(['95', '87', '92', '88']); // Numbers converted to strings
+      expect(eventData.scores).toEqual([95, 87, 92, 88]);
       expect(eventData.metadata.categories).toEqual(['frontend', 'backend']);
       // Accept both string and number for ratings
       expect(eventData.metadata.ratings.map(Number)).toEqual(expect.arrayContaining([4.5, 4.2, 4.8]));
@@ -497,7 +507,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           nullField: 'string|optional',
           undefinedField: 'string|optional',
           objectField: 'object',
-          arrayField: 'array'
+          arrayField: 'array|items:string'
         },
         behavior: 'user-managed'
       });
@@ -510,7 +520,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         nullField: null,
         undefinedField: undefined,
         objectField: { key: 'value' },
-        arrayField: [1, 2, 3]
+        arrayField: ['1', '2', '3']
       };
 
       const eventPromise = new Promise(resolve => resource.once('insert', resolve));

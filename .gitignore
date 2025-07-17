@@ -1,4 +1,5 @@
+.shrimp
 node_modules/
 coverage/
 .env
-.coveralls.yml
+*.log

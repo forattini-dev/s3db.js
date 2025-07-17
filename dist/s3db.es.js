@@ -1,6 +1,6 @@
-import { customAlphabet, urlAlphabet } from 'nanoid';
-import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get as get$1, set, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
+import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get as get$1, set, isObject as isObject$1, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
 import { PromisePool } from '@supercharge/promise-pool';
+import { customAlphabet, urlAlphabet } from 'nanoid';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { createHash } from 'crypto';
 import { flatten, unflatten } from 'flat';
@@ -239,10 +239,6 @@ var substr = 'ab'.substr(-1) === 'b' ?
         return str.substr(start, len);
     }
 ;
-
-const idGenerator = customAlphabet(urlAlphabet, 22);
-const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-const passwordGenerator = customAlphabet(passwordAlphabet, 12);
 
 var domain;
 
@@ -718,8 +714,513 @@ function unwrapListeners(arr) {
   return ret;
 }
 
+const idGenerator = customAlphabet(urlAlphabet, 22);
+const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+const passwordGenerator = customAlphabet(passwordAlphabet, 16);
+
+function tryFn(fnOrPromise) {
+  if (fnOrPromise == null) {
+    const err = new Error("fnOrPromise cannot be null or undefined");
+    err.stack = new Error().stack;
+    return [false, err, void 0];
+  }
+  if (typeof fnOrPromise === "function") {
+    try {
+      const result = fnOrPromise();
+      if (result == null) {
+        return [true, null, result];
+      }
+      if (typeof result.then === "function") {
+        return result.then((data) => [true, null, data]).catch((error) => {
+          if (error instanceof Error && Object.isExtensible(error)) {
+            const desc = Object.getOwnPropertyDescriptor(error, "stack");
+            if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+              try {
+                error.stack = new Error().stack;
+              } catch (_) {
+              }
+            }
+          }
+          return [false, error, void 0];
+        });
+      }
+      return [true, null, result];
+    } catch (error) {
+      if (error instanceof Error && Object.isExtensible(error)) {
+        const desc = Object.getOwnPropertyDescriptor(error, "stack");
+        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+          try {
+            error.stack = new Error().stack;
+          } catch (_) {
+          }
+        }
+      }
+      return [false, error, void 0];
+    }
+  }
+  if (typeof fnOrPromise.then === "function") {
+    return Promise.resolve(fnOrPromise).then((data) => [true, null, data]).catch((error) => {
+      if (error instanceof Error && Object.isExtensible(error)) {
+        const desc = Object.getOwnPropertyDescriptor(error, "stack");
+        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+          try {
+            error.stack = new Error().stack;
+          } catch (_) {
+          }
+        }
+      }
+      return [false, error, void 0];
+    });
+  }
+  return [true, null, fnOrPromise];
+}
+function tryFnSync(fn) {
+  try {
+    const result = fn();
+    return [true, null, result];
+  } catch (err) {
+    return [false, err, null];
+  }
+}
+
+var global$1 = (typeof global !== "undefined" ? global :
+  typeof self !== "undefined" ? self :
+  typeof window !== "undefined" ? window : {});
+
+/******************************************************************************
+Copyright (c) Microsoft Corporation.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+***************************************************************************** */
+/* global Reflect, Promise, SuppressedError, Symbol, Iterator */
+
+
+function __awaiter(thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, [])).next());
+    });
+}
+
+typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
+    var e = new Error(message);
+    return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+};
+
+class Mutex {
+    constructor() {
+        this.mutex = Promise.resolve();
+    }
+    lock() {
+        let begin = () => { };
+        this.mutex = this.mutex.then(() => new Promise(begin));
+        return new Promise((res) => {
+            begin = res;
+        });
+    }
+    dispatch(fn) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const unlock = yield this.lock();
+            try {
+                return yield Promise.resolve(fn());
+            }
+            finally {
+                unlock();
+            }
+        });
+    }
+}
+
+var _a;
+function getGlobal() {
+    if (typeof globalThis !== "undefined")
+        return globalThis;
+    if (typeof self !== "undefined")
+        return self;
+    if (typeof window !== "undefined")
+        return window;
+    return global$1;
+}
+const globalObject = getGlobal();
+const nodeBuffer = (_a = globalObject.Buffer) !== null && _a !== void 0 ? _a : null;
+const textEncoder = globalObject.TextEncoder
+    ? new globalObject.TextEncoder()
+    : null;
+function hexCharCodesToInt(a, b) {
+    return ((((a & 0xf) + ((a >> 6) | ((a >> 3) & 0x8))) << 4) |
+        ((b & 0xf) + ((b >> 6) | ((b >> 3) & 0x8))));
+}
+function writeHexToUInt8(buf, str) {
+    const size = str.length >> 1;
+    for (let i = 0; i < size; i++) {
+        const index = i << 1;
+        buf[i] = hexCharCodesToInt(str.charCodeAt(index), str.charCodeAt(index + 1));
+    }
+}
+function hexStringEqualsUInt8(str, buf) {
+    if (str.length !== buf.length * 2) {
+        return false;
+    }
+    for (let i = 0; i < buf.length; i++) {
+        const strIndex = i << 1;
+        if (buf[i] !==
+            hexCharCodesToInt(str.charCodeAt(strIndex), str.charCodeAt(strIndex + 1))) {
+            return false;
+        }
+    }
+    return true;
+}
+const alpha = "a".charCodeAt(0) - 10;
+const digit = "0".charCodeAt(0);
+function getDigestHex(tmpBuffer, input, hashLength) {
+    let p = 0;
+    for (let i = 0; i < hashLength; i++) {
+        let nibble = input[i] >>> 4;
+        tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+        nibble = input[i] & 0xf;
+        tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+    }
+    return String.fromCharCode.apply(null, tmpBuffer);
+}
+const getUInt8Buffer = nodeBuffer !== null
+    ? (data) => {
+        if (typeof data === "string") {
+            const buf = nodeBuffer.from(data, "utf8");
+            return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+        }
+        if (nodeBuffer.isBuffer(data)) {
+            return new Uint8Array(data.buffer, data.byteOffset, data.length);
+        }
+        if (ArrayBuffer.isView(data)) {
+            return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        }
+        throw new Error("Invalid data type!");
+    }
+    : (data) => {
+        if (typeof data === "string") {
+            return textEncoder.encode(data);
+        }
+        if (ArrayBuffer.isView(data)) {
+            return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        }
+        throw new Error("Invalid data type!");
+    };
+const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const base64Lookup = new Uint8Array(256);
+for (let i = 0; i < base64Chars.length; i++) {
+    base64Lookup[base64Chars.charCodeAt(i)] = i;
+}
+function getDecodeBase64Length(data) {
+    let bufferLength = Math.floor(data.length * 0.75);
+    const len = data.length;
+    if (data[len - 1] === "=") {
+        bufferLength -= 1;
+        if (data[len - 2] === "=") {
+            bufferLength -= 1;
+        }
+    }
+    return bufferLength;
+}
+function decodeBase64(data) {
+    const bufferLength = getDecodeBase64Length(data);
+    const len = data.length;
+    const bytes = new Uint8Array(bufferLength);
+    let p = 0;
+    for (let i = 0; i < len; i += 4) {
+        const encoded1 = base64Lookup[data.charCodeAt(i)];
+        const encoded2 = base64Lookup[data.charCodeAt(i + 1)];
+        const encoded3 = base64Lookup[data.charCodeAt(i + 2)];
+        const encoded4 = base64Lookup[data.charCodeAt(i + 3)];
+        bytes[p] = (encoded1 << 2) | (encoded2 >> 4);
+        p += 1;
+        bytes[p] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+        p += 1;
+        bytes[p] = ((encoded3 & 3) << 6) | (encoded4 & 63);
+        p += 1;
+    }
+    return bytes;
+}
+
+const MAX_HEAP = 16 * 1024;
+const WASM_FUNC_HASH_LENGTH = 4;
+const wasmMutex = new Mutex();
+const wasmModuleCache = new Map();
+function WASMInterface(binary, hashLength) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let wasmInstance = null;
+        let memoryView = null;
+        let initialized = false;
+        if (typeof WebAssembly === "undefined") {
+            throw new Error("WebAssembly is not supported in this environment!");
+        }
+        const writeMemory = (data, offset = 0) => {
+            memoryView.set(data, offset);
+        };
+        const getMemory = () => memoryView;
+        const getExports = () => wasmInstance.exports;
+        const setMemorySize = (totalSize) => {
+            wasmInstance.exports.Hash_SetMemorySize(totalSize);
+            const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            memoryView = new Uint8Array(memoryBuffer, arrayOffset, totalSize);
+        };
+        const getStateSize = () => {
+            const view = new DataView(wasmInstance.exports.memory.buffer);
+            const stateSize = view.getUint32(wasmInstance.exports.STATE_SIZE, true);
+            return stateSize;
+        };
+        const loadWASMPromise = wasmMutex.dispatch(() => __awaiter(this, void 0, void 0, function* () {
+            if (!wasmModuleCache.has(binary.name)) {
+                const asm = decodeBase64(binary.data);
+                const promise = WebAssembly.compile(asm);
+                wasmModuleCache.set(binary.name, promise);
+            }
+            const module = yield wasmModuleCache.get(binary.name);
+            wasmInstance = yield WebAssembly.instantiate(module, {
+            // env: {
+            //   emscripten_memcpy_big: (dest, src, num) => {
+            //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+            //     const memView = new Uint8Array(memoryBuffer, 0);
+            //     memView.set(memView.subarray(src, src + num), dest);
+            //   },
+            //   print_memory: (offset, len) => {
+            //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+            //     const memView = new Uint8Array(memoryBuffer, 0);
+            //     console.log('print_int32', memView.subarray(offset, offset + len));
+            //   },
+            // },
+            });
+            // wasmInstance.exports._start();
+        }));
+        const setupInterface = () => __awaiter(this, void 0, void 0, function* () {
+            if (!wasmInstance) {
+                yield loadWASMPromise;
+            }
+            const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            memoryView = new Uint8Array(memoryBuffer, arrayOffset, MAX_HEAP);
+        });
+        const init = (bits = null) => {
+            initialized = true;
+            wasmInstance.exports.Hash_Init(bits);
+        };
+        const updateUInt8Array = (data) => {
+            let read = 0;
+            while (read < data.length) {
+                const chunk = data.subarray(read, read + MAX_HEAP);
+                read += chunk.length;
+                memoryView.set(chunk);
+                wasmInstance.exports.Hash_Update(chunk.length);
+            }
+        };
+        const update = (data) => {
+            if (!initialized) {
+                throw new Error("update() called before init()");
+            }
+            const Uint8Buffer = getUInt8Buffer(data);
+            updateUInt8Array(Uint8Buffer);
+        };
+        const digestChars = new Uint8Array(hashLength * 2);
+        const digest = (outputType, padding = null) => {
+            if (!initialized) {
+                throw new Error("digest() called before init()");
+            }
+            initialized = false;
+            wasmInstance.exports.Hash_Final(padding);
+            if (outputType === "binary") {
+                // the data is copied to allow GC of the original memory object
+                return memoryView.slice(0, hashLength);
+            }
+            return getDigestHex(digestChars, memoryView, hashLength);
+        };
+        const save = () => {
+            if (!initialized) {
+                throw new Error("save() can only be called after init() and before digest()");
+            }
+            const stateOffset = wasmInstance.exports.Hash_GetState();
+            const stateLength = getStateSize();
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            const internalState = new Uint8Array(memoryBuffer, stateOffset, stateLength);
+            // prefix is 4 bytes from SHA1 hash of the WASM binary
+            // it is used to detect incompatible internal states between different versions of hash-wasm
+            const prefixedState = new Uint8Array(WASM_FUNC_HASH_LENGTH + stateLength);
+            writeHexToUInt8(prefixedState, binary.hash);
+            prefixedState.set(internalState, WASM_FUNC_HASH_LENGTH);
+            return prefixedState;
+        };
+        const load = (state) => {
+            if (!(state instanceof Uint8Array)) {
+                throw new Error("load() expects an Uint8Array generated by save()");
+            }
+            const stateOffset = wasmInstance.exports.Hash_GetState();
+            const stateLength = getStateSize();
+            const overallLength = WASM_FUNC_HASH_LENGTH + stateLength;
+            const memoryBuffer = wasmInstance.exports.memory.buffer;
+            if (state.length !== overallLength) {
+                throw new Error(`Bad state length (expected ${overallLength} bytes, got ${state.length})`);
+            }
+            if (!hexStringEqualsUInt8(binary.hash, state.subarray(0, WASM_FUNC_HASH_LENGTH))) {
+                throw new Error("This state was written by an incompatible hash implementation");
+            }
+            const internalState = state.subarray(WASM_FUNC_HASH_LENGTH);
+            new Uint8Array(memoryBuffer, stateOffset, stateLength).set(internalState);
+            initialized = true;
+        };
+        const isDataShort = (data) => {
+            if (typeof data === "string") {
+                // worst case is 4 bytes / char
+                return data.length < MAX_HEAP / 4;
+            }
+            return data.byteLength < MAX_HEAP;
+        };
+        let canSimplify = isDataShort;
+        switch (binary.name) {
+            case "argon2":
+            case "scrypt":
+                canSimplify = () => true;
+                break;
+            case "blake2b":
+            case "blake2s":
+                // if there is a key at blake2 then cannot simplify
+                canSimplify = (data, initParam) => initParam <= 512 && isDataShort(data);
+                break;
+            case "blake3":
+                // if there is a key at blake3 then cannot simplify
+                canSimplify = (data, initParam) => initParam === 0 && isDataShort(data);
+                break;
+            case "xxhash64": // cannot simplify
+            case "xxhash3":
+            case "xxhash128":
+            case "crc64":
+                canSimplify = () => false;
+                break;
+        }
+        // shorthand for (init + update + digest) for better performance
+        const calculate = (data, initParam = null, digestParam = null) => {
+            if (!canSimplify(data, initParam)) {
+                init(initParam);
+                update(data);
+                return digest("hex", digestParam);
+            }
+            const buffer = getUInt8Buffer(data);
+            memoryView.set(buffer);
+            wasmInstance.exports.Hash_Calculate(buffer.length, initParam, digestParam);
+            return getDigestHex(digestChars, memoryView, hashLength);
+        };
+        yield setupInterface();
+        return {
+            getMemory,
+            writeMemory,
+            getExports,
+            setMemorySize,
+            init,
+            update,
+            digest,
+            save,
+            load,
+            calculate,
+            hashLength,
+        };
+    });
+}
+
+function lockedCreate(mutex, binary, hashLength) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const unlock = yield mutex.lock();
+        const wasm = yield WASMInterface(binary, hashLength);
+        unlock();
+        return wasm;
+    });
+}
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+var name$d = "md5";
+var data$d = "AGFzbQEAAAABEgRgAAF/YAAAYAF/AGACf38BfwMIBwABAgMBAAIFBAEBAgIGDgJ/AUGgigULfwBBgAgLB3AIBm1lbW9yeQIADkhhc2hfR2V0QnVmZmVyAAAJSGFzaF9Jbml0AAELSGFzaF9VcGRhdGUAAgpIYXNoX0ZpbmFsAAQNSGFzaF9HZXRTdGF0ZQAFDkhhc2hfQ2FsY3VsYXRlAAYKU1RBVEVfU0laRQMBCoMaBwUAQYAJCy0AQQBC/rnrxemOlZkQNwKQiQFBAEKBxpS6lvHq5m83AoiJAUEAQgA3AoCJAQu+BQEHf0EAQQAoAoCJASIBIABqQf////8BcSICNgKAiQFBAEEAKAKEiQEgAiABSWogAEEddmo2AoSJAQJAAkACQAJAAkACQCABQT9xIgMNAEGACSEEDAELIABBwAAgA2siBUkNASAFQQNxIQZBACEBAkAgA0E/c0EDSQ0AIANBgIkBaiEEIAVB/ABxIQdBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAcgAUEEaiIBRw0ACwsCQCAGRQ0AIANBmIkBaiECA0AgAiABaiABQYAJai0AADoAACABQQFqIQEgBkF/aiIGDQALC0GYiQFBwAAQAxogACAFayEAIAVBgAlqIQQLIABBwABPDQEgACECDAILIABFDQIgAEEDcSEGQQAhAQJAIABBBEkNACADQYCJAWohBCAAQXxxIQBBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAiADQZiJAWohAgNAIAIgAWogAUGACWotAAA6AAAgAUEBaiEBIAZBf2oiBg0ADAMLCyAAQT9xIQIgBCAAQUBxEAMhBAsgAkUNACACQQNxIQZBACEBAkAgAkEESQ0AIAJBPHEhAEEAIQEDQCABQZiJAWogBCABaiICLQAAOgAAIAFBmYkBaiACQQFqLQAAOgAAIAFBmokBaiACQQJqLQAAOgAAIAFBm4kBaiACQQNqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAANAIAFBmIkBaiAEIAFqLQAAOgAAIAFBAWohASAGQX9qIgYNAAsLC4cQARl/QQAoApSJASECQQAoApCJASEDQQAoAoyJASEEQQAoAoiJASEFA0AgACgCCCIGIAAoAhgiByAAKAIoIgggACgCOCIJIAAoAjwiCiAAKAIMIgsgACgCHCIMIAAoAiwiDSAMIAsgCiANIAkgCCAHIAMgBmogAiAAKAIEIg5qIAUgBCACIANzcSACc2ogACgCACIPakH4yKq7fWpBB3cgBGoiECAEIANzcSADc2pB1u6exn5qQQx3IBBqIhEgECAEc3EgBHNqQdvhgaECakERdyARaiISaiAAKAIUIhMgEWogACgCECIUIBBqIAQgC2ogEiARIBBzcSAQc2pB7p33jXxqQRZ3IBJqIhAgEiARc3EgEXNqQa+f8Kt/akEHdyAQaiIRIBAgEnNxIBJzakGqjJ+8BGpBDHcgEWoiEiARIBBzcSAQc2pBk4zBwXpqQRF3IBJqIhVqIAAoAiQiFiASaiAAKAIgIhcgEWogDCAQaiAVIBIgEXNxIBFzakGBqppqakEWdyAVaiIQIBUgEnNxIBJzakHYsYLMBmpBB3cgEGoiESAQIBVzcSAVc2pBr++T2nhqQQx3IBFqIhIgESAQc3EgEHNqQbG3fWpBEXcgEmoiFWogACgCNCIYIBJqIAAoAjAiGSARaiANIBBqIBUgEiARc3EgEXNqQb6v88p4akEWdyAVaiIQIBUgEnNxIBJzakGiosDcBmpBB3cgEGoiESAQIBVzcSAVc2pBk+PhbGpBDHcgEWoiFSARIBBzcSAQc2pBjofls3pqQRF3IBVqIhJqIAcgFWogDiARaiAKIBBqIBIgFSARc3EgEXNqQaGQ0M0EakEWdyASaiIQIBJzIBVxIBJzakHiyviwf2pBBXcgEGoiESAQcyAScSAQc2pBwOaCgnxqQQl3IBFqIhIgEXMgEHEgEXNqQdG0+bICakEOdyASaiIVaiAIIBJqIBMgEWogDyAQaiAVIBJzIBFxIBJzakGqj9vNfmpBFHcgFWoiECAVcyAScSAVc2pB3aC8sX1qQQV3IBBqIhEgEHMgFXEgEHNqQdOokBJqQQl3IBFqIhIgEXMgEHEgEXNqQYHNh8V9akEOdyASaiIVaiAJIBJqIBYgEWogFCAQaiAVIBJzIBFxIBJzakHI98++fmpBFHcgFWoiECAVcyAScSAVc2pB5puHjwJqQQV3IBBqIhEgEHMgFXEgEHNqQdaP3Jl8akEJdyARaiISIBFzIBBxIBFzakGHm9Smf2pBDncgEmoiFWogBiASaiAYIBFqIBcgEGogFSAScyARcSASc2pB7anoqgRqQRR3IBVqIhAgFXMgEnEgFXNqQYXSj896akEFdyAQaiIRIBBzIBVxIBBzakH4x75nakEJdyARaiISIBFzIBBxIBFzakHZhby7BmpBDncgEmoiFWogFyASaiATIBFqIBkgEGogFSAScyARcSASc2pBipmp6XhqQRR3IBVqIhAgFXMiFSASc2pBwvJoakEEdyAQaiIRIBVzakGB7ce7eGpBC3cgEWoiEiARcyIaIBBzakGiwvXsBmpBEHcgEmoiFWogFCASaiAOIBFqIAkgEGogFSAac2pBjPCUb2pBF3cgFWoiECAVcyIVIBJzakHE1PulempBBHcgEGoiESAVc2pBqZ/73gRqQQt3IBFqIhIgEXMiCSAQc2pB4JbttX9qQRB3IBJqIhVqIA8gEmogGCARaiAIIBBqIBUgCXNqQfD4/vV7akEXdyAVaiIQIBVzIhUgEnNqQcb97cQCakEEdyAQaiIRIBVzakH6z4TVfmpBC3cgEWoiEiARcyIIIBBzakGF4bynfWpBEHcgEmoiFWogGSASaiAWIBFqIAcgEGogFSAIc2pBhbqgJGpBF3cgFWoiESAVcyIQIBJzakG5oNPOfWpBBHcgEWoiEiAQc2pB5bPutn5qQQt3IBJqIhUgEnMiByARc2pB+PmJ/QFqQRB3IBVqIhBqIAwgFWogDyASaiAGIBFqIBAgB3NqQeWssaV8akEXdyAQaiIRIBVBf3NyIBBzakHExKShf2pBBncgEWoiEiAQQX9zciARc2pBl/+rmQRqQQp3IBJqIhAgEUF/c3IgEnNqQafH0Nx6akEPdyAQaiIVaiALIBBqIBkgEmogEyARaiAVIBJBf3NyIBBzakG5wM5kakEVdyAVaiIRIBBBf3NyIBVzakHDs+2qBmpBBncgEWoiECAVQX9zciARc2pBkpmz+HhqQQp3IBBqIhIgEUF/c3IgEHNqQf3ov39qQQ93IBJqIhVqIAogEmogFyAQaiAOIBFqIBUgEEF/c3IgEnNqQdG7kax4akEVdyAVaiIQIBJBf3NyIBVzakHP/KH9BmpBBncgEGoiESAVQX9zciAQc2pB4M2zcWpBCncgEWoiEiAQQX9zciARc2pBlIaFmHpqQQ93IBJqIhVqIA0gEmogFCARaiAYIBBqIBUgEUF/c3IgEnNqQaGjoPAEakEVdyAVaiIQIBJBf3NyIBVzakGC/c26f2pBBncgEGoiESAVQX9zciAQc2pBteTr6XtqQQp3IBFqIhIgEEF/c3IgEXNqQbul39YCakEPdyASaiIVIARqIBYgEGogFSARQX9zciASc2pBkaeb3H5qQRV3aiEEIBUgA2ohAyASIAJqIQIgESAFaiEFIABBwABqIQAgAUFAaiIBDQALQQAgAjYClIkBQQAgAzYCkIkBQQAgBDYCjIkBQQAgBTYCiIkBIAALyAMBBX9BACgCgIkBQT9xIgBBmIkBakGAAToAACAAQQFqIQECQAJAAkACQCAAQT9zIgJBB0sNACACRQ0BIAFBmIkBakEAOgAAIAJBAUYNASAAQZqJAWpBADoAACACQQJGDQEgAEGbiQFqQQA6AAAgAkEDRg0BIABBnIkBakEAOgAAIAJBBEYNASAAQZ2JAWpBADoAACACQQVGDQEgAEGeiQFqQQA6AAAgAkEGRg0BIABBn4kBakEAOgAADAELIAJBCEYNAkE2IABrIgMhBAJAIAJBA3EiAEUNAEEAIABrIQRBACEAA0AgAEHPiQFqQQA6AAAgBCAAQX9qIgBHDQALIAMgAGohBAsgA0EDSQ0CDAELQZiJAUHAABADGkEAIQFBNyEECyABQYCJAWohAEF/IQIDQCAAIARqQRVqQQA2AAAgAEF8aiEAIAQgAkEEaiICRw0ACwtBAEEAKAKEiQE2AtSJAUEAQQAoAoCJASIAQRV2OgDTiQFBACAAQQ12OgDSiQFBACAAQQV2OgDRiQFBACAAQQN0IgA6ANCJAUEAIAA2AoCJAUGYiQFBwAAQAxpBAEEAKQKIiQE3A4AJQQBBACkCkIkBNwOICQsGAEGAiQELMwBBAEL+uevF6Y6VmRA3ApCJAUEAQoHGlLqW8ermbzcCiIkBQQBCADcCgIkBIAAQAhAECwsLAQBBgAgLBJgAAAA=";
+var hash$d = "e6508e4b";
+var wasmJson$d = {
+	name: name$d,
+	data: data$d,
+	hash: hash$d
+};
+
+const mutex$e = new Mutex();
+let wasmCache$e = null;
+/**
+ * Calculates MD5 hash
+ * @param data Input data (string, Buffer or TypedArray)
+ * @returns Computed hash as a hexadecimal string
+ */
+function md5(data) {
+    if (wasmCache$e === null) {
+        return lockedCreate(mutex$e, wasmJson$d, 16).then((wasm) => {
+            wasmCache$e = wasm;
+            return wasmCache$e.calculate(data);
+        });
+    }
+    try {
+        const hash = wasmCache$e.calculate(data);
+        return Promise.resolve(hash);
+    }
+    catch (err) {
+        return Promise.reject(err);
+    }
+}
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
+new Mutex();
+
 class BaseError extends Error {
-  constructor({ verbose, bucket, message, ...rest }) {
+  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
     if (verbose) message = message + `
 
 Verbose:
@@ -734,94 +1235,159 @@ ${JSON.stringify(rest, null, 2)}`;
     super.name = this.constructor.name;
     this.name = this.constructor.name;
     this.bucket = bucket;
+    this.key = key;
     this.thrownAt = /* @__PURE__ */ new Date();
+    this.code = code;
+    this.statusCode = statusCode;
+    this.requestId = requestId;
+    this.awsMessage = awsMessage;
+    this.original = original;
+    this.commandName = commandName;
+    this.commandInput = commandInput;
+    this.metadata = metadata;
+    this.suggestion = suggestion;
+    this.data = { bucket, key, ...rest, verbose, message };
   }
   toJson() {
-    return { ...this };
+    return {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      statusCode: this.statusCode,
+      requestId: this.requestId,
+      awsMessage: this.awsMessage,
+      bucket: this.bucket,
+      key: this.key,
+      thrownAt: this.thrownAt,
+      commandName: this.commandName,
+      commandInput: this.commandInput,
+      metadata: this.metadata,
+      suggestion: this.suggestion,
+      data: this.data,
+      original: this.original,
+      stack: this.stack
+    };
   }
   toString() {
     return `${this.name} | ${this.message}`;
   }
 }
-class S3DBError extends BaseError {
+class S3dbError extends BaseError {
   constructor(message, details = {}) {
-    super({ message, ...details });
+    let code, statusCode, requestId, awsMessage, original, metadata;
+    if (details.original) {
+      original = details.original;
+      code = original.code || original.Code || original.name;
+      statusCode = original.statusCode || original.$metadata && original.$metadata.httpStatusCode;
+      requestId = original.requestId || original.$metadata && original.$metadata.requestId;
+      awsMessage = original.message;
+      metadata = original.$metadata ? { ...original.$metadata } : void 0;
+    }
+    super({ message, ...details, code, statusCode, requestId, awsMessage, original, metadata });
   }
 }
-class DatabaseError extends S3DBError {
-  constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
-  }
-}
-class ValidationError extends S3DBError {
-  constructor(message, details = {}) {
-    super(message, details);
-    Object.assign(this, details);
-  }
-}
-class AuthenticationError extends S3DBError {
+class DatabaseError extends S3dbError {
   constructor(message, details = {}) {
     super(message, details);
     Object.assign(this, details);
   }
 }
-class PermissionError extends S3DBError {
+class ValidationError extends S3dbError {
   constructor(message, details = {}) {
     super(message, details);
     Object.assign(this, details);
   }
 }
-class EncryptionError extends S3DBError {
+class AuthenticationError extends S3dbError {
   constructor(message, details = {}) {
     super(message, details);
     Object.assign(this, details);
   }
 }
-class ResourceNotFound extends S3DBError {
-  constructor({ bucket, resourceName, id, ...rest }) {
+class PermissionError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class EncryptionError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
+  }
+}
+class ResourceNotFound extends S3dbError {
+  constructor({ bucket, resourceName, id, original, ...rest }) {
+    if (typeof id !== "string") throw new Error("id must be a string");
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
     super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
       bucket,
       resourceName,
       id,
+      original,
       ...rest
     });
   }
 }
-class NoSuchBucket extends S3DBError {
-  constructor({ bucket, ...rest }) {
-    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, ...rest });
+class NoSuchBucket extends S3dbError {
+  constructor({ bucket, original, ...rest }) {
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    super(`Bucket does not exists [bucket:${bucket}]`, { bucket, original, ...rest });
   }
 }
-class NoSuchKey extends S3DBError {
-  constructor({ bucket, key, ...rest }) {
-    super(`Key [${key}] does not exists [bucket:${bucket}/${key}]`, { bucket, key, ...rest });
+class NoSuchKey extends S3dbError {
+  constructor({ bucket, key, resourceName, id, original, ...rest }) {
+    if (typeof key !== "string") throw new Error("key must be a string");
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (id !== void 0 && typeof id !== "string") throw new Error("id must be a string");
+    super(`No such key: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    this.resourceName = resourceName;
+    this.id = id;
   }
 }
-class NotFound extends NoSuchKey {
-}
-class MissingMetadata extends S3DBError {
-  constructor({ bucket, ...rest }) {
-    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, ...rest });
+class NotFound extends S3dbError {
+  constructor({ bucket, key, resourceName, id, original, ...rest }) {
+    if (typeof key !== "string") throw new Error("key must be a string");
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    super(`Not found: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+    this.resourceName = resourceName;
+    this.id = id;
   }
 }
-class InvalidResourceItem extends S3DBError {
+class MissingMetadata extends S3dbError {
+  constructor({ bucket, original, ...rest }) {
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, original, ...rest });
+  }
+}
+class InvalidResourceItem extends S3dbError {
   constructor({
     bucket,
     resourceName,
     attributes,
-    validation
+    validation,
+    message,
+    original,
+    ...rest
   }) {
-    super(`This item is not valid. Resource=${resourceName} [bucket:${bucket}].
-${JSON.stringify(validation, null, 2)}`, {
-      bucket,
-      resourceName,
-      attributes,
-      validation
-    });
+    if (typeof bucket !== "string") throw new Error("bucket must be a string");
+    if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
+    super(
+      message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].
+${JSON.stringify(validation, null, 2)}`,
+      {
+        bucket,
+        resourceName,
+        attributes,
+        validation,
+        original,
+        ...rest
+      }
+    );
   }
 }
-class UnknownError extends S3DBError {
+class UnknownError extends S3dbError {
 }
 const ErrorMap = {
   "NotFound": NotFound,
@@ -831,28 +1397,89 @@ const ErrorMap = {
   "MissingMetadata": MissingMetadata,
   "InvalidResourceItem": InvalidResourceItem
 };
+function mapAwsError(err, context = {}) {
+  const code = err.code || err.Code || err.name;
+  const metadata = err.$metadata ? { ...err.$metadata } : void 0;
+  const commandName = context.commandName;
+  const commandInput = context.commandInput;
+  let suggestion;
+  if (code === "NoSuchKey" || code === "NotFound") {
+    suggestion = "Check if the key exists in the specified bucket and if your credentials have permission.";
+    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  if (code === "NoSuchBucket") {
+    suggestion = "Check if the bucket exists and if your credentials have permission.";
+    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  if (code === "AccessDenied" || err.statusCode === 403 || code === "Forbidden") {
+    suggestion = "Check your credentials and bucket policy.";
+    return new PermissionError("Access denied", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  if (code === "ValidationError" || err.statusCode === 400) {
+    suggestion = "Check the request parameters and payload.";
+    return new ValidationError("Validation error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  if (code === "MissingMetadata") {
+    suggestion = "Check if the object metadata is present and valid.";
+    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  suggestion = "Check the error details and AWS documentation.";
+  return new UnknownError("Unknown error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+}
+class ConnectionStringError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, { ...details, suggestion: "Check the connection string format and credentials." });
+  }
+}
+class CryptoError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, { ...details, suggestion: "Check if the crypto library is available and input is valid." });
+  }
+}
+class SchemaError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, { ...details, suggestion: "Check schema definition and input data." });
+  }
+}
+class ResourceError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, { ...details, suggestion: details.suggestion || "Check resource configuration, attributes, and operation context." });
+    Object.assign(this, details);
+  }
+}
+class PartitionError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, { ...details, suggestion: details.suggestion || "Check partition definition, fields, and input values." });
+  }
+}
 
 const S3_DEFAULT_REGION = "us-east-1";
 const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
 class ConnectionString {
   constructor(connectionString) {
     let uri;
-    try {
-      uri = new URL(connectionString);
-    } catch (error) {
-      throw new Error("Invalid connection string: " + connectionString);
+    const [ok, err, parsed] = tryFn(() => new URL(connectionString));
+    if (!ok) {
+      throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
     }
+    uri = parsed;
     this.region = S3_DEFAULT_REGION;
-    if (uri.protocol === "s3:") this.defineS3(uri);
-    else this.defineMinio(uri);
+    if (uri.protocol === "s3:") this.defineFromS3(uri);
+    else this.defineFromCustomUri(uri);
     for (const [k, v] of uri.searchParams.entries()) {
       this[k] = v;
     }
   }
-  defineS3(uri) {
-    this.bucket = decodeURIComponent(uri.hostname);
-    this.accessKeyId = decodeURIComponent(uri.username);
-    this.secretAccessKey = decodeURIComponent(uri.password);
+  defineFromS3(uri) {
+    const [okBucket, errBucket, bucket] = tryFnSync(() => decodeURIComponent(uri.hostname));
+    if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: uri.hostname });
+    this.bucket = bucket || "s3db";
+    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+    this.accessKeyId = user;
+    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+    this.secretAccessKey = pass;
     this.endpoint = S3_DEFAULT_ENDPOINT;
     if (["/", "", null].includes(uri.pathname)) {
       this.keyPrefix = "";
@@ -861,17 +1488,27 @@ class ConnectionString {
       this.keyPrefix = [...subpath || []].join("/");
     }
   }
-  defineMinio(uri) {
+  defineFromCustomUri(uri) {
     this.forcePathStyle = true;
     this.endpoint = uri.origin;
-    this.accessKeyId = decodeURIComponent(uri.username);
-    this.secretAccessKey = decodeURIComponent(uri.password);
+    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+    this.accessKeyId = user;
+    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+    this.secretAccessKey = pass;
     if (["/", "", null].includes(uri.pathname)) {
       this.bucket = "s3db";
       this.keyPrefix = "";
     } else {
       let [, bucket, ...subpath] = uri.pathname.split("/");
-      this.bucket = decodeURIComponent(bucket);
+      if (!bucket) {
+        this.bucket = "s3db";
+      } else {
+        const [okBucket, errBucket, bucketDecoded] = tryFnSync(() => decodeURIComponent(bucket));
+        if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: bucket });
+        this.bucket = bucketDecoded;
+      }
       this.keyPrefix = [...subpath || []].join("/");
     }
   }
@@ -893,53 +1530,56 @@ class Client extends EventEmitter {
     this.client = AwsS3Client || this.createClient();
   }
   createClient() {
-    let options2 = {
+    let options = {
       region: this.config.region,
       endpoint: this.config.endpoint
     };
-    if (this.config.forcePathStyle) options2.forcePathStyle = true;
+    if (this.config.forcePathStyle) options.forcePathStyle = true;
     if (this.config.accessKeyId) {
-      options2.credentials = {
+      options.credentials = {
         accessKeyId: this.config.accessKeyId,
         secretAccessKey: this.config.secretAccessKey
       };
     }
-    return new S3Client(options2);
+    const client = new S3Client(options);
+    client.middlewareStack.add(
+      (next, context) => async (args) => {
+        if (context.commandName === "DeleteObjectsCommand") {
+          const body = args.request.body;
+          if (body && typeof body === "string") {
+            const contentMd5 = Buffer.from(await md5(body), "hex").toString("base64");
+            args.request.headers["Content-MD5"] = contentMd5;
+          }
+        }
+        return next(args);
+      },
+      {
+        step: "build",
+        name: "addContentMd5ForDeleteObjects",
+        priority: "high"
+      }
+    );
+    return client;
   }
   async sendCommand(command) {
     this.emit("command.request", command.constructor.name, command.input);
-    const originalWarn = console.warn;
-    try {
-      console.warn = (message) => {
-        if (!message.includes("Stream of unknown length")) {
-          originalWarn(message);
-        }
-      };
-    } catch (error) {
-      console.error(error);
+    const [ok, err, response] = await tryFn(() => this.client.send(command));
+    if (!ok) {
+      const bucket = this.config.bucket;
+      const key = command.input && command.input.Key;
+      throw mapAwsError(err, {
+        bucket,
+        key,
+        commandName: command.constructor.name,
+        commandInput: command.input
+      });
     }
-    const response = await this.client.send(command);
     this.emit("command.response", command.constructor.name, response, command.input);
-    try {
-      console.warn = originalWarn;
-    } catch (error) {
-      console.error(error);
-    }
     return response;
-  }
-  errorProxy(error, data) {
-    if (this.verbose) {
-      data.bucket = this.config.bucket;
-      data.config = this.config;
-      data.verbose = this.verbose;
-    }
-    error.data = data;
-    const errorClass = ErrorMap[error.name];
-    if (errorClass) return new errorClass(data);
-    return error;
   }
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    keyPrefix ? path.join(keyPrefix, key) : key;
     const stringMetadata = {};
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
@@ -947,110 +1587,136 @@ class Client extends EventEmitter {
         stringMetadata[validKey] = String(v);
       }
     }
-    const options2 = {
+    const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
       Metadata: stringMetadata,
       Body: body || Buffer.alloc(0)
     };
-    if (contentType !== void 0) options2.ContentType = contentType;
-    if (contentEncoding !== void 0) options2.ContentEncoding = contentEncoding;
-    if (contentLength !== void 0) options2.ContentLength = contentLength;
+    if (contentType !== void 0) options.ContentType = contentType;
+    if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
+    if (contentLength !== void 0) options.ContentLength = contentLength;
+    let response, error;
     try {
-      const response = await this.sendCommand(new PutObjectCommand(options2));
-      this.emit("putObject", response, options2);
+      response = await this.sendCommand(new PutObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options2
+        commandName: "PutObjectCommand",
+        commandInput: options
       });
+    } finally {
+      this.emit("putObject", error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     }
   }
   async getObject(key) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const options2 = {
+    const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
+    let response, error;
     try {
-      const response = await this.sendCommand(new GetObjectCommand(options2));
-      this.emit("getObject", response, options2);
+      response = await this.sendCommand(new GetObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options2
+        commandName: "GetObjectCommand",
+        commandInput: options
       });
+    } finally {
+      this.emit("getObject", error || response, { key });
     }
   }
   async headObject(key) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const options2 = {
+    const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
+    let response, error;
     try {
-      const response = await this.sendCommand(new HeadObjectCommand(options2));
-      this.emit("headObject", response, options2);
+      response = await this.sendCommand(new HeadObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options2
+        commandName: "HeadObjectCommand",
+        commandInput: options
       });
+    } finally {
+      this.emit("headObject", error || response, { key });
     }
   }
   async copyObject({ from, to }) {
-    const options2 = {
+    const options = {
       Bucket: this.config.bucket,
       Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
       CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
     };
+    let response, error;
     try {
-      const response = await this.client.send(new CopyObjectCommand(options2));
-      this.emit("copyObject", response, options2);
+      response = await this.sendCommand(new CopyObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
-        from,
-        to,
-        command: options2
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key: to,
+        commandName: "CopyObjectCommand",
+        commandInput: options
       });
+    } finally {
+      this.emit("copyObject", error || response, { from, to });
     }
   }
   async exists(key) {
-    try {
-      await this.headObject(key);
-      return true;
-    } catch (err) {
-      if (err.name === "NoSuchKey") return false;
-      else if (err.name === "NotFound") return false;
-      throw err;
-    }
+    const [ok, err] = await tryFn(() => this.headObject(key));
+    if (ok) return true;
+    if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
+    throw err;
   }
   async deleteObject(key) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const options2 = {
+    keyPrefix ? path.join(keyPrefix, key) : key;
+    const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key
     };
+    let response, error;
     try {
-      const response = await this.sendCommand(new DeleteObjectCommand(options2));
-      this.emit("deleteObject", response, options2);
+      response = await this.sendCommand(new DeleteObjectCommand(options));
       return response;
-    } catch (error) {
-      throw this.errorProxy(error, {
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
         key,
-        command: options2
+        commandName: "DeleteObjectCommand",
+        commandInput: options
       });
+    } finally {
+      this.emit("deleteObject", error || response, { key });
     }
   }
   async deleteObjects(keys) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const packages = chunk(keys, 1e3);
     const { results, errors } = await PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
-      const options2 = {
+      for (const key of keys2) {
+        keyPrefix ? path.join(keyPrefix, key) : key;
+        this.config.bucket;
+        await this.exists(key);
+      }
+      const options = {
         Bucket: this.config.bucket,
         Delete: {
           Objects: keys2.map((key) => ({
@@ -1058,15 +1724,13 @@ class Client extends EventEmitter {
           }))
         }
       };
-      try {
-        const response = await this.sendCommand(new DeleteObjectsCommand(options2));
-        return response;
-      } catch (error) {
-        throw this.errorProxy(error, {
-          keys: keys2,
-          command: options2
-        });
-      }
+      let response;
+      const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
+      if (!ok) throw err;
+      response = res;
+      if (response && response.Errors && response.Errors.length > 0) ;
+      if (response && response.Deleted && response.Deleted.length !== keys2.length) ;
+      return response;
     });
     const report = {
       deleted: results,
@@ -1088,7 +1752,7 @@ class Client extends EventEmitter {
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: keyPrefix ? path.join(keyPrefix, prefix) : prefix,
+        Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
         ContinuationToken: continuationToken
       });
       const listResponse = await this.client.send(listCommand);
@@ -1117,47 +1781,43 @@ class Client extends EventEmitter {
     return totalDeleted;
   }
   async moveObject({ from, to }) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       await this.copyObject({ from, to });
       await this.deleteObject(from);
-      return true;
-    } catch (error) {
-      throw this.errorProxy(error, {
-        from,
-        to,
-        command: options
-      });
+    });
+    if (!ok) {
+      throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
     }
+    return true;
   }
   async listObjects({
     prefix,
     maxKeys = 1e3,
     continuationToken
   } = {}) {
-    const options2 = {
+    const options = {
       Bucket: this.config.bucket,
       MaxKeys: maxKeys,
       ContinuationToken: continuationToken,
       Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
     };
-    try {
-      const response = await this.sendCommand(new ListObjectsV2Command(options2));
-      this.emit("listObjects", response, options2);
-      return response;
-    } catch (error) {
-      throw this.errorProxy(error, { command: options2 });
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
+    if (!ok) {
+      throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
+    this.emit("listObjects", response, options);
+    return response;
   }
   async count({ prefix } = {}) {
     let count = 0;
     let truncated = true;
     let continuationToken;
     while (truncated) {
-      const options2 = {
+      const options = {
         prefix,
         continuationToken
       };
-      const response = await this.listObjects(options2);
+      const response = await this.listObjects(options);
       count += response.KeyCount || 0;
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
@@ -1170,11 +1830,11 @@ class Client extends EventEmitter {
     let truncated = true;
     let continuationToken;
     while (truncated) {
-      const options2 = {
+      const options = {
         prefix,
         continuationToken
       };
-      const response = await this.listObjects(options2);
+      const response = await this.listObjects(options);
       if (response.Contents) {
         keys = keys.concat(response.Contents.map((x) => x.Key));
       }
@@ -1198,12 +1858,12 @@ class Client extends EventEmitter {
     let skipped = 0;
     while (truncated) {
       let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
-      const options2 = {
+      const options = {
         prefix,
         maxKeys,
         continuationToken
       };
-      const res = await this.listObjects(options2);
+      const res = await this.listObjects(options);
       if (res.Contents) {
         skipped += res.Contents.length;
       }
@@ -1236,11 +1896,11 @@ class Client extends EventEmitter {
       }
     }
     while (truncated) {
-      const options2 = {
+      const options = {
         prefix,
         continuationToken
       };
-      const res = await this.listObjects(options2);
+      const res = await this.listObjects(options);
       if (res.Contents) {
         keys = keys.concat(res.Contents.map((x) => x.Key));
       }
@@ -1261,18 +1921,16 @@ class Client extends EventEmitter {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
     const { results, errors } = await PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
       const to = key.replace(prefixFrom, prefixTo);
-      try {
+      const [ok, err] = await tryFn(async () => {
         await this.moveObject({
           from: key,
           to
         });
-        return to;
-      } catch (error) {
-        throw this.errorProxy(error, {
-          from: key,
-          to
-        });
+      });
+      if (!ok) {
+        throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
       }
+      return to;
     });
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
@@ -1285,35 +1943,43 @@ class Client extends EventEmitter {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const { webcrypto } = await import('crypto');
-      lib = webcrypto;
-    } catch (error) {
-      throw new Error("Crypto API not available");
+      return webcrypto;
+    });
+    if (ok) {
+      lib = result;
+    } else {
+      throw new CryptoError("Crypto API not available", { original: err, context: "dynamicCrypto" });
     }
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
-  if (!lib) throw new Error("Could not load any crypto library");
+  if (!lib) throw new CryptoError("Could not load any crypto library", { context: "dynamicCrypto" });
   return lib;
 }
 async function sha256(message) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
-  const hashBuffer = await cryptoLib.subtle.digest("SHA-256", data);
+  const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest("SHA-256", data));
+  if (!ok) throw new CryptoError("SHA-256 digest failed", { original: err, input: message });
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   return hashHex;
 }
 async function encrypt(content, passphrase) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const salt = cryptoLib.getRandomValues(new Uint8Array(16));
-  const key = await getKeyMaterial(passphrase, salt);
+  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  if (!okKey) throw new CryptoError("Key derivation failed", { original: errKey, passphrase, salt });
   const iv = cryptoLib.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
   const encodedContent = encoder.encode(content);
-  const encryptedContent = await cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent);
+  const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
+  if (!okEnc) throw new CryptoError("Encryption failed", { original: errEnc, content });
   const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
   encryptedData.set(salt);
   encryptedData.set(iv, salt.length);
@@ -1321,28 +1987,33 @@ async function encrypt(content, passphrase) {
   return arrayBufferToBase64(encryptedData);
 }
 async function decrypt(encryptedBase64, passphrase) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encryptedData = base64ToArrayBuffer(encryptedBase64);
   const salt = encryptedData.slice(0, 16);
   const iv = encryptedData.slice(16, 28);
   const encryptedContent = encryptedData.slice(28);
-  const key = await getKeyMaterial(passphrase, salt);
-  const decryptedContent = await cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent);
+  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  if (!okKey) throw new CryptoError("Key derivation failed (decrypt)", { original: errKey, passphrase, salt });
+  const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
+  if (!okDec) throw new CryptoError("Decryption failed", { original: errDec, encryptedBase64 });
   const decoder = new TextDecoder();
   return decoder.decode(decryptedContent);
 }
 async function getKeyMaterial(passphrase, salt) {
-  const cryptoLib = await dynamicCrypto();
+  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const keyMaterial = encoder.encode(passphrase);
-  const baseKey = await cryptoLib.subtle.importKey(
+  const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
     "raw",
     keyMaterial,
     { name: "PBKDF2" },
     false,
     ["deriveKey"]
-  );
-  return await cryptoLib.subtle.deriveKey(
+  ));
+  if (!okImport) throw new CryptoError("importKey failed", { original: errImport, passphrase });
+  const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
     {
       name: "PBKDF2",
       salt,
@@ -1353,13 +2024,16 @@ async function getKeyMaterial(passphrase, salt) {
     { name: "AES-GCM", length: 256 },
     true,
     ["encrypt", "decrypt"]
-  );
+  ));
+  if (!okDerive) throw new CryptoError("deriveKey failed", { original: errDerive, passphrase, salt });
+  return derivedKey;
 }
 function arrayBufferToBase64(buffer) {
   if (typeof process !== "undefined") {
     return Buffer.from(buffer).toString("base64");
   } else {
-    const binary = String.fromCharCode.apply(null, new Uint8Array(buffer));
+    const [ok, err, binary] = tryFnSync(() => String.fromCharCode.apply(null, new Uint8Array(buffer)));
+    if (!ok) throw new CryptoError("Failed to convert ArrayBuffer to base64 (browser)", { original: err });
     return window.btoa(binary);
   }
 }
@@ -1367,7 +2041,8 @@ function base64ToArrayBuffer(base64) {
   if (typeof process !== "undefined") {
     return new Uint8Array(Buffer.from(base64, "base64"));
   } else {
-    const binaryString = window.atob(base64);
+    const [ok, err, binaryString] = tryFnSync(() => window.atob(base64));
+    if (!ok) throw new CryptoError("Failed to decode base64 (browser)", { original: err });
     const len = binaryString.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
@@ -3407,20 +4082,28 @@ var jsonStableStringify = /*@__PURE__*/getDefaultExportFromCjs(jsonStableStringi
 
 async function secretHandler(actual, errors, schema) {
   if (!this.passphrase) {
-    errors.push({ actual, type: "encryptionKeyMissing" });
+    errors.push(new ValidationError("Missing configuration for secrets encryption.", {
+      actual,
+      type: "encryptionKeyMissing",
+      suggestion: "Provide a passphrase for secret encryption."
+    }));
     return actual;
   }
-  try {
-    const res = await encrypt(String(actual), this.passphrase);
-    return res;
-  } catch (error) {
-    errors.push({ actual, type: "encryptionProblem", error });
-  }
+  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+  if (ok) return res;
+  errors.push(new ValidationError("Problem encrypting secret.", {
+    actual,
+    type: "encryptionProblem",
+    error: err,
+    suggestion: "Check the passphrase and input value."
+  }));
   return actual;
 }
 async function jsonHandler(actual, errors, schema) {
   if (isString$1(actual)) return actual;
-  return JSON.stringify(actual);
+  const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
+  if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
+  return json;
 }
 class Validator extends FastestValidator {
   constructor({ options, passphrase, autoEncrypt = true } = {}) {
@@ -3436,6 +4119,9 @@ class Validator extends FastestValidator {
         },
         object: {
           strict: "remove"
+        },
+        number: {
+          convert: true
         }
       }
     }, options));
@@ -3471,38 +4157,96 @@ const ValidatorManager = new Proxy(Validator, {
   }
 });
 
-function toBase36(num) {
-  return num.toString(36);
-}
-function generateBase36Mapping(keys) {
+const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const base = alphabet.length;
+const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
+const encode = (n) => {
+  if (typeof n !== "number" || isNaN(n)) return "undefined";
+  if (!isFinite(n)) return "undefined";
+  if (n === 0) return alphabet[0];
+  if (n < 0) return "-" + encode(-Math.floor(n));
+  n = Math.floor(n);
+  let s = "";
+  while (n) {
+    s = alphabet[n % base] + s;
+    n = Math.floor(n / base);
+  }
+  return s;
+};
+const decode = (s) => {
+  if (typeof s !== "string") return NaN;
+  if (s === "") return 0;
+  let negative = false;
+  if (s[0] === "-") {
+    negative = true;
+    s = s.slice(1);
+  }
+  let r = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = charToValue[s[i]];
+    if (idx === void 0) return NaN;
+    r = r * base + idx;
+  }
+  return negative ? -r : r;
+};
+const encodeDecimal = (n) => {
+  if (typeof n !== "number" || isNaN(n)) return "undefined";
+  if (!isFinite(n)) return "undefined";
+  const negative = n < 0;
+  n = Math.abs(n);
+  const [intPart, decPart] = n.toString().split(".");
+  const encodedInt = encode(Number(intPart));
+  if (decPart) {
+    return (negative ? "-" : "") + encodedInt + "." + decPart;
+  }
+  return (negative ? "-" : "") + encodedInt;
+};
+const decodeDecimal = (s) => {
+  if (typeof s !== "string") return NaN;
+  let negative = false;
+  if (s[0] === "-") {
+    negative = true;
+    s = s.slice(1);
+  }
+  const [intPart, decPart] = s.split(".");
+  const decodedInt = decode(intPart);
+  if (isNaN(decodedInt)) return NaN;
+  const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
+  return negative ? -num : num;
+};
+
+function generateBase62Mapping(keys) {
   const mapping = {};
   const reversedMapping = {};
   keys.forEach((key, index) => {
-    const base36Key = toBase36(index);
-    mapping[key] = base36Key;
-    reversedMapping[base36Key] = key;
+    const base62Key = encode(index);
+    mapping[key] = base62Key;
+    reversedMapping[base62Key] = key;
   });
   return { mapping, reversedMapping };
 }
 const SchemaActions = {
-  trim: (value) => value.trim(),
-  encrypt: (value, { passphrase }) => encrypt(value, passphrase),
-  decrypt: async (value, { passphrase }) => {
-    try {
-      const raw = await decrypt(value, passphrase);
-      return raw;
-    } catch (error) {
-      console.warn(`Schema decrypt error: ${error}`, error);
-      return value;
-    }
+  trim: (value) => value == null ? value : value.trim(),
+  encrypt: async (value, { passphrase }) => {
+    if (value === null || value === void 0) return value;
+    const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
+    return ok ? res : value;
   },
-  toString: (value) => String(value),
+  decrypt: async (value, { passphrase }) => {
+    if (value === null || value === void 0) return value;
+    const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
+    if (!ok) return value;
+    if (raw === "null") return null;
+    if (raw === "undefined") return void 0;
+    return raw;
+  },
+  toString: (value) => value == null ? value : String(value),
   fromArray: (value, { separator }) => {
     if (value === null || value === void 0 || !Array.isArray(value)) {
       return value;
     }
     if (value.length === 0) {
-      return "[]";
+      return "";
     }
     const escapedItems = value.map((item) => {
       if (typeof item === "string") {
@@ -3513,11 +4257,11 @@ const SchemaActions = {
     return escapedItems.join(separator);
   },
   toArray: (value, { separator }) => {
-    if (value === null || value === void 0) {
+    if (Array.isArray(value)) {
       return value;
     }
-    if (value === "[]") {
-      return [];
+    if (value === null || value === void 0) {
+      return value;
     }
     if (value === "") {
       return [];
@@ -3528,16 +4272,8 @@ const SchemaActions = {
     const str = String(value);
     while (i < str.length) {
       if (str[i] === "\\" && i + 1 < str.length) {
-        if (str[i + 1] === separator) {
-          current += separator;
-          i += 2;
-        } else if (str[i + 1] === "\\") {
-          current += "\\";
-          i += 2;
-        } else {
-          current += str[i];
-          i++;
-        }
+        current += str[i + 1];
+        i += 2;
       } else if (str[i] === separator) {
         items.push(current);
         current = "";
@@ -3550,11 +4286,174 @@ const SchemaActions = {
     items.push(current);
     return items;
   },
-  toJSON: (value) => JSON.stringify(value),
-  fromJSON: (value) => JSON.parse(value),
+  toJSON: (value) => {
+    if (value === null) return null;
+    if (value === void 0) return void 0;
+    if (typeof value === "string") {
+      const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(value));
+      if (ok2 && typeof parsed === "object") return value;
+      return value;
+    }
+    const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
+    return ok ? json : value;
+  },
+  fromJSON: (value) => {
+    if (value === null) return null;
+    if (value === void 0) return void 0;
+    if (typeof value !== "string") return value;
+    if (value === "") return "";
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+    return ok ? parsed : value;
+  },
   toNumber: (value) => isString$1(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
   toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
-  fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0"
+  fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0",
+  fromBase62: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const n = decode(value);
+      return isNaN(n) ? void 0 : n;
+    }
+    return void 0;
+  },
+  toBase62: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") {
+      return encode(value);
+    }
+    if (typeof value === "string") {
+      const n = Number(value);
+      return isNaN(n) ? value : encode(n);
+    }
+    return value;
+  },
+  fromBase62Decimal: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const n = decodeDecimal(value);
+      return isNaN(n) ? void 0 : n;
+    }
+    return void 0;
+  },
+  toBase62Decimal: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") {
+      return encodeDecimal(value);
+    }
+    if (typeof value === "string") {
+      const n = Number(value);
+      return isNaN(n) ? value : encodeDecimal(n);
+    }
+    return value;
+  },
+  fromArrayOfNumbers: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const base62Items = value.map((item) => {
+      if (typeof item === "number" && !isNaN(item)) {
+        return encode(item);
+      }
+      const n = Number(item);
+      return isNaN(n) ? "" : encode(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfNumbers: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map((v) => typeof v === "number" ? v : decode(v));
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = "";
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map((v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v !== "") {
+        const n = decode(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
+  fromArrayOfDecimals: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const base62Items = value.map((item) => {
+      if (typeof item === "number" && !isNaN(item)) {
+        return encodeDecimal(item);
+      }
+      const n = Number(item);
+      return isNaN(n) ? "" : encodeDecimal(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfDecimals: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map((v) => typeof v === "number" ? v : decodeDecimal(v));
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = "";
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map((v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v !== "") {
+        const n = decodeDecimal(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  }
 };
 class Schema {
   constructor(args) {
@@ -3586,7 +4485,7 @@ class Schema {
       const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
       const objectKeys = this.extractObjectKeys(this.attributes);
       const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-      const { mapping, reversedMapping } = generateBase36Mapping(allKeys);
+      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
     }
@@ -3627,8 +4526,20 @@ class Schema {
     const schema = flatten(cloneDeep(this.attributes), { safe: true });
     for (const [name, definition] of Object.entries(schema)) {
       if (definition.includes("array")) {
-        this.addHook("beforeMap", name, "fromArray");
-        this.addHook("afterUnmap", name, "toArray");
+        if (definition.includes("items:string")) {
+          this.addHook("beforeMap", name, "fromArray");
+          this.addHook("afterUnmap", name, "toArray");
+        } else if (definition.includes("items:number")) {
+          const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+          if (isIntegerArray) {
+            this.addHook("beforeMap", name, "fromArrayOfNumbers");
+            this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else {
+            this.addHook("beforeMap", name, "fromArrayOfDecimals");
+            this.addHook("afterUnmap", name, "toArrayOfDecimals");
+          }
+        }
+        continue;
       }
       if (definition.includes("secret")) {
         if (this.options.autoEncrypt) {
@@ -3637,22 +4548,33 @@ class Schema {
         if (this.options.autoDecrypt) {
           this.addHook("afterUnmap", name, "decrypt");
         }
+        continue;
       }
       if (definition.includes("number")) {
-        this.addHook("beforeMap", name, "toString");
-        this.addHook("afterUnmap", name, "toNumber");
+        const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+        if (isInteger) {
+          this.addHook("beforeMap", name, "toBase62");
+          this.addHook("afterUnmap", name, "fromBase62");
+        } else {
+          this.addHook("beforeMap", name, "toBase62Decimal");
+          this.addHook("afterUnmap", name, "fromBase62Decimal");
+        }
+        continue;
       }
       if (definition.includes("boolean")) {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
+        continue;
       }
       if (definition.includes("json")) {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
+        continue;
       }
-      if (definition === "object") {
+      if (definition === "object" || definition.includes("object")) {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
+        continue;
       }
     }
   }
@@ -3664,7 +4586,9 @@ class Schema {
       version,
       attributes
     } = isString$1(data) ? JSON.parse(data) : data;
-    attributes = Schema._importAttributes(attributes);
+    const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
+    if (!ok) throw new SchemaError("Failed to import schema attributes", { original: err, input: attributes });
+    attributes = attrs;
     const schema = new Schema({
       map,
       name,
@@ -3679,22 +4603,25 @@ class Schema {
    */
   static _importAttributes(attrs) {
     if (typeof attrs === "string") {
-      try {
-        const parsed = JSON.parse(attrs);
-        if (typeof parsed === "object" && parsed !== null) {
-          return Schema._importAttributes(parsed);
-        }
-      } catch (e) {
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
+      if (ok && typeof parsed === "object" && parsed !== null) {
+        const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
+        if (!okNested) throw new SchemaError("Failed to parse nested schema attribute", { original: errNested, input: attrs });
+        return nested;
       }
       return attrs;
     }
     if (Array.isArray(attrs)) {
-      return attrs.map((a) => Schema._importAttributes(a));
+      const [okArr, errArr, arr] = tryFnSync(() => attrs.map((a) => Schema._importAttributes(a)));
+      if (!okArr) throw new SchemaError("Failed to import array schema attributes", { original: errArr, input: attrs });
+      return arr;
     }
     if (typeof attrs === "object" && attrs !== null) {
       const out = {};
       for (const [k, v] of Object.entries(attrs)) {
-        out[k] = Schema._importAttributes(v);
+        const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
+        if (!okObj) throw new SchemaError("Failed to import object schema attribute", { original: errObj, key: k, input: v });
+        out[k] = val;
       }
       return out;
     }
@@ -3730,17 +4657,19 @@ class Schema {
     return attrs;
   }
   async applyHooksActions(resourceItem, hook) {
+    const cloned = cloneDeep(resourceItem);
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
       for (const action of actions) {
-        const value = get$1(resourceItem, attribute);
+        const value = get$1(cloned, attribute);
         if (value !== void 0 && typeof SchemaActions[action] === "function") {
-          set(resourceItem, attribute, await SchemaActions[action](value, {
+          set(cloned, attribute, await SchemaActions[action](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator
           }));
         }
       }
     }
+    return cloned;
   }
   async validate(resourceItem, { mutateOriginal = false } = {}) {
     let data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);
@@ -3748,26 +4677,98 @@ class Schema {
     return result;
   }
   async mapper(resourceItem) {
-    const obj = cloneDeep(resourceItem);
-    await this.applyHooksActions(obj, "beforeMap");
+    let obj = cloneDeep(resourceItem);
+    obj = await this.applyHooksActions(obj, "beforeMap");
     const flattenedObj = flatten(obj, { safe: true });
     const rest = { "_v": this.version + "" };
     for (const [key, value] of Object.entries(flattenedObj)) {
-      rest[this.map[key]] = value;
+      const mappedKey = this.map[key] || key;
+      const attrDef = this.getAttributeDefinition(key);
+      if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
+        rest[mappedKey] = encode(value);
+      } else if (typeof value === "string") {
+        if (value === "[object Object]") {
+          rest[mappedKey] = "{}";
+        } else if (value.startsWith("{") || value.startsWith("[")) {
+          rest[mappedKey] = value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (Array.isArray(value) || typeof value === "object" && value !== null) {
+        rest[mappedKey] = JSON.stringify(value);
+      } else {
+        rest[mappedKey] = value;
+      }
     }
     await this.applyHooksActions(rest, "afterMap");
     return rest;
   }
-  async unmapper(mappedResourceItem) {
-    const obj = cloneDeep(mappedResourceItem);
+  async unmapper(mappedResourceItem, mapOverride) {
+    let obj = cloneDeep(mappedResourceItem);
     delete obj._v;
-    await this.applyHooksActions(obj, "beforeUnmap");
+    obj = await this.applyHooksActions(obj, "beforeUnmap");
+    const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
     const rest = {};
     for (const [key, value] of Object.entries(obj)) {
-      rest[this.reversedMap[key]] = value;
+      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+      let parsedValue = value;
+      const attrDef = this.getAttributeDefinition(originalKey);
+      if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
+        if (typeof parsedValue === "string" && parsedValue !== "") {
+          parsedValue = decode(parsedValue);
+        } else if (typeof parsedValue === "number") ; else {
+          parsedValue = void 0;
+        }
+      } else if (typeof value === "string") {
+        if (value === "[object Object]") {
+          parsedValue = {};
+        } else if (value.startsWith("{") || value.startsWith("[")) {
+          const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+          if (ok) parsedValue = parsed;
+        }
+      }
+      if (this.attributes) {
+        if (typeof attrDef === "string" && attrDef.includes("array")) {
+          if (Array.isArray(parsedValue)) ; else if (typeof parsedValue === "string" && parsedValue.trim().startsWith("[")) {
+            const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
+            if (okArr && Array.isArray(arr)) {
+              parsedValue = arr;
+            }
+          } else {
+            parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
+          }
+        }
+      }
+      if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
+        for (const action of this.options.hooks.afterUnmap[originalKey]) {
+          if (typeof SchemaActions[action] === "function") {
+            parsedValue = await SchemaActions[action](parsedValue, {
+              passphrase: this.passphrase,
+              separator: this.options.arraySeparator
+            });
+          }
+        }
+      }
+      rest[originalKey] = parsedValue;
     }
     await this.applyHooksActions(rest, "afterUnmap");
-    return unflatten(rest);
+    const result = unflatten(rest);
+    for (const [key, value] of Object.entries(mappedResourceItem)) {
+      if (key.startsWith("$")) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+  // Helper to get attribute definition by dot notation key
+  getAttributeDefinition(key) {
+    const parts = key.split(".");
+    let def = this.attributes;
+    for (const part of parts) {
+      if (!def) return void 0;
+      def = def[part];
+    }
+    return def;
   }
   /**
    * Preprocess attributes to convert nested objects into validator-compatible format
@@ -3796,10 +4797,6 @@ class Schema {
     return processed;
   }
 }
-
-var global$1 = (typeof global !== "undefined" ? global :
-  typeof self !== "undefined" ? self :
-  typeof window !== "undefined" ? window : {});
 
 var lookup = [];
 var revLookup = [];
@@ -6024,16 +7021,6 @@ if (typeof Object.create === 'function'){
   };
 }
 
-var getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors ||
-  function getOwnPropertyDescriptors(obj) {
-    var keys = Object.keys(obj);
-    var descriptors = {};
-    for (var i = 0; i < keys.length; i++) {
-      descriptors[keys[i]] = Object.getOwnPropertyDescriptor(obj, keys[i]);
-    }
-    return descriptors;
-  };
-
 var formatRegExp = /%[sdj%]/g;
 function format(f) {
   if (!isString(f)) {
@@ -6518,64 +7505,6 @@ function _extend(origin, add) {
 function hasOwnProperty(obj, prop) {
   return Object.prototype.hasOwnProperty.call(obj, prop);
 }
-
-var kCustomPromisifiedSymbol = typeof Symbol !== 'undefined' ? Symbol('util.promisify.custom') : undefined;
-
-function promisify(original) {
-  if (typeof original !== 'function')
-    throw new TypeError('The "original" argument must be of type Function');
-
-  if (kCustomPromisifiedSymbol && original[kCustomPromisifiedSymbol]) {
-    var fn = original[kCustomPromisifiedSymbol];
-    if (typeof fn !== 'function') {
-      throw new TypeError('The "util.promisify.custom" argument must be of type Function');
-    }
-    Object.defineProperty(fn, kCustomPromisifiedSymbol, {
-      value: fn, enumerable: false, writable: false, configurable: true
-    });
-    return fn;
-  }
-
-  function fn() {
-    var promiseResolve, promiseReject;
-    var promise = new Promise(function (resolve, reject) {
-      promiseResolve = resolve;
-      promiseReject = reject;
-    });
-
-    var args = [];
-    for (var i = 0; i < arguments.length; i++) {
-      args.push(arguments[i]);
-    }
-    args.push(function (err, value) {
-      if (err) {
-        promiseReject(err);
-      } else {
-        promiseResolve(value);
-      }
-    });
-
-    try {
-      original.apply(this, args);
-    } catch (err) {
-      promiseReject(err);
-    }
-
-    return promise;
-  }
-
-  Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
-
-  if (kCustomPromisifiedSymbol) Object.defineProperty(fn, kCustomPromisifiedSymbol, {
-    value: fn, enumerable: false, writable: false, configurable: true
-  });
-  return Object.defineProperties(
-    fn,
-    getOwnPropertyDescriptors(original)
-  );
-}
-
-promisify.custom = kCustomPromisifiedSymbol;
 
 function BufferList() {
   this.head = null;
@@ -8574,7 +9503,6 @@ class ResourceIdsReader extends EventEmitter {
     });
   }
   _cancel(reason) {
-    console.warn("Stream cancelled", reason);
   }
 }
 
@@ -8623,7 +9551,7 @@ class ResourceReader extends EventEmitter {
     return this;
   }
   async _transform(chunk, encoding, callback) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       await PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
         this.emit("error", error, content);
       }).process(async (id) => {
@@ -8631,10 +9559,8 @@ class ResourceReader extends EventEmitter {
         this.push(data);
         return data;
       });
-      callback();
-    } catch (error) {
-      callback(error);
-    }
+    });
+    callback(err);
   }
   resume() {
     this.input.resume();
@@ -8683,14 +9609,23 @@ class ResourceWriter extends EventEmitter {
     this.writing = true;
     while (this.buffer.length > 0) {
       const batch = this.buffer.splice(0, this.batchSize);
-      try {
+      const [ok, err] = await tryFn(async () => {
         await PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
           this.emit("error", error, content);
         }).process(async (item) => {
-          await this.resource.insert(item);
+          const [ok2, err2, result] = await tryFn(async () => {
+            const res = await this.resource.insert(item);
+            return res;
+          });
+          if (!ok2) {
+            this.emit("error", err2, item);
+            return null;
+          }
+          return result;
         });
-      } catch (error) {
-        this.emit("error", error);
+      });
+      if (!ok) {
+        this.emit("error", err);
       }
     }
     this.writing = false;
@@ -8705,6 +9640,9 @@ class ResourceWriter extends EventEmitter {
 
 function streamToString(stream) {
   return new Promise((resolve, reject) => {
+    if (!stream) {
+      return reject(new Error("streamToString: stream is undefined"));
+    }
     const chunks = [];
     stream.on("data", (chunk) => chunks.push(chunk));
     stream.on("error", reject);
@@ -8804,26 +9742,74 @@ function getSizeBreakdown(mappedObject) {
     }
   };
 }
-
-const S3_METADATA_LIMIT_BYTES = 2048;
-async function handleInsert$4({ resource, data, mappedData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+function calculateSystemOverhead(config = {}) {
+  const { version = "1", timestamps = false, id = "" } = config;
+  const systemFields = {
+    "_v": String(version)
+    // Version field (e.g., "1", "10", "100")
+  };
+  if (timestamps) {
+    systemFields.createdAt = "2024-01-01T00:00:00.000Z";
+    systemFields.updatedAt = "2024-01-01T00:00:00.000Z";
   }
-  return { mappedData, body: "" };
+  if (id) {
+    systemFields.id = id;
+  }
+  const overheadObject = {};
+  for (const [key, value] of Object.entries(systemFields)) {
+    overheadObject[key] = value;
+  }
+  return calculateTotalSize(overheadObject);
 }
-async function handleUpdate$4({ resource, id, data, mappedData }) {
+function calculateEffectiveLimit(config = {}) {
+  const { s3Limit = 2048, systemConfig = {} } = config;
+  const overhead = calculateSystemOverhead(systemConfig);
+  return s3Limit - overhead;
+}
+
+const S3_METADATA_LIMIT_BYTES = 2047;
+async function handleInsert$4({ resource, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(mappedData) };
+}
+async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  }
+  return { mappedData, body: JSON.stringify(mappedData) };
 }
 async function handleUpsert$4({ resource, id, data, mappedData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
   return { mappedData, body: "" };
 }
@@ -8840,46 +9826,70 @@ var enforceLimits = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$4
 });
 
-async function handleInsert$3({ resource, data, mappedData }) {
+async function handleInsert$3({ resource, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  if (totalSize > effectiveLimit) {
     resource.emit("exceedsLimit", {
       operation: "insert",
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
-async function handleUpdate$3({ resource, id, data, mappedData }) {
+async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
     resource.emit("exceedsLimit", {
       operation: "update",
       id,
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
-async function handleUpsert$3({ resource, id, data, mappedData }) {
+async function handleUpsert$3({ resource, id, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
-  if (totalSize > S3_METADATA_LIMIT_BYTES) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
     resource.emit("exceedsLimit", {
       operation: "upsert",
       id,
       totalSize,
-      limit: S3_METADATA_LIMIT_BYTES,
-      excess: totalSize - S3_METADATA_LIMIT_BYTES,
-      data
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
     });
   }
-  return { mappedData, body: "" };
+  return { mappedData, body: JSON.stringify(data) };
 }
 async function handleGet$3({ resource, metadata, body }) {
   return { metadata, body };
@@ -8893,53 +9903,100 @@ var userManaged = /*#__PURE__*/Object.freeze({
   handleUpsert: handleUpsert$3
 });
 
-const TRUNCATE_SUFFIX = "...";
-const TRUNCATE_SUFFIX_BYTES = calculateUTF8Bytes(TRUNCATE_SUFFIX);
-async function handleInsert$2({ resource, data, mappedData }) {
-  return handleTruncate({ resource, data, mappedData });
+const TRUNCATED_FLAG = "$truncated";
+const TRUNCATED_FLAG_VALUE = "true";
+const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8Bytes(TRUNCATED_FLAG_VALUE);
+async function handleInsert$2({ resource, data, mappedData, originalData }) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+  const resultFields = {};
+  let currentSize = 0;
+  let truncated = false;
+  if (mappedData._v) {
+    resultFields._v = mappedData._v;
+    currentSize += attributeSizes._v;
+  }
+  for (const [fieldName, size] of sortedFields) {
+    if (fieldName === "_v") continue;
+    const fieldValue = mappedData[fieldName];
+    const spaceNeeded = size + (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+    if (currentSize + spaceNeeded <= effectiveLimit) {
+      resultFields[fieldName] = fieldValue;
+      currentSize += size;
+    } else {
+      const availableSpace = effectiveLimit - currentSize - (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+      if (availableSpace > 0) {
+        const truncatedValue = truncateValue(fieldValue, availableSpace);
+        resultFields[fieldName] = truncatedValue;
+        truncated = true;
+        currentSize += calculateUTF8Bytes(truncatedValue);
+      } else {
+        resultFields[fieldName] = "";
+        truncated = true;
+      }
+      break;
+    }
+  }
+  let finalSize = calculateTotalSize(resultFields) + (truncated ? TRUNCATED_FLAG_BYTES : 0);
+  while (finalSize > effectiveLimit) {
+    const fieldNames = Object.keys(resultFields).filter((f) => f !== "_v" && f !== "$truncated");
+    if (fieldNames.length === 0) {
+      break;
+    }
+    const lastField = fieldNames[fieldNames.length - 1];
+    resultFields[lastField] = "";
+    finalSize = calculateTotalSize(resultFields) + TRUNCATED_FLAG_BYTES;
+    truncated = true;
+  }
+  if (truncated) {
+    resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
+  }
+  return { mappedData: resultFields, body: JSON.stringify(mappedData) };
 }
-async function handleUpdate$2({ resource, id, data, mappedData }) {
-  return handleTruncate({ resource, data, mappedData });
+async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
+  return handleInsert$2({ resource, data, mappedData, originalData });
 }
 async function handleUpsert$2({ resource, id, data, mappedData }) {
-  return handleTruncate({ resource, data, mappedData });
+  return handleInsert$2({ resource, data, mappedData });
 }
 async function handleGet$2({ resource, metadata, body }) {
   return { metadata, body };
 }
-function handleTruncate({ resource, data, mappedData }) {
-  const attributeSizes = calculateAttributeSizes(mappedData);
-  const sortedAttributes = Object.entries(attributeSizes).sort(([, sizeA], [, sizeB]) => sizeA - sizeB);
-  const result = {};
-  let currentSize = 0;
-  for (const [key, size] of sortedAttributes) {
-    const availableSpace = S3_METADATA_LIMIT_BYTES - currentSize;
-    if (size <= availableSpace) {
-      result[key] = mappedData[key];
-      currentSize += size;
-    } else if (availableSpace > TRUNCATE_SUFFIX_BYTES) {
-      const maxContentBytes = availableSpace - TRUNCATE_SUFFIX_BYTES;
-      const originalValue = transformValue(mappedData[key]);
-      let truncatedValue = "";
-      let bytes = 0;
-      for (let i = 0; i < originalValue.length; i++) {
-        const char = originalValue[i];
-        const charBytes = calculateUTF8Bytes(char);
-        if (bytes + charBytes <= maxContentBytes) {
-          truncatedValue += char;
-          bytes += charBytes;
-        } else {
-          break;
-        }
-      }
-      result[key] = truncatedValue + TRUNCATE_SUFFIX;
-      currentSize = S3_METADATA_LIMIT_BYTES;
-      break;
-    } else {
-      break;
-    }
+function truncateValue(value, maxBytes) {
+  if (typeof value === "string") {
+    return truncateString(value, maxBytes);
+  } else if (typeof value === "object" && value !== null) {
+    const jsonStr = JSON.stringify(value);
+    return truncateString(jsonStr, maxBytes);
+  } else {
+    const stringValue = String(value);
+    return truncateString(stringValue, maxBytes);
   }
-  return { mappedData: result, body: "" };
+}
+function truncateString(str, maxBytes) {
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(str);
+  if (bytes.length <= maxBytes) {
+    return str;
+  }
+  let length = str.length;
+  while (length > 0) {
+    const truncated = str.substring(0, length);
+    bytes = encoder.encode(truncated);
+    if (bytes.length <= maxBytes) {
+      return truncated;
+    }
+    length--;
+  }
+  return "";
 }
 
 var dataTruncate = /*#__PURE__*/Object.freeze({
@@ -8953,54 +10010,70 @@ var dataTruncate = /*#__PURE__*/Object.freeze({
 const OVERFLOW_FLAG = "$overflow";
 const OVERFLOW_FLAG_VALUE = "true";
 const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
-async function handleInsert$1({ resource, data, mappedData }) {
-  return handleOverflow({ resource, data, mappedData });
+async function handleInsert$1({ resource, data, mappedData, originalData }) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+  const metadataFields = {};
+  const bodyFields = {};
+  let currentSize = 0;
+  let willOverflow = false;
+  if (mappedData._v) {
+    metadataFields._v = mappedData._v;
+    currentSize += attributeSizes._v;
+  }
+  let reservedLimit = effectiveLimit;
+  for (const [fieldName, size] of sortedFields) {
+    if (fieldName === "_v") continue;
+    if (!willOverflow && currentSize + size > effectiveLimit) {
+      reservedLimit -= OVERFLOW_FLAG_BYTES;
+      willOverflow = true;
+    }
+    if (!willOverflow && currentSize + size <= reservedLimit) {
+      metadataFields[fieldName] = mappedData[fieldName];
+      currentSize += size;
+    } else {
+      bodyFields[fieldName] = mappedData[fieldName];
+      willOverflow = true;
+    }
+  }
+  if (willOverflow) {
+    metadataFields[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
+  }
+  const hasOverflow = Object.keys(bodyFields).length > 0;
+  let body = hasOverflow ? JSON.stringify(bodyFields) : "";
+  if (!hasOverflow) body = "{}";
+  return { mappedData: metadataFields, body };
 }
-async function handleUpdate$1({ resource, id, data, mappedData }) {
-  return handleOverflow({ resource, data, mappedData });
+async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
+  return handleInsert$1({ resource, data, mappedData, originalData });
 }
 async function handleUpsert$1({ resource, id, data, mappedData }) {
-  return handleOverflow({ resource, data, mappedData });
+  return handleInsert$1({ resource, data, mappedData });
 }
 async function handleGet$1({ resource, metadata, body }) {
-  if (metadata[OVERFLOW_FLAG] === OVERFLOW_FLAG_VALUE) {
-    try {
-      const bodyData = body ? JSON.parse(body) : {};
-      const cleanMetadata = { ...metadata };
-      delete cleanMetadata[OVERFLOW_FLAG];
-      const mergedData = { ...cleanMetadata, ...bodyData };
-      return { metadata: mergedData, body: "" };
-    } catch (error) {
-      return { metadata, body };
-    }
-  }
-  return { metadata, body };
-}
-function handleOverflow({ resource, data, mappedData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  if (totalSize <= S3_METADATA_LIMIT_BYTES) {
-    return { mappedData, body: "" };
-  }
-  const availableMetadataSpace = S3_METADATA_LIMIT_BYTES - OVERFLOW_FLAG_BYTES;
-  const attributeSizes = calculateAttributeSizes(mappedData);
-  const sortedAttributes = Object.entries(attributeSizes).sort(([, sizeA], [, sizeB]) => sizeA - sizeB);
-  const metadataAttributes = {};
-  const bodyAttributes = {};
-  let currentMetadataSize = 0;
-  for (const [key, size] of sortedAttributes) {
-    if (currentMetadataSize + size <= availableMetadataSpace) {
-      metadataAttributes[key] = mappedData[key];
-      currentMetadataSize += size;
+  let bodyData = {};
+  if (body && body.trim() !== "") {
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
     } else {
-      bodyAttributes[key] = mappedData[key];
+      bodyData = {};
     }
   }
-  metadataAttributes[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
-  const bodyContent = Object.keys(bodyAttributes).length > 0 ? JSON.stringify(bodyAttributes) : "";
-  return {
-    mappedData: metadataAttributes,
-    body: bodyContent
+  const mergedData = {
+    ...bodyData,
+    ...metadata
   };
+  delete mergedData.$overflow;
+  return { metadata: mergedData, body };
 }
 
 var bodyOverflow = /*#__PURE__*/Object.freeze({
@@ -9012,40 +10085,40 @@ var bodyOverflow = /*#__PURE__*/Object.freeze({
 });
 
 async function handleInsert({ resource, data, mappedData }) {
-  const bodyContent = JSON.stringify(mappedData);
-  return {
-    mappedData: {},
-    body: bodyContent
+  const metadataOnly = {
+    "_v": mappedData._v || String(resource.version)
   };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  const body = JSON.stringify(mappedData);
+  return { mappedData: metadataOnly, body };
 }
 async function handleUpdate({ resource, id, data, mappedData }) {
-  const bodyContent = JSON.stringify(mappedData);
-  return {
-    mappedData: {},
-    body: bodyContent
+  const metadataOnly = {
+    "_v": mappedData._v || String(resource.version)
   };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  const body = JSON.stringify(mappedData);
+  return { mappedData: metadataOnly, body };
 }
 async function handleUpsert({ resource, id, data, mappedData }) {
-  const bodyContent = JSON.stringify(mappedData);
-  return {
-    mappedData: {},
-    body: bodyContent
-  };
+  return handleInsert({ resource, data, mappedData });
 }
 async function handleGet({ resource, metadata, body }) {
-  try {
-    const bodyData = body ? JSON.parse(body) : {};
-    return {
-      metadata: bodyData,
-      body: ""
-    };
-  } catch (error) {
-    console.warn(`Failed to parse body-only content:`, error.message);
-    return {
-      metadata,
-      body: ""
-    };
+  let bodyData = {};
+  if (body && body.trim() !== "") {
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
+    } else {
+      bodyData = {};
+    }
   }
+  const mergedData = {
+    ...bodyData,
+    ...metadata
+    // metadata contains _v
+  };
+  return { metadata: mergedData, body };
 }
 
 var bodyOnly = /*#__PURE__*/Object.freeze({
@@ -9073,9 +10146,6 @@ function getBehavior(behaviorName) {
 const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
 const DEFAULT_BEHAVIOR = "user-managed";
 
-function createIdGeneratorWithSize(size) {
-  return customAlphabet(urlAlphabet, size);
-}
 class Resource extends EventEmitter {
   /**
    * Create a new Resource instance
@@ -9118,8 +10188,7 @@ class Resource extends EventEmitter {
    *   },
    *   hooks: {
    *     beforeInsert: [async (data) => {
-   *       console.log('Pre-insert hook:', data);
-   *       return data;
+      *       return data;
    *     }]
    *   }
    * });
@@ -9148,12 +10217,12 @@ class Resource extends EventEmitter {
    *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
    * });
    */
-  constructor(config) {
+  constructor(config = {}) {
     super();
+    this._instanceId = Math.random().toString(36).slice(2, 8);
     const validation = validateResourceConfig(config);
     if (!validation.isValid) {
-      throw new Error(`Invalid Resource ${config.name} configuration:
-${validation.errors.join("\n")}`);
+      throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: "constructor", suggestion: "Check resource config and attributes." });
     }
     const {
       name,
@@ -9202,7 +10271,8 @@ ${validation.errors.join("\n")}`);
       afterDelete: []
     };
     this.attributes = attributes || {};
-    this.applyConfiguration();
+    this.map = config.map;
+    this.applyConfiguration({ map: this.map });
     if (hooks) {
       for (const [event, hooksArr] of Object.entries(hooks)) {
         if (Array.isArray(hooksArr) && this.hooks[event]) {
@@ -9214,6 +10284,7 @@ ${validation.errors.join("\n")}`);
         }
       }
     }
+    this._initMiddleware();
   }
   /**
    * Configure ID generator based on provided options
@@ -9227,10 +10298,10 @@ ${validation.errors.join("\n")}`);
       return customIdGenerator;
     }
     if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
-      return createIdGeneratorWithSize(customIdGenerator);
+      return customAlphabet(urlAlphabet, customIdGenerator);
     }
-    if (typeof idSize === "number" && idSize > 0) {
-      return createIdGeneratorWithSize(idSize);
+    if (typeof idSize === "number" && idSize > 0 && idSize !== 22) {
+      return customAlphabet(urlAlphabet, idSize);
     }
     return idGenerator;
   }
@@ -9257,13 +10328,14 @@ ${validation.errors.join("\n")}`);
     exported.autoDecrypt = this.config.autoDecrypt;
     exported.cache = this.config.cache;
     exported.hooks = this.hooks;
+    exported.map = this.map;
     return exported;
   }
   /**
    * Apply configuration settings (timestamps, partitions, hooks)
    * This method ensures that all configuration-dependent features are properly set up
    */
-  applyConfiguration() {
+  applyConfiguration({ map } = {}) {
     if (this.config.timestamps) {
       if (!this.attributes.createdAt) {
         this.attributes.createdAt = "string|optional";
@@ -9307,7 +10379,8 @@ ${validation.errors.join("\n")}`);
       options: {
         autoDecrypt: this.config.autoDecrypt,
         allNestedObjectsOptional: this.config.allNestedObjectsOptional
-      }
+      },
+      map: map || this.map
     });
     this.validatePartitions();
   }
@@ -9318,7 +10391,7 @@ ${validation.errors.join("\n")}`);
   updateAttributes(newAttributes) {
     const oldAttributes = this.attributes;
     this.attributes = newAttributes;
-    this.applyConfiguration();
+    this.applyConfiguration({ map: this.schema?.map });
     return { oldAttributes, newAttributes };
   }
   /**
@@ -9377,7 +10450,7 @@ ${validation.errors.join("\n")}`);
       isValid: false,
       errors: []
     };
-    const check = await this.schema.validate(data, { mutateOriginal: true });
+    const check = await this.schema.validate(data, { mutateOriginal: false });
     if (check === true) {
       result.isValid = true;
     } else {
@@ -9405,9 +10478,7 @@ ${validation.errors.join("\n")}`);
       }
       for (const fieldName of Object.keys(partitionDef.fields)) {
         if (!this.fieldExistsInAttributes(fieldName)) {
-          throw new Error(
-            `Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(", ")}.`
-          );
+          throw new PartitionError(`Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(", ")}.`, { resourceName: this.name, partitionName, fieldName, availableFields: currentAttributes, operation: "validatePartitions" });
         }
       }
     }
@@ -9458,16 +10529,13 @@ ${validation.errors.join("\n")}`);
       if (transformedValue instanceof Date) {
         transformedValue = transformedValue.toISOString().split("T")[0];
       } else if (typeof transformedValue === "string") {
-        try {
-          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
-            transformedValue = transformedValue.split("T")[0];
-          } else {
-            const date = new Date(transformedValue);
-            if (!isNaN(date.getTime())) {
-              transformedValue = date.toISOString().split("T")[0];
-            }
+        if (transformedValue.includes("T") && transformedValue.includes("Z")) {
+          transformedValue = transformedValue.split("T")[0];
+        } else {
+          const date = new Date(transformedValue);
+          if (!isNaN(date.getTime())) {
+            transformedValue = date.toISOString().split("T")[0];
           }
-        } catch (e) {
         }
       }
     }
@@ -9479,7 +10547,8 @@ ${validation.errors.join("\n")}`);
    * @returns {string} The main S3 key path
    */
   getResourceKey(id) {
-    return join(`resource=${this.name}`, `data`, `id=${id}`);
+    const key = join("resource=" + this.name, "data", `id=${id}`);
+    return key;
   }
   /**
    * Generate partition key for a resource in a specific partition
@@ -9506,7 +10575,7 @@ ${validation.errors.join("\n")}`);
    */
   getPartitionKey({ partitionName, id, data }) {
     if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new Error(`Partition '${partitionName}' not found`);
+      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getPartitionKey" });
     }
     const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
@@ -9572,8 +10641,7 @@ ${validation.errors.join("\n")}`);
    *   email: 'john@example.com',
    *   age: 30
    * });
-   * console.log(user.id); // Auto-generated ID
-   * 
+      * 
    * // Insert with custom ID
    * const user = await resource.insert({
    *   id: 'user-123',
@@ -9582,26 +10650,38 @@ ${validation.errors.join("\n")}`);
    * });
    */
   async insert({ id, ...attributes }) {
+    const exists = await this.exists(id);
+    if (exists) throw new Error(`Resource with id '${id}' already exists`);
+    this.getResourceKey(id || "(auto)");
     if (this.options.timestamps) {
       attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
-    const completeData = { id, ...attributes };
+    const attributesWithDefaults = this.applyDefaults(attributes);
+    const completeData = { id, ...attributesWithDefaults };
     const preProcessedData = await this.executeHooks("beforeInsert", completeData);
+    const extraProps = Object.keys(preProcessedData).filter(
+      (k) => !(k in completeData) || preProcessedData[k] !== completeData[k]
+    );
+    const extraData = {};
+    for (const k of extraProps) extraData[k] = preProcessedData[k];
     const {
       errors,
       isValid,
       data: validated
     } = await this.validate(preProcessedData);
     if (!isValid) {
+      const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Insert failed";
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
         resourceName: this.name,
         attributes: preProcessedData,
-        validation: errors
+        validation: errors,
+        message: errorMsg
       });
     }
     const { id: validatedId, ...validatedAttributes } = validated;
+    Object.assign(validatedAttributes, extraData);
     const finalId = validatedId || id || this.idGenerator();
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
@@ -9609,34 +10689,65 @@ ${validation.errors.join("\n")}`);
     const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
       resource: this,
       data: validatedAttributes,
-      mappedData
+      mappedData,
+      originalData: completeData
     });
     const finalMetadata = processedMetadata;
     const key = this.getResourceKey(finalId);
     let contentType = void 0;
     if (body && body !== "") {
-      try {
-        JSON.parse(body);
-        contentType = "application/json";
-      } catch {
-      }
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = "application/json";
     }
-    await this.client.putObject({
-      metadata: finalMetadata,
+    if (this.behavior === "body-only" && (!body || body === "")) {
+      throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
+    }
+    const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
       key,
       body,
       contentType,
-      contentLength: this.calculateContentLength(body)
-    });
-    const insertedData = await this.composeFullObjectFromWrite({
+      metadata: finalMetadata
+    }));
+    if (!okPut) {
+      const msg = errPut && errPut.message ? errPut.message : "";
+      if (msg.includes("metadata headers exceed") || msg.includes("Insert failed")) {
+        const totalSize = calculateTotalSize(finalMetadata);
+        const effectiveLimit = calculateEffectiveLimit({
+          s3Limit: 2047,
+          systemConfig: {
+            version: this.version,
+            timestamps: this.config.timestamps,
+            id: finalId
+          }
+        });
+        const excess = totalSize - effectiveLimit;
+        errPut.totalSize = totalSize;
+        errPut.limit = 2047;
+        errPut.effectiveLimit = effectiveLimit;
+        errPut.excess = excess;
+        throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "insert", id: finalId, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
+      }
+      throw mapAwsError(errPut, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "insert",
+        id: finalId
+      });
+    }
+    let insertedData = await this.composeFullObjectFromWrite({
       id: finalId,
       metadata: finalMetadata,
       body,
       behavior: this.behavior
     });
-    await this.executeHooks("afterInsert", insertedData);
-    this.emit("insert", insertedData);
-    return insertedData;
+    const finalResult = await this.executeHooks("afterInsert", insertedData);
+    this.emit("insert", {
+      ...insertedData,
+      $before: { ...completeData },
+      $after: { ...finalResult }
+    });
+    return finalResult;
   }
   /**
    * Retrieve a resource object by ID
@@ -9644,127 +10755,80 @@ ${validation.errors.join("\n")}`);
    * @returns {Promise<Object>} The resource object with all attributes and metadata
    * @example
    * const user = await resource.get('user-123');
-   * console.log(user.name); // 'John Doe'
-   * console.log(user._lastModified); // Date object
-   * console.log(user._hasContent); // boolean
-   */
+            */
   async get(id) {
+    if (isObject$1(id)) throw new Error(`id cannot be an object`);
+    if (isEmpty(id)) throw new Error("id cannot be empty");
     const key = this.getResourceKey(id);
-    try {
-      const request = await this.client.headObject(key);
-      const objectVersionRaw = request.Metadata?._v || this.version;
-      const objectVersion = typeof objectVersionRaw === "string" && objectVersionRaw.startsWith("v") ? objectVersionRaw.slice(1) : objectVersionRaw;
-      const schema = await this.getSchemaForVersion(objectVersion);
-      let metadata = await schema.unmapper(request.Metadata);
-      const behaviorImpl = getBehavior(this.behavior);
-      let body = "";
-      if (request.ContentLength > 0) {
-        try {
-          const fullObject = await this.client.getObject(key);
-          body = await streamToString(fullObject.Body);
-        } catch (error) {
-          console.warn(`Failed to read body for resource ${id}:`, error.message);
-          body = "";
-        }
-      }
-      const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-        resource: this,
-        metadata,
-        body
+    const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      throw mapAwsError(err, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "get",
+        id
       });
-      let data = processedMetadata;
-      data.id = id;
-      data._contentLength = request.ContentLength;
-      data._lastModified = request.LastModified;
-      data._hasContent = request.ContentLength > 0;
-      data._mimeType = request.ContentType || null;
-      data._v = objectVersion;
-      if (request.VersionId) data._versionId = request.VersionId;
-      if (request.Expiration) data._expiresAt = request.Expiration;
-      data._definitionHash = this.getDefinitionHash();
-      if (objectVersion !== this.version) {
-        data = await this.applyVersionMapping(data, objectVersion, this.version);
-      }
-      this.emit("get", data);
-      return data;
-    } catch (error) {
-      if (error.message.includes("Cipher job failed") || error.message.includes("OperationError") || error.originalError?.message?.includes("Cipher job failed")) {
-        try {
-          console.warn(`Decryption failed for resource ${id}, attempting to get raw metadata`);
-          const request = await this.client.headObject(key);
-          const objectVersion = this.extractVersionFromKey(key) || this.version;
-          const tempSchema = new Schema({
-            name: this.name,
-            attributes: this.attributes,
-            passphrase: this.passphrase,
-            version: objectVersion,
-            options: {
-              ...this.config,
-              autoDecrypt: false,
-              // Disable decryption
-              autoEncrypt: false
-              // Disable encryption
-            }
-          });
-          let metadata = await tempSchema.unmapper(request.Metadata);
-          const behaviorImpl = getBehavior(this.behavior);
-          let body = "";
-          if (request.ContentLength > 0) {
-            try {
-              const fullObject = await this.client.getObject(key);
-              body = await streamToString(fullObject.Body);
-            } catch (bodyError) {
-              console.warn(`Failed to read body for resource ${id}:`, bodyError.message);
-              body = "";
-            }
-          }
-          const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-            resource: this,
-            metadata,
-            body
-          });
-          let data = processedMetadata;
-          data.id = id;
-          data._contentLength = request.ContentLength;
-          data._lastModified = request.LastModified;
-          data._hasContent = request.ContentLength > 0;
-          data._mimeType = request.ContentType || null;
-          data._version = objectVersion;
-          data._decryptionFailed = true;
-          if (request.VersionId) data._versionId = request.VersionId;
-          if (request.Expiration) data._expiresAt = request.Expiration;
-          data._definitionHash = this.getDefinitionHash();
-          this.emit("get", data);
-          return data;
-        } catch (fallbackError) {
-          console.error(`Fallback attempt also failed for resource ${id}:`, fallbackError.message);
-        }
-      }
-      const enhancedError = new Error(`Failed to get resource with id '${id}': ${error.message}`);
-      enhancedError.originalError = error;
-      enhancedError.resourceId = id;
-      enhancedError.resourceKey = key;
-      throw enhancedError;
     }
+    if (request.ContentLength === 0) {
+      const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
+      noContentErr.name = "NoSuchKey";
+      throw mapAwsError(noContentErr, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "get",
+        id
+      });
+    }
+    const objectVersionRaw = request.Metadata?._v || this.version;
+    const objectVersion = typeof objectVersionRaw === "string" && objectVersionRaw.startsWith("v") ? objectVersionRaw.slice(1) : objectVersionRaw;
+    const schema = await this.getSchemaForVersion(objectVersion);
+    let metadata = await schema.unmapper(request.Metadata);
+    const behaviorImpl = getBehavior(this.behavior);
+    let body = "";
+    if (request.ContentLength > 0) {
+      const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
+      if (okBody) {
+        body = await streamToString(fullObject.Body);
+      } else {
+        body = "";
+      }
+    }
+    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+      resource: this,
+      metadata,
+      body
+    });
+    let data = await this.composeFullObjectFromWrite({
+      id,
+      metadata: processedMetadata,
+      body,
+      behavior: this.behavior
+    });
+    data._contentLength = request.ContentLength;
+    data._lastModified = request.LastModified;
+    data._hasContent = request.ContentLength > 0;
+    data._mimeType = request.ContentType || null;
+    data._v = objectVersion;
+    if (request.VersionId) data._versionId = request.VersionId;
+    if (request.Expiration) data._expiresAt = request.Expiration;
+    data._definitionHash = this.getDefinitionHash();
+    if (objectVersion !== this.version) {
+      data = await this.applyVersionMapping(data, objectVersion, this.version);
+    }
+    this.emit("get", data);
+    const value = data;
+    return value;
   }
   /**
    * Check if a resource exists by ID
-   * @param {string} id - Resource ID
    * @returns {Promise<boolean>} True if resource exists, false otherwise
-   * @example
-   * const exists = await resource.exists('user-123');
-   * if (exists) {
-   *   console.log('User exists');
-   * }
    */
   async exists(id) {
-    try {
-      const key = this.getResourceKey(id);
-      await this.client.headObject(key);
-      return true;
-    } catch (error) {
-      return false;
-    }
+    const key = this.getResourceKey(id);
+    const [ok, err] = await tryFn(() => this.client.headObject(key));
+    return ok;
   }
   /**
    * Update an existing resource object
@@ -9782,25 +10846,65 @@ ${validation.errors.join("\n")}`);
    * const updatedUser = await resource.update('user-123', {
    *   email: 'newemail@example.com'
    * });
-   * console.log(updatedUser.updatedAt); // ISO timestamp
-   */
+      */
   async update(id, attributes) {
-    const originalData = await this.get(id);
-    if (this.config.timestamps) {
-      attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (isEmpty(id)) {
+      throw new Error("id cannot be empty");
     }
-    const preProcessedData = await this.executeHooks("beforeUpdate", attributes);
+    const exists = await this.exists(id);
+    if (!exists) {
+      throw new Error(`Resource with id '${id}' does not exist`);
+    }
+    const originalData = await this.get(id);
+    const attributesClone = cloneDeep(attributes);
+    let mergedData = cloneDeep(originalData);
+    for (const [key2, value] of Object.entries(attributesClone)) {
+      if (key2.includes(".")) {
+        let ref = mergedData;
+        const parts = key2.split(".");
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (typeof ref[parts[i]] !== "object" || ref[parts[i]] === null) {
+            ref[parts[i]] = {};
+          }
+          ref = ref[parts[i]];
+        }
+        ref[parts[parts.length - 1]] = cloneDeep(value);
+      } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        mergedData[key2] = merge({}, mergedData[key2], value);
+      } else {
+        mergedData[key2] = cloneDeep(value);
+      }
+    }
+    if (this.config.timestamps) {
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      mergedData.updatedAt = now;
+      if (!mergedData.metadata) mergedData.metadata = {};
+      mergedData.metadata.updatedAt = now;
+    }
+    const preProcessedData = await this.executeHooks("beforeUpdate", cloneDeep(mergedData));
     const completeData = { ...originalData, ...preProcessedData, id };
-    const { isValid, errors, data: validated } = await this.validate(completeData);
+    const { isValid, errors, data } = await this.validate(cloneDeep(completeData));
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
         resourceName: this.name,
         attributes: preProcessedData,
-        validation: errors
+        validation: errors,
+        message: "validation: " + (errors && errors.length ? JSON.stringify(errors) : "unknown")
       });
     }
-    const { id: validatedId, ...validatedAttributes } = validated;
+    await this.schema.mapper(data);
+    const earlyBehaviorImpl = getBehavior(this.behavior);
+    const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
+    tempMappedData._v = String(this.version);
+    await earlyBehaviorImpl.handleUpdate({
+      resource: this,
+      id,
+      data: { ...originalData, ...preProcessedData },
+      mappedData: tempMappedData,
+      originalData: { ...attributesClone, id }
+    });
+    const { id: validatedId, ...validatedAttributes } = data;
     const oldData = { ...originalData, id };
     const newData = { ...validatedAttributes, id };
     await this.handlePartitionReferenceUpdates(oldData, newData);
@@ -9811,54 +10915,85 @@ ${validation.errors.join("\n")}`);
       resource: this,
       id,
       data: validatedAttributes,
-      mappedData
+      mappedData,
+      originalData: { ...attributesClone, id }
     });
     const finalMetadata = processedMetadata;
     const key = this.getResourceKey(id);
     let existingContentType = void 0;
     let finalBody = body;
     if (body === "" && this.behavior !== "body-overflow") {
-      try {
-        const existingObject = await this.client.getObject(key);
-        if (existingObject.ContentLength > 0) {
-          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
-          const existingBodyString = existingBodyBuffer.toString();
-          try {
-            JSON.parse(existingBodyString);
-          } catch {
-            finalBody = existingBodyBuffer;
-            existingContentType = existingObject.ContentType;
-          }
+      const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+      if (ok2 && existingObject.ContentLength > 0) {
+        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+        const existingBodyString = existingBodyBuffer.toString();
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        if (!okParse) {
+          finalBody = existingBodyBuffer;
+          existingContentType = existingObject.ContentType;
         }
-      } catch (error) {
       }
     }
     let finalContentType = existingContentType;
     if (finalBody && finalBody !== "" && !finalContentType) {
-      try {
-        JSON.parse(finalBody);
-        finalContentType = "application/json";
-      } catch {
-      }
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      if (okParse) finalContentType = "application/json";
     }
     if (this.versioningEnabled && originalData._v !== this.version) {
       await this.createHistoricalVersion(id, originalData);
     }
-    await this.client.putObject({
+    const [ok, err] = await tryFn(() => this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
       metadata: finalMetadata
-    });
+    }));
+    if (!ok && err && err.message && err.message.includes("metadata headers exceed")) {
+      const totalSize = calculateTotalSize(finalMetadata);
+      const effectiveLimit = calculateEffectiveLimit({
+        s3Limit: 2047,
+        systemConfig: {
+          version: this.version,
+          timestamps: this.config.timestamps,
+          id
+        }
+      });
+      const excess = totalSize - effectiveLimit;
+      err.totalSize = totalSize;
+      err.limit = 2047;
+      err.effectiveLimit = effectiveLimit;
+      err.excess = excess;
+      this.emit("exceedsLimit", {
+        operation: "update",
+        totalSize,
+        limit: 2047,
+        effectiveLimit,
+        excess,
+        data: validatedAttributes
+      });
+      throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "update", id, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
+    } else if (!ok) {
+      throw mapAwsError(err, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "update",
+        id
+      });
+    }
     const updatedData = await this.composeFullObjectFromWrite({
       id,
       metadata: finalMetadata,
       body: finalBody,
       behavior: this.behavior
     });
-    await this.executeHooks("afterUpdate", updatedData);
-    this.emit("update", originalData, updatedData);
-    return updatedData;
+    const finalResult = await this.executeHooks("afterUpdate", updatedData);
+    this.emit("update", {
+      ...updatedData,
+      $before: { ...originalData },
+      $after: { ...finalResult }
+    });
+    return finalResult;
   }
   /**
    * Delete a resource object by ID
@@ -9866,20 +11001,44 @@ ${validation.errors.join("\n")}`);
    * @returns {Promise<Object>} S3 delete response
    * @example
    * await resource.delete('user-123');
-   * console.log('User deleted successfully');
    */
   async delete(id) {
+    if (isEmpty(id)) {
+      throw new Error("id cannot be empty");
+    }
     let objectData;
-    try {
-      objectData = await this.get(id);
-    } catch (error) {
+    let deleteError = null;
+    const [ok, err, data] = await tryFn(() => this.get(id));
+    if (ok) {
+      objectData = data;
+    } else {
       objectData = { id };
+      deleteError = err;
     }
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
-    const response = await this.client.deleteObject(key);
+    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+    this.emit("delete", {
+      ...objectData,
+      $before: { ...objectData },
+      $after: null
+    });
+    if (deleteError) {
+      throw mapAwsError(deleteError, {
+        bucket: this.client.config.bucket,
+        key,
+        resourceName: this.name,
+        operation: "delete",
+        id
+      });
+    }
+    if (!ok2) throw mapAwsError(err2, {
+      key,
+      resourceName: this.name,
+      operation: "delete",
+      id
+    });
     await this.executeHooks("afterDelete", objectData);
-    this.emit("delete", objectData);
     return response;
   }
   /**
@@ -9930,7 +11089,7 @@ ${validation.errors.join("\n")}`);
     if (partition && Object.keys(partitionValues).length > 0) {
       const partitionDef = this.config.partitions[partition];
       if (!partitionDef) {
-        throw new Error(`Partition '${partition}' not found`);
+        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "count" });
       }
       const partitionSegments = [];
       const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
@@ -9964,12 +11123,11 @@ ${validation.errors.join("\n")}`);
    *   { name: 'Bob', email: 'bob@example.com' }
    * ];
    * const insertedUsers = await resource.insertMany(users);
-   * console.log(`Inserted ${insertedUsers.length} users`);
-   */
+      */
   async insertMany(objects) {
-    const { results } = await PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
+    const { results } = await PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content2) => {
+      this.emit("error", error, content2);
+      this.observers.map((x) => x.emit("error", this.name, error, content2));
     }).process(async (attributes) => {
       const result = await this.insert(attributes);
       return result;
@@ -9984,16 +11142,16 @@ ${validation.errors.join("\n")}`);
    * @example
    * const deletedIds = ['user-1', 'user-2', 'user-3'];
    * const results = await resource.deleteMany(deletedIds);
-   * console.log(`Deleted ${deletedIds.length} users`);
-   */
+      */
   async deleteMany(ids) {
     const packages = chunk(
       ids.map((id) => this.getResourceKey(id)),
       1e3
     );
-    const { results } = await PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content) => {
-      this.emit("error", error, content);
-      this.observers.map((x) => x.emit("error", this.name, error, content));
+    ids.map((id) => this.getResourceKey(id));
+    const { results } = await PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content2) => {
+      this.emit("error", error, content2);
+      this.observers.map((x) => x.emit("error", this.name, error, content2));
     }).process(async (keys) => {
       const response = await this.client.deleteObjects(keys);
       keys.forEach((key) => {
@@ -10012,9 +11170,7 @@ ${validation.errors.join("\n")}`);
   }
   async deleteAll() {
     if (this.config.paranoid !== false) {
-      throw new Error(
-        `deleteAll() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.config.paranoid}`
-      );
+      throw new ResourceError("deleteAll() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAll", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAll." });
     }
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
@@ -10031,9 +11187,7 @@ ${validation.errors.join("\n")}`);
    */
   async deleteAllData() {
     if (this.config.paranoid !== false) {
-      throw new Error(
-        `deleteAllData() is a dangerous operation and requires paranoid: false option. Current paranoid setting: ${this.config.paranoid}`
-      );
+      throw new ResourceError("deleteAllData() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAllData", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAllData." });
     }
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
@@ -10076,7 +11230,7 @@ ${validation.errors.join("\n")}`);
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
       if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new Error(`Partition '${partition}' not found`);
+        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "listIds" });
       }
       const partitionDef = this.config.partitions[partition];
       const partitionSegments = [];
@@ -10132,36 +11286,33 @@ ${validation.errors.join("\n")}`);
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
       }
       return await this.listPartition({ partition, partitionValues, limit, offset });
-    } catch (error) {
-      return this.handleListError(error, { partition, partitionValues });
+    });
+    if (!ok) {
+      return this.handleListError(err, { partition, partitionValues });
     }
+    return result;
   }
-  /**
-   * List resources from main resource (no partition)
-   */
   async listMain({ limit, offset = 0 }) {
-    const ids = await this.listIds({ limit, offset });
+    const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
+    if (!ok) throw err;
     const results = await this.processListResults(ids, "main");
     this.emit("list", { count: results.length, errors: 0 });
     return results;
   }
-  /**
-   * List resources from specific partition
-   */
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
     if (!this.config.partitions?.[partition]) {
-      console.warn(`Partition '${partition}' not found in resource '${this.name}'`);
       this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    const keys = await this.client.getAllKeys({ prefix });
+    const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+    if (!ok) throw err;
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
@@ -10201,16 +11352,17 @@ ${validation.errors.join("\n")}`);
    */
   async processListResults(ids, context = "main") {
     const { results, errors } = await PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
-      console.warn(`Failed to get ${context} resource ${id}:`, error.message);
-      return null;
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      try {
-        return await this.get(id);
-      } catch (error) {
-        return this.handleResourceError(error, id, context);
+      const [ok, err, result] = await tryFn(() => this.get(id));
+      if (ok) {
+        return result;
       }
+      return this.handleResourceError(err, id, context);
     });
-    return results.filter((item) => item !== null);
+    this.emit("list", { count: results.length, errors: 0 });
+    return results;
   }
   /**
    * Process partition results with error handling
@@ -10218,19 +11370,19 @@ ${validation.errors.join("\n")}`);
   async processPartitionResults(ids, partition, partitionDef, keys) {
     const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
     const { results, errors } = await PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
-      console.warn(`Failed to get partition resource ${id}:`, error.message);
-      return null;
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      try {
+      const [ok, err, result] = await tryFn(async () => {
         const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
         return await this.getFromPartition({
           id,
           partitionName: partition,
           partitionValues: actualPartitionValues
         });
-      } catch (error) {
-        return this.handleResourceError(error, id, "partition");
-      }
+      });
+      if (ok) return result;
+      return this.handleResourceError(err, id, "partition");
     });
     return results.filter((item) => item !== null);
   }
@@ -10240,7 +11392,7 @@ ${validation.errors.join("\n")}`);
   extractPartitionValuesFromKey(id, keys, sortedFields) {
     const keyForId = keys.find((key) => key.includes(`id=${id}`));
     if (!keyForId) {
-      throw new Error(`Partition key not found for ID ${id}`);
+      throw new PartitionError(`Partition key not found for ID ${id}`, { resourceName: this.name, id, operation: "extractPartitionValuesFromKey" });
     }
     const keyParts = keyForId.split("/");
     const actualPartitionValues = {};
@@ -10258,7 +11410,6 @@ ${validation.errors.join("\n")}`);
    */
   handleResourceError(error, id, context) {
     if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-      console.warn(`Decryption failed for ${context} resource ${id}, returning basic info`);
       return {
         id,
         _decryptionFailed: true,
@@ -10273,11 +11424,9 @@ ${validation.errors.join("\n")}`);
    */
   handleListError(error, { partition, partitionValues }) {
     if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      console.warn(`Partition error in list method:`, error.message);
       this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
-    console.error(`Critical error in list method:`, error.message);
     this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
@@ -10287,33 +11436,27 @@ ${validation.errors.join("\n")}`);
    * @returns {Promise<Object[]>} Array of resource objects
    * @example
    * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
-   * users.forEach(user => console.log(user.name));
-   */
+      */
   async getMany(ids) {
     const { results, errors } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
-      console.warn(`Failed to get resource ${id}:`, error.message);
+      this.emit("error", error, content);
+      this.observers.map((x) => x.emit("error", this.name, error, content));
       return {
         id,
         _error: error.message,
         _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
       };
     }).process(async (id) => {
-      this.emit("id", id);
-      try {
-        const data = await this.get(id);
-        this.emit("data", data);
-        return data;
-      } catch (error) {
-        if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-          console.warn(`Decryption failed for ${id}, returning basic info`);
-          return {
-            id,
-            _decryptionFailed: true,
-            _error: error.message
-          };
-        }
-        throw error;
+      const [ok, err, data] = await tryFn(() => this.get(id));
+      if (ok) return data;
+      if (err.message.includes("Cipher job failed") || err.message.includes("OperationError")) {
+        return {
+          id,
+          _decryptionFailed: true,
+          _error: err.message
+        };
       }
+      throw err;
     });
     this.emit("getMany", ids.length);
     return results;
@@ -10323,35 +11466,17 @@ ${validation.errors.join("\n")}`);
    * @returns {Promise<Object[]>} Array of all resource objects
    * @example
    * const allUsers = await resource.getAll();
-   * console.log(`Total users: ${allUsers.length}`);
-   */
+      */
   async getAll() {
-    let ids = await this.listIds();
-    if (ids.length === 0) return [];
-    const { results, errors } = await PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
-      console.warn(`Failed to get resource ${id}:`, error.message);
-      return {
-        id,
-        _error: error.message,
-        _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
-      };
-    }).process(async (id) => {
-      try {
-        const data = await this.get(id);
-        return data;
-      } catch (error) {
-        if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-          console.warn(`Decryption failed for ${id}, returning basic info`);
-          return {
-            id,
-            _decryptionFailed: true,
-            _error: error.message
-          };
-        }
-        throw error;
+    const [ok, err, ids] = await tryFn(() => this.listIds());
+    if (!ok) throw err;
+    const results = [];
+    for (const id of ids) {
+      const [ok2, err2, item] = await tryFn(() => this.get(id));
+      if (ok2) {
+        results.push(item);
       }
-    });
-    this.emit("getAll", results.length);
+    }
     return results;
   }
   /**
@@ -10366,9 +11491,7 @@ ${validation.errors.join("\n")}`);
    * @example
    * // Get first page of all resources
    * const page = await resource.page({ offset: 0, size: 10 });
-   * console.log(`Page ${page.page + 1} of ${page.totalPages}`);
-   * console.log(`Showing ${page.items.length} of ${page.totalItems} total`);
-   * 
+         * 
    * // Get page from specific partition
    * const googlePage = await resource.page({
    *   partition: 'byUtmSource',
@@ -10383,42 +11506,36 @@ ${validation.errors.join("\n")}`);
    *   size: 100, 
    *   skipCount: true 
    * });
-   * console.log(`Got ${fastPage.items.length} items`); // totalItems will be null
-   */
+      */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       let totalItems = null;
       let totalPages = null;
       if (!skipCount) {
-        try {
-          totalItems = await this.count({ partition, partitionValues });
+        const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+        if (okCount) {
+          totalItems = count;
           totalPages = Math.ceil(totalItems / size);
-        } catch (countError) {
-          console.warn(`Failed to get count for page:`, countError.message);
+        } else {
           totalItems = null;
           totalPages = null;
         }
       }
       const page = Math.floor(offset / size);
       let items = [];
-      try {
-        items = await this.list({
-          partition,
-          partitionValues,
-          limit: size,
-          offset
-        });
-      } catch (listError) {
-        console.warn(`Failed to get items for page:`, listError.message);
+      if (size <= 0) {
         items = [];
+      } else {
+        const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
+        items = okList ? listResult : [];
       }
-      const result = {
+      const result2 = {
         items,
         totalItems,
         page,
         pageSize: size,
         totalPages,
-        // Add additional metadata for debugging
+        hasMore: items.length === size && offset + size < (totalItems || Infinity),
         _debug: {
           requestedSize: size,
           requestedOffset: offset,
@@ -10427,26 +11544,25 @@ ${validation.errors.join("\n")}`);
           hasTotalItems: totalItems !== null
         }
       };
-      this.emit("page", result);
-      return result;
-    } catch (error) {
-      console.error(`Critical error in page method:`, error.message);
-      return {
-        items: [],
-        totalItems: null,
-        page: Math.floor(offset / size),
-        pageSize: size,
-        totalPages: null,
-        _debug: {
-          requestedSize: size,
-          requestedOffset: offset,
-          actualItemsReturned: 0,
-          skipCount,
-          hasTotalItems: false,
-          error: error.message
-        }
-      };
-    }
+      this.emit("page", result2);
+      return result2;
+    });
+    if (ok) return result;
+    return {
+      items: [],
+      totalItems: null,
+      page: Math.floor(offset / size),
+      pageSize: size,
+      totalPages: null,
+      _debug: {
+        requestedSize: size,
+        requestedOffset: offset,
+        actualItemsReturned: 0,
+        skipCount,
+        hasTotalItems: false,
+        error: err.message
+      }
+    };
   }
   readable() {
     const stream = new ResourceReader({ resource: this });
@@ -10480,9 +11596,9 @@ ${validation.errors.join("\n")}`);
    * });
    */
   async setContent({ id, buffer, contentType = "application/octet-stream" }) {
-    const currentData = await this.get(id);
-    if (!currentData) {
-      throw new Error(`Resource with id '${id}' not found`);
+    const [ok, err, currentData] = await tryFn(() => this.get(id));
+    if (!ok || !currentData) {
+      throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: "setContent" });
     }
     const updatedData = {
       ...currentData,
@@ -10490,12 +11606,14 @@ ${validation.errors.join("\n")}`);
       _contentLength: buffer.length,
       _mimeType: contentType
     };
-    await this.client.putObject({
+    const mappedMetadata = await this.schema.mapper(updatedData);
+    const [ok2, err2] = await tryFn(() => this.client.putObject({
       key: this.getResourceKey(id),
-      metadata: await this.schema.mapper(updatedData),
+      metadata: mappedMetadata,
       body: buffer,
       contentType
-    });
+    }));
+    if (!ok2) throw err2;
     this.emit("setContent", { id, contentType, contentLength: buffer.length });
     return updatedData;
   }
@@ -10506,34 +11624,30 @@ ${validation.errors.join("\n")}`);
    * @example
    * const content = await resource.content('user-123');
    * if (content.buffer) {
-   *   console.log('Content type:', content.contentType);
-   *   console.log('Content size:', content.buffer.length);
-   *   // Save to file
+         *   // Save to file
    *   fs.writeFileSync('output.jpg', content.buffer);
    * } else {
-   *   console.log('No content found');
-   * }
+      * }
    */
   async content(id) {
     const key = this.getResourceKey(id);
-    try {
-      const response = await this.client.getObject(key);
-      const buffer = Buffer.from(await response.Body.transformToByteArray());
-      const contentType = response.ContentType || null;
-      this.emit("content", id, buffer.length, contentType);
-      return {
-        buffer,
-        contentType
-      };
-    } catch (error) {
-      if (error.name === "NoSuchKey") {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      if (err.name === "NoSuchKey") {
         return {
           buffer: null,
           contentType: null
         };
       }
-      throw error;
+      throw err;
     }
+    const buffer = Buffer.from(await response.Body.transformToByteArray());
+    const contentType = response.ContentType || null;
+    this.emit("content", id, buffer.length, contentType);
+    return {
+      buffer,
+      contentType
+    };
   }
   /**
    * Check if binary content exists for a resource
@@ -10542,12 +11656,9 @@ ${validation.errors.join("\n")}`);
    */
   async hasContent(id) {
     const key = this.getResourceKey(id);
-    try {
-      const response = await this.client.headObject(key);
-      return response.ContentLength > 0;
-    } catch (error) {
-      return false;
-    }
+    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    if (!ok) return false;
+    return response.ContentLength > 0;
   }
   /**
    * Delete binary content but preserve metadata
@@ -10555,13 +11666,15 @@ ${validation.errors.join("\n")}`);
    */
   async deleteContent(id) {
     const key = this.getResourceKey(id);
-    const existingObject = await this.client.headObject(key);
+    const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
+    if (!ok) throw err;
     const existingMetadata = existingObject.Metadata || {};
-    const response = await this.client.putObject({
+    const [ok2, err2, response] = await tryFn(() => this.client.putObject({
       key,
       body: "",
       metadata: existingMetadata
-    });
+    }));
+    if (!ok2) throw err2;
     this.emit("deleteContent", id);
     return response;
   }
@@ -10596,24 +11709,19 @@ ${validation.errors.join("\n")}`);
     if (version === this.version) {
       return this.schema;
     }
-    try {
-      const compatibleSchema = new Schema({
-        name: this.name,
-        attributes: this.attributes,
-        passphrase: this.passphrase,
-        version,
-        options: {
-          ...this.config,
-          // For older versions, be more lenient with decryption
-          autoDecrypt: true,
-          autoEncrypt: true
-        }
-      });
-      return compatibleSchema;
-    } catch (error) {
-      console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, error.message);
-      return this.schema;
-    }
+    const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
+      name: this.name,
+      attributes: this.attributes,
+      passphrase: this.passphrase,
+      version,
+      options: {
+        ...this.config,
+        autoDecrypt: true,
+        autoEncrypt: true
+      }
+    })));
+    if (ok) return compatibleSchema;
+    return this.schema;
   }
   /**
    * Create partition references after insert
@@ -10656,11 +11764,7 @@ ${validation.errors.join("\n")}`);
       }
     }
     if (keysToDelete.length > 0) {
-      try {
-        await this.client.deleteObjects(keysToDelete);
-      } catch (error) {
-        console.warn("Some partition objects could not be deleted:", error.message);
-      }
+      const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
     }
   }
   /**
@@ -10742,30 +11846,22 @@ ${validation.errors.join("\n")}`);
       return;
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      try {
-        await this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData);
-      } catch (error) {
-        console.warn(`Failed to update partition references for ${partitionName}:`, error.message);
-      }
+      const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
     }
     const id = newData.id || oldData.id;
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
       let allKeys = [];
-      try {
-        allKeys = await this.client.getAllKeys({ prefix });
-      } catch (error) {
-        console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, error.message);
+      const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+      if (okKeys) {
+        allKeys = keys;
+      } else {
         continue;
       }
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
       for (const key of allKeys) {
         if (key.endsWith(`/id=${id}`) && key !== validKey) {
-          try {
-            await this.client.deleteObject(key);
-          } catch (error) {
-            console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, error.message);
-          }
+          const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
         }
       }
     }
@@ -10783,14 +11879,12 @@ ${validation.errors.join("\n")}`);
     const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
     if (oldPartitionKey !== newPartitionKey) {
       if (oldPartitionKey) {
-        try {
+        const [ok, err] = await tryFn(async () => {
           await this.client.deleteObject(oldPartitionKey);
-        } catch (error) {
-          console.warn(`Old partition object could not be deleted for ${partitionName}:`, error.message);
-        }
+        });
       }
       if (newPartitionKey) {
-        try {
+        const [ok, err] = await tryFn(async () => {
           const partitionMetadata = {
             _v: String(this.version)
           };
@@ -10800,12 +11894,10 @@ ${validation.errors.join("\n")}`);
             body: "",
             contentType: void 0
           });
-        } catch (error) {
-          console.warn(`New partition object could not be created for ${partitionName}:`, error.message);
-        }
+        });
       }
     } else if (newPartitionKey) {
-      try {
+      const [ok, err] = await tryFn(async () => {
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -10815,9 +11907,7 @@ ${validation.errors.join("\n")}`);
           body: "",
           contentType: void 0
         });
-      } catch (error) {
-        console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
-      }
+      });
     }
   }
   /**
@@ -10831,7 +11921,6 @@ ${validation.errors.join("\n")}`);
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
       if (!partition || !partition.fields || typeof partition.fields !== "object") {
-        console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
         continue;
       }
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
@@ -10839,16 +11928,14 @@ ${validation.errors.join("\n")}`);
         const partitionMetadata = {
           _v: String(this.version)
         };
-        try {
+        const [ok, err] = await tryFn(async () => {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
             body: "",
             contentType: void 0
           });
-        } catch (error) {
-          console.warn(`Partition object could not be updated for ${partitionName}:`, error.message);
-        }
+        });
       }
     }
   }
@@ -10866,9 +11953,7 @@ ${validation.errors.join("\n")}`);
    *   partitionName: 'byUtmSource',
    *   partitionValues: { 'utm.source': 'google' }
    * });
-   * console.log(user._partition); // 'byUtmSource'
-   * console.log(user._partitionValues); // { 'utm.source': 'google' }
-   * 
+         * 
    * // Get product from multi-field partition
    * const product = await resource.getFromPartition({
    *   id: 'product-456',
@@ -10878,7 +11963,7 @@ ${validation.errors.join("\n")}`);
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
     if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new Error(`Partition '${partitionName}' not found`);
+      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
     }
     const partition = this.config.partitions[partitionName];
     const partitionSegments = [];
@@ -10891,13 +11976,14 @@ ${validation.errors.join("\n")}`);
       }
     }
     if (partitionSegments.length === 0) {
-      throw new Error(`No partition values provided for partition '${partitionName}'`);
+      throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
     }
     const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-    try {
+    const [ok, err] = await tryFn(async () => {
       await this.client.headObject(partitionKey);
-    } catch (error) {
-      throw new Error(`Resource with id '${id}' not found in partition '${partitionName}'`);
+    });
+    if (!ok) {
+      throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, { resourceName: this.name, id, partitionName, operation: "getFromPartition" });
     }
     const data = await this.get(id);
     data._partition = partitionName;
@@ -10931,11 +12017,8 @@ ${validation.errors.join("\n")}`);
     };
     let contentType = void 0;
     if (body && body !== "") {
-      try {
-        JSON.parse(body);
-        contentType = "application/json";
-      } catch {
-      }
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = "application/json";
     }
     await this.client.putObject({
       key: historicalKey,
@@ -10968,49 +12051,175 @@ ${validation.errors.join("\n")}`);
    * usando os dados em memória após insert/update, de acordo com o behavior
    */
   async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
-    let unmappedMetadata = {};
-    try {
-      unmappedMetadata = await this.schema.unmapper(metadata);
-    } catch (error) {
-      console.warn("Failed to unmap metadata, using as-is:", error.message);
-      unmappedMetadata = metadata;
+    const behaviorFlags = {};
+    if (metadata && metadata["$truncated"] === "true") {
+      behaviorFlags.$truncated = "true";
     }
+    if (metadata && metadata["$overflow"] === "true") {
+      behaviorFlags.$overflow = "true";
+    }
+    let unmappedMetadata = {};
+    const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
+    unmappedMetadata = ok ? unmapped : metadata;
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
-      const filtered = {};
+      const filtered2 = {};
       for (const [key, value] of Object.entries(obj)) {
-        if (!key.startsWith("_") && key !== "$overflow") {
-          filtered[key] = value;
+        if (!key.startsWith("_")) {
+          filtered2[key] = value;
         }
       }
-      return filtered;
+      return filtered2;
+    };
+    const fixValue = (v) => {
+      if (typeof v === "object" && v !== null) {
+        return v;
+      }
+      if (typeof v === "string") {
+        if (v === "[object Object]") return {};
+        if (v.startsWith("{") || v.startsWith("[")) {
+          const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(v));
+          return ok2 ? parsed : v;
+        }
+        return v;
+      }
+      return v;
     };
     if (behavior === "body-overflow") {
       const hasOverflow = metadata && metadata["$overflow"] === "true";
       let bodyData = {};
       if (hasOverflow && body) {
-        try {
-          const parsedBody = JSON.parse(body);
-          bodyData = await this.schema.unmapper(parsedBody);
-        } catch {
+        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        if (okBody) {
+          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+          bodyData = okUnmap ? unmappedBody : {};
         }
       }
       const merged = { ...unmappedMetadata, ...bodyData, id };
-      return filterInternalFields(merged);
+      Object.keys(merged).forEach((k) => {
+        merged[k] = fixValue(merged[k]);
+      });
+      const result2 = filterInternalFields(merged);
+      if (hasOverflow) {
+        result2.$overflow = "true";
+      }
+      return result2;
     }
     if (behavior === "body-only") {
-      try {
-        const parsedBody = body ? JSON.parse(body) : {};
-        const unmappedBody = await this.schema.unmapper(parsedBody);
-        const result2 = { ...unmappedBody, id };
-        return filterInternalFields(result2);
-      } catch (error) {
-        console.warn("Failed to parse/unmap body data:", error.message);
-        return { id };
+      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
+      let mapFromMeta = this.schema.map;
+      if (metadata && metadata._map) {
+        const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
+        mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
+      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+      const result2 = okUnmap ? { ...unmappedBody, id } : { id };
+      Object.keys(result2).forEach((k) => {
+        result2[k] = fixValue(result2[k]);
+      });
+      return result2;
     }
     const result = { ...unmappedMetadata, id };
-    return filterInternalFields(result);
+    Object.keys(result).forEach((k) => {
+      result[k] = fixValue(result[k]);
+    });
+    const filtered = filterInternalFields(result);
+    if (behaviorFlags.$truncated) {
+      filtered.$truncated = behaviorFlags.$truncated;
+    }
+    if (behaviorFlags.$overflow) {
+      filtered.$overflow = behaviorFlags.$overflow;
+    }
+    return filtered;
+  }
+  emit(event, ...args) {
+    return super.emit(event, ...args);
+  }
+  async replace(id, attributes) {
+    await this.delete(id);
+    await new Promise((r) => setTimeout(r, 100));
+    const maxWait = 5e3;
+    const interval = 50;
+    const start = Date.now();
+    while (Date.now() - start < maxWait) {
+      const exists = await this.exists(id);
+      if (!exists) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    try {
+      const result = await this.insert({ ...attributes, id });
+      return result;
+    } catch (err) {
+      if (err && err.message && err.message.includes("already exists")) {
+        const result = await this.update(id, attributes);
+        return result;
+      }
+      throw err;
+    }
+  }
+  // --- MIDDLEWARE SYSTEM ---
+  _initMiddleware() {
+    this._middlewares = /* @__PURE__ */ new Map();
+    this._middlewareMethods = [
+      "get",
+      "list",
+      "listIds",
+      "getAll",
+      "count",
+      "page",
+      "insert",
+      "update",
+      "delete",
+      "deleteMany",
+      "exists",
+      "getMany"
+    ];
+    for (const method of this._middlewareMethods) {
+      this._middlewares.set(method, []);
+      if (!this[`_original_${method}`]) {
+        this[`_original_${method}`] = this[method].bind(this);
+        this[method] = async (...args) => {
+          const ctx = { resource: this, args, method };
+          let idx = -1;
+          const stack = this._middlewares.get(method);
+          const dispatch = async (i) => {
+            if (i <= idx) throw new Error("next() called multiple times");
+            idx = i;
+            if (i < stack.length) {
+              return await stack[i](ctx, () => dispatch(i + 1));
+            } else {
+              return await this[`_original_${method}`](...ctx.args);
+            }
+          };
+          return await dispatch(0);
+        };
+      }
+    }
+  }
+  useMiddleware(method, fn) {
+    if (!this._middlewares) this._initMiddleware();
+    if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: "useMiddleware", method });
+    this._middlewares.get(method).push(fn);
+  }
+  // Utilitário para aplicar valores default do schema
+  applyDefaults(data) {
+    const out = { ...data };
+    for (const [key, def] of Object.entries(this.attributes)) {
+      if (out[key] === void 0) {
+        if (typeof def === "string" && def.includes("default:")) {
+          const match = def.match(/default:([^|]+)/);
+          if (match) {
+            let val = match[1];
+            if (def.includes("boolean")) val = val === "true";
+            else if (def.includes("number")) val = Number(val);
+            out[key] = val;
+          }
+        }
+      }
+    }
+    return out;
   }
 }
 function validateResourceConfig(config) {
@@ -11125,11 +12334,8 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      try {
-        return true ? "6.2.0" : "latest";
-      } catch (e) {
-        return "latest";
-      }
+      const [ok, err, version] = tryFn(() => true ? "6.2.0" : "latest");
+      return ok ? version : "latest";
     })();
     this.resources = {};
     this.savedMetadata = null;
@@ -11169,6 +12375,17 @@ class Database extends EventEmitter {
     });
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
+    if (!this._exitListenerRegistered) {
+      this._exitListenerRegistered = true;
+      process.on("exit", async () => {
+        if (this.isConnected()) {
+          try {
+            await this.disconnect();
+          } catch (err) {
+          }
+        }
+      });
+    }
   }
   async connect() {
     await this.startPlugins();
@@ -11189,6 +12406,8 @@ class Database extends EventEmitter {
         this.resources[name] = new Resource({
           name,
           client: this.client,
+          database: this,
+          // garantir referência
           version: currentVersion,
           attributes: versionData.attributes,
           behavior: versionData.behavior || "user-managed",
@@ -11202,7 +12421,8 @@ class Database extends EventEmitter {
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
           hooks: versionData.hooks || {},
-          versioningEnabled: this.versioningEnabled
+          versioningEnabled: this.versioningEnabled,
+          map: versionData.map
         });
       }
     }
@@ -11277,7 +12497,8 @@ class Database extends EventEmitter {
     }
     const hashObj = {
       attributes: stableAttributes,
-      behavior: behavior || definition.behavior || "user-managed"
+      behavior: behavior || definition.behavior || "user-managed",
+      partitions: definition.partitions || {}
     };
     const stableString = jsonStableStringify(hashObj);
     return `sha256:${createHash("sha256").update(stableString).digest("hex")}`;
@@ -11403,7 +12624,7 @@ class Database extends EventEmitter {
    * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", options = {} }) {
+  resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", partitions = {}, options = {} }) {
     if (!this.resources[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
@@ -11413,6 +12634,7 @@ class Database extends EventEmitter {
       name,
       attributes,
       behavior,
+      partitions,
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
@@ -11464,17 +12686,26 @@ class Database extends EventEmitter {
     const version = existingMetadata?.currentVersion || "v0";
     const resource = new Resource({
       name,
+      client: this.client,
+      version: config.version !== void 0 ? config.version : version,
       attributes,
       behavior,
+      parallelism: this.parallelism,
+      passphrase: config.passphrase !== void 0 ? config.passphrase : this.passphrase,
       observers: [this],
-      client: this.client,
-      version,
-      passphrase: this.passphrase,
-      cache: this.cache,
-      hooks,
+      cache: config.cache !== void 0 ? config.cache : this.cache,
+      timestamps: config.timestamps !== void 0 ? config.timestamps : false,
+      partitions: config.partitions || {},
+      paranoid: config.paranoid !== void 0 ? config.paranoid : true,
+      allNestedObjectsOptional: config.allNestedObjectsOptional !== void 0 ? config.allNestedObjectsOptional : true,
+      autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
+      hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
-      ...config
+      map: config.map,
+      idGenerator: config.idGenerator,
+      idSize: config.idSize
     });
+    resource.database = this;
     this.resources[name] = resource;
     await this.uploadMetadataFile();
     this.emit("s3db.resourceCreated", name);
@@ -11500,7 +12731,11 @@ class Database extends EventEmitter {
    */
   async getResource(name) {
     if (!this.resources[name]) {
-      throw new Error(`Resource not found: ${name}`);
+      throw new ResourceNotFound({
+        bucket: this.client.config.bucket,
+        resourceName: name,
+        id: name
+      });
     }
     return this.resources[name];
   }
@@ -11520,6 +12755,55 @@ class Database extends EventEmitter {
   }
   isConnected() {
     return !!this.savedMetadata;
+  }
+  async disconnect() {
+    try {
+      if (this.pluginList && this.pluginList.length > 0) {
+        for (const plugin of this.pluginList) {
+          if (plugin && typeof plugin.removeAllListeners === "function") {
+            plugin.removeAllListeners();
+          }
+        }
+        const stopProms = this.pluginList.map(async (plugin) => {
+          try {
+            if (plugin && typeof plugin.stop === "function") {
+              await plugin.stop();
+            }
+          } catch (err) {
+          }
+        });
+        await Promise.all(stopProms);
+      }
+      if (this.resources && Object.keys(this.resources).length > 0) {
+        for (const [name, resource] of Object.entries(this.resources)) {
+          try {
+            if (resource && typeof resource.removeAllListeners === "function") {
+              resource.removeAllListeners();
+            }
+            if (resource._pluginWrappers) {
+              resource._pluginWrappers.clear();
+            }
+            if (resource._pluginMiddlewares) {
+              resource._pluginMiddlewares = {};
+            }
+            if (resource.observers && Array.isArray(resource.observers)) {
+              resource.observers = [];
+            }
+          } catch (err) {
+          }
+        }
+        Object.keys(this.resources).forEach((k) => delete this.resources[k]);
+      }
+      if (this.client && typeof this.client.removeAllListeners === "function") {
+        this.client.removeAllListeners();
+      }
+      this.removeAllListeners();
+      this.savedMetadata = null;
+      this.plugins = {};
+      this.pluginList = [];
+      this.emit("disconnected", /* @__PURE__ */ new Date());
+    } catch (err) {
+    }
   }
 }
 class S3db extends Database {
@@ -11566,8 +12850,8 @@ class Cache extends EventEmitter {
   async delete(key) {
     return this.del(key);
   }
-  async clear() {
-    const data = await this._clear();
+  async clear(prefix) {
+    const data = await this._clear(prefix);
     this.emit("clear", data);
     return data;
   }
@@ -11611,9 +12895,18 @@ class MemoryCache extends Cache {
     delete this.meta[key];
     return true;
   }
-  async _clear() {
-    this.cache = {};
-    this.meta = {};
+  async _clear(prefix) {
+    if (!prefix) {
+      this.cache = {};
+      this.meta = {};
+      return true;
+    }
+    for (const key of Object.keys(this.cache)) {
+      if (key.startsWith(prefix)) {
+        delete this.cache[key];
+        delete this.meta[key];
+      }
+    }
     return true;
   }
   async size() {
@@ -17902,18 +19195,16 @@ class S3Cache extends Cache {
     });
   }
   async _get(key) {
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const { Body } = await this.client.getObject(join(this.keyPrefix, key));
       let content = await streamToString(Body);
       content = Buffer.from(content, "base64");
       content = zlib.unzipSync(content).toString();
       return JSON.parse(content);
-    } catch (error) {
-      if (error.name === "NoSuchKey" || error.name === "NotFound") {
-        return null;
-      }
-      throw error;
-    }
+    });
+    if (ok) return result;
+    if (err.name === "NoSuchKey" || err.name === "NotFound") return null;
+    throw err;
   }
   async _del(key) {
     await this.client.deleteObject(join(this.keyPrefix, key));
@@ -17923,9 +19214,7 @@ class S3Cache extends Cache {
     const keys = await this.client.getAllKeys({
       prefix: this.keyPrefix
     });
-    for (const key of keys) {
-      await this.client.deleteObject(key);
-    }
+    await this.client.deleteObjects(keys);
   }
   async size() {
     const keys = await this.keys();
@@ -18015,6 +19304,35 @@ class Plugin extends EventEmitter {
       }
     }
   }
+  /**
+   * Add a middleware to intercept a resource method (Koa/Express style).
+   * Middleware signature: async (next, ...args) => { ... }
+   * - Chame next(...args) para continuar a cadeia.
+   * - Retorne sem chamar next para interromper.
+   * - Pode modificar argumentos/resultados.
+   */
+  addMiddleware(resource, methodName, middleware) {
+    if (!resource._pluginMiddlewares) {
+      resource._pluginMiddlewares = {};
+    }
+    if (!resource._pluginMiddlewares[methodName]) {
+      resource._pluginMiddlewares[methodName] = [];
+      const originalMethod = resource[methodName].bind(resource);
+      resource[methodName] = async function(...args) {
+        let idx = -1;
+        const next = async (...nextArgs) => {
+          idx++;
+          if (idx < resource._pluginMiddlewares[methodName].length) {
+            return await resource._pluginMiddlewares[methodName][idx].call(this, next, ...nextArgs);
+          } else {
+            return await originalMethod(...nextArgs);
+          }
+        };
+        return await next(...args);
+      };
+    }
+    resource._pluginMiddlewares[methodName].push(middleware);
+  }
   // Partition-aware helper methods
   getPartitionValues(data, resource) {
     if (!resource.config?.partitions) return {};
@@ -18097,31 +19415,26 @@ class AuditPlugin extends Plugin {
       this.auditResource = null;
       return;
     }
-    try {
-      this.auditResource = await this.database.createResource({
-        name: "audits",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          operation: "string|required",
-          recordId: "string|required",
-          userId: "string|optional",
-          timestamp: "string|required",
-          oldData: "string|optional",
-          newData: "string|optional",
-          partition: "string|optional",
-          partitionValues: "string|optional",
-          metadata: "string|optional"
-        }
-      });
-    } catch (error) {
-      try {
-        this.auditResource = this.database.resources.audits;
-      } catch (innerError) {
-        this.auditResource = null;
-        return;
-      }
-    }
+    const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
+      name: "audits",
+      attributes: {
+        id: "string|required",
+        resourceName: "string|required",
+        operation: "string|required",
+        recordId: "string|required",
+        userId: "string|optional",
+        timestamp: "string|required",
+        oldData: "string|optional",
+        newData: "string|optional",
+        partition: "string|optional",
+        partitionValues: "string|optional",
+        metadata: "string|optional"
+      },
+      behavior: "body-overflow"
+      // keyPrefix removido
+    }));
+    this.auditResource = ok ? auditResource : this.database.resources.audits || null;
+    if (!ok && !this.auditResource) return;
     this.installDatabaseProxy();
     this.installEventListeners();
   }
@@ -18146,7 +19459,9 @@ class AuditPlugin extends Plugin {
   }
   installEventListeners() {
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === "audits") continue;
+      if (resource.name === "audits") {
+        continue;
+      }
       this.installEventListenersForResource(resource);
     }
   }
@@ -18172,14 +19487,12 @@ class AuditPlugin extends Plugin {
       };
       this.logAudit(auditRecord).catch(console.error);
     });
-    resource.on("update", async (data, beforeData) => {
+    resource.on("update", async (data) => {
       const recordId = data.id;
-      let oldData = beforeData;
+      let oldData = data.$before;
       if (this.config.includeData && !oldData) {
-        try {
-          oldData = await resource.get(recordId);
-        } catch (error) {
-        }
+        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        if (ok) oldData = fetched;
       }
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       const auditRecord = {
@@ -18204,10 +19517,8 @@ class AuditPlugin extends Plugin {
       const recordId = data.id;
       let oldData = data;
       if (this.config.includeData && !oldData) {
-        try {
-          oldData = await resource.get(recordId);
-        } catch (error) {
-        }
+        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        if (ok) oldData = fetched;
       }
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
       const auditRecord = {
@@ -18228,40 +19539,45 @@ class AuditPlugin extends Plugin {
       };
       this.logAudit(auditRecord).catch(console.error);
     });
-    const originalDeleteMany = resource.deleteMany.bind(resource);
-    resource.deleteMany = async (ids) => {
-      const result = await originalDeleteMany(ids);
+    resource.useMiddleware("deleteMany", async (ctx, next) => {
+      const ids = ctx.args[0];
+      const oldDataMap = {};
+      if (this.config.includeData) {
+        for (const id of ids) {
+          const [ok, err, data] = await tryFn(() => resource.get(id));
+          oldDataMap[id] = ok ? data : null;
+        }
+      }
+      const result = await next();
       if (result && result.length > 0 && this.config.includeData) {
         for (const id of ids) {
-          try {
-            const oldData = await resource.get(id);
-            const partitionValues = this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
-            const auditRecord = {
-              id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-              resourceName: resource.name,
-              operation: "delete",
-              recordId: id,
-              userId: this.getCurrentUserId?.() || "system",
-              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
-              newData: null,
-              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-              partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-              metadata: JSON.stringify({
-                source: "audit-plugin",
-                version: "2.0",
-                batchOperation: true
-              })
-            };
-            this.logAudit(auditRecord).catch(console.error);
-          } catch (error) {
-          }
+          const oldData = oldDataMap[id];
+          const partitionValues = oldData ? this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null : null;
+          const auditRecord = {
+            id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+            resourceName: resource.name,
+            operation: "delete",
+            recordId: id,
+            userId: this.getCurrentUserId?.() || "system",
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
+            newData: null,
+            partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+            partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+            metadata: JSON.stringify({
+              source: "audit-plugin",
+              version: "2.0",
+              batchOperation: true
+            })
+          };
+          this.logAudit(auditRecord).catch(console.error);
         }
       }
       return result;
-    };
+    });
   }
   getPartitionValues(data, resource) {
+    if (!data) return null;
     const partitions = resource.config?.partitions || {};
     const partitionValues = {};
     for (const [partitionName, partitionDef] of Object.entries(partitions)) {
@@ -18300,13 +19616,11 @@ class AuditPlugin extends Plugin {
     return partitionNames.length > 0 ? partitionNames[0] : null;
   }
   async logAudit(auditRecord) {
-    if (!this.auditResource) return;
-    try {
-      await this.auditResource.insert(auditRecord);
-    } catch (error) {
-      console.error("Failed to log audit record:", error);
-      if (error && error.stack) console.error(error.stack);
+    if (!auditRecord.id) {
+      auditRecord.id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
+    const result = await this.auditResource.insert(auditRecord);
+    return result;
   }
   truncateData(data) {
     if (!data) return data;
@@ -18320,8 +19634,26 @@ class AuditPlugin extends Plugin {
     if (dataStr.length <= this.config.maxDataSize) {
       return filteredData;
     }
+    let truncatedData = { ...filteredData };
+    let currentSize = JSON.stringify(truncatedData).length;
+    const metadataOverhead = JSON.stringify({
+      _truncated: true,
+      _originalSize: dataStr.length,
+      _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }).length;
+    const targetSize = this.config.maxDataSize - metadataOverhead;
+    for (const [key, value] of Object.entries(truncatedData)) {
+      if (typeof value === "string" && currentSize > targetSize) {
+        const excess = currentSize - targetSize;
+        const newLength = Math.max(0, value.length - excess - 3);
+        if (newLength < value.length) {
+          truncatedData[key] = value.substring(0, newLength) + "...";
+          currentSize = JSON.stringify(truncatedData).length;
+        }
+      }
+    }
     return {
-      ...filteredData,
+      ...truncatedData,
       _truncated: true,
       _originalSize: dataStr.length,
       _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -18330,7 +19662,7 @@ class AuditPlugin extends Plugin {
   // Utility methods for querying audit logs
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const {
         resourceName,
         operation,
@@ -18354,19 +19686,22 @@ class AuditPlugin extends Plugin {
         return true;
       });
       filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      const deserialized = filtered.slice(offset, offset + limit).map((audit) => ({
-        ...audit,
-        oldData: audit.oldData ? JSON.parse(audit.oldData) : null,
-        newData: audit.newData ? JSON.parse(audit.newData) : null,
-        partitionValues: audit.partitionValues ? JSON.parse(audit.partitionValues) : null,
-        metadata: audit.metadata ? JSON.parse(audit.metadata) : null
-      }));
+      const deserialized = filtered.slice(offset, offset + limit).map((audit) => {
+        const [okOld, , oldData] = typeof audit.oldData === "string" ? tryFnSync(() => JSON.parse(audit.oldData)) : [true, null, audit.oldData];
+        const [okNew, , newData] = typeof audit.newData === "string" ? tryFnSync(() => JSON.parse(audit.newData)) : [true, null, audit.newData];
+        const [okPart, , partitionValues] = audit.partitionValues && typeof audit.partitionValues === "string" ? tryFnSync(() => JSON.parse(audit.partitionValues)) : [true, null, audit.partitionValues];
+        const [okMeta, , metadata] = audit.metadata && typeof audit.metadata === "string" ? tryFnSync(() => JSON.parse(audit.metadata)) : [true, null, audit.metadata];
+        return {
+          ...audit,
+          oldData: audit.oldData === null || audit.oldData === void 0 || audit.oldData === "null" ? null : okOld ? oldData : null,
+          newData: audit.newData === null || audit.newData === void 0 || audit.newData === "null" ? null : okNew ? newData : null,
+          partitionValues: okPart ? partitionValues : audit.partitionValues,
+          metadata: okMeta ? metadata : audit.metadata
+        };
+      });
       return deserialized;
-    } catch (error) {
-      console.error("Failed to get audit logs:", error);
-      if (error && error.stack) console.error(error.stack);
-      return [];
-    }
+    });
+    return ok ? result : [];
   }
   async getRecordHistory(resourceName, recordId) {
     return this.getAuditLogs({
@@ -18409,8 +19744,10 @@ class AuditPlugin extends Plugin {
         stats.byPartition[audit.partition] = (stats.byPartition[audit.partition] || 0) + 1;
       }
       stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
-      const day = audit.timestamp.split("T")[0];
-      stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+      if (audit.timestamp) {
+        const day = audit.timestamp.split("T")[0];
+        stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+      }
     }
     return stats;
   }
@@ -18438,7 +19775,7 @@ class CachePlugin extends Plugin {
     } else if (this.config.driverType === "memory") {
       this.driver = new MemoryCache(this.config.memoryOptions || {});
     } else {
-      this.driver = new S3Cache(this.config.s3Options || {});
+      this.driver = new S3Cache({ client: this.database.client, ...this.config.s3Options || {} });
     }
     this.installDatabaseProxy();
     this.installResourceHooks();
@@ -18467,161 +19804,88 @@ class CachePlugin extends Plugin {
   }
   installResourceHooksForResource(resource) {
     if (!this.driver) return;
-    resource.cache = this.driver;
+    Object.defineProperty(resource, "cache", {
+      value: this.driver,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
     resource.cacheKeyFor = async (options = {}) => {
       const { action, params = {}, partition, partitionValues } = options;
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
-    resource._originalCount = resource.count;
-    resource._originalListIds = resource.listIds;
-    resource._originalGetMany = resource.getMany;
-    resource._originalGetAll = resource.getAll;
-    resource._originalPage = resource.page;
-    resource._originalList = resource.list;
-    resource.count = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      const key = await resource.cacheKeyFor({
-        action: "count",
-        partition,
-        partitionValues
-      });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalCount(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-    resource.listIds = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      const key = await resource.cacheKeyFor({
-        action: "listIds",
-        partition,
-        partitionValues
-      });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalListIds(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-    resource.getMany = async function(ids) {
-      const key = await resource.cacheKeyFor({
-        action: "getMany",
-        params: { ids }
-      });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalGetMany(ids);
-      await resource.cache.set(key, result);
-      return result;
-    };
-    resource.getAll = async function() {
-      const key = await resource.cacheKeyFor({ action: "getAll" });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalGetAll();
-      await resource.cache.set(key, result);
-      return result;
-    };
-    resource.page = async function({ offset, size, partition, partitionValues } = {}) {
-      const key = await resource.cacheKeyFor({
-        action: "page",
-        params: { offset, size },
-        partition,
-        partitionValues
-      });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalPage({ offset, size, partition, partitionValues });
-      await resource.cache.set(key, result);
-      return result;
-    };
-    resource.list = async function(options = {}) {
-      const { partition, partitionValues } = options;
-      const key = await resource.cacheKeyFor({
-        action: "list",
-        partition,
-        partitionValues
-      });
-      try {
-        const cached = await resource.cache.get(key);
-        if (cached !== null && cached !== void 0) return cached;
-      } catch (err) {
-        if (err.name !== "NoSuchKey") throw err;
-      }
-      const result = await resource._originalList(options);
-      await resource.cache.set(key, result);
-      return result;
-    };
-    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
-      const [data] = args;
-      await this.clearCacheForResource(resource, data);
-      return result;
-    });
-    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
-      const [id, data] = args;
-      await this.clearCacheForResource(resource, { id, ...data });
-      return result;
-    });
-    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
-      const [id] = args;
-      let data = { id };
-      if (typeof resource.get === "function") {
-        try {
-          const full = await resource.get(id);
-          if (full) data = full;
-        } catch {
+    const cacheMethods = [
+      "count",
+      "listIds",
+      "getMany",
+      "getAll",
+      "page",
+      "list",
+      "get"
+    ];
+    for (const method of cacheMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        let key;
+        if (method === "getMany") {
+          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
+        } else if (method === "page") {
+          const { offset, size, partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
+        } else if (method === "list" || method === "listIds" || method === "count") {
+          const { partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+        } else if (method === "getAll") {
+          key = await resource.cacheKeyFor({ action: method });
+        } else if (method === "get") {
+          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
-      }
-      await this.clearCacheForResource(resource, data);
-      return result;
-    });
-    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
-      const [ids] = args;
-      for (const id of ids) {
-        let data = { id };
-        if (typeof resource.get === "function") {
-          try {
-            const full = await resource.get(id);
-            if (full) data = full;
-          } catch {
+        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
+        if (ok && cached !== null && cached !== void 0) return cached;
+        if (!ok && err.name !== "NoSuchKey") throw err;
+        const result = await next();
+        await resource.cache.set(key, result);
+        return result;
+      });
+    }
+    const writeMethods = ["insert", "update", "delete", "deleteMany"];
+    for (const method of writeMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        const result = await next();
+        if (method === "insert") {
+          await this.clearCacheForResource(resource, ctx.args[0]);
+        } else if (method === "update") {
+          await this.clearCacheForResource(resource, { id: ctx.args[0], ...ctx.args[1] });
+        } else if (method === "delete") {
+          let data = { id: ctx.args[0] };
+          if (typeof resource.get === "function") {
+            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
+            if (ok && full) data = full;
           }
+          await this.clearCacheForResource(resource, data);
+        } else if (method === "deleteMany") {
+          await this.clearCacheForResource(resource);
         }
-        await this.clearCacheForResource(resource, data);
-      }
-      return result;
-    });
+        return result;
+      });
+    }
   }
   async clearCacheForResource(resource, data) {
     if (!resource.cache) return;
     const keyPrefix = `resource=${resource.name}`;
     await resource.cache.clear(keyPrefix);
     if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
-      const partitionValues = this.getPartitionValues(data, resource);
-      for (const [partitionName, values] of Object.entries(partitionValues)) {
-        if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
+      if (!data) {
+        for (const partitionName of Object.keys(resource.config.partitions)) {
           const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
           await resource.cache.clear(partitionKeyPrefix);
+        }
+      } else {
+        const partitionValues = this.getPartitionValues(data, resource);
+        for (const [partitionName, values] of Object.entries(partitionValues)) {
+          if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
+            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+            await resource.cache.clear(partitionKeyPrefix);
+          }
         }
       }
     }
@@ -18783,23 +20047,20 @@ class FullTextPlugin extends Plugin {
   async setup(database) {
     this.database = database;
     if (!this.config.enabled) return;
-    try {
-      this.indexResource = await database.createResource({
-        name: "fulltext_indexes",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          fieldName: "string|required",
-          word: "string|required",
-          recordIds: "json|required",
-          // Array of record IDs containing this word
-          count: "number|required",
-          lastUpdated: "string|required"
-        }
-      });
-    } catch (error) {
-      this.indexResource = database.resources.fulltext_indexes;
-    }
+    const [ok, err, indexResource] = await tryFn(() => database.createResource({
+      name: "fulltext_indexes",
+      attributes: {
+        id: "string|required",
+        resourceName: "string|required",
+        fieldName: "string|required",
+        word: "string|required",
+        recordIds: "json|required",
+        // Array of record IDs containing this word
+        count: "number|required",
+        lastUpdated: "string|required"
+      }
+    }));
+    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
     await this.loadIndexes();
     this.installIndexingHooks();
   }
@@ -18810,8 +20071,8 @@ class FullTextPlugin extends Plugin {
   }
   async loadIndexes() {
     if (!this.indexResource) return;
-    try {
-      const allIndexes = await this.indexResource.getAll();
+    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
+    if (ok) {
       for (const indexRecord of allIndexes) {
         const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
         this.indexes.set(key, {
@@ -18819,13 +20080,11 @@ class FullTextPlugin extends Plugin {
           count: indexRecord.count || 0
         });
       }
-    } catch (error) {
-      console.warn("Failed to load existing indexes:", error.message);
     }
   }
   async saveIndexes() {
     if (!this.indexResource) return;
-    try {
+    const [ok, err] = await tryFn(async () => {
       const existingIndexes = await this.indexResource.getAll();
       for (const index of existingIndexes) {
         await this.indexResource.delete(index.id);
@@ -18842,9 +20101,7 @@ class FullTextPlugin extends Plugin {
           lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
         });
       }
-    } catch (error) {
-      console.error("Failed to save indexes:", error);
-    }
+    });
   }
   installIndexingHooks() {
     if (!this.database.plugins) {
@@ -18903,13 +20160,19 @@ class FullTextPlugin extends Plugin {
   }
   async indexRecord(resourceName, recordId, data) {
     const indexedFields = this.getIndexedFields(resourceName);
-    if (!indexedFields || indexedFields.length === 0) return;
+    if (!indexedFields || indexedFields.length === 0) {
+      return;
+    }
     for (const fieldName of indexedFields) {
       const fieldValue = this.getFieldValue(data, fieldName);
-      if (!fieldValue) continue;
+      if (!fieldValue) {
+        continue;
+      }
       const words = this.tokenize(fieldValue);
       for (const word of words) {
-        if (word.length < this.config.minWordLength) continue;
+        if (word.length < this.config.minWordLength) {
+          continue;
+        }
         const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
         const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
         if (!existing.recordIds.includes(recordId)) {
@@ -18938,7 +20201,7 @@ class FullTextPlugin extends Plugin {
   }
   getFieldValue(data, fieldPath) {
     if (!fieldPath.includes(".")) {
-      return data[fieldPath];
+      return data && data[fieldPath] !== void 0 ? data[fieldPath] : null;
     }
     const keys = fieldPath.split(".");
     let value = data;
@@ -19023,15 +20286,16 @@ class FullTextPlugin extends Plugin {
     if (!resource) {
       throw new Error(`Resource '${resourceName}' not found`);
     }
-    const recordIds = searchResults.map((result) => result.recordId);
+    const recordIds = searchResults.map((result2) => result2.recordId);
     const records = await resource.getMany(recordIds);
-    return records.map((record) => {
+    const result = records.filter((record) => record && typeof record === "object").map((record) => {
       const searchResult = searchResults.find((sr) => sr.recordId === record.id);
       return {
         ...record,
         _searchScore: searchResult ? searchResult.score : 0
       };
     }).sort((a, b) => b._searchScore - a._searchScore);
+    return result;
   }
   // Utility methods
   async rebuildIndex(resourceName) {
@@ -19049,7 +20313,7 @@ class FullTextPlugin extends Plugin {
     for (let i = 0; i < allRecords.length; i += batchSize) {
       const batch = allRecords.slice(i, i + batchSize);
       for (const record of batch) {
-        await this.indexRecord(resourceName, record.id, record);
+        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
       }
     }
     await this.saveIndexes();
@@ -19100,11 +20364,7 @@ class FullTextPlugin extends Plugin {
   async _rebuildAllIndexesInternal() {
     const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
     for (const resourceName of resourceNames) {
-      try {
-        await this.rebuildIndex(resourceName);
-      } catch (error) {
-        console.warn(`Failed to rebuild index for resource ${resourceName}:`, error.message);
-      }
+      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
     }
   }
   async clearIndex(resourceName) {
@@ -19153,8 +20413,8 @@ class MetricsPlugin extends Plugin {
   async setup(database) {
     this.database = database;
     if (!this.config.enabled || process.env.NODE_ENV === "test") return;
-    try {
-      this.metricsResource = await database.createResource({
+    const [ok, err] = await tryFn(async () => {
+      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
         name: "metrics",
         attributes: {
           id: "string|required",
@@ -19169,8 +20429,9 @@ class MetricsPlugin extends Plugin {
           timestamp: "string|required",
           metadata: "json"
         }
-      });
-      this.errorsResource = await database.createResource({
+      }));
+      this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
+      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
         name: "error_logs",
         attributes: {
           id: "string|required",
@@ -19180,8 +20441,9 @@ class MetricsPlugin extends Plugin {
           timestamp: "string|required",
           metadata: "json"
         }
-      });
-      this.performanceResource = await database.createResource({
+      }));
+      this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
+      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
         name: "performance_logs",
         attributes: {
           id: "string|required",
@@ -19191,8 +20453,10 @@ class MetricsPlugin extends Plugin {
           timestamp: "string|required",
           metadata: "json"
         }
-      });
-    } catch (error) {
+      }));
+      this.performanceResource = ok3 ? performanceResource : database.resources.performance_logs;
+    });
+    if (!ok) {
       this.metricsResource = database.resources.metrics;
       this.errorsResource = database.resources.error_logs;
       this.performanceResource = database.resources.performance_logs;
@@ -19243,135 +20507,91 @@ class MetricsPlugin extends Plugin {
     resource._page = resource.page;
     resource.insert = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._insert(...args);
-        this.recordOperation(resource.name, "insert", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "insert", Date.now() - startTime, true);
-        this.recordError(resource.name, "insert", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._insert(...args));
+      this.recordOperation(resource.name, "insert", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "insert", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.update = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._update(...args);
-        this.recordOperation(resource.name, "update", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "update", Date.now() - startTime, true);
-        this.recordError(resource.name, "update", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._update(...args));
+      this.recordOperation(resource.name, "update", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "update", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.delete = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._delete(...args);
-        this.recordOperation(resource.name, "delete", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "delete", Date.now() - startTime, true);
-        this.recordError(resource.name, "delete", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._delete(...args));
+      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "delete", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.deleteMany = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._deleteMany(...args);
-        this.recordOperation(resource.name, "delete", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "delete", Date.now() - startTime, true);
-        this.recordError(resource.name, "delete", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
+      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "delete", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.get = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._get(...args);
-        this.recordOperation(resource.name, "get", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "get", Date.now() - startTime, true);
-        this.recordError(resource.name, "get", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._get(...args));
+      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "get", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.getMany = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._getMany(...args);
-        this.recordOperation(resource.name, "get", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "get", Date.now() - startTime, true);
-        this.recordError(resource.name, "get", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
+      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "get", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.getAll = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._getAll(...args);
-        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
-        this.recordError(resource.name, "list", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.list = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._list(...args);
-        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
-        this.recordError(resource.name, "list", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._list(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.listIds = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._listIds(...args);
-        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
-        this.recordError(resource.name, "list", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.count = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._count(...args);
-        this.recordOperation(resource.name, "count", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "count", Date.now() - startTime, true);
-        this.recordError(resource.name, "count", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._count(...args));
+      this.recordOperation(resource.name, "count", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "count", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
     resource.page = async function(...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._page(...args);
-        this.recordOperation(resource.name, "list", Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, "list", Date.now() - startTime, true);
-        this.recordError(resource.name, "list", error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._page(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
   }
   recordOperation(resourceName, operation, duration, isError) {
@@ -19430,7 +20650,7 @@ class MetricsPlugin extends Plugin {
   }
   async flushMetrics() {
     if (!this.metricsResource) return;
-    try {
+    const [ok, err] = await tryFn(async () => {
       const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
       const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
       const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
@@ -19495,8 +20715,9 @@ class MetricsPlugin extends Plugin {
         }
       }
       this.resetMetrics();
-    } catch (error) {
-      console.error("Failed to flush metrics:", error);
+    });
+    if (!ok) {
+      console.error("Failed to flush metrics:", err);
     }
   }
   resetMetrics() {
@@ -19641,7 +20862,6 @@ class MetricsPlugin extends Plugin {
         await this.performanceResource.delete(perf.id);
       }
     }
-    console.log(`Cleaned up data older than ${this.config.retentionDays} days`);
   }
 }
 
@@ -19667,7 +20887,7 @@ class BaseReplicator extends EventEmitter {
    * @param {string} operation - Operation type (insert, update, delete)
    * @param {Object} data - The data to replicate
    * @param {string} id - Record ID
-   * @returns {Promise<Object>} Replication result
+   * @returns {Promise<Object>} replicator result
    */
   async replicate(resourceName, operation, data, id) {
     throw new Error(`replicate() method must be implemented by ${this.name}`);
@@ -19676,7 +20896,7 @@ class BaseReplicator extends EventEmitter {
    * Replicate multiple records in batch
    * @param {string} resourceName - Name of the resource being replicated
    * @param {Array} records - Array of records to replicate
-   * @returns {Promise<Object>} Batch replication result
+   * @returns {Promise<Object>} Batch replicator result
    */
   async replicateBatch(resourceName, records) {
     throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
@@ -19695,7 +20915,7 @@ class BaseReplicator extends EventEmitter {
   async getStatus() {
     return {
       name: this.name,
-      enabled: this.enabled,
+      // Removed: enabled: this.enabled,
       config: this.config,
       connected: false
     };
@@ -19713,392 +20933,6 @@ class BaseReplicator extends EventEmitter {
    */
   validateConfig() {
     return { isValid: true, errors: [] };
-  }
-}
-
-class S3dbReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
-    super(config);
-    this.resources = resources;
-    this.connectionString = config.connectionString;
-    this.region = config.region;
-    this.bucket = config.bucket;
-    this.keyPrefix = config.keyPrefix;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.connectionString && !this.bucket) {
-      errors.push("Either connectionString or bucket must be provided");
-    }
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    const targetConfig = {
-      connectionString: this.connectionString,
-      region: this.region,
-      bucket: this.bucket,
-      keyPrefix: this.keyPrefix,
-      verbose: this.config.verbose || false
-    };
-    this.targetDatabase = new S3db(targetConfig);
-    await this.targetDatabase.connect();
-    this.emit("connected", {
-      replicator: this.name,
-      target: this.connectionString || this.bucket
-    });
-  }
-  async replicate(resourceName, operation, data, id) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    try {
-      let result;
-      switch (operation) {
-        case "insert":
-          result = await this.targetDatabase.resources[resourceName]?.insert(data);
-          break;
-        case "update":
-          result = await this.targetDatabase.resources[resourceName]?.update(id, data);
-          break;
-        case "delete":
-          result = await this.targetDatabase.resources[resourceName]?.delete(id);
-          break;
-        default:
-          throw new Error(`Unsupported operation: ${operation}`);
-      }
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        success: true
-      });
-      return { success: true, result };
-    } catch (error) {
-      this.emit("replication_error", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
-  }
-  async replicateBatch(resourceName, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    try {
-      const results = [];
-      const errors = [];
-      for (const record of records) {
-        try {
-          const result = await this.replicate(
-            resourceName,
-            record.operation,
-            record.data,
-            record.id
-          );
-          results.push(result);
-        } catch (error) {
-          errors.push({ id: record.id, error: error.message });
-        }
-      }
-      this.emit("batch_replicated", {
-        replicator: this.name,
-        resourceName,
-        total: records.length,
-        successful: results.filter((r) => r.success).length,
-        errors: errors.length
-      });
-      return {
-        success: errors.length === 0,
-        results,
-        errors,
-        total: records.length
-      };
-    } catch (error) {
-      this.emit("batch_replication_error", {
-        replicator: this.name,
-        resourceName,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
-  }
-  async testConnection() {
-    try {
-      if (!this.targetDatabase) {
-        await this.initialize(this.database);
-      }
-      await this.targetDatabase.listResources();
-      return true;
-    } catch (error) {
-      this.emit("connection_error", {
-        replicator: this.name,
-        error: error.message
-      });
-      return false;
-    }
-  }
-  async getStatus() {
-    const baseStatus = await super.getStatus();
-    return {
-      ...baseStatus,
-      connected: !!this.targetDatabase,
-      targetDatabase: this.connectionString || this.bucket,
-      resources: this.resources,
-      totalReplications: this.listenerCount("replicated"),
-      totalErrors: this.listenerCount("replication_error")
-    };
-  }
-  async cleanup() {
-    if (this.targetDatabase) {
-      this.targetDatabase.removeAllListeners();
-    }
-    await super.cleanup();
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.length === 0 || this.resources.includes(resourceName);
-  }
-}
-
-class SqsReplicator extends BaseReplicator {
-  constructor(config = {}, resources = []) {
-    super(config);
-    this.resources = resources;
-    this.queueUrl = config.queueUrl;
-    this.queues = config.queues || {};
-    this.defaultQueueUrl = config.defaultQueueUrl;
-    this.region = config.region || "us-east-1";
-    this.sqsClient = null;
-    this.messageGroupId = config.messageGroupId;
-    this.deduplicationId = config.deduplicationId;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueueUrl) {
-      errors.push("Either queueUrl, queues object, or defaultQueueUrl must be provided");
-    }
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-  /**
-   * Get the appropriate queue URL for a resource
-   */
-  getQueueUrlForResource(resourceName) {
-    if (this.queues[resourceName]) {
-      return this.queues[resourceName];
-    }
-    if (this.queueUrl) {
-      return this.queueUrl;
-    }
-    if (this.defaultQueueUrl) {
-      return this.defaultQueueUrl;
-    }
-    throw new Error(`No queue URL found for resource '${resourceName}'`);
-  }
-  /**
-   * Create standardized message structure
-   */
-  createMessage(resourceName, operation, data, id, beforeData = null) {
-    const baseMessage = {
-      resource: resourceName,
-      action: operation,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      source: "s3db-replication"
-    };
-    switch (operation) {
-      case "insert":
-        return {
-          ...baseMessage,
-          data
-        };
-      case "update":
-        return {
-          ...baseMessage,
-          before: beforeData,
-          data
-        };
-      case "delete":
-        return {
-          ...baseMessage,
-          data
-        };
-      default:
-        return {
-          ...baseMessage,
-          data
-        };
-    }
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    try {
-      const { SQSClient, SendMessageCommand, SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
-      this.sqsClient = new SQSClient({
-        region: this.region,
-        credentials: this.config.credentials
-      });
-      this.emit("initialized", {
-        replicator: this.name,
-        queueUrl: this.queueUrl,
-        queues: this.queues,
-        defaultQueueUrl: this.defaultQueueUrl
-      });
-    } catch (error) {
-      this.emit("initialization_error", {
-        replicator: this.name,
-        error: error.message
-      });
-      throw error;
-    }
-  }
-  async replicate(resourceName, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    try {
-      const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
-      const queueUrl = this.getQueueUrlForResource(resourceName);
-      const message = this.createMessage(resourceName, operation, data, id, beforeData);
-      const command = new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify(message),
-        MessageGroupId: this.messageGroupId,
-        MessageDeduplicationId: this.deduplicationId ? `${resourceName}:${operation}:${id}` : void 0
-      });
-      const result = await this.sqsClient.send(command);
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        queueUrl,
-        messageId: result.MessageId,
-        success: true
-      });
-      return { success: true, messageId: result.MessageId, queueUrl };
-    } catch (error) {
-      this.emit("replication_error", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
-  }
-  async replicateBatch(resourceName, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    try {
-      const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
-      const queueUrl = this.getQueueUrlForResource(resourceName);
-      const batchSize = 10;
-      const batches = [];
-      for (let i = 0; i < records.length; i += batchSize) {
-        batches.push(records.slice(i, i + batchSize));
-      }
-      const results = [];
-      const errors = [];
-      for (const batch of batches) {
-        try {
-          const entries = batch.map((record, index) => ({
-            Id: `${record.id}-${index}`,
-            MessageBody: JSON.stringify(this.createMessage(
-              resourceName,
-              record.operation,
-              record.data,
-              record.id,
-              record.beforeData
-            )),
-            MessageGroupId: this.messageGroupId,
-            MessageDeduplicationId: this.deduplicationId ? `${resourceName}:${record.operation}:${record.id}` : void 0
-          }));
-          const command = new SendMessageBatchCommand({
-            QueueUrl: queueUrl,
-            Entries: entries
-          });
-          const result = await this.sqsClient.send(command);
-          results.push(result);
-        } catch (error) {
-          errors.push({ batch: batch.length, error: error.message });
-        }
-      }
-      this.emit("batch_replicated", {
-        replicator: this.name,
-        resourceName,
-        queueUrl,
-        total: records.length,
-        successful: results.length,
-        errors: errors.length
-      });
-      return {
-        success: errors.length === 0,
-        results,
-        errors,
-        total: records.length,
-        queueUrl
-      };
-    } catch (error) {
-      this.emit("batch_replication_error", {
-        replicator: this.name,
-        resourceName,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
-  }
-  async testConnection() {
-    try {
-      if (!this.sqsClient) {
-        await this.initialize(this.database);
-      }
-      const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
-      const command = new GetQueueAttributesCommand({
-        QueueUrl: this.queueUrl,
-        AttributeNames: ["QueueArn"]
-      });
-      await this.sqsClient.send(command);
-      return true;
-    } catch (error) {
-      this.emit("connection_error", {
-        replicator: this.name,
-        error: error.message
-      });
-      return false;
-    }
-  }
-  async getStatus() {
-    const baseStatus = await super.getStatus();
-    return {
-      ...baseStatus,
-      connected: !!this.sqsClient,
-      queueUrl: this.queueUrl,
-      region: this.region,
-      resources: this.resources,
-      totalReplications: this.listenerCount("replicated"),
-      totalErrors: this.listenerCount("replication_error")
-    };
-  }
-  async cleanup() {
-    if (this.sqsClient) {
-      this.sqsClient.destroy();
-    }
-    await super.cleanup();
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.length === 0 || this.resources.includes(resourceName);
   }
 }
 
@@ -20164,23 +20998,23 @@ class BigqueryReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
-    try {
-      const { BigQuery } = await import('@google-cloud/bigquery');
-      this.bigqueryClient = new BigQuery({
-        projectId: this.projectId,
-        credentials: this.credentials,
-        location: this.location
-      });
-      this.emit("initialized", {
-        replicator: this.name,
-        projectId: this.projectId,
-        datasetId: this.datasetId,
-        resources: Object.keys(this.resources)
-      });
-    } catch (error) {
-      this.emit("initialization_error", { replicator: this.name, error: error.message });
-      throw error;
+    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
+    if (!ok) {
+      this.emit("initialization_error", { replicator: this.name, error: err.message });
+      throw err;
     }
+    const { BigQuery } = sdk;
+    this.bigqueryClient = new BigQuery({
+      projectId: this.projectId,
+      credentials: this.credentials,
+      location: this.location
+    });
+    this.emit("initialized", {
+      replicator: this.name,
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: Object.keys(this.resources)
+    });
   }
   shouldReplicateResource(resourceName) {
     return this.resources.hasOwnProperty(resourceName);
@@ -20208,10 +21042,10 @@ class BigqueryReplicator extends BaseReplicator {
     }
     const results = [];
     const errors = [];
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       for (const tableId of tables) {
-        try {
+        const [okTable, errTable] = await tryFn(async () => {
           const table = dataset.table(tableId);
           let job;
           if (operation === "insert") {
@@ -20247,15 +21081,16 @@ class BigqueryReplicator extends BaseReplicator {
             success: true,
             jobId: job[0]?.id
           });
-        } catch (error) {
+        });
+        if (!okTable) {
           errors.push({
             table: tableId,
-            error: error.message
+            error: errTable.message
           });
         }
       }
       if (this.logTable) {
-        try {
+        const [okLog, errLog] = await tryFn(async () => {
           const logTable = dataset.table(this.logTable);
           await logTable.insert([{
             resource_name: resourceName,
@@ -20263,10 +21098,10 @@ class BigqueryReplicator extends BaseReplicator {
             record_id: id,
             data: JSON.stringify(data),
             timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            source: "s3db-replication"
+            source: "s3db-replicator"
           }]);
-        } catch (error) {
-          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
+        });
+        if (!okLog) {
         }
       }
       const success = errors.length === 0;
@@ -20286,33 +21121,30 @@ class BigqueryReplicator extends BaseReplicator {
         errors,
         tables
       };
-    } catch (error) {
-      this.emit("replication_error", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
   async replicateBatch(resourceName, records) {
     const results = [];
     const errors = [];
     for (const record of records) {
-      try {
-        const res = await this.replicate(
-          resourceName,
-          record.operation,
-          record.data,
-          record.id,
-          record.beforeData
-        );
-        results.push(res);
-      } catch (err) {
-        errors.push({ id: record.id, error: err.message });
-      }
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
     }
     return {
       success: errors.length === 0,
@@ -20321,15 +21153,15 @@ class BigqueryReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.bigqueryClient) await this.initialize();
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       await dataset.getMetadata();
       return true;
-    } catch (error) {
-      this.emit("connection_error", { replicator: this.name, error: error.message });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
   }
   async cleanup() {
   }
@@ -20412,36 +21244,36 @@ class PostgresReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
-    try {
-      const { Client } = await import('pg');
-      const config = this.connectionString ? {
-        connectionString: this.connectionString,
-        ssl: this.ssl
-      } : {
-        host: this.host,
-        port: this.port,
-        database: this.database,
-        user: this.user,
-        password: this.password,
-        ssl: this.ssl
-      };
-      this.client = new Client(config);
-      await this.client.connect();
-      if (this.logTable) {
-        await this.createLogTableIfNotExists();
-      }
-      this.emit("initialized", {
-        replicator: this.name,
-        database: this.database || "postgres",
-        resources: Object.keys(this.resources)
-      });
-    } catch (error) {
+    const [ok, err, sdk] = await tryFn(() => import('pg'));
+    if (!ok) {
       this.emit("initialization_error", {
         replicator: this.name,
-        error: error.message
+        error: err.message
       });
-      throw error;
+      throw err;
     }
+    const { Client } = sdk;
+    const config = this.connectionString ? {
+      connectionString: this.connectionString,
+      ssl: this.ssl
+    } : {
+      host: this.host,
+      port: this.port,
+      database: this.database,
+      user: this.user,
+      password: this.password,
+      ssl: this.ssl
+    };
+    this.client = new Client(config);
+    await this.client.connect();
+    if (this.logTable) {
+      await this.createLogTableIfNotExists();
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      database: this.database || "postgres",
+      resources: Object.keys(this.resources)
+    });
   }
   async createLogTableIfNotExists() {
     const createTableQuery = `
@@ -20452,7 +21284,7 @@ class PostgresReplicator extends BaseReplicator {
         record_id VARCHAR(255) NOT NULL,
         data JSONB,
         timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        source VARCHAR(100) DEFAULT 's3db-replication',
+        source VARCHAR(100) DEFAULT 's3db-replicator',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
@@ -20488,51 +21320,52 @@ class PostgresReplicator extends BaseReplicator {
     }
     const results = [];
     const errors = [];
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       for (const table of tables) {
-        try {
-          let result;
+        const [okTable, errTable] = await tryFn(async () => {
+          let result2;
           if (operation === "insert") {
             const keys = Object.keys(data);
             const values = keys.map((k) => data[k]);
             const columns = keys.map((k) => `"${k}"`).join(", ");
             const params = keys.map((_, i) => `$${i + 1}`).join(", ");
             const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
-            result = await this.client.query(sql, values);
+            result2 = await this.client.query(sql, values);
           } else if (operation === "update") {
             const keys = Object.keys(data).filter((k) => k !== "id");
             const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
             const values = keys.map((k) => data[k]);
             values.push(id);
             const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
-            result = await this.client.query(sql, values);
+            result2 = await this.client.query(sql, values);
           } else if (operation === "delete") {
             const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
-            result = await this.client.query(sql, [id]);
+            result2 = await this.client.query(sql, [id]);
           } else {
             throw new Error(`Unsupported operation: ${operation}`);
           }
           results.push({
             table,
             success: true,
-            rows: result.rows,
-            rowCount: result.rowCount
+            rows: result2.rows,
+            rowCount: result2.rowCount
           });
-        } catch (error) {
+        });
+        if (!okTable) {
           errors.push({
             table,
-            error: error.message
+            error: errTable.message
           });
         }
       }
       if (this.logTable) {
-        try {
+        const [okLog, errLog] = await tryFn(async () => {
           await this.client.query(
             `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replication"]
+            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
           );
-        } catch (error) {
-          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
+        });
+        if (!okLog) {
         }
       }
       const success = errors.length === 0;
@@ -20552,33 +21385,30 @@ class PostgresReplicator extends BaseReplicator {
         errors,
         tables
       };
-    } catch (error) {
-      this.emit("replication_error", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
   async replicateBatch(resourceName, records) {
     const results = [];
     const errors = [];
     for (const record of records) {
-      try {
-        const res = await this.replicate(
-          resourceName,
-          record.operation,
-          record.data,
-          record.id,
-          record.beforeData
-        );
-        results.push(res);
-      } catch (err) {
-        errors.push({ id: record.id, error: err.message });
-      }
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
     }
     return {
       success: errors.length === 0,
@@ -20587,14 +21417,14 @@ class PostgresReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.client) await this.initialize();
       await this.client.query("SELECT 1");
       return true;
-    } catch (error) {
-      this.emit("connection_error", { replicator: this.name, error: error.message });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
   }
   async cleanup() {
     if (this.client) await this.client.end();
@@ -20609,433 +21439,969 @@ class PostgresReplicator extends BaseReplicator {
   }
 }
 
+function normalizeResourceName$1(name) {
+  return typeof name === "string" ? name.trim().toLowerCase() : name;
+}
+class S3dbReplicator extends BaseReplicator {
+  constructor(config = {}, resources = [], client = null) {
+    super(config);
+    this.instanceId = Math.random().toString(36).slice(2, 10);
+    this.client = client;
+    let normalizedResources = resources;
+    if (!resources) normalizedResources = {};
+    else if (Array.isArray(resources)) {
+      normalizedResources = {};
+      for (const res of resources) {
+        if (typeof res === "string") normalizedResources[normalizeResourceName$1(res)] = res;
+      }
+    } else if (typeof resources === "string") {
+      normalizedResources[normalizeResourceName$1(resources)] = resources;
+    }
+    this.resourcesMap = this._normalizeResources(normalizedResources);
+  }
+  _normalizeResources(resources) {
+    if (!resources) return {};
+    if (Array.isArray(resources)) {
+      const map = {};
+      for (const res of resources) {
+        if (typeof res === "string") map[normalizeResourceName$1(res)] = res;
+        else if (Array.isArray(res) && typeof res[0] === "string") map[normalizeResourceName$1(res[0])] = res;
+        else if (typeof res === "object" && res.resource) {
+          map[normalizeResourceName$1(res.resource)] = { ...res };
+        }
+      }
+      return map;
+    }
+    if (typeof resources === "object") {
+      const map = {};
+      for (const [src, dest] of Object.entries(resources)) {
+        const normSrc = normalizeResourceName$1(src);
+        if (typeof dest === "string") map[normSrc] = dest;
+        else if (Array.isArray(dest)) {
+          map[normSrc] = dest.map((item) => {
+            if (typeof item === "string") return item;
+            if (typeof item === "function") return item;
+            if (typeof item === "object" && item.resource) {
+              return { ...item };
+            }
+            return item;
+          });
+        } else if (typeof dest === "function") map[normSrc] = dest;
+        else if (typeof dest === "object" && dest.resource) {
+          map[normSrc] = { ...dest };
+        }
+      }
+      return map;
+    }
+    if (typeof resources === "function") {
+      return resources;
+    }
+    if (typeof resources === "string") {
+      const map = { [normalizeResourceName$1(resources)]: resources };
+      return map;
+    }
+    return {};
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.client && !this.connectionString) {
+      errors.push("You must provide a client or a connectionString");
+    }
+    if (!this.resources || Array.isArray(this.resources) && this.resources.length === 0 || typeof this.resources === "object" && Object.keys(this.resources).length === 0) {
+      errors.push("You must provide a resources map or array");
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    try {
+      await super.initialize(database);
+      if (this.client) {
+        this.targetDatabase = this.client;
+      } else if (this.connectionString) {
+        const targetConfig = {
+          connectionString: this.connectionString,
+          region: this.region,
+          bucket: this.bucket,
+          keyPrefix: this.keyPrefix,
+          verbose: this.config.verbose || false
+        };
+        this.targetDatabase = new S3db(targetConfig);
+        await this.targetDatabase.connect();
+      } else {
+        throw new Error("S3dbReplicator: No client or connectionString provided");
+      }
+      this.emit("connected", {
+        replicator: this.name,
+        target: this.connectionString || this.bucket
+      });
+    } catch (err) {
+      throw err;
+    }
+  }
+  // Change signature to accept id
+  async replicate({ resource, operation, data, id: explicitId }) {
+    const normResource = normalizeResourceName$1(resource);
+    const destResource = this._resolveDestResource(normResource, data);
+    const destResourceObj = this._getDestResourceObj(destResource);
+    const transformedData = this._applyTransformer(normResource, data);
+    let result;
+    if (operation === "insert") {
+      result = await destResourceObj.insert(transformedData);
+    } else if (operation === "update") {
+      result = await destResourceObj.update(explicitId, transformedData);
+    } else if (operation === "delete") {
+      result = await destResourceObj.delete(explicitId);
+    }
+    return result;
+  }
+  _applyTransformer(resource, data) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    let result;
+    if (!entry) return data;
+    if (Array.isArray(entry) && typeof entry[1] === "function") {
+      result = entry[1](data);
+    } else if (typeof entry === "function") {
+      result = entry(data);
+    } else if (typeof entry === "object") {
+      if (typeof entry.transform === "function") result = entry.transform(data);
+      else if (typeof entry.transformer === "function") result = entry.transformer(data);
+    } else {
+      result = data;
+    }
+    if (result && data && data.id && !result.id) result.id = data.id;
+    if (!result && data) result = data;
+    return result;
+  }
+  _resolveDestResource(resource, data) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return resource;
+    if (Array.isArray(entry)) {
+      if (typeof entry[0] === "string") return entry[0];
+      if (typeof entry[0] === "object" && entry[0].resource) return entry[0].resource;
+      if (typeof entry[0] === "function") return resource;
+    }
+    if (typeof entry === "string") return entry;
+    if (typeof entry === "function") return resource;
+    if (typeof entry === "object" && entry.resource) return entry.resource;
+    return resource;
+  }
+  _getDestResourceObj(resource) {
+    if (!this.client || !this.client.resources) return null;
+    const available = Object.keys(this.client.resources);
+    const norm = normalizeResourceName$1(resource);
+    const found = available.find((r) => normalizeResourceName$1(r) === norm);
+    if (!found) {
+      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(", ")}`);
+    }
+    return this.client.resources[found];
+  }
+  async replicateBatch(resourceName, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, result] = await tryFn(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.id,
+        record.data,
+        record.beforeData
+      ));
+      if (ok) results.push(result);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    this.emit("batch_replicated", {
+      replicator: this.name,
+      resourceName,
+      total: records.length,
+      successful: results.filter((r) => r.success).length,
+      errors: errors.length
+    });
+    return {
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.targetDatabase) {
+        await this.initialize(this.database);
+      }
+      await this.targetDatabase.listResources();
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.targetDatabase,
+      targetDatabase: this.connectionString || this.bucket,
+      resources: this.resources,
+      totalreplicators: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replicator_error")
+    };
+  }
+  async cleanup() {
+    if (this.targetDatabase) {
+      this.targetDatabase.removeAllListeners();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resource, action) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return false;
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (typeof item === "object" && item.resource) {
+          if (item.actions && Array.isArray(item.actions)) {
+            if (item.actions.includes(action)) return true;
+          } else {
+            return true;
+          }
+        } else if (typeof item === "string" || typeof item === "function") {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (typeof entry === "object" && entry.resource) {
+      if (entry.actions && Array.isArray(entry.actions)) {
+        return entry.actions.includes(action);
+      }
+      return true;
+    }
+    if (typeof entry === "string" || typeof entry === "function") {
+      return true;
+    }
+    return false;
+  }
+}
+
+class SqsReplicator extends BaseReplicator {
+  constructor(config = {}, resources = [], client = null) {
+    super(config);
+    this.resources = resources;
+    this.client = client;
+    this.queueUrl = config.queueUrl;
+    this.queues = config.queues || {};
+    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
+    this.region = config.region || "us-east-1";
+    this.sqsClient = client || null;
+    this.messageGroupId = config.messageGroupId;
+    this.deduplicationId = config.deduplicationId;
+    if (resources && typeof resources === "object") {
+      for (const [resourceName, resourceConfig] of Object.entries(resources)) {
+        if (resourceConfig.queueUrl) {
+          this.queues[resourceName] = resourceConfig.queueUrl;
+        }
+      }
+    }
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueue && !this.resourceQueueMap) {
+      errors.push("Either queueUrl, queues object, defaultQueue, or resourceQueueMap must be provided");
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  getQueueUrlsForResource(resource) {
+    if (this.resourceQueueMap && this.resourceQueueMap[resource]) {
+      return this.resourceQueueMap[resource];
+    }
+    if (this.queues[resource]) {
+      return [this.queues[resource]];
+    }
+    if (this.queueUrl) {
+      return [this.queueUrl];
+    }
+    if (this.defaultQueue) {
+      return [this.defaultQueue];
+    }
+    throw new Error(`No queue URL found for resource '${resource}'`);
+  }
+  _applyTransformer(resource, data) {
+    const entry = this.resources[resource];
+    let result = data;
+    if (!entry) return data;
+    if (typeof entry.transform === "function") {
+      result = entry.transform(data);
+    } else if (typeof entry.transformer === "function") {
+      result = entry.transformer(data);
+    }
+    return result || data;
+  }
+  /**
+   * Create standardized message structure
+   */
+  createMessage(resource, operation, data, id, beforeData = null) {
+    const baseMessage = {
+      resource,
+      // padronizado para 'resource'
+      action: operation,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "s3db-replicator"
+    };
+    switch (operation) {
+      case "insert":
+        return {
+          ...baseMessage,
+          data
+        };
+      case "update":
+        return {
+          ...baseMessage,
+          before: beforeData,
+          data
+        };
+      case "delete":
+        return {
+          ...baseMessage,
+          data
+        };
+      default:
+        return {
+          ...baseMessage,
+          data
+        };
+    }
+  }
+  async initialize(database, client) {
+    await super.initialize(database);
+    if (!this.sqsClient) {
+      const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+      if (!ok) {
+        this.emit("initialization_error", {
+          replicator: this.name,
+          error: err.message
+        });
+        throw err;
+      }
+      const { SQSClient } = sdk;
+      this.sqsClient = client || new SQSClient({
+        region: this.region,
+        credentials: this.config.credentials
+      });
+      this.emit("initialized", {
+        replicator: this.name,
+        queueUrl: this.queueUrl,
+        queues: this.queues,
+        defaultQueue: this.defaultQueue
+      });
+    }
+  }
+  async replicate(resource, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await tryFn(async () => {
+      const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrls = this.getQueueUrlsForResource(resource);
+      const transformedData = this._applyTransformer(resource, data);
+      const message = this.createMessage(resource, operation, transformedData, id, beforeData);
+      const results = [];
+      for (const queueUrl of queueUrls) {
+        const command = new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify(message),
+          MessageGroupId: this.messageGroupId,
+          MessageDeduplicationId: this.deduplicationId ? `${resource}:${operation}:${id}` : void 0
+        });
+        const result2 = await this.sqsClient.send(command);
+        results.push({ queueUrl, messageId: result2.MessageId });
+        this.emit("replicated", {
+          replicator: this.name,
+          resource,
+          operation,
+          id,
+          queueUrl,
+          messageId: result2.MessageId,
+          success: true
+        });
+      }
+      return { success: true, results };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resource,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resource, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await tryFn(async () => {
+      const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrls = this.getQueueUrlsForResource(resource);
+      const batchSize = 10;
+      const batches = [];
+      for (let i = 0; i < records.length; i += batchSize) {
+        batches.push(records.slice(i, i + batchSize));
+      }
+      const results = [];
+      const errors = [];
+      for (const batch of batches) {
+        const [okBatch, errBatch] = await tryFn(async () => {
+          const entries = batch.map((record, index) => ({
+            Id: `${record.id}-${index}`,
+            MessageBody: JSON.stringify(this.createMessage(
+              resource,
+              record.operation,
+              record.data,
+              record.id,
+              record.beforeData
+            )),
+            MessageGroupId: this.messageGroupId,
+            MessageDeduplicationId: this.deduplicationId ? `${resource}:${record.operation}:${record.id}` : void 0
+          }));
+          const command = new SendMessageBatchCommand({
+            QueueUrl: queueUrls[0],
+            // Assuming all queueUrls in a batch are the same for batching
+            Entries: entries
+          });
+          const result2 = await this.sqsClient.send(command);
+          results.push(result2);
+        });
+        if (!okBatch) errors.push({ batch: batch.length, error: errBatch.message });
+      }
+      this.emit("batch_replicated", {
+        replicator: this.name,
+        resource,
+        queueUrl: queueUrls[0],
+        // Assuming all queueUrls in a batch are the same for batching
+        total: records.length,
+        successful: results.length,
+        errors: errors.length
+      });
+      return {
+        success: errors.length === 0,
+        results,
+        errors,
+        total: records.length,
+        queueUrl: queueUrls[0]
+        // Assuming all queueUrls in a batch are the same for batching
+      };
+    });
+    if (ok) return result;
+    this.emit("batch_replicator_error", {
+      replicator: this.name,
+      resource,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.sqsClient) {
+        await this.initialize(this.database);
+      }
+      const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
+      const command = new GetQueueAttributesCommand({
+        QueueUrl: this.queueUrl,
+        AttributeNames: ["QueueArn"]
+      });
+      await this.sqsClient.send(command);
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.sqsClient,
+      queueUrl: this.queueUrl,
+      region: this.region,
+      resources: this.resources,
+      totalreplicators: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replicator_error")
+    };
+  }
+  async cleanup() {
+    if (this.sqsClient) {
+      this.sqsClient.destroy();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resource) {
+    const result = this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource) || this.queues && Object.keys(this.queues).includes(resource) || (this.defaultQueue || this.queueUrl) || this.resources && Object.keys(this.resources).includes(resource) || false;
+    return result;
+  }
+}
+
 const REPLICATOR_DRIVERS = {
   s3db: S3dbReplicator,
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
   postgres: PostgresReplicator
 };
-function createReplicator(driver, config = {}, resources = []) {
+function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
   if (!ReplicatorClass) {
     throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
   }
-  return new ReplicatorClass(config, resources);
+  return new ReplicatorClass(config, resources, client);
 }
-function validateReplicatorConfig(driver, config, resources = []) {
-  const replicator = createReplicator(driver, config, resources);
+function validateReplicatorConfig(driver, config, resources = [], client = null) {
+  const replicator = createReplicator(driver, config, resources, client);
   return replicator.validateConfig();
 }
 
-const gzipAsync = promisify(gzip);
-const gunzipAsync = promisify(gunzip);
-class ReplicationPlugin extends Plugin {
+function normalizeResourceName(name) {
+  return typeof name === "string" ? name.trim().toLowerCase() : name;
+}
+class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
     super();
+    if (options.verbose) {
+      console.log("[PLUGIN][CONSTRUCTOR] ReplicatorPlugin constructor called");
+    }
+    if (options.verbose) {
+      console.log("[PLUGIN][constructor] New ReplicatorPlugin instance created with config:", options);
+    }
+    if (!options.replicators || !Array.isArray(options.replicators)) {
+      throw new Error("ReplicatorPlugin: replicators array is required");
+    }
+    for (const rep of options.replicators) {
+      if (!rep.driver) throw new Error("ReplicatorPlugin: each replicator must have a driver");
+    }
     this.config = {
-      enabled: options.enabled !== false,
-      replicators: options.replicators || [],
-      syncMode: options.syncMode || "async",
-      // 'sync' or 'async'
-      retryAttempts: options.retryAttempts || 3,
-      retryDelay: options.retryDelay || 1e3,
-      // ms
-      batchSize: options.batchSize || 10,
-      compression: options.compression || false,
-      // Enable compression
-      compressionLevel: options.compressionLevel || 6,
-      // 0-9
-      ...options
+      verbose: options.verbose ?? false,
+      persistReplicatorLog: options.persistReplicatorLog ?? false,
+      replicatorLogResource: options.replicatorLogResource ?? "replicator_logs",
+      replicators: options.replicators || []
     };
     this.replicators = [];
     this.queue = [];
     this.isProcessing = false;
     this.stats = {
       totalOperations: 0,
-      successfulOperations: 0,
-      failedOperations: 0,
-      lastSync: null
+      totalErrors: 0,
+      lastError: null
     };
-  }
-  /**
-   * Process data according to replication mode
-   */
-  processDataForReplication(data, metadata = {}) {
-    switch (this.config.replicationMode) {
-      case "exact-copy":
-        return {
-          body: data,
-          metadata
-        };
-      case "just-metadata":
-        return {
-          body: null,
-          metadata
-        };
-      case "all-in-body":
-        return {
-          body: {
-            data,
-            metadata,
-            replicationMode: this.config.replicationMode,
-            timestamp: (/* @__PURE__ */ new Date()).toISOString()
-          },
-          metadata: {
-            replicationMode: this.config.replicationMode,
-            timestamp: (/* @__PURE__ */ new Date()).toISOString()
-          }
-        };
-      default:
-        return {
-          body: data,
-          metadata
-        };
-    }
-  }
-  /**
-   * Compress data if compression is enabled
-   */
-  async compressData(data) {
-    if (!this.config.compression || !data) {
-      return data;
-    }
-    try {
-      const jsonString = JSON.stringify(data);
-      const compressed = await gzipAsync(jsonString, { level: this.config.compressionLevel });
-      return compressed.toString("base64");
-    } catch (error) {
-      this.emit("replication.compression.failed", { error, data });
-      return data;
-    }
+    this._installedListeners = [];
   }
   /**
    * Decompress data if it was compressed
    */
   async decompressData(data) {
-    if (!this.config.compression || !data) {
-      return data;
-    }
-    try {
-      if (typeof data === "string" && data.startsWith("H4sI")) {
-        const buffer = Buffer.from(data, "base64");
-        const decompressed = await gunzipAsync(buffer);
-        return JSON.parse(decompressed.toString());
+    return data;
+  }
+  // Helper to filter out internal S3DB fields
+  filterInternalFields(obj) {
+    if (!obj || typeof obj !== "object") return obj;
+    const filtered = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (!key.startsWith("_") && key !== "$overflow" && key !== "$before" && key !== "$after") {
+        filtered[key] = value;
       }
-      return data;
-    } catch (error) {
-      this.emit("replication.decompression.failed", { error, data });
-      return data;
     }
+    return filtered;
   }
   installEventListeners(resource) {
-    if (!resource || resource.name === "replication_logs") return;
+    const plugin = this;
+    if (plugin.config.verbose) {
+      console.log("[PLUGIN] installEventListeners called for:", resource && resource.name, {
+        hasDatabase: !!resource.database,
+        sameDatabase: resource.database === plugin.database,
+        alreadyInstalled: resource._replicatorListenersInstalled,
+        resourceObj: resource,
+        resourceObjId: resource && resource.id,
+        resourceObjType: typeof resource,
+        resourceObjIs: resource && Object.is(resource, plugin.database.resources && plugin.database.resources[resource.name]),
+        resourceObjEq: resource === (plugin.database.resources && plugin.database.resources[resource.name])
+      });
+    }
+    if (!resource || resource.name === plugin.config.replicatorLogResource || !resource.database || resource.database !== plugin.database) return;
+    if (resource._replicatorListenersInstalled) return;
+    resource._replicatorListenersInstalled = true;
+    this._installedListeners.push(resource);
+    if (plugin.config.verbose) {
+      console.log(`[PLUGIN] installEventListeners INSTALLED for resource: ${resource && resource.name}`);
+    }
     resource.on("insert", async (data) => {
-      const completeData = await this.getCompleteData(resource, data);
-      await this.queueReplication(resource.name, "insert", data.id, completeData);
+      if (plugin.config.verbose) {
+        console.log("[PLUGIN] Listener INSERT on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })));
+      }
+      try {
+        const completeData = await plugin.getCompleteData(resource, data);
+        if (plugin.config.verbose) {
+          console.log(`[PLUGIN] Listener INSERT completeData for ${resource.name} id=${data && data.id}:`, completeData);
+        }
+        await plugin.processReplicatorEvent(resource.name, "insert", data.id, completeData, null);
+      } catch (err) {
+        if (plugin.config.verbose) {
+          console.error(`[PLUGIN] Listener INSERT error on ${resource.name} id=${data && data.id}:`, err);
+        }
+      }
     });
-    resource.on("update", async (data, beforeData) => {
-      const completeData = await this.getCompleteData(resource, data);
-      const completeBeforeData = beforeData ? await this.getCompleteData(resource, beforeData) : null;
-      await this.queueReplication(resource.name, "update", data.id, completeData, completeBeforeData);
+    resource.on("update", async (data) => {
+      console.log("[PLUGIN][Listener][UPDATE][START] triggered for resource:", resource.name, "data:", data);
+      const beforeData = data && data.$before;
+      if (plugin.config.verbose) {
+        console.log("[PLUGIN] Listener UPDATE on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })), "data:", data, "beforeData:", beforeData);
+      }
+      try {
+        let completeData;
+        const [ok, err, record] = await tryFn(() => resource.get(data.id));
+        if (ok && record) {
+          completeData = record;
+        } else {
+          completeData = data;
+        }
+        await plugin.processReplicatorEvent(resource.name, "update", data.id, completeData, beforeData);
+      } catch (err) {
+        if (plugin.config.verbose) {
+          console.error(`[PLUGIN] Listener UPDATE erro em ${resource.name} id=${data && data.id}:`, err);
+        }
+      }
     });
-    resource.on("delete", async (data) => {
-      const completeData = await this.getCompleteData(resource, data);
-      await this.queueReplication(resource.name, "delete", data.id, completeData);
+    resource.on("delete", async (data, beforeData) => {
+      if (plugin.config.verbose) {
+        console.log("[PLUGIN] Listener DELETE on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })));
+      }
+      try {
+        await plugin.processReplicatorEvent(resource.name, "delete", data.id, null, beforeData);
+      } catch (err) {
+        if (plugin.config.verbose) {
+          console.error(`[PLUGIN] Listener DELETE erro em ${resource.name} id=${data && data.id}:`, err);
+        }
+      }
     });
+    if (plugin.config.verbose) {
+      console.log(`[PLUGIN] Listeners instalados para resource: ${resource && resource.name} (insert: ${resource.listenerCount("insert")}, update: ${resource.listenerCount("update")}, delete: ${resource.listenerCount("delete")})`);
+    }
   }
   /**
    * Get complete data by always fetching the full record from the resource
    * This ensures we always have the complete data regardless of behavior or data size
    */
   async getCompleteData(resource, data) {
-    try {
-      const completeRecord = await resource.get(data.id);
-      return completeRecord;
-    } catch (error) {
-      return data;
-    }
+    const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
+    return ok ? completeRecord : data;
   }
   async setup(database) {
+    console.log("[PLUGIN][SETUP] setup called");
+    if (this.config.verbose) {
+      console.log("[PLUGIN][setup] called with database:", database && database.name);
+    }
     this.database = database;
-    if (!this.config.enabled) {
-      return;
+    if (this.config.persistReplicatorLog) {
+      let logRes = database.resources[normalizeResourceName(this.config.replicatorLogResource)];
+      if (!logRes) {
+        logRes = await database.createResource({
+          name: this.config.replicatorLogResource,
+          behavior: "truncate-data",
+          attributes: {
+            id: "string|required",
+            resource: "string|required",
+            action: "string|required",
+            data: "object",
+            timestamp: "number|required",
+            createdAt: "string|required"
+          },
+          partitions: {
+            byDate: { fields: { "createdAt": "string|maxlength:10" } }
+          }
+        });
+        if (this.config.verbose) {
+          console.log("[PLUGIN] Log resource created:", this.config.replicatorLogResource, !!logRes);
+        }
+      }
+      database.resources[normalizeResourceName(this.config.replicatorLogResource)] = logRes;
+      this.replicatorLog = logRes;
+      if (this.config.verbose) {
+        console.log("[PLUGIN] Log resource created and registered:", this.config.replicatorLogResource, !!database.resources[normalizeResourceName(this.config.replicatorLogResource)]);
+      }
+      if (typeof database.uploadMetadataFile === "function") {
+        await database.uploadMetadataFile();
+        if (this.config.verbose) {
+          console.log("[PLUGIN] uploadMetadataFile called. database.resources keys:", Object.keys(database.resources));
+        }
+      }
     }
     if (this.config.replicators && this.config.replicators.length > 0 && this.replicators.length === 0) {
       await this.initializeReplicators();
-    }
-    if (!database.resources.replication_logs) {
-      this.replicationLog = await database.createResource({
-        name: "replication_logs",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          operation: "string|required",
-          recordId: "string|required",
-          replicatorId: "string|required",
-          status: "string|required",
-          attempts: "number|required",
-          lastAttempt: "string|required",
-          error: "string|required",
-          data: "object|required",
-          timestamp: "string|required"
-        }
-      });
-    } else {
-      this.replicationLog = database.resources.replication_logs;
+      console.log("[PLUGIN][SETUP] after initializeReplicators, replicators.length:", this.replicators.length);
+      if (this.config.verbose) {
+        console.log("[PLUGIN][setup] After initializeReplicators, replicators.length:", this.replicators.length, this.replicators.map((r) => ({ id: r.id, driver: r.driver })));
+      }
     }
     for (const resourceName in database.resources) {
-      if (resourceName !== "replication_logs") {
+      if (normalizeResourceName(resourceName) !== normalizeResourceName(this.config.replicatorLogResource)) {
         this.installEventListeners(database.resources[resourceName]);
       }
     }
+    database.on("connected", () => {
+      for (const resourceName in database.resources) {
+        if (normalizeResourceName(resourceName) !== normalizeResourceName(this.config.replicatorLogResource)) {
+          this.installEventListeners(database.resources[resourceName]);
+        }
+      }
+    });
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
+      if (this.config.verbose) {
+        console.log("[PLUGIN] createResource proxy called for:", config && config.name);
+      }
       const resource = await originalCreateResource(config);
-      if (resource && resource.name !== "replication_logs") {
+      if (resource && resource.name !== this.config.replicatorLogResource) {
         this.installEventListeners(resource);
       }
       return resource;
     };
-    this.startQueueProcessor();
+    database.on("s3db.resourceCreated", (resourceName) => {
+      const resource = database.resources[resourceName];
+      if (resource && resource.name !== this.config.replicatorLogResource) {
+        this.installEventListeners(resource);
+      }
+    });
   }
   async initializeReplicators() {
+    console.log("[PLUGIN][INIT] initializeReplicators called");
     for (const replicatorConfig of this.config.replicators) {
       try {
-        const { driver, config: replicatorConfigData, resources = [] } = replicatorConfig;
-        const validation = validateReplicatorConfig(driver, replicatorConfigData, resources);
-        if (!validation.isValid) {
-          this.emit("replicator.validation.failed", {
+        console.log("[PLUGIN][INIT] processing replicatorConfig:", replicatorConfig);
+        const driver = replicatorConfig.driver;
+        const resources = replicatorConfig.resources;
+        const client = replicatorConfig.client;
+        const replicator = createReplicator(driver, replicatorConfig, resources, client);
+        if (replicator) {
+          this.replicators.push({
+            id: Math.random().toString(36).slice(2),
             driver,
-            errors: validation.errors
+            config: replicatorConfig,
+            resources,
+            instance: replicator
           });
-          continue;
+          console.log("[PLUGIN][INIT] pushed replicator:", driver, resources);
+        } else {
+          console.log("[PLUGIN][INIT] createReplicator returned null/undefined for driver:", driver);
         }
-        const replicator = createReplicator(driver, replicatorConfigData, resources);
-        await replicator.initialize(this.database);
-        replicator.on("replicated", (data) => {
-          this.emit("replication.success", data);
-        });
-        replicator.on("replication_error", (data) => {
-          this.emit("replication.failed", data);
-        });
-        this.replicators.push({
-          id: `${driver}-${Date.now()}`,
-          driver,
-          config: replicatorConfigData,
-          resources,
-          instance: replicator
-        });
-        this.emit("replicator.initialized", {
-          driver,
-          config: replicatorConfigData,
-          resources
-        });
-      } catch (error) {
-        this.emit("replicator.initialization.failed", {
-          driver: replicatorConfig.driver,
-          error: error.message
-        });
+      } catch (err) {
+        console.error("[PLUGIN][INIT] Error creating replicator:", err);
       }
     }
   }
   async start() {
   }
   async stop() {
-    this.isProcessing = false;
-    await this.processQueue();
   }
-  async queueReplication(resourceName, operation, recordId, data, beforeData = null) {
-    if (!this.config.enabled) {
-      return;
+  async processReplicatorEvent(resourceName, operation, recordId, data, beforeData = null) {
+    if (this.config.verbose) {
+      console.log("[PLUGIN][processReplicatorEvent] replicators.length:", this.replicators.length, this.replicators.map((r) => ({ id: r.id, driver: r.driver })));
+      console.log(`[PLUGIN][processReplicatorEvent] operation: ${operation}, resource: ${resourceName}, recordId: ${recordId}, data:`, data, "beforeData:", beforeData);
+    }
+    if (this.config.verbose) {
+      console.log(`[PLUGIN] processReplicatorEvent: resource=${resourceName} op=${operation} id=${recordId} data=`, data);
+    }
+    if (this.config.verbose) {
+      console.log(`[PLUGIN] processReplicatorEvent: resource=${resourceName} op=${operation} replicators=${this.replicators.length}`);
     }
     if (this.replicators.length === 0) {
+      if (this.config.verbose) {
+        console.log("[PLUGIN] No replicators registered");
+      }
       return;
     }
-    const applicableReplicators = this.replicators.filter(
-      (replicator) => replicator.instance.shouldReplicateResource(resourceName)
-    );
+    const applicableReplicators = this.replicators.filter((replicator) => {
+      const should = replicator.instance.shouldReplicateResource(resourceName, operation);
+      if (this.config.verbose) {
+        console.log(`[PLUGIN] Replicator ${replicator.driver} shouldReplicateResource(${resourceName}, ${operation}):`, should);
+      }
+      return should;
+    });
+    if (this.config.verbose) {
+      console.log(`[PLUGIN] processReplicatorEvent: applicableReplicators for resource=${resourceName}:`, applicableReplicators.map((r) => r.driver));
+    }
     if (applicableReplicators.length === 0) {
+      if (this.config.verbose) {
+        console.log("[PLUGIN] No applicable replicators for resource", resourceName);
+      }
       return;
     }
+    const filteredData = this.filterInternalFields(isPlainObject(data) ? data : { raw: data });
+    const filteredBeforeData = beforeData ? this.filterInternalFields(isPlainObject(beforeData) ? beforeData : { raw: beforeData }) : null;
     const item = {
       id: `repl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       resourceName,
       operation,
       recordId,
-      data: isPlainObject(data) ? data : { raw: data },
-      beforeData: beforeData ? isPlainObject(beforeData) ? beforeData : { raw: beforeData } : null,
+      data: filteredData,
+      beforeData: filteredBeforeData,
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       attempts: 0
     };
-    const logId = await this.logReplication(item);
-    if (this.config.syncMode === "sync") {
-      try {
-        const result = await this.processReplicationItem(item);
-        if (logId) {
-          await this.updateReplicationLog(logId, {
-            status: result.success ? "success" : "failed",
-            attempts: 1,
-            error: result.success ? "" : JSON.stringify(result.results)
-          });
-        }
-        this.stats.totalOperations++;
-        if (result.success) {
-          this.stats.successfulOperations++;
-        } else {
-          this.stats.failedOperations++;
-        }
-      } catch (error) {
-        if (logId) {
-          await this.updateReplicationLog(logId, {
-            status: "failed",
-            attempts: 1,
-            error: error.message
-          });
-        }
+    const logId = await this.logreplicator(item);
+    const [ok, err, result] = await tryFn(async () => this.processreplicatorItem(item));
+    if (ok) {
+      if (logId) {
+        await this.updatereplicatorLog(logId, {
+          status: result.success ? "success" : "failed",
+          attempts: 1,
+          error: result.success ? "" : JSON.stringify(result.results)
+        });
+      }
+      this.stats.totalOperations++;
+      if (result.success) {
+        this.stats.successfulOperations++;
+      } else {
         this.stats.failedOperations++;
       }
     } else {
-      this.queue.push(item);
-      this.emit("replication.queued", { item, queueLength: this.queue.length });
+      if (logId) {
+        await this.updatereplicatorLog(logId, {
+          status: "failed",
+          attempts: 1,
+          error: err.message
+        });
+      }
+      this.stats.failedOperations++;
     }
   }
-  async processReplicationItem(item) {
-    const { resourceName, operation, recordId, data, beforeData } = item;
-    const applicableReplicators = this.replicators.filter(
-      (replicator) => replicator.instance.shouldReplicateResource(resourceName)
-    );
+  async processreplicatorItem(item) {
+    if (this.config.verbose) {
+      console.log("[PLUGIN][processreplicatorItem] called with item:", item);
+    }
+    const applicableReplicators = this.replicators.filter((replicator) => {
+      const should = replicator.instance.shouldReplicateResource(item.resourceName, item.operation);
+      if (this.config.verbose) {
+        console.log(`[PLUGIN] processreplicatorItem: Replicator ${replicator.driver} shouldReplicateResource(${item.resourceName}, ${item.operation}):`, should);
+      }
+      return should;
+    });
+    if (this.config.verbose) {
+      console.log(`[PLUGIN] processreplicatorItem: applicableReplicators for resource=${item.resourceName}:`, applicableReplicators.map((r) => r.driver));
+    }
     if (applicableReplicators.length === 0) {
+      if (this.config.verbose) {
+        console.log("[PLUGIN] processreplicatorItem: No applicable replicators for resource", item.resourceName);
+      }
       return { success: true, skipped: true, reason: "no_applicable_replicators" };
     }
     const results = [];
     for (const replicator of applicableReplicators) {
-      try {
-        const result = await replicator.instance.replicate(resourceName, operation, data, recordId, beforeData);
-        results.push({
-          replicatorId: replicator.id,
-          driver: replicator.driver,
-          success: result.success,
-          error: result.error,
-          skipped: result.skipped
-        });
-      } catch (error) {
-        results.push({
-          replicatorId: replicator.id,
-          driver: replicator.driver,
-          success: false,
-          error: error.message
+      let result;
+      let ok, err;
+      if (this.config.verbose) {
+        console.log("[PLUGIN] processReplicatorItem", {
+          resource: item.resourceName,
+          operation: item.operation,
+          data: item.data,
+          beforeData: item.beforeData,
+          replicator: replicator.instance?.constructor?.name
         });
       }
+      if (replicator.instance && replicator.instance.constructor && replicator.instance.constructor.name === "S3dbReplicator") {
+        [ok, err, result] = await tryFn(
+          () => replicator.instance.replicate({
+            resource: item.resourceName,
+            operation: item.operation,
+            data: item.data,
+            id: item.recordId,
+            beforeData: item.beforeData
+          })
+        );
+      } else {
+        [ok, err, result] = await tryFn(
+          () => replicator.instance.replicate(
+            item.resourceName,
+            item.operation,
+            item.data,
+            item.recordId,
+            item.beforeData
+          )
+        );
+      }
+      results.push({
+        replicatorId: replicator.id,
+        driver: replicator.driver,
+        success: result && result.success,
+        error: result && result.error,
+        skipped: result && result.skipped
+      });
     }
     return {
       success: results.every((r) => r.success || r.skipped),
       results
     };
   }
-  async logReplication(item) {
-    if (!this.replicationLog) return;
+  async logreplicator(item) {
+    const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
+    if (!logRes) {
+      if (this.config.verbose) {
+        console.error("[PLUGIN] replicator log resource not found!");
+      }
+      if (this.database) {
+        if (this.config.verbose) {
+          console.warn("[PLUGIN] database.resources keys:", Object.keys(this.database.resources));
+        }
+        if (this.database.options && this.database.options.connectionString) {
+          if (this.config.verbose) {
+            console.warn("[PLUGIN] database connectionString:", this.database.options.connectionString);
+          }
+        }
+      }
+      this.emit("replicator.log.failed", { error: "replicator log resource not found", item });
+      return;
+    }
+    const logItem = {
+      id: item.id || `repl-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      resource: item.resource || item.resourceName || "",
+      action: item.operation || item.action || "",
+      data: item.data || {},
+      timestamp: typeof item.timestamp === "number" ? item.timestamp : Date.now(),
+      createdAt: item.createdAt || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
+    };
     try {
-      const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      await this.replicationLog.insert({
-        id: logId,
-        resourceName: item.resourceName,
-        operation: item.operation,
-        recordId: item.recordId,
-        replicatorId: "all",
-        // Will be updated with specific replicator results
-        status: "queued",
-        attempts: 0,
-        lastAttempt: (/* @__PURE__ */ new Date()).toISOString(),
-        error: "",
-        data: isPlainObject(item.data) ? item.data : { raw: item.data },
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      return logId;
-    } catch (error) {
-      this.emit("replication.log.failed", { error: error.message, item });
-      return null;
+      await logRes.insert(logItem);
+    } catch (err) {
+      if (this.config.verbose) {
+        console.error("[PLUGIN] Error writing to replicator log:", err);
+      }
+      this.emit("replicator.log.failed", { error: err, item });
     }
   }
-  async updateReplicationLog(logId, updates) {
-    if (!this.replicationLog) return;
-    try {
-      await this.replicationLog.update(logId, {
+  async updatereplicatorLog(logId, updates) {
+    if (!this.replicatorLog) return;
+    const [ok, err] = await tryFn(async () => {
+      await this.replicatorLog.update(logId, {
         ...updates,
         lastAttempt: (/* @__PURE__ */ new Date()).toISOString()
       });
-    } catch (error) {
-      this.emit("replication.updateLog.failed", { error: error.message, logId, updates });
-    }
-  }
-  startQueueProcessor() {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-    this.processQueueLoop();
-  }
-  async processQueueLoop() {
-    while (this.isProcessing) {
-      if (this.queue.length > 0) {
-        const batch = this.queue.splice(0, this.config.batchSize);
-        for (const item of batch) {
-          await this.processReplicationItem(item);
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1e3));
-      }
-    }
-  }
-  async processQueue() {
-    if (this.queue.length === 0) return;
-    const item = this.queue.shift();
-    let attempts = 0;
-    let lastError = null;
-    while (attempts < this.config.retryAttempts) {
-      try {
-        attempts++;
-        this.emit("replication.retry.started", {
-          item,
-          attempt: attempts,
-          maxAttempts: this.config.retryAttempts
-        });
-        const result = await this.processReplicationItem(item);
-        if (result.success) {
-          this.stats.successfulOperations++;
-          this.emit("replication.success", {
-            item,
-            attempts,
-            results: result.results,
-            stats: this.stats
-          });
-          return;
-        } else {
-          lastError = result.results;
-          if (attempts < this.config.retryAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, this.config.retryDelay * attempts));
-          }
-        }
-      } catch (error) {
-        lastError = error.message;
-        if (attempts < this.config.retryAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, this.config.retryDelay * attempts));
-        } else {
-          this.emit("replication.retry.exhausted", {
-            attempts,
-            lastError,
-            item
-          });
-        }
-      }
-    }
-    this.stats.failedOperations++;
-    this.emit("replication.failed", {
-      attempts,
-      lastError,
-      item,
-      stats: this.stats
     });
+    if (!ok) {
+      this.emit("replicator.updateLog.failed", { error: err.message, logId, updates });
+    }
   }
   // Utility methods
-  async getReplicationStats() {
+  async getreplicatorStats() {
     const replicatorStats = await Promise.all(
       this.replicators.map(async (replicator) => {
         const status = await replicator.instance.getStatus();
@@ -21048,7 +22414,6 @@ class ReplicationPlugin extends Plugin {
       })
     );
     return {
-      enabled: this.config.enabled,
       replicators: replicatorStats,
       queue: {
         length: this.queue.length,
@@ -21058,8 +22423,8 @@ class ReplicationPlugin extends Plugin {
       lastSync: this.stats.lastSync
     };
   }
-  async getReplicationLogs(options = {}) {
-    if (!this.replicationLog) {
+  async getreplicatorLogs(options = {}) {
+    if (!this.replicatorLog) {
       return [];
     }
     const {
@@ -21079,28 +22444,32 @@ class ReplicationPlugin extends Plugin {
     if (status) {
       query.status = status;
     }
-    const logs = await this.replicationLog.list(query);
+    const logs = await this.replicatorLog.list(query);
     return logs.slice(offset, offset + limit);
   }
-  async retryFailedReplications() {
-    if (!this.replicationLog) {
+  async retryFailedreplicators() {
+    if (!this.replicatorLog) {
       return { retried: 0 };
     }
-    const failedLogs = await this.replicationLog.list({
+    const failedLogs = await this.replicatorLog.list({
       status: "failed"
     });
     let retried = 0;
     for (const log of failedLogs) {
-      try {
-        await this.queueReplication(
+      const [ok, err] = await tryFn(async () => {
+        await this.processReplicatorEvent(
           log.resourceName,
           log.operation,
           log.recordId,
           log.data
         );
+      });
+      if (ok) {
         retried++;
-      } catch (error) {
-        console.error("Failed to retry replication:", error);
+      } else {
+        if (this.config.verbose) {
+          console.error("Failed to retry replicator:", err);
+        }
       }
     }
     return { retried };
@@ -21112,9 +22481,9 @@ class ReplicationPlugin extends Plugin {
     }
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
-      if (resourceName === "replication_logs") continue;
+      if (normalizeResourceName(resourceName) === normalizeResourceName("replicator_logs")) continue;
       if (replicator.instance.shouldReplicateResource(resourceName)) {
-        this.emit("replication.sync.resource", { resourceName, replicatorId });
+        this.emit("replicator.sync.resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
         const allRecords = await resource.getAll();
         for (const record of allRecords) {
@@ -21122,8 +22491,45 @@ class ReplicationPlugin extends Plugin {
         }
       }
     }
-    this.emit("replication.sync.completed", { replicatorId, stats: this.stats });
+    this.emit("replicator.sync.completed", { replicatorId, stats: this.stats });
+  }
+  async cleanup() {
+    if (this.config.verbose) {
+      console.log("[PLUGIN][CLEANUP] Cleaning up ReplicatorPlugin");
+    }
+    if (this._installedListeners && Array.isArray(this._installedListeners)) {
+      for (const resource of this._installedListeners) {
+        if (resource && typeof resource.removeAllListeners === "function") {
+          resource.removeAllListeners("insert");
+          resource.removeAllListeners("update");
+          resource.removeAllListeners("delete");
+        }
+        resource._replicatorListenersInstalled = false;
+      }
+      this._installedListeners = [];
+    }
+    if (this.database && typeof this.database.removeAllListeners === "function") {
+      this.database.removeAllListeners();
+    }
+    if (this.replicators && Array.isArray(this.replicators)) {
+      for (const rep of this.replicators) {
+        if (rep.instance && typeof rep.instance.cleanup === "function") {
+          await rep.instance.cleanup();
+        }
+      }
+      this.replicators = [];
+    }
+    this.queue = [];
+    this.isProcessing = false;
+    this.stats = {
+      totalOperations: 0,
+      totalErrors: 0,
+      lastError: null
+    };
+    if (this.config.verbose) {
+      console.log("[PLUGIN][CLEANUP] ReplicatorPlugin cleanup complete");
+    }
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BaseError, Cache, CachePlugin, Client, ConnectionString, CostsPlugin, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, FullTextPlugin, InvalidResourceItem, MemoryCache, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PermissionError, Plugin, PluginObject, ReplicationPlugin, Resource, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3Cache, S3DBError, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, Schema, SchemaActions, UnknownError, ValidationError, Validator, ValidatorManager, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateTotalSize, calculateUTF8Bytes, decrypt, S3db as default, encrypt, getBehavior, getSizeBreakdown, idGenerator, passwordGenerator, sha256, streamToString, transformValue };
+export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BaseError, BaseReplicator, BigqueryReplicator, Cache, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, FullTextPlugin, InvalidResourceItem, MemoryCache, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, PostgresReplicator, REPLICATOR_DRIVERS, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3Cache, S3_DEFAULT_ENDPOINT, S3_DEFAULT_REGION, S3db, S3dbError, S3dbReplicator, Schema, SchemaActions, SchemaError, SqsReplicator, UnknownError, ValidationError, Validator, ValidatorManager, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, createReplicator, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync, validateReplicatorConfig };
