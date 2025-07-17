@@ -1,5 +1,7 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 import { v4 as uuidv4 } from 'uuid';
+import { describe, expect, test, beforeEach, jest, afterEach } from '@jest/globals';
+
+import { ResourceError } from '#src/errors.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Custom ID Generators - Real Integration Tests', () => {
@@ -8,6 +10,12 @@ describe('Custom ID Generators - Real Integration Tests', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('resource-ids');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   describe('idSize parameter', () => {
@@ -141,48 +149,98 @@ describe('Custom ID Generators - Real Integration Tests', () => {
 
   describe('validation', () => {
     test('should throw error for invalid idGenerator type', async () => {
-      await expect(async () => {
-        // This should throw during resource creation
+      let error;
+      try {
         await database.createResource({
           name: 'invalid-generator-resource',
           attributes: { name: 'string|required' },
           idGenerator: 'invalid'
         });
-      }).rejects.toThrow("Resource 'idGenerator' must be a function or a number (size)");
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(ResourceError);
+      expect(error.validation).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Resource 'idGenerator' must be a function or a number (size)")
+        ])
+      );
     });
 
     test('should throw error for invalid idSize type', async () => {
-      await expect(async () => {
+      let error;
+      try {
         await database.createResource({
           name: 'invalid-size-resource',
           attributes: { name: 'string|required' },
           idSize: 'invalid'
         });
-      }).rejects.toThrow("Resource 'idSize' must be an integer");
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(ResourceError);
+      expect(error.validation).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Resource 'idSize' must be an integer")
+        ])
+      );
     });
 
     test('should throw error for negative idSize', async () => {
-      await expect(database.createResource({
-        name: 'negative-size-resource',
-        attributes: { name: 'string|required' },
-        idSize: -1
-      })).rejects.toThrow("Resource 'idSize' must be greater than 0");
+      let error;
+      try {
+        await database.createResource({
+          name: 'negative-size-resource',
+          attributes: { name: 'string|required' },
+          idSize: -1
+        });
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(ResourceError);
+      expect(error.validation).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Resource 'idSize' must be greater than 0")
+        ])
+      );
     });
 
     test('should throw error for zero idSize', async () => {
-      await expect(database.createResource({
-        name: 'zero-size-resource',
-        attributes: { name: 'string|required' },
-        idSize: 0
-      })).rejects.toThrow("Resource 'idSize' must be greater than 0");
+      let error;
+      try {
+        await database.createResource({
+          name: 'zero-size-resource',
+          attributes: { name: 'string|required' },
+          idSize: 0
+        });
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(ResourceError);
+      expect(error.validation).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Resource 'idSize' must be greater than 0")
+        ])
+      );
     });
 
     test('should throw error for negative idGenerator size', async () => {
-      await expect(database.createResource({
-        name: 'negative-generator-resource',
-        attributes: { name: 'string|required' },
-        idGenerator: -1
-      })).rejects.toThrow("Resource 'idGenerator' size must be greater than 0");
+      let error;
+      try {
+        await database.createResource({
+          name: 'negative-generator-resource',
+          attributes: { name: 'string|required' },
+          idGenerator: -1
+        });
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(ResourceError);
+      expect(error.validation).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Resource 'idGenerator' size must be greater than 0")
+        ])
+      );
     });
   });
 
@@ -352,15 +410,28 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       
       // Insert multiple items
       const promises = Array.from({ length: 10 }, (_, i) => 
-        resource.insert({ name: `User ${i}` })
+        resource.insert({ name: `User ${i}` }).catch(err => {
+          console.error(`Insert ${i} failed:`, err.message);
+          return null;
+        })
       );
       
-      const results = await Promise.all(promises);
+      const allResults = await Promise.all(promises);
+      const results = allResults.filter(r => r !== null);
+      
+      console.log('Successful results:', results.length, 'IDs:', results.map(r => r.id));
       const endTime = Date.now();
 
-      expect(results).toHaveLength(10);
-      expect(results[0].id).toBe('fast-1');
-      expect(results[9].id).toBe('fast-10');
+      // Sort results by ID number since parallel operations can complete out of order
+      const sortedResults = results.sort((a, b) => {
+        const numA = parseInt(a.id.split('-')[1]);
+        const numB = parseInt(b.id.split('-')[1]);
+        return numA - numB;
+      });
+
+      expect(sortedResults).toHaveLength(10);
+      expect(sortedResults[0].id).toBe('fast-1');
+      expect(sortedResults[9].id).toBe('fast-10');
       
       // Should complete in reasonable time
       expect(endTime - startTime).toBeLessThan(5000);

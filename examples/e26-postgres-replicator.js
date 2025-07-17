@@ -16,7 +16,7 @@
  */
 
 import S3db from '../src/index.js';
-import { ReplicationPlugin } from '../src/plugins/index.js';
+import { ReplicatorPlugin } from '../src/plugins/index.js';
 
 // Example configuration - replace with your actual PostgreSQL credentials
 const POSTGRES_CONFIG = {
@@ -28,16 +28,16 @@ const POSTGRES_CONFIG = {
   // user: 'user',
   // password: 'password',
   ssl: false,
-  logTable: 's3db_replication_log'
+  logTable: 's3db_replicator_log'
 };
 
 async function main() {
   console.log('🚀 PostgreSQL Replicator Example\n');
 
-  // Create database with PostgreSQL replication
+  // Create database with PostgreSQL replicator
   const s3db = new S3db({
     connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/postgres-demo",
-    plugins: [new ReplicationPlugin({
+    plugins: [new ReplicatorPlugin({
       enabled: true,
       replicators: [
         {
@@ -76,7 +76,7 @@ async function main() {
   });
 
   await s3db.connect();
-  console.log('✅ Connected to S3DB with PostgreSQL replication\n');
+  console.log('✅ Connected to S3DB with PostgreSQL replicator\n');
 
   // Create resources
   const users = await s3db.createResource({
@@ -144,19 +144,19 @@ async function main() {
 
   console.log('✅ Created resources: users, orders, products, categories, reviews, inventory\n');
 
-  // Listen to replication events
-  const replicationPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicationPlugin');
+  // Listen to replicator events
+  const ReplicatorPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
   
-  replicationPlugin.on('replication.success', (data) => {
-    console.log(`✅ Replication succeeded: ${data.item.resourceName} ${data.item.operation}`);
+  ReplicatorPlugin.on('replicator.success', (data) => {
+    console.log(`✅ replicator succeeded: ${data.item.resourceName} ${data.item.operation}`);
   });
 
-  replicationPlugin.on('replication.failed', (data) => {
-    console.log(`❌ Replication failed: ${data.item.resourceName} ${data.item.operation} - ${data.lastError}`);
+  ReplicatorPlugin.on('replicator.failed', (data) => {
+    console.log(`❌ replicator failed: ${data.item.resourceName} ${data.item.operation} - ${data.lastError}`);
   });
 
   // Listen to PostgreSQL replicator events
-  replicationPlugin.on('replicator.replicated', (data) => {
+  ReplicatorPlugin.on('replicator.replicated', (data) => {
     if (data.replicator === 'PostgresReplicator') {
       console.log(`📊 PostgreSQL replicated: ${data.resourceName} ${data.operation} to ${data.tables.length} tables`);
       if (data.results) {
@@ -234,18 +234,18 @@ async function main() {
   await users.delete('user-1');
   console.log('✅ Deleted user');
 
-  // Wait for async replications to process
-  console.log('\n⏳ Waiting for replications to process...');
+  // Wait for async replicators to process
+  console.log('\n⏳ Waiting for replicators to process...');
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Get replication statistics
-  const stats = await replicationPlugin.getReplicationStats();
-  console.log('\n📊 Replication Statistics:');
+  // Get replicator statistics
+  const stats = await ReplicatorPlugin.getreplicatorStats();
+  console.log('\n📊 replicator Statistics:');
   console.log(JSON.stringify(stats, null, 2));
 
   // Test PostgreSQL connection
   console.log('\n🔍 Testing PostgreSQL connection...');
-  const postgresReplicator = replicationPlugin.replicators.find(r => r.driver === 'postgres');
+  const postgresReplicator = ReplicatorPlugin.replicators.find(r => r.driver === 'postgres');
   if (postgresReplicator) {
     try {
       const isConnected = await postgresReplicator.instance.testConnection();
@@ -263,7 +263,7 @@ async function main() {
   console.log('- categories: insert → categories_table');
   console.log('- reviews: insert → reviews_table');
   console.log('- inventory: insert → inventory_table');
-  console.log('- All operations logged to: s3db_replication_log');
+  console.log('- All operations logged to: s3db_replicator_log');
   console.log('\n💡 PostgreSQL Features:');
   console.log('- UPSERT operations with ON CONFLICT handling');
   console.log('- Transaction support for data consistency');

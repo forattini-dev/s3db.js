@@ -1,4 +1,5 @@
 import Plugin from "./plugin.class.js";
+import tryFn from "../concerns/try-fn.js";
 
 export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
@@ -35,8 +36,8 @@ export class MetricsPlugin extends Plugin {
     this.database = database;
     if (!this.config.enabled || process.env.NODE_ENV === 'test') return;
 
-    try {
-      this.metricsResource = await database.createResource({
+    const [ok, err] = await tryFn(async () => {
+      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
         name: 'metrics',
         attributes: {
           id: 'string|required',
@@ -50,9 +51,10 @@ export class MetricsPlugin extends Plugin {
           timestamp: 'string|required',
           metadata: 'json'
         }
-      });
+      }));
+      this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
 
-      this.errorsResource = await database.createResource({
+      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
         name: 'error_logs',
         attributes: {
           id: 'string|required',
@@ -62,9 +64,10 @@ export class MetricsPlugin extends Plugin {
           timestamp: 'string|required',
           metadata: 'json'
         }
-      });
+      }));
+      this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
 
-      this.performanceResource = await database.createResource({
+      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
         name: 'performance_logs',
         attributes: {
           id: 'string|required',
@@ -74,8 +77,10 @@ export class MetricsPlugin extends Plugin {
           timestamp: 'string|required',
           metadata: 'json'
         }
-      });
-    } catch (error) {
+      }));
+      this.performanceResource = ok3 ? performanceResource : database.resources.performance_logs;
+    });
+    if (!ok) {
       // Resources might already exist
       this.metricsResource = database.resources.metrics;
       this.errorsResource = database.resources.error_logs;
@@ -146,155 +151,111 @@ export class MetricsPlugin extends Plugin {
     // Hook insert operations
     resource.insert = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._insert(...args);
-        this.recordOperation(resource.name, 'insert', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'insert', Date.now() - startTime, true);
-        this.recordError(resource.name, 'insert', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._insert(...args));
+      this.recordOperation(resource.name, 'insert', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'insert', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook update operations
     resource.update = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._update(...args);
-        this.recordOperation(resource.name, 'update', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'update', Date.now() - startTime, true);
-        this.recordError(resource.name, 'update', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._update(...args));
+      this.recordOperation(resource.name, 'update', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'update', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook delete operations
     resource.delete = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._delete(...args);
-        this.recordOperation(resource.name, 'delete', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'delete', Date.now() - startTime, true);
-        this.recordError(resource.name, 'delete', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._delete(...args));
+      this.recordOperation(resource.name, 'delete', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'delete', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook deleteMany operations
     resource.deleteMany = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._deleteMany(...args);
-        this.recordOperation(resource.name, 'delete', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'delete', Date.now() - startTime, true);
-        this.recordError(resource.name, 'delete', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
+      this.recordOperation(resource.name, 'delete', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'delete', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook get operations
     resource.get = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._get(...args);
-        this.recordOperation(resource.name, 'get', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'get', Date.now() - startTime, true);
-        this.recordError(resource.name, 'get', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._get(...args));
+      this.recordOperation(resource.name, 'get', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'get', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook getMany operations
     resource.getMany = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._getMany(...args);
-        this.recordOperation(resource.name, 'get', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'get', Date.now() - startTime, true);
-        this.recordError(resource.name, 'get', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
+      this.recordOperation(resource.name, 'get', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'get', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook getAll operations
     resource.getAll = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._getAll(...args);
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, true);
-        this.recordError(resource.name, 'list', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
+      this.recordOperation(resource.name, 'list', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'list', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook list operations
     resource.list = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._list(...args);
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, true);
-        this.recordError(resource.name, 'list', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._list(...args));
+      this.recordOperation(resource.name, 'list', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'list', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook listIds operations
     resource.listIds = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._listIds(...args);
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, true);
-        this.recordError(resource.name, 'list', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
+      this.recordOperation(resource.name, 'list', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'list', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook count operations
     resource.count = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._count(...args);
-        this.recordOperation(resource.name, 'count', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'count', Date.now() - startTime, true);
-        this.recordError(resource.name, 'count', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._count(...args));
+      this.recordOperation(resource.name, 'count', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'count', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
 
     // Hook page operations
     resource.page = async function (...args) {
       const startTime = Date.now();
-      try {
-        const result = await resource._page(...args);
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, false);
-        return result;
-      } catch (error) {
-        this.recordOperation(resource.name, 'list', Date.now() - startTime, true);
-        this.recordError(resource.name, 'list', error);
-        throw error;
-      }
+      const [ok, err, result] = await tryFn(() => resource._page(...args));
+      this.recordOperation(resource.name, 'list', Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, 'list', err);
+      if (!ok) throw err;
+      return result;
     }.bind(this);
   }
 
@@ -367,7 +328,7 @@ export class MetricsPlugin extends Plugin {
   async flushMetrics() {
     if (!this.metricsResource) return;
 
-    try {
+    const [ok, err] = await tryFn(async () => {
       // Use empty metadata during tests to avoid header issues
       const metadata = process.env.NODE_ENV === 'test' ? {} : { global: 'true' };
       const perfMetadata = process.env.NODE_ENV === 'test' ? {} : { perf: 'true' };
@@ -443,9 +404,9 @@ export class MetricsPlugin extends Plugin {
 
       // Reset metrics after flushing
       this.resetMetrics();
-
-    } catch (error) {
-      console.error('Failed to flush metrics:', error);
+    });
+    if (!ok) {
+      console.error('Failed to flush metrics:', err);
     }
   }
 
@@ -637,8 +598,6 @@ export class MetricsPlugin extends Plugin {
         await this.performanceResource.delete(perf.id);
       }
     }
-
-    console.log(`Cleaned up data older than ${this.config.retentionDays} days`);
   }
 }
 

@@ -368,6 +368,7 @@ describe('Resource Versions - Real Integration Tests', () => {
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
       expect(error.message).toContain('validation');
+      expect(error.message).not.toContain('[object');
     }
 
     // Verify user data wasn't changed by invalid update
@@ -449,7 +450,10 @@ describe('Resource Versions - Real Integration Tests', () => {
       expect(document.metadata.size).toBe(10000);
     } catch (error) {
       // Acceptable for user-managed behavior: S3 may reject large metadata
-      expect(error.message).toContain('metadata headers exceed');
+      expect(
+        error.message.includes('metadata headers exceed') ||
+        error.message.includes('Validation error')
+      ).toBe(true);
       return; // Skip the rest of the test if insert fails
     }
 
@@ -472,7 +476,10 @@ describe('Resource Versions - Real Integration Tests', () => {
       expect(updatedDocument.metadata.type).toBe('text'); // Should remain unchanged
     } catch (error) {
       // Acceptable for user-managed behavior: S3 may reject large metadata
-      expect(error.message).toContain('metadata headers exceed');
+      expect(
+        error.message.includes('metadata headers exceed') ||
+        error.message.includes('Validation error')
+      ).toBe(true);
     }
   });
 

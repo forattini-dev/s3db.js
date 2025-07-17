@@ -106,6 +106,39 @@ export class Plugin extends EventEmitter {
     }
   }
 
+  /**
+   * Add a middleware to intercept a resource method (Koa/Express style).
+   * Middleware signature: async (next, ...args) => { ... }
+   * - Chame next(...args) para continuar a cadeia.
+   * - Retorne sem chamar next para interromper.
+   * - Pode modificar argumentos/resultados.
+   */
+  addMiddleware(resource, methodName, middleware) {
+    if (!resource._pluginMiddlewares) {
+      resource._pluginMiddlewares = {};
+    }
+    if (!resource._pluginMiddlewares[methodName]) {
+      resource._pluginMiddlewares[methodName] = [];
+      // Wrap the original method only once
+      const originalMethod = resource[methodName].bind(resource);
+      resource[methodName] = async function(...args) {
+        let idx = -1;
+        const next = async (...nextArgs) => {
+          idx++;
+          if (idx < resource._pluginMiddlewares[methodName].length) {
+            // Call next middleware
+            return await resource._pluginMiddlewares[methodName][idx].call(this, next, ...nextArgs);
+          } else {
+            // Call original method
+            return await originalMethod(...nextArgs);
+          }
+        };
+        return await next(...args);
+      };
+    }
+    resource._pluginMiddlewares[methodName].push(middleware);
+  }
+
   // Partition-aware helper methods
   getPartitionValues(data, resource) {
     if (!resource.config?.partitions) return {};

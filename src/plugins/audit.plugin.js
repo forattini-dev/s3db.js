@@ -1,4 +1,5 @@
 import Plugin from "./plugin.class.js";
+import tryFn, { tryFnSync } from "../concerns/try-fn.js";
 
 export class AuditPlugin extends Plugin {
   constructor(options = {}) {
@@ -20,34 +21,26 @@ export class AuditPlugin extends Plugin {
     }
 
     // Create audit resource if it doesn't exist
-    try {
-      this.auditResource = await this.database.createResource({
-        name: 'audits',
-        attributes: {
-          id: 'string|required',
-          resourceName: 'string|required',
-          operation: 'string|required',
-          recordId: 'string|required',
-          userId: 'string|optional',
-          timestamp: 'string|required',
-          oldData: 'string|optional',
-          newData: 'string|optional',
-          partition: 'string|optional',
-          partitionValues: 'string|optional',
-          metadata: 'string|optional'
-        }
-        // keyPrefix removido
-      });
-    } catch (error) {
-      // Resource might already exist
-      try {
-        this.auditResource = this.database.resources.audits;
-      } catch (innerError) {
-        // If audit resource doesn't exist and can't be created, set to null
-        this.auditResource = null;
-        return;
-      }
-    }
+    const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
+      name: 'audits',
+      attributes: {
+        id: 'string|required',
+        resourceName: 'string|required',
+        operation: 'string|required',
+        recordId: 'string|required',
+        userId: 'string|optional',
+        timestamp: 'string|required',
+        oldData: 'string|optional',
+        newData: 'string|optional',
+        partition: 'string|optional',
+        partitionValues: 'string|optional',
+        metadata: 'string|optional'
+      },
+      behavior: 'body-overflow'
+      // keyPrefix removido
+    }));
+    this.auditResource = ok ? auditResource : (this.database.resources.audits || null);
+    if (!ok && !this.auditResource) return;
 
     this.installDatabaseProxy();
     this.installEventListeners();
@@ -131,11 +124,8 @@ export class AuditPlugin extends Plugin {
       let oldData = data.$before;
       
       if (this.config.includeData && !oldData) {
-        try {
-          oldData = await resource.get(recordId);
-        } catch (error) {
-          // Record might not exist or be inaccessible
-        }
+        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        if (ok) oldData = fetched;
       }
 
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
@@ -167,11 +157,8 @@ export class AuditPlugin extends Plugin {
       let oldData = data;
       
       if (this.config.includeData && !oldData) {
-        try {
-          oldData = await resource.get(recordId);
-        } catch (error) {
-          // Record might not exist or be inaccessible
-        }
+        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        if (ok) oldData = fetched;
       }
 
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
@@ -205,11 +192,8 @@ export class AuditPlugin extends Plugin {
       const oldDataMap = {};
       if (this.config.includeData) {
         for (const id of ids) {
-          try {
-            oldDataMap[id] = await resource.get(id);
-          } catch (error) {
-            oldDataMap[id] = null;
-          }
+          const [ok, err, data] = await tryFn(() => resource.get(id));
+          oldDataMap[id] = ok ? data : null;
         }
       }
       const result = await next();
@@ -316,8 +300,33 @@ export class AuditPlugin extends Plugin {
       return filteredData;
     }
     
+    // Need to actually truncate the data to fit within maxDataSize
+    let truncatedData = { ...filteredData };
+    let currentSize = JSON.stringify(truncatedData).length;
+    
+    // Reserve space for truncation metadata
+    const metadataOverhead = JSON.stringify({
+      _truncated: true,
+      _originalSize: dataStr.length,
+      _truncatedAt: new Date().toISOString()
+    }).length;
+    
+    const targetSize = this.config.maxDataSize - metadataOverhead;
+    
+    // Truncate string fields until we fit within the limit
+    for (const [key, value] of Object.entries(truncatedData)) {
+      if (typeof value === 'string' && currentSize > targetSize) {
+        const excess = currentSize - targetSize;
+        const newLength = Math.max(0, value.length - excess - 3); // -3 for "..."
+        if (newLength < value.length) {
+          truncatedData[key] = value.substring(0, newLength) + '...';
+          currentSize = JSON.stringify(truncatedData).length;
+        }
+      }
+    }
+    
     return {
-      ...filteredData,
+      ...truncatedData,
       _truncated: true,
       _originalSize: dataStr.length,
       _truncatedAt: new Date().toISOString()
@@ -327,7 +336,7 @@ export class AuditPlugin extends Plugin {
   // Utility methods for querying audit logs
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const {
         resourceName,
         operation,
@@ -352,17 +361,22 @@ export class AuditPlugin extends Plugin {
         return true;
       });
       filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      const deserialized = filtered.slice(offset, offset + limit).map(audit => ({
-        ...audit,
-        oldData: audit.oldData === null || audit.oldData === undefined || audit.oldData === 'null' ? null : (typeof audit.oldData === 'string' ? JSON.parse(audit.oldData) : audit.oldData),
-        newData: audit.newData === null || audit.newData === undefined || audit.newData === 'null' ? null : (typeof audit.newData === 'string' ? JSON.parse(audit.newData) : audit.newData),
-        partitionValues: audit.partitionValues && typeof audit.partitionValues === 'string' ? JSON.parse(audit.partitionValues) : audit.partitionValues,
-        metadata: audit.metadata && typeof audit.metadata === 'string' ? JSON.parse(audit.metadata) : audit.metadata
-      }));
+      const deserialized = filtered.slice(offset, offset + limit).map(audit => {
+        const [okOld, , oldData] = typeof audit.oldData === 'string' ? tryFnSync(() => JSON.parse(audit.oldData)) : [true, null, audit.oldData];
+        const [okNew, , newData] = typeof audit.newData === 'string' ? tryFnSync(() => JSON.parse(audit.newData)) : [true, null, audit.newData];
+        const [okPart, , partitionValues] = audit.partitionValues && typeof audit.partitionValues === 'string' ? tryFnSync(() => JSON.parse(audit.partitionValues)) : [true, null, audit.partitionValues];
+        const [okMeta, , metadata] = audit.metadata && typeof audit.metadata === 'string' ? tryFnSync(() => JSON.parse(audit.metadata)) : [true, null, audit.metadata];
+        return {
+          ...audit,
+          oldData: audit.oldData === null || audit.oldData === undefined || audit.oldData === 'null' ? null : (okOld ? oldData : null),
+          newData: audit.newData === null || audit.newData === undefined || audit.newData === 'null' ? null : (okNew ? newData : null),
+          partitionValues: okPart ? partitionValues : audit.partitionValues,
+          metadata: okMeta ? metadata : audit.metadata
+        };
+      });
       return deserialized;
-    } catch (error) {
-      return [];
-    }
+    });
+    return ok ? result : [];
   }
 
   async getRecordHistory(resourceName, recordId) {

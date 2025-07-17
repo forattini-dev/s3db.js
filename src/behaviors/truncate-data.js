@@ -64,7 +64,7 @@ const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8B
  * @property {string[]} [priorityFields] - Fields that should not be truncated
  * @property {boolean} [preserveStructure=true] - Whether to preserve JSON structure
  */
-export async function handleInsert({ resource, data, mappedData }) {
+export async function handleInsert({ resource, data, mappedData, originalData }) {
   const effectiveLimit = calculateEffectiveLimit({
     s3Limit: S3_METADATA_LIMIT_BYTES,
     systemConfig: {
@@ -142,11 +142,11 @@ export async function handleInsert({ resource, data, mappedData }) {
     resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
   }
 
-  return { mappedData: resultFields, body: "" };
+  return { mappedData: resultFields, body: JSON.stringify(mappedData) };
 }
 
-export async function handleUpdate({ resource, id, data, mappedData }) {
-  return handleInsert({ resource, data, mappedData });
+export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
+  return handleInsert({ resource, data, mappedData, originalData });
 }
 
 export async function handleUpsert({ resource, id, data, mappedData }) {

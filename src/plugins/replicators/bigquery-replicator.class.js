@@ -1,4 +1,5 @@
 import BaseReplicator from './base-replicator.class.js';
+import tryFn from "../../concerns/try-fn.js";
 
 /**
  * BigQuery Replicator
@@ -33,7 +34,7 @@ import BaseReplicator from './base-replicator.class.js';
  *   datasetId: 'analytics',
  *   location: 'US',
  *   credentials: require('./gcp-service-account.json'),
- *   logTable: 's3db_replication_log'
+ *   logTable: 's3db_replicator_log'
  * }, {
  *   users: [
  *     { actions: ['insert', 'update', 'delete'], table: 'users_table' },
@@ -125,23 +126,23 @@ class BigqueryReplicator extends BaseReplicator {
 
   async initialize(database) {
     await super.initialize(database);
-    try {
-      const { BigQuery } = await import('@google-cloud/bigquery');
-      this.bigqueryClient = new BigQuery({
-        projectId: this.projectId,
-        credentials: this.credentials,
-        location: this.location
-      });
-      this.emit('initialized', {
-        replicator: this.name,
-        projectId: this.projectId,
-        datasetId: this.datasetId,
-        resources: Object.keys(this.resources)
-      });
-    } catch (error) {
-      this.emit('initialization_error', { replicator: this.name, error: error.message });
-      throw error;
+    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
+    if (!ok) {
+      this.emit('initialization_error', { replicator: this.name, error: err.message });
+      throw err;
     }
+    const { BigQuery } = sdk;
+    this.bigqueryClient = new BigQuery({
+      projectId: this.projectId,
+      credentials: this.credentials,
+      location: this.location
+    });
+    this.emit('initialized', {
+      replicator: this.name,
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: Object.keys(this.resources)
+    });
   }
 
   shouldReplicateResource(resourceName) {
@@ -182,15 +183,13 @@ class BigqueryReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
 
-    try {
+    const [ok, err, result] = await tryFn(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
-      
       // Replicate to all applicable tables
       for (const tableId of tables) {
-        try {
+        const [okTable, errTable] = await tryFn(async () => {
           const table = dataset.table(tableId);
           let job;
-
           if (operation === 'insert') {
             const row = { ...data };
             job = await table.insert([row]);
@@ -199,7 +198,6 @@ class BigqueryReplicator extends BaseReplicator {
             const setClause = keys.map(k => `${k}=@${k}`).join(', ');
             const params = { id };
             keys.forEach(k => { params[k] = data[k]; });
-            
             const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
             const [updateJob] = await this.bigqueryClient.createQueryJob({
               query,
@@ -218,23 +216,22 @@ class BigqueryReplicator extends BaseReplicator {
           } else {
             throw new Error(`Unsupported operation: ${operation}`);
           }
-
           results.push({
             table: tableId,
             success: true,
             jobId: job[0]?.id
           });
-        } catch (error) {
+        });
+        if (!okTable) {
           errors.push({
             table: tableId,
-            error: error.message
+            error: errTable.message
           });
         }
       }
-
       // Log operation if logTable is configured
       if (this.logTable) {
-        try {
+        const [okLog, errLog] = await tryFn(async () => {
           const logTable = dataset.table(this.logTable);
           await logTable.insert([{
             resource_name: resourceName,
@@ -242,14 +239,13 @@ class BigqueryReplicator extends BaseReplicator {
             record_id: id,
             data: JSON.stringify(data),
             timestamp: new Date().toISOString(),
-            source: 's3db-replication'
+            source: 's3db-replicator'
           }]);
-        } catch (error) {
+        });
+        if (!okLog) {
           // Don't fail the main operation if logging fails
-          console.warn(`Failed to log operation to ${this.logTable}:`, error.message);
         }
       }
-
       const success = errors.length === 0;
       this.emit('replicated', {
         replicator: this.name,
@@ -261,23 +257,22 @@ class BigqueryReplicator extends BaseReplicator {
         errors,
         success
       });
-
       return { 
         success, 
         results, 
         errors,
         tables 
       };
-    } catch (error) {
-      this.emit('replication_error', {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        error: error.message
-      });
-      return { success: false, error: error.message };
-    }
+    });
+    if (ok) return result;
+    this.emit('replicator_error', {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
   }
 
   async replicateBatch(resourceName, records) {
@@ -285,18 +280,15 @@ class BigqueryReplicator extends BaseReplicator {
     const errors = [];
     
     for (const record of records) {
-      try {
-        const res = await this.replicate(
-          resourceName, 
-          record.operation, 
-          record.data, 
-          record.id, 
-          record.beforeData
-        );
-        results.push(res);
-      } catch (err) {
-        errors.push({ id: record.id, error: err.message });
-      }
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName, 
+        record.operation, 
+        record.data, 
+        record.id, 
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
     }
     
     return { 
@@ -307,15 +299,15 @@ class BigqueryReplicator extends BaseReplicator {
   }
 
   async testConnection() {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (!this.bigqueryClient) await this.initialize();
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       await dataset.getMetadata();
       return true;
-    } catch (error) {
-      this.emit('connection_error', { replicator: this.name, error: error.message });
-      return false;
-    }
+    });
+    if (ok) return true;
+    this.emit('connection_error', { replicator: this.name, error: err.message });
+    return false;
   }
 
   async cleanup() {

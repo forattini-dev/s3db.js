@@ -1,11 +1,13 @@
-import { isEmpty, isFunction } from "lodash-es";
 import EventEmitter from "events";
-import jsonStableStringify from "json-stable-stringify";
 import { createHash } from "crypto";
+import { isEmpty, isFunction } from "lodash-es";
+import jsonStableStringify from "json-stable-stringify";
 
 import Client from "./client.class.js";
+import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
 import { streamToString } from "./stream/index.js";
+import { ResourceNotFound } from "./errors.js";
 
 export class Database extends EventEmitter {
   constructor(options) {
@@ -14,13 +16,10 @@ export class Database extends EventEmitter {
     this.version = "1";
     // Version is injected during build, fallback to "latest" for development
     this.s3dbVersion = (() => {
-      try {
-        return typeof __PACKAGE_VERSION__ !== 'undefined' && __PACKAGE_VERSION__ !== '__PACKAGE_VERSION__' 
-          ? __PACKAGE_VERSION__ 
-          : "latest";
-      } catch (e) {
-        return "latest";
-      }
+      const [ok, err, version] = tryFn(() => (typeof __PACKAGE_VERSION__ !== 'undefined' && __PACKAGE_VERSION__ !== '__PACKAGE_VERSION__' 
+        ? __PACKAGE_VERSION__ 
+        : "latest"));
+      return ok ? version : "latest";
     })();
     this.resources = {};
     this.savedMetadata = null; // Store loaded metadata for versioning
@@ -71,6 +70,20 @@ export class Database extends EventEmitter {
 
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
+
+    // Add process exit listener for cleanup
+    if (!this._exitListenerRegistered) {
+      this._exitListenerRegistered = true;
+      process.on('exit', async () => {
+        if (this.isConnected()) {
+          try {
+            await this.disconnect();
+          } catch (err) {
+            // Silently ignore errors on exit
+          }
+        }
+      });
+    }
   }
   
   async connect() {
@@ -398,8 +411,6 @@ export class Database extends EventEmitter {
     };
   }
 
-
-
   async createResource({ name, attributes, behavior = 'user-managed', hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
@@ -439,11 +450,9 @@ export class Database extends EventEmitter {
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || 'v0';
-    
     const resource = new Resource({
       name,
       client: this.client,
-      database: this, // garantir referência
       version: config.version !== undefined ? config.version : version,
       attributes,
       behavior,
@@ -462,6 +471,7 @@ export class Database extends EventEmitter {
       idGenerator: config.idGenerator,
       idSize: config.idSize
     });
+    resource.database = this;
     this.resources[name] = resource;
     await this.uploadMetadataFile();
     this.emit("s3db.resourceCreated", name);
@@ -491,7 +501,11 @@ export class Database extends EventEmitter {
    */
   async getResource(name) {
     if (!this.resources[name]) {
-      throw new Error(`Resource not found: ${name}`);
+      throw new ResourceNotFound({
+        bucket: this.client.config.bucket,
+        resourceName: name,
+        id: name
+      });
     }
     return this.resources[name];
   }
@@ -515,7 +529,70 @@ export class Database extends EventEmitter {
     return !!this.savedMetadata;
   }
 
-  async disconnect() {}
+  async disconnect() {
+    try {
+      // 1. Remove all listeners from all plugins
+      if (this.pluginList && this.pluginList.length > 0) {
+        for (const plugin of this.pluginList) {
+          if (plugin && typeof plugin.removeAllListeners === 'function') {
+            plugin.removeAllListeners();
+          }
+        }
+        // Also stop plugins if they have a stop method
+        const stopProms = this.pluginList.map(async (plugin) => {
+          try {
+            if (plugin && typeof plugin.stop === 'function') {
+              await plugin.stop();
+            }
+          } catch (err) {
+            // Silently ignore errors on exit
+          }
+        });
+        await Promise.all(stopProms);
+      }
+
+      // 2. Remove all listeners from all resources
+      if (this.resources && Object.keys(this.resources).length > 0) {
+        for (const [name, resource] of Object.entries(this.resources)) {
+          try {
+            if (resource && typeof resource.removeAllListeners === 'function') {
+              resource.removeAllListeners();
+            }
+            if (resource._pluginWrappers) {
+              resource._pluginWrappers.clear();
+            }
+            if (resource._pluginMiddlewares) {
+              resource._pluginMiddlewares = {};
+            }
+            if (resource.observers && Array.isArray(resource.observers)) {
+              resource.observers = [];
+            }
+          } catch (err) {
+            // Silently ignore errors on exit
+          }
+        }
+        // Instead of reassigning, clear in place
+        Object.keys(this.resources).forEach(k => delete this.resources[k]);
+      }
+
+      // 3. Remove all listeners from the client
+      if (this.client && typeof this.client.removeAllListeners === 'function') {
+        this.client.removeAllListeners();
+      }
+
+      // 4. Remove all listeners from the database itself
+      this.removeAllListeners();
+
+      // 5. Clear saved metadata and plugin lists
+      this.savedMetadata = null;
+      this.plugins = {};
+      this.pluginList = [];
+
+      this.emit('disconnected', new Date());
+    } catch (err) {
+      // Silently ignore errors on exit
+    }
+  }
 }
 
 export class S3db extends Database {}

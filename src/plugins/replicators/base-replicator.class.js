@@ -9,7 +9,7 @@ export class BaseReplicator extends EventEmitter {
     super();
     this.config = config;
     this.name = this.constructor.name;
-    this.enabled = config.enabled !== false;
+    this.enabled = config.enabled !== false; // Default to enabled unless explicitly disabled
   }
 
   /**
@@ -28,7 +28,7 @@ export class BaseReplicator extends EventEmitter {
    * @param {string} operation - Operation type (insert, update, delete)
    * @param {Object} data - The data to replicate
    * @param {string} id - Record ID
-   * @returns {Promise<Object>} Replication result
+   * @returns {Promise<Object>} replicator result
    */
   async replicate(resourceName, operation, data, id) {
     throw new Error(`replicate() method must be implemented by ${this.name}`);
@@ -38,7 +38,7 @@ export class BaseReplicator extends EventEmitter {
    * Replicate multiple records in batch
    * @param {string} resourceName - Name of the resource being replicated
    * @param {Array} records - Array of records to replicate
-   * @returns {Promise<Object>} Batch replication result
+   * @returns {Promise<Object>} Batch replicator result
    */
   async replicateBatch(resourceName, records) {
     throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
@@ -59,7 +59,7 @@ export class BaseReplicator extends EventEmitter {
   async getStatus() {
     return {
       name: this.name,
-      enabled: this.enabled,
+      // Removed: enabled: this.enabled,
       config: this.config,
       connected: false
     };

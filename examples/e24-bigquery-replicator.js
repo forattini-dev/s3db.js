@@ -15,14 +15,14 @@
  */
 
 import S3db from '../src/index.js';
-import { ReplicationPlugin } from '../src/plugins/index.js';
+import { ReplicatorPlugin } from '../src/plugins/index.js';
 
 // Example configuration - replace with your actual BigQuery credentials
 const BIGQUERY_CONFIG = {
   projectId: 'your-gcp-project-id',
   datasetId: 'your-dataset-id',
   location: 'US',
-  logTable: 's3db_replication_log',
+  logTable: 's3db_replicator_log',
   credentials: {
     // Your Google Cloud service account credentials
     client_email: 'service-account@your-project.iam.gserviceaccount.com',
@@ -33,10 +33,10 @@ const BIGQUERY_CONFIG = {
 async function main() {
   console.log('🚀 BigQuery Replicator Example\n');
 
-  // Create database with BigQuery replication
+  // Create database with BigQuery replicator
   const s3db = new S3db({
     connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/bigquery-demo",
-    plugins: [new ReplicationPlugin({
+    plugins: [new ReplicatorPlugin({
       enabled: true,
       replicators: [
         {
@@ -75,7 +75,7 @@ async function main() {
   });
 
   await s3db.connect();
-  console.log('✅ Connected to S3DB with BigQuery replication\n');
+  console.log('✅ Connected to S3DB with BigQuery replicator\n');
 
   // Create resources
   const users = await s3db.createResource({
@@ -142,19 +142,19 @@ async function main() {
 
   console.log('✅ Created resources: users, urls, clicks, views, shares, scans\n');
 
-  // Listen to replication events
-  const replicationPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicationPlugin');
+  // Listen to replicator events
+  const ReplicatorPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
   
-  replicationPlugin.on('replication.success', (data) => {
-    console.log(`✅ Replication succeeded: ${data.item.resourceName} ${data.item.operation}`);
+  ReplicatorPlugin.on('replicator.success', (data) => {
+    console.log(`✅ replicator succeeded: ${data.item.resourceName} ${data.item.operation}`);
   });
 
-  replicationPlugin.on('replication.failed', (data) => {
-    console.log(`❌ Replication failed: ${data.item.resourceName} ${data.item.operation} - ${data.lastError}`);
+  ReplicatorPlugin.on('replicator.failed', (data) => {
+    console.log(`❌ replicator failed: ${data.item.resourceName} ${data.item.operation} - ${data.lastError}`);
   });
 
   // Listen to BigQuery replicator events
-  replicationPlugin.on('replicator.replicated', (data) => {
+  ReplicatorPlugin.on('replicator.replicated', (data) => {
     if (data.replicator === 'BigqueryReplicator') {
       console.log(`📊 BigQuery replicated: ${data.resourceName} ${data.operation} to ${data.tables.length} tables`);
       if (data.results) {
@@ -231,18 +231,18 @@ async function main() {
   await users.delete('user-1');
   console.log('✅ Deleted user');
 
-  // Wait for async replications to process
-  console.log('\n⏳ Waiting for replications to process...');
+  // Wait for async replicators to process
+  console.log('\n⏳ Waiting for replicators to process...');
   await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // Get replication statistics
-  const stats = await replicationPlugin.getReplicationStats();
-  console.log('\n📊 Replication Statistics:');
+  // Get replicator statistics
+  const stats = await ReplicatorPlugin.getreplicatorStats();
+  console.log('\n📊 replicator Statistics:');
   console.log(JSON.stringify(stats, null, 2));
 
   // Test BigQuery connection
   console.log('\n🔍 Testing BigQuery connection...');
-  const bigqueryReplicator = replicationPlugin.replicators.find(r => r.driver === 'bigquery');
+  const bigqueryReplicator = ReplicatorPlugin.replicators.find(r => r.driver === 'bigquery');
   if (bigqueryReplicator) {
     try {
       const isConnected = await bigqueryReplicator.instance.testConnection();
@@ -260,7 +260,7 @@ async function main() {
   console.log('- views: insert → mrt-shortner__views');
   console.log('- shares: insert → mrt-shortner__shares');
   console.log('- scans: insert → mrt-shortner__scans');
-  console.log('- All operations logged to: mrt-shortner__replication_log');
+  console.log('- All operations logged to: mrt-shortner__replicator_log');
 }
 
 // Error handling

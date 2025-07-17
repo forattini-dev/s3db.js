@@ -148,7 +148,6 @@ export class MemoryCache extends Cache {
       }
     }
     if (removed.length > 0) {
-      console.log('[MemoryCache][DEBUG] Cleared keys with prefix', prefix, removed);
     }
     return true;
   }

@@ -9,9 +9,6 @@ async function main() {
   
   const total = await s3db.resource("leads").count();
 
-  console.log(`reading ${total} leads.`);
-  console.log(`parallelism of ${ENV.PARALLELISM} requests.\n`);
-
   const barData = new ProgressBar(
     "reading-data  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds)",
     {

@@ -46,6 +46,12 @@ describe('Full-Text Plugin', () => {
     });
   });
 
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
+  });
+
   describe('Setup and Initialization', () => {
     test('should setup full-text plugin correctly', async () => {
       await fullTextPlugin.setup(database);
