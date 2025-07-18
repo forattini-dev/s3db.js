@@ -12199,7 +12199,7 @@ ${JSON.stringify(validation, null, 2)}`,
       super();
       this.version = "1";
       this.s3dbVersion = (() => {
-        const [ok, err, version] = try_fn_default(() => true ? "7.0.3" : "latest");
+        const [ok, err, version] = try_fn_default(() => true ? "7.1.0" : "latest");
         return ok ? version : "latest";
       })();
       this.resources = {};
