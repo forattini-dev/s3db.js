@@ -1,238 +1,974 @@
-var S3DB = (function (exports, lodashEs, promisePool, nanoid, clientS3, crypto, flat, FastestValidator, web) {
+var S3DB = (function (exports, nanoid, promisePool, web, lodashEs, crypto, clientS3, flat, FastestValidator) {
   'use strict';
 
-  // Copyright Joyent, Inc. and other Node contributors.
-  //
-  // Permission is hereby granted, free of charge, to any person obtaining a
-  // copy of this software and associated documentation files (the
-  // "Software"), to deal in the Software without restriction, including
-  // without limitation the rights to use, copy, modify, merge, publish,
-  // distribute, sublicense, and/or sell copies of the Software, and to permit
-  // persons to whom the Software is furnished to do so, subject to the
-  // following conditions:
-  //
-  // The above copyright notice and this permission notice shall be included
-  // in all copies or substantial portions of the Software.
-  //
-  // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-  // OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-  // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-  // NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-  // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-  // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-  // USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-  // resolves . and .. elements in a path array with directory names there
-  // must be no slashes, empty elements, or device names (c:\) in the array
-  // (so also no leading and trailing slashes - it does not distinguish
-  // relative and absolute paths)
-  function normalizeArray(parts, allowAboveRoot) {
-    // if the path tries to go above the root, `up` ends up > 0
-    var up = 0;
-    for (var i = parts.length - 1; i >= 0; i--) {
-      var last = parts[i];
-      if (last === '.') {
-        parts.splice(i, 1);
-      } else if (last === '..') {
-        parts.splice(i, 1);
-        up++;
-      } else if (up) {
-        parts.splice(i, 1);
-        up--;
+  function calculateUTF8Bytes(str) {
+    if (typeof str !== "string") {
+      str = String(str);
+    }
+    let bytes = 0;
+    for (let i = 0; i < str.length; i++) {
+      const codePoint = str.codePointAt(i);
+      if (codePoint <= 127) {
+        bytes += 1;
+      } else if (codePoint <= 2047) {
+        bytes += 2;
+      } else if (codePoint <= 65535) {
+        bytes += 3;
+      } else if (codePoint <= 1114111) {
+        bytes += 4;
+        if (codePoint > 65535) {
+          i++;
+        }
       }
     }
-
-    // if the path is allowed to go above the root, restore leading ..s
-    if (allowAboveRoot) {
-      for (; up--; up) {
-        parts.unshift('..');
-      }
+    return bytes;
+  }
+  function calculateAttributeNamesSize(mappedObject) {
+    let totalSize = 0;
+    for (const key of Object.keys(mappedObject)) {
+      totalSize += calculateUTF8Bytes(key);
     }
-
-    return parts;
+    return totalSize;
+  }
+  function transformValue(value) {
+    if (value === null || value === void 0) {
+      return "";
+    }
+    if (typeof value === "boolean") {
+      return value ? "1" : "0";
+    }
+    if (typeof value === "number") {
+      return String(value);
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return "[]";
+      }
+      return value.map((item) => String(item)).join("|");
+    }
+    if (typeof value === "object") {
+      return JSON.stringify(value);
+    }
+    return String(value);
+  }
+  function calculateAttributeSizes(mappedObject) {
+    const sizes = {};
+    for (const [key, value] of Object.entries(mappedObject)) {
+      const transformedValue = transformValue(value);
+      const byteSize = calculateUTF8Bytes(transformedValue);
+      sizes[key] = byteSize;
+    }
+    return sizes;
+  }
+  function calculateTotalSize(mappedObject) {
+    const valueSizes = calculateAttributeSizes(mappedObject);
+    const valueTotal = Object.values(valueSizes).reduce((total, size) => total + size, 0);
+    const namesSize = calculateAttributeNamesSize(mappedObject);
+    return valueTotal + namesSize;
+  }
+  function getSizeBreakdown(mappedObject) {
+    const valueSizes = calculateAttributeSizes(mappedObject);
+    const namesSize = calculateAttributeNamesSize(mappedObject);
+    const valueTotal = Object.values(valueSizes).reduce((sum, size) => sum + size, 0);
+    const total = valueTotal + namesSize;
+    const sortedAttributes = Object.entries(valueSizes).sort(([, a], [, b]) => b - a).map(([key, size]) => ({
+      attribute: key,
+      size,
+      percentage: (size / total * 100).toFixed(2) + "%"
+    }));
+    return {
+      total,
+      valueSizes,
+      namesSize,
+      valueTotal,
+      breakdown: sortedAttributes,
+      // Add detailed breakdown including names
+      detailedBreakdown: {
+        values: valueTotal,
+        names: namesSize,
+        total
+      }
+    };
+  }
+  function calculateSystemOverhead(config = {}) {
+    const { version = "1", timestamps = false, id = "" } = config;
+    const systemFields = {
+      "_v": String(version)
+      // Version field (e.g., "1", "10", "100")
+    };
+    if (timestamps) {
+      systemFields.createdAt = "2024-01-01T00:00:00.000Z";
+      systemFields.updatedAt = "2024-01-01T00:00:00.000Z";
+    }
+    if (id) {
+      systemFields.id = id;
+    }
+    const overheadObject = {};
+    for (const [key, value] of Object.entries(systemFields)) {
+      overheadObject[key] = value;
+    }
+    return calculateTotalSize(overheadObject);
+  }
+  function calculateEffectiveLimit(config = {}) {
+    const { s3Limit = 2048, systemConfig = {} } = config;
+    const overhead = calculateSystemOverhead(systemConfig);
+    return s3Limit - overhead;
   }
 
-  // Split a filename into [root, dir, basename, ext], unix version
-  // 'root' is just a slash, or nothing.
-  var splitPathRe =
-      /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
-  var splitPath = function(filename) {
-    return splitPathRe.exec(filename).slice(1);
-  };
-
-  // path.resolve([from ...], to)
-  // posix version
-  function resolve() {
-    var resolvedPath = '',
-        resolvedAbsolute = false;
-
-    for (var i = arguments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
-      var path = (i >= 0) ? arguments[i] : '/';
-
-      // Skip empty and invalid entries
-      if (typeof path !== 'string') {
-        throw new TypeError('Arguments to path.resolve must be strings');
-      } else if (!path) {
-        continue;
+  const S3_METADATA_LIMIT_BYTES = 2047;
+  async function handleInsert$4({ resource, data, mappedData, originalData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id: data.id
       }
-
-      resolvedPath = path + '/' + resolvedPath;
-      resolvedAbsolute = path.charAt(0) === '/';
+    });
+    if (totalSize > effectiveLimit) {
+      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
     }
-
-    // At this point the path should be resolved to a full absolute path, but
-    // handle relative paths to be safe (might happen when process.cwd() fails)
-
-    // Normalize the path
-    resolvedPath = normalizeArray(filter(resolvedPath.split('/'), function(p) {
-      return !!p;
-    }), !resolvedAbsolute).join('/');
-
-    return ((resolvedAbsolute ? '/' : '') + resolvedPath) || '.';
+    return { mappedData, body: JSON.stringify(mappedData) };
   }
-  // path.normalize(path)
-  // posix version
-  function normalize(path) {
-    var isPathAbsolute = isAbsolute(path),
-        trailingSlash = substr(path, -1) === '/';
-
-    // Normalize the path
-    path = normalizeArray(filter(path.split('/'), function(p) {
-      return !!p;
-    }), !isPathAbsolute).join('/');
-
-    if (!path && !isPathAbsolute) {
-      path = '.';
+  async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id
+      }
+    });
+    if (totalSize > effectiveLimit) {
+      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
     }
-    if (path && trailingSlash) {
-      path += '/';
-    }
-
-    return (isPathAbsolute ? '/' : '') + path;
+    return { mappedData, body: JSON.stringify(mappedData) };
   }
-  // posix version
-  function isAbsolute(path) {
-    return path.charAt(0) === '/';
+  async function handleUpsert$4({ resource, id, data, mappedData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id
+      }
+    });
+    if (totalSize > effectiveLimit) {
+      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    }
+    return { mappedData, body: "" };
+  }
+  async function handleGet$4({ resource, metadata, body }) {
+    return { metadata, body };
   }
 
-  // posix version
-  function join() {
-    var paths = Array.prototype.slice.call(arguments, 0);
-    return normalize(filter(paths, function(p, index) {
-      if (typeof p !== 'string') {
-        throw new TypeError('Arguments to path.join must be strings');
+  var enforceLimits = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
+    handleGet: handleGet$4,
+    handleInsert: handleInsert$4,
+    handleUpdate: handleUpdate$4,
+    handleUpsert: handleUpsert$4
+  });
+
+  async function handleInsert$3({ resource, data, mappedData, originalData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id: data.id
       }
-      return p;
-    }).join('/'));
+    });
+    if (totalSize > effectiveLimit) {
+      resource.emit("exceedsLimit", {
+        operation: "insert",
+        totalSize,
+        limit: 2047,
+        excess: totalSize - 2047,
+        data: originalData || data
+      });
+    }
+    return { mappedData, body: JSON.stringify(data) };
+  }
+  async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id
+      }
+    });
+    if (totalSize > effectiveLimit) {
+      resource.emit("exceedsLimit", {
+        operation: "update",
+        id,
+        totalSize,
+        limit: 2047,
+        excess: totalSize - 2047,
+        data: originalData || data
+      });
+    }
+    return { mappedData, body: JSON.stringify(data) };
+  }
+  async function handleUpsert$3({ resource, id, data, mappedData, originalData }) {
+    const totalSize = calculateTotalSize(mappedData);
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id
+      }
+    });
+    if (totalSize > effectiveLimit) {
+      resource.emit("exceedsLimit", {
+        operation: "upsert",
+        id,
+        totalSize,
+        limit: 2047,
+        excess: totalSize - 2047,
+        data: originalData || data
+      });
+    }
+    return { mappedData, body: JSON.stringify(data) };
+  }
+  async function handleGet$3({ resource, metadata, body }) {
+    return { metadata, body };
   }
 
+  var userManaged = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    handleGet: handleGet$3,
+    handleInsert: handleInsert$3,
+    handleUpdate: handleUpdate$3,
+    handleUpsert: handleUpsert$3
+  });
 
-  // path.relative(from, to)
-  // posix version
-  function relative(from, to) {
-    from = resolve(from).substr(1);
-    to = resolve(to).substr(1);
-
-    function trim(arr) {
-      var start = 0;
-      for (; start < arr.length; start++) {
-        if (arr[start] !== '') break;
+  const TRUNCATED_FLAG = "$truncated";
+  const TRUNCATED_FLAG_VALUE = "true";
+  const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8Bytes(TRUNCATED_FLAG_VALUE);
+  async function handleInsert$2({ resource, data, mappedData, originalData }) {
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id: data.id
       }
-
-      var end = arr.length - 1;
-      for (; end >= 0; end--) {
-        if (arr[end] !== '') break;
-      }
-
-      if (start > end) return [];
-      return arr.slice(start, end - start + 1);
+    });
+    const attributeSizes = calculateAttributeSizes(mappedData);
+    const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+    const resultFields = {};
+    let currentSize = 0;
+    let truncated = false;
+    if (mappedData._v) {
+      resultFields._v = mappedData._v;
+      currentSize += attributeSizes._v;
     }
-
-    var fromParts = trim(from.split('/'));
-    var toParts = trim(to.split('/'));
-
-    var length = Math.min(fromParts.length, toParts.length);
-    var samePartsLength = length;
-    for (var i = 0; i < length; i++) {
-      if (fromParts[i] !== toParts[i]) {
-        samePartsLength = i;
+    for (const [fieldName, size] of sortedFields) {
+      if (fieldName === "_v") continue;
+      const fieldValue = mappedData[fieldName];
+      const spaceNeeded = size + (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+      if (currentSize + spaceNeeded <= effectiveLimit) {
+        resultFields[fieldName] = fieldValue;
+        currentSize += size;
+      } else {
+        const availableSpace = effectiveLimit - currentSize - (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+        if (availableSpace > 0) {
+          const truncatedValue = truncateValue(fieldValue, availableSpace);
+          resultFields[fieldName] = truncatedValue;
+          truncated = true;
+          currentSize += calculateUTF8Bytes(truncatedValue);
+        } else {
+          resultFields[fieldName] = "";
+          truncated = true;
+        }
         break;
       }
     }
-
-    var outputParts = [];
-    for (var i = samePartsLength; i < fromParts.length; i++) {
-      outputParts.push('..');
+    let finalSize = calculateTotalSize(resultFields) + (truncated ? TRUNCATED_FLAG_BYTES : 0);
+    while (finalSize > effectiveLimit) {
+      const fieldNames = Object.keys(resultFields).filter((f) => f !== "_v" && f !== "$truncated");
+      if (fieldNames.length === 0) {
+        break;
+      }
+      const lastField = fieldNames[fieldNames.length - 1];
+      resultFields[lastField] = "";
+      finalSize = calculateTotalSize(resultFields) + TRUNCATED_FLAG_BYTES;
+      truncated = true;
     }
-
-    outputParts = outputParts.concat(toParts.slice(samePartsLength));
-
-    return outputParts.join('/');
+    if (truncated) {
+      resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
+    }
+    return { mappedData: resultFields, body: JSON.stringify(mappedData) };
+  }
+  async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
+    return handleInsert$2({ resource, data, mappedData, originalData });
+  }
+  async function handleUpsert$2({ resource, id, data, mappedData }) {
+    return handleInsert$2({ resource, data, mappedData });
+  }
+  async function handleGet$2({ resource, metadata, body }) {
+    return { metadata, body };
+  }
+  function truncateValue(value, maxBytes) {
+    if (typeof value === "string") {
+      return truncateString(value, maxBytes);
+    } else if (typeof value === "object" && value !== null) {
+      const jsonStr = JSON.stringify(value);
+      return truncateString(jsonStr, maxBytes);
+    } else {
+      const stringValue = String(value);
+      return truncateString(stringValue, maxBytes);
+    }
+  }
+  function truncateString(str, maxBytes) {
+    const encoder = new TextEncoder();
+    let bytes = encoder.encode(str);
+    if (bytes.length <= maxBytes) {
+      return str;
+    }
+    let length = str.length;
+    while (length > 0) {
+      const truncated = str.substring(0, length);
+      bytes = encoder.encode(truncated);
+      if (bytes.length <= maxBytes) {
+        return truncated;
+      }
+      length--;
+    }
+    return "";
   }
 
-  var sep = '/';
-  var delimiter = ':';
+  var dataTruncate = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    handleGet: handleGet$2,
+    handleInsert: handleInsert$2,
+    handleUpdate: handleUpdate$2,
+    handleUpsert: handleUpsert$2
+  });
 
-  function dirname(path) {
-    var result = splitPath(path),
-        root = result[0],
-        dir = result[1];
-
-    if (!root && !dir) {
-      // No dirname whatsoever
-      return '.';
+  function tryFn(fnOrPromise) {
+    if (fnOrPromise == null) {
+      const err = new Error("fnOrPromise cannot be null or undefined");
+      err.stack = new Error().stack;
+      return [false, err, void 0];
     }
-
-    if (dir) {
-      // It has a dirname, strip trailing slash
-      dir = dir.substr(0, dir.length - 1);
+    if (typeof fnOrPromise === "function") {
+      try {
+        const result = fnOrPromise();
+        if (result == null) {
+          return [true, null, result];
+        }
+        if (typeof result.then === "function") {
+          return result.then((data) => [true, null, data]).catch((error) => {
+            if (error instanceof Error && Object.isExtensible(error)) {
+              const desc = Object.getOwnPropertyDescriptor(error, "stack");
+              if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+                try {
+                  error.stack = new Error().stack;
+                } catch (_) {
+                }
+              }
+            }
+            return [false, error, void 0];
+          });
+        }
+        return [true, null, result];
+      } catch (error) {
+        if (error instanceof Error && Object.isExtensible(error)) {
+          const desc = Object.getOwnPropertyDescriptor(error, "stack");
+          if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+            try {
+              error.stack = new Error().stack;
+            } catch (_) {
+            }
+          }
+        }
+        return [false, error, void 0];
+      }
     }
-
-    return root + dir;
+    if (typeof fnOrPromise.then === "function") {
+      return Promise.resolve(fnOrPromise).then((data) => [true, null, data]).catch((error) => {
+        if (error instanceof Error && Object.isExtensible(error)) {
+          const desc = Object.getOwnPropertyDescriptor(error, "stack");
+          if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+            try {
+              error.stack = new Error().stack;
+            } catch (_) {
+            }
+          }
+        }
+        return [false, error, void 0];
+      });
+    }
+    return [true, null, fnOrPromise];
+  }
+  function tryFnSync(fn) {
+    try {
+      const result = fn();
+      return [true, null, result];
+    } catch (err) {
+      return [false, err, null];
+    }
   }
 
-  function basename(path, ext) {
-    var f = splitPath(path)[2];
-    // TODO: make this comparison case-insensitive on windows?
-    if (ext && f.substr(-1 * ext.length) === ext) {
-      f = f.substr(0, f.length - ext.length);
+  const OVERFLOW_FLAG = "$overflow";
+  const OVERFLOW_FLAG_VALUE = "true";
+  const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
+  async function handleInsert$1({ resource, data, mappedData, originalData }) {
+    const effectiveLimit = calculateEffectiveLimit({
+      s3Limit: S3_METADATA_LIMIT_BYTES,
+      systemConfig: {
+        version: resource.version,
+        timestamps: resource.config.timestamps,
+        id: data.id
+      }
+    });
+    const attributeSizes = calculateAttributeSizes(mappedData);
+    const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+    const metadataFields = {};
+    const bodyFields = {};
+    let currentSize = 0;
+    let willOverflow = false;
+    if (mappedData._v) {
+      metadataFields._v = mappedData._v;
+      currentSize += attributeSizes._v;
     }
-    return f;
+    let reservedLimit = effectiveLimit;
+    for (const [fieldName, size] of sortedFields) {
+      if (fieldName === "_v") continue;
+      if (!willOverflow && currentSize + size > effectiveLimit) {
+        reservedLimit -= OVERFLOW_FLAG_BYTES;
+        willOverflow = true;
+      }
+      if (!willOverflow && currentSize + size <= reservedLimit) {
+        metadataFields[fieldName] = mappedData[fieldName];
+        currentSize += size;
+      } else {
+        bodyFields[fieldName] = mappedData[fieldName];
+        willOverflow = true;
+      }
+    }
+    if (willOverflow) {
+      metadataFields[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
+    }
+    const hasOverflow = Object.keys(bodyFields).length > 0;
+    let body = hasOverflow ? JSON.stringify(bodyFields) : "";
+    if (!hasOverflow) body = "{}";
+    return { mappedData: metadataFields, body };
+  }
+  async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
+    return handleInsert$1({ resource, data, mappedData, originalData });
+  }
+  async function handleUpsert$1({ resource, id, data, mappedData }) {
+    return handleInsert$1({ resource, data, mappedData });
+  }
+  async function handleGet$1({ resource, metadata, body }) {
+    let bodyData = {};
+    if (body && body.trim() !== "") {
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+      if (ok) {
+        bodyData = parsed;
+      } else {
+        bodyData = {};
+      }
+    }
+    const mergedData = {
+      ...bodyData,
+      ...metadata
+    };
+    delete mergedData.$overflow;
+    return { metadata: mergedData, body };
   }
 
+  var bodyOverflow = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    handleGet: handleGet$1,
+    handleInsert: handleInsert$1,
+    handleUpdate: handleUpdate$1,
+    handleUpsert: handleUpsert$1
+  });
 
-  function extname(path) {
-    return splitPath(path)[3];
+  async function handleInsert({ resource, data, mappedData }) {
+    const metadataOnly = {
+      "_v": mappedData._v || String(resource.version)
+    };
+    metadataOnly._map = JSON.stringify(resource.schema.map);
+    const body = JSON.stringify(mappedData);
+    return { mappedData: metadataOnly, body };
   }
-  var path = {
-    extname: extname,
-    basename: basename,
-    dirname: dirname,
-    sep: sep,
-    delimiter: delimiter,
-    relative: relative,
-    join: join,
-    isAbsolute: isAbsolute,
-    normalize: normalize,
-    resolve: resolve
+  async function handleUpdate({ resource, id, data, mappedData }) {
+    const metadataOnly = {
+      "_v": mappedData._v || String(resource.version)
+    };
+    metadataOnly._map = JSON.stringify(resource.schema.map);
+    const body = JSON.stringify(mappedData);
+    return { mappedData: metadataOnly, body };
+  }
+  async function handleUpsert({ resource, id, data, mappedData }) {
+    return handleInsert({ resource, data, mappedData });
+  }
+  async function handleGet({ resource, metadata, body }) {
+    let bodyData = {};
+    if (body && body.trim() !== "") {
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+      if (ok) {
+        bodyData = parsed;
+      } else {
+        bodyData = {};
+      }
+    }
+    const mergedData = {
+      ...bodyData,
+      ...metadata
+      // metadata contains _v
+    };
+    return { metadata: mergedData, body };
+  }
+
+  var bodyOnly = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    handleGet: handleGet,
+    handleInsert: handleInsert,
+    handleUpdate: handleUpdate,
+    handleUpsert: handleUpsert
+  });
+
+  const behaviors = {
+    "user-managed": userManaged,
+    "enforce-limits": enforceLimits,
+    "truncate-data": dataTruncate,
+    "body-overflow": bodyOverflow,
+    "body-only": bodyOnly
   };
-  function filter (xs, f) {
-      if (xs.filter) return xs.filter(f);
-      var res = [];
-      for (var i = 0; i < xs.length; i++) {
-          if (f(xs[i], i, xs)) res.push(xs[i]);
+  function getBehavior(behaviorName) {
+    const behavior = behaviors[behaviorName];
+    if (!behavior) {
+      throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
+    }
+    return behavior;
+  }
+  const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
+  const DEFAULT_BEHAVIOR = "user-managed";
+
+  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const base = alphabet.length;
+  const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
+  const encode = (n) => {
+    if (typeof n !== "number" || isNaN(n)) return "undefined";
+    if (!isFinite(n)) return "undefined";
+    if (n === 0) return alphabet[0];
+    if (n < 0) return "-" + encode(-Math.floor(n));
+    n = Math.floor(n);
+    let s = "";
+    while (n) {
+      s = alphabet[n % base] + s;
+      n = Math.floor(n / base);
+    }
+    return s;
+  };
+  const decode = (s) => {
+    if (typeof s !== "string") return NaN;
+    if (s === "") return 0;
+    let negative = false;
+    if (s[0] === "-") {
+      negative = true;
+      s = s.slice(1);
+    }
+    let r = 0;
+    for (let i = 0; i < s.length; i++) {
+      const idx = charToValue[s[i]];
+      if (idx === void 0) return NaN;
+      r = r * base + idx;
+    }
+    return negative ? -r : r;
+  };
+  const encodeDecimal = (n) => {
+    if (typeof n !== "number" || isNaN(n)) return "undefined";
+    if (!isFinite(n)) return "undefined";
+    const negative = n < 0;
+    n = Math.abs(n);
+    const [intPart, decPart] = n.toString().split(".");
+    const encodedInt = encode(Number(intPart));
+    if (decPart) {
+      return (negative ? "-" : "") + encodedInt + "." + decPart;
+    }
+    return (negative ? "-" : "") + encodedInt;
+  };
+  const decodeDecimal = (s) => {
+    if (typeof s !== "string") return NaN;
+    let negative = false;
+    if (s[0] === "-") {
+      negative = true;
+      s = s.slice(1);
+    }
+    const [intPart, decPart] = s.split(".");
+    const decodedInt = decode(intPart);
+    if (isNaN(decodedInt)) return NaN;
+    const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
+    return negative ? -num : num;
+  };
+
+  class BaseError extends Error {
+    constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
+      if (verbose) message = message + `
+
+Verbose:
+
+${JSON.stringify(rest, null, 2)}`;
+      super(message);
+      if (typeof Error.captureStackTrace === "function") {
+        Error.captureStackTrace(this, this.constructor);
+      } else {
+        this.stack = new Error(message).stack;
       }
-      return res;
+      super.name = this.constructor.name;
+      this.name = this.constructor.name;
+      this.bucket = bucket;
+      this.key = key;
+      this.thrownAt = /* @__PURE__ */ new Date();
+      this.code = code;
+      this.statusCode = statusCode;
+      this.requestId = requestId;
+      this.awsMessage = awsMessage;
+      this.original = original;
+      this.commandName = commandName;
+      this.commandInput = commandInput;
+      this.metadata = metadata;
+      this.suggestion = suggestion;
+      this.data = { bucket, key, ...rest, verbose, message };
+    }
+    toJson() {
+      return {
+        name: this.name,
+        message: this.message,
+        code: this.code,
+        statusCode: this.statusCode,
+        requestId: this.requestId,
+        awsMessage: this.awsMessage,
+        bucket: this.bucket,
+        key: this.key,
+        thrownAt: this.thrownAt,
+        commandName: this.commandName,
+        commandInput: this.commandInput,
+        metadata: this.metadata,
+        suggestion: this.suggestion,
+        data: this.data,
+        original: this.original,
+        stack: this.stack
+      };
+    }
+    toString() {
+      return `${this.name} | ${this.message}`;
+    }
+  }
+  class S3dbError extends BaseError {
+    constructor(message, details = {}) {
+      let code, statusCode, requestId, awsMessage, original, metadata;
+      if (details.original) {
+        original = details.original;
+        code = original.code || original.Code || original.name;
+        statusCode = original.statusCode || original.$metadata && original.$metadata.httpStatusCode;
+        requestId = original.requestId || original.$metadata && original.$metadata.requestId;
+        awsMessage = original.message;
+        metadata = original.$metadata ? { ...original.$metadata } : void 0;
+      }
+      super({ message, ...details, code, statusCode, requestId, awsMessage, original, metadata });
+    }
+  }
+  class DatabaseError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, details);
+      Object.assign(this, details);
+    }
+  }
+  class ValidationError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, details);
+      Object.assign(this, details);
+    }
+  }
+  class AuthenticationError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, details);
+      Object.assign(this, details);
+    }
+  }
+  class PermissionError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, details);
+      Object.assign(this, details);
+    }
+  }
+  class EncryptionError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, details);
+      Object.assign(this, details);
+    }
+  }
+  class ResourceNotFound extends S3dbError {
+    constructor({ bucket, resourceName, id, original, ...rest }) {
+      if (typeof id !== "string") throw new Error("id must be a string");
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
+      super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
+        bucket,
+        resourceName,
+        id,
+        original,
+        ...rest
+      });
+    }
+  }
+  class NoSuchBucket extends S3dbError {
+    constructor({ bucket, original, ...rest }) {
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      super(`Bucket does not exists [bucket:${bucket}]`, { bucket, original, ...rest });
+    }
+  }
+  class NoSuchKey extends S3dbError {
+    constructor({ bucket, key, resourceName, id, original, ...rest }) {
+      if (typeof key !== "string") throw new Error("key must be a string");
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      if (id !== void 0 && typeof id !== "string") throw new Error("id must be a string");
+      super(`No such key: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+      this.resourceName = resourceName;
+      this.id = id;
+    }
+  }
+  class NotFound extends S3dbError {
+    constructor({ bucket, key, resourceName, id, original, ...rest }) {
+      if (typeof key !== "string") throw new Error("key must be a string");
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      super(`Not found: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
+      this.resourceName = resourceName;
+      this.id = id;
+    }
+  }
+  class MissingMetadata extends S3dbError {
+    constructor({ bucket, original, ...rest }) {
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, original, ...rest });
+    }
+  }
+  class InvalidResourceItem extends S3dbError {
+    constructor({
+      bucket,
+      resourceName,
+      attributes,
+      validation,
+      message,
+      original,
+      ...rest
+    }) {
+      if (typeof bucket !== "string") throw new Error("bucket must be a string");
+      if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
+      super(
+        message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].
+${JSON.stringify(validation, null, 2)}`,
+        {
+          bucket,
+          resourceName,
+          attributes,
+          validation,
+          original,
+          ...rest
+        }
+      );
+    }
+  }
+  class UnknownError extends S3dbError {
+  }
+  const ErrorMap = {
+    "NotFound": NotFound,
+    "NoSuchKey": NoSuchKey,
+    "UnknownError": UnknownError,
+    "NoSuchBucket": NoSuchBucket,
+    "MissingMetadata": MissingMetadata,
+    "InvalidResourceItem": InvalidResourceItem
+  };
+  function mapAwsError(err, context = {}) {
+    const code = err.code || err.Code || err.name;
+    const metadata = err.$metadata ? { ...err.$metadata } : void 0;
+    const commandName = context.commandName;
+    const commandInput = context.commandInput;
+    let suggestion;
+    if (code === "NoSuchKey" || code === "NotFound") {
+      suggestion = "Check if the key exists in the specified bucket and if your credentials have permission.";
+      return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    }
+    if (code === "NoSuchBucket") {
+      suggestion = "Check if the bucket exists and if your credentials have permission.";
+      return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    }
+    if (code === "AccessDenied" || err.statusCode === 403 || code === "Forbidden") {
+      suggestion = "Check your credentials and bucket policy.";
+      return new PermissionError("Access denied", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    }
+    if (code === "ValidationError" || err.statusCode === 400) {
+      suggestion = "Check the request parameters and payload.";
+      return new ValidationError("Validation error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    }
+    if (code === "MissingMetadata") {
+      suggestion = "Check if the object metadata is present and valid.";
+      return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    }
+    suggestion = "Check the error details and AWS documentation.";
+    return new UnknownError("Unknown error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+  }
+  class ConnectionStringError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, { ...details, suggestion: "Check the connection string format and credentials." });
+    }
+  }
+  class CryptoError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, { ...details, suggestion: "Check if the crypto library is available and input is valid." });
+    }
+  }
+  class SchemaError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, { ...details, suggestion: "Check schema definition and input data." });
+    }
+  }
+  class ResourceError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, { ...details, suggestion: details.suggestion || "Check resource configuration, attributes, and operation context." });
+      Object.assign(this, details);
+    }
+  }
+  class PartitionError extends S3dbError {
+    constructor(message, details = {}) {
+      super(message, { ...details, suggestion: details.suggestion || "Check partition definition, fields, and input values." });
+    }
   }
 
-  // String.prototype.substr - negative index don't work in IE8
-  var substr = 'ab'.substr(-1) === 'b' ?
-      function (str, start, len) { return str.substr(start, len) } :
-      function (str, start, len) {
-          if (start < 0) start = str.length + start;
-          return str.substr(start, len);
+  async function dynamicCrypto() {
+    let lib;
+    if (typeof process !== "undefined") {
+      const [ok, err, result] = await tryFn(async () => {
+        const { webcrypto } = await import('crypto');
+        return webcrypto;
+      });
+      if (ok) {
+        lib = result;
+      } else {
+        throw new CryptoError("Crypto API not available", { original: err, context: "dynamicCrypto" });
       }
-  ;
+    } else if (typeof window !== "undefined") {
+      lib = window.crypto;
+    }
+    if (!lib) throw new CryptoError("Could not load any crypto library", { context: "dynamicCrypto" });
+    return lib;
+  }
+  async function sha256(message) {
+    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
+    const encoder = new TextEncoder();
+    const data = encoder.encode(message);
+    const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest("SHA-256", data));
+    if (!ok) throw new CryptoError("SHA-256 digest failed", { original: err, input: message });
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    return hashHex;
+  }
+  async function encrypt(content, passphrase) {
+    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
+    const salt = cryptoLib.getRandomValues(new Uint8Array(16));
+    const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+    if (!okKey) throw new CryptoError("Key derivation failed", { original: errKey, passphrase, salt });
+    const iv = cryptoLib.getRandomValues(new Uint8Array(12));
+    const encoder = new TextEncoder();
+    const encodedContent = encoder.encode(content);
+    const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
+    if (!okEnc) throw new CryptoError("Encryption failed", { original: errEnc, content });
+    const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
+    encryptedData.set(salt);
+    encryptedData.set(iv, salt.length);
+    encryptedData.set(new Uint8Array(encryptedContent), salt.length + iv.length);
+    return arrayBufferToBase64(encryptedData);
+  }
+  async function decrypt(encryptedBase64, passphrase) {
+    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
+    const encryptedData = base64ToArrayBuffer(encryptedBase64);
+    const salt = encryptedData.slice(0, 16);
+    const iv = encryptedData.slice(16, 28);
+    const encryptedContent = encryptedData.slice(28);
+    const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+    if (!okKey) throw new CryptoError("Key derivation failed (decrypt)", { original: errKey, passphrase, salt });
+    const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
+    if (!okDec) throw new CryptoError("Decryption failed", { original: errDec, encryptedBase64 });
+    const decoder = new TextDecoder();
+    return decoder.decode(decryptedContent);
+  }
+  async function getKeyMaterial(passphrase, salt) {
+    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
+    const encoder = new TextEncoder();
+    const keyMaterial = encoder.encode(passphrase);
+    const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
+      "raw",
+      keyMaterial,
+      { name: "PBKDF2" },
+      false,
+      ["deriveKey"]
+    ));
+    if (!okImport) throw new CryptoError("importKey failed", { original: errImport, passphrase });
+    const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt,
+        iterations: 1e5,
+        hash: "SHA-256"
+      },
+      baseKey,
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    ));
+    if (!okDerive) throw new CryptoError("deriveKey failed", { original: errDerive, passphrase, salt });
+    return derivedKey;
+  }
+  function arrayBufferToBase64(buffer) {
+    if (typeof process !== "undefined") {
+      return Buffer.from(buffer).toString("base64");
+    } else {
+      const [ok, err, binary] = tryFnSync(() => String.fromCharCode.apply(null, new Uint8Array(buffer)));
+      if (!ok) throw new CryptoError("Failed to convert ArrayBuffer to base64 (browser)", { original: err });
+      return window.btoa(binary);
+    }
+  }
+  function base64ToArrayBuffer(base64) {
+    if (typeof process !== "undefined") {
+      return new Uint8Array(Buffer.from(base64, "base64"));
+    } else {
+      const [ok, err, binaryString] = tryFnSync(() => window.atob(base64));
+      if (!ok) throw new CryptoError("Failed to decode base64 (browser)", { original: err });
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
+    }
+  }
+
+  const idGenerator = nanoid.customAlphabet(nanoid.urlAlphabet, 22);
+  const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const passwordGenerator = nanoid.customAlphabet(passwordAlphabet, 16);
 
   var domain;
 
@@ -708,4089 +1444,769 @@ var S3DB = (function (exports, lodashEs, promisePool, nanoid, clientS3, crypto, 
     return ret;
   }
 
-  const idGenerator = nanoid.customAlphabet(nanoid.urlAlphabet, 22);
-  const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const passwordGenerator = nanoid.customAlphabet(passwordAlphabet, 16);
+  var _polyfillNode_events = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    EventEmitter: EventEmitter,
+    default: EventEmitter
+  });
 
-  function tryFn(fnOrPromise) {
-    if (fnOrPromise == null) {
-      const err = new Error("fnOrPromise cannot be null or undefined");
-      err.stack = new Error().stack;
-      return [false, err, void 0];
+  class Plugin extends EventEmitter {
+    constructor(options = {}) {
+      super();
+      this.name = this.constructor.name;
+      this.options = options;
+      this.hooks = /* @__PURE__ */ new Map();
     }
-    if (typeof fnOrPromise === "function") {
-      try {
-        const result = fnOrPromise();
-        if (result == null) {
-          return [true, null, result];
+    async setup(database) {
+      this.database = database;
+      this.beforeSetup();
+      await this.onSetup();
+      this.afterSetup();
+    }
+    async start() {
+      this.beforeStart();
+      await this.onStart();
+      this.afterStart();
+    }
+    async stop() {
+      this.beforeStop();
+      await this.onStop();
+      this.afterStop();
+    }
+    // Override these methods in subclasses
+    async onSetup() {
+    }
+    async onStart() {
+    }
+    async onStop() {
+    }
+    // Hook management methods
+    addHook(resource, event, handler) {
+      if (!this.hooks.has(resource)) {
+        this.hooks.set(resource, /* @__PURE__ */ new Map());
+      }
+      const resourceHooks = this.hooks.get(resource);
+      if (!resourceHooks.has(event)) {
+        resourceHooks.set(event, []);
+      }
+      resourceHooks.get(event).push(handler);
+    }
+    removeHook(resource, event, handler) {
+      const resourceHooks = this.hooks.get(resource);
+      if (resourceHooks && resourceHooks.has(event)) {
+        const handlers = resourceHooks.get(event);
+        const index = handlers.indexOf(handler);
+        if (index > -1) {
+          handlers.splice(index, 1);
         }
-        if (typeof result.then === "function") {
-          return result.then((data) => [true, null, data]).catch((error) => {
-            if (error instanceof Error && Object.isExtensible(error)) {
-              const desc = Object.getOwnPropertyDescriptor(error, "stack");
-              if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-                try {
-                  error.stack = new Error().stack;
-                } catch (_) {
-                }
-              }
-            }
-            return [false, error, void 0];
-          });
-        }
-        return [true, null, result];
-      } catch (error) {
-        if (error instanceof Error && Object.isExtensible(error)) {
-          const desc = Object.getOwnPropertyDescriptor(error, "stack");
-          if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-            try {
-              error.stack = new Error().stack;
-            } catch (_) {
-            }
-          }
-        }
-        return [false, error, void 0];
       }
     }
-    if (typeof fnOrPromise.then === "function") {
-      return Promise.resolve(fnOrPromise).then((data) => [true, null, data]).catch((error) => {
-        if (error instanceof Error && Object.isExtensible(error)) {
-          const desc = Object.getOwnPropertyDescriptor(error, "stack");
-          if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-            try {
-              error.stack = new Error().stack;
-            } catch (_) {
+    // Enhanced resource method wrapping that supports multiple plugins
+    wrapResourceMethod(resource, methodName, wrapper) {
+      const originalMethod = resource[methodName];
+      if (!resource._pluginWrappers) {
+        resource._pluginWrappers = /* @__PURE__ */ new Map();
+      }
+      if (!resource._pluginWrappers.has(methodName)) {
+        resource._pluginWrappers.set(methodName, []);
+      }
+      resource._pluginWrappers.get(methodName).push(wrapper);
+      if (!resource[`_wrapped_${methodName}`]) {
+        resource[`_wrapped_${methodName}`] = originalMethod;
+        const isJestMock = originalMethod && originalMethod._isMockFunction;
+        resource[methodName] = async function(...args) {
+          let result = await resource[`_wrapped_${methodName}`](...args);
+          for (const wrapper2 of resource._pluginWrappers.get(methodName)) {
+            result = await wrapper2.call(this, result, args, methodName);
+          }
+          return result;
+        };
+        if (isJestMock) {
+          Object.setPrototypeOf(resource[methodName], Object.getPrototypeOf(originalMethod));
+          Object.assign(resource[methodName], originalMethod);
+        }
+      }
+    }
+    /**
+     * Add a middleware to intercept a resource method (Koa/Express style).
+     * Middleware signature: async (next, ...args) => { ... }
+     * - Chame next(...args) para continuar a cadeia.
+     * - Retorne sem chamar next para interromper.
+     * - Pode modificar argumentos/resultados.
+     */
+    addMiddleware(resource, methodName, middleware) {
+      if (!resource._pluginMiddlewares) {
+        resource._pluginMiddlewares = {};
+      }
+      if (!resource._pluginMiddlewares[methodName]) {
+        resource._pluginMiddlewares[methodName] = [];
+        const originalMethod = resource[methodName].bind(resource);
+        resource[methodName] = async function(...args) {
+          let idx = -1;
+          const next = async (...nextArgs) => {
+            idx++;
+            if (idx < resource._pluginMiddlewares[methodName].length) {
+              return await resource._pluginMiddlewares[methodName][idx].call(this, next, ...nextArgs);
+            } else {
+              return await originalMethod(...nextArgs);
+            }
+          };
+          return await next(...args);
+        };
+      }
+      resource._pluginMiddlewares[methodName].push(middleware);
+    }
+    // Partition-aware helper methods
+    getPartitionValues(data, resource) {
+      if (!resource.config?.partitions) return {};
+      const partitionValues = {};
+      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+        if (partitionDef.fields) {
+          partitionValues[partitionName] = {};
+          for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+            const value = this.getNestedFieldValue(data, fieldName);
+            if (value !== null && value !== void 0) {
+              partitionValues[partitionName][fieldName] = resource.applyPartitionRule(value, rule);
             }
           }
+        } else {
+          partitionValues[partitionName] = {};
         }
-        return [false, error, void 0];
+      }
+      return partitionValues;
+    }
+    getNestedFieldValue(data, fieldPath) {
+      if (!fieldPath.includes(".")) {
+        return data[fieldPath] ?? null;
+      }
+      const keys = fieldPath.split(".");
+      let value = data;
+      for (const key of keys) {
+        if (value && typeof value === "object" && key in value) {
+          value = value[key];
+        } else {
+          return null;
+        }
+      }
+      return value ?? null;
+    }
+    // Event emission methods
+    beforeSetup() {
+      this.emit("plugin.beforeSetup", /* @__PURE__ */ new Date());
+    }
+    afterSetup() {
+      this.emit("plugin.afterSetup", /* @__PURE__ */ new Date());
+    }
+    beforeStart() {
+      this.emit("plugin.beforeStart", /* @__PURE__ */ new Date());
+    }
+    afterStart() {
+      this.emit("plugin.afterStart", /* @__PURE__ */ new Date());
+    }
+    beforeStop() {
+      this.emit("plugin.beforeStop", /* @__PURE__ */ new Date());
+    }
+    afterStop() {
+      this.emit("plugin.afterStop", /* @__PURE__ */ new Date());
+    }
+  }
+
+  const PluginObject = {
+    setup(database) {
+    },
+    start() {
+    },
+    stop() {
+    }
+  };
+
+  class AuditPlugin extends Plugin {
+    constructor(options = {}) {
+      super(options);
+      this.auditResource = null;
+      this.config = {
+        includeData: options.includeData !== false,
+        includePartitions: options.includePartitions !== false,
+        maxDataSize: options.maxDataSize || 1e4,
+        // 10KB limit
+        ...options
+      };
+    }
+    async onSetup() {
+      const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
+        name: "audits",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          recordId: "string|required",
+          userId: "string|optional",
+          timestamp: "string|required",
+          oldData: "string|optional",
+          newData: "string|optional",
+          partition: "string|optional",
+          partitionValues: "string|optional",
+          metadata: "string|optional"
+        },
+        behavior: "body-overflow"
+        // keyPrefix removido
+      }));
+      this.auditResource = ok ? auditResource : this.database.resources.audits || null;
+      if (!ok && !this.auditResource) return;
+      this.installDatabaseProxy();
+      this.installEventListeners();
+    }
+    async onStart() {
+    }
+    async onStop() {
+    }
+    installDatabaseProxy() {
+      if (this.database._auditProxyInstalled) {
+        return;
+      }
+      const installEventListenersForResource = this.installEventListenersForResource.bind(this);
+      this.database._originalCreateResource = this.database.createResource;
+      this.database.createResource = async function(...args) {
+        const resource = await this._originalCreateResource(...args);
+        if (resource.name !== "audits") {
+          installEventListenersForResource(resource);
+        }
+        return resource;
+      };
+      this.database._auditProxyInstalled = true;
+    }
+    installEventListeners() {
+      for (const resource of Object.values(this.database.resources)) {
+        if (resource.name === "audits") {
+          continue;
+        }
+        this.installEventListenersForResource(resource);
+      }
+    }
+    installEventListenersForResource(resource) {
+      resource.on("insert", async (data) => {
+        const recordId = data.id || "auto-generated";
+        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
+        const auditRecord = {
+          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+          resourceName: resource.name,
+          operation: "insert",
+          recordId,
+          userId: this.getCurrentUserId?.() || "system",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          oldData: null,
+          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
+          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+          metadata: JSON.stringify({
+            source: "audit-plugin",
+            version: "2.0"
+          })
+        };
+        this.logAudit(auditRecord).catch(console.error);
+      });
+      resource.on("update", async (data) => {
+        const recordId = data.id;
+        let oldData = data.$before;
+        if (this.config.includeData && !oldData) {
+          const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+          if (ok) oldData = fetched;
+        }
+        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
+        const auditRecord = {
+          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+          resourceName: resource.name,
+          operation: "update",
+          recordId,
+          userId: this.getCurrentUserId?.() || "system",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
+          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
+          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+          metadata: JSON.stringify({
+            source: "audit-plugin",
+            version: "2.0"
+          })
+        };
+        this.logAudit(auditRecord).catch(console.error);
+      });
+      resource.on("delete", async (data) => {
+        const recordId = data.id;
+        let oldData = data;
+        if (this.config.includeData && !oldData) {
+          const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+          if (ok) oldData = fetched;
+        }
+        const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
+        const auditRecord = {
+          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+          resourceName: resource.name,
+          operation: "delete",
+          recordId,
+          userId: this.getCurrentUserId?.() || "system",
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
+          newData: null,
+          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+          metadata: JSON.stringify({
+            source: "audit-plugin",
+            version: "2.0"
+          })
+        };
+        this.logAudit(auditRecord).catch(console.error);
+      });
+      resource.useMiddleware("deleteMany", async (ctx, next) => {
+        const ids = ctx.args[0];
+        const oldDataMap = {};
+        if (this.config.includeData) {
+          for (const id of ids) {
+            const [ok, err, data] = await tryFn(() => resource.get(id));
+            oldDataMap[id] = ok ? data : null;
+          }
+        }
+        const result = await next();
+        if (result && result.length > 0 && this.config.includeData) {
+          for (const id of ids) {
+            const oldData = oldDataMap[id];
+            const partitionValues = oldData ? this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null : null;
+            const auditRecord = {
+              id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+              resourceName: resource.name,
+              operation: "delete",
+              recordId: id,
+              userId: this.getCurrentUserId?.() || "system",
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
+              newData: null,
+              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
+              partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
+              metadata: JSON.stringify({
+                source: "audit-plugin",
+                version: "2.0",
+                batchOperation: true
+              })
+            };
+            this.logAudit(auditRecord).catch(console.error);
+          }
+        }
+        return result;
       });
     }
-    return [true, null, fnOrPromise];
-  }
-  function tryFnSync(fn) {
-    try {
-      const result = fn();
-      return [true, null, result];
-    } catch (err) {
-      return [false, err, null];
+    getPartitionValues(data, resource) {
+      if (!data) return null;
+      const partitions = resource.config?.partitions || {};
+      const partitionValues = {};
+      for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+        if (partitionDef.fields) {
+          const partitionData = {};
+          for (const [fieldName, fieldRule] of Object.entries(partitionDef.fields)) {
+            const fieldValue = this.getNestedFieldValue(data, fieldName);
+            if (fieldValue !== void 0 && fieldValue !== null) {
+              partitionData[fieldName] = fieldValue;
+            }
+          }
+          if (Object.keys(partitionData).length > 0) {
+            partitionValues[partitionName] = partitionData;
+          }
+        }
+      }
+      return partitionValues;
+    }
+    getNestedFieldValue(data, fieldPath) {
+      if (!fieldPath.includes(".")) {
+        return data[fieldPath];
+      }
+      const keys = fieldPath.split(".");
+      let currentLevel = data;
+      for (const key of keys) {
+        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+          return void 0;
+        }
+        currentLevel = currentLevel[key];
+      }
+      return currentLevel;
+    }
+    getPrimaryPartition(partitionValues) {
+      if (!partitionValues) return null;
+      const partitionNames = Object.keys(partitionValues);
+      return partitionNames.length > 0 ? partitionNames[0] : null;
+    }
+    async logAudit(auditRecord) {
+      if (!auditRecord.id) {
+        auditRecord.id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+      const result = await this.auditResource.insert(auditRecord);
+      return result;
+    }
+    truncateData(data) {
+      if (!data) return data;
+      const filteredData = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (!key.startsWith("_") && key !== "$overflow") {
+          filteredData[key] = value;
+        }
+      }
+      const dataStr = JSON.stringify(filteredData);
+      if (dataStr.length <= this.config.maxDataSize) {
+        return filteredData;
+      }
+      let truncatedData = { ...filteredData };
+      let currentSize = JSON.stringify(truncatedData).length;
+      const metadataOverhead = JSON.stringify({
+        _truncated: true,
+        _originalSize: dataStr.length,
+        _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }).length;
+      const targetSize = this.config.maxDataSize - metadataOverhead;
+      for (const [key, value] of Object.entries(truncatedData)) {
+        if (typeof value === "string" && currentSize > targetSize) {
+          const excess = currentSize - targetSize;
+          const newLength = Math.max(0, value.length - excess - 3);
+          if (newLength < value.length) {
+            truncatedData[key] = value.substring(0, newLength) + "...";
+            currentSize = JSON.stringify(truncatedData).length;
+          }
+        }
+      }
+      return {
+        ...truncatedData,
+        _truncated: true,
+        _originalSize: dataStr.length,
+        _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+    }
+    // Utility methods for querying audit logs
+    async getAuditLogs(options = {}) {
+      if (!this.auditResource) return [];
+      const [ok, err, result] = await tryFn(async () => {
+        const {
+          resourceName,
+          operation,
+          recordId,
+          userId,
+          partition,
+          startDate,
+          endDate,
+          limit = 100,
+          offset = 0
+        } = options;
+        const allAudits = await this.auditResource.getAll();
+        let filtered = allAudits.filter((audit) => {
+          if (resourceName && audit.resourceName !== resourceName) return false;
+          if (operation && audit.operation !== operation) return false;
+          if (recordId && audit.recordId !== recordId) return false;
+          if (userId && audit.userId !== userId) return false;
+          if (partition && audit.partition !== partition) return false;
+          if (startDate && new Date(audit.timestamp) < new Date(startDate)) return false;
+          if (endDate && new Date(audit.timestamp) > new Date(endDate)) return false;
+          return true;
+        });
+        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        const deserialized = filtered.slice(offset, offset + limit).map((audit) => {
+          const [okOld, , oldData] = typeof audit.oldData === "string" ? tryFnSync(() => JSON.parse(audit.oldData)) : [true, null, audit.oldData];
+          const [okNew, , newData] = typeof audit.newData === "string" ? tryFnSync(() => JSON.parse(audit.newData)) : [true, null, audit.newData];
+          const [okPart, , partitionValues] = audit.partitionValues && typeof audit.partitionValues === "string" ? tryFnSync(() => JSON.parse(audit.partitionValues)) : [true, null, audit.partitionValues];
+          const [okMeta, , metadata] = audit.metadata && typeof audit.metadata === "string" ? tryFnSync(() => JSON.parse(audit.metadata)) : [true, null, audit.metadata];
+          return {
+            ...audit,
+            oldData: audit.oldData === null || audit.oldData === void 0 || audit.oldData === "null" ? null : okOld ? oldData : null,
+            newData: audit.newData === null || audit.newData === void 0 || audit.newData === "null" ? null : okNew ? newData : null,
+            partitionValues: okPart ? partitionValues : audit.partitionValues,
+            metadata: okMeta ? metadata : audit.metadata
+          };
+        });
+        return deserialized;
+      });
+      return ok ? result : [];
+    }
+    async getRecordHistory(resourceName, recordId) {
+      return this.getAuditLogs({
+        resourceName,
+        recordId,
+        limit: 1e3
+      });
+    }
+    async getPartitionHistory(resourceName, partitionName, partitionValues) {
+      return this.getAuditLogs({
+        resourceName,
+        partition: partitionName,
+        limit: 1e3
+      });
+    }
+    async getAuditStats(options = {}) {
+      const {
+        resourceName,
+        startDate,
+        endDate
+      } = options;
+      const allAudits = await this.getAuditLogs({
+        resourceName,
+        startDate,
+        endDate,
+        limit: 1e4
+      });
+      const stats = {
+        total: allAudits.length,
+        byOperation: {},
+        byResource: {},
+        byPartition: {},
+        byUser: {},
+        timeline: {}
+      };
+      for (const audit of allAudits) {
+        stats.byOperation[audit.operation] = (stats.byOperation[audit.operation] || 0) + 1;
+        stats.byResource[audit.resourceName] = (stats.byResource[audit.resourceName] || 0) + 1;
+        if (audit.partition) {
+          stats.byPartition[audit.partition] = (stats.byPartition[audit.partition] || 0) + 1;
+        }
+        stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
+        if (audit.timestamp) {
+          const day = audit.timestamp.split("T")[0];
+          stats.timeline[day] = (stats.timeline[day] || 0) + 1;
+        }
+      }
+      return stats;
     }
   }
+
+  // Copyright Joyent, Inc. and other Node contributors.
+  //
+  // Permission is hereby granted, free of charge, to any person obtaining a
+  // copy of this software and associated documentation files (the
+  // "Software"), to deal in the Software without restriction, including
+  // without limitation the rights to use, copy, modify, merge, publish,
+  // distribute, sublicense, and/or sell copies of the Software, and to permit
+  // persons to whom the Software is furnished to do so, subject to the
+  // following conditions:
+  //
+  // The above copyright notice and this permission notice shall be included
+  // in all copies or substantial portions of the Software.
+  //
+  // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  // OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+  // NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+  // USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+  // resolves . and .. elements in a path array with directory names there
+  // must be no slashes, empty elements, or device names (c:\) in the array
+  // (so also no leading and trailing slashes - it does not distinguish
+  // relative and absolute paths)
+  function normalizeArray(parts, allowAboveRoot) {
+    // if the path tries to go above the root, `up` ends up > 0
+    var up = 0;
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var last = parts[i];
+      if (last === '.') {
+        parts.splice(i, 1);
+      } else if (last === '..') {
+        parts.splice(i, 1);
+        up++;
+      } else if (up) {
+        parts.splice(i, 1);
+        up--;
+      }
+    }
+
+    // if the path is allowed to go above the root, restore leading ..s
+    if (allowAboveRoot) {
+      for (; up--; up) {
+        parts.unshift('..');
+      }
+    }
+
+    return parts;
+  }
+
+  // Split a filename into [root, dir, basename, ext], unix version
+  // 'root' is just a slash, or nothing.
+  var splitPathRe =
+      /^(\/?|)([\s\S]*?)((?:\.{1,2}|[^\/]+?|)(\.[^.\/]*|))(?:[\/]*)$/;
+  var splitPath = function(filename) {
+    return splitPathRe.exec(filename).slice(1);
+  };
+
+  // path.resolve([from ...], to)
+  // posix version
+  function resolve() {
+    var resolvedPath = '',
+        resolvedAbsolute = false;
+
+    for (var i = arguments.length - 1; i >= -1 && !resolvedAbsolute; i--) {
+      var path = (i >= 0) ? arguments[i] : '/';
+
+      // Skip empty and invalid entries
+      if (typeof path !== 'string') {
+        throw new TypeError('Arguments to path.resolve must be strings');
+      } else if (!path) {
+        continue;
+      }
+
+      resolvedPath = path + '/' + resolvedPath;
+      resolvedAbsolute = path.charAt(0) === '/';
+    }
+
+    // At this point the path should be resolved to a full absolute path, but
+    // handle relative paths to be safe (might happen when process.cwd() fails)
+
+    // Normalize the path
+    resolvedPath = normalizeArray(filter(resolvedPath.split('/'), function(p) {
+      return !!p;
+    }), !resolvedAbsolute).join('/');
+
+    return ((resolvedAbsolute ? '/' : '') + resolvedPath) || '.';
+  }
+  // path.normalize(path)
+  // posix version
+  function normalize(path) {
+    var isPathAbsolute = isAbsolute(path),
+        trailingSlash = substr(path, -1) === '/';
+
+    // Normalize the path
+    path = normalizeArray(filter(path.split('/'), function(p) {
+      return !!p;
+    }), !isPathAbsolute).join('/');
+
+    if (!path && !isPathAbsolute) {
+      path = '.';
+    }
+    if (path && trailingSlash) {
+      path += '/';
+    }
+
+    return (isPathAbsolute ? '/' : '') + path;
+  }
+  // posix version
+  function isAbsolute(path) {
+    return path.charAt(0) === '/';
+  }
+
+  // posix version
+  function join() {
+    var paths = Array.prototype.slice.call(arguments, 0);
+    return normalize(filter(paths, function(p, index) {
+      if (typeof p !== 'string') {
+        throw new TypeError('Arguments to path.join must be strings');
+      }
+      return p;
+    }).join('/'));
+  }
+
+
+  // path.relative(from, to)
+  // posix version
+  function relative(from, to) {
+    from = resolve(from).substr(1);
+    to = resolve(to).substr(1);
+
+    function trim(arr) {
+      var start = 0;
+      for (; start < arr.length; start++) {
+        if (arr[start] !== '') break;
+      }
+
+      var end = arr.length - 1;
+      for (; end >= 0; end--) {
+        if (arr[end] !== '') break;
+      }
+
+      if (start > end) return [];
+      return arr.slice(start, end - start + 1);
+    }
+
+    var fromParts = trim(from.split('/'));
+    var toParts = trim(to.split('/'));
+
+    var length = Math.min(fromParts.length, toParts.length);
+    var samePartsLength = length;
+    for (var i = 0; i < length; i++) {
+      if (fromParts[i] !== toParts[i]) {
+        samePartsLength = i;
+        break;
+      }
+    }
+
+    var outputParts = [];
+    for (var i = samePartsLength; i < fromParts.length; i++) {
+      outputParts.push('..');
+    }
+
+    outputParts = outputParts.concat(toParts.slice(samePartsLength));
+
+    return outputParts.join('/');
+  }
+
+  var sep = '/';
+  var delimiter = ':';
+
+  function dirname(path) {
+    var result = splitPath(path),
+        root = result[0],
+        dir = result[1];
+
+    if (!root && !dir) {
+      // No dirname whatsoever
+      return '.';
+    }
+
+    if (dir) {
+      // It has a dirname, strip trailing slash
+      dir = dir.substr(0, dir.length - 1);
+    }
+
+    return root + dir;
+  }
+
+  function basename(path, ext) {
+    var f = splitPath(path)[2];
+    // TODO: make this comparison case-insensitive on windows?
+    if (ext && f.substr(-1 * ext.length) === ext) {
+      f = f.substr(0, f.length - ext.length);
+    }
+    return f;
+  }
+
+
+  function extname(path) {
+    return splitPath(path)[3];
+  }
+  var path = {
+    extname: extname,
+    basename: basename,
+    dirname: dirname,
+    sep: sep,
+    delimiter: delimiter,
+    relative: relative,
+    join: join,
+    isAbsolute: isAbsolute,
+    normalize: normalize,
+    resolve: resolve
+  };
+  function filter (xs, f) {
+      if (xs.filter) return xs.filter(f);
+      var res = [];
+      for (var i = 0; i < xs.length; i++) {
+          if (f(xs[i], i, xs)) res.push(xs[i]);
+      }
+      return res;
+  }
+
+  // String.prototype.substr - negative index don't work in IE8
+  var substr = 'ab'.substr(-1) === 'b' ?
+      function (str, start, len) { return str.substr(start, len) } :
+      function (str, start, len) {
+          if (start < 0) start = str.length + start;
+          return str.substr(start, len);
+      }
+  ;
 
   var global$1 = (typeof global !== "undefined" ? global :
     typeof self !== "undefined" ? self :
     typeof window !== "undefined" ? window : {});
-
-  /******************************************************************************
-  Copyright (c) Microsoft Corporation.
-
-  Permission to use, copy, modify, and/or distribute this software for any
-  purpose with or without fee is hereby granted.
-
-  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-  REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
-  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-  INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-  LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-  PERFORMANCE OF THIS SOFTWARE.
-  ***************************************************************************** */
-  /* global Reflect, Promise, SuppressedError, Symbol, Iterator */
-
-
-  function __awaiter(thisArg, _arguments, P, generator) {
-      function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-      return new (P || (P = Promise))(function (resolve, reject) {
-          function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-          function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-          function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-          step((generator = generator.apply(thisArg, [])).next());
-      });
-  }
-
-  typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
-      var e = new Error(message);
-      return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
-  };
-
-  class Mutex {
-      constructor() {
-          this.mutex = Promise.resolve();
-      }
-      lock() {
-          let begin = () => { };
-          this.mutex = this.mutex.then(() => new Promise(begin));
-          return new Promise((res) => {
-              begin = res;
-          });
-      }
-      dispatch(fn) {
-          return __awaiter(this, void 0, void 0, function* () {
-              const unlock = yield this.lock();
-              try {
-                  return yield Promise.resolve(fn());
-              }
-              finally {
-                  unlock();
-              }
-          });
-      }
-  }
-
-  var _a;
-  function getGlobal() {
-      if (typeof globalThis !== "undefined")
-          return globalThis;
-      if (typeof self !== "undefined")
-          return self;
-      if (typeof window !== "undefined")
-          return window;
-      return global$1;
-  }
-  const globalObject = getGlobal();
-  const nodeBuffer = (_a = globalObject.Buffer) !== null && _a !== void 0 ? _a : null;
-  const textEncoder = globalObject.TextEncoder
-      ? new globalObject.TextEncoder()
-      : null;
-  function hexCharCodesToInt(a, b) {
-      return ((((a & 0xf) + ((a >> 6) | ((a >> 3) & 0x8))) << 4) |
-          ((b & 0xf) + ((b >> 6) | ((b >> 3) & 0x8))));
-  }
-  function writeHexToUInt8(buf, str) {
-      const size = str.length >> 1;
-      for (let i = 0; i < size; i++) {
-          const index = i << 1;
-          buf[i] = hexCharCodesToInt(str.charCodeAt(index), str.charCodeAt(index + 1));
-      }
-  }
-  function hexStringEqualsUInt8(str, buf) {
-      if (str.length !== buf.length * 2) {
-          return false;
-      }
-      for (let i = 0; i < buf.length; i++) {
-          const strIndex = i << 1;
-          if (buf[i] !==
-              hexCharCodesToInt(str.charCodeAt(strIndex), str.charCodeAt(strIndex + 1))) {
-              return false;
-          }
-      }
-      return true;
-  }
-  const alpha = "a".charCodeAt(0) - 10;
-  const digit = "0".charCodeAt(0);
-  function getDigestHex(tmpBuffer, input, hashLength) {
-      let p = 0;
-      for (let i = 0; i < hashLength; i++) {
-          let nibble = input[i] >>> 4;
-          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
-          nibble = input[i] & 0xf;
-          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
-      }
-      return String.fromCharCode.apply(null, tmpBuffer);
-  }
-  const getUInt8Buffer = nodeBuffer !== null
-      ? (data) => {
-          if (typeof data === "string") {
-              const buf = nodeBuffer.from(data, "utf8");
-              return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
-          }
-          if (nodeBuffer.isBuffer(data)) {
-              return new Uint8Array(data.buffer, data.byteOffset, data.length);
-          }
-          if (ArrayBuffer.isView(data)) {
-              return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-          }
-          throw new Error("Invalid data type!");
-      }
-      : (data) => {
-          if (typeof data === "string") {
-              return textEncoder.encode(data);
-          }
-          if (ArrayBuffer.isView(data)) {
-              return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-          }
-          throw new Error("Invalid data type!");
-      };
-  const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const base64Lookup = new Uint8Array(256);
-  for (let i = 0; i < base64Chars.length; i++) {
-      base64Lookup[base64Chars.charCodeAt(i)] = i;
-  }
-  function getDecodeBase64Length(data) {
-      let bufferLength = Math.floor(data.length * 0.75);
-      const len = data.length;
-      if (data[len - 1] === "=") {
-          bufferLength -= 1;
-          if (data[len - 2] === "=") {
-              bufferLength -= 1;
-          }
-      }
-      return bufferLength;
-  }
-  function decodeBase64(data) {
-      const bufferLength = getDecodeBase64Length(data);
-      const len = data.length;
-      const bytes = new Uint8Array(bufferLength);
-      let p = 0;
-      for (let i = 0; i < len; i += 4) {
-          const encoded1 = base64Lookup[data.charCodeAt(i)];
-          const encoded2 = base64Lookup[data.charCodeAt(i + 1)];
-          const encoded3 = base64Lookup[data.charCodeAt(i + 2)];
-          const encoded4 = base64Lookup[data.charCodeAt(i + 3)];
-          bytes[p] = (encoded1 << 2) | (encoded2 >> 4);
-          p += 1;
-          bytes[p] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
-          p += 1;
-          bytes[p] = ((encoded3 & 3) << 6) | (encoded4 & 63);
-          p += 1;
-      }
-      return bytes;
-  }
-
-  const MAX_HEAP = 16 * 1024;
-  const WASM_FUNC_HASH_LENGTH = 4;
-  const wasmMutex = new Mutex();
-  const wasmModuleCache = new Map();
-  function WASMInterface(binary, hashLength) {
-      return __awaiter(this, void 0, void 0, function* () {
-          let wasmInstance = null;
-          let memoryView = null;
-          let initialized = false;
-          if (typeof WebAssembly === "undefined") {
-              throw new Error("WebAssembly is not supported in this environment!");
-          }
-          const writeMemory = (data, offset = 0) => {
-              memoryView.set(data, offset);
-          };
-          const getMemory = () => memoryView;
-          const getExports = () => wasmInstance.exports;
-          const setMemorySize = (totalSize) => {
-              wasmInstance.exports.Hash_SetMemorySize(totalSize);
-              const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
-              const memoryBuffer = wasmInstance.exports.memory.buffer;
-              memoryView = new Uint8Array(memoryBuffer, arrayOffset, totalSize);
-          };
-          const getStateSize = () => {
-              const view = new DataView(wasmInstance.exports.memory.buffer);
-              const stateSize = view.getUint32(wasmInstance.exports.STATE_SIZE, true);
-              return stateSize;
-          };
-          const loadWASMPromise = wasmMutex.dispatch(() => __awaiter(this, void 0, void 0, function* () {
-              if (!wasmModuleCache.has(binary.name)) {
-                  const asm = decodeBase64(binary.data);
-                  const promise = WebAssembly.compile(asm);
-                  wasmModuleCache.set(binary.name, promise);
-              }
-              const module = yield wasmModuleCache.get(binary.name);
-              wasmInstance = yield WebAssembly.instantiate(module, {
-              // env: {
-              //   emscripten_memcpy_big: (dest, src, num) => {
-              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
-              //     const memView = new Uint8Array(memoryBuffer, 0);
-              //     memView.set(memView.subarray(src, src + num), dest);
-              //   },
-              //   print_memory: (offset, len) => {
-              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
-              //     const memView = new Uint8Array(memoryBuffer, 0);
-              //     console.log('print_int32', memView.subarray(offset, offset + len));
-              //   },
-              // },
-              });
-              // wasmInstance.exports._start();
-          }));
-          const setupInterface = () => __awaiter(this, void 0, void 0, function* () {
-              if (!wasmInstance) {
-                  yield loadWASMPromise;
-              }
-              const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
-              const memoryBuffer = wasmInstance.exports.memory.buffer;
-              memoryView = new Uint8Array(memoryBuffer, arrayOffset, MAX_HEAP);
-          });
-          const init = (bits = null) => {
-              initialized = true;
-              wasmInstance.exports.Hash_Init(bits);
-          };
-          const updateUInt8Array = (data) => {
-              let read = 0;
-              while (read < data.length) {
-                  const chunk = data.subarray(read, read + MAX_HEAP);
-                  read += chunk.length;
-                  memoryView.set(chunk);
-                  wasmInstance.exports.Hash_Update(chunk.length);
-              }
-          };
-          const update = (data) => {
-              if (!initialized) {
-                  throw new Error("update() called before init()");
-              }
-              const Uint8Buffer = getUInt8Buffer(data);
-              updateUInt8Array(Uint8Buffer);
-          };
-          const digestChars = new Uint8Array(hashLength * 2);
-          const digest = (outputType, padding = null) => {
-              if (!initialized) {
-                  throw new Error("digest() called before init()");
-              }
-              initialized = false;
-              wasmInstance.exports.Hash_Final(padding);
-              if (outputType === "binary") {
-                  // the data is copied to allow GC of the original memory object
-                  return memoryView.slice(0, hashLength);
-              }
-              return getDigestHex(digestChars, memoryView, hashLength);
-          };
-          const save = () => {
-              if (!initialized) {
-                  throw new Error("save() can only be called after init() and before digest()");
-              }
-              const stateOffset = wasmInstance.exports.Hash_GetState();
-              const stateLength = getStateSize();
-              const memoryBuffer = wasmInstance.exports.memory.buffer;
-              const internalState = new Uint8Array(memoryBuffer, stateOffset, stateLength);
-              // prefix is 4 bytes from SHA1 hash of the WASM binary
-              // it is used to detect incompatible internal states between different versions of hash-wasm
-              const prefixedState = new Uint8Array(WASM_FUNC_HASH_LENGTH + stateLength);
-              writeHexToUInt8(prefixedState, binary.hash);
-              prefixedState.set(internalState, WASM_FUNC_HASH_LENGTH);
-              return prefixedState;
-          };
-          const load = (state) => {
-              if (!(state instanceof Uint8Array)) {
-                  throw new Error("load() expects an Uint8Array generated by save()");
-              }
-              const stateOffset = wasmInstance.exports.Hash_GetState();
-              const stateLength = getStateSize();
-              const overallLength = WASM_FUNC_HASH_LENGTH + stateLength;
-              const memoryBuffer = wasmInstance.exports.memory.buffer;
-              if (state.length !== overallLength) {
-                  throw new Error(`Bad state length (expected ${overallLength} bytes, got ${state.length})`);
-              }
-              if (!hexStringEqualsUInt8(binary.hash, state.subarray(0, WASM_FUNC_HASH_LENGTH))) {
-                  throw new Error("This state was written by an incompatible hash implementation");
-              }
-              const internalState = state.subarray(WASM_FUNC_HASH_LENGTH);
-              new Uint8Array(memoryBuffer, stateOffset, stateLength).set(internalState);
-              initialized = true;
-          };
-          const isDataShort = (data) => {
-              if (typeof data === "string") {
-                  // worst case is 4 bytes / char
-                  return data.length < MAX_HEAP / 4;
-              }
-              return data.byteLength < MAX_HEAP;
-          };
-          let canSimplify = isDataShort;
-          switch (binary.name) {
-              case "argon2":
-              case "scrypt":
-                  canSimplify = () => true;
-                  break;
-              case "blake2b":
-              case "blake2s":
-                  // if there is a key at blake2 then cannot simplify
-                  canSimplify = (data, initParam) => initParam <= 512 && isDataShort(data);
-                  break;
-              case "blake3":
-                  // if there is a key at blake3 then cannot simplify
-                  canSimplify = (data, initParam) => initParam === 0 && isDataShort(data);
-                  break;
-              case "xxhash64": // cannot simplify
-              case "xxhash3":
-              case "xxhash128":
-              case "crc64":
-                  canSimplify = () => false;
-                  break;
-          }
-          // shorthand for (init + update + digest) for better performance
-          const calculate = (data, initParam = null, digestParam = null) => {
-              if (!canSimplify(data, initParam)) {
-                  init(initParam);
-                  update(data);
-                  return digest("hex", digestParam);
-              }
-              const buffer = getUInt8Buffer(data);
-              memoryView.set(buffer);
-              wasmInstance.exports.Hash_Calculate(buffer.length, initParam, digestParam);
-              return getDigestHex(digestChars, memoryView, hashLength);
-          };
-          yield setupInterface();
-          return {
-              getMemory,
-              writeMemory,
-              getExports,
-              setMemorySize,
-              init,
-              update,
-              digest,
-              save,
-              load,
-              calculate,
-              hashLength,
-          };
-      });
-  }
-
-  function lockedCreate(mutex, binary, hashLength) {
-      return __awaiter(this, void 0, void 0, function* () {
-          const unlock = yield mutex.lock();
-          const wasm = yield WASMInterface(binary, hashLength);
-          unlock();
-          return wasm;
-      });
-  }
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  var name$d = "md5";
-  var data$d = "AGFzbQEAAAABEgRgAAF/YAAAYAF/AGACf38BfwMIBwABAgMBAAIFBAEBAgIGDgJ/AUGgigULfwBBgAgLB3AIBm1lbW9yeQIADkhhc2hfR2V0QnVmZmVyAAAJSGFzaF9Jbml0AAELSGFzaF9VcGRhdGUAAgpIYXNoX0ZpbmFsAAQNSGFzaF9HZXRTdGF0ZQAFDkhhc2hfQ2FsY3VsYXRlAAYKU1RBVEVfU0laRQMBCoMaBwUAQYAJCy0AQQBC/rnrxemOlZkQNwKQiQFBAEKBxpS6lvHq5m83AoiJAUEAQgA3AoCJAQu+BQEHf0EAQQAoAoCJASIBIABqQf////8BcSICNgKAiQFBAEEAKAKEiQEgAiABSWogAEEddmo2AoSJAQJAAkACQAJAAkACQCABQT9xIgMNAEGACSEEDAELIABBwAAgA2siBUkNASAFQQNxIQZBACEBAkAgA0E/c0EDSQ0AIANBgIkBaiEEIAVB/ABxIQdBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAcgAUEEaiIBRw0ACwsCQCAGRQ0AIANBmIkBaiECA0AgAiABaiABQYAJai0AADoAACABQQFqIQEgBkF/aiIGDQALC0GYiQFBwAAQAxogACAFayEAIAVBgAlqIQQLIABBwABPDQEgACECDAILIABFDQIgAEEDcSEGQQAhAQJAIABBBEkNACADQYCJAWohBCAAQXxxIQBBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAiADQZiJAWohAgNAIAIgAWogAUGACWotAAA6AAAgAUEBaiEBIAZBf2oiBg0ADAMLCyAAQT9xIQIgBCAAQUBxEAMhBAsgAkUNACACQQNxIQZBACEBAkAgAkEESQ0AIAJBPHEhAEEAIQEDQCABQZiJAWogBCABaiICLQAAOgAAIAFBmYkBaiACQQFqLQAAOgAAIAFBmokBaiACQQJqLQAAOgAAIAFBm4kBaiACQQNqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAANAIAFBmIkBaiAEIAFqLQAAOgAAIAFBAWohASAGQX9qIgYNAAsLC4cQARl/QQAoApSJASECQQAoApCJASEDQQAoAoyJASEEQQAoAoiJASEFA0AgACgCCCIGIAAoAhgiByAAKAIoIgggACgCOCIJIAAoAjwiCiAAKAIMIgsgACgCHCIMIAAoAiwiDSAMIAsgCiANIAkgCCAHIAMgBmogAiAAKAIEIg5qIAUgBCACIANzcSACc2ogACgCACIPakH4yKq7fWpBB3cgBGoiECAEIANzcSADc2pB1u6exn5qQQx3IBBqIhEgECAEc3EgBHNqQdvhgaECakERdyARaiISaiAAKAIUIhMgEWogACgCECIUIBBqIAQgC2ogEiARIBBzcSAQc2pB7p33jXxqQRZ3IBJqIhAgEiARc3EgEXNqQa+f8Kt/akEHdyAQaiIRIBAgEnNxIBJzakGqjJ+8BGpBDHcgEWoiEiARIBBzcSAQc2pBk4zBwXpqQRF3IBJqIhVqIAAoAiQiFiASaiAAKAIgIhcgEWogDCAQaiAVIBIgEXNxIBFzakGBqppqakEWdyAVaiIQIBUgEnNxIBJzakHYsYLMBmpBB3cgEGoiESAQIBVzcSAVc2pBr++T2nhqQQx3IBFqIhIgESAQc3EgEHNqQbG3fWpBEXcgEmoiFWogACgCNCIYIBJqIAAoAjAiGSARaiANIBBqIBUgEiARc3EgEXNqQb6v88p4akEWdyAVaiIQIBUgEnNxIBJzakGiosDcBmpBB3cgEGoiESAQIBVzcSAVc2pBk+PhbGpBDHcgEWoiFSARIBBzcSAQc2pBjofls3pqQRF3IBVqIhJqIAcgFWogDiARaiAKIBBqIBIgFSARc3EgEXNqQaGQ0M0EakEWdyASaiIQIBJzIBVxIBJzakHiyviwf2pBBXcgEGoiESAQcyAScSAQc2pBwOaCgnxqQQl3IBFqIhIgEXMgEHEgEXNqQdG0+bICakEOdyASaiIVaiAIIBJqIBMgEWogDyAQaiAVIBJzIBFxIBJzakGqj9vNfmpBFHcgFWoiECAVcyAScSAVc2pB3aC8sX1qQQV3IBBqIhEgEHMgFXEgEHNqQdOokBJqQQl3IBFqIhIgEXMgEHEgEXNqQYHNh8V9akEOdyASaiIVaiAJIBJqIBYgEWogFCAQaiAVIBJzIBFxIBJzakHI98++fmpBFHcgFWoiECAVcyAScSAVc2pB5puHjwJqQQV3IBBqIhEgEHMgFXEgEHNqQdaP3Jl8akEJdyARaiISIBFzIBBxIBFzakGHm9Smf2pBDncgEmoiFWogBiASaiAYIBFqIBcgEGogFSAScyARcSASc2pB7anoqgRqQRR3IBVqIhAgFXMgEnEgFXNqQYXSj896akEFdyAQaiIRIBBzIBVxIBBzakH4x75nakEJdyARaiISIBFzIBBxIBFzakHZhby7BmpBDncgEmoiFWogFyASaiATIBFqIBkgEGogFSAScyARcSASc2pBipmp6XhqQRR3IBVqIhAgFXMiFSASc2pBwvJoakEEdyAQaiIRIBVzakGB7ce7eGpBC3cgEWoiEiARcyIaIBBzakGiwvXsBmpBEHcgEmoiFWogFCASaiAOIBFqIAkgEGogFSAac2pBjPCUb2pBF3cgFWoiECAVcyIVIBJzakHE1PulempBBHcgEGoiESAVc2pBqZ/73gRqQQt3IBFqIhIgEXMiCSAQc2pB4JbttX9qQRB3IBJqIhVqIA8gEmogGCARaiAIIBBqIBUgCXNqQfD4/vV7akEXdyAVaiIQIBVzIhUgEnNqQcb97cQCakEEdyAQaiIRIBVzakH6z4TVfmpBC3cgEWoiEiARcyIIIBBzakGF4bynfWpBEHcgEmoiFWogGSASaiAWIBFqIAcgEGogFSAIc2pBhbqgJGpBF3cgFWoiESAVcyIQIBJzakG5oNPOfWpBBHcgEWoiEiAQc2pB5bPutn5qQQt3IBJqIhUgEnMiByARc2pB+PmJ/QFqQRB3IBVqIhBqIAwgFWogDyASaiAGIBFqIBAgB3NqQeWssaV8akEXdyAQaiIRIBVBf3NyIBBzakHExKShf2pBBncgEWoiEiAQQX9zciARc2pBl/+rmQRqQQp3IBJqIhAgEUF/c3IgEnNqQafH0Nx6akEPdyAQaiIVaiALIBBqIBkgEmogEyARaiAVIBJBf3NyIBBzakG5wM5kakEVdyAVaiIRIBBBf3NyIBVzakHDs+2qBmpBBncgEWoiECAVQX9zciARc2pBkpmz+HhqQQp3IBBqIhIgEUF/c3IgEHNqQf3ov39qQQ93IBJqIhVqIAogEmogFyAQaiAOIBFqIBUgEEF/c3IgEnNqQdG7kax4akEVdyAVaiIQIBJBf3NyIBVzakHP/KH9BmpBBncgEGoiESAVQX9zciAQc2pB4M2zcWpBCncgEWoiEiAQQX9zciARc2pBlIaFmHpqQQ93IBJqIhVqIA0gEmogFCARaiAYIBBqIBUgEUF/c3IgEnNqQaGjoPAEakEVdyAVaiIQIBJBf3NyIBVzakGC/c26f2pBBncgEGoiESAVQX9zciAQc2pBteTr6XtqQQp3IBFqIhIgEEF/c3IgEXNqQbul39YCakEPdyASaiIVIARqIBYgEGogFSARQX9zciASc2pBkaeb3H5qQRV3aiEEIBUgA2ohAyASIAJqIQIgESAFaiEFIABBwABqIQAgAUFAaiIBDQALQQAgAjYClIkBQQAgAzYCkIkBQQAgBDYCjIkBQQAgBTYCiIkBIAALyAMBBX9BACgCgIkBQT9xIgBBmIkBakGAAToAACAAQQFqIQECQAJAAkACQCAAQT9zIgJBB0sNACACRQ0BIAFBmIkBakEAOgAAIAJBAUYNASAAQZqJAWpBADoAACACQQJGDQEgAEGbiQFqQQA6AAAgAkEDRg0BIABBnIkBakEAOgAAIAJBBEYNASAAQZ2JAWpBADoAACACQQVGDQEgAEGeiQFqQQA6AAAgAkEGRg0BIABBn4kBakEAOgAADAELIAJBCEYNAkE2IABrIgMhBAJAIAJBA3EiAEUNAEEAIABrIQRBACEAA0AgAEHPiQFqQQA6AAAgBCAAQX9qIgBHDQALIAMgAGohBAsgA0EDSQ0CDAELQZiJAUHAABADGkEAIQFBNyEECyABQYCJAWohAEF/IQIDQCAAIARqQRVqQQA2AAAgAEF8aiEAIAQgAkEEaiICRw0ACwtBAEEAKAKEiQE2AtSJAUEAQQAoAoCJASIAQRV2OgDTiQFBACAAQQ12OgDSiQFBACAAQQV2OgDRiQFBACAAQQN0IgA6ANCJAUEAIAA2AoCJAUGYiQFBwAAQAxpBAEEAKQKIiQE3A4AJQQBBACkCkIkBNwOICQsGAEGAiQELMwBBAEL+uevF6Y6VmRA3ApCJAUEAQoHGlLqW8ermbzcCiIkBQQBCADcCgIkBIAAQAhAECwsLAQBBgAgLBJgAAAA=";
-  var hash$d = "e6508e4b";
-  var wasmJson$d = {
-  	name: name$d,
-  	data: data$d,
-  	hash: hash$d
-  };
-
-  const mutex$e = new Mutex();
-  let wasmCache$e = null;
-  /**
-   * Calculates MD5 hash
-   * @param data Input data (string, Buffer or TypedArray)
-   * @returns Computed hash as a hexadecimal string
-   */
-  function md5(data) {
-      if (wasmCache$e === null) {
-          return lockedCreate(mutex$e, wasmJson$d, 16).then((wasm) => {
-              wasmCache$e = wasm;
-              return wasmCache$e.calculate(data);
-          });
-      }
-      try {
-          const hash = wasmCache$e.calculate(data);
-          return Promise.resolve(hash);
-      }
-      catch (err) {
-          return Promise.reject(err);
-      }
-  }
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  new Mutex();
-
-  class BaseError extends Error {
-    constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
-      if (verbose) message = message + `
-
-Verbose:
-
-${JSON.stringify(rest, null, 2)}`;
-      super(message);
-      if (typeof Error.captureStackTrace === "function") {
-        Error.captureStackTrace(this, this.constructor);
-      } else {
-        this.stack = new Error(message).stack;
-      }
-      super.name = this.constructor.name;
-      this.name = this.constructor.name;
-      this.bucket = bucket;
-      this.key = key;
-      this.thrownAt = /* @__PURE__ */ new Date();
-      this.code = code;
-      this.statusCode = statusCode;
-      this.requestId = requestId;
-      this.awsMessage = awsMessage;
-      this.original = original;
-      this.commandName = commandName;
-      this.commandInput = commandInput;
-      this.metadata = metadata;
-      this.suggestion = suggestion;
-      this.data = { bucket, key, ...rest, verbose, message };
-    }
-    toJson() {
-      return {
-        name: this.name,
-        message: this.message,
-        code: this.code,
-        statusCode: this.statusCode,
-        requestId: this.requestId,
-        awsMessage: this.awsMessage,
-        bucket: this.bucket,
-        key: this.key,
-        thrownAt: this.thrownAt,
-        commandName: this.commandName,
-        commandInput: this.commandInput,
-        metadata: this.metadata,
-        suggestion: this.suggestion,
-        data: this.data,
-        original: this.original,
-        stack: this.stack
-      };
-    }
-    toString() {
-      return `${this.name} | ${this.message}`;
-    }
-  }
-  class S3dbError extends BaseError {
-    constructor(message, details = {}) {
-      let code, statusCode, requestId, awsMessage, original, metadata;
-      if (details.original) {
-        original = details.original;
-        code = original.code || original.Code || original.name;
-        statusCode = original.statusCode || original.$metadata && original.$metadata.httpStatusCode;
-        requestId = original.requestId || original.$metadata && original.$metadata.requestId;
-        awsMessage = original.message;
-        metadata = original.$metadata ? { ...original.$metadata } : void 0;
-      }
-      super({ message, ...details, code, statusCode, requestId, awsMessage, original, metadata });
-    }
-  }
-  class DatabaseError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, details);
-      Object.assign(this, details);
-    }
-  }
-  class ValidationError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, details);
-      Object.assign(this, details);
-    }
-  }
-  class AuthenticationError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, details);
-      Object.assign(this, details);
-    }
-  }
-  class PermissionError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, details);
-      Object.assign(this, details);
-    }
-  }
-  class EncryptionError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, details);
-      Object.assign(this, details);
-    }
-  }
-  class ResourceNotFound extends S3dbError {
-    constructor({ bucket, resourceName, id, original, ...rest }) {
-      if (typeof id !== "string") throw new Error("id must be a string");
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
-      super(`Resource not found: ${resourceName}/${id} [bucket:${bucket}]`, {
-        bucket,
-        resourceName,
-        id,
-        original,
-        ...rest
-      });
-    }
-  }
-  class NoSuchBucket extends S3dbError {
-    constructor({ bucket, original, ...rest }) {
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      super(`Bucket does not exists [bucket:${bucket}]`, { bucket, original, ...rest });
-    }
-  }
-  class NoSuchKey extends S3dbError {
-    constructor({ bucket, key, resourceName, id, original, ...rest }) {
-      if (typeof key !== "string") throw new Error("key must be a string");
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      if (id !== void 0 && typeof id !== "string") throw new Error("id must be a string");
-      super(`No such key: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
-      this.resourceName = resourceName;
-      this.id = id;
-    }
-  }
-  class NotFound extends S3dbError {
-    constructor({ bucket, key, resourceName, id, original, ...rest }) {
-      if (typeof key !== "string") throw new Error("key must be a string");
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      super(`Not found: ${key} [bucket:${bucket}]`, { bucket, key, resourceName, id, original, ...rest });
-      this.resourceName = resourceName;
-      this.id = id;
-    }
-  }
-  class MissingMetadata extends S3dbError {
-    constructor({ bucket, original, ...rest }) {
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      super(`Missing metadata for bucket [bucket:${bucket}]`, { bucket, original, ...rest });
-    }
-  }
-  class InvalidResourceItem extends S3dbError {
-    constructor({
-      bucket,
-      resourceName,
-      attributes,
-      validation,
-      message,
-      original,
-      ...rest
-    }) {
-      if (typeof bucket !== "string") throw new Error("bucket must be a string");
-      if (typeof resourceName !== "string") throw new Error("resourceName must be a string");
-      super(
-        message || `Validation error: This item is not valid. Resource=${resourceName} [bucket:${bucket}].
-${JSON.stringify(validation, null, 2)}`,
-        {
-          bucket,
-          resourceName,
-          attributes,
-          validation,
-          original,
-          ...rest
-        }
-      );
-    }
-  }
-  class UnknownError extends S3dbError {
-  }
-  const ErrorMap = {
-    "NotFound": NotFound,
-    "NoSuchKey": NoSuchKey,
-    "UnknownError": UnknownError,
-    "NoSuchBucket": NoSuchBucket,
-    "MissingMetadata": MissingMetadata,
-    "InvalidResourceItem": InvalidResourceItem
-  };
-  function mapAwsError(err, context = {}) {
-    const code = err.code || err.Code || err.name;
-    const metadata = err.$metadata ? { ...err.$metadata } : void 0;
-    const commandName = context.commandName;
-    const commandInput = context.commandInput;
-    let suggestion;
-    if (code === "NoSuchKey" || code === "NotFound") {
-      suggestion = "Check if the key exists in the specified bucket and if your credentials have permission.";
-      return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, suggestion });
-    }
-    if (code === "NoSuchBucket") {
-      suggestion = "Check if the bucket exists and if your credentials have permission.";
-      return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, suggestion });
-    }
-    if (code === "AccessDenied" || err.statusCode === 403 || code === "Forbidden") {
-      suggestion = "Check your credentials and bucket policy.";
-      return new PermissionError("Access denied", { ...context, original: err, metadata, commandName, commandInput, suggestion });
-    }
-    if (code === "ValidationError" || err.statusCode === 400) {
-      suggestion = "Check the request parameters and payload.";
-      return new ValidationError("Validation error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
-    }
-    if (code === "MissingMetadata") {
-      suggestion = "Check if the object metadata is present and valid.";
-      return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
-    }
-    suggestion = "Check the error details and AWS documentation.";
-    return new UnknownError("Unknown error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
-  }
-  class ConnectionStringError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, { ...details, suggestion: "Check the connection string format and credentials." });
-    }
-  }
-  class CryptoError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, { ...details, suggestion: "Check if the crypto library is available and input is valid." });
-    }
-  }
-  class SchemaError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, { ...details, suggestion: "Check schema definition and input data." });
-    }
-  }
-  class ResourceError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, { ...details, suggestion: details.suggestion || "Check resource configuration, attributes, and operation context." });
-      Object.assign(this, details);
-    }
-  }
-  class PartitionError extends S3dbError {
-    constructor(message, details = {}) {
-      super(message, { ...details, suggestion: details.suggestion || "Check partition definition, fields, and input values." });
-    }
-  }
-
-  const S3_DEFAULT_REGION = "us-east-1";
-  const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
-  class ConnectionString {
-    constructor(connectionString) {
-      let uri;
-      const [ok, err, parsed] = tryFn(() => new URL(connectionString));
-      if (!ok) {
-        throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
-      }
-      uri = parsed;
-      this.region = S3_DEFAULT_REGION;
-      if (uri.protocol === "s3:") this.defineFromS3(uri);
-      else this.defineFromCustomUri(uri);
-      for (const [k, v] of uri.searchParams.entries()) {
-        this[k] = v;
-      }
-    }
-    defineFromS3(uri) {
-      const [okBucket, errBucket, bucket] = tryFnSync(() => decodeURIComponent(uri.hostname));
-      if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: uri.hostname });
-      this.bucket = bucket || "s3db";
-      const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
-      if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
-      this.accessKeyId = user;
-      const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
-      if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
-      this.secretAccessKey = pass;
-      this.endpoint = S3_DEFAULT_ENDPOINT;
-      if (["/", "", null].includes(uri.pathname)) {
-        this.keyPrefix = "";
-      } else {
-        let [, ...subpath] = uri.pathname.split("/");
-        this.keyPrefix = [...subpath || []].join("/");
-      }
-    }
-    defineFromCustomUri(uri) {
-      this.forcePathStyle = true;
-      this.endpoint = uri.origin;
-      const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
-      if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
-      this.accessKeyId = user;
-      const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
-      if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
-      this.secretAccessKey = pass;
-      if (["/", "", null].includes(uri.pathname)) {
-        this.bucket = "s3db";
-        this.keyPrefix = "";
-      } else {
-        let [, bucket, ...subpath] = uri.pathname.split("/");
-        if (!bucket) {
-          this.bucket = "s3db";
-        } else {
-          const [okBucket, errBucket, bucketDecoded] = tryFnSync(() => decodeURIComponent(bucket));
-          if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: bucket });
-          this.bucket = bucketDecoded;
-        }
-        this.keyPrefix = [...subpath || []].join("/");
-      }
-    }
-  }
-
-  class Client extends EventEmitter {
-    constructor({
-      verbose = false,
-      id = null,
-      AwsS3Client,
-      connectionString,
-      parallelism = 10
-    }) {
-      super();
-      this.verbose = verbose;
-      this.id = id ?? idGenerator();
-      this.parallelism = parallelism;
-      this.config = new ConnectionString(connectionString);
-      this.client = AwsS3Client || this.createClient();
-    }
-    createClient() {
-      let options = {
-        region: this.config.region,
-        endpoint: this.config.endpoint
-      };
-      if (this.config.forcePathStyle) options.forcePathStyle = true;
-      if (this.config.accessKeyId) {
-        options.credentials = {
-          accessKeyId: this.config.accessKeyId,
-          secretAccessKey: this.config.secretAccessKey
-        };
-      }
-      const client = new clientS3.S3Client(options);
-      client.middlewareStack.add(
-        (next, context) => async (args) => {
-          if (context.commandName === "DeleteObjectsCommand") {
-            const body = args.request.body;
-            if (body && typeof body === "string") {
-              const contentMd5 = Buffer.from(await md5(body), "hex").toString("base64");
-              args.request.headers["Content-MD5"] = contentMd5;
-            }
-          }
-          return next(args);
-        },
-        {
-          step: "build",
-          name: "addContentMd5ForDeleteObjects",
-          priority: "high"
-        }
-      );
-      return client;
-    }
-    async sendCommand(command) {
-      this.emit("command.request", command.constructor.name, command.input);
-      const [ok, err, response] = await tryFn(() => this.client.send(command));
-      if (!ok) {
-        const bucket = this.config.bucket;
-        const key = command.input && command.input.Key;
-        throw mapAwsError(err, {
-          bucket,
-          key,
-          commandName: command.constructor.name,
-          commandInput: command.input
-        });
-      }
-      this.emit("command.response", command.constructor.name, response, command.input);
-      return response;
-    }
-    async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      keyPrefix ? path.join(keyPrefix, key) : key;
-      const stringMetadata = {};
-      if (metadata) {
-        for (const [k, v] of Object.entries(metadata)) {
-          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
-          stringMetadata[validKey] = String(v);
-        }
-      }
-      const options = {
-        Bucket: this.config.bucket,
-        Key: keyPrefix ? path.join(keyPrefix, key) : key,
-        Metadata: stringMetadata,
-        Body: body || Buffer.alloc(0)
-      };
-      if (contentType !== void 0) options.ContentType = contentType;
-      if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
-      if (contentLength !== void 0) options.ContentLength = contentLength;
-      let response, error;
-      try {
-        response = await this.sendCommand(new clientS3.PutObjectCommand(options));
-        return response;
-      } catch (err) {
-        error = err;
-        throw mapAwsError(err, {
-          bucket: this.config.bucket,
-          key,
-          commandName: "PutObjectCommand",
-          commandInput: options
-        });
-      } finally {
-        this.emit("putObject", error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
-      }
-    }
-    async getObject(key) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      const options = {
-        Bucket: this.config.bucket,
-        Key: keyPrefix ? path.join(keyPrefix, key) : key
-      };
-      let response, error;
-      try {
-        response = await this.sendCommand(new clientS3.GetObjectCommand(options));
-        return response;
-      } catch (err) {
-        error = err;
-        throw mapAwsError(err, {
-          bucket: this.config.bucket,
-          key,
-          commandName: "GetObjectCommand",
-          commandInput: options
-        });
-      } finally {
-        this.emit("getObject", error || response, { key });
-      }
-    }
-    async headObject(key) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      const options = {
-        Bucket: this.config.bucket,
-        Key: keyPrefix ? path.join(keyPrefix, key) : key
-      };
-      let response, error;
-      try {
-        response = await this.sendCommand(new clientS3.HeadObjectCommand(options));
-        return response;
-      } catch (err) {
-        error = err;
-        throw mapAwsError(err, {
-          bucket: this.config.bucket,
-          key,
-          commandName: "HeadObjectCommand",
-          commandInput: options
-        });
-      } finally {
-        this.emit("headObject", error || response, { key });
-      }
-    }
-    async copyObject({ from, to }) {
-      const options = {
-        Bucket: this.config.bucket,
-        Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
-        CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
-      };
-      let response, error;
-      try {
-        response = await this.sendCommand(new clientS3.CopyObjectCommand(options));
-        return response;
-      } catch (err) {
-        error = err;
-        throw mapAwsError(err, {
-          bucket: this.config.bucket,
-          key: to,
-          commandName: "CopyObjectCommand",
-          commandInput: options
-        });
-      } finally {
-        this.emit("copyObject", error || response, { from, to });
-      }
-    }
-    async exists(key) {
-      const [ok, err] = await tryFn(() => this.headObject(key));
-      if (ok) return true;
-      if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
-      throw err;
-    }
-    async deleteObject(key) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      keyPrefix ? path.join(keyPrefix, key) : key;
-      const options = {
-        Bucket: this.config.bucket,
-        Key: keyPrefix ? path.join(keyPrefix, key) : key
-      };
-      let response, error;
-      try {
-        response = await this.sendCommand(new clientS3.DeleteObjectCommand(options));
-        return response;
-      } catch (err) {
-        error = err;
-        throw mapAwsError(err, {
-          bucket: this.config.bucket,
-          key,
-          commandName: "DeleteObjectCommand",
-          commandInput: options
-        });
-      } finally {
-        this.emit("deleteObject", error || response, { key });
-      }
-    }
-    async deleteObjects(keys) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      const packages = lodashEs.chunk(keys, 1e3);
-      const { results, errors } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
-        for (const key of keys2) {
-          keyPrefix ? path.join(keyPrefix, key) : key;
-          this.config.bucket;
-          await this.exists(key);
-        }
-        const options = {
-          Bucket: this.config.bucket,
-          Delete: {
-            Objects: keys2.map((key) => ({
-              Key: keyPrefix ? path.join(keyPrefix, key) : key
-            }))
-          }
-        };
-        let response;
-        const [ok, err, res] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
-        if (!ok) throw err;
-        response = res;
-        if (response && response.Errors && response.Errors.length > 0) ;
-        if (response && response.Deleted && response.Deleted.length !== keys2.length) ;
-        return response;
-      });
-      const report = {
-        deleted: results,
-        notFound: errors
-      };
-      this.emit("deleteObjects", report, keys);
-      return report;
-    }
-    /**
-     * Delete all objects under a specific prefix using efficient pagination
-     * @param {Object} options - Delete options
-     * @param {string} options.prefix - S3 prefix to delete
-     * @returns {Promise<number>} Number of objects deleted
-     */
-    async deleteAll({ prefix } = {}) {
-      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-      let continuationToken;
-      let totalDeleted = 0;
-      do {
-        const listCommand = new clientS3.ListObjectsV2Command({
-          Bucket: this.config.bucket,
-          Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
-          ContinuationToken: continuationToken
-        });
-        const listResponse = await this.client.send(listCommand);
-        if (listResponse.Contents && listResponse.Contents.length > 0) {
-          const deleteCommand = new clientS3.DeleteObjectsCommand({
-            Bucket: this.config.bucket,
-            Delete: {
-              Objects: listResponse.Contents.map((obj) => ({ Key: obj.Key }))
-            }
-          });
-          const deleteResponse = await this.client.send(deleteCommand);
-          const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
-          totalDeleted += deletedCount;
-          this.emit("deleteAll", {
-            prefix,
-            batch: deletedCount,
-            total: totalDeleted
-          });
-        }
-        continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
-      } while (continuationToken);
-      this.emit("deleteAllComplete", {
-        prefix,
-        totalDeleted
-      });
-      return totalDeleted;
-    }
-    async moveObject({ from, to }) {
-      const [ok, err] = await tryFn(async () => {
-        await this.copyObject({ from, to });
-        await this.deleteObject(from);
-      });
-      if (!ok) {
-        throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
-      }
-      return true;
-    }
-    async listObjects({
-      prefix,
-      maxKeys = 1e3,
-      continuationToken
-    } = {}) {
-      const options = {
-        Bucket: this.config.bucket,
-        MaxKeys: maxKeys,
-        ContinuationToken: continuationToken,
-        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
-      };
-      const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
-      if (!ok) {
-        throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
-      }
-      this.emit("listObjects", response, options);
-      return response;
-    }
-    async count({ prefix } = {}) {
-      let count = 0;
-      let truncated = true;
-      let continuationToken;
-      while (truncated) {
-        const options = {
-          prefix,
-          continuationToken
-        };
-        const response = await this.listObjects(options);
-        count += response.KeyCount || 0;
-        truncated = response.IsTruncated || false;
-        continuationToken = response.NextContinuationToken;
-      }
-      this.emit("count", count, { prefix });
-      return count;
-    }
-    async getAllKeys({ prefix } = {}) {
-      let keys = [];
-      let truncated = true;
-      let continuationToken;
-      while (truncated) {
-        const options = {
-          prefix,
-          continuationToken
-        };
-        const response = await this.listObjects(options);
-        if (response.Contents) {
-          keys = keys.concat(response.Contents.map((x) => x.Key));
-        }
-        truncated = response.IsTruncated || false;
-        continuationToken = response.NextContinuationToken;
-      }
-      if (this.config.keyPrefix) {
-        keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
-      }
-      this.emit("getAllKeys", keys, { prefix });
-      return keys;
-    }
-    async getContinuationTokenAfterOffset(params = {}) {
-      const {
-        prefix,
-        offset = 1e3
-      } = params;
-      if (offset === 0) return null;
-      let truncated = true;
-      let continuationToken;
-      let skipped = 0;
-      while (truncated) {
-        let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
-        const options = {
-          prefix,
-          maxKeys,
-          continuationToken
-        };
-        const res = await this.listObjects(options);
-        if (res.Contents) {
-          skipped += res.Contents.length;
-        }
-        truncated = res.IsTruncated || false;
-        continuationToken = res.NextContinuationToken;
-        if (skipped >= offset) {
-          break;
-        }
-      }
-      this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
-      return continuationToken || null;
-    }
-    async getKeysPage(params = {}) {
-      const {
-        prefix,
-        offset = 0,
-        amount = 100
-      } = params;
-      let keys = [];
-      let truncated = true;
-      let continuationToken;
-      if (offset > 0) {
-        continuationToken = await this.getContinuationTokenAfterOffset({
-          prefix,
-          offset
-        });
-        if (!continuationToken) {
-          this.emit("getKeysPage", [], params);
-          return [];
-        }
-      }
-      while (truncated) {
-        const options = {
-          prefix,
-          continuationToken
-        };
-        const res = await this.listObjects(options);
-        if (res.Contents) {
-          keys = keys.concat(res.Contents.map((x) => x.Key));
-        }
-        truncated = res.IsTruncated || false;
-        continuationToken = res.NextContinuationToken;
-        if (keys.length >= amount) {
-          keys = keys.slice(0, amount);
-          break;
-        }
-      }
-      if (this.config.keyPrefix) {
-        keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
-      }
-      this.emit("getKeysPage", keys, params);
-      return keys;
-    }
-    async moveAllObjects({ prefixFrom, prefixTo }) {
-      const keys = await this.getAllKeys({ prefix: prefixFrom });
-      const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
-        const to = key.replace(prefixFrom, prefixTo);
-        const [ok, err] = await tryFn(async () => {
-          await this.moveObject({
-            from: key,
-            to
-          });
-        });
-        if (!ok) {
-          throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
-        }
-        return to;
-      });
-      this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
-      if (errors.length > 0) {
-        throw new Error("Some objects could not be moved");
-      }
-      return results;
-    }
-  }
-
-  async function dynamicCrypto() {
-    let lib;
-    if (typeof process !== "undefined") {
-      const [ok, err, result] = await tryFn(async () => {
-        const { webcrypto } = await import('crypto');
-        return webcrypto;
-      });
-      if (ok) {
-        lib = result;
-      } else {
-        throw new CryptoError("Crypto API not available", { original: err, context: "dynamicCrypto" });
-      }
-    } else if (typeof window !== "undefined") {
-      lib = window.crypto;
-    }
-    if (!lib) throw new CryptoError("Could not load any crypto library", { context: "dynamicCrypto" });
-    return lib;
-  }
-  async function sha256(message) {
-    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
-    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
-    const encoder = new TextEncoder();
-    const data = encoder.encode(message);
-    const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest("SHA-256", data));
-    if (!ok) throw new CryptoError("SHA-256 digest failed", { original: err, input: message });
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-    return hashHex;
-  }
-  async function encrypt(content, passphrase) {
-    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
-    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
-    const salt = cryptoLib.getRandomValues(new Uint8Array(16));
-    const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
-    if (!okKey) throw new CryptoError("Key derivation failed", { original: errKey, passphrase, salt });
-    const iv = cryptoLib.getRandomValues(new Uint8Array(12));
-    const encoder = new TextEncoder();
-    const encodedContent = encoder.encode(content);
-    const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
-    if (!okEnc) throw new CryptoError("Encryption failed", { original: errEnc, content });
-    const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
-    encryptedData.set(salt);
-    encryptedData.set(iv, salt.length);
-    encryptedData.set(new Uint8Array(encryptedContent), salt.length + iv.length);
-    return arrayBufferToBase64(encryptedData);
-  }
-  async function decrypt(encryptedBase64, passphrase) {
-    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
-    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
-    const encryptedData = base64ToArrayBuffer(encryptedBase64);
-    const salt = encryptedData.slice(0, 16);
-    const iv = encryptedData.slice(16, 28);
-    const encryptedContent = encryptedData.slice(28);
-    const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
-    if (!okKey) throw new CryptoError("Key derivation failed (decrypt)", { original: errKey, passphrase, salt });
-    const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
-    if (!okDec) throw new CryptoError("Decryption failed", { original: errDec, encryptedBase64 });
-    const decoder = new TextDecoder();
-    return decoder.decode(decryptedContent);
-  }
-  async function getKeyMaterial(passphrase, salt) {
-    const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
-    if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
-    const encoder = new TextEncoder();
-    const keyMaterial = encoder.encode(passphrase);
-    const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
-      "raw",
-      keyMaterial,
-      { name: "PBKDF2" },
-      false,
-      ["deriveKey"]
-    ));
-    if (!okImport) throw new CryptoError("importKey failed", { original: errImport, passphrase });
-    const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
-      {
-        name: "PBKDF2",
-        salt,
-        iterations: 1e5,
-        hash: "SHA-256"
-      },
-      baseKey,
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["encrypt", "decrypt"]
-    ));
-    if (!okDerive) throw new CryptoError("deriveKey failed", { original: errDerive, passphrase, salt });
-    return derivedKey;
-  }
-  function arrayBufferToBase64(buffer) {
-    if (typeof process !== "undefined") {
-      return Buffer.from(buffer).toString("base64");
-    } else {
-      const [ok, err, binary] = tryFnSync(() => String.fromCharCode.apply(null, new Uint8Array(buffer)));
-      if (!ok) throw new CryptoError("Failed to convert ArrayBuffer to base64 (browser)", { original: err });
-      return window.btoa(binary);
-    }
-  }
-  function base64ToArrayBuffer(base64) {
-    if (typeof process !== "undefined") {
-      return new Uint8Array(Buffer.from(base64, "base64"));
-    } else {
-      const [ok, err, binaryString] = tryFnSync(() => window.atob(base64));
-      if (!ok) throw new CryptoError("Failed to decode base64 (browser)", { original: err });
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      return bytes;
-    }
-  }
-
-  function getDefaultExportFromCjs (x) {
-  	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
-  }
-
-  var jsonify = {};
-
-  var parse;
-  var hasRequiredParse;
-
-  function requireParse () {
-  	if (hasRequiredParse) return parse;
-  	hasRequiredParse = 1;
-
-  	var at; // The index of the current character
-  	var ch; // The current character
-  	var escapee = {
-  		'"': '"',
-  		'\\': '\\',
-  		'/': '/',
-  		b: '\b',
-  		f: '\f',
-  		n: '\n',
-  		r: '\r',
-  		t: '\t'
-  	};
-  	var text;
-
-  	// Call error when something is wrong.
-  	function error(m) {
-  		throw {
-  			name: 'SyntaxError',
-  			message: m,
-  			at: at,
-  			text: text
-  		};
-  	}
-
-  	function next(c) {
-  		// If a c parameter is provided, verify that it matches the current character.
-  		if (c && c !== ch) {
-  			error("Expected '" + c + "' instead of '" + ch + "'");
-  		}
-
-  		// Get the next character. When there are no more characters, return the empty string.
-
-  		ch = text.charAt(at);
-  		at += 1;
-  		return ch;
-  	}
-
-  	function number() {
-  		// Parse a number value.
-  		var num;
-  		var str = '';
-
-  		if (ch === '-') {
-  			str = '-';
-  			next('-');
-  		}
-  		while (ch >= '0' && ch <= '9') {
-  			str += ch;
-  			next();
-  		}
-  		if (ch === '.') {
-  			str += '.';
-  			while (next() && ch >= '0' && ch <= '9') {
-  				str += ch;
-  			}
-  		}
-  		if (ch === 'e' || ch === 'E') {
-  			str += ch;
-  			next();
-  			if (ch === '-' || ch === '+') {
-  				str += ch;
-  				next();
-  			}
-  			while (ch >= '0' && ch <= '9') {
-  				str += ch;
-  				next();
-  			}
-  		}
-  		num = Number(str);
-  		if (!isFinite(num)) {
-  			error('Bad number');
-  		}
-  		return num;
-  	}
-
-  	function string() {
-  		// Parse a string value.
-  		var hex;
-  		var i;
-  		var str = '';
-  		var uffff;
-
-  		// When parsing for string values, we must look for " and \ characters.
-  		if (ch === '"') {
-  			while (next()) {
-  				if (ch === '"') {
-  					next();
-  					return str;
-  				} else if (ch === '\\') {
-  					next();
-  					if (ch === 'u') {
-  						uffff = 0;
-  						for (i = 0; i < 4; i += 1) {
-  							hex = parseInt(next(), 16);
-  							if (!isFinite(hex)) {
-  								break;
-  							}
-  							uffff = (uffff * 16) + hex;
-  						}
-  						str += String.fromCharCode(uffff);
-  					} else if (typeof escapee[ch] === 'string') {
-  						str += escapee[ch];
-  					} else {
-  						break;
-  					}
-  				} else {
-  					str += ch;
-  				}
-  			}
-  		}
-  		error('Bad string');
-  	}
-
-  	// Skip whitespace.
-  	function white() {
-  		while (ch && ch <= ' ') {
-  			next();
-  		}
-  	}
-
-  	// true, false, or null.
-  	function word() {
-  		switch (ch) {
-  			case 't':
-  				next('t');
-  				next('r');
-  				next('u');
-  				next('e');
-  				return true;
-  			case 'f':
-  				next('f');
-  				next('a');
-  				next('l');
-  				next('s');
-  				next('e');
-  				return false;
-  			case 'n':
-  				next('n');
-  				next('u');
-  				next('l');
-  				next('l');
-  				return null;
-  			default:
-  				error("Unexpected '" + ch + "'");
-  		}
-  	}
-
-  	// Parse an array value.
-  	function array() {
-  		var arr = [];
-
-  		if (ch === '[') {
-  			next('[');
-  			white();
-  			if (ch === ']') {
-  				next(']');
-  				return arr; // empty array
-  			}
-  			while (ch) {
-  				arr.push(value()); // eslint-disable-line no-use-before-define
-  				white();
-  				if (ch === ']') {
-  					next(']');
-  					return arr;
-  				}
-  				next(',');
-  				white();
-  			}
-  		}
-  		error('Bad array');
-  	}
-
-  	// Parse an object value.
-  	function object() {
-  		var key;
-  		var obj = {};
-
-  		if (ch === '{') {
-  			next('{');
-  			white();
-  			if (ch === '}') {
-  				next('}');
-  				return obj; // empty object
-  			}
-  			while (ch) {
-  				key = string();
-  				white();
-  				next(':');
-  				if (Object.prototype.hasOwnProperty.call(obj, key)) {
-  					error('Duplicate key "' + key + '"');
-  				}
-  				obj[key] = value(); // eslint-disable-line no-use-before-define
-  				white();
-  				if (ch === '}') {
-  					next('}');
-  					return obj;
-  				}
-  				next(',');
-  				white();
-  			}
-  		}
-  		error('Bad object');
-  	}
-
-  	// Parse a JSON value. It could be an object, an array, a string, a number, or a word.
-  	function value() {
-  		white();
-  		switch (ch) {
-  			case '{':
-  				return object();
-  			case '[':
-  				return array();
-  			case '"':
-  				return string();
-  			case '-':
-  				return number();
-  			default:
-  				return ch >= '0' && ch <= '9' ? number() : word();
-  		}
-  	}
-
-  	// Return the json_parse function. It will have access to all of the above functions and variables.
-  	parse = function (source, reviver) {
-  		var result;
-
-  		text = source;
-  		at = 0;
-  		ch = ' ';
-  		result = value();
-  		white();
-  		if (ch) {
-  			error('Syntax error');
-  		}
-
-  		// If there is a reviver function, we recursively walk the new structure,
-  		// passing each name/value pair to the reviver function for possible
-  		// transformation, starting with a temporary root object that holds the result
-  		// in an empty key. If there is not a reviver function, we simply return the
-  		// result.
-
-  		return typeof reviver === 'function' ? (function walk(holder, key) {
-  			var k;
-  			var v;
-  			var val = holder[key];
-  			if (val && typeof val === 'object') {
-  				for (k in value) {
-  					if (Object.prototype.hasOwnProperty.call(val, k)) {
-  						v = walk(val, k);
-  						if (typeof v === 'undefined') {
-  							delete val[k];
-  						} else {
-  							val[k] = v;
-  						}
-  					}
-  				}
-  			}
-  			return reviver.call(holder, key, val);
-  		}({ '': result }, '')) : result;
-  	};
-  	return parse;
-  }
-
-  var stringify;
-  var hasRequiredStringify;
-
-  function requireStringify () {
-  	if (hasRequiredStringify) return stringify;
-  	hasRequiredStringify = 1;
-
-  	var escapable = /[\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
-  	var gap;
-  	var indent;
-  	var meta = { // table of character substitutions
-  		'\b': '\\b',
-  		'\t': '\\t',
-  		'\n': '\\n',
-  		'\f': '\\f',
-  		'\r': '\\r',
-  		'"': '\\"',
-  		'\\': '\\\\'
-  	};
-  	var rep;
-
-  	function quote(string) {
-  		// If the string contains no control characters, no quote characters, and no
-  		// backslash characters, then we can safely slap some quotes around it.
-  		// Otherwise we must also replace the offending characters with safe escape sequences.
-
-  		escapable.lastIndex = 0;
-  		return escapable.test(string) ? '"' + string.replace(escapable, function (a) {
-  			var c = meta[a];
-  			return typeof c === 'string' ? c
-  				: '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
-  		}) + '"' : '"' + string + '"';
-  	}
-
-  	function str(key, holder) {
-  		// Produce a string from holder[key].
-  		var i; // The loop counter.
-  		var k; // The member key.
-  		var v; // The member value.
-  		var length;
-  		var mind = gap;
-  		var partial;
-  		var value = holder[key];
-
-  		// If the value has a toJSON method, call it to obtain a replacement value.
-  		if (value && typeof value === 'object' && typeof value.toJSON === 'function') {
-  			value = value.toJSON(key);
-  		}
-
-  		// If we were called with a replacer function, then call the replacer to obtain a replacement value.
-  		if (typeof rep === 'function') {
-  			value = rep.call(holder, key, value);
-  		}
-
-  		// What happens next depends on the value's type.
-  		switch (typeof value) {
-  			case 'string':
-  				return quote(value);
-
-  			case 'number':
-  				// JSON numbers must be finite. Encode non-finite numbers as null.
-  				return isFinite(value) ? String(value) : 'null';
-
-  			case 'boolean':
-  			case 'null':
-  				// If the value is a boolean or null, convert it to a string. Note:
-  				// typeof null does not produce 'null'. The case is included here in
-  				// the remote chance that this gets fixed someday.
-  				return String(value);
-
-  			case 'object':
-  				if (!value) {
-  					return 'null';
-  				}
-  				gap += indent;
-  				partial = [];
-
-  				// Array.isArray
-  				if (Object.prototype.toString.apply(value) === '[object Array]') {
-  					length = value.length;
-  					for (i = 0; i < length; i += 1) {
-  						partial[i] = str(i, value) || 'null';
-  					}
-
-  					// Join all of the elements together, separated with commas, and wrap them in brackets.
-  					v = partial.length === 0 ? '[]' : gap
-  						? '[\n' + gap + partial.join(',\n' + gap) + '\n' + mind + ']'
-  						: '[' + partial.join(',') + ']';
-  					gap = mind;
-  					return v;
-  				}
-
-  				// If the replacer is an array, use it to select the members to be stringified.
-  				if (rep && typeof rep === 'object') {
-  					length = rep.length;
-  					for (i = 0; i < length; i += 1) {
-  						k = rep[i];
-  						if (typeof k === 'string') {
-  							v = str(k, value);
-  							if (v) {
-  								partial.push(quote(k) + (gap ? ': ' : ':') + v);
-  							}
-  						}
-  					}
-  				} else {
-  					// Otherwise, iterate through all of the keys in the object.
-  					for (k in value) {
-  						if (Object.prototype.hasOwnProperty.call(value, k)) {
-  							v = str(k, value);
-  							if (v) {
-  								partial.push(quote(k) + (gap ? ': ' : ':') + v);
-  							}
-  						}
-  					}
-  				}
-
-  				// Join all of the member texts together, separated with commas, and wrap them in braces.
-
-  				v = partial.length === 0 ? '{}' : gap
-  					? '{\n' + gap + partial.join(',\n' + gap) + '\n' + mind + '}'
-  					: '{' + partial.join(',') + '}';
-  				gap = mind;
-  				return v;
-  		}
-  	}
-
-  	stringify = function (value, replacer, space) {
-  		var i;
-  		gap = '';
-  		indent = '';
-
-  		// If the space parameter is a number, make an indent string containing that many spaces.
-  		if (typeof space === 'number') {
-  			for (i = 0; i < space; i += 1) {
-  				indent += ' ';
-  			}
-  		} else if (typeof space === 'string') {
-  			// If the space parameter is a string, it will be used as the indent string.
-  			indent = space;
-  		}
-
-  		// If there is a replacer, it must be a function or an array. Otherwise, throw an error.
-  		rep = replacer;
-  		if (
-  			replacer
-  			&& typeof replacer !== 'function'
-  			&& (typeof replacer !== 'object' || typeof replacer.length !== 'number')
-  		) {
-  			throw new Error('JSON.stringify');
-  		}
-
-  		// Make a fake root object containing our value under the key of ''.
-  		// Return the result of stringifying the value.
-  		return str('', { '': value });
-  	};
-  	return stringify;
-  }
-
-  var hasRequiredJsonify;
-
-  function requireJsonify () {
-  	if (hasRequiredJsonify) return jsonify;
-  	hasRequiredJsonify = 1;
-
-  	jsonify.parse = requireParse();
-  	jsonify.stringify = requireStringify();
-  	return jsonify;
-  }
-
-  var isarray;
-  var hasRequiredIsarray;
-
-  function requireIsarray () {
-  	if (hasRequiredIsarray) return isarray;
-  	hasRequiredIsarray = 1;
-  	var toString = {}.toString;
-
-  	isarray = Array.isArray || function (arr) {
-  	  return toString.call(arr) == '[object Array]';
-  	};
-  	return isarray;
-  }
-
-  var isArguments;
-  var hasRequiredIsArguments;
-
-  function requireIsArguments () {
-  	if (hasRequiredIsArguments) return isArguments;
-  	hasRequiredIsArguments = 1;
-
-  	var toStr = Object.prototype.toString;
-
-  	isArguments = function isArguments(value) {
-  		var str = toStr.call(value);
-  		var isArgs = str === '[object Arguments]';
-  		if (!isArgs) {
-  			isArgs = str !== '[object Array]' &&
-  				value !== null &&
-  				typeof value === 'object' &&
-  				typeof value.length === 'number' &&
-  				value.length >= 0 &&
-  				toStr.call(value.callee) === '[object Function]';
-  		}
-  		return isArgs;
-  	};
-  	return isArguments;
-  }
-
-  var implementation$1;
-  var hasRequiredImplementation$1;
-
-  function requireImplementation$1 () {
-  	if (hasRequiredImplementation$1) return implementation$1;
-  	hasRequiredImplementation$1 = 1;
-
-  	var keysShim;
-  	if (!Object.keys) {
-  		// modified from https://github.com/es-shims/es5-shim
-  		var has = Object.prototype.hasOwnProperty;
-  		var toStr = Object.prototype.toString;
-  		var isArgs = requireIsArguments(); // eslint-disable-line global-require
-  		var isEnumerable = Object.prototype.propertyIsEnumerable;
-  		var hasDontEnumBug = !isEnumerable.call({ toString: null }, 'toString');
-  		var hasProtoEnumBug = isEnumerable.call(function () {}, 'prototype');
-  		var dontEnums = [
-  			'toString',
-  			'toLocaleString',
-  			'valueOf',
-  			'hasOwnProperty',
-  			'isPrototypeOf',
-  			'propertyIsEnumerable',
-  			'constructor'
-  		];
-  		var equalsConstructorPrototype = function (o) {
-  			var ctor = o.constructor;
-  			return ctor && ctor.prototype === o;
-  		};
-  		var excludedKeys = {
-  			$applicationCache: true,
-  			$console: true,
-  			$external: true,
-  			$frame: true,
-  			$frameElement: true,
-  			$frames: true,
-  			$innerHeight: true,
-  			$innerWidth: true,
-  			$onmozfullscreenchange: true,
-  			$onmozfullscreenerror: true,
-  			$outerHeight: true,
-  			$outerWidth: true,
-  			$pageXOffset: true,
-  			$pageYOffset: true,
-  			$parent: true,
-  			$scrollLeft: true,
-  			$scrollTop: true,
-  			$scrollX: true,
-  			$scrollY: true,
-  			$self: true,
-  			$webkitIndexedDB: true,
-  			$webkitStorageInfo: true,
-  			$window: true
-  		};
-  		var hasAutomationEqualityBug = (function () {
-  			/* global window */
-  			if (typeof window === 'undefined') { return false; }
-  			for (var k in window) {
-  				try {
-  					if (!excludedKeys['$' + k] && has.call(window, k) && window[k] !== null && typeof window[k] === 'object') {
-  						try {
-  							equalsConstructorPrototype(window[k]);
-  						} catch (e) {
-  							return true;
-  						}
-  					}
-  				} catch (e) {
-  					return true;
-  				}
-  			}
-  			return false;
-  		}());
-  		var equalsConstructorPrototypeIfNotBuggy = function (o) {
-  			/* global window */
-  			if (typeof window === 'undefined' || !hasAutomationEqualityBug) {
-  				return equalsConstructorPrototype(o);
-  			}
-  			try {
-  				return equalsConstructorPrototype(o);
-  			} catch (e) {
-  				return false;
-  			}
-  		};
-
-  		keysShim = function keys(object) {
-  			var isObject = object !== null && typeof object === 'object';
-  			var isFunction = toStr.call(object) === '[object Function]';
-  			var isArguments = isArgs(object);
-  			var isString = isObject && toStr.call(object) === '[object String]';
-  			var theKeys = [];
-
-  			if (!isObject && !isFunction && !isArguments) {
-  				throw new TypeError('Object.keys called on a non-object');
-  			}
-
-  			var skipProto = hasProtoEnumBug && isFunction;
-  			if (isString && object.length > 0 && !has.call(object, 0)) {
-  				for (var i = 0; i < object.length; ++i) {
-  					theKeys.push(String(i));
-  				}
-  			}
-
-  			if (isArguments && object.length > 0) {
-  				for (var j = 0; j < object.length; ++j) {
-  					theKeys.push(String(j));
-  				}
-  			} else {
-  				for (var name in object) {
-  					if (!(skipProto && name === 'prototype') && has.call(object, name)) {
-  						theKeys.push(String(name));
-  					}
-  				}
-  			}
-
-  			if (hasDontEnumBug) {
-  				var skipConstructor = equalsConstructorPrototypeIfNotBuggy(object);
-
-  				for (var k = 0; k < dontEnums.length; ++k) {
-  					if (!(skipConstructor && dontEnums[k] === 'constructor') && has.call(object, dontEnums[k])) {
-  						theKeys.push(dontEnums[k]);
-  					}
-  				}
-  			}
-  			return theKeys;
-  		};
-  	}
-  	implementation$1 = keysShim;
-  	return implementation$1;
-  }
-
-  var objectKeys;
-  var hasRequiredObjectKeys;
-
-  function requireObjectKeys () {
-  	if (hasRequiredObjectKeys) return objectKeys;
-  	hasRequiredObjectKeys = 1;
-
-  	var slice = Array.prototype.slice;
-  	var isArgs = requireIsArguments();
-
-  	var origKeys = Object.keys;
-  	var keysShim = origKeys ? function keys(o) { return origKeys(o); } : requireImplementation$1();
-
-  	var originalKeys = Object.keys;
-
-  	keysShim.shim = function shimObjectKeys() {
-  		if (Object.keys) {
-  			var keysWorksWithArguments = (function () {
-  				// Safari 5.0 bug
-  				var args = Object.keys(arguments);
-  				return args && args.length === arguments.length;
-  			}(1, 2));
-  			if (!keysWorksWithArguments) {
-  				Object.keys = function keys(object) { // eslint-disable-line func-name-matching
-  					if (isArgs(object)) {
-  						return originalKeys(slice.call(object));
-  					}
-  					return originalKeys(object);
-  				};
-  			}
-  		} else {
-  			Object.keys = keysShim;
-  		}
-  		return Object.keys || keysShim;
-  	};
-
-  	objectKeys = keysShim;
-  	return objectKeys;
-  }
-
-  var callBind = {exports: {}};
-
-  var esObjectAtoms;
-  var hasRequiredEsObjectAtoms;
-
-  function requireEsObjectAtoms () {
-  	if (hasRequiredEsObjectAtoms) return esObjectAtoms;
-  	hasRequiredEsObjectAtoms = 1;
-
-  	/** @type {import('.')} */
-  	esObjectAtoms = Object;
-  	return esObjectAtoms;
-  }
-
-  var esErrors;
-  var hasRequiredEsErrors;
-
-  function requireEsErrors () {
-  	if (hasRequiredEsErrors) return esErrors;
-  	hasRequiredEsErrors = 1;
-
-  	/** @type {import('.')} */
-  	esErrors = Error;
-  	return esErrors;
-  }
-
-  var _eval;
-  var hasRequired_eval;
-
-  function require_eval () {
-  	if (hasRequired_eval) return _eval;
-  	hasRequired_eval = 1;
-
-  	/** @type {import('./eval')} */
-  	_eval = EvalError;
-  	return _eval;
-  }
-
-  var range;
-  var hasRequiredRange;
-
-  function requireRange () {
-  	if (hasRequiredRange) return range;
-  	hasRequiredRange = 1;
-
-  	/** @type {import('./range')} */
-  	range = RangeError;
-  	return range;
-  }
-
-  var ref;
-  var hasRequiredRef;
-
-  function requireRef () {
-  	if (hasRequiredRef) return ref;
-  	hasRequiredRef = 1;
-
-  	/** @type {import('./ref')} */
-  	ref = ReferenceError;
-  	return ref;
-  }
-
-  var syntax;
-  var hasRequiredSyntax;
-
-  function requireSyntax () {
-  	if (hasRequiredSyntax) return syntax;
-  	hasRequiredSyntax = 1;
-
-  	/** @type {import('./syntax')} */
-  	syntax = SyntaxError;
-  	return syntax;
-  }
-
-  var type;
-  var hasRequiredType;
-
-  function requireType () {
-  	if (hasRequiredType) return type;
-  	hasRequiredType = 1;
-
-  	/** @type {import('./type')} */
-  	type = TypeError;
-  	return type;
-  }
-
-  var uri;
-  var hasRequiredUri;
-
-  function requireUri () {
-  	if (hasRequiredUri) return uri;
-  	hasRequiredUri = 1;
-
-  	/** @type {import('./uri')} */
-  	uri = URIError;
-  	return uri;
-  }
-
-  var abs;
-  var hasRequiredAbs;
-
-  function requireAbs () {
-  	if (hasRequiredAbs) return abs;
-  	hasRequiredAbs = 1;
-
-  	/** @type {import('./abs')} */
-  	abs = Math.abs;
-  	return abs;
-  }
-
-  var floor;
-  var hasRequiredFloor;
-
-  function requireFloor () {
-  	if (hasRequiredFloor) return floor;
-  	hasRequiredFloor = 1;
-
-  	/** @type {import('./floor')} */
-  	floor = Math.floor;
-  	return floor;
-  }
-
-  var max;
-  var hasRequiredMax;
-
-  function requireMax () {
-  	if (hasRequiredMax) return max;
-  	hasRequiredMax = 1;
-
-  	/** @type {import('./max')} */
-  	max = Math.max;
-  	return max;
-  }
-
-  var min;
-  var hasRequiredMin;
-
-  function requireMin () {
-  	if (hasRequiredMin) return min;
-  	hasRequiredMin = 1;
-
-  	/** @type {import('./min')} */
-  	min = Math.min;
-  	return min;
-  }
-
-  var pow;
-  var hasRequiredPow;
-
-  function requirePow () {
-  	if (hasRequiredPow) return pow;
-  	hasRequiredPow = 1;
-
-  	/** @type {import('./pow')} */
-  	pow = Math.pow;
-  	return pow;
-  }
-
-  var round;
-  var hasRequiredRound;
-
-  function requireRound () {
-  	if (hasRequiredRound) return round;
-  	hasRequiredRound = 1;
-
-  	/** @type {import('./round')} */
-  	round = Math.round;
-  	return round;
-  }
-
-  var _isNaN;
-  var hasRequired_isNaN;
-
-  function require_isNaN () {
-  	if (hasRequired_isNaN) return _isNaN;
-  	hasRequired_isNaN = 1;
-
-  	/** @type {import('./isNaN')} */
-  	_isNaN = Number.isNaN || function isNaN(a) {
-  		return a !== a;
-  	};
-  	return _isNaN;
-  }
-
-  var sign;
-  var hasRequiredSign;
-
-  function requireSign () {
-  	if (hasRequiredSign) return sign;
-  	hasRequiredSign = 1;
-
-  	var $isNaN = require_isNaN();
-
-  	/** @type {import('./sign')} */
-  	sign = function sign(number) {
-  		if ($isNaN(number) || number === 0) {
-  			return number;
-  		}
-  		return number < 0 ? -1 : 1;
-  	};
-  	return sign;
-  }
-
-  var gOPD;
-  var hasRequiredGOPD;
-
-  function requireGOPD () {
-  	if (hasRequiredGOPD) return gOPD;
-  	hasRequiredGOPD = 1;
-
-  	/** @type {import('./gOPD')} */
-  	gOPD = Object.getOwnPropertyDescriptor;
-  	return gOPD;
-  }
-
-  var gopd;
-  var hasRequiredGopd;
-
-  function requireGopd () {
-  	if (hasRequiredGopd) return gopd;
-  	hasRequiredGopd = 1;
-
-  	/** @type {import('.')} */
-  	var $gOPD = requireGOPD();
-
-  	if ($gOPD) {
-  		try {
-  			$gOPD([], 'length');
-  		} catch (e) {
-  			// IE 8 has a broken gOPD
-  			$gOPD = null;
-  		}
-  	}
-
-  	gopd = $gOPD;
-  	return gopd;
-  }
-
-  var esDefineProperty;
-  var hasRequiredEsDefineProperty;
-
-  function requireEsDefineProperty () {
-  	if (hasRequiredEsDefineProperty) return esDefineProperty;
-  	hasRequiredEsDefineProperty = 1;
-
-  	/** @type {import('.')} */
-  	var $defineProperty = Object.defineProperty || false;
-  	if ($defineProperty) {
-  		try {
-  			$defineProperty({}, 'a', { value: 1 });
-  		} catch (e) {
-  			// IE 8 has a broken defineProperty
-  			$defineProperty = false;
-  		}
-  	}
-
-  	esDefineProperty = $defineProperty;
-  	return esDefineProperty;
-  }
-
-  var shams;
-  var hasRequiredShams;
-
-  function requireShams () {
-  	if (hasRequiredShams) return shams;
-  	hasRequiredShams = 1;
-
-  	/** @type {import('./shams')} */
-  	/* eslint complexity: [2, 18], max-statements: [2, 33] */
-  	shams = function hasSymbols() {
-  		if (typeof Symbol !== 'function' || typeof Object.getOwnPropertySymbols !== 'function') { return false; }
-  		if (typeof Symbol.iterator === 'symbol') { return true; }
-
-  		/** @type {{ [k in symbol]?: unknown }} */
-  		var obj = {};
-  		var sym = Symbol('test');
-  		var symObj = Object(sym);
-  		if (typeof sym === 'string') { return false; }
-
-  		if (Object.prototype.toString.call(sym) !== '[object Symbol]') { return false; }
-  		if (Object.prototype.toString.call(symObj) !== '[object Symbol]') { return false; }
-
-  		// temp disabled per https://github.com/ljharb/object.assign/issues/17
-  		// if (sym instanceof Symbol) { return false; }
-  		// temp disabled per https://github.com/WebReflection/get-own-property-symbols/issues/4
-  		// if (!(symObj instanceof Symbol)) { return false; }
-
-  		// if (typeof Symbol.prototype.toString !== 'function') { return false; }
-  		// if (String(sym) !== Symbol.prototype.toString.call(sym)) { return false; }
-
-  		var symVal = 42;
-  		obj[sym] = symVal;
-  		for (var _ in obj) { return false; } // eslint-disable-line no-restricted-syntax, no-unreachable-loop
-  		if (typeof Object.keys === 'function' && Object.keys(obj).length !== 0) { return false; }
-
-  		if (typeof Object.getOwnPropertyNames === 'function' && Object.getOwnPropertyNames(obj).length !== 0) { return false; }
-
-  		var syms = Object.getOwnPropertySymbols(obj);
-  		if (syms.length !== 1 || syms[0] !== sym) { return false; }
-
-  		if (!Object.prototype.propertyIsEnumerable.call(obj, sym)) { return false; }
-
-  		if (typeof Object.getOwnPropertyDescriptor === 'function') {
-  			// eslint-disable-next-line no-extra-parens
-  			var descriptor = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(obj, sym));
-  			if (descriptor.value !== symVal || descriptor.enumerable !== true) { return false; }
-  		}
-
-  		return true;
-  	};
-  	return shams;
-  }
-
-  var hasSymbols;
-  var hasRequiredHasSymbols;
-
-  function requireHasSymbols () {
-  	if (hasRequiredHasSymbols) return hasSymbols;
-  	hasRequiredHasSymbols = 1;
-
-  	var origSymbol = typeof Symbol !== 'undefined' && Symbol;
-  	var hasSymbolSham = requireShams();
-
-  	/** @type {import('.')} */
-  	hasSymbols = function hasNativeSymbols() {
-  		if (typeof origSymbol !== 'function') { return false; }
-  		if (typeof Symbol !== 'function') { return false; }
-  		if (typeof origSymbol('foo') !== 'symbol') { return false; }
-  		if (typeof Symbol('bar') !== 'symbol') { return false; }
-
-  		return hasSymbolSham();
-  	};
-  	return hasSymbols;
-  }
-
-  var Reflect_getPrototypeOf;
-  var hasRequiredReflect_getPrototypeOf;
-
-  function requireReflect_getPrototypeOf () {
-  	if (hasRequiredReflect_getPrototypeOf) return Reflect_getPrototypeOf;
-  	hasRequiredReflect_getPrototypeOf = 1;
-
-  	/** @type {import('./Reflect.getPrototypeOf')} */
-  	Reflect_getPrototypeOf = (typeof Reflect !== 'undefined' && Reflect.getPrototypeOf) || null;
-  	return Reflect_getPrototypeOf;
-  }
-
-  var Object_getPrototypeOf;
-  var hasRequiredObject_getPrototypeOf;
-
-  function requireObject_getPrototypeOf () {
-  	if (hasRequiredObject_getPrototypeOf) return Object_getPrototypeOf;
-  	hasRequiredObject_getPrototypeOf = 1;
-
-  	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
-
-  	/** @type {import('./Object.getPrototypeOf')} */
-  	Object_getPrototypeOf = $Object.getPrototypeOf || null;
-  	return Object_getPrototypeOf;
-  }
-
-  var implementation;
-  var hasRequiredImplementation;
-
-  function requireImplementation () {
-  	if (hasRequiredImplementation) return implementation;
-  	hasRequiredImplementation = 1;
-
-  	/* eslint no-invalid-this: 1 */
-
-  	var ERROR_MESSAGE = 'Function.prototype.bind called on incompatible ';
-  	var toStr = Object.prototype.toString;
-  	var max = Math.max;
-  	var funcType = '[object Function]';
-
-  	var concatty = function concatty(a, b) {
-  	    var arr = [];
-
-  	    for (var i = 0; i < a.length; i += 1) {
-  	        arr[i] = a[i];
-  	    }
-  	    for (var j = 0; j < b.length; j += 1) {
-  	        arr[j + a.length] = b[j];
-  	    }
-
-  	    return arr;
-  	};
-
-  	var slicy = function slicy(arrLike, offset) {
-  	    var arr = [];
-  	    for (var i = offset, j = 0; i < arrLike.length; i += 1, j += 1) {
-  	        arr[j] = arrLike[i];
-  	    }
-  	    return arr;
-  	};
-
-  	var joiny = function (arr, joiner) {
-  	    var str = '';
-  	    for (var i = 0; i < arr.length; i += 1) {
-  	        str += arr[i];
-  	        if (i + 1 < arr.length) {
-  	            str += joiner;
-  	        }
-  	    }
-  	    return str;
-  	};
-
-  	implementation = function bind(that) {
-  	    var target = this;
-  	    if (typeof target !== 'function' || toStr.apply(target) !== funcType) {
-  	        throw new TypeError(ERROR_MESSAGE + target);
-  	    }
-  	    var args = slicy(arguments, 1);
-
-  	    var bound;
-  	    var binder = function () {
-  	        if (this instanceof bound) {
-  	            var result = target.apply(
-  	                this,
-  	                concatty(args, arguments)
-  	            );
-  	            if (Object(result) === result) {
-  	                return result;
-  	            }
-  	            return this;
-  	        }
-  	        return target.apply(
-  	            that,
-  	            concatty(args, arguments)
-  	        );
-
-  	    };
-
-  	    var boundLength = max(0, target.length - args.length);
-  	    var boundArgs = [];
-  	    for (var i = 0; i < boundLength; i++) {
-  	        boundArgs[i] = '$' + i;
-  	    }
-
-  	    bound = Function('binder', 'return function (' + joiny(boundArgs, ',') + '){ return binder.apply(this,arguments); }')(binder);
-
-  	    if (target.prototype) {
-  	        var Empty = function Empty() {};
-  	        Empty.prototype = target.prototype;
-  	        bound.prototype = new Empty();
-  	        Empty.prototype = null;
-  	    }
-
-  	    return bound;
-  	};
-  	return implementation;
-  }
-
-  var functionBind;
-  var hasRequiredFunctionBind;
-
-  function requireFunctionBind () {
-  	if (hasRequiredFunctionBind) return functionBind;
-  	hasRequiredFunctionBind = 1;
-
-  	var implementation = requireImplementation();
-
-  	functionBind = Function.prototype.bind || implementation;
-  	return functionBind;
-  }
-
-  var functionCall;
-  var hasRequiredFunctionCall;
-
-  function requireFunctionCall () {
-  	if (hasRequiredFunctionCall) return functionCall;
-  	hasRequiredFunctionCall = 1;
-
-  	/** @type {import('./functionCall')} */
-  	functionCall = Function.prototype.call;
-  	return functionCall;
-  }
-
-  var functionApply;
-  var hasRequiredFunctionApply;
-
-  function requireFunctionApply () {
-  	if (hasRequiredFunctionApply) return functionApply;
-  	hasRequiredFunctionApply = 1;
-
-  	/** @type {import('./functionApply')} */
-  	functionApply = Function.prototype.apply;
-  	return functionApply;
-  }
-
-  var reflectApply;
-  var hasRequiredReflectApply;
-
-  function requireReflectApply () {
-  	if (hasRequiredReflectApply) return reflectApply;
-  	hasRequiredReflectApply = 1;
-
-  	/** @type {import('./reflectApply')} */
-  	reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
-  	return reflectApply;
-  }
-
-  var actualApply;
-  var hasRequiredActualApply;
-
-  function requireActualApply () {
-  	if (hasRequiredActualApply) return actualApply;
-  	hasRequiredActualApply = 1;
-
-  	var bind = requireFunctionBind();
-
-  	var $apply = requireFunctionApply();
-  	var $call = requireFunctionCall();
-  	var $reflectApply = requireReflectApply();
-
-  	/** @type {import('./actualApply')} */
-  	actualApply = $reflectApply || bind.call($call, $apply);
-  	return actualApply;
-  }
-
-  var callBindApplyHelpers;
-  var hasRequiredCallBindApplyHelpers;
-
-  function requireCallBindApplyHelpers () {
-  	if (hasRequiredCallBindApplyHelpers) return callBindApplyHelpers;
-  	hasRequiredCallBindApplyHelpers = 1;
-
-  	var bind = requireFunctionBind();
-  	var $TypeError = /*@__PURE__*/ requireType();
-
-  	var $call = requireFunctionCall();
-  	var $actualApply = requireActualApply();
-
-  	/** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
-  	callBindApplyHelpers = function callBindBasic(args) {
-  		if (args.length < 1 || typeof args[0] !== 'function') {
-  			throw new $TypeError('a function is required');
-  		}
-  		return $actualApply(bind, $call, args);
-  	};
-  	return callBindApplyHelpers;
-  }
-
-  var get;
-  var hasRequiredGet;
-
-  function requireGet () {
-  	if (hasRequiredGet) return get;
-  	hasRequiredGet = 1;
-
-  	var callBind = requireCallBindApplyHelpers();
-  	var gOPD = /*@__PURE__*/ requireGopd();
-
-  	var hasProtoAccessor;
-  	try {
-  		// eslint-disable-next-line no-extra-parens, no-proto
-  		hasProtoAccessor = /** @type {{ __proto__?: typeof Array.prototype }} */ ([]).__proto__ === Array.prototype;
-  	} catch (e) {
-  		if (!e || typeof e !== 'object' || !('code' in e) || e.code !== 'ERR_PROTO_ACCESS') {
-  			throw e;
-  		}
-  	}
-
-  	// eslint-disable-next-line no-extra-parens
-  	var desc = !!hasProtoAccessor && gOPD && gOPD(Object.prototype, /** @type {keyof typeof Object.prototype} */ ('__proto__'));
-
-  	var $Object = Object;
-  	var $getPrototypeOf = $Object.getPrototypeOf;
-
-  	/** @type {import('./get')} */
-  	get = desc && typeof desc.get === 'function'
-  		? callBind([desc.get])
-  		: typeof $getPrototypeOf === 'function'
-  			? /** @type {import('./get')} */ function getDunder(value) {
-  				// eslint-disable-next-line eqeqeq
-  				return $getPrototypeOf(value == null ? value : $Object(value));
-  			}
-  			: false;
-  	return get;
-  }
-
-  var getProto;
-  var hasRequiredGetProto;
-
-  function requireGetProto () {
-  	if (hasRequiredGetProto) return getProto;
-  	hasRequiredGetProto = 1;
-
-  	var reflectGetProto = requireReflect_getPrototypeOf();
-  	var originalGetProto = requireObject_getPrototypeOf();
-
-  	var getDunderProto = /*@__PURE__*/ requireGet();
-
-  	/** @type {import('.')} */
-  	getProto = reflectGetProto
-  		? function getProto(O) {
-  			// @ts-expect-error TS can't narrow inside a closure, for some reason
-  			return reflectGetProto(O);
-  		}
-  		: originalGetProto
-  			? function getProto(O) {
-  				if (!O || (typeof O !== 'object' && typeof O !== 'function')) {
-  					throw new TypeError('getProto: not an object');
-  				}
-  				// @ts-expect-error TS can't narrow inside a closure, for some reason
-  				return originalGetProto(O);
-  			}
-  			: getDunderProto
-  				? function getProto(O) {
-  					// @ts-expect-error TS can't narrow inside a closure, for some reason
-  					return getDunderProto(O);
-  				}
-  				: null;
-  	return getProto;
-  }
-
-  var hasown;
-  var hasRequiredHasown;
-
-  function requireHasown () {
-  	if (hasRequiredHasown) return hasown;
-  	hasRequiredHasown = 1;
-
-  	var call = Function.prototype.call;
-  	var $hasOwn = Object.prototype.hasOwnProperty;
-  	var bind = requireFunctionBind();
-
-  	/** @type {import('.')} */
-  	hasown = bind.call(call, $hasOwn);
-  	return hasown;
-  }
-
-  var getIntrinsic;
-  var hasRequiredGetIntrinsic;
-
-  function requireGetIntrinsic () {
-  	if (hasRequiredGetIntrinsic) return getIntrinsic;
-  	hasRequiredGetIntrinsic = 1;
-
-  	var undefined$1;
-
-  	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
-
-  	var $Error = /*@__PURE__*/ requireEsErrors();
-  	var $EvalError = /*@__PURE__*/ require_eval();
-  	var $RangeError = /*@__PURE__*/ requireRange();
-  	var $ReferenceError = /*@__PURE__*/ requireRef();
-  	var $SyntaxError = /*@__PURE__*/ requireSyntax();
-  	var $TypeError = /*@__PURE__*/ requireType();
-  	var $URIError = /*@__PURE__*/ requireUri();
-
-  	var abs = /*@__PURE__*/ requireAbs();
-  	var floor = /*@__PURE__*/ requireFloor();
-  	var max = /*@__PURE__*/ requireMax();
-  	var min = /*@__PURE__*/ requireMin();
-  	var pow = /*@__PURE__*/ requirePow();
-  	var round = /*@__PURE__*/ requireRound();
-  	var sign = /*@__PURE__*/ requireSign();
-
-  	var $Function = Function;
-
-  	// eslint-disable-next-line consistent-return
-  	var getEvalledConstructor = function (expressionSyntax) {
-  		try {
-  			return $Function('"use strict"; return (' + expressionSyntax + ').constructor;')();
-  		} catch (e) {}
-  	};
-
-  	var $gOPD = /*@__PURE__*/ requireGopd();
-  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
-
-  	var throwTypeError = function () {
-  		throw new $TypeError();
-  	};
-  	var ThrowTypeError = $gOPD
-  		? (function () {
-  			try {
-  				// eslint-disable-next-line no-unused-expressions, no-caller, no-restricted-properties
-  				arguments.callee; // IE 8 does not throw here
-  				return throwTypeError;
-  			} catch (calleeThrows) {
-  				try {
-  					// IE 8 throws on Object.getOwnPropertyDescriptor(arguments, '')
-  					return $gOPD(arguments, 'callee').get;
-  				} catch (gOPDthrows) {
-  					return throwTypeError;
-  				}
-  			}
-  		}())
-  		: throwTypeError;
-
-  	var hasSymbols = requireHasSymbols()();
-
-  	var getProto = requireGetProto();
-  	var $ObjectGPO = requireObject_getPrototypeOf();
-  	var $ReflectGPO = requireReflect_getPrototypeOf();
-
-  	var $apply = requireFunctionApply();
-  	var $call = requireFunctionCall();
-
-  	var needsEval = {};
-
-  	var TypedArray = typeof Uint8Array === 'undefined' || !getProto ? undefined$1 : getProto(Uint8Array);
-
-  	var INTRINSICS = {
-  		__proto__: null,
-  		'%AggregateError%': typeof AggregateError === 'undefined' ? undefined$1 : AggregateError,
-  		'%Array%': Array,
-  		'%ArrayBuffer%': typeof ArrayBuffer === 'undefined' ? undefined$1 : ArrayBuffer,
-  		'%ArrayIteratorPrototype%': hasSymbols && getProto ? getProto([][Symbol.iterator]()) : undefined$1,
-  		'%AsyncFromSyncIteratorPrototype%': undefined$1,
-  		'%AsyncFunction%': needsEval,
-  		'%AsyncGenerator%': needsEval,
-  		'%AsyncGeneratorFunction%': needsEval,
-  		'%AsyncIteratorPrototype%': needsEval,
-  		'%Atomics%': typeof Atomics === 'undefined' ? undefined$1 : Atomics,
-  		'%BigInt%': typeof BigInt === 'undefined' ? undefined$1 : BigInt,
-  		'%BigInt64Array%': typeof BigInt64Array === 'undefined' ? undefined$1 : BigInt64Array,
-  		'%BigUint64Array%': typeof BigUint64Array === 'undefined' ? undefined$1 : BigUint64Array,
-  		'%Boolean%': Boolean,
-  		'%DataView%': typeof DataView === 'undefined' ? undefined$1 : DataView,
-  		'%Date%': Date,
-  		'%decodeURI%': decodeURI,
-  		'%decodeURIComponent%': decodeURIComponent,
-  		'%encodeURI%': encodeURI,
-  		'%encodeURIComponent%': encodeURIComponent,
-  		'%Error%': $Error,
-  		'%eval%': eval, // eslint-disable-line no-eval
-  		'%EvalError%': $EvalError,
-  		'%Float16Array%': typeof Float16Array === 'undefined' ? undefined$1 : Float16Array,
-  		'%Float32Array%': typeof Float32Array === 'undefined' ? undefined$1 : Float32Array,
-  		'%Float64Array%': typeof Float64Array === 'undefined' ? undefined$1 : Float64Array,
-  		'%FinalizationRegistry%': typeof FinalizationRegistry === 'undefined' ? undefined$1 : FinalizationRegistry,
-  		'%Function%': $Function,
-  		'%GeneratorFunction%': needsEval,
-  		'%Int8Array%': typeof Int8Array === 'undefined' ? undefined$1 : Int8Array,
-  		'%Int16Array%': typeof Int16Array === 'undefined' ? undefined$1 : Int16Array,
-  		'%Int32Array%': typeof Int32Array === 'undefined' ? undefined$1 : Int32Array,
-  		'%isFinite%': isFinite,
-  		'%isNaN%': isNaN,
-  		'%IteratorPrototype%': hasSymbols && getProto ? getProto(getProto([][Symbol.iterator]())) : undefined$1,
-  		'%JSON%': typeof JSON === 'object' ? JSON : undefined$1,
-  		'%Map%': typeof Map === 'undefined' ? undefined$1 : Map,
-  		'%MapIteratorPrototype%': typeof Map === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Map()[Symbol.iterator]()),
-  		'%Math%': Math,
-  		'%Number%': Number,
-  		'%Object%': $Object,
-  		'%Object.getOwnPropertyDescriptor%': $gOPD,
-  		'%parseFloat%': parseFloat,
-  		'%parseInt%': parseInt,
-  		'%Promise%': typeof Promise === 'undefined' ? undefined$1 : Promise,
-  		'%Proxy%': typeof Proxy === 'undefined' ? undefined$1 : Proxy,
-  		'%RangeError%': $RangeError,
-  		'%ReferenceError%': $ReferenceError,
-  		'%Reflect%': typeof Reflect === 'undefined' ? undefined$1 : Reflect,
-  		'%RegExp%': RegExp,
-  		'%Set%': typeof Set === 'undefined' ? undefined$1 : Set,
-  		'%SetIteratorPrototype%': typeof Set === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Set()[Symbol.iterator]()),
-  		'%SharedArrayBuffer%': typeof SharedArrayBuffer === 'undefined' ? undefined$1 : SharedArrayBuffer,
-  		'%String%': String,
-  		'%StringIteratorPrototype%': hasSymbols && getProto ? getProto(''[Symbol.iterator]()) : undefined$1,
-  		'%Symbol%': hasSymbols ? Symbol : undefined$1,
-  		'%SyntaxError%': $SyntaxError,
-  		'%ThrowTypeError%': ThrowTypeError,
-  		'%TypedArray%': TypedArray,
-  		'%TypeError%': $TypeError,
-  		'%Uint8Array%': typeof Uint8Array === 'undefined' ? undefined$1 : Uint8Array,
-  		'%Uint8ClampedArray%': typeof Uint8ClampedArray === 'undefined' ? undefined$1 : Uint8ClampedArray,
-  		'%Uint16Array%': typeof Uint16Array === 'undefined' ? undefined$1 : Uint16Array,
-  		'%Uint32Array%': typeof Uint32Array === 'undefined' ? undefined$1 : Uint32Array,
-  		'%URIError%': $URIError,
-  		'%WeakMap%': typeof WeakMap === 'undefined' ? undefined$1 : WeakMap,
-  		'%WeakRef%': typeof WeakRef === 'undefined' ? undefined$1 : WeakRef,
-  		'%WeakSet%': typeof WeakSet === 'undefined' ? undefined$1 : WeakSet,
-
-  		'%Function.prototype.call%': $call,
-  		'%Function.prototype.apply%': $apply,
-  		'%Object.defineProperty%': $defineProperty,
-  		'%Object.getPrototypeOf%': $ObjectGPO,
-  		'%Math.abs%': abs,
-  		'%Math.floor%': floor,
-  		'%Math.max%': max,
-  		'%Math.min%': min,
-  		'%Math.pow%': pow,
-  		'%Math.round%': round,
-  		'%Math.sign%': sign,
-  		'%Reflect.getPrototypeOf%': $ReflectGPO
-  	};
-
-  	if (getProto) {
-  		try {
-  			null.error; // eslint-disable-line no-unused-expressions
-  		} catch (e) {
-  			// https://github.com/tc39/proposal-shadowrealm/pull/384#issuecomment-1364264229
-  			var errorProto = getProto(getProto(e));
-  			INTRINSICS['%Error.prototype%'] = errorProto;
-  		}
-  	}
-
-  	var doEval = function doEval(name) {
-  		var value;
-  		if (name === '%AsyncFunction%') {
-  			value = getEvalledConstructor('async function () {}');
-  		} else if (name === '%GeneratorFunction%') {
-  			value = getEvalledConstructor('function* () {}');
-  		} else if (name === '%AsyncGeneratorFunction%') {
-  			value = getEvalledConstructor('async function* () {}');
-  		} else if (name === '%AsyncGenerator%') {
-  			var fn = doEval('%AsyncGeneratorFunction%');
-  			if (fn) {
-  				value = fn.prototype;
-  			}
-  		} else if (name === '%AsyncIteratorPrototype%') {
-  			var gen = doEval('%AsyncGenerator%');
-  			if (gen && getProto) {
-  				value = getProto(gen.prototype);
-  			}
-  		}
-
-  		INTRINSICS[name] = value;
-
-  		return value;
-  	};
-
-  	var LEGACY_ALIASES = {
-  		__proto__: null,
-  		'%ArrayBufferPrototype%': ['ArrayBuffer', 'prototype'],
-  		'%ArrayPrototype%': ['Array', 'prototype'],
-  		'%ArrayProto_entries%': ['Array', 'prototype', 'entries'],
-  		'%ArrayProto_forEach%': ['Array', 'prototype', 'forEach'],
-  		'%ArrayProto_keys%': ['Array', 'prototype', 'keys'],
-  		'%ArrayProto_values%': ['Array', 'prototype', 'values'],
-  		'%AsyncFunctionPrototype%': ['AsyncFunction', 'prototype'],
-  		'%AsyncGenerator%': ['AsyncGeneratorFunction', 'prototype'],
-  		'%AsyncGeneratorPrototype%': ['AsyncGeneratorFunction', 'prototype', 'prototype'],
-  		'%BooleanPrototype%': ['Boolean', 'prototype'],
-  		'%DataViewPrototype%': ['DataView', 'prototype'],
-  		'%DatePrototype%': ['Date', 'prototype'],
-  		'%ErrorPrototype%': ['Error', 'prototype'],
-  		'%EvalErrorPrototype%': ['EvalError', 'prototype'],
-  		'%Float32ArrayPrototype%': ['Float32Array', 'prototype'],
-  		'%Float64ArrayPrototype%': ['Float64Array', 'prototype'],
-  		'%FunctionPrototype%': ['Function', 'prototype'],
-  		'%Generator%': ['GeneratorFunction', 'prototype'],
-  		'%GeneratorPrototype%': ['GeneratorFunction', 'prototype', 'prototype'],
-  		'%Int8ArrayPrototype%': ['Int8Array', 'prototype'],
-  		'%Int16ArrayPrototype%': ['Int16Array', 'prototype'],
-  		'%Int32ArrayPrototype%': ['Int32Array', 'prototype'],
-  		'%JSONParse%': ['JSON', 'parse'],
-  		'%JSONStringify%': ['JSON', 'stringify'],
-  		'%MapPrototype%': ['Map', 'prototype'],
-  		'%NumberPrototype%': ['Number', 'prototype'],
-  		'%ObjectPrototype%': ['Object', 'prototype'],
-  		'%ObjProto_toString%': ['Object', 'prototype', 'toString'],
-  		'%ObjProto_valueOf%': ['Object', 'prototype', 'valueOf'],
-  		'%PromisePrototype%': ['Promise', 'prototype'],
-  		'%PromiseProto_then%': ['Promise', 'prototype', 'then'],
-  		'%Promise_all%': ['Promise', 'all'],
-  		'%Promise_reject%': ['Promise', 'reject'],
-  		'%Promise_resolve%': ['Promise', 'resolve'],
-  		'%RangeErrorPrototype%': ['RangeError', 'prototype'],
-  		'%ReferenceErrorPrototype%': ['ReferenceError', 'prototype'],
-  		'%RegExpPrototype%': ['RegExp', 'prototype'],
-  		'%SetPrototype%': ['Set', 'prototype'],
-  		'%SharedArrayBufferPrototype%': ['SharedArrayBuffer', 'prototype'],
-  		'%StringPrototype%': ['String', 'prototype'],
-  		'%SymbolPrototype%': ['Symbol', 'prototype'],
-  		'%SyntaxErrorPrototype%': ['SyntaxError', 'prototype'],
-  		'%TypedArrayPrototype%': ['TypedArray', 'prototype'],
-  		'%TypeErrorPrototype%': ['TypeError', 'prototype'],
-  		'%Uint8ArrayPrototype%': ['Uint8Array', 'prototype'],
-  		'%Uint8ClampedArrayPrototype%': ['Uint8ClampedArray', 'prototype'],
-  		'%Uint16ArrayPrototype%': ['Uint16Array', 'prototype'],
-  		'%Uint32ArrayPrototype%': ['Uint32Array', 'prototype'],
-  		'%URIErrorPrototype%': ['URIError', 'prototype'],
-  		'%WeakMapPrototype%': ['WeakMap', 'prototype'],
-  		'%WeakSetPrototype%': ['WeakSet', 'prototype']
-  	};
-
-  	var bind = requireFunctionBind();
-  	var hasOwn = /*@__PURE__*/ requireHasown();
-  	var $concat = bind.call($call, Array.prototype.concat);
-  	var $spliceApply = bind.call($apply, Array.prototype.splice);
-  	var $replace = bind.call($call, String.prototype.replace);
-  	var $strSlice = bind.call($call, String.prototype.slice);
-  	var $exec = bind.call($call, RegExp.prototype.exec);
-
-  	/* adapted from https://github.com/lodash/lodash/blob/4.17.15/dist/lodash.js#L6735-L6744 */
-  	var rePropName = /[^%.[\]]+|\[(?:(-?\d+(?:\.\d+)?)|(["'])((?:(?!\2)[^\\]|\\.)*?)\2)\]|(?=(?:\.|\[\])(?:\.|\[\]|%$))/g;
-  	var reEscapeChar = /\\(\\)?/g; /** Used to match backslashes in property paths. */
-  	var stringToPath = function stringToPath(string) {
-  		var first = $strSlice(string, 0, 1);
-  		var last = $strSlice(string, -1);
-  		if (first === '%' && last !== '%') {
-  			throw new $SyntaxError('invalid intrinsic syntax, expected closing `%`');
-  		} else if (last === '%' && first !== '%') {
-  			throw new $SyntaxError('invalid intrinsic syntax, expected opening `%`');
-  		}
-  		var result = [];
-  		$replace(string, rePropName, function (match, number, quote, subString) {
-  			result[result.length] = quote ? $replace(subString, reEscapeChar, '$1') : number || match;
-  		});
-  		return result;
-  	};
-  	/* end adaptation */
-
-  	var getBaseIntrinsic = function getBaseIntrinsic(name, allowMissing) {
-  		var intrinsicName = name;
-  		var alias;
-  		if (hasOwn(LEGACY_ALIASES, intrinsicName)) {
-  			alias = LEGACY_ALIASES[intrinsicName];
-  			intrinsicName = '%' + alias[0] + '%';
-  		}
-
-  		if (hasOwn(INTRINSICS, intrinsicName)) {
-  			var value = INTRINSICS[intrinsicName];
-  			if (value === needsEval) {
-  				value = doEval(intrinsicName);
-  			}
-  			if (typeof value === 'undefined' && !allowMissing) {
-  				throw new $TypeError('intrinsic ' + name + ' exists, but is not available. Please file an issue!');
-  			}
-
-  			return {
-  				alias: alias,
-  				name: intrinsicName,
-  				value: value
-  			};
-  		}
-
-  		throw new $SyntaxError('intrinsic ' + name + ' does not exist!');
-  	};
-
-  	getIntrinsic = function GetIntrinsic(name, allowMissing) {
-  		if (typeof name !== 'string' || name.length === 0) {
-  			throw new $TypeError('intrinsic name must be a non-empty string');
-  		}
-  		if (arguments.length > 1 && typeof allowMissing !== 'boolean') {
-  			throw new $TypeError('"allowMissing" argument must be a boolean');
-  		}
-
-  		if ($exec(/^%?[^%]*%?$/, name) === null) {
-  			throw new $SyntaxError('`%` may not be present anywhere but at the beginning and end of the intrinsic name');
-  		}
-  		var parts = stringToPath(name);
-  		var intrinsicBaseName = parts.length > 0 ? parts[0] : '';
-
-  		var intrinsic = getBaseIntrinsic('%' + intrinsicBaseName + '%', allowMissing);
-  		var intrinsicRealName = intrinsic.name;
-  		var value = intrinsic.value;
-  		var skipFurtherCaching = false;
-
-  		var alias = intrinsic.alias;
-  		if (alias) {
-  			intrinsicBaseName = alias[0];
-  			$spliceApply(parts, $concat([0, 1], alias));
-  		}
-
-  		for (var i = 1, isOwn = true; i < parts.length; i += 1) {
-  			var part = parts[i];
-  			var first = $strSlice(part, 0, 1);
-  			var last = $strSlice(part, -1);
-  			if (
-  				(
-  					(first === '"' || first === "'" || first === '`')
-  					|| (last === '"' || last === "'" || last === '`')
-  				)
-  				&& first !== last
-  			) {
-  				throw new $SyntaxError('property names with quotes must have matching quotes');
-  			}
-  			if (part === 'constructor' || !isOwn) {
-  				skipFurtherCaching = true;
-  			}
-
-  			intrinsicBaseName += '.' + part;
-  			intrinsicRealName = '%' + intrinsicBaseName + '%';
-
-  			if (hasOwn(INTRINSICS, intrinsicRealName)) {
-  				value = INTRINSICS[intrinsicRealName];
-  			} else if (value != null) {
-  				if (!(part in value)) {
-  					if (!allowMissing) {
-  						throw new $TypeError('base intrinsic for ' + name + ' exists, but the property is not available.');
-  					}
-  					return void undefined$1;
-  				}
-  				if ($gOPD && (i + 1) >= parts.length) {
-  					var desc = $gOPD(value, part);
-  					isOwn = !!desc;
-
-  					// By convention, when a data property is converted to an accessor
-  					// property to emulate a data property that does not suffer from
-  					// the override mistake, that accessor's getter is marked with
-  					// an `originalValue` property. Here, when we detect this, we
-  					// uphold the illusion by pretending to see that original data
-  					// property, i.e., returning the value rather than the getter
-  					// itself.
-  					if (isOwn && 'get' in desc && !('originalValue' in desc.get)) {
-  						value = desc.get;
-  					} else {
-  						value = value[part];
-  					}
-  				} else {
-  					isOwn = hasOwn(value, part);
-  					value = value[part];
-  				}
-
-  				if (isOwn && !skipFurtherCaching) {
-  					INTRINSICS[intrinsicRealName] = value;
-  				}
-  			}
-  		}
-  		return value;
-  	};
-  	return getIntrinsic;
-  }
-
-  var defineDataProperty;
-  var hasRequiredDefineDataProperty;
-
-  function requireDefineDataProperty () {
-  	if (hasRequiredDefineDataProperty) return defineDataProperty;
-  	hasRequiredDefineDataProperty = 1;
-
-  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
-
-  	var $SyntaxError = /*@__PURE__*/ requireSyntax();
-  	var $TypeError = /*@__PURE__*/ requireType();
-
-  	var gopd = /*@__PURE__*/ requireGopd();
-
-  	/** @type {import('.')} */
-  	defineDataProperty = function defineDataProperty(
-  		obj,
-  		property,
-  		value
-  	) {
-  		if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) {
-  			throw new $TypeError('`obj` must be an object or a function`');
-  		}
-  		if (typeof property !== 'string' && typeof property !== 'symbol') {
-  			throw new $TypeError('`property` must be a string or a symbol`');
-  		}
-  		if (arguments.length > 3 && typeof arguments[3] !== 'boolean' && arguments[3] !== null) {
-  			throw new $TypeError('`nonEnumerable`, if provided, must be a boolean or null');
-  		}
-  		if (arguments.length > 4 && typeof arguments[4] !== 'boolean' && arguments[4] !== null) {
-  			throw new $TypeError('`nonWritable`, if provided, must be a boolean or null');
-  		}
-  		if (arguments.length > 5 && typeof arguments[5] !== 'boolean' && arguments[5] !== null) {
-  			throw new $TypeError('`nonConfigurable`, if provided, must be a boolean or null');
-  		}
-  		if (arguments.length > 6 && typeof arguments[6] !== 'boolean') {
-  			throw new $TypeError('`loose`, if provided, must be a boolean');
-  		}
-
-  		var nonEnumerable = arguments.length > 3 ? arguments[3] : null;
-  		var nonWritable = arguments.length > 4 ? arguments[4] : null;
-  		var nonConfigurable = arguments.length > 5 ? arguments[5] : null;
-  		var loose = arguments.length > 6 ? arguments[6] : false;
-
-  		/* @type {false | TypedPropertyDescriptor<unknown>} */
-  		var desc = !!gopd && gopd(obj, property);
-
-  		if ($defineProperty) {
-  			$defineProperty(obj, property, {
-  				configurable: nonConfigurable === null && desc ? desc.configurable : !nonConfigurable,
-  				enumerable: nonEnumerable === null && desc ? desc.enumerable : !nonEnumerable,
-  				value: value,
-  				writable: nonWritable === null && desc ? desc.writable : !nonWritable
-  			});
-  		} else if (loose || (!nonEnumerable && !nonWritable && !nonConfigurable)) {
-  			// must fall back to [[Set]], and was not explicitly asked to make non-enumerable, non-writable, or non-configurable
-  			obj[property] = value; // eslint-disable-line no-param-reassign
-  		} else {
-  			throw new $SyntaxError('This environment does not support defining a property as non-configurable, non-writable, or non-enumerable.');
-  		}
-  	};
-  	return defineDataProperty;
-  }
-
-  var hasPropertyDescriptors_1;
-  var hasRequiredHasPropertyDescriptors;
-
-  function requireHasPropertyDescriptors () {
-  	if (hasRequiredHasPropertyDescriptors) return hasPropertyDescriptors_1;
-  	hasRequiredHasPropertyDescriptors = 1;
-
-  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
-
-  	var hasPropertyDescriptors = function hasPropertyDescriptors() {
-  		return !!$defineProperty;
-  	};
-
-  	hasPropertyDescriptors.hasArrayLengthDefineBug = function hasArrayLengthDefineBug() {
-  		// node v0.6 has a bug where array lengths can be Set but not Defined
-  		if (!$defineProperty) {
-  			return null;
-  		}
-  		try {
-  			return $defineProperty([], 'length', { value: 1 }).length !== 1;
-  		} catch (e) {
-  			// In Firefox 4-22, defining length on an array throws an exception.
-  			return true;
-  		}
-  	};
-
-  	hasPropertyDescriptors_1 = hasPropertyDescriptors;
-  	return hasPropertyDescriptors_1;
-  }
-
-  var setFunctionLength;
-  var hasRequiredSetFunctionLength;
-
-  function requireSetFunctionLength () {
-  	if (hasRequiredSetFunctionLength) return setFunctionLength;
-  	hasRequiredSetFunctionLength = 1;
-
-  	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
-  	var define = /*@__PURE__*/ requireDefineDataProperty();
-  	var hasDescriptors = /*@__PURE__*/ requireHasPropertyDescriptors()();
-  	var gOPD = /*@__PURE__*/ requireGopd();
-
-  	var $TypeError = /*@__PURE__*/ requireType();
-  	var $floor = GetIntrinsic('%Math.floor%');
-
-  	/** @type {import('.')} */
-  	setFunctionLength = function setFunctionLength(fn, length) {
-  		if (typeof fn !== 'function') {
-  			throw new $TypeError('`fn` is not a function');
-  		}
-  		if (typeof length !== 'number' || length < 0 || length > 0xFFFFFFFF || $floor(length) !== length) {
-  			throw new $TypeError('`length` must be a positive 32-bit integer');
-  		}
-
-  		var loose = arguments.length > 2 && !!arguments[2];
-
-  		var functionLengthIsConfigurable = true;
-  		var functionLengthIsWritable = true;
-  		if ('length' in fn && gOPD) {
-  			var desc = gOPD(fn, 'length');
-  			if (desc && !desc.configurable) {
-  				functionLengthIsConfigurable = false;
-  			}
-  			if (desc && !desc.writable) {
-  				functionLengthIsWritable = false;
-  			}
-  		}
-
-  		if (functionLengthIsConfigurable || functionLengthIsWritable || !loose) {
-  			if (hasDescriptors) {
-  				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length, true, true);
-  			} else {
-  				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length);
-  			}
-  		}
-  		return fn;
-  	};
-  	return setFunctionLength;
-  }
-
-  var applyBind;
-  var hasRequiredApplyBind;
-
-  function requireApplyBind () {
-  	if (hasRequiredApplyBind) return applyBind;
-  	hasRequiredApplyBind = 1;
-
-  	var bind = requireFunctionBind();
-  	var $apply = requireFunctionApply();
-  	var actualApply = requireActualApply();
-
-  	/** @type {import('./applyBind')} */
-  	applyBind = function applyBind() {
-  		return actualApply(bind, $apply, arguments);
-  	};
-  	return applyBind;
-  }
-
-  var hasRequiredCallBind;
-
-  function requireCallBind () {
-  	if (hasRequiredCallBind) return callBind.exports;
-  	hasRequiredCallBind = 1;
-  	(function (module) {
-
-  		var setFunctionLength = /*@__PURE__*/ requireSetFunctionLength();
-
-  		var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
-
-  		var callBindBasic = requireCallBindApplyHelpers();
-  		var applyBind = requireApplyBind();
-
-  		module.exports = function callBind(originalFunction) {
-  			var func = callBindBasic(arguments);
-  			var adjustedLength = originalFunction.length - (arguments.length - 1);
-  			return setFunctionLength(
-  				func,
-  				1 + (adjustedLength > 0 ? adjustedLength : 0),
-  				true
-  			);
-  		};
-
-  		if ($defineProperty) {
-  			$defineProperty(module.exports, 'apply', { value: applyBind });
-  		} else {
-  			module.exports.apply = applyBind;
-  		} 
-  	} (callBind));
-  	return callBind.exports;
-  }
-
-  var callBound;
-  var hasRequiredCallBound;
-
-  function requireCallBound () {
-  	if (hasRequiredCallBound) return callBound;
-  	hasRequiredCallBound = 1;
-
-  	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
-
-  	var callBindBasic = requireCallBindApplyHelpers();
-
-  	/** @type {(thisArg: string, searchString: string, position?: number) => number} */
-  	var $indexOf = callBindBasic([GetIntrinsic('%String.prototype.indexOf%')]);
-
-  	/** @type {import('.')} */
-  	callBound = function callBoundIntrinsic(name, allowMissing) {
-  		/* eslint no-extra-parens: 0 */
-
-  		var intrinsic = /** @type {(this: unknown, ...args: unknown[]) => unknown} */ (GetIntrinsic(name, !!allowMissing));
-  		if (typeof intrinsic === 'function' && $indexOf(name, '.prototype.') > -1) {
-  			return callBindBasic(/** @type {const} */ ([intrinsic]));
-  		}
-  		return intrinsic;
-  	};
-  	return callBound;
-  }
-
-  var jsonStableStringify$1;
-  var hasRequiredJsonStableStringify;
-
-  function requireJsonStableStringify () {
-  	if (hasRequiredJsonStableStringify) return jsonStableStringify$1;
-  	hasRequiredJsonStableStringify = 1;
-
-  	/** @type {typeof JSON.stringify} */
-  	var jsonStringify = (typeof JSON !== 'undefined' ? JSON : requireJsonify()).stringify;
-
-  	var isArray = requireIsarray();
-  	var objectKeys = requireObjectKeys();
-  	var callBind = requireCallBind();
-  	var callBound = /*@__PURE__*/ requireCallBound();
-
-  	var $join = callBound('Array.prototype.join');
-  	var $indexOf = callBound('Array.prototype.indexOf');
-  	var $splice = callBound('Array.prototype.splice');
-  	var $sort = callBound('Array.prototype.sort');
-
-  	/** @type {(n: number, char: string) => string} */
-  	var strRepeat = function repeat(n, char) {
-  		var str = '';
-  		for (var i = 0; i < n; i += 1) {
-  			str += char;
-  		}
-  		return str;
-  	};
-
-  	/** @type {(parent: import('.').Node, key: import('.').Key, value: unknown) => unknown} */
-  	var defaultReplacer = function (_parent, _key, value) { return value; };
-
-  	/** @type {import('.')} */
-  	jsonStableStringify$1 = function stableStringify(obj) {
-  		/** @type {Parameters<import('.')>[1]} */
-  		var opts = arguments.length > 1 ? arguments[1] : void undefined;
-  		var space = (opts && opts.space) || '';
-  		if (typeof space === 'number') { space = strRepeat(space, ' '); }
-  		var cycles = !!opts && typeof opts.cycles === 'boolean' && opts.cycles;
-  		/** @type {undefined | typeof defaultReplacer} */
-  		var replacer = opts && opts.replacer ? callBind(opts.replacer) : defaultReplacer;
-  		if (opts && typeof opts.collapseEmpty !== 'undefined' && typeof opts.collapseEmpty !== 'boolean') {
-  			throw new TypeError('`collapseEmpty` must be a boolean, if provided');
-  		}
-  		var collapseEmpty = !!opts && opts.collapseEmpty;
-
-  		var cmpOpt = typeof opts === 'function' ? opts : opts && opts.cmp;
-  		/** @type {undefined | (<T extends import('.').NonArrayNode>(node: T) => (a: Exclude<keyof T, symbol | number>, b: Exclude<keyof T, symbol | number>) => number)} */
-  		var cmp = cmpOpt && function (node) {
-  			// eslint-disable-next-line no-extra-parens
-  			var get = /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt).length > 2
-  				&& /** @type {import('.').Getter['get']} */ function get(k) { return node[k]; };
-  			return function (a, b) {
-  				// eslint-disable-next-line no-extra-parens
-  				return /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt)(
-  					{ key: a, value: node[a] },
-  					{ key: b, value: node[b] },
-  					// @ts-expect-error TS doesn't understand the optimization used here
-  					get ? /** @type {import('.').Getter} */ { __proto__: null, get: get } : void undefined
-  				);
-  			};
-  		};
-
-  		/** @type {import('.').Node[]} */
-  		var seen = [];
-  		return (/** @type {(parent: import('.').Node, key: string | number, node: unknown, level: number) => string | undefined} */
-  			function stringify(parent, key, node, level) {
-  				var indent = space ? '\n' + strRepeat(level, space) : '';
-  				var colonSeparator = space ? ': ' : ':';
-
-  				// eslint-disable-next-line no-extra-parens
-  				if (node && /** @type {{ toJSON?: unknown }} */ (node).toJSON && typeof /** @type {{ toJSON?: unknown }} */ (node).toJSON === 'function') {
-  					// eslint-disable-next-line no-extra-parens
-  					node = /** @type {{ toJSON: Function }} */ (node).toJSON();
-  				}
-
-  				node = replacer(parent, key, node);
-  				if (node === undefined) {
-  					return;
-  				}
-  				if (typeof node !== 'object' || node === null) {
-  					return jsonStringify(node);
-  				}
-
-  				/** @type {(out: string[], brackets: '[]' | '{}') => string} */
-  				var groupOutput = function (out, brackets) {
-  					return collapseEmpty && out.length === 0
-  						? brackets
-  						: (brackets === '[]' ? '[' : '{') + $join(out, ',') + indent + (brackets === '[]' ? ']' : '}');
-  				};
-
-  				if (isArray(node)) {
-  					var out = [];
-  					for (var i = 0; i < node.length; i++) {
-  						var item = stringify(node, i, node[i], level + 1) || jsonStringify(null);
-  						out[out.length] = indent + space + item;
-  					}
-  					return groupOutput(out, '[]');
-  				}
-
-  				if ($indexOf(seen, node) !== -1) {
-  					if (cycles) { return jsonStringify('__cycle__'); }
-  					throw new TypeError('Converting circular structure to JSON');
-  				} else {
-  					seen[seen.length] = /** @type {import('.').NonArrayNode} */ (node);
-  				}
-
-  				/** @type {import('.').Key[]} */
-  				// eslint-disable-next-line no-extra-parens
-  				var keys = $sort(objectKeys(node), cmp && cmp(/** @type {import('.').NonArrayNode} */ (node)));
-  				var out = [];
-  				for (var i = 0; i < keys.length; i++) {
-  					var key = keys[i];
-  					// eslint-disable-next-line no-extra-parens
-  					var value = stringify(/** @type {import('.').Node} */ (node), key, /** @type {import('.').NonArrayNode} */ (node)[key], level + 1);
-
-  					if (!value) { continue; }
-
-  					var keyValue = jsonStringify(key)
-  						+ colonSeparator
-  						+ value;
-
-  					out[out.length] = indent + space + keyValue;
-  				}
-  				$splice(seen, $indexOf(seen, node), 1);
-  				return groupOutput(out, '{}');
-  			}({ '': obj }, '', obj, 0)
-  		);
-  	};
-  	return jsonStableStringify$1;
-  }
-
-  var jsonStableStringifyExports = requireJsonStableStringify();
-  var jsonStableStringify = /*@__PURE__*/getDefaultExportFromCjs(jsonStableStringifyExports);
-
-  async function secretHandler(actual, errors, schema) {
-    if (!this.passphrase) {
-      errors.push(new ValidationError("Missing configuration for secrets encryption.", {
-        actual,
-        type: "encryptionKeyMissing",
-        suggestion: "Provide a passphrase for secret encryption."
-      }));
-      return actual;
-    }
-    const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
-    if (ok) return res;
-    errors.push(new ValidationError("Problem encrypting secret.", {
-      actual,
-      type: "encryptionProblem",
-      error: err,
-      suggestion: "Check the passphrase and input value."
-    }));
-    return actual;
-  }
-  async function jsonHandler(actual, errors, schema) {
-    if (lodashEs.isString(actual)) return actual;
-    const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
-    if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
-    return json;
-  }
-  class Validator extends FastestValidator {
-    constructor({ options, passphrase, autoEncrypt = true } = {}) {
-      super(lodashEs.merge({}, {
-        useNewCustomCheckerFunction: true,
-        messages: {
-          encryptionKeyMissing: "Missing configuration for secrets encryption.",
-          encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}"
-        },
-        defaults: {
-          string: {
-            trim: true
-          },
-          object: {
-            strict: "remove"
-          },
-          number: {
-            convert: true
-          }
-        }
-      }, options));
-      this.passphrase = passphrase;
-      this.autoEncrypt = autoEncrypt;
-      this.alias("secret", {
-        type: "string",
-        custom: this.autoEncrypt ? secretHandler : void 0,
-        messages: {
-          string: "The '{field}' field must be a string.",
-          stringMin: "This secret '{field}' field length must be at least {expected} long."
-        }
-      });
-      this.alias("secretAny", {
-        type: "any",
-        custom: this.autoEncrypt ? secretHandler : void 0
-      });
-      this.alias("secretNumber", {
-        type: "number",
-        custom: this.autoEncrypt ? secretHandler : void 0
-      });
-      this.alias("json", {
-        type: "any",
-        custom: this.autoEncrypt ? jsonHandler : void 0
-      });
-    }
-  }
-  const ValidatorManager = new Proxy(Validator, {
-    instance: null,
-    construct(target, args) {
-      if (!this.instance) this.instance = new target(...args);
-      return this.instance;
-    }
-  });
-
-  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const base = alphabet.length;
-  const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
-  const encode = (n) => {
-    if (typeof n !== "number" || isNaN(n)) return "undefined";
-    if (!isFinite(n)) return "undefined";
-    if (n === 0) return alphabet[0];
-    if (n < 0) return "-" + encode(-Math.floor(n));
-    n = Math.floor(n);
-    let s = "";
-    while (n) {
-      s = alphabet[n % base] + s;
-      n = Math.floor(n / base);
-    }
-    return s;
-  };
-  const decode = (s) => {
-    if (typeof s !== "string") return NaN;
-    if (s === "") return 0;
-    let negative = false;
-    if (s[0] === "-") {
-      negative = true;
-      s = s.slice(1);
-    }
-    let r = 0;
-    for (let i = 0; i < s.length; i++) {
-      const idx = charToValue[s[i]];
-      if (idx === void 0) return NaN;
-      r = r * base + idx;
-    }
-    return negative ? -r : r;
-  };
-  const encodeDecimal = (n) => {
-    if (typeof n !== "number" || isNaN(n)) return "undefined";
-    if (!isFinite(n)) return "undefined";
-    const negative = n < 0;
-    n = Math.abs(n);
-    const [intPart, decPart] = n.toString().split(".");
-    const encodedInt = encode(Number(intPart));
-    if (decPart) {
-      return (negative ? "-" : "") + encodedInt + "." + decPart;
-    }
-    return (negative ? "-" : "") + encodedInt;
-  };
-  const decodeDecimal = (s) => {
-    if (typeof s !== "string") return NaN;
-    let negative = false;
-    if (s[0] === "-") {
-      negative = true;
-      s = s.slice(1);
-    }
-    const [intPart, decPart] = s.split(".");
-    const decodedInt = decode(intPart);
-    if (isNaN(decodedInt)) return NaN;
-    const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
-    return negative ? -num : num;
-  };
-
-  function generateBase62Mapping(keys) {
-    const mapping = {};
-    const reversedMapping = {};
-    keys.forEach((key, index) => {
-      const base62Key = encode(index);
-      mapping[key] = base62Key;
-      reversedMapping[base62Key] = key;
-    });
-    return { mapping, reversedMapping };
-  }
-  const SchemaActions = {
-    trim: (value) => value == null ? value : value.trim(),
-    encrypt: async (value, { passphrase }) => {
-      if (value === null || value === void 0) return value;
-      const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
-      return ok ? res : value;
-    },
-    decrypt: async (value, { passphrase }) => {
-      if (value === null || value === void 0) return value;
-      const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
-      if (!ok) return value;
-      if (raw === "null") return null;
-      if (raw === "undefined") return void 0;
-      return raw;
-    },
-    toString: (value) => value == null ? value : String(value),
-    fromArray: (value, { separator }) => {
-      if (value === null || value === void 0 || !Array.isArray(value)) {
-        return value;
-      }
-      if (value.length === 0) {
-        return "";
-      }
-      const escapedItems = value.map((item) => {
-        if (typeof item === "string") {
-          return item.replace(/\\/g, "\\\\").replace(new RegExp(`\\${separator}`, "g"), `\\${separator}`);
-        }
-        return String(item);
-      });
-      return escapedItems.join(separator);
-    },
-    toArray: (value, { separator }) => {
-      if (Array.isArray(value)) {
-        return value;
-      }
-      if (value === null || value === void 0) {
-        return value;
-      }
-      if (value === "") {
-        return [];
-      }
-      const items = [];
-      let current = "";
-      let i = 0;
-      const str = String(value);
-      while (i < str.length) {
-        if (str[i] === "\\" && i + 1 < str.length) {
-          current += str[i + 1];
-          i += 2;
-        } else if (str[i] === separator) {
-          items.push(current);
-          current = "";
-          i++;
-        } else {
-          current += str[i];
-          i++;
-        }
-      }
-      items.push(current);
-      return items;
-    },
-    toJSON: (value) => {
-      if (value === null) return null;
-      if (value === void 0) return void 0;
-      if (typeof value === "string") {
-        const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(value));
-        if (ok2 && typeof parsed === "object") return value;
-        return value;
-      }
-      const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
-      return ok ? json : value;
-    },
-    fromJSON: (value) => {
-      if (value === null) return null;
-      if (value === void 0) return void 0;
-      if (typeof value !== "string") return value;
-      if (value === "") return "";
-      const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
-      return ok ? parsed : value;
-    },
-    toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
-    toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
-    fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0",
-    fromBase62: (value) => {
-      if (value === null || value === void 0 || value === "") return value;
-      if (typeof value === "number") return value;
-      if (typeof value === "string") {
-        const n = decode(value);
-        return isNaN(n) ? void 0 : n;
-      }
-      return void 0;
-    },
-    toBase62: (value) => {
-      if (value === null || value === void 0 || value === "") return value;
-      if (typeof value === "number") {
-        return encode(value);
-      }
-      if (typeof value === "string") {
-        const n = Number(value);
-        return isNaN(n) ? value : encode(n);
-      }
-      return value;
-    },
-    fromBase62Decimal: (value) => {
-      if (value === null || value === void 0 || value === "") return value;
-      if (typeof value === "number") return value;
-      if (typeof value === "string") {
-        const n = decodeDecimal(value);
-        return isNaN(n) ? void 0 : n;
-      }
-      return void 0;
-    },
-    toBase62Decimal: (value) => {
-      if (value === null || value === void 0 || value === "") return value;
-      if (typeof value === "number") {
-        return encodeDecimal(value);
-      }
-      if (typeof value === "string") {
-        const n = Number(value);
-        return isNaN(n) ? value : encodeDecimal(n);
-      }
-      return value;
-    },
-    fromArrayOfNumbers: (value, { separator }) => {
-      if (value === null || value === void 0 || !Array.isArray(value)) {
-        return value;
-      }
-      if (value.length === 0) {
-        return "";
-      }
-      const base62Items = value.map((item) => {
-        if (typeof item === "number" && !isNaN(item)) {
-          return encode(item);
-        }
-        const n = Number(item);
-        return isNaN(n) ? "" : encode(n);
-      });
-      return base62Items.join(separator);
-    },
-    toArrayOfNumbers: (value, { separator }) => {
-      if (Array.isArray(value)) {
-        return value.map((v) => typeof v === "number" ? v : decode(v));
-      }
-      if (value === null || value === void 0) {
-        return value;
-      }
-      if (value === "") {
-        return [];
-      }
-      const str = String(value);
-      const items = [];
-      let current = "";
-      let i = 0;
-      while (i < str.length) {
-        if (str[i] === "\\" && i + 1 < str.length) {
-          current += str[i + 1];
-          i += 2;
-        } else if (str[i] === separator) {
-          items.push(current);
-          current = "";
-          i++;
-        } else {
-          current += str[i];
-          i++;
-        }
-      }
-      items.push(current);
-      return items.map((v) => {
-        if (typeof v === "number") return v;
-        if (typeof v === "string" && v !== "") {
-          const n = decode(v);
-          return isNaN(n) ? NaN : n;
-        }
-        return NaN;
-      });
-    },
-    fromArrayOfDecimals: (value, { separator }) => {
-      if (value === null || value === void 0 || !Array.isArray(value)) {
-        return value;
-      }
-      if (value.length === 0) {
-        return "";
-      }
-      const base62Items = value.map((item) => {
-        if (typeof item === "number" && !isNaN(item)) {
-          return encodeDecimal(item);
-        }
-        const n = Number(item);
-        return isNaN(n) ? "" : encodeDecimal(n);
-      });
-      return base62Items.join(separator);
-    },
-    toArrayOfDecimals: (value, { separator }) => {
-      if (Array.isArray(value)) {
-        return value.map((v) => typeof v === "number" ? v : decodeDecimal(v));
-      }
-      if (value === null || value === void 0) {
-        return value;
-      }
-      if (value === "") {
-        return [];
-      }
-      const str = String(value);
-      const items = [];
-      let current = "";
-      let i = 0;
-      while (i < str.length) {
-        if (str[i] === "\\" && i + 1 < str.length) {
-          current += str[i + 1];
-          i += 2;
-        } else if (str[i] === separator) {
-          items.push(current);
-          current = "";
-          i++;
-        } else {
-          current += str[i];
-          i++;
-        }
-      }
-      items.push(current);
-      return items.map((v) => {
-        if (typeof v === "number") return v;
-        if (typeof v === "string" && v !== "") {
-          const n = decodeDecimal(v);
-          return isNaN(n) ? NaN : n;
-        }
-        return NaN;
-      });
-    }
-  };
-  class Schema {
-    constructor(args) {
-      const {
-        map,
-        name,
-        attributes,
-        passphrase,
-        version = 1,
-        options = {}
-      } = args;
-      this.name = name;
-      this.version = version;
-      this.attributes = attributes || {};
-      this.passphrase = passphrase ?? "secret";
-      this.options = lodashEs.merge({}, this.defaultOptions(), options);
-      this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
-      const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
-      this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
-        { $$async: true },
-        processedAttributes
-      ));
-      if (this.options.generateAutoHooks) this.generateAutoHooks();
-      if (!lodashEs.isEmpty(map)) {
-        this.map = map;
-        this.reversedMap = lodashEs.invert(map);
-      } else {
-        const flatAttrs = flat.flatten(this.attributes, { safe: true });
-        const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
-        const objectKeys = this.extractObjectKeys(this.attributes);
-        const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-        const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
-        this.map = mapping;
-        this.reversedMap = reversedMapping;
-      }
-    }
-    defaultOptions() {
-      return {
-        autoEncrypt: true,
-        autoDecrypt: true,
-        arraySeparator: "|",
-        generateAutoHooks: true,
-        hooks: {
-          beforeMap: {},
-          afterMap: {},
-          beforeUnmap: {},
-          afterUnmap: {}
-        }
-      };
-    }
-    addHook(hook, attribute, action) {
-      if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
-      this.options.hooks[hook][attribute] = lodashEs.uniq([...this.options.hooks[hook][attribute], action]);
-    }
-    extractObjectKeys(obj, prefix = "") {
-      const objectKeys = [];
-      for (const [key, value] of Object.entries(obj)) {
-        if (key.startsWith("$$")) continue;
-        const fullKey = prefix ? `${prefix}.${key}` : key;
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-          objectKeys.push(fullKey);
-          if (value.$$type === "object") {
-            objectKeys.push(...this.extractObjectKeys(value, fullKey));
-          }
-        }
-      }
-      return objectKeys;
-    }
-    generateAutoHooks() {
-      const schema = flat.flatten(lodashEs.cloneDeep(this.attributes), { safe: true });
-      for (const [name, definition] of Object.entries(schema)) {
-        if (definition.includes("array")) {
-          if (definition.includes("items:string")) {
-            this.addHook("beforeMap", name, "fromArray");
-            this.addHook("afterUnmap", name, "toArray");
-          } else if (definition.includes("items:number")) {
-            const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
-            if (isIntegerArray) {
-              this.addHook("beforeMap", name, "fromArrayOfNumbers");
-              this.addHook("afterUnmap", name, "toArrayOfNumbers");
-            } else {
-              this.addHook("beforeMap", name, "fromArrayOfDecimals");
-              this.addHook("afterUnmap", name, "toArrayOfDecimals");
-            }
-          }
-          continue;
-        }
-        if (definition.includes("secret")) {
-          if (this.options.autoEncrypt) {
-            this.addHook("beforeMap", name, "encrypt");
-          }
-          if (this.options.autoDecrypt) {
-            this.addHook("afterUnmap", name, "decrypt");
-          }
-          continue;
-        }
-        if (definition.includes("number")) {
-          const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
-          if (isInteger) {
-            this.addHook("beforeMap", name, "toBase62");
-            this.addHook("afterUnmap", name, "fromBase62");
-          } else {
-            this.addHook("beforeMap", name, "toBase62Decimal");
-            this.addHook("afterUnmap", name, "fromBase62Decimal");
-          }
-          continue;
-        }
-        if (definition.includes("boolean")) {
-          this.addHook("beforeMap", name, "fromBool");
-          this.addHook("afterUnmap", name, "toBool");
-          continue;
-        }
-        if (definition.includes("json")) {
-          this.addHook("beforeMap", name, "toJSON");
-          this.addHook("afterUnmap", name, "fromJSON");
-          continue;
-        }
-        if (definition === "object" || definition.includes("object")) {
-          this.addHook("beforeMap", name, "toJSON");
-          this.addHook("afterUnmap", name, "fromJSON");
-          continue;
-        }
-      }
-    }
-    static import(data) {
-      let {
-        map,
-        name,
-        options,
-        version,
-        attributes
-      } = lodashEs.isString(data) ? JSON.parse(data) : data;
-      const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
-      if (!ok) throw new SchemaError("Failed to import schema attributes", { original: err, input: attributes });
-      attributes = attrs;
-      const schema = new Schema({
-        map,
-        name,
-        options,
-        version,
-        attributes
-      });
-      return schema;
-    }
-    /**
-     * Recursively import attributes, parsing only stringified objects (legacy)
-     */
-    static _importAttributes(attrs) {
-      if (typeof attrs === "string") {
-        const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
-        if (ok && typeof parsed === "object" && parsed !== null) {
-          const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
-          if (!okNested) throw new SchemaError("Failed to parse nested schema attribute", { original: errNested, input: attrs });
-          return nested;
-        }
-        return attrs;
-      }
-      if (Array.isArray(attrs)) {
-        const [okArr, errArr, arr] = tryFnSync(() => attrs.map((a) => Schema._importAttributes(a)));
-        if (!okArr) throw new SchemaError("Failed to import array schema attributes", { original: errArr, input: attrs });
-        return arr;
-      }
-      if (typeof attrs === "object" && attrs !== null) {
-        const out = {};
-        for (const [k, v] of Object.entries(attrs)) {
-          const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
-          if (!okObj) throw new SchemaError("Failed to import object schema attribute", { original: errObj, key: k, input: v });
-          out[k] = val;
-        }
-        return out;
-      }
-      return attrs;
-    }
-    export() {
-      const data = {
-        version: this.version,
-        name: this.name,
-        options: this.options,
-        attributes: this._exportAttributes(this.attributes),
-        map: this.map
-      };
-      return data;
-    }
-    /**
-     * Recursively export attributes, keeping objects as objects and only serializing leaves as string
-     */
-    _exportAttributes(attrs) {
-      if (typeof attrs === "string") {
-        return attrs;
-      }
-      if (Array.isArray(attrs)) {
-        return attrs.map((a) => this._exportAttributes(a));
-      }
-      if (typeof attrs === "object" && attrs !== null) {
-        const out = {};
-        for (const [k, v] of Object.entries(attrs)) {
-          out[k] = this._exportAttributes(v);
-        }
-        return out;
-      }
-      return attrs;
-    }
-    async applyHooksActions(resourceItem, hook) {
-      const cloned = lodashEs.cloneDeep(resourceItem);
-      for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
-        for (const action of actions) {
-          const value = lodashEs.get(cloned, attribute);
-          if (value !== void 0 && typeof SchemaActions[action] === "function") {
-            lodashEs.set(cloned, attribute, await SchemaActions[action](value, {
-              passphrase: this.passphrase,
-              separator: this.options.arraySeparator
-            }));
-          }
-        }
-      }
-      return cloned;
-    }
-    async validate(resourceItem, { mutateOriginal = false } = {}) {
-      let data = mutateOriginal ? resourceItem : lodashEs.cloneDeep(resourceItem);
-      const result = await this.validator(data);
-      return result;
-    }
-    async mapper(resourceItem) {
-      let obj = lodashEs.cloneDeep(resourceItem);
-      obj = await this.applyHooksActions(obj, "beforeMap");
-      const flattenedObj = flat.flatten(obj, { safe: true });
-      const rest = { "_v": this.version + "" };
-      for (const [key, value] of Object.entries(flattenedObj)) {
-        const mappedKey = this.map[key] || key;
-        const attrDef = this.getAttributeDefinition(key);
-        if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
-          rest[mappedKey] = encode(value);
-        } else if (typeof value === "string") {
-          if (value === "[object Object]") {
-            rest[mappedKey] = "{}";
-          } else if (value.startsWith("{") || value.startsWith("[")) {
-            rest[mappedKey] = value;
-          } else {
-            rest[mappedKey] = value;
-          }
-        } else if (Array.isArray(value) || typeof value === "object" && value !== null) {
-          rest[mappedKey] = JSON.stringify(value);
-        } else {
-          rest[mappedKey] = value;
-        }
-      }
-      await this.applyHooksActions(rest, "afterMap");
-      return rest;
-    }
-    async unmapper(mappedResourceItem, mapOverride) {
-      let obj = lodashEs.cloneDeep(mappedResourceItem);
-      delete obj._v;
-      obj = await this.applyHooksActions(obj, "beforeUnmap");
-      const reversedMap = mapOverride ? lodashEs.invert(mapOverride) : this.reversedMap;
-      const rest = {};
-      for (const [key, value] of Object.entries(obj)) {
-        const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
-        let parsedValue = value;
-        const attrDef = this.getAttributeDefinition(originalKey);
-        if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
-          if (typeof parsedValue === "string" && parsedValue !== "") {
-            parsedValue = decode(parsedValue);
-          } else if (typeof parsedValue === "number") ; else {
-            parsedValue = void 0;
-          }
-        } else if (typeof value === "string") {
-          if (value === "[object Object]") {
-            parsedValue = {};
-          } else if (value.startsWith("{") || value.startsWith("[")) {
-            const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
-            if (ok) parsedValue = parsed;
-          }
-        }
-        if (this.attributes) {
-          if (typeof attrDef === "string" && attrDef.includes("array")) {
-            if (Array.isArray(parsedValue)) ; else if (typeof parsedValue === "string" && parsedValue.trim().startsWith("[")) {
-              const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
-              if (okArr && Array.isArray(arr)) {
-                parsedValue = arr;
-              }
-            } else {
-              parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
-            }
-          }
-        }
-        if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
-          for (const action of this.options.hooks.afterUnmap[originalKey]) {
-            if (typeof SchemaActions[action] === "function") {
-              parsedValue = await SchemaActions[action](parsedValue, {
-                passphrase: this.passphrase,
-                separator: this.options.arraySeparator
-              });
-            }
-          }
-        }
-        rest[originalKey] = parsedValue;
-      }
-      await this.applyHooksActions(rest, "afterUnmap");
-      const result = flat.unflatten(rest);
-      for (const [key, value] of Object.entries(mappedResourceItem)) {
-        if (key.startsWith("$")) {
-          result[key] = value;
-        }
-      }
-      return result;
-    }
-    // Helper to get attribute definition by dot notation key
-    getAttributeDefinition(key) {
-      const parts = key.split(".");
-      let def = this.attributes;
-      for (const part of parts) {
-        if (!def) return void 0;
-        def = def[part];
-      }
-      return def;
-    }
-    /**
-     * Preprocess attributes to convert nested objects into validator-compatible format
-     * @param {Object} attributes - Original attributes
-     * @returns {Object} Processed attributes for validator
-     */
-    preprocessAttributesForValidation(attributes) {
-      const processed = {};
-      for (const [key, value] of Object.entries(attributes)) {
-        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-          const isExplicitRequired = value.$$type && value.$$type.includes("required");
-          const isExplicitOptional = value.$$type && value.$$type.includes("optional");
-          const objectConfig = {
-            type: "object",
-            properties: this.preprocessAttributesForValidation(value),
-            strict: false
-          };
-          if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
-            objectConfig.optional = true;
-          }
-          processed[key] = objectConfig;
-        } else {
-          processed[key] = value;
-        }
-      }
-      return processed;
-    }
-  }
 
   var lookup = [];
   var revLookup = [];
@@ -4989,7 +2405,7 @@ ${JSON.stringify(validation, null, 2)}`,
 
   var toString = {}.toString;
 
-  var isArray$1 = Array.isArray || function (arr) {
+  var isArray$2 = Array.isArray || function (arr) {
     return toString.call(arr) == '[object Array]';
   };
 
@@ -5273,7 +2689,7 @@ ${JSON.stringify(validation, null, 2)}`,
         return fromArrayLike(that, obj)
       }
 
-      if (obj.type === 'Buffer' && isArray$1(obj.data)) {
+      if (obj.type === 'Buffer' && isArray$2(obj.data)) {
         return fromArrayLike(that, obj.data)
       }
     }
@@ -5290,7 +2706,7 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     return length | 0
   }
-  Buffer$1.isBuffer = isBuffer;
+  Buffer$1.isBuffer = isBuffer$1;
   function internalIsBuffer (b) {
     return !!(b != null && b._isBuffer)
   }
@@ -5338,7 +2754,7 @@ ${JSON.stringify(validation, null, 2)}`,
   };
 
   Buffer$1.concat = function concat (list, length) {
-    if (!isArray$1(list)) {
+    if (!isArray$2(list)) {
       throw new TypeError('"list" argument must be an Array of Buffers')
     }
 
@@ -6756,7 +4172,7 @@ ${JSON.stringify(validation, null, 2)}`,
   // the following is from is-buffer, also by Feross Aboukhadijeh and with same lisence
   // The _isBuffer check is for Safari 5-7 support, because it's missing
   // Object.prototype.constructor. Remove this eventually
-  function isBuffer(obj) {
+  function isBuffer$1(obj) {
     return obj != null && (!!obj._isBuffer || isFastBuffer(obj) || isSlowBuffer(obj))
   }
 
@@ -6907,7 +4323,7 @@ ${JSON.stringify(validation, null, 2)}`,
   var browser = true;
   var env = {};
   var argv = [];
-  var version = ''; // empty string to avoid regexp issues
+  var version$1 = ''; // empty string to avoid regexp issues
   var versions = {};
   var release = {};
   var config = {};
@@ -6971,7 +4387,7 @@ ${JSON.stringify(validation, null, 2)}`,
     browser: browser,
     env: env,
     argv: argv,
-    version: version,
+    version: version$1,
     versions: versions,
     on: on,
     addListener: addListener,
@@ -7015,12 +4431,22 @@ ${JSON.stringify(validation, null, 2)}`,
     };
   }
 
+  var getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors ||
+    function getOwnPropertyDescriptors(obj) {
+      var keys = Object.keys(obj);
+      var descriptors = {};
+      for (var i = 0; i < keys.length; i++) {
+        descriptors[keys[i]] = Object.getOwnPropertyDescriptor(obj, keys[i]);
+      }
+      return descriptors;
+    };
+
   var formatRegExp = /%[sdj%]/g;
-  function format(f) {
+  function format$1(f) {
     if (!isString(f)) {
       var objects = [];
       for (var i = 0; i < arguments.length; i++) {
-        objects.push(inspect(arguments[i]));
+        objects.push(inspect$1(arguments[i]));
       }
       return objects.join(' ');
     }
@@ -7048,7 +4474,7 @@ ${JSON.stringify(validation, null, 2)}`,
       if (isNull(x) || !isObject(x)) {
         str += ' ' + x;
       } else {
-        str += ' ' + inspect(x);
+        str += ' ' + inspect$1(x);
       }
     }
     return str;
@@ -7097,7 +4523,7 @@ ${JSON.stringify(validation, null, 2)}`,
       if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
         var pid = 0;
         debugs[set] = function() {
-          var msg = format.apply(null, arguments);
+          var msg = format$1.apply(null, arguments);
           console.error('%s %d: %s', set, pid, msg);
         };
       } else {
@@ -7115,7 +4541,7 @@ ${JSON.stringify(validation, null, 2)}`,
    * @param {Object} opts Optional options object that alters the output.
    */
   /* legacy: obj, showHidden, depth, colors*/
-  function inspect(obj, opts) {
+  function inspect$1(obj, opts) {
     // default options
     var ctx = {
       seen: [],
@@ -7141,7 +4567,7 @@ ${JSON.stringify(validation, null, 2)}`,
   }
 
   // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-  inspect.colors = {
+  inspect$1.colors = {
     'bold' : [1, 22],
     'italic' : [3, 23],
     'underline' : [4, 24],
@@ -7158,7 +4584,7 @@ ${JSON.stringify(validation, null, 2)}`,
   };
 
   // Don't use 'blue' not visible on cmd.exe
-  inspect.styles = {
+  inspect$1.styles = {
     'special': 'cyan',
     'number': 'yellow',
     'boolean': 'yellow',
@@ -7172,11 +4598,11 @@ ${JSON.stringify(validation, null, 2)}`,
 
 
   function stylizeWithColor(str, styleType) {
-    var style = inspect.styles[styleType];
+    var style = inspect$1.styles[styleType];
 
     if (style) {
-      return '\u001b[' + inspect.colors[style][0] + 'm' + str +
-             '\u001b[' + inspect.colors[style][1] + 'm';
+      return '\u001b[' + inspect$1.colors[style][0] + 'm' + str +
+             '\u001b[' + inspect$1.colors[style][1] + 'm';
     } else {
       return str;
     }
@@ -7206,7 +4632,7 @@ ${JSON.stringify(validation, null, 2)}`,
         value &&
         isFunction(value.inspect) &&
         // Filter out the util module, it's inspect function is special
-        value.inspect !== inspect &&
+        value.inspect !== inspect$1 &&
         // Also filter out any prototype objects using the circular check.
         !(value.constructor && value.constructor.prototype === value)) {
       var ret = value.inspect(recurseTimes, ctx);
@@ -7257,7 +4683,7 @@ ${JSON.stringify(validation, null, 2)}`,
     var base = '', array = false, braces = ['{', '}'];
 
     // Make Array say that they are Array
-    if (isArray(value)) {
+    if (isArray$1(value)) {
       array = true;
       braces = ['[', ']'];
     }
@@ -7339,7 +4765,7 @@ ${JSON.stringify(validation, null, 2)}`,
   function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
     var output = [];
     for (var i = 0, l = value.length; i < l; ++i) {
-      if (hasOwnProperty(value, String(i))) {
+      if (hasOwnProperty$1(value, String(i))) {
         output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
             String(i), true));
       } else {
@@ -7370,7 +4796,7 @@ ${JSON.stringify(validation, null, 2)}`,
         str = ctx.stylize('[Setter]', 'special');
       }
     }
-    if (!hasOwnProperty(visibleKeys, key)) {
+    if (!hasOwnProperty$1(visibleKeys, key)) {
       name = '[' + key + ']';
     }
     if (!str) {
@@ -7436,7 +4862,7 @@ ${JSON.stringify(validation, null, 2)}`,
 
   // NOTE: These type checking functions intentionally don't use `instanceof`
   // because it is fragile and can be easily faked with `Object.create()`.
-  function isArray(ar) {
+  function isArray$1(ar) {
     return Array.isArray(ar);
   }
 
@@ -7448,12 +4874,20 @@ ${JSON.stringify(validation, null, 2)}`,
     return arg === null;
   }
 
+  function isNullOrUndefined(arg) {
+    return arg == null;
+  }
+
   function isNumber(arg) {
     return typeof arg === 'number';
   }
 
   function isString(arg) {
     return typeof arg === 'string';
+  }
+
+  function isSymbol(arg) {
+    return typeof arg === 'symbol';
   }
 
   function isUndefined(arg) {
@@ -7481,8 +4915,45 @@ ${JSON.stringify(validation, null, 2)}`,
     return typeof arg === 'function';
   }
 
+  function isPrimitive(arg) {
+    return arg === null ||
+           typeof arg === 'boolean' ||
+           typeof arg === 'number' ||
+           typeof arg === 'string' ||
+           typeof arg === 'symbol' ||  // ES6 symbol
+           typeof arg === 'undefined';
+  }
+
+  function isBuffer(maybeBuf) {
+    return Buffer$1.isBuffer(maybeBuf);
+  }
+
   function objectToString(o) {
     return Object.prototype.toString.call(o);
+  }
+
+
+  function pad(n) {
+    return n < 10 ? '0' + n.toString(10) : n.toString(10);
+  }
+
+
+  var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+                'Oct', 'Nov', 'Dec'];
+
+  // 26 Feb 16:19:34
+  function timestamp() {
+    var d = new Date();
+    var time = [pad(d.getHours()),
+                pad(d.getMinutes()),
+                pad(d.getSeconds())].join(':');
+    return [d.getDate(), months[d.getMonth()], time].join(' ');
+  }
+
+
+  // log is just a thin wrapper to console.log that prepends a timestamp
+  function log() {
+    console.log('%s - %s', timestamp(), format$1.apply(null, arguments));
   }
 
   function _extend(origin, add) {
@@ -7496,9 +4967,170 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     return origin;
   }
-  function hasOwnProperty(obj, prop) {
+  function hasOwnProperty$1(obj, prop) {
     return Object.prototype.hasOwnProperty.call(obj, prop);
   }
+
+  var kCustomPromisifiedSymbol = typeof Symbol !== 'undefined' ? Symbol('util.promisify.custom') : undefined;
+
+  function promisify(original) {
+    if (typeof original !== 'function')
+      throw new TypeError('The "original" argument must be of type Function');
+
+    if (kCustomPromisifiedSymbol && original[kCustomPromisifiedSymbol]) {
+      var fn = original[kCustomPromisifiedSymbol];
+      if (typeof fn !== 'function') {
+        throw new TypeError('The "util.promisify.custom" argument must be of type Function');
+      }
+      Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+        value: fn, enumerable: false, writable: false, configurable: true
+      });
+      return fn;
+    }
+
+    function fn() {
+      var promiseResolve, promiseReject;
+      var promise = new Promise(function (resolve, reject) {
+        promiseResolve = resolve;
+        promiseReject = reject;
+      });
+
+      var args = [];
+      for (var i = 0; i < arguments.length; i++) {
+        args.push(arguments[i]);
+      }
+      args.push(function (err, value) {
+        if (err) {
+          promiseReject(err);
+        } else {
+          promiseResolve(value);
+        }
+      });
+
+      try {
+        original.apply(this, args);
+      } catch (err) {
+        promiseReject(err);
+      }
+
+      return promise;
+    }
+
+    Object.setPrototypeOf(fn, Object.getPrototypeOf(original));
+
+    if (kCustomPromisifiedSymbol) Object.defineProperty(fn, kCustomPromisifiedSymbol, {
+      value: fn, enumerable: false, writable: false, configurable: true
+    });
+    return Object.defineProperties(
+      fn,
+      getOwnPropertyDescriptors(original)
+    );
+  }
+
+  promisify.custom = kCustomPromisifiedSymbol;
+
+  function callbackifyOnRejected(reason, cb) {
+    // `!reason` guard inspired by bluebird (Ref: https://goo.gl/t5IS6M).
+    // Because `null` is a special error value in callbacks which means "no error
+    // occurred", we error-wrap so the callback consumer can distinguish between
+    // "the promise rejected with null" or "the promise fulfilled with undefined".
+    if (!reason) {
+      var newReason = new Error('Promise was rejected with a falsy value');
+      newReason.reason = reason;
+      reason = newReason;
+    }
+    return cb(reason);
+  }
+
+  function callbackify(original) {
+    if (typeof original !== 'function') {
+      throw new TypeError('The "original" argument must be of type Function');
+    }
+
+    // We DO NOT return the promise as it gives the user a false sense that
+    // the promise is actually somehow related to the callback's execution
+    // and that the callback throwing will reject the promise.
+    function callbackified() {
+      var args = [];
+      for (var i = 0; i < arguments.length; i++) {
+        args.push(arguments[i]);
+      }
+
+      var maybeCb = args.pop();
+      if (typeof maybeCb !== 'function') {
+        throw new TypeError('The last argument must be of type Function');
+      }
+      var self = this;
+      var cb = function() {
+        return maybeCb.apply(self, arguments);
+      };
+      // In true node style we process the callback on `nextTick` with all the
+      // implications (stack, `uncaughtException`, `async_hooks`)
+      original.apply(this, args)
+        .then(function(ret) { browser$1.nextTick(cb.bind(null, null, ret)); },
+          function(rej) { browser$1.nextTick(callbackifyOnRejected.bind(null, rej, cb)); });
+    }
+
+    Object.setPrototypeOf(callbackified, Object.getPrototypeOf(original));
+    Object.defineProperties(callbackified, getOwnPropertyDescriptors(original));
+    return callbackified;
+  }
+
+  var _polyfillNode_util = {
+    inherits: inherits,
+    _extend: _extend,
+    log: log,
+    isBuffer: isBuffer,
+    isPrimitive: isPrimitive,
+    isFunction: isFunction,
+    isError: isError,
+    isDate: isDate,
+    isObject: isObject,
+    isRegExp: isRegExp,
+    isUndefined: isUndefined,
+    isSymbol: isSymbol,
+    isString: isString,
+    isNumber: isNumber,
+    isNullOrUndefined: isNullOrUndefined,
+    isNull: isNull,
+    isBoolean: isBoolean,
+    isArray: isArray$1,
+    inspect: inspect$1,
+    deprecate: deprecate,
+    format: format$1,
+    debuglog: debuglog,
+    promisify: promisify,
+    callbackify: callbackify,
+  };
+
+  var _polyfillNode_util$1 = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    _extend: _extend,
+    callbackify: callbackify,
+    debuglog: debuglog,
+    default: _polyfillNode_util,
+    deprecate: deprecate,
+    format: format$1,
+    inherits: inherits,
+    inspect: inspect$1,
+    isArray: isArray$1,
+    isBoolean: isBoolean,
+    isBuffer: isBuffer,
+    isDate: isDate,
+    isError: isError,
+    isFunction: isFunction,
+    isNull: isNull,
+    isNullOrUndefined: isNullOrUndefined,
+    isNumber: isNumber,
+    isObject: isObject,
+    isPrimitive: isPrimitive,
+    isRegExp: isRegExp,
+    isString: isString,
+    isSymbol: isSymbol,
+    isUndefined: isUndefined,
+    log: log,
+    promisify: promisify
+  });
 
   function BufferList() {
     this.head = null;
@@ -9456,3460 +7088,16 @@ ${JSON.stringify(validation, null, 2)}`,
     return dest;
   };
 
-  class ResourceIdsReader extends EventEmitter {
-    constructor({ resource }) {
-      super();
-      this.resource = resource;
-      this.client = resource.client;
-      this.stream = new web.ReadableStream({
-        highWaterMark: this.client.parallelism * 3,
-        start: this._start.bind(this),
-        pull: this._pull.bind(this),
-        cancel: this._cancel.bind(this)
-      });
-    }
-    build() {
-      return this.stream.getReader();
-    }
-    async _start(controller) {
-      this.controller = controller;
-      this.continuationToken = null;
-      this.closeNextIteration = false;
-    }
-    async _pull(controller) {
-      if (this.closeNextIteration) {
-        controller.close();
-        return;
-      }
-      const response = await this.client.listObjects({
-        prefix: `resource=${this.resource.name}`,
-        continuationToken: this.continuationToken
-      });
-      const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
-      this.continuationToken = response.NextContinuationToken;
-      this.enqueue(keys);
-      if (!response.IsTruncated) this.closeNextIteration = true;
-    }
-    enqueue(ids) {
-      ids.forEach((key) => {
-        this.controller.enqueue(key);
-        this.emit("id", key);
-      });
-    }
-    _cancel(reason) {
-    }
-  }
-
-  class ResourceIdsPageReader extends ResourceIdsReader {
-    enqueue(ids) {
-      this.controller.enqueue(ids);
-      this.emit("page", ids);
-    }
-  }
-
-  class ResourceReader extends EventEmitter {
-    constructor({ resource, batchSize = 10, concurrency = 5 }) {
-      super();
-      if (!resource) {
-        throw new Error("Resource is required for ResourceReader");
-      }
-      this.resource = resource;
-      this.client = resource.client;
-      this.batchSize = batchSize;
-      this.concurrency = concurrency;
-      this.input = new ResourceIdsPageReader({ resource: this.resource });
-      this.transform = new Transform({
-        objectMode: true,
-        transform: this._transform.bind(this)
-      });
-      this.input.on("data", (chunk) => {
-        this.transform.write(chunk);
-      });
-      this.input.on("end", () => {
-        this.transform.end();
-      });
-      this.input.on("error", (error) => {
-        this.emit("error", error);
-      });
-      this.transform.on("data", (data) => {
-        this.emit("data", data);
-      });
-      this.transform.on("end", () => {
-        this.emit("end");
-      });
-      this.transform.on("error", (error) => {
-        this.emit("error", error);
-      });
-    }
-    build() {
-      return this;
-    }
-    async _transform(chunk, encoding, callback) {
-      const [ok, err] = await tryFn(async () => {
-        await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
-          this.emit("error", error, content);
-        }).process(async (id) => {
-          const data = await this.resource.get(id);
-          this.push(data);
-          return data;
-        });
-      });
-      callback(err);
-    }
-    resume() {
-      this.input.resume();
-    }
-  }
-
-  class ResourceWriter extends EventEmitter {
-    constructor({ resource, batchSize = 10, concurrency = 5 }) {
-      super();
-      this.resource = resource;
-      this.client = resource.client;
-      this.batchSize = batchSize;
-      this.concurrency = concurrency;
-      this.buffer = [];
-      this.writing = false;
-      this.writable = new Writable({
-        objectMode: true,
-        write: this._write.bind(this)
-      });
-      this.writable.on("finish", () => {
-        this.emit("finish");
-      });
-      this.writable.on("error", (error) => {
-        this.emit("error", error);
-      });
-    }
-    build() {
-      return this;
-    }
-    write(chunk) {
-      this.buffer.push(chunk);
-      this._maybeWrite().catch((error) => {
-        this.emit("error", error);
-      });
-      return true;
-    }
-    end() {
-      this.ended = true;
-      this._maybeWrite().catch((error) => {
-        this.emit("error", error);
-      });
-    }
-    async _maybeWrite() {
-      if (this.writing) return;
-      if (this.buffer.length === 0 && !this.ended) return;
-      this.writing = true;
-      while (this.buffer.length > 0) {
-        const batch = this.buffer.splice(0, this.batchSize);
-        const [ok, err] = await tryFn(async () => {
-          await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
-            this.emit("error", error, content);
-          }).process(async (item) => {
-            const [ok2, err2, result] = await tryFn(async () => {
-              const res = await this.resource.insert(item);
-              return res;
-            });
-            if (!ok2) {
-              this.emit("error", err2, item);
-              return null;
-            }
-            return result;
-          });
-        });
-        if (!ok) {
-          this.emit("error", err);
-        }
-      }
-      this.writing = false;
-      if (this.ended) {
-        this.writable.emit("finish");
-      }
-    }
-    async _write(chunk, encoding, callback) {
-      callback();
-    }
-  }
-
-  function streamToString(stream) {
-    return new Promise((resolve, reject) => {
-      if (!stream) {
-        return reject(new Error("streamToString: stream is undefined"));
-      }
-      const chunks = [];
-      stream.on("data", (chunk) => chunks.push(chunk));
-      stream.on("error", reject);
-      stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    });
-  }
-
-  function calculateUTF8Bytes(str) {
-    if (typeof str !== "string") {
-      str = String(str);
-    }
-    let bytes = 0;
-    for (let i = 0; i < str.length; i++) {
-      const codePoint = str.codePointAt(i);
-      if (codePoint <= 127) {
-        bytes += 1;
-      } else if (codePoint <= 2047) {
-        bytes += 2;
-      } else if (codePoint <= 65535) {
-        bytes += 3;
-      } else if (codePoint <= 1114111) {
-        bytes += 4;
-        if (codePoint > 65535) {
-          i++;
-        }
-      }
-    }
-    return bytes;
-  }
-  function calculateAttributeNamesSize(mappedObject) {
-    let totalSize = 0;
-    for (const key of Object.keys(mappedObject)) {
-      totalSize += calculateUTF8Bytes(key);
-    }
-    return totalSize;
-  }
-  function transformValue(value) {
-    if (value === null || value === void 0) {
-      return "";
-    }
-    if (typeof value === "boolean") {
-      return value ? "1" : "0";
-    }
-    if (typeof value === "number") {
-      return String(value);
-    }
-    if (typeof value === "string") {
-      return value;
-    }
-    if (Array.isArray(value)) {
-      if (value.length === 0) {
-        return "[]";
-      }
-      return value.map((item) => String(item)).join("|");
-    }
-    if (typeof value === "object") {
-      return JSON.stringify(value);
-    }
-    return String(value);
-  }
-  function calculateAttributeSizes(mappedObject) {
-    const sizes = {};
-    for (const [key, value] of Object.entries(mappedObject)) {
-      const transformedValue = transformValue(value);
-      const byteSize = calculateUTF8Bytes(transformedValue);
-      sizes[key] = byteSize;
-    }
-    return sizes;
-  }
-  function calculateTotalSize(mappedObject) {
-    const valueSizes = calculateAttributeSizes(mappedObject);
-    const valueTotal = Object.values(valueSizes).reduce((total, size) => total + size, 0);
-    const namesSize = calculateAttributeNamesSize(mappedObject);
-    return valueTotal + namesSize;
-  }
-  function getSizeBreakdown(mappedObject) {
-    const valueSizes = calculateAttributeSizes(mappedObject);
-    const namesSize = calculateAttributeNamesSize(mappedObject);
-    const valueTotal = Object.values(valueSizes).reduce((sum, size) => sum + size, 0);
-    const total = valueTotal + namesSize;
-    const sortedAttributes = Object.entries(valueSizes).sort(([, a], [, b]) => b - a).map(([key, size]) => ({
-      attribute: key,
-      size,
-      percentage: (size / total * 100).toFixed(2) + "%"
-    }));
-    return {
-      total,
-      valueSizes,
-      namesSize,
-      valueTotal,
-      breakdown: sortedAttributes,
-      // Add detailed breakdown including names
-      detailedBreakdown: {
-        values: valueTotal,
-        names: namesSize,
-        total
-      }
-    };
-  }
-  function calculateSystemOverhead(config = {}) {
-    const { version = "1", timestamps = false, id = "" } = config;
-    const systemFields = {
-      "_v": String(version)
-      // Version field (e.g., "1", "10", "100")
-    };
-    if (timestamps) {
-      systemFields.createdAt = "2024-01-01T00:00:00.000Z";
-      systemFields.updatedAt = "2024-01-01T00:00:00.000Z";
-    }
-    if (id) {
-      systemFields.id = id;
-    }
-    const overheadObject = {};
-    for (const [key, value] of Object.entries(systemFields)) {
-      overheadObject[key] = value;
-    }
-    return calculateTotalSize(overheadObject);
-  }
-  function calculateEffectiveLimit(config = {}) {
-    const { s3Limit = 2048, systemConfig = {} } = config;
-    const overhead = calculateSystemOverhead(systemConfig);
-    return s3Limit - overhead;
-  }
-
-  const S3_METADATA_LIMIT_BYTES = 2047;
-  async function handleInsert$4({ resource, data, mappedData, originalData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id: data.id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-    }
-    return { mappedData, body: JSON.stringify(mappedData) };
-  }
-  async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-    }
-    return { mappedData, body: JSON.stringify(mappedData) };
-  }
-  async function handleUpsert$4({ resource, id, data, mappedData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-    }
-    return { mappedData, body: "" };
-  }
-  async function handleGet$4({ resource, metadata, body }) {
-    return { metadata, body };
-  }
-
-  var enforceLimits = /*#__PURE__*/Object.freeze({
+  var _polyfillNode_stream = /*#__PURE__*/Object.freeze({
     __proto__: null,
-    S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
-    handleGet: handleGet$4,
-    handleInsert: handleInsert$4,
-    handleUpdate: handleUpdate$4,
-    handleUpsert: handleUpsert$4
+    Duplex: Duplex,
+    PassThrough: PassThrough,
+    Readable: Readable,
+    Stream: Stream,
+    Transform: Transform,
+    Writable: Writable,
+    default: Stream
   });
-
-  async function handleInsert$3({ resource, data, mappedData, originalData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id: data.id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      resource.emit("exceedsLimit", {
-        operation: "insert",
-        totalSize,
-        limit: 2047,
-        excess: totalSize - 2047,
-        data: originalData || data
-      });
-    }
-    return { mappedData, body: JSON.stringify(data) };
-  }
-  async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      resource.emit("exceedsLimit", {
-        operation: "update",
-        id,
-        totalSize,
-        limit: 2047,
-        excess: totalSize - 2047,
-        data: originalData || data
-      });
-    }
-    return { mappedData, body: JSON.stringify(data) };
-  }
-  async function handleUpsert$3({ resource, id, data, mappedData, originalData }) {
-    const totalSize = calculateTotalSize(mappedData);
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id
-      }
-    });
-    if (totalSize > effectiveLimit) {
-      resource.emit("exceedsLimit", {
-        operation: "upsert",
-        id,
-        totalSize,
-        limit: 2047,
-        excess: totalSize - 2047,
-        data: originalData || data
-      });
-    }
-    return { mappedData, body: JSON.stringify(data) };
-  }
-  async function handleGet$3({ resource, metadata, body }) {
-    return { metadata, body };
-  }
-
-  var userManaged = /*#__PURE__*/Object.freeze({
-    __proto__: null,
-    handleGet: handleGet$3,
-    handleInsert: handleInsert$3,
-    handleUpdate: handleUpdate$3,
-    handleUpsert: handleUpsert$3
-  });
-
-  const TRUNCATED_FLAG = "$truncated";
-  const TRUNCATED_FLAG_VALUE = "true";
-  const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8Bytes(TRUNCATED_FLAG_VALUE);
-  async function handleInsert$2({ resource, data, mappedData, originalData }) {
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id: data.id
-      }
-    });
-    const attributeSizes = calculateAttributeSizes(mappedData);
-    const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
-    const resultFields = {};
-    let currentSize = 0;
-    let truncated = false;
-    if (mappedData._v) {
-      resultFields._v = mappedData._v;
-      currentSize += attributeSizes._v;
-    }
-    for (const [fieldName, size] of sortedFields) {
-      if (fieldName === "_v") continue;
-      const fieldValue = mappedData[fieldName];
-      const spaceNeeded = size + (truncated ? 0 : TRUNCATED_FLAG_BYTES);
-      if (currentSize + spaceNeeded <= effectiveLimit) {
-        resultFields[fieldName] = fieldValue;
-        currentSize += size;
-      } else {
-        const availableSpace = effectiveLimit - currentSize - (truncated ? 0 : TRUNCATED_FLAG_BYTES);
-        if (availableSpace > 0) {
-          const truncatedValue = truncateValue(fieldValue, availableSpace);
-          resultFields[fieldName] = truncatedValue;
-          truncated = true;
-          currentSize += calculateUTF8Bytes(truncatedValue);
-        } else {
-          resultFields[fieldName] = "";
-          truncated = true;
-        }
-        break;
-      }
-    }
-    let finalSize = calculateTotalSize(resultFields) + (truncated ? TRUNCATED_FLAG_BYTES : 0);
-    while (finalSize > effectiveLimit) {
-      const fieldNames = Object.keys(resultFields).filter((f) => f !== "_v" && f !== "$truncated");
-      if (fieldNames.length === 0) {
-        break;
-      }
-      const lastField = fieldNames[fieldNames.length - 1];
-      resultFields[lastField] = "";
-      finalSize = calculateTotalSize(resultFields) + TRUNCATED_FLAG_BYTES;
-      truncated = true;
-    }
-    if (truncated) {
-      resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
-    }
-    return { mappedData: resultFields, body: JSON.stringify(mappedData) };
-  }
-  async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
-    return handleInsert$2({ resource, data, mappedData, originalData });
-  }
-  async function handleUpsert$2({ resource, id, data, mappedData }) {
-    return handleInsert$2({ resource, data, mappedData });
-  }
-  async function handleGet$2({ resource, metadata, body }) {
-    return { metadata, body };
-  }
-  function truncateValue(value, maxBytes) {
-    if (typeof value === "string") {
-      return truncateString(value, maxBytes);
-    } else if (typeof value === "object" && value !== null) {
-      const jsonStr = JSON.stringify(value);
-      return truncateString(jsonStr, maxBytes);
-    } else {
-      const stringValue = String(value);
-      return truncateString(stringValue, maxBytes);
-    }
-  }
-  function truncateString(str, maxBytes) {
-    const encoder = new TextEncoder();
-    let bytes = encoder.encode(str);
-    if (bytes.length <= maxBytes) {
-      return str;
-    }
-    let length = str.length;
-    while (length > 0) {
-      const truncated = str.substring(0, length);
-      bytes = encoder.encode(truncated);
-      if (bytes.length <= maxBytes) {
-        return truncated;
-      }
-      length--;
-    }
-    return "";
-  }
-
-  var dataTruncate = /*#__PURE__*/Object.freeze({
-    __proto__: null,
-    handleGet: handleGet$2,
-    handleInsert: handleInsert$2,
-    handleUpdate: handleUpdate$2,
-    handleUpsert: handleUpsert$2
-  });
-
-  const OVERFLOW_FLAG = "$overflow";
-  const OVERFLOW_FLAG_VALUE = "true";
-  const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
-  async function handleInsert$1({ resource, data, mappedData, originalData }) {
-    const effectiveLimit = calculateEffectiveLimit({
-      s3Limit: S3_METADATA_LIMIT_BYTES,
-      systemConfig: {
-        version: resource.version,
-        timestamps: resource.config.timestamps,
-        id: data.id
-      }
-    });
-    const attributeSizes = calculateAttributeSizes(mappedData);
-    const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
-    const metadataFields = {};
-    const bodyFields = {};
-    let currentSize = 0;
-    let willOverflow = false;
-    if (mappedData._v) {
-      metadataFields._v = mappedData._v;
-      currentSize += attributeSizes._v;
-    }
-    let reservedLimit = effectiveLimit;
-    for (const [fieldName, size] of sortedFields) {
-      if (fieldName === "_v") continue;
-      if (!willOverflow && currentSize + size > effectiveLimit) {
-        reservedLimit -= OVERFLOW_FLAG_BYTES;
-        willOverflow = true;
-      }
-      if (!willOverflow && currentSize + size <= reservedLimit) {
-        metadataFields[fieldName] = mappedData[fieldName];
-        currentSize += size;
-      } else {
-        bodyFields[fieldName] = mappedData[fieldName];
-        willOverflow = true;
-      }
-    }
-    if (willOverflow) {
-      metadataFields[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
-    }
-    const hasOverflow = Object.keys(bodyFields).length > 0;
-    let body = hasOverflow ? JSON.stringify(bodyFields) : "";
-    if (!hasOverflow) body = "{}";
-    return { mappedData: metadataFields, body };
-  }
-  async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
-    return handleInsert$1({ resource, data, mappedData, originalData });
-  }
-  async function handleUpsert$1({ resource, id, data, mappedData }) {
-    return handleInsert$1({ resource, data, mappedData });
-  }
-  async function handleGet$1({ resource, metadata, body }) {
-    let bodyData = {};
-    if (body && body.trim() !== "") {
-      const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
-      if (ok) {
-        bodyData = parsed;
-      } else {
-        bodyData = {};
-      }
-    }
-    const mergedData = {
-      ...bodyData,
-      ...metadata
-    };
-    delete mergedData.$overflow;
-    return { metadata: mergedData, body };
-  }
-
-  var bodyOverflow = /*#__PURE__*/Object.freeze({
-    __proto__: null,
-    handleGet: handleGet$1,
-    handleInsert: handleInsert$1,
-    handleUpdate: handleUpdate$1,
-    handleUpsert: handleUpsert$1
-  });
-
-  async function handleInsert({ resource, data, mappedData }) {
-    const metadataOnly = {
-      "_v": mappedData._v || String(resource.version)
-    };
-    metadataOnly._map = JSON.stringify(resource.schema.map);
-    const body = JSON.stringify(mappedData);
-    return { mappedData: metadataOnly, body };
-  }
-  async function handleUpdate({ resource, id, data, mappedData }) {
-    const metadataOnly = {
-      "_v": mappedData._v || String(resource.version)
-    };
-    metadataOnly._map = JSON.stringify(resource.schema.map);
-    const body = JSON.stringify(mappedData);
-    return { mappedData: metadataOnly, body };
-  }
-  async function handleUpsert({ resource, id, data, mappedData }) {
-    return handleInsert({ resource, data, mappedData });
-  }
-  async function handleGet({ resource, metadata, body }) {
-    let bodyData = {};
-    if (body && body.trim() !== "") {
-      const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
-      if (ok) {
-        bodyData = parsed;
-      } else {
-        bodyData = {};
-      }
-    }
-    const mergedData = {
-      ...bodyData,
-      ...metadata
-      // metadata contains _v
-    };
-    return { metadata: mergedData, body };
-  }
-
-  var bodyOnly = /*#__PURE__*/Object.freeze({
-    __proto__: null,
-    handleGet: handleGet,
-    handleInsert: handleInsert,
-    handleUpdate: handleUpdate,
-    handleUpsert: handleUpsert
-  });
-
-  const behaviors = {
-    "user-managed": userManaged,
-    "enforce-limits": enforceLimits,
-    "truncate-data": dataTruncate,
-    "body-overflow": bodyOverflow,
-    "body-only": bodyOnly
-  };
-  function getBehavior(behaviorName) {
-    const behavior = behaviors[behaviorName];
-    if (!behavior) {
-      throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
-    }
-    return behavior;
-  }
-  const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
-  const DEFAULT_BEHAVIOR = "user-managed";
-
-  class Resource extends EventEmitter {
-    /**
-     * Create a new Resource instance
-     * @param {Object} config - Resource configuration
-     * @param {string} config.name - Resource name
-     * @param {Object} config.client - S3 client instance
-     * @param {string} [config.version='v0'] - Resource version
-     * @param {Object} [config.attributes={}] - Resource attributes schema
-     * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
-     * @param {string} [config.passphrase='secret'] - Encryption passphrase
-     * @param {number} [config.parallelism=10] - Parallelism for bulk operations
-     * @param {Array} [config.observers=[]] - Observer instances
-     * @param {boolean} [config.cache=false] - Enable caching
-     * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
-     * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
-     * @param {Object} [config.partitions={}] - Partition definitions
-     * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
-     * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
-     * @param {Object} [config.hooks={}] - Custom hooks
-     * @param {Object} [config.options={}] - Additional options
-     * @param {Function} [config.idGenerator] - Custom ID generator function
-     * @param {number} [config.idSize=22] - Size for auto-generated IDs
-     * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
-     * @example
-     * const users = new Resource({
-     *   name: 'users',
-     *   client: s3Client,
-     *   attributes: {
-     *     name: 'string|required',
-     *     email: 'string|required',
-     *     password: 'secret|required'
-     *   },
-     *   behavior: 'user-managed',
-     *   passphrase: 'my-secret-key',
-     *   timestamps: true,
-     *   partitions: {
-     *     byRegion: {
-     *       fields: { region: 'string' }
-     *     }
-     *   },
-     *   hooks: {
-     *     beforeInsert: [async (data) => {
-        *       return data;
-     *     }]
-     *   }
-     * });
-     * 
-     * // With custom ID size
-     * const shortIdUsers = new Resource({
-     *   name: 'users',
-     *   client: s3Client,
-     *   attributes: { name: 'string|required' },
-     *   idSize: 8 // Generate 8-character IDs
-     * });
-     * 
-     * // With custom ID generator function
-     * const customIdUsers = new Resource({
-     *   name: 'users',
-     *   client: s3Client,
-     *   attributes: { name: 'string|required' },
-     *   idGenerator: () => `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
-     * });
-     * 
-     * // With custom ID generator using size parameter
-     * const longIdUsers = new Resource({
-     *   name: 'users',
-     *   client: s3Client,
-     *   attributes: { name: 'string|required' },
-     *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
-     * });
-     */
-    constructor(config = {}) {
-      super();
-      this._instanceId = Math.random().toString(36).slice(2, 8);
-      const validation = validateResourceConfig(config);
-      if (!validation.isValid) {
-        throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: "constructor", suggestion: "Check resource config and attributes." });
-      }
-      const {
-        name,
-        client,
-        version = "1",
-        attributes = {},
-        behavior = DEFAULT_BEHAVIOR,
-        passphrase = "secret",
-        parallelism = 10,
-        observers = [],
-        cache = false,
-        autoDecrypt = true,
-        timestamps = false,
-        partitions = {},
-        paranoid = true,
-        allNestedObjectsOptional = true,
-        hooks = {},
-        idGenerator: customIdGenerator,
-        idSize = 22,
-        versioningEnabled = false
-      } = config;
-      this.name = name;
-      this.client = client;
-      this.version = version;
-      this.behavior = behavior;
-      this.observers = observers;
-      this.parallelism = parallelism;
-      this.passphrase = passphrase ?? "secret";
-      this.versioningEnabled = versioningEnabled;
-      this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
-      this.config = {
-        cache,
-        hooks,
-        paranoid,
-        timestamps,
-        partitions,
-        autoDecrypt,
-        allNestedObjectsOptional
-      };
-      this.hooks = {
-        beforeInsert: [],
-        afterInsert: [],
-        beforeUpdate: [],
-        afterUpdate: [],
-        beforeDelete: [],
-        afterDelete: []
-      };
-      this.attributes = attributes || {};
-      this.map = config.map;
-      this.applyConfiguration({ map: this.map });
-      if (hooks) {
-        for (const [event, hooksArr] of Object.entries(hooks)) {
-          if (Array.isArray(hooksArr) && this.hooks[event]) {
-            for (const fn of hooksArr) {
-              if (typeof fn === "function") {
-                this.hooks[event].push(fn.bind(this));
-              }
-            }
-          }
-        }
-      }
-      this._initMiddleware();
-    }
-    /**
-     * Configure ID generator based on provided options
-     * @param {Function|number} customIdGenerator - Custom ID generator function or size
-     * @param {number} idSize - Size for auto-generated IDs
-     * @returns {Function} Configured ID generator function
-     * @private
-     */
-    configureIdGenerator(customIdGenerator, idSize) {
-      if (typeof customIdGenerator === "function") {
-        return customIdGenerator;
-      }
-      if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
-        return nanoid.customAlphabet(nanoid.urlAlphabet, customIdGenerator);
-      }
-      if (typeof idSize === "number" && idSize > 0 && idSize !== 22) {
-        return nanoid.customAlphabet(nanoid.urlAlphabet, idSize);
-      }
-      return idGenerator;
-    }
-    /**
-     * Get resource options (for backward compatibility with tests)
-     */
-    get options() {
-      return {
-        timestamps: this.config.timestamps,
-        partitions: this.config.partitions || {},
-        cache: this.config.cache,
-        autoDecrypt: this.config.autoDecrypt,
-        paranoid: this.config.paranoid,
-        allNestedObjectsOptional: this.config.allNestedObjectsOptional
-      };
-    }
-    export() {
-      const exported = this.schema.export();
-      exported.behavior = this.behavior;
-      exported.timestamps = this.config.timestamps;
-      exported.partitions = this.config.partitions || {};
-      exported.paranoid = this.config.paranoid;
-      exported.allNestedObjectsOptional = this.config.allNestedObjectsOptional;
-      exported.autoDecrypt = this.config.autoDecrypt;
-      exported.cache = this.config.cache;
-      exported.hooks = this.hooks;
-      exported.map = this.map;
-      return exported;
-    }
-    /**
-     * Apply configuration settings (timestamps, partitions, hooks)
-     * This method ensures that all configuration-dependent features are properly set up
-     */
-    applyConfiguration({ map } = {}) {
-      if (this.config.timestamps) {
-        if (!this.attributes.createdAt) {
-          this.attributes.createdAt = "string|optional";
-        }
-        if (!this.attributes.updatedAt) {
-          this.attributes.updatedAt = "string|optional";
-        }
-        if (!this.config.partitions) {
-          this.config.partitions = {};
-        }
-        if (!this.config.partitions.byCreatedDate) {
-          this.config.partitions.byCreatedDate = {
-            fields: {
-              createdAt: "date|maxlength:10"
-            }
-          };
-        }
-        if (!this.config.partitions.byUpdatedDate) {
-          this.config.partitions.byUpdatedDate = {
-            fields: {
-              updatedAt: "date|maxlength:10"
-            }
-          };
-        }
-      }
-      this.setupPartitionHooks();
-      if (this.versioningEnabled) {
-        if (!this.config.partitions.byVersion) {
-          this.config.partitions.byVersion = {
-            fields: {
-              _v: "string"
-            }
-          };
-        }
-      }
-      this.schema = new Schema({
-        name: this.name,
-        attributes: this.attributes,
-        passphrase: this.passphrase,
-        version: this.version,
-        options: {
-          autoDecrypt: this.config.autoDecrypt,
-          allNestedObjectsOptional: this.config.allNestedObjectsOptional
-        },
-        map: map || this.map
-      });
-      this.validatePartitions();
-    }
-    /**
-     * Update resource attributes and rebuild schema
-     * @param {Object} newAttributes - New attributes definition
-     */
-    updateAttributes(newAttributes) {
-      const oldAttributes = this.attributes;
-      this.attributes = newAttributes;
-      this.applyConfiguration({ map: this.schema?.map });
-      return { oldAttributes, newAttributes };
-    }
-    /**
-     * Add a hook function for a specific event
-     * @param {string} event - Hook event (beforeInsert, afterInsert, etc.)
-     * @param {Function} fn - Hook function
-     */
-    addHook(event, fn) {
-      if (this.hooks[event]) {
-        this.hooks[event].push(fn.bind(this));
-      }
-    }
-    /**
-     * Execute hooks for a specific event
-     * @param {string} event - Hook event
-     * @param {*} data - Data to pass to hooks
-     * @returns {*} Modified data
-     */
-    async executeHooks(event, data) {
-      if (!this.hooks[event]) return data;
-      let result = data;
-      for (const hook of this.hooks[event]) {
-        result = await hook(result);
-      }
-      return result;
-    }
-    /**
-     * Setup automatic partition hooks
-     */
-    setupPartitionHooks() {
-      if (!this.config.partitions) {
-        return;
-      }
-      const partitions = this.config.partitions;
-      if (Object.keys(partitions).length === 0) {
-        return;
-      }
-      if (!this.hooks.afterInsert) {
-        this.hooks.afterInsert = [];
-      }
-      this.hooks.afterInsert.push(async (data) => {
-        await this.createPartitionReferences(data);
-        return data;
-      });
-      if (!this.hooks.afterDelete) {
-        this.hooks.afterDelete = [];
-      }
-      this.hooks.afterDelete.push(async (data) => {
-        await this.deletePartitionReferences(data);
-        return data;
-      });
-    }
-    async validate(data) {
-      const result = {
-        original: lodashEs.cloneDeep(data),
-        isValid: false,
-        errors: []
-      };
-      const check = await this.schema.validate(data, { mutateOriginal: false });
-      if (check === true) {
-        result.isValid = true;
-      } else {
-        result.errors = check;
-      }
-      result.data = data;
-      return result;
-    }
-    /**
-     * Validate that all partition fields exist in current resource attributes
-     * @throws {Error} If partition fields don't exist in current schema
-     */
-    validatePartitions() {
-      if (!this.config.partitions) {
-        return;
-      }
-      const partitions = this.config.partitions;
-      if (Object.keys(partitions).length === 0) {
-        return;
-      }
-      const currentAttributes = Object.keys(this.attributes || {});
-      for (const [partitionName, partitionDef] of Object.entries(partitions)) {
-        if (!partitionDef.fields) {
-          continue;
-        }
-        for (const fieldName of Object.keys(partitionDef.fields)) {
-          if (!this.fieldExistsInAttributes(fieldName)) {
-            throw new PartitionError(`Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(", ")}.`, { resourceName: this.name, partitionName, fieldName, availableFields: currentAttributes, operation: "validatePartitions" });
-          }
-        }
-      }
-    }
-    /**
-     * Check if a field (including nested fields) exists in the current attributes
-     * @param {string} fieldName - Field name (can be nested like 'utm.source')
-     * @returns {boolean} True if field exists
-     */
-    fieldExistsInAttributes(fieldName) {
-      if (fieldName.startsWith("_")) {
-        return true;
-      }
-      if (!fieldName.includes(".")) {
-        return Object.keys(this.attributes || {}).includes(fieldName);
-      }
-      const keys = fieldName.split(".");
-      let currentLevel = this.attributes || {};
-      for (const key of keys) {
-        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
-          return false;
-        }
-        currentLevel = currentLevel[key];
-      }
-      return true;
-    }
-    /**
-     * Apply a single partition rule to a field value
-     * @param {*} value - The field value
-     * @param {string} rule - The partition rule
-     * @returns {*} Transformed value
-     */
-    applyPartitionRule(value, rule) {
-      if (value === void 0 || value === null) {
-        return value;
-      }
-      let transformedValue = value;
-      if (typeof rule === "string" && rule.includes("maxlength:")) {
-        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
-        if (maxLengthMatch) {
-          const maxLength = parseInt(maxLengthMatch[1]);
-          if (typeof transformedValue === "string" && transformedValue.length > maxLength) {
-            transformedValue = transformedValue.substring(0, maxLength);
-          }
-        }
-      }
-      if (rule.includes("date")) {
-        if (transformedValue instanceof Date) {
-          transformedValue = transformedValue.toISOString().split("T")[0];
-        } else if (typeof transformedValue === "string") {
-          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
-            transformedValue = transformedValue.split("T")[0];
-          } else {
-            const date = new Date(transformedValue);
-            if (!isNaN(date.getTime())) {
-              transformedValue = date.toISOString().split("T")[0];
-            }
-          }
-        }
-      }
-      return transformedValue;
-    }
-    /**
-     * Get the main resource key (new format without version in path)
-     * @param {string} id - Resource ID
-     * @returns {string} The main S3 key path
-     */
-    getResourceKey(id) {
-      const key = join("resource=" + this.name, "data", `id=${id}`);
-      return key;
-    }
-    /**
-     * Generate partition key for a resource in a specific partition
-     * @param {Object} params - Partition key parameters
-     * @param {string} params.partitionName - Name of the partition
-     * @param {string} params.id - Resource ID
-     * @param {Object} params.data - Resource data for partition value extraction
-     * @returns {string|null} The partition key path or null if required fields are missing
-     * @example
-     * const partitionKey = resource.getPartitionKey({
-     *   partitionName: 'byUtmSource',
-     *   id: 'user-123',
-     *   data: { utm: { source: 'google' } }
-     * });
-     * // Returns: 'resource=users/partition=byUtmSource/utm.source=google/id=user-123'
-     * 
-     * // Returns null if required field is missing
-     * const nullKey = resource.getPartitionKey({
-     *   partitionName: 'byUtmSource',
-     *   id: 'user-123',
-     *   data: { name: 'John' } // Missing utm.source
-     * });
-     * // Returns: null
-     */
-    getPartitionKey({ partitionName, id, data }) {
-      if (!this.config.partitions || !this.config.partitions[partitionName]) {
-        throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getPartitionKey" });
-      }
-      const partition = this.config.partitions[partitionName];
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const fieldValue = this.getNestedFieldValue(data, fieldName);
-        const transformedValue = this.applyPartitionRule(fieldValue, rule);
-        if (transformedValue === void 0 || transformedValue === null) {
-          return null;
-        }
-        partitionSegments.push(`${fieldName}=${transformedValue}`);
-      }
-      if (partitionSegments.length === 0) {
-        return null;
-      }
-      const finalId = id || data?.id;
-      if (!finalId) {
-        return null;
-      }
-      return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
-    }
-    /**
-     * Get nested field value from data object using dot notation
-     * @param {Object} data - Data object
-     * @param {string} fieldPath - Field path (e.g., "utm.source", "address.city")
-     * @returns {*} Field value
-     */
-    getNestedFieldValue(data, fieldPath) {
-      if (!fieldPath.includes(".")) {
-        return data[fieldPath];
-      }
-      const keys = fieldPath.split(".");
-      let currentLevel = data;
-      for (const key of keys) {
-        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
-          return void 0;
-        }
-        currentLevel = currentLevel[key];
-      }
-      return currentLevel;
-    }
-    /**
-     * Calculate estimated content length for body data
-     * @param {string|Buffer} body - Body content
-     * @returns {number} Estimated content length in bytes
-     */
-    calculateContentLength(body) {
-      if (!body) return 0;
-      if (Buffer.isBuffer(body)) return body.length;
-      if (typeof body === "string") return Buffer.byteLength(body, "utf8");
-      if (typeof body === "object") return Buffer.byteLength(JSON.stringify(body), "utf8");
-      return Buffer.byteLength(String(body), "utf8");
-    }
-    /**
-     * Insert a new resource object
-     * @param {Object} attributes - Resource attributes
-     * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
-     * @returns {Promise<Object>} The created resource object with all attributes
-     * @example
-     * // Insert with auto-generated ID
-     * const user = await resource.insert({
-     *   name: 'John Doe',
-     *   email: 'john@example.com',
-     *   age: 30
-     * });
-        * 
-     * // Insert with custom ID
-     * const user = await resource.insert({
-     *   id: 'user-123',
-     *   name: 'John Doe',
-     *   email: 'john@example.com'
-     * });
-     */
-    async insert({ id, ...attributes }) {
-      const exists = await this.exists(id);
-      if (exists) throw new Error(`Resource with id '${id}' already exists`);
-      this.getResourceKey(id || "(auto)");
-      if (this.options.timestamps) {
-        attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
-        attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-      }
-      const attributesWithDefaults = this.applyDefaults(attributes);
-      const completeData = { id, ...attributesWithDefaults };
-      const preProcessedData = await this.executeHooks("beforeInsert", completeData);
-      const extraProps = Object.keys(preProcessedData).filter(
-        (k) => !(k in completeData) || preProcessedData[k] !== completeData[k]
-      );
-      const extraData = {};
-      for (const k of extraProps) extraData[k] = preProcessedData[k];
-      const {
-        errors,
-        isValid,
-        data: validated
-      } = await this.validate(preProcessedData);
-      if (!isValid) {
-        const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Insert failed";
-        throw new InvalidResourceItem({
-          bucket: this.client.config.bucket,
-          resourceName: this.name,
-          attributes: preProcessedData,
-          validation: errors,
-          message: errorMsg
-        });
-      }
-      const { id: validatedId, ...validatedAttributes } = validated;
-      Object.assign(validatedAttributes, extraData);
-      const finalId = validatedId || id || this.idGenerator();
-      const mappedData = await this.schema.mapper(validatedAttributes);
-      mappedData._v = String(this.version);
-      const behaviorImpl = getBehavior(this.behavior);
-      const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
-        resource: this,
-        data: validatedAttributes,
-        mappedData,
-        originalData: completeData
-      });
-      const finalMetadata = processedMetadata;
-      const key = this.getResourceKey(finalId);
-      let contentType = void 0;
-      if (body && body !== "") {
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
-        if (okParse) contentType = "application/json";
-      }
-      if (this.behavior === "body-only" && (!body || body === "")) {
-        throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
-      }
-      const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
-        key,
-        body,
-        contentType,
-        metadata: finalMetadata
-      }));
-      if (!okPut) {
-        const msg = errPut && errPut.message ? errPut.message : "";
-        if (msg.includes("metadata headers exceed") || msg.includes("Insert failed")) {
-          const totalSize = calculateTotalSize(finalMetadata);
-          const effectiveLimit = calculateEffectiveLimit({
-            s3Limit: 2047,
-            systemConfig: {
-              version: this.version,
-              timestamps: this.config.timestamps,
-              id: finalId
-            }
-          });
-          const excess = totalSize - effectiveLimit;
-          errPut.totalSize = totalSize;
-          errPut.limit = 2047;
-          errPut.effectiveLimit = effectiveLimit;
-          errPut.excess = excess;
-          throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "insert", id: finalId, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
-        }
-        throw mapAwsError(errPut, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "insert",
-          id: finalId
-        });
-      }
-      let insertedData = await this.composeFullObjectFromWrite({
-        id: finalId,
-        metadata: finalMetadata,
-        body,
-        behavior: this.behavior
-      });
-      const finalResult = await this.executeHooks("afterInsert", insertedData);
-      this.emit("insert", {
-        ...insertedData,
-        $before: { ...completeData },
-        $after: { ...finalResult }
-      });
-      return finalResult;
-    }
-    /**
-     * Retrieve a resource object by ID
-     * @param {string} id - Resource ID
-     * @returns {Promise<Object>} The resource object with all attributes and metadata
-     * @example
-     * const user = await resource.get('user-123');
-              */
-    async get(id) {
-      if (lodashEs.isObject(id)) throw new Error(`id cannot be an object`);
-      if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
-      const key = this.getResourceKey(id);
-      const [ok, err, request] = await tryFn(() => this.client.getObject(key));
-      if (!ok) {
-        throw mapAwsError(err, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "get",
-          id
-        });
-      }
-      if (request.ContentLength === 0) {
-        const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
-        noContentErr.name = "NoSuchKey";
-        throw mapAwsError(noContentErr, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "get",
-          id
-        });
-      }
-      const objectVersionRaw = request.Metadata?._v || this.version;
-      const objectVersion = typeof objectVersionRaw === "string" && objectVersionRaw.startsWith("v") ? objectVersionRaw.slice(1) : objectVersionRaw;
-      const schema = await this.getSchemaForVersion(objectVersion);
-      let metadata = await schema.unmapper(request.Metadata);
-      const behaviorImpl = getBehavior(this.behavior);
-      let body = "";
-      if (request.ContentLength > 0) {
-        const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
-        if (okBody) {
-          body = await streamToString(fullObject.Body);
-        } else {
-          body = "";
-        }
-      }
-      const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-        resource: this,
-        metadata,
-        body
-      });
-      let data = await this.composeFullObjectFromWrite({
-        id,
-        metadata: processedMetadata,
-        body,
-        behavior: this.behavior
-      });
-      data._contentLength = request.ContentLength;
-      data._lastModified = request.LastModified;
-      data._hasContent = request.ContentLength > 0;
-      data._mimeType = request.ContentType || null;
-      data._v = objectVersion;
-      if (request.VersionId) data._versionId = request.VersionId;
-      if (request.Expiration) data._expiresAt = request.Expiration;
-      data._definitionHash = this.getDefinitionHash();
-      if (objectVersion !== this.version) {
-        data = await this.applyVersionMapping(data, objectVersion, this.version);
-      }
-      this.emit("get", data);
-      const value = data;
-      return value;
-    }
-    /**
-     * Check if a resource exists by ID
-     * @returns {Promise<boolean>} True if resource exists, false otherwise
-     */
-    async exists(id) {
-      const key = this.getResourceKey(id);
-      const [ok, err] = await tryFn(() => this.client.headObject(key));
-      return ok;
-    }
-    /**
-     * Update an existing resource object
-     * @param {string} id - Resource ID
-     * @param {Object} attributes - Attributes to update (partial update supported)
-     * @returns {Promise<Object>} The updated resource object with all attributes
-     * @example
-     * // Update specific fields
-     * const updatedUser = await resource.update('user-123', {
-     *   name: 'John Updated',
-     *   age: 31
-     * });
-     * 
-     * // Update with timestamps (if enabled)
-     * const updatedUser = await resource.update('user-123', {
-     *   email: 'newemail@example.com'
-     * });
-        */
-    async update(id, attributes) {
-      if (lodashEs.isEmpty(id)) {
-        throw new Error("id cannot be empty");
-      }
-      const exists = await this.exists(id);
-      if (!exists) {
-        throw new Error(`Resource with id '${id}' does not exist`);
-      }
-      const originalData = await this.get(id);
-      const attributesClone = lodashEs.cloneDeep(attributes);
-      let mergedData = lodashEs.cloneDeep(originalData);
-      for (const [key2, value] of Object.entries(attributesClone)) {
-        if (key2.includes(".")) {
-          let ref = mergedData;
-          const parts = key2.split(".");
-          for (let i = 0; i < parts.length - 1; i++) {
-            if (typeof ref[parts[i]] !== "object" || ref[parts[i]] === null) {
-              ref[parts[i]] = {};
-            }
-            ref = ref[parts[i]];
-          }
-          ref[parts[parts.length - 1]] = lodashEs.cloneDeep(value);
-        } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-          mergedData[key2] = lodashEs.merge({}, mergedData[key2], value);
-        } else {
-          mergedData[key2] = lodashEs.cloneDeep(value);
-        }
-      }
-      if (this.config.timestamps) {
-        const now = (/* @__PURE__ */ new Date()).toISOString();
-        mergedData.updatedAt = now;
-        if (!mergedData.metadata) mergedData.metadata = {};
-        mergedData.metadata.updatedAt = now;
-      }
-      const preProcessedData = await this.executeHooks("beforeUpdate", lodashEs.cloneDeep(mergedData));
-      const completeData = { ...originalData, ...preProcessedData, id };
-      const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData));
-      if (!isValid) {
-        throw new InvalidResourceItem({
-          bucket: this.client.config.bucket,
-          resourceName: this.name,
-          attributes: preProcessedData,
-          validation: errors,
-          message: "validation: " + (errors && errors.length ? JSON.stringify(errors) : "unknown")
-        });
-      }
-      await this.schema.mapper(data);
-      const earlyBehaviorImpl = getBehavior(this.behavior);
-      const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
-      tempMappedData._v = String(this.version);
-      await earlyBehaviorImpl.handleUpdate({
-        resource: this,
-        id,
-        data: { ...originalData, ...preProcessedData },
-        mappedData: tempMappedData,
-        originalData: { ...attributesClone, id }
-      });
-      const { id: validatedId, ...validatedAttributes } = data;
-      const oldData = { ...originalData, id };
-      const newData = { ...validatedAttributes, id };
-      await this.handlePartitionReferenceUpdates(oldData, newData);
-      const mappedData = await this.schema.mapper(validatedAttributes);
-      mappedData._v = String(this.version);
-      const behaviorImpl = getBehavior(this.behavior);
-      const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-        resource: this,
-        id,
-        data: validatedAttributes,
-        mappedData,
-        originalData: { ...attributesClone, id }
-      });
-      const finalMetadata = processedMetadata;
-      const key = this.getResourceKey(id);
-      let existingContentType = void 0;
-      let finalBody = body;
-      if (body === "" && this.behavior !== "body-overflow") {
-        const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
-        if (ok2 && existingObject.ContentLength > 0) {
-          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
-          const existingBodyString = existingBodyBuffer.toString();
-          const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
-          if (!okParse) {
-            finalBody = existingBodyBuffer;
-            existingContentType = existingObject.ContentType;
-          }
-        }
-      }
-      let finalContentType = existingContentType;
-      if (finalBody && finalBody !== "" && !finalContentType) {
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
-        if (okParse) finalContentType = "application/json";
-      }
-      if (this.versioningEnabled && originalData._v !== this.version) {
-        await this.createHistoricalVersion(id, originalData);
-      }
-      const [ok, err] = await tryFn(() => this.client.putObject({
-        key,
-        body: finalBody,
-        contentType: finalContentType,
-        metadata: finalMetadata
-      }));
-      if (!ok && err && err.message && err.message.includes("metadata headers exceed")) {
-        const totalSize = calculateTotalSize(finalMetadata);
-        const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
-          systemConfig: {
-            version: this.version,
-            timestamps: this.config.timestamps,
-            id
-          }
-        });
-        const excess = totalSize - effectiveLimit;
-        err.totalSize = totalSize;
-        err.limit = 2047;
-        err.effectiveLimit = effectiveLimit;
-        err.excess = excess;
-        this.emit("exceedsLimit", {
-          operation: "update",
-          totalSize,
-          limit: 2047,
-          effectiveLimit,
-          excess,
-          data: validatedAttributes
-        });
-        throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "update", id, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
-      } else if (!ok) {
-        throw mapAwsError(err, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "update",
-          id
-        });
-      }
-      const updatedData = await this.composeFullObjectFromWrite({
-        id,
-        metadata: finalMetadata,
-        body: finalBody,
-        behavior: this.behavior
-      });
-      const finalResult = await this.executeHooks("afterUpdate", updatedData);
-      this.emit("update", {
-        ...updatedData,
-        $before: { ...originalData },
-        $after: { ...finalResult }
-      });
-      return finalResult;
-    }
-    /**
-     * Delete a resource object by ID
-     * @param {string} id - Resource ID
-     * @returns {Promise<Object>} S3 delete response
-     * @example
-     * await resource.delete('user-123');
-     */
-    async delete(id) {
-      if (lodashEs.isEmpty(id)) {
-        throw new Error("id cannot be empty");
-      }
-      let objectData;
-      let deleteError = null;
-      const [ok, err, data] = await tryFn(() => this.get(id));
-      if (ok) {
-        objectData = data;
-      } else {
-        objectData = { id };
-        deleteError = err;
-      }
-      await this.executeHooks("beforeDelete", objectData);
-      const key = this.getResourceKey(id);
-      const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-      this.emit("delete", {
-        ...objectData,
-        $before: { ...objectData },
-        $after: null
-      });
-      if (deleteError) {
-        throw mapAwsError(deleteError, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "delete",
-          id
-        });
-      }
-      if (!ok2) throw mapAwsError(err2, {
-        key,
-        resourceName: this.name,
-        operation: "delete",
-        id
-      });
-      await this.executeHooks("afterDelete", objectData);
-      return response;
-    }
-    /**
-     * Insert or update a resource object (upsert operation)
-     * @param {Object} params - Upsert parameters
-     * @param {string} params.id - Resource ID (required for upsert)
-     * @param {...Object} params - Resource attributes (any additional properties)
-     * @returns {Promise<Object>} The inserted or updated resource object
-     * @example
-     * // Will insert if doesn't exist, update if exists
-     * const user = await resource.upsert({
-     *   id: 'user-123',
-     *   name: 'John Doe',
-     *   email: 'john@example.com'
-     * });
-     */
-    async upsert({ id, ...attributes }) {
-      const exists = await this.exists(id);
-      if (exists) {
-        return this.update(id, attributes);
-      }
-      return this.insert({ id, ...attributes });
-    }
-    /**
-     * Count resources with optional partition filtering
-     * @param {Object} [params] - Count parameters
-     * @param {string} [params.partition] - Partition name to count in
-     * @param {Object} [params.partitionValues] - Partition field values to filter by
-     * @returns {Promise<number>} Total count of matching resources
-     * @example
-     * // Count all resources
-     * const total = await resource.count();
-     * 
-     * // Count in specific partition
-     * const googleUsers = await resource.count({
-     *   partition: 'byUtmSource',
-     *   partitionValues: { 'utm.source': 'google' }
-     * });
-     * 
-     * // Count in multi-field partition
-     * const usElectronics = await resource.count({
-     *   partition: 'byCategoryRegion',
-     *   partitionValues: { category: 'electronics', region: 'US' }
-     * });
-     */
-    async count({ partition = null, partitionValues = {} } = {}) {
-      let prefix;
-      if (partition && Object.keys(partitionValues).length > 0) {
-        const partitionDef = this.config.partitions[partition];
-        if (!partitionDef) {
-          throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "count" });
-        }
-        const partitionSegments = [];
-        const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-        for (const [fieldName, rule] of sortedFields) {
-          const value = partitionValues[fieldName];
-          if (value !== void 0 && value !== null) {
-            const transformedValue = this.applyPartitionRule(value, rule);
-            partitionSegments.push(`${fieldName}=${transformedValue}`);
-          }
-        }
-        if (partitionSegments.length > 0) {
-          prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-        } else {
-          prefix = `resource=${this.name}/partition=${partition}`;
-        }
-      } else {
-        prefix = `resource=${this.name}/data`;
-      }
-      const count = await this.client.count({ prefix });
-      this.emit("count", count);
-      return count;
-    }
-    /**
-     * Insert multiple resources in parallel
-     * @param {Object[]} objects - Array of resource objects to insert
-     * @returns {Promise<Object[]>} Array of inserted resource objects
-     * @example
-     * const users = [
-     *   { name: 'John', email: 'john@example.com' },
-     *   { name: 'Jane', email: 'jane@example.com' },
-     *   { name: 'Bob', email: 'bob@example.com' }
-     * ];
-     * const insertedUsers = await resource.insertMany(users);
-        */
-    async insertMany(objects) {
-      const { results } = await promisePool.PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content2) => {
-        this.emit("error", error, content2);
-        this.observers.map((x) => x.emit("error", this.name, error, content2));
-      }).process(async (attributes) => {
-        const result = await this.insert(attributes);
-        return result;
-      });
-      this.emit("insertMany", objects.length);
-      return results;
-    }
-    /**
-     * Delete multiple resources by their IDs in parallel
-     * @param {string[]} ids - Array of resource IDs to delete
-     * @returns {Promise<Object[]>} Array of S3 delete responses
-     * @example
-     * const deletedIds = ['user-1', 'user-2', 'user-3'];
-     * const results = await resource.deleteMany(deletedIds);
-        */
-    async deleteMany(ids) {
-      const packages = lodashEs.chunk(
-        ids.map((id) => this.getResourceKey(id)),
-        1e3
-      );
-      ids.map((id) => this.getResourceKey(id));
-      const { results } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content2) => {
-        this.emit("error", error, content2);
-        this.observers.map((x) => x.emit("error", this.name, error, content2));
-      }).process(async (keys) => {
-        const response = await this.client.deleteObjects(keys);
-        keys.forEach((key) => {
-          const parts = key.split("/");
-          const idPart = parts.find((part) => part.startsWith("id="));
-          const id = idPart ? idPart.replace("id=", "") : null;
-          if (id) {
-            this.emit("deleted", id);
-            this.observers.map((x) => x.emit("deleted", this.name, id));
-          }
-        });
-        return response;
-      });
-      this.emit("deleteMany", ids.length);
-      return results;
-    }
-    async deleteAll() {
-      if (this.config.paranoid !== false) {
-        throw new ResourceError("deleteAll() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAll", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAll." });
-      }
-      const prefix = `resource=${this.name}/data`;
-      const deletedCount = await this.client.deleteAll({ prefix });
-      this.emit("deleteAll", {
-        version: this.version,
-        prefix,
-        deletedCount
-      });
-      return { deletedCount, version: this.version };
-    }
-    /**
-     * Delete all data for this resource across ALL versions
-     * @returns {Promise<Object>} Deletion report
-     */
-    async deleteAllData() {
-      if (this.config.paranoid !== false) {
-        throw new ResourceError("deleteAllData() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAllData", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAllData." });
-      }
-      const prefix = `resource=${this.name}`;
-      const deletedCount = await this.client.deleteAll({ prefix });
-      this.emit("deleteAllData", {
-        resource: this.name,
-        prefix,
-        deletedCount
-      });
-      return { deletedCount, resource: this.name };
-    }
-    /**
-     * List resource IDs with optional partition filtering and pagination
-     * @param {Object} [params] - List parameters
-     * @param {string} [params.partition] - Partition name to list from
-     * @param {Object} [params.partitionValues] - Partition field values to filter by
-     * @param {number} [params.limit] - Maximum number of results to return
-     * @param {number} [params.offset=0] - Offset for pagination
-     * @returns {Promise<string[]>} Array of resource IDs (strings)
-     * @example
-     * // List all IDs
-     * const allIds = await resource.listIds();
-     * 
-     * // List IDs with pagination
-     * const firstPageIds = await resource.listIds({ limit: 10, offset: 0 });
-     * const secondPageIds = await resource.listIds({ limit: 10, offset: 10 });
-     * 
-     * // List IDs from specific partition
-     * const googleUserIds = await resource.listIds({
-     *   partition: 'byUtmSource',
-     *   partitionValues: { 'utm.source': 'google' }
-     * });
-     * 
-     * // List IDs from multi-field partition
-     * const usElectronicsIds = await resource.listIds({
-     *   partition: 'byCategoryRegion',
-     *   partitionValues: { category: 'electronics', region: 'US' }
-     * });
-     */
-    async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-      let prefix;
-      if (partition && Object.keys(partitionValues).length > 0) {
-        if (!this.config.partitions || !this.config.partitions[partition]) {
-          throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "listIds" });
-        }
-        const partitionDef = this.config.partitions[partition];
-        const partitionSegments = [];
-        const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-        for (const [fieldName, rule] of sortedFields) {
-          const value = partitionValues[fieldName];
-          if (value !== void 0 && value !== null) {
-            const transformedValue = this.applyPartitionRule(value, rule);
-            partitionSegments.push(`${fieldName}=${transformedValue}`);
-          }
-        }
-        if (partitionSegments.length > 0) {
-          prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-        } else {
-          prefix = `resource=${this.name}/partition=${partition}`;
-        }
-      } else {
-        prefix = `resource=${this.name}/data`;
-      }
-      const keys = await this.client.getKeysPage({
-        prefix,
-        offset,
-        amount: limit || 1e3
-        // Default to 1000 if no limit specified
-      });
-      const ids = keys.map((key) => {
-        const parts = key.split("/");
-        const idPart = parts.find((part) => part.startsWith("id="));
-        return idPart ? idPart.replace("id=", "") : null;
-      }).filter(Boolean);
-      this.emit("listIds", ids.length);
-      return ids;
-    }
-    /**
-     * List resources with optional partition filtering and pagination
-     * @param {Object} [params] - List parameters
-     * @param {string} [params.partition] - Partition name to list from
-     * @param {Object} [params.partitionValues] - Partition field values to filter by
-     * @param {number} [params.limit] - Maximum number of results
-     * @param {number} [params.offset=0] - Number of results to skip
-     * @returns {Promise<Object[]>} Array of resource objects
-     * @example
-     * // List all resources
-     * const allUsers = await resource.list();
-     * 
-     * // List with pagination
-     * const first10 = await resource.list({ limit: 10, offset: 0 });
-     * 
-     * // List from specific partition
-     * const usUsers = await resource.list({
-     *   partition: 'byCountry',
-     *   partitionValues: { 'profile.country': 'US' }
-     * });
-     */
-    async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-      const [ok, err, result] = await tryFn(async () => {
-        if (!partition) {
-          return await this.listMain({ limit, offset });
-        }
-        return await this.listPartition({ partition, partitionValues, limit, offset });
-      });
-      if (!ok) {
-        return this.handleListError(err, { partition, partitionValues });
-      }
-      return result;
-    }
-    async listMain({ limit, offset = 0 }) {
-      const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
-      if (!ok) throw err;
-      const results = await this.processListResults(ids, "main");
-      this.emit("list", { count: results.length, errors: 0 });
-      return results;
-    }
-    async listPartition({ partition, partitionValues, limit, offset = 0 }) {
-      if (!this.config.partitions?.[partition]) {
-        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
-        return [];
-      }
-      const partitionDef = this.config.partitions[partition];
-      const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-      const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-      if (!ok) throw err;
-      const ids = this.extractIdsFromKeys(keys).slice(offset);
-      const filteredIds = limit ? ids.slice(0, limit) : ids;
-      const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-      this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
-      return results;
-    }
-    /**
-     * Build partition prefix from partition definition and values
-     */
-    buildPartitionPrefix(partition, partitionDef, partitionValues) {
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      if (partitionSegments.length > 0) {
-        return `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
-      }
-      return `resource=${this.name}/partition=${partition}`;
-    }
-    /**
-     * Extract IDs from S3 keys
-     */
-    extractIdsFromKeys(keys) {
-      return keys.map((key) => {
-        const parts = key.split("/");
-        const idPart = parts.find((part) => part.startsWith("id="));
-        return idPart ? idPart.replace("id=", "") : null;
-      }).filter(Boolean);
-    }
-    /**
-     * Process list results with error handling
-     */
-    async processListResults(ids, context = "main") {
-      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      }).process(async (id) => {
-        const [ok, err, result] = await tryFn(() => this.get(id));
-        if (ok) {
-          return result;
-        }
-        return this.handleResourceError(err, id, context);
-      });
-      this.emit("list", { count: results.length, errors: 0 });
-      return results;
-    }
-    /**
-     * Process partition results with error handling
-     */
-    async processPartitionResults(ids, partition, partitionDef, keys) {
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-      }).process(async (id) => {
-        const [ok, err, result] = await tryFn(async () => {
-          const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
-          return await this.getFromPartition({
-            id,
-            partitionName: partition,
-            partitionValues: actualPartitionValues
-          });
-        });
-        if (ok) return result;
-        return this.handleResourceError(err, id, "partition");
-      });
-      return results.filter((item) => item !== null);
-    }
-    /**
-     * Extract partition values from S3 key for specific ID
-     */
-    extractPartitionValuesFromKey(id, keys, sortedFields) {
-      const keyForId = keys.find((key) => key.includes(`id=${id}`));
-      if (!keyForId) {
-        throw new PartitionError(`Partition key not found for ID ${id}`, { resourceName: this.name, id, operation: "extractPartitionValuesFromKey" });
-      }
-      const keyParts = keyForId.split("/");
-      const actualPartitionValues = {};
-      for (const [fieldName] of sortedFields) {
-        const fieldPart = keyParts.find((part) => part.startsWith(`${fieldName}=`));
-        if (fieldPart) {
-          const value = fieldPart.replace(`${fieldName}=`, "");
-          actualPartitionValues[fieldName] = value;
-        }
-      }
-      return actualPartitionValues;
-    }
-    /**
-     * Handle resource-specific errors
-     */
-    handleResourceError(error, id, context) {
-      if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
-        return {
-          id,
-          _decryptionFailed: true,
-          _error: error.message,
-          ...context === "partition" && { _partition: context }
-        };
-      }
-      throw error;
-    }
-    /**
-     * Handle list method errors
-     */
-    handleListError(error, { partition, partitionValues }) {
-      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
-        return [];
-      }
-      this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
-      return [];
-    }
-    /**
-     * Get multiple resources by their IDs
-     * @param {string[]} ids - Array of resource IDs
-     * @returns {Promise<Object[]>} Array of resource objects
-     * @example
-     * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
-        */
-    async getMany(ids) {
-      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
-        this.emit("error", error, content);
-        this.observers.map((x) => x.emit("error", this.name, error, content));
-        return {
-          id,
-          _error: error.message,
-          _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
-        };
-      }).process(async (id) => {
-        const [ok, err, data] = await tryFn(() => this.get(id));
-        if (ok) return data;
-        if (err.message.includes("Cipher job failed") || err.message.includes("OperationError")) {
-          return {
-            id,
-            _decryptionFailed: true,
-            _error: err.message
-          };
-        }
-        throw err;
-      });
-      this.emit("getMany", ids.length);
-      return results;
-    }
-    /**
-     * Get all resources (equivalent to list() without pagination)
-     * @returns {Promise<Object[]>} Array of all resource objects
-     * @example
-     * const allUsers = await resource.getAll();
-        */
-    async getAll() {
-      const [ok, err, ids] = await tryFn(() => this.listIds());
-      if (!ok) throw err;
-      const results = [];
-      for (const id of ids) {
-        const [ok2, err2, item] = await tryFn(() => this.get(id));
-        if (ok2) {
-          results.push(item);
-        }
-      }
-      return results;
-    }
-    /**
-     * Get a page of resources with pagination metadata
-     * @param {Object} [params] - Page parameters
-     * @param {number} [params.offset=0] - Offset for pagination
-     * @param {number} [params.size=100] - Page size
-     * @param {string} [params.partition] - Partition name to page from
-     * @param {Object} [params.partitionValues] - Partition field values to filter by
-     * @param {boolean} [params.skipCount=false] - Skip total count for performance (useful for large collections)
-     * @returns {Promise<Object>} Page result with items and pagination info
-     * @example
-     * // Get first page of all resources
-     * const page = await resource.page({ offset: 0, size: 10 });
-           * 
-     * // Get page from specific partition
-     * const googlePage = await resource.page({
-     *   partition: 'byUtmSource',
-     *   partitionValues: { 'utm.source': 'google' },
-     *   offset: 0,
-     *   size: 5
-     * });
-     * 
-     * // Skip count for performance in large collections
-     * const fastPage = await resource.page({ 
-     *   offset: 0, 
-     *   size: 100, 
-     *   skipCount: true 
-     * });
-        */
-    async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-      const [ok, err, result] = await tryFn(async () => {
-        let totalItems = null;
-        let totalPages = null;
-        if (!skipCount) {
-          const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
-          if (okCount) {
-            totalItems = count;
-            totalPages = Math.ceil(totalItems / size);
-          } else {
-            totalItems = null;
-            totalPages = null;
-          }
-        }
-        const page = Math.floor(offset / size);
-        let items = [];
-        if (size <= 0) {
-          items = [];
-        } else {
-          const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
-          items = okList ? listResult : [];
-        }
-        const result2 = {
-          items,
-          totalItems,
-          page,
-          pageSize: size,
-          totalPages,
-          hasMore: items.length === size && offset + size < (totalItems || Infinity),
-          _debug: {
-            requestedSize: size,
-            requestedOffset: offset,
-            actualItemsReturned: items.length,
-            skipCount,
-            hasTotalItems: totalItems !== null
-          }
-        };
-        this.emit("page", result2);
-        return result2;
-      });
-      if (ok) return result;
-      return {
-        items: [],
-        totalItems: null,
-        page: Math.floor(offset / size),
-        pageSize: size,
-        totalPages: null,
-        _debug: {
-          requestedSize: size,
-          requestedOffset: offset,
-          actualItemsReturned: 0,
-          skipCount,
-          hasTotalItems: false,
-          error: err.message
-        }
-      };
-    }
-    readable() {
-      const stream = new ResourceReader({ resource: this });
-      return stream.build();
-    }
-    writable() {
-      const stream = new ResourceWriter({ resource: this });
-      return stream.build();
-    }
-    /**
-     * Set binary content for a resource
-     * @param {Object} params - Content parameters
-     * @param {string} params.id - Resource ID
-     * @param {Buffer|string} params.buffer - Content buffer or string
-     * @param {string} [params.contentType='application/octet-stream'] - Content type
-     * @returns {Promise<Object>} Updated resource data
-     * @example
-     * // Set image content
-     * const imageBuffer = fs.readFileSync('image.jpg');
-     * await resource.setContent({
-     *   id: 'user-123',
-     *   buffer: imageBuffer,
-     *   contentType: 'image/jpeg'
-     * });
-     * 
-     * // Set text content
-     * await resource.setContent({
-     *   id: 'document-456',
-     *   buffer: 'Hello World',
-     *   contentType: 'text/plain'
-     * });
-     */
-    async setContent({ id, buffer, contentType = "application/octet-stream" }) {
-      const [ok, err, currentData] = await tryFn(() => this.get(id));
-      if (!ok || !currentData) {
-        throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: "setContent" });
-      }
-      const updatedData = {
-        ...currentData,
-        _hasContent: true,
-        _contentLength: buffer.length,
-        _mimeType: contentType
-      };
-      const mappedMetadata = await this.schema.mapper(updatedData);
-      const [ok2, err2] = await tryFn(() => this.client.putObject({
-        key: this.getResourceKey(id),
-        metadata: mappedMetadata,
-        body: buffer,
-        contentType
-      }));
-      if (!ok2) throw err2;
-      this.emit("setContent", { id, contentType, contentLength: buffer.length });
-      return updatedData;
-    }
-    /**
-     * Retrieve binary content associated with a resource
-     * @param {string} id - Resource ID
-     * @returns {Promise<Object>} Object with buffer and contentType
-     * @example
-     * const content = await resource.content('user-123');
-     * if (content.buffer) {
-           *   // Save to file
-     *   fs.writeFileSync('output.jpg', content.buffer);
-     * } else {
-        * }
-     */
-    async content(id) {
-      const key = this.getResourceKey(id);
-      const [ok, err, response] = await tryFn(() => this.client.getObject(key));
-      if (!ok) {
-        if (err.name === "NoSuchKey") {
-          return {
-            buffer: null,
-            contentType: null
-          };
-        }
-        throw err;
-      }
-      const buffer = Buffer.from(await response.Body.transformToByteArray());
-      const contentType = response.ContentType || null;
-      this.emit("content", id, buffer.length, contentType);
-      return {
-        buffer,
-        contentType
-      };
-    }
-    /**
-     * Check if binary content exists for a resource
-     * @param {string} id - Resource ID
-     * @returns {boolean}
-     */
-    async hasContent(id) {
-      const key = this.getResourceKey(id);
-      const [ok, err, response] = await tryFn(() => this.client.headObject(key));
-      if (!ok) return false;
-      return response.ContentLength > 0;
-    }
-    /**
-     * Delete binary content but preserve metadata
-     * @param {string} id - Resource ID
-     */
-    async deleteContent(id) {
-      const key = this.getResourceKey(id);
-      const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
-      if (!ok) throw err;
-      const existingMetadata = existingObject.Metadata || {};
-      const [ok2, err2, response] = await tryFn(() => this.client.putObject({
-        key,
-        body: "",
-        metadata: existingMetadata
-      }));
-      if (!ok2) throw err2;
-      this.emit("deleteContent", id);
-      return response;
-    }
-    /**
-     * Generate definition hash for this resource
-     * @returns {string} SHA256 hash of the resource definition (name + attributes)
-     */
-    getDefinitionHash() {
-      const definition = {
-        attributes: this.attributes,
-        behavior: this.behavior
-      };
-      const stableString = jsonStableStringify(definition);
-      return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
-    }
-    /**
-     * Extract version from S3 key
-     * @param {string} key - S3 object key
-     * @returns {string|null} Version string or null
-     */
-    extractVersionFromKey(key) {
-      const parts = key.split("/");
-      const versionPart = parts.find((part) => part.startsWith("v="));
-      return versionPart ? versionPart.replace("v=", "") : null;
-    }
-    /**
-     * Get schema for a specific version
-     * @param {string} version - Version string (e.g., 'v0', 'v1')
-     * @returns {Object} Schema object for the version
-     */
-    async getSchemaForVersion(version) {
-      if (version === this.version) {
-        return this.schema;
-      }
-      const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
-        name: this.name,
-        attributes: this.attributes,
-        passphrase: this.passphrase,
-        version,
-        options: {
-          ...this.config,
-          autoDecrypt: true,
-          autoEncrypt: true
-        }
-      })));
-      if (ok) return compatibleSchema;
-      return this.schema;
-    }
-    /**
-     * Create partition references after insert
-     * @param {Object} data - Inserted object data
-     */
-    async createPartitionReferences(data) {
-      const partitions = this.config.partitions;
-      if (!partitions || Object.keys(partitions).length === 0) {
-        return;
-      }
-      for (const [partitionName, partition] of Object.entries(partitions)) {
-        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-        if (partitionKey) {
-          const partitionMetadata = {
-            _v: String(this.version)
-          };
-          await this.client.putObject({
-            key: partitionKey,
-            metadata: partitionMetadata,
-            body: "",
-            contentType: void 0
-          });
-        }
-      }
-    }
-    /**
-     * Delete partition references after delete
-     * @param {Object} data - Deleted object data
-     */
-    async deletePartitionReferences(data) {
-      const partitions = this.config.partitions;
-      if (!partitions || Object.keys(partitions).length === 0) {
-        return;
-      }
-      const keysToDelete = [];
-      for (const [partitionName, partition] of Object.entries(partitions)) {
-        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-        if (partitionKey) {
-          keysToDelete.push(partitionKey);
-        }
-      }
-      if (keysToDelete.length > 0) {
-        const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
-      }
-    }
-    /**
-     * Query resources with simple filtering and pagination
-     * @param {Object} [filter={}] - Filter criteria (exact field matches)
-     * @param {Object} [options] - Query options
-     * @param {number} [options.limit=100] - Maximum number of results
-     * @param {number} [options.offset=0] - Offset for pagination
-     * @param {string} [options.partition] - Partition name to query from
-     * @param {Object} [options.partitionValues] - Partition field values to filter by
-     * @returns {Promise<Object[]>} Array of filtered resource objects
-     * @example
-     * // Query all resources (no filter)
-     * const allUsers = await resource.query();
-     * 
-     * // Query with simple filter
-     * const activeUsers = await resource.query({ status: 'active' });
-     * 
-     * // Query with multiple filters
-     * const usElectronics = await resource.query({
-     *   category: 'electronics',
-     *   region: 'US'
-     * });
-     * 
-     * // Query with pagination
-     * const firstPage = await resource.query(
-     *   { status: 'active' },
-     *   { limit: 10, offset: 0 }
-     * );
-     * 
-     * // Query within partition
-     * const googleUsers = await resource.query(
-     *   { status: 'active' },
-     *   {
-     *     partition: 'byUtmSource',
-     *     partitionValues: { 'utm.source': 'google' },
-     *     limit: 5
-     *   }
-     * );
-     */
-    async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
-      if (Object.keys(filter).length === 0) {
-        return await this.list({ partition, partitionValues, limit, offset });
-      }
-      const results = [];
-      let currentOffset = offset;
-      const batchSize = Math.min(limit, 50);
-      while (results.length < limit) {
-        const batch = await this.list({
-          partition,
-          partitionValues,
-          limit: batchSize,
-          offset: currentOffset
-        });
-        if (batch.length === 0) {
-          break;
-        }
-        const filteredBatch = batch.filter((doc) => {
-          return Object.entries(filter).every(([key, value]) => {
-            return doc[key] === value;
-          });
-        });
-        results.push(...filteredBatch);
-        currentOffset += batchSize;
-        if (batch.length < batchSize) {
-          break;
-        }
-      }
-      return results.slice(0, limit);
-    }
-    /**
-     * Handle partition reference updates with change detection
-     * @param {Object} oldData - Original object data before update
-     * @param {Object} newData - Updated object data
-     */
-    async handlePartitionReferenceUpdates(oldData, newData) {
-      const partitions = this.config.partitions;
-      if (!partitions || Object.keys(partitions).length === 0) {
-        return;
-      }
-      for (const [partitionName, partition] of Object.entries(partitions)) {
-        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
-      }
-      const id = newData.id || oldData.id;
-      for (const [partitionName, partition] of Object.entries(partitions)) {
-        const prefix = `resource=${this.name}/partition=${partitionName}`;
-        let allKeys = [];
-        const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-        if (okKeys) {
-          allKeys = keys;
-        } else {
-          continue;
-        }
-        const validKey = this.getPartitionKey({ partitionName, id, data: newData });
-        for (const key of allKeys) {
-          if (key.endsWith(`/id=${id}`) && key !== validKey) {
-            const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
-          }
-        }
-      }
-    }
-    /**
-     * Handle partition reference update for a specific partition
-     * @param {string} partitionName - Name of the partition
-     * @param {Object} partition - Partition definition
-     * @param {Object} oldData - Original object data before update
-     * @param {Object} newData - Updated object data
-     */
-    async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
-      const id = newData.id || oldData.id;
-      const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
-      const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
-      if (oldPartitionKey !== newPartitionKey) {
-        if (oldPartitionKey) {
-          const [ok, err] = await tryFn(async () => {
-            await this.client.deleteObject(oldPartitionKey);
-          });
-        }
-        if (newPartitionKey) {
-          const [ok, err] = await tryFn(async () => {
-            const partitionMetadata = {
-              _v: String(this.version)
-            };
-            await this.client.putObject({
-              key: newPartitionKey,
-              metadata: partitionMetadata,
-              body: "",
-              contentType: void 0
-            });
-          });
-        }
-      } else if (newPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
-          const partitionMetadata = {
-            _v: String(this.version)
-          };
-          await this.client.putObject({
-            key: newPartitionKey,
-            metadata: partitionMetadata,
-            body: "",
-            contentType: void 0
-          });
-        });
-      }
-    }
-    /**
-     * Update partition objects to keep them in sync (legacy method for backward compatibility)
-     * @param {Object} data - Updated object data
-     */
-    async updatePartitionReferences(data) {
-      const partitions = this.config.partitions;
-      if (!partitions || Object.keys(partitions).length === 0) {
-        return;
-      }
-      for (const [partitionName, partition] of Object.entries(partitions)) {
-        if (!partition || !partition.fields || typeof partition.fields !== "object") {
-          continue;
-        }
-        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-        if (partitionKey) {
-          const partitionMetadata = {
-            _v: String(this.version)
-          };
-          const [ok, err] = await tryFn(async () => {
-            await this.client.putObject({
-              key: partitionKey,
-              metadata: partitionMetadata,
-              body: "",
-              contentType: void 0
-            });
-          });
-        }
-      }
-    }
-    /**
-     * Get a resource object directly from a specific partition
-     * @param {Object} params - Partition parameters
-     * @param {string} params.id - Resource ID
-     * @param {string} params.partitionName - Name of the partition
-     * @param {Object} params.partitionValues - Values for partition fields
-     * @returns {Promise<Object>} The resource object with partition metadata
-     * @example
-     * // Get user from UTM source partition
-     * const user = await resource.getFromPartition({
-     *   id: 'user-123',
-     *   partitionName: 'byUtmSource',
-     *   partitionValues: { 'utm.source': 'google' }
-     * });
-           * 
-     * // Get product from multi-field partition
-     * const product = await resource.getFromPartition({
-     *   id: 'product-456',
-     *   partitionName: 'byCategoryRegion',
-     *   partitionValues: { category: 'electronics', region: 'US' }
-     * });
-     */
-    async getFromPartition({ id, partitionName, partitionValues = {} }) {
-      if (!this.config.partitions || !this.config.partitions[partitionName]) {
-        throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
-      }
-      const partition = this.config.partitions[partitionName];
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== void 0 && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      if (partitionSegments.length === 0) {
-        throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
-      }
-      const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-      const [ok, err] = await tryFn(async () => {
-        await this.client.headObject(partitionKey);
-      });
-      if (!ok) {
-        throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, { resourceName: this.name, id, partitionName, operation: "getFromPartition" });
-      }
-      const data = await this.get(id);
-      data._partition = partitionName;
-      data._partitionValues = partitionValues;
-      this.emit("getFromPartition", data);
-      return data;
-    }
-    /**
-     * Create a historical version of an object
-     * @param {string} id - Resource ID
-     * @param {Object} data - Object data to store historically
-     */
-    async createHistoricalVersion(id, data) {
-      const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
-      const historicalData = {
-        ...data,
-        _v: data._v || this.version,
-        _historicalTimestamp: (/* @__PURE__ */ new Date()).toISOString()
-      };
-      const mappedData = await this.schema.mapper(historicalData);
-      const behaviorImpl = getBehavior(this.behavior);
-      const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
-        resource: this,
-        data: historicalData,
-        mappedData
-      });
-      const finalMetadata = {
-        ...processedMetadata,
-        _v: data._v || this.version,
-        _historicalTimestamp: historicalData._historicalTimestamp
-      };
-      let contentType = void 0;
-      if (body && body !== "") {
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
-        if (okParse) contentType = "application/json";
-      }
-      await this.client.putObject({
-        key: historicalKey,
-        metadata: finalMetadata,
-        body,
-        contentType
-      });
-    }
-    /**
-     * Apply version mapping to convert an object from one version to another
-     * @param {Object} data - Object data to map
-     * @param {string} fromVersion - Source version
-     * @param {string} toVersion - Target version
-     * @returns {Object} Mapped object data
-     */
-    async applyVersionMapping(data, fromVersion, toVersion) {
-      if (fromVersion === toVersion) {
-        return data;
-      }
-      const mappedData = {
-        ...data,
-        _v: toVersion,
-        _originalVersion: fromVersion,
-        _versionMapped: true
-      };
-      return mappedData;
-    }
-    /**
-     * Compose the full object (metadata + body) as retornado por .get(),
-     * usando os dados em memória após insert/update, de acordo com o behavior
-     */
-    async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
-      const behaviorFlags = {};
-      if (metadata && metadata["$truncated"] === "true") {
-        behaviorFlags.$truncated = "true";
-      }
-      if (metadata && metadata["$overflow"] === "true") {
-        behaviorFlags.$overflow = "true";
-      }
-      let unmappedMetadata = {};
-      const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
-      unmappedMetadata = ok ? unmapped : metadata;
-      const filterInternalFields = (obj) => {
-        if (!obj || typeof obj !== "object") return obj;
-        const filtered2 = {};
-        for (const [key, value] of Object.entries(obj)) {
-          if (!key.startsWith("_")) {
-            filtered2[key] = value;
-          }
-        }
-        return filtered2;
-      };
-      const fixValue = (v) => {
-        if (typeof v === "object" && v !== null) {
-          return v;
-        }
-        if (typeof v === "string") {
-          if (v === "[object Object]") return {};
-          if (v.startsWith("{") || v.startsWith("[")) {
-            const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(v));
-            return ok2 ? parsed : v;
-          }
-          return v;
-        }
-        return v;
-      };
-      if (behavior === "body-overflow") {
-        const hasOverflow = metadata && metadata["$overflow"] === "true";
-        let bodyData = {};
-        if (hasOverflow && body) {
-          const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
-          if (okBody) {
-            const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
-            bodyData = okUnmap ? unmappedBody : {};
-          }
-        }
-        const merged = { ...unmappedMetadata, ...bodyData, id };
-        Object.keys(merged).forEach((k) => {
-          merged[k] = fixValue(merged[k]);
-        });
-        const result2 = filterInternalFields(merged);
-        if (hasOverflow) {
-          result2.$overflow = "true";
-        }
-        return result2;
-      }
-      if (behavior === "body-only") {
-        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
-        let mapFromMeta = this.schema.map;
-        if (metadata && metadata._map) {
-          const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
-          mapFromMeta = okMap ? parsedMap : this.schema.map;
-        }
-        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
-        const result2 = okUnmap ? { ...unmappedBody, id } : { id };
-        Object.keys(result2).forEach((k) => {
-          result2[k] = fixValue(result2[k]);
-        });
-        return result2;
-      }
-      const result = { ...unmappedMetadata, id };
-      Object.keys(result).forEach((k) => {
-        result[k] = fixValue(result[k]);
-      });
-      const filtered = filterInternalFields(result);
-      if (behaviorFlags.$truncated) {
-        filtered.$truncated = behaviorFlags.$truncated;
-      }
-      if (behaviorFlags.$overflow) {
-        filtered.$overflow = behaviorFlags.$overflow;
-      }
-      return filtered;
-    }
-    emit(event, ...args) {
-      return super.emit(event, ...args);
-    }
-    async replace(id, attributes) {
-      await this.delete(id);
-      await new Promise((r) => setTimeout(r, 100));
-      const maxWait = 5e3;
-      const interval = 50;
-      const start = Date.now();
-      while (Date.now() - start < maxWait) {
-        const exists = await this.exists(id);
-        if (!exists) {
-          break;
-        }
-        await new Promise((r) => setTimeout(r, interval));
-      }
-      try {
-        const result = await this.insert({ ...attributes, id });
-        return result;
-      } catch (err) {
-        if (err && err.message && err.message.includes("already exists")) {
-          const result = await this.update(id, attributes);
-          return result;
-        }
-        throw err;
-      }
-    }
-    // --- MIDDLEWARE SYSTEM ---
-    _initMiddleware() {
-      this._middlewares = /* @__PURE__ */ new Map();
-      this._middlewareMethods = [
-        "get",
-        "list",
-        "listIds",
-        "getAll",
-        "count",
-        "page",
-        "insert",
-        "update",
-        "delete",
-        "deleteMany",
-        "exists",
-        "getMany"
-      ];
-      for (const method of this._middlewareMethods) {
-        this._middlewares.set(method, []);
-        if (!this[`_original_${method}`]) {
-          this[`_original_${method}`] = this[method].bind(this);
-          this[method] = async (...args) => {
-            const ctx = { resource: this, args, method };
-            let idx = -1;
-            const stack = this._middlewares.get(method);
-            const dispatch = async (i) => {
-              if (i <= idx) throw new Error("next() called multiple times");
-              idx = i;
-              if (i < stack.length) {
-                return await stack[i](ctx, () => dispatch(i + 1));
-              } else {
-                return await this[`_original_${method}`](...ctx.args);
-              }
-            };
-            return await dispatch(0);
-          };
-        }
-      }
-    }
-    useMiddleware(method, fn) {
-      if (!this._middlewares) this._initMiddleware();
-      if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: "useMiddleware", method });
-      this._middlewares.get(method).push(fn);
-    }
-    // Utilitário para aplicar valores default do schema
-    applyDefaults(data) {
-      const out = { ...data };
-      for (const [key, def] of Object.entries(this.attributes)) {
-        if (out[key] === void 0) {
-          if (typeof def === "string" && def.includes("default:")) {
-            const match = def.match(/default:([^|]+)/);
-            if (match) {
-              let val = match[1];
-              if (def.includes("boolean")) val = val === "true";
-              else if (def.includes("number")) val = Number(val);
-              out[key] = val;
-            }
-          }
-        }
-      }
-      return out;
-    }
-  }
-  function validateResourceConfig(config) {
-    const errors = [];
-    if (!config.name) {
-      errors.push("Resource 'name' is required");
-    } else if (typeof config.name !== "string") {
-      errors.push("Resource 'name' must be a string");
-    } else if (config.name.trim() === "") {
-      errors.push("Resource 'name' cannot be empty");
-    }
-    if (!config.client) {
-      errors.push("S3 'client' is required");
-    }
-    if (!config.attributes) {
-      errors.push("Resource 'attributes' are required");
-    } else if (typeof config.attributes !== "object" || Array.isArray(config.attributes)) {
-      errors.push("Resource 'attributes' must be an object");
-    } else if (Object.keys(config.attributes).length === 0) {
-      errors.push("Resource 'attributes' cannot be empty");
-    }
-    if (config.version !== void 0 && typeof config.version !== "string") {
-      errors.push("Resource 'version' must be a string");
-    }
-    if (config.behavior !== void 0 && typeof config.behavior !== "string") {
-      errors.push("Resource 'behavior' must be a string");
-    }
-    if (config.passphrase !== void 0 && typeof config.passphrase !== "string") {
-      errors.push("Resource 'passphrase' must be a string");
-    }
-    if (config.parallelism !== void 0) {
-      if (typeof config.parallelism !== "number" || !Number.isInteger(config.parallelism)) {
-        errors.push("Resource 'parallelism' must be an integer");
-      } else if (config.parallelism < 1) {
-        errors.push("Resource 'parallelism' must be greater than 0");
-      }
-    }
-    if (config.observers !== void 0 && !Array.isArray(config.observers)) {
-      errors.push("Resource 'observers' must be an array");
-    }
-    const booleanFields = ["cache", "autoDecrypt", "timestamps", "paranoid", "allNestedObjectsOptional"];
-    for (const field of booleanFields) {
-      if (config[field] !== void 0 && typeof config[field] !== "boolean") {
-        errors.push(`Resource '${field}' must be a boolean`);
-      }
-    }
-    if (config.idGenerator !== void 0) {
-      if (typeof config.idGenerator !== "function" && typeof config.idGenerator !== "number") {
-        errors.push("Resource 'idGenerator' must be a function or a number (size)");
-      } else if (typeof config.idGenerator === "number" && config.idGenerator <= 0) {
-        errors.push("Resource 'idGenerator' size must be greater than 0");
-      }
-    }
-    if (config.idSize !== void 0) {
-      if (typeof config.idSize !== "number" || !Number.isInteger(config.idSize)) {
-        errors.push("Resource 'idSize' must be an integer");
-      } else if (config.idSize <= 0) {
-        errors.push("Resource 'idSize' must be greater than 0");
-      }
-    }
-    if (config.partitions !== void 0) {
-      if (typeof config.partitions !== "object" || Array.isArray(config.partitions)) {
-        errors.push("Resource 'partitions' must be an object");
-      } else {
-        for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
-          if (typeof partitionDef !== "object" || Array.isArray(partitionDef)) {
-            errors.push(`Partition '${partitionName}' must be an object`);
-          } else if (!partitionDef.fields) {
-            errors.push(`Partition '${partitionName}' must have a 'fields' property`);
-          } else if (typeof partitionDef.fields !== "object" || Array.isArray(partitionDef.fields)) {
-            errors.push(`Partition '${partitionName}.fields' must be an object`);
-          } else {
-            for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
-              if (typeof fieldType !== "string") {
-                errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
-              }
-            }
-          }
-        }
-      }
-    }
-    if (config.hooks !== void 0) {
-      if (typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
-        errors.push("Resource 'hooks' must be an object");
-      } else {
-        const validHookEvents = ["beforeInsert", "afterInsert", "beforeUpdate", "afterUpdate", "beforeDelete", "afterDelete"];
-        for (const [event, hooksArr] of Object.entries(config.hooks)) {
-          if (!validHookEvents.includes(event)) {
-            errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(", ")}`);
-          } else if (!Array.isArray(hooksArr)) {
-            errors.push(`Resource 'hooks.${event}' must be an array`);
-          } else {
-            for (let i = 0; i < hooksArr.length; i++) {
-              const hook = hooksArr[i];
-              if (typeof hook !== "function") {
-                if (typeof hook === "string") continue;
-                continue;
-              }
-            }
-          }
-        }
-      }
-    }
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-
-  class Database extends EventEmitter {
-    constructor(options) {
-      super();
-      this.version = "1";
-      this.s3dbVersion = (() => {
-        const [ok, err, version] = tryFn(() => true ? "6.2.0" : "latest");
-        return ok ? version : "latest";
-      })();
-      this.resources = {};
-      this.savedMetadata = null;
-      this.options = options;
-      this.verbose = options.verbose || false;
-      this.parallelism = parseInt(options.parallelism + "") || 10;
-      this.plugins = options.plugins || [];
-      this.pluginList = options.plugins || [];
-      this.cache = options.cache;
-      this.passphrase = options.passphrase || "secret";
-      this.versioningEnabled = options.versioningEnabled || false;
-      let connectionString = options.connectionString;
-      if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
-        const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
-        if (endpoint) {
-          const url = new URL(endpoint);
-          if (accessKeyId) url.username = encodeURIComponent(accessKeyId);
-          if (secretAccessKey) url.password = encodeURIComponent(secretAccessKey);
-          url.pathname = `/${bucket || "s3db"}`;
-          if (forcePathStyle) {
-            url.searchParams.set("forcePathStyle", "true");
-          }
-          connectionString = url.toString();
-        } else if (accessKeyId && secretAccessKey) {
-          const params = new URLSearchParams();
-          params.set("region", region || "us-east-1");
-          if (forcePathStyle) {
-            params.set("forcePathStyle", "true");
-          }
-          connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || "s3db"}?${params.toString()}`;
-        }
-      }
-      this.client = options.client || new Client({
-        verbose: this.verbose,
-        parallelism: this.parallelism,
-        connectionString
-      });
-      this.bucket = this.client.bucket;
-      this.keyPrefix = this.client.keyPrefix;
-      if (!this._exitListenerRegistered) {
-        this._exitListenerRegistered = true;
-        process.on("exit", async () => {
-          if (this.isConnected()) {
-            try {
-              await this.disconnect();
-            } catch (err) {
-            }
-          }
-        });
-      }
-    }
-    async connect() {
-      await this.startPlugins();
-      let metadata = null;
-      if (await this.client.exists(`s3db.json`)) {
-        const request = await this.client.getObject(`s3db.json`);
-        metadata = JSON.parse(await streamToString(request?.Body));
-      } else {
-        metadata = this.blankMetadataStructure();
-        await this.uploadMetadataFile();
-      }
-      this.savedMetadata = metadata;
-      const definitionChanges = this.detectDefinitionChanges(metadata);
-      for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
-        const currentVersion = resourceMetadata.currentVersion || "v0";
-        const versionData = resourceMetadata.versions?.[currentVersion];
-        if (versionData) {
-          this.resources[name] = new Resource({
-            name,
-            client: this.client,
-            database: this,
-            // garantir referência
-            version: currentVersion,
-            attributes: versionData.attributes,
-            behavior: versionData.behavior || "user-managed",
-            parallelism: this.parallelism,
-            passphrase: this.passphrase,
-            observers: [this],
-            cache: this.cache,
-            timestamps: versionData.timestamps !== void 0 ? versionData.timestamps : false,
-            partitions: resourceMetadata.partitions || versionData.partitions || {},
-            paranoid: versionData.paranoid !== void 0 ? versionData.paranoid : true,
-            allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
-            autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
-            hooks: versionData.hooks || {},
-            versioningEnabled: this.versioningEnabled,
-            map: versionData.map
-          });
-        }
-      }
-      if (definitionChanges.length > 0) {
-        this.emit("resourceDefinitionsChanged", {
-          changes: definitionChanges,
-          metadata: this.savedMetadata
-        });
-      }
-      this.emit("connected", /* @__PURE__ */ new Date());
-    }
-    /**
-     * Detect changes in resource definitions compared to saved metadata
-     * @param {Object} savedMetadata - The metadata loaded from s3db.json
-     * @returns {Array} Array of change objects
-     */
-    detectDefinitionChanges(savedMetadata) {
-      const changes = [];
-      for (const [name, currentResource] of Object.entries(this.resources)) {
-        const currentHash = this.generateDefinitionHash(currentResource.export());
-        const savedResource = savedMetadata.resources?.[name];
-        if (!savedResource) {
-          changes.push({
-            type: "new",
-            resourceName: name,
-            currentHash,
-            savedHash: null
-          });
-        } else {
-          const currentVersion = savedResource.currentVersion || "v0";
-          const versionData = savedResource.versions?.[currentVersion];
-          const savedHash = versionData?.hash;
-          if (savedHash !== currentHash) {
-            changes.push({
-              type: "changed",
-              resourceName: name,
-              currentHash,
-              savedHash,
-              fromVersion: currentVersion,
-              toVersion: this.getNextVersion(savedResource.versions)
-            });
-          }
-        }
-      }
-      for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
-        if (!this.resources[name]) {
-          const currentVersion = savedResource.currentVersion || "v0";
-          const versionData = savedResource.versions?.[currentVersion];
-          changes.push({
-            type: "deleted",
-            resourceName: name,
-            currentHash: null,
-            savedHash: versionData?.hash,
-            deletedVersion: currentVersion
-          });
-        }
-      }
-      return changes;
-    }
-    /**
-     * Generate a consistent hash for a resource definition
-     * @param {Object} definition - Resource definition to hash
-     * @param {string} behavior - Resource behavior
-     * @returns {string} SHA256 hash
-     */
-    generateDefinitionHash(definition, behavior = void 0) {
-      const attributes = definition.attributes;
-      const stableAttributes = { ...attributes };
-      if (definition.timestamps) {
-        delete stableAttributes.createdAt;
-        delete stableAttributes.updatedAt;
-      }
-      const hashObj = {
-        attributes: stableAttributes,
-        behavior: behavior || definition.behavior || "user-managed",
-        partitions: definition.partitions || {}
-      };
-      const stableString = jsonStableStringify(hashObj);
-      return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
-    }
-    /**
-     * Get the next version number for a resource
-     * @param {Object} versions - Existing versions object
-     * @returns {string} Next version string (e.g., 'v1', 'v2')
-     */
-    getNextVersion(versions = {}) {
-      const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
-      const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
-      return `v${maxVersion + 1}`;
-    }
-    async startPlugins() {
-      const db = this;
-      if (!lodashEs.isEmpty(this.pluginList)) {
-        const plugins = this.pluginList.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
-        const setupProms = plugins.map(async (plugin) => {
-          if (plugin.beforeSetup) await plugin.beforeSetup();
-          await plugin.setup(db);
-          if (plugin.afterSetup) await plugin.afterSetup();
-        });
-        await Promise.all(setupProms);
-        const startProms = plugins.map(async (plugin) => {
-          if (plugin.beforeStart) await plugin.beforeStart();
-          await plugin.start();
-          if (plugin.afterStart) await plugin.afterStart();
-        });
-        await Promise.all(startProms);
-      }
-    }
-    /**
-     * Register and setup a plugin
-     * @param {Plugin} plugin - Plugin instance to register
-     * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
-     */
-    async usePlugin(plugin, name = null) {
-      const pluginName = name || plugin.constructor.name.replace("Plugin", "").toLowerCase();
-      this.plugins[pluginName] = plugin;
-      if (this.isConnected()) {
-        await plugin.setup(this);
-        await plugin.start();
-      }
-      return plugin;
-    }
-    async uploadMetadataFile() {
-      const metadata = {
-        version: this.version,
-        s3dbVersion: this.s3dbVersion,
-        lastUpdated: (/* @__PURE__ */ new Date()).toISOString(),
-        resources: {}
-      };
-      Object.entries(this.resources).forEach(([name, resource]) => {
-        const resourceDef = resource.export();
-        const definitionHash = this.generateDefinitionHash(resourceDef);
-        const existingResource = this.savedMetadata?.resources?.[name];
-        const currentVersion = existingResource?.currentVersion || "v0";
-        const existingVersionData = existingResource?.versions?.[currentVersion];
-        let version, isNewVersion;
-        if (!existingVersionData || existingVersionData.hash !== definitionHash) {
-          version = this.getNextVersion(existingResource?.versions);
-          isNewVersion = true;
-        } else {
-          version = currentVersion;
-          isNewVersion = false;
-        }
-        metadata.resources[name] = {
-          currentVersion: version,
-          partitions: resource.config.partitions || {},
-          versions: {
-            ...existingResource?.versions,
-            // Preserve previous versions
-            [version]: {
-              hash: definitionHash,
-              attributes: resourceDef.attributes,
-              behavior: resourceDef.behavior || "user-managed",
-              timestamps: resource.config.timestamps,
-              partitions: resource.config.partitions,
-              paranoid: resource.config.paranoid,
-              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
-              autoDecrypt: resource.config.autoDecrypt,
-              cache: resource.config.cache,
-              hooks: resource.config.hooks,
-              createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
-            }
-          }
-        };
-        if (resource.version !== version) {
-          resource.version = version;
-          resource.emit("versionUpdated", { oldVersion: currentVersion, newVersion: version });
-        }
-      });
-      await this.client.putObject({
-        key: "s3db.json",
-        body: JSON.stringify(metadata, null, 2),
-        contentType: "application/json"
-      });
-      this.savedMetadata = metadata;
-      this.emit("metadataUploaded", metadata);
-    }
-    blankMetadataStructure() {
-      return {
-        version: `1`,
-        s3dbVersion: this.s3dbVersion,
-        resources: {}
-      };
-    }
-    /**
-     * Check if a resource exists by name
-     * @param {string} name - Resource name
-     * @returns {boolean} True if resource exists, false otherwise
-     */
-    resourceExists(name) {
-      return !!this.resources[name];
-    }
-    /**
-     * Check if a resource exists with the same definition hash
-     * @param {Object} config - Resource configuration
-     * @param {string} config.name - Resource name
-     * @param {Object} config.attributes - Resource attributes
-     * @param {string} [config.behavior] - Resource behavior
-     * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
-     * @returns {Object} Result with exists and hash information
-     */
-    resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", partitions = {}, options = {} }) {
-      if (!this.resources[name]) {
-        return { exists: false, sameHash: false, hash: null };
-      }
-      const existingResource = this.resources[name];
-      const existingHash = this.generateDefinitionHash(existingResource.export());
-      const mockResource = new Resource({
-        name,
-        attributes,
-        behavior,
-        partitions,
-        client: this.client,
-        version: existingResource.version,
-        passphrase: this.passphrase,
-        versioningEnabled: this.versioningEnabled,
-        ...options
-      });
-      const newHash = this.generateDefinitionHash(mockResource.export());
-      return {
-        exists: true,
-        sameHash: existingHash === newHash,
-        hash: newHash,
-        existingHash
-      };
-    }
-    async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
-      if (this.resources[name]) {
-        const existingResource = this.resources[name];
-        Object.assign(existingResource.config, {
-          cache: this.cache,
-          ...config
-        });
-        if (behavior) {
-          existingResource.behavior = behavior;
-        }
-        existingResource.versioningEnabled = this.versioningEnabled;
-        existingResource.updateAttributes(attributes);
-        if (hooks) {
-          for (const [event, hooksArr] of Object.entries(hooks)) {
-            if (Array.isArray(hooksArr) && existingResource.hooks[event]) {
-              for (const fn of hooksArr) {
-                if (typeof fn === "function") {
-                  existingResource.hooks[event].push(fn.bind(existingResource));
-                }
-              }
-            }
-          }
-        }
-        const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
-        const existingMetadata2 = this.savedMetadata?.resources?.[name];
-        const currentVersion = existingMetadata2?.currentVersion || "v0";
-        const existingVersionData = existingMetadata2?.versions?.[currentVersion];
-        if (!existingVersionData || existingVersionData.hash !== newHash) {
-          await this.uploadMetadataFile();
-        }
-        this.emit("s3db.resourceUpdated", name);
-        return existingResource;
-      }
-      const existingMetadata = this.savedMetadata?.resources?.[name];
-      const version = existingMetadata?.currentVersion || "v0";
-      const resource = new Resource({
-        name,
-        client: this.client,
-        version: config.version !== void 0 ? config.version : version,
-        attributes,
-        behavior,
-        parallelism: this.parallelism,
-        passphrase: config.passphrase !== void 0 ? config.passphrase : this.passphrase,
-        observers: [this],
-        cache: config.cache !== void 0 ? config.cache : this.cache,
-        timestamps: config.timestamps !== void 0 ? config.timestamps : false,
-        partitions: config.partitions || {},
-        paranoid: config.paranoid !== void 0 ? config.paranoid : true,
-        allNestedObjectsOptional: config.allNestedObjectsOptional !== void 0 ? config.allNestedObjectsOptional : true,
-        autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
-        hooks: hooks || {},
-        versioningEnabled: this.versioningEnabled,
-        map: config.map,
-        idGenerator: config.idGenerator,
-        idSize: config.idSize
-      });
-      resource.database = this;
-      this.resources[name] = resource;
-      await this.uploadMetadataFile();
-      this.emit("s3db.resourceCreated", name);
-      return resource;
-    }
-    resource(name) {
-      if (!this.resources[name]) {
-        return Promise.reject(`resource ${name} does not exist`);
-      }
-      return this.resources[name];
-    }
-    /**
-     * List all resource names
-     * @returns {Array} Array of resource names
-     */
-    async listResources() {
-      return Object.keys(this.resources).map((name) => ({ name }));
-    }
-    /**
-     * Get a specific resource by name
-     * @param {string} name - Resource name
-     * @returns {Resource} Resource instance
-     */
-    async getResource(name) {
-      if (!this.resources[name]) {
-        throw new ResourceNotFound({
-          bucket: this.client.config.bucket,
-          resourceName: name,
-          id: name
-        });
-      }
-      return this.resources[name];
-    }
-    /**
-     * Get database configuration
-     * @returns {Object} Configuration object
-     */
-    get config() {
-      return {
-        version: this.version,
-        s3dbVersion: this.s3dbVersion,
-        bucket: this.bucket,
-        keyPrefix: this.keyPrefix,
-        parallelism: this.parallelism,
-        verbose: this.verbose
-      };
-    }
-    isConnected() {
-      return !!this.savedMetadata;
-    }
-    async disconnect() {
-      try {
-        if (this.pluginList && this.pluginList.length > 0) {
-          for (const plugin of this.pluginList) {
-            if (plugin && typeof plugin.removeAllListeners === "function") {
-              plugin.removeAllListeners();
-            }
-          }
-          const stopProms = this.pluginList.map(async (plugin) => {
-            try {
-              if (plugin && typeof plugin.stop === "function") {
-                await plugin.stop();
-              }
-            } catch (err) {
-            }
-          });
-          await Promise.all(stopProms);
-        }
-        if (this.resources && Object.keys(this.resources).length > 0) {
-          for (const [name, resource] of Object.entries(this.resources)) {
-            try {
-              if (resource && typeof resource.removeAllListeners === "function") {
-                resource.removeAllListeners();
-              }
-              if (resource._pluginWrappers) {
-                resource._pluginWrappers.clear();
-              }
-              if (resource._pluginMiddlewares) {
-                resource._pluginMiddlewares = {};
-              }
-              if (resource.observers && Array.isArray(resource.observers)) {
-                resource.observers = [];
-              }
-            } catch (err) {
-            }
-          }
-          Object.keys(this.resources).forEach((k) => delete this.resources[k]);
-        }
-        if (this.client && typeof this.client.removeAllListeners === "function") {
-          this.client.removeAllListeners();
-        }
-        this.removeAllListeners();
-        this.savedMetadata = null;
-        this.plugins = {};
-        this.pluginList = [];
-        this.emit("disconnected", /* @__PURE__ */ new Date());
-      } catch (err) {
-      }
-    }
-  }
-  class S3db extends Database {
-  }
-
-  class Cache extends EventEmitter {
-    constructor(config = {}) {
-      super();
-      this.config = config;
-    }
-    // to implement:
-    async _set(key, data) {
-    }
-    async _get(key) {
-    }
-    async _del(key) {
-    }
-    async _clear(key) {
-    }
-    validateKey(key) {
-      if (key === null || key === void 0 || typeof key !== "string" || !key) {
-        throw new Error("Invalid key");
-      }
-    }
-    // generic class methods
-    async set(key, data) {
-      this.validateKey(key);
-      await this._set(key, data);
-      this.emit("set", data);
-      return data;
-    }
-    async get(key) {
-      this.validateKey(key);
-      const data = await this._get(key);
-      this.emit("get", data);
-      return data;
-    }
-    async del(key) {
-      this.validateKey(key);
-      const data = await this._del(key);
-      this.emit("delete", data);
-      return data;
-    }
-    async delete(key) {
-      return this.del(key);
-    }
-    async clear(prefix) {
-      const data = await this._clear(prefix);
-      this.emit("clear", data);
-      return data;
-    }
-  }
-
-  class MemoryCache extends Cache {
-    constructor(config = {}) {
-      super(config);
-      this.cache = {};
-      this.meta = {};
-      this.maxSize = config.maxSize || 0;
-      this.ttl = config.ttl || 0;
-    }
-    async _set(key, data) {
-      if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
-        const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-        if (oldestKey) {
-          delete this.cache[oldestKey];
-          delete this.meta[oldestKey];
-        }
-      }
-      this.cache[key] = data;
-      this.meta[key] = { ts: Date.now() };
-      return data;
-    }
-    async _get(key) {
-      if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
-      if (this.ttl > 0) {
-        const now = Date.now();
-        const meta = this.meta[key];
-        if (meta && now - meta.ts > this.ttl * 1e3) {
-          delete this.cache[key];
-          delete this.meta[key];
-          return null;
-        }
-      }
-      return this.cache[key];
-    }
-    async _del(key) {
-      delete this.cache[key];
-      delete this.meta[key];
-      return true;
-    }
-    async _clear(prefix) {
-      if (!prefix) {
-        this.cache = {};
-        this.meta = {};
-        return true;
-      }
-      for (const key of Object.keys(this.cache)) {
-        if (key.startsWith(prefix)) {
-          delete this.cache[key];
-          delete this.meta[key];
-        }
-      }
-      return true;
-    }
-    async size() {
-      return Object.keys(this.cache).length;
-    }
-    async keys() {
-      return Object.keys(this.cache);
-    }
-  }
 
   var msg = {
     2:      'need dictionary',     /* Z_NEED_DICT       2  */
@@ -18543,7 +12731,7 @@ ${JSON.stringify(validation, null, 2)}`,
     Zlib: Zlib$1
   });
 
-  function assert (a, msg) {
+  function assert$1 (a, msg) {
     if (!a) {
       throw new Error(msg);
     }
@@ -19063,7 +13251,7 @@ ${JSON.stringify(validation, null, 2)}`,
         return;
 
       var have = availOutBefore - availOutAfter;
-      assert(have >= 0, 'have should not go down');
+      assert$1(have >= 0, 'have should not go down');
 
       if (have > 0) {
         var out = self._buffer.slice(self._offset, self._offset + have);
@@ -19155,6 +13343,242 @@ ${JSON.stringify(validation, null, 2)}`,
     Zlib: Zlib
   };
 
+  class Cache extends EventEmitter {
+    constructor(config = {}) {
+      super();
+      this.config = config;
+    }
+    // to implement:
+    async _set(key, data) {
+    }
+    async _get(key) {
+    }
+    async _del(key) {
+    }
+    async _clear(key) {
+    }
+    validateKey(key) {
+      if (key === null || key === void 0 || typeof key !== "string" || !key) {
+        throw new Error("Invalid key");
+      }
+    }
+    // generic class methods
+    async set(key, data) {
+      this.validateKey(key);
+      await this._set(key, data);
+      this.emit("set", data);
+      return data;
+    }
+    async get(key) {
+      this.validateKey(key);
+      const data = await this._get(key);
+      this.emit("get", data);
+      return data;
+    }
+    async del(key) {
+      this.validateKey(key);
+      const data = await this._del(key);
+      this.emit("delete", data);
+      return data;
+    }
+    async delete(key) {
+      return this.del(key);
+    }
+    async clear(prefix) {
+      const data = await this._clear(prefix);
+      this.emit("clear", data);
+      return data;
+    }
+  }
+
+  class ResourceIdsReader extends EventEmitter {
+    constructor({ resource }) {
+      super();
+      this.resource = resource;
+      this.client = resource.client;
+      this.stream = new web.ReadableStream({
+        highWaterMark: this.client.parallelism * 3,
+        start: this._start.bind(this),
+        pull: this._pull.bind(this),
+        cancel: this._cancel.bind(this)
+      });
+    }
+    build() {
+      return this.stream.getReader();
+    }
+    async _start(controller) {
+      this.controller = controller;
+      this.continuationToken = null;
+      this.closeNextIteration = false;
+    }
+    async _pull(controller) {
+      if (this.closeNextIteration) {
+        controller.close();
+        return;
+      }
+      const response = await this.client.listObjects({
+        prefix: `resource=${this.resource.name}`,
+        continuationToken: this.continuationToken
+      });
+      const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
+      this.continuationToken = response.NextContinuationToken;
+      this.enqueue(keys);
+      if (!response.IsTruncated) this.closeNextIteration = true;
+    }
+    enqueue(ids) {
+      ids.forEach((key) => {
+        this.controller.enqueue(key);
+        this.emit("id", key);
+      });
+    }
+    _cancel(reason) {
+    }
+  }
+
+  class ResourceIdsPageReader extends ResourceIdsReader {
+    enqueue(ids) {
+      this.controller.enqueue(ids);
+      this.emit("page", ids);
+    }
+  }
+
+  class ResourceReader extends EventEmitter {
+    constructor({ resource, batchSize = 10, concurrency = 5 }) {
+      super();
+      if (!resource) {
+        throw new Error("Resource is required for ResourceReader");
+      }
+      this.resource = resource;
+      this.client = resource.client;
+      this.batchSize = batchSize;
+      this.concurrency = concurrency;
+      this.input = new ResourceIdsPageReader({ resource: this.resource });
+      this.transform = new Transform({
+        objectMode: true,
+        transform: this._transform.bind(this)
+      });
+      this.input.on("data", (chunk) => {
+        this.transform.write(chunk);
+      });
+      this.input.on("end", () => {
+        this.transform.end();
+      });
+      this.input.on("error", (error) => {
+        this.emit("error", error);
+      });
+      this.transform.on("data", (data) => {
+        this.emit("data", data);
+      });
+      this.transform.on("end", () => {
+        this.emit("end");
+      });
+      this.transform.on("error", (error) => {
+        this.emit("error", error);
+      });
+    }
+    build() {
+      return this;
+    }
+    async _transform(chunk, encoding, callback) {
+      const [ok, err] = await tryFn(async () => {
+        await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
+          this.emit("error", error, content);
+        }).process(async (id) => {
+          const data = await this.resource.get(id);
+          this.push(data);
+          return data;
+        });
+      });
+      callback(err);
+    }
+    resume() {
+      this.input.resume();
+    }
+  }
+
+  class ResourceWriter extends EventEmitter {
+    constructor({ resource, batchSize = 10, concurrency = 5 }) {
+      super();
+      this.resource = resource;
+      this.client = resource.client;
+      this.batchSize = batchSize;
+      this.concurrency = concurrency;
+      this.buffer = [];
+      this.writing = false;
+      this.writable = new Writable({
+        objectMode: true,
+        write: this._write.bind(this)
+      });
+      this.writable.on("finish", () => {
+        this.emit("finish");
+      });
+      this.writable.on("error", (error) => {
+        this.emit("error", error);
+      });
+    }
+    build() {
+      return this;
+    }
+    write(chunk) {
+      this.buffer.push(chunk);
+      this._maybeWrite().catch((error) => {
+        this.emit("error", error);
+      });
+      return true;
+    }
+    end() {
+      this.ended = true;
+      this._maybeWrite().catch((error) => {
+        this.emit("error", error);
+      });
+    }
+    async _maybeWrite() {
+      if (this.writing) return;
+      if (this.buffer.length === 0 && !this.ended) return;
+      this.writing = true;
+      while (this.buffer.length > 0) {
+        const batch = this.buffer.splice(0, this.batchSize);
+        const [ok, err] = await tryFn(async () => {
+          await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
+            this.emit("error", error, content);
+          }).process(async (item) => {
+            const [ok2, err2, result] = await tryFn(async () => {
+              const res = await this.resource.insert(item);
+              return res;
+            });
+            if (!ok2) {
+              this.emit("error", err2, item);
+              return null;
+            }
+            return result;
+          });
+        });
+        if (!ok) {
+          this.emit("error", err);
+        }
+      }
+      this.writing = false;
+      if (this.ended) {
+        this.writable.emit("finish");
+      }
+    }
+    async _write(chunk, encoding, callback) {
+      callback();
+    }
+  }
+
+  function streamToString(stream) {
+    return new Promise((resolve, reject) => {
+      if (!stream) {
+        return reject(new Error("streamToString: stream is undefined"));
+      }
+      const chunks = [];
+      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.on("error", reject);
+      stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+    });
+  }
+
   class S3Cache extends Cache {
     constructor({
       client,
@@ -19221,529 +13645,63 @@ ${JSON.stringify(validation, null, 2)}`,
     }
   }
 
-  class Plugin extends EventEmitter {
-    constructor(options = {}) {
-      super();
-      this.name = this.constructor.name;
-      this.options = options;
-      this.hooks = /* @__PURE__ */ new Map();
+  class MemoryCache extends Cache {
+    constructor(config = {}) {
+      super(config);
+      this.cache = {};
+      this.meta = {};
+      this.maxSize = config.maxSize || 0;
+      this.ttl = config.ttl || 0;
     }
-    async setup(database) {
-      this.database = database;
-      this.beforeSetup();
-      await this.onSetup();
-      this.afterSetup();
-    }
-    async start() {
-      this.beforeStart();
-      await this.onStart();
-      this.afterStart();
-    }
-    async stop() {
-      this.beforeStop();
-      await this.onStop();
-      this.afterStop();
-    }
-    // Override these methods in subclasses
-    async onSetup() {
-    }
-    async onStart() {
-    }
-    async onStop() {
-    }
-    // Hook management methods
-    addHook(resource, event, handler) {
-      if (!this.hooks.has(resource)) {
-        this.hooks.set(resource, /* @__PURE__ */ new Map());
-      }
-      const resourceHooks = this.hooks.get(resource);
-      if (!resourceHooks.has(event)) {
-        resourceHooks.set(event, []);
-      }
-      resourceHooks.get(event).push(handler);
-    }
-    removeHook(resource, event, handler) {
-      const resourceHooks = this.hooks.get(resource);
-      if (resourceHooks && resourceHooks.has(event)) {
-        const handlers = resourceHooks.get(event);
-        const index = handlers.indexOf(handler);
-        if (index > -1) {
-          handlers.splice(index, 1);
+    async _set(key, data) {
+      if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
+        const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+        if (oldestKey) {
+          delete this.cache[oldestKey];
+          delete this.meta[oldestKey];
         }
       }
+      this.cache[key] = data;
+      this.meta[key] = { ts: Date.now() };
+      return data;
     }
-    // Enhanced resource method wrapping that supports multiple plugins
-    wrapResourceMethod(resource, methodName, wrapper) {
-      const originalMethod = resource[methodName];
-      if (!resource._pluginWrappers) {
-        resource._pluginWrappers = /* @__PURE__ */ new Map();
-      }
-      if (!resource._pluginWrappers.has(methodName)) {
-        resource._pluginWrappers.set(methodName, []);
-      }
-      resource._pluginWrappers.get(methodName).push(wrapper);
-      if (!resource[`_wrapped_${methodName}`]) {
-        resource[`_wrapped_${methodName}`] = originalMethod;
-        const isJestMock = originalMethod && originalMethod._isMockFunction;
-        resource[methodName] = async function(...args) {
-          let result = await resource[`_wrapped_${methodName}`](...args);
-          for (const wrapper2 of resource._pluginWrappers.get(methodName)) {
-            result = await wrapper2.call(this, result, args, methodName);
-          }
-          return result;
-        };
-        if (isJestMock) {
-          Object.setPrototypeOf(resource[methodName], Object.getPrototypeOf(originalMethod));
-          Object.assign(resource[methodName], originalMethod);
-        }
-      }
-    }
-    /**
-     * Add a middleware to intercept a resource method (Koa/Express style).
-     * Middleware signature: async (next, ...args) => { ... }
-     * - Chame next(...args) para continuar a cadeia.
-     * - Retorne sem chamar next para interromper.
-     * - Pode modificar argumentos/resultados.
-     */
-    addMiddleware(resource, methodName, middleware) {
-      if (!resource._pluginMiddlewares) {
-        resource._pluginMiddlewares = {};
-      }
-      if (!resource._pluginMiddlewares[methodName]) {
-        resource._pluginMiddlewares[methodName] = [];
-        const originalMethod = resource[methodName].bind(resource);
-        resource[methodName] = async function(...args) {
-          let idx = -1;
-          const next = async (...nextArgs) => {
-            idx++;
-            if (idx < resource._pluginMiddlewares[methodName].length) {
-              return await resource._pluginMiddlewares[methodName][idx].call(this, next, ...nextArgs);
-            } else {
-              return await originalMethod(...nextArgs);
-            }
-          };
-          return await next(...args);
-        };
-      }
-      resource._pluginMiddlewares[methodName].push(middleware);
-    }
-    // Partition-aware helper methods
-    getPartitionValues(data, resource) {
-      if (!resource.config?.partitions) return {};
-      const partitionValues = {};
-      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
-        if (partitionDef.fields) {
-          partitionValues[partitionName] = {};
-          for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
-            const value = this.getNestedFieldValue(data, fieldName);
-            if (value !== null && value !== void 0) {
-              partitionValues[partitionName][fieldName] = resource.applyPartitionRule(value, rule);
-            }
-          }
-        } else {
-          partitionValues[partitionName] = {};
-        }
-      }
-      return partitionValues;
-    }
-    getNestedFieldValue(data, fieldPath) {
-      if (!fieldPath.includes(".")) {
-        return data[fieldPath] ?? null;
-      }
-      const keys = fieldPath.split(".");
-      let value = data;
-      for (const key of keys) {
-        if (value && typeof value === "object" && key in value) {
-          value = value[key];
-        } else {
+    async _get(key) {
+      if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+      if (this.ttl > 0) {
+        const now = Date.now();
+        const meta = this.meta[key];
+        if (meta && now - meta.ts > this.ttl * 1e3) {
+          delete this.cache[key];
+          delete this.meta[key];
           return null;
         }
       }
-      return value ?? null;
+      return this.cache[key];
     }
-    // Event emission methods
-    beforeSetup() {
-      this.emit("plugin.beforeSetup", /* @__PURE__ */ new Date());
+    async _del(key) {
+      delete this.cache[key];
+      delete this.meta[key];
+      return true;
     }
-    afterSetup() {
-      this.emit("plugin.afterSetup", /* @__PURE__ */ new Date());
-    }
-    beforeStart() {
-      this.emit("plugin.beforeStart", /* @__PURE__ */ new Date());
-    }
-    afterStart() {
-      this.emit("plugin.afterStart", /* @__PURE__ */ new Date());
-    }
-    beforeStop() {
-      this.emit("plugin.beforeStop", /* @__PURE__ */ new Date());
-    }
-    afterStop() {
-      this.emit("plugin.afterStop", /* @__PURE__ */ new Date());
-    }
-  }
-
-  const PluginObject = {
-    setup(database) {
-    },
-    start() {
-    },
-    stop() {
-    }
-  };
-
-  class AuditPlugin extends Plugin {
-    constructor(options = {}) {
-      super(options);
-      this.auditResource = null;
-      this.config = {
-        enabled: options.enabled !== false,
-        includeData: options.includeData !== false,
-        includePartitions: options.includePartitions !== false,
-        maxDataSize: options.maxDataSize || 1e4,
-        // 10KB limit
-        ...options
-      };
-    }
-    async onSetup() {
-      if (!this.config.enabled) {
-        this.auditResource = null;
-        return;
+    async _clear(prefix) {
+      if (!prefix) {
+        this.cache = {};
+        this.meta = {};
+        return true;
       }
-      const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
-        name: "audits",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          operation: "string|required",
-          recordId: "string|required",
-          userId: "string|optional",
-          timestamp: "string|required",
-          oldData: "string|optional",
-          newData: "string|optional",
-          partition: "string|optional",
-          partitionValues: "string|optional",
-          metadata: "string|optional"
-        },
-        behavior: "body-overflow"
-        // keyPrefix removido
-      }));
-      this.auditResource = ok ? auditResource : this.database.resources.audits || null;
-      if (!ok && !this.auditResource) return;
-      this.installDatabaseProxy();
-      this.installEventListeners();
-    }
-    async onStart() {
-    }
-    async onStop() {
-    }
-    installDatabaseProxy() {
-      if (this.database._auditProxyInstalled) {
-        return;
-      }
-      const installEventListenersForResource = this.installEventListenersForResource.bind(this);
-      this.database._originalCreateResource = this.database.createResource;
-      this.database.createResource = async function(...args) {
-        const resource = await this._originalCreateResource(...args);
-        if (resource.name !== "audits") {
-          installEventListenersForResource(resource);
-        }
-        return resource;
-      };
-      this.database._auditProxyInstalled = true;
-    }
-    installEventListeners() {
-      for (const resource of Object.values(this.database.resources)) {
-        if (resource.name === "audits") {
-          continue;
-        }
-        this.installEventListenersForResource(resource);
-      }
-    }
-    installEventListenersForResource(resource) {
-      resource.on("insert", async (data) => {
-        const recordId = data.id || "auto-generated";
-        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-          resourceName: resource.name,
-          operation: "insert",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          oldData: null,
-          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(console.error);
-      });
-      resource.on("update", async (data) => {
-        const recordId = data.id;
-        let oldData = data.$before;
-        if (this.config.includeData && !oldData) {
-          const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
-          if (ok) oldData = fetched;
-        }
-        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-          resourceName: resource.name,
-          operation: "update",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
-          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(console.error);
-      });
-      resource.on("delete", async (data) => {
-        const recordId = data.id;
-        let oldData = data;
-        if (this.config.includeData && !oldData) {
-          const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
-          if (ok) oldData = fetched;
-        }
-        const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-          resourceName: resource.name,
-          operation: "delete",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
-          newData: null,
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(console.error);
-      });
-      resource.useMiddleware("deleteMany", async (ctx, next) => {
-        const ids = ctx.args[0];
-        const oldDataMap = {};
-        if (this.config.includeData) {
-          for (const id of ids) {
-            const [ok, err, data] = await tryFn(() => resource.get(id));
-            oldDataMap[id] = ok ? data : null;
-          }
-        }
-        const result = await next();
-        if (result && result.length > 0 && this.config.includeData) {
-          for (const id of ids) {
-            const oldData = oldDataMap[id];
-            const partitionValues = oldData ? this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null : null;
-            const auditRecord = {
-              id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-              resourceName: resource.name,
-              operation: "delete",
-              recordId: id,
-              userId: this.getCurrentUserId?.() || "system",
-              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
-              newData: null,
-              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-              partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-              metadata: JSON.stringify({
-                source: "audit-plugin",
-                version: "2.0",
-                batchOperation: true
-              })
-            };
-            this.logAudit(auditRecord).catch(console.error);
-          }
-        }
-        return result;
-      });
-    }
-    getPartitionValues(data, resource) {
-      if (!data) return null;
-      const partitions = resource.config?.partitions || {};
-      const partitionValues = {};
-      for (const [partitionName, partitionDef] of Object.entries(partitions)) {
-        if (partitionDef.fields) {
-          const partitionData = {};
-          for (const [fieldName, fieldRule] of Object.entries(partitionDef.fields)) {
-            const fieldValue = this.getNestedFieldValue(data, fieldName);
-            if (fieldValue !== void 0 && fieldValue !== null) {
-              partitionData[fieldName] = fieldValue;
-            }
-          }
-          if (Object.keys(partitionData).length > 0) {
-            partitionValues[partitionName] = partitionData;
-          }
+      for (const key of Object.keys(this.cache)) {
+        if (key.startsWith(prefix)) {
+          delete this.cache[key];
+          delete this.meta[key];
         }
       }
-      return partitionValues;
+      return true;
     }
-    getNestedFieldValue(data, fieldPath) {
-      if (!fieldPath.includes(".")) {
-        return data[fieldPath];
-      }
-      const keys = fieldPath.split(".");
-      let currentLevel = data;
-      for (const key of keys) {
-        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
-          return void 0;
-        }
-        currentLevel = currentLevel[key];
-      }
-      return currentLevel;
+    async size() {
+      return Object.keys(this.cache).length;
     }
-    getPrimaryPartition(partitionValues) {
-      if (!partitionValues) return null;
-      const partitionNames = Object.keys(partitionValues);
-      return partitionNames.length > 0 ? partitionNames[0] : null;
-    }
-    async logAudit(auditRecord) {
-      if (!auditRecord.id) {
-        auditRecord.id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      }
-      const result = await this.auditResource.insert(auditRecord);
-      return result;
-    }
-    truncateData(data) {
-      if (!data) return data;
-      const filteredData = {};
-      for (const [key, value] of Object.entries(data)) {
-        if (!key.startsWith("_") && key !== "$overflow") {
-          filteredData[key] = value;
-        }
-      }
-      const dataStr = JSON.stringify(filteredData);
-      if (dataStr.length <= this.config.maxDataSize) {
-        return filteredData;
-      }
-      let truncatedData = { ...filteredData };
-      let currentSize = JSON.stringify(truncatedData).length;
-      const metadataOverhead = JSON.stringify({
-        _truncated: true,
-        _originalSize: dataStr.length,
-        _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }).length;
-      const targetSize = this.config.maxDataSize - metadataOverhead;
-      for (const [key, value] of Object.entries(truncatedData)) {
-        if (typeof value === "string" && currentSize > targetSize) {
-          const excess = currentSize - targetSize;
-          const newLength = Math.max(0, value.length - excess - 3);
-          if (newLength < value.length) {
-            truncatedData[key] = value.substring(0, newLength) + "...";
-            currentSize = JSON.stringify(truncatedData).length;
-          }
-        }
-      }
-      return {
-        ...truncatedData,
-        _truncated: true,
-        _originalSize: dataStr.length,
-        _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    }
-    // Utility methods for querying audit logs
-    async getAuditLogs(options = {}) {
-      if (!this.auditResource) return [];
-      const [ok, err, result] = await tryFn(async () => {
-        const {
-          resourceName,
-          operation,
-          recordId,
-          userId,
-          partition,
-          startDate,
-          endDate,
-          limit = 100,
-          offset = 0
-        } = options;
-        const allAudits = await this.auditResource.getAll();
-        let filtered = allAudits.filter((audit) => {
-          if (resourceName && audit.resourceName !== resourceName) return false;
-          if (operation && audit.operation !== operation) return false;
-          if (recordId && audit.recordId !== recordId) return false;
-          if (userId && audit.userId !== userId) return false;
-          if (partition && audit.partition !== partition) return false;
-          if (startDate && new Date(audit.timestamp) < new Date(startDate)) return false;
-          if (endDate && new Date(audit.timestamp) > new Date(endDate)) return false;
-          return true;
-        });
-        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        const deserialized = filtered.slice(offset, offset + limit).map((audit) => {
-          const [okOld, , oldData] = typeof audit.oldData === "string" ? tryFnSync(() => JSON.parse(audit.oldData)) : [true, null, audit.oldData];
-          const [okNew, , newData] = typeof audit.newData === "string" ? tryFnSync(() => JSON.parse(audit.newData)) : [true, null, audit.newData];
-          const [okPart, , partitionValues] = audit.partitionValues && typeof audit.partitionValues === "string" ? tryFnSync(() => JSON.parse(audit.partitionValues)) : [true, null, audit.partitionValues];
-          const [okMeta, , metadata] = audit.metadata && typeof audit.metadata === "string" ? tryFnSync(() => JSON.parse(audit.metadata)) : [true, null, audit.metadata];
-          return {
-            ...audit,
-            oldData: audit.oldData === null || audit.oldData === void 0 || audit.oldData === "null" ? null : okOld ? oldData : null,
-            newData: audit.newData === null || audit.newData === void 0 || audit.newData === "null" ? null : okNew ? newData : null,
-            partitionValues: okPart ? partitionValues : audit.partitionValues,
-            metadata: okMeta ? metadata : audit.metadata
-          };
-        });
-        return deserialized;
-      });
-      return ok ? result : [];
-    }
-    async getRecordHistory(resourceName, recordId) {
-      return this.getAuditLogs({
-        resourceName,
-        recordId,
-        limit: 1e3
-      });
-    }
-    async getPartitionHistory(resourceName, partitionName, partitionValues) {
-      return this.getAuditLogs({
-        resourceName,
-        partition: partitionName,
-        limit: 1e3
-      });
-    }
-    async getAuditStats(options = {}) {
-      const {
-        resourceName,
-        startDate,
-        endDate
-      } = options;
-      const allAudits = await this.getAuditLogs({
-        resourceName,
-        startDate,
-        endDate,
-        limit: 1e4
-      });
-      const stats = {
-        total: allAudits.length,
-        byOperation: {},
-        byResource: {},
-        byPartition: {},
-        byUser: {},
-        timeline: {}
-      };
-      for (const audit of allAudits) {
-        stats.byOperation[audit.operation] = (stats.byOperation[audit.operation] || 0) + 1;
-        stats.byResource[audit.resourceName] = (stats.byResource[audit.resourceName] || 0) + 1;
-        if (audit.partition) {
-          stats.byPartition[audit.partition] = (stats.byPartition[audit.partition] || 0) + 1;
-        }
-        stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
-        if (audit.timestamp) {
-          const day = audit.timestamp.split("T")[0];
-          stats.timeline[day] = (stats.timeline[day] || 0) + 1;
-        }
-      }
-      return stats;
+    async keys() {
+      return Object.keys(this.cache);
     }
   }
 
@@ -19752,15 +13710,11 @@ ${JSON.stringify(validation, null, 2)}`,
       super(options);
       this.driver = options.driver;
       this.config = {
-        enabled: options.enabled !== false,
         includePartitions: options.includePartitions !== false,
         ...options
       };
     }
     async setup(database) {
-      if (!this.config.enabled) {
-        return;
-      }
       await super.setup(database);
     }
     async onSetup() {
@@ -20031,7 +13985,6 @@ ${JSON.stringify(validation, null, 2)}`,
       super();
       this.indexResource = null;
       this.config = {
-        enabled: options.enabled !== false,
         minWordLength: options.minWordLength || 3,
         maxResults: options.maxResults || 100,
         ...options
@@ -20040,7 +13993,6 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async setup(database) {
       this.database = database;
-      if (!this.config.enabled) return;
       const [ok, err, indexResource] = await tryFn(() => database.createResource({
         name: "fulltext_indexes",
         attributes: {
@@ -20379,7 +14331,6 @@ ${JSON.stringify(validation, null, 2)}`,
     constructor(options = {}) {
       super();
       this.config = {
-        enabled: options.enabled !== false,
         collectPerformance: options.collectPerformance !== false,
         collectErrors: options.collectErrors !== false,
         collectUsage: options.collectUsage !== false,
@@ -20406,7 +14357,7 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async setup(database) {
       this.database = database;
-      if (!this.config.enabled || process.env.NODE_ENV === "test") return;
+      if (process.env.NODE_ENV === "test") return;
       const [ok, err] = await tryFn(async () => {
         const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
           name: "metrics",
@@ -20858,6 +14809,9976 @@ ${JSON.stringify(validation, null, 2)}`,
       }
     }
   }
+
+  var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
+
+  function getDefaultExportFromCjs (x) {
+  	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
+  }
+
+  function getAugmentedNamespace(n) {
+    if (Object.prototype.hasOwnProperty.call(n, '__esModule')) return n;
+    var f = n.default;
+  	if (typeof f == "function") {
+  		var a = function a () {
+  			var isInstance = false;
+        try {
+          isInstance = this instanceof a;
+        } catch {}
+  			if (isInstance) {
+          return Reflect.construct(f, arguments, this.constructor);
+  			}
+  			return f.apply(this, arguments);
+  		};
+  		a.prototype = f.prototype;
+    } else a = {};
+    Object.defineProperty(a, '__esModule', {value: true});
+  	Object.keys(n).forEach(function (k) {
+  		var d = Object.getOwnPropertyDescriptor(n, k);
+  		Object.defineProperty(a, k, d.get ? d : {
+  			enumerable: true,
+  			get: function () {
+  				return n[k];
+  			}
+  		});
+  	});
+  	return a;
+  }
+
+  var channel_api = {};
+
+  var connect = {};
+
+  var requiresPort;
+  var hasRequiredRequiresPort;
+
+  function requireRequiresPort () {
+  	if (hasRequiredRequiresPort) return requiresPort;
+  	hasRequiredRequiresPort = 1;
+
+  	/**
+  	 * Check if we're required to add a port number.
+  	 *
+  	 * @see https://url.spec.whatwg.org/#default-port
+  	 * @param {Number|String} port Port number we need to check
+  	 * @param {String} protocol Protocol we need to check against.
+  	 * @returns {Boolean} Is it a default port for the given protocol
+  	 * @api private
+  	 */
+  	requiresPort = function required(port, protocol) {
+  	  protocol = protocol.split(':')[0];
+  	  port = +port;
+
+  	  if (!port) return false;
+
+  	  switch (protocol) {
+  	    case 'http':
+  	    case 'ws':
+  	    return port !== 80;
+
+  	    case 'https':
+  	    case 'wss':
+  	    return port !== 443;
+
+  	    case 'ftp':
+  	    return port !== 21;
+
+  	    case 'gopher':
+  	    return port !== 70;
+
+  	    case 'file':
+  	    return false;
+  	  }
+
+  	  return port !== 0;
+  	};
+  	return requiresPort;
+  }
+
+  var querystringify = {};
+
+  var hasRequiredQuerystringify;
+
+  function requireQuerystringify () {
+  	if (hasRequiredQuerystringify) return querystringify;
+  	hasRequiredQuerystringify = 1;
+
+  	var has = Object.prototype.hasOwnProperty
+  	  , undef;
+
+  	/**
+  	 * Decode a URI encoded string.
+  	 *
+  	 * @param {String} input The URI encoded string.
+  	 * @returns {String|Null} The decoded string.
+  	 * @api private
+  	 */
+  	function decode(input) {
+  	  try {
+  	    return decodeURIComponent(input.replace(/\+/g, ' '));
+  	  } catch (e) {
+  	    return null;
+  	  }
+  	}
+
+  	/**
+  	 * Attempts to encode a given input.
+  	 *
+  	 * @param {String} input The string that needs to be encoded.
+  	 * @returns {String|Null} The encoded string.
+  	 * @api private
+  	 */
+  	function encode(input) {
+  	  try {
+  	    return encodeURIComponent(input);
+  	  } catch (e) {
+  	    return null;
+  	  }
+  	}
+
+  	/**
+  	 * Simple query string parser.
+  	 *
+  	 * @param {String} query The query string that needs to be parsed.
+  	 * @returns {Object}
+  	 * @api public
+  	 */
+  	function querystring(query) {
+  	  var parser = /([^=?#&]+)=?([^&]*)/g
+  	    , result = {}
+  	    , part;
+
+  	  while (part = parser.exec(query)) {
+  	    var key = decode(part[1])
+  	      , value = decode(part[2]);
+
+  	    //
+  	    // Prevent overriding of existing properties. This ensures that build-in
+  	    // methods like `toString` or __proto__ are not overriden by malicious
+  	    // querystrings.
+  	    //
+  	    // In the case if failed decoding, we want to omit the key/value pairs
+  	    // from the result.
+  	    //
+  	    if (key === null || value === null || key in result) continue;
+  	    result[key] = value;
+  	  }
+
+  	  return result;
+  	}
+
+  	/**
+  	 * Transform a query string to an object.
+  	 *
+  	 * @param {Object} obj Object that should be transformed.
+  	 * @param {String} prefix Optional prefix.
+  	 * @returns {String}
+  	 * @api public
+  	 */
+  	function querystringify$1(obj, prefix) {
+  	  prefix = prefix || '';
+
+  	  var pairs = []
+  	    , value
+  	    , key;
+
+  	  //
+  	  // Optionally prefix with a '?' if needed
+  	  //
+  	  if ('string' !== typeof prefix) prefix = '?';
+
+  	  for (key in obj) {
+  	    if (has.call(obj, key)) {
+  	      value = obj[key];
+
+  	      //
+  	      // Edge cases where we actually want to encode the value to an empty
+  	      // string instead of the stringified value.
+  	      //
+  	      if (!value && (value === null || value === undef || isNaN(value))) {
+  	        value = '';
+  	      }
+
+  	      key = encode(key);
+  	      value = encode(value);
+
+  	      //
+  	      // If we failed to encode the strings, we should bail out as we don't
+  	      // want to add invalid strings to the query.
+  	      //
+  	      if (key === null || value === null) continue;
+  	      pairs.push(key +'='+ value);
+  	    }
+  	  }
+
+  	  return pairs.length ? prefix + pairs.join('&') : '';
+  	}
+
+  	//
+  	// Expose the module.
+  	//
+  	querystringify.stringify = querystringify$1;
+  	querystringify.parse = querystring;
+  	return querystringify;
+  }
+
+  var urlParse;
+  var hasRequiredUrlParse;
+
+  function requireUrlParse () {
+  	if (hasRequiredUrlParse) return urlParse;
+  	hasRequiredUrlParse = 1;
+
+  	var required = requireRequiresPort()
+  	  , qs = requireQuerystringify()
+  	  , controlOrWhitespace = /^[\x00-\x20\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+/
+  	  , CRHTLF = /[\n\r\t]/g
+  	  , slashes = /^[A-Za-z][A-Za-z0-9+-.]*:\/\//
+  	  , port = /:\d+$/
+  	  , protocolre = /^([a-z][a-z0-9.+-]*:)?(\/\/)?([\\/]+)?([\S\s]*)/i
+  	  , windowsDriveLetter = /^[a-zA-Z]:/;
+
+  	/**
+  	 * Remove control characters and whitespace from the beginning of a string.
+  	 *
+  	 * @param {Object|String} str String to trim.
+  	 * @returns {String} A new string representing `str` stripped of control
+  	 *     characters and whitespace from its beginning.
+  	 * @public
+  	 */
+  	function trimLeft(str) {
+  	  return (str ? str : '').toString().replace(controlOrWhitespace, '');
+  	}
+
+  	/**
+  	 * These are the parse rules for the URL parser, it informs the parser
+  	 * about:
+  	 *
+  	 * 0. The char it Needs to parse, if it's a string it should be done using
+  	 *    indexOf, RegExp using exec and NaN means set as current value.
+  	 * 1. The property we should set when parsing this value.
+  	 * 2. Indication if it's backwards or forward parsing, when set as number it's
+  	 *    the value of extra chars that should be split off.
+  	 * 3. Inherit from location if non existing in the parser.
+  	 * 4. `toLowerCase` the resulting value.
+  	 */
+  	var rules = [
+  	  ['#', 'hash'],                        // Extract from the back.
+  	  ['?', 'query'],                       // Extract from the back.
+  	  function sanitize(address, url) {     // Sanitize what is left of the address
+  	    return isSpecial(url.protocol) ? address.replace(/\\/g, '/') : address;
+  	  },
+  	  ['/', 'pathname'],                    // Extract from the back.
+  	  ['@', 'auth', 1],                     // Extract from the front.
+  	  [NaN, 'host', undefined, 1, 1],       // Set left over value.
+  	  [/:(\d*)$/, 'port', undefined, 1],    // RegExp the back.
+  	  [NaN, 'hostname', undefined, 1, 1]    // Set left over.
+  	];
+
+  	/**
+  	 * These properties should not be copied or inherited from. This is only needed
+  	 * for all non blob URL's as a blob URL does not include a hash, only the
+  	 * origin.
+  	 *
+  	 * @type {Object}
+  	 * @private
+  	 */
+  	var ignore = { hash: 1, query: 1 };
+
+  	/**
+  	 * The location object differs when your code is loaded through a normal page,
+  	 * Worker or through a worker using a blob. And with the blobble begins the
+  	 * trouble as the location object will contain the URL of the blob, not the
+  	 * location of the page where our code is loaded in. The actual origin is
+  	 * encoded in the `pathname` so we can thankfully generate a good "default"
+  	 * location from it so we can generate proper relative URL's again.
+  	 *
+  	 * @param {Object|String} loc Optional default location object.
+  	 * @returns {Object} lolcation object.
+  	 * @public
+  	 */
+  	function lolcation(loc) {
+  	  var globalVar;
+
+  	  if (typeof window !== 'undefined') globalVar = window;
+  	  else if (typeof commonjsGlobal !== 'undefined') globalVar = commonjsGlobal;
+  	  else if (typeof self !== 'undefined') globalVar = self;
+  	  else globalVar = {};
+
+  	  var location = globalVar.location || {};
+  	  loc = loc || location;
+
+  	  var finaldestination = {}
+  	    , type = typeof loc
+  	    , key;
+
+  	  if ('blob:' === loc.protocol) {
+  	    finaldestination = new Url(unescape(loc.pathname), {});
+  	  } else if ('string' === type) {
+  	    finaldestination = new Url(loc, {});
+  	    for (key in ignore) delete finaldestination[key];
+  	  } else if ('object' === type) {
+  	    for (key in loc) {
+  	      if (key in ignore) continue;
+  	      finaldestination[key] = loc[key];
+  	    }
+
+  	    if (finaldestination.slashes === undefined) {
+  	      finaldestination.slashes = slashes.test(loc.href);
+  	    }
+  	  }
+
+  	  return finaldestination;
+  	}
+
+  	/**
+  	 * Check whether a protocol scheme is special.
+  	 *
+  	 * @param {String} The protocol scheme of the URL
+  	 * @return {Boolean} `true` if the protocol scheme is special, else `false`
+  	 * @private
+  	 */
+  	function isSpecial(scheme) {
+  	  return (
+  	    scheme === 'file:' ||
+  	    scheme === 'ftp:' ||
+  	    scheme === 'http:' ||
+  	    scheme === 'https:' ||
+  	    scheme === 'ws:' ||
+  	    scheme === 'wss:'
+  	  );
+  	}
+
+  	/**
+  	 * @typedef ProtocolExtract
+  	 * @type Object
+  	 * @property {String} protocol Protocol matched in the URL, in lowercase.
+  	 * @property {Boolean} slashes `true` if protocol is followed by "//", else `false`.
+  	 * @property {String} rest Rest of the URL that is not part of the protocol.
+  	 */
+
+  	/**
+  	 * Extract protocol information from a URL with/without double slash ("//").
+  	 *
+  	 * @param {String} address URL we want to extract from.
+  	 * @param {Object} location
+  	 * @return {ProtocolExtract} Extracted information.
+  	 * @private
+  	 */
+  	function extractProtocol(address, location) {
+  	  address = trimLeft(address);
+  	  address = address.replace(CRHTLF, '');
+  	  location = location || {};
+
+  	  var match = protocolre.exec(address);
+  	  var protocol = match[1] ? match[1].toLowerCase() : '';
+  	  var forwardSlashes = !!match[2];
+  	  var otherSlashes = !!match[3];
+  	  var slashesCount = 0;
+  	  var rest;
+
+  	  if (forwardSlashes) {
+  	    if (otherSlashes) {
+  	      rest = match[2] + match[3] + match[4];
+  	      slashesCount = match[2].length + match[3].length;
+  	    } else {
+  	      rest = match[2] + match[4];
+  	      slashesCount = match[2].length;
+  	    }
+  	  } else {
+  	    if (otherSlashes) {
+  	      rest = match[3] + match[4];
+  	      slashesCount = match[3].length;
+  	    } else {
+  	      rest = match[4];
+  	    }
+  	  }
+
+  	  if (protocol === 'file:') {
+  	    if (slashesCount >= 2) {
+  	      rest = rest.slice(2);
+  	    }
+  	  } else if (isSpecial(protocol)) {
+  	    rest = match[4];
+  	  } else if (protocol) {
+  	    if (forwardSlashes) {
+  	      rest = rest.slice(2);
+  	    }
+  	  } else if (slashesCount >= 2 && isSpecial(location.protocol)) {
+  	    rest = match[4];
+  	  }
+
+  	  return {
+  	    protocol: protocol,
+  	    slashes: forwardSlashes || isSpecial(protocol),
+  	    slashesCount: slashesCount,
+  	    rest: rest
+  	  };
+  	}
+
+  	/**
+  	 * Resolve a relative URL pathname against a base URL pathname.
+  	 *
+  	 * @param {String} relative Pathname of the relative URL.
+  	 * @param {String} base Pathname of the base URL.
+  	 * @return {String} Resolved pathname.
+  	 * @private
+  	 */
+  	function resolve(relative, base) {
+  	  if (relative === '') return base;
+
+  	  var path = (base || '/').split('/').slice(0, -1).concat(relative.split('/'))
+  	    , i = path.length
+  	    , last = path[i - 1]
+  	    , unshift = false
+  	    , up = 0;
+
+  	  while (i--) {
+  	    if (path[i] === '.') {
+  	      path.splice(i, 1);
+  	    } else if (path[i] === '..') {
+  	      path.splice(i, 1);
+  	      up++;
+  	    } else if (up) {
+  	      if (i === 0) unshift = true;
+  	      path.splice(i, 1);
+  	      up--;
+  	    }
+  	  }
+
+  	  if (unshift) path.unshift('');
+  	  if (last === '.' || last === '..') path.push('');
+
+  	  return path.join('/');
+  	}
+
+  	/**
+  	 * The actual URL instance. Instead of returning an object we've opted-in to
+  	 * create an actual constructor as it's much more memory efficient and
+  	 * faster and it pleases my OCD.
+  	 *
+  	 * It is worth noting that we should not use `URL` as class name to prevent
+  	 * clashes with the global URL instance that got introduced in browsers.
+  	 *
+  	 * @constructor
+  	 * @param {String} address URL we want to parse.
+  	 * @param {Object|String} [location] Location defaults for relative paths.
+  	 * @param {Boolean|Function} [parser] Parser for the query string.
+  	 * @private
+  	 */
+  	function Url(address, location, parser) {
+  	  address = trimLeft(address);
+  	  address = address.replace(CRHTLF, '');
+
+  	  if (!(this instanceof Url)) {
+  	    return new Url(address, location, parser);
+  	  }
+
+  	  var relative, extracted, parse, instruction, index, key
+  	    , instructions = rules.slice()
+  	    , type = typeof location
+  	    , url = this
+  	    , i = 0;
+
+  	  //
+  	  // The following if statements allows this module two have compatibility with
+  	  // 2 different API:
+  	  //
+  	  // 1. Node.js's `url.parse` api which accepts a URL, boolean as arguments
+  	  //    where the boolean indicates that the query string should also be parsed.
+  	  //
+  	  // 2. The `URL` interface of the browser which accepts a URL, object as
+  	  //    arguments. The supplied object will be used as default values / fall-back
+  	  //    for relative paths.
+  	  //
+  	  if ('object' !== type && 'string' !== type) {
+  	    parser = location;
+  	    location = null;
+  	  }
+
+  	  if (parser && 'function' !== typeof parser) parser = qs.parse;
+
+  	  location = lolcation(location);
+
+  	  //
+  	  // Extract protocol information before running the instructions.
+  	  //
+  	  extracted = extractProtocol(address || '', location);
+  	  relative = !extracted.protocol && !extracted.slashes;
+  	  url.slashes = extracted.slashes || relative && location.slashes;
+  	  url.protocol = extracted.protocol || location.protocol || '';
+  	  address = extracted.rest;
+
+  	  //
+  	  // When the authority component is absent the URL starts with a path
+  	  // component.
+  	  //
+  	  if (
+  	    extracted.protocol === 'file:' && (
+  	      extracted.slashesCount !== 2 || windowsDriveLetter.test(address)) ||
+  	    (!extracted.slashes &&
+  	      (extracted.protocol ||
+  	        extracted.slashesCount < 2 ||
+  	        !isSpecial(url.protocol)))
+  	  ) {
+  	    instructions[3] = [/(.*)/, 'pathname'];
+  	  }
+
+  	  for (; i < instructions.length; i++) {
+  	    instruction = instructions[i];
+
+  	    if (typeof instruction === 'function') {
+  	      address = instruction(address, url);
+  	      continue;
+  	    }
+
+  	    parse = instruction[0];
+  	    key = instruction[1];
+
+  	    if (parse !== parse) {
+  	      url[key] = address;
+  	    } else if ('string' === typeof parse) {
+  	      index = parse === '@'
+  	        ? address.lastIndexOf(parse)
+  	        : address.indexOf(parse);
+
+  	      if (~index) {
+  	        if ('number' === typeof instruction[2]) {
+  	          url[key] = address.slice(0, index);
+  	          address = address.slice(index + instruction[2]);
+  	        } else {
+  	          url[key] = address.slice(index);
+  	          address = address.slice(0, index);
+  	        }
+  	      }
+  	    } else if ((index = parse.exec(address))) {
+  	      url[key] = index[1];
+  	      address = address.slice(0, index.index);
+  	    }
+
+  	    url[key] = url[key] || (
+  	      relative && instruction[3] ? location[key] || '' : ''
+  	    );
+
+  	    //
+  	    // Hostname, host and protocol should be lowercased so they can be used to
+  	    // create a proper `origin`.
+  	    //
+  	    if (instruction[4]) url[key] = url[key].toLowerCase();
+  	  }
+
+  	  //
+  	  // Also parse the supplied query string in to an object. If we're supplied
+  	  // with a custom parser as function use that instead of the default build-in
+  	  // parser.
+  	  //
+  	  if (parser) url.query = parser(url.query);
+
+  	  //
+  	  // If the URL is relative, resolve the pathname against the base URL.
+  	  //
+  	  if (
+  	      relative
+  	    && location.slashes
+  	    && url.pathname.charAt(0) !== '/'
+  	    && (url.pathname !== '' || location.pathname !== '')
+  	  ) {
+  	    url.pathname = resolve(url.pathname, location.pathname);
+  	  }
+
+  	  //
+  	  // Default to a / for pathname if none exists. This normalizes the URL
+  	  // to always have a /
+  	  //
+  	  if (url.pathname.charAt(0) !== '/' && isSpecial(url.protocol)) {
+  	    url.pathname = '/' + url.pathname;
+  	  }
+
+  	  //
+  	  // We should not add port numbers if they are already the default port number
+  	  // for a given protocol. As the host also contains the port number we're going
+  	  // override it with the hostname which contains no port number.
+  	  //
+  	  if (!required(url.port, url.protocol)) {
+  	    url.host = url.hostname;
+  	    url.port = '';
+  	  }
+
+  	  //
+  	  // Parse down the `auth` for the username and password.
+  	  //
+  	  url.username = url.password = '';
+
+  	  if (url.auth) {
+  	    index = url.auth.indexOf(':');
+
+  	    if (~index) {
+  	      url.username = url.auth.slice(0, index);
+  	      url.username = encodeURIComponent(decodeURIComponent(url.username));
+
+  	      url.password = url.auth.slice(index + 1);
+  	      url.password = encodeURIComponent(decodeURIComponent(url.password));
+  	    } else {
+  	      url.username = encodeURIComponent(decodeURIComponent(url.auth));
+  	    }
+
+  	    url.auth = url.password ? url.username +':'+ url.password : url.username;
+  	  }
+
+  	  url.origin = url.protocol !== 'file:' && isSpecial(url.protocol) && url.host
+  	    ? url.protocol +'//'+ url.host
+  	    : 'null';
+
+  	  //
+  	  // The href is just the compiled result.
+  	  //
+  	  url.href = url.toString();
+  	}
+
+  	/**
+  	 * This is convenience method for changing properties in the URL instance to
+  	 * insure that they all propagate correctly.
+  	 *
+  	 * @param {String} part          Property we need to adjust.
+  	 * @param {Mixed} value          The newly assigned value.
+  	 * @param {Boolean|Function} fn  When setting the query, it will be the function
+  	 *                               used to parse the query.
+  	 *                               When setting the protocol, double slash will be
+  	 *                               removed from the final url if it is true.
+  	 * @returns {URL} URL instance for chaining.
+  	 * @public
+  	 */
+  	function set(part, value, fn) {
+  	  var url = this;
+
+  	  switch (part) {
+  	    case 'query':
+  	      if ('string' === typeof value && value.length) {
+  	        value = (fn || qs.parse)(value);
+  	      }
+
+  	      url[part] = value;
+  	      break;
+
+  	    case 'port':
+  	      url[part] = value;
+
+  	      if (!required(value, url.protocol)) {
+  	        url.host = url.hostname;
+  	        url[part] = '';
+  	      } else if (value) {
+  	        url.host = url.hostname +':'+ value;
+  	      }
+
+  	      break;
+
+  	    case 'hostname':
+  	      url[part] = value;
+
+  	      if (url.port) value += ':'+ url.port;
+  	      url.host = value;
+  	      break;
+
+  	    case 'host':
+  	      url[part] = value;
+
+  	      if (port.test(value)) {
+  	        value = value.split(':');
+  	        url.port = value.pop();
+  	        url.hostname = value.join(':');
+  	      } else {
+  	        url.hostname = value;
+  	        url.port = '';
+  	      }
+
+  	      break;
+
+  	    case 'protocol':
+  	      url.protocol = value.toLowerCase();
+  	      url.slashes = !fn;
+  	      break;
+
+  	    case 'pathname':
+  	    case 'hash':
+  	      if (value) {
+  	        var char = part === 'pathname' ? '/' : '#';
+  	        url[part] = value.charAt(0) !== char ? char + value : value;
+  	      } else {
+  	        url[part] = value;
+  	      }
+  	      break;
+
+  	    case 'username':
+  	    case 'password':
+  	      url[part] = encodeURIComponent(value);
+  	      break;
+
+  	    case 'auth':
+  	      var index = value.indexOf(':');
+
+  	      if (~index) {
+  	        url.username = value.slice(0, index);
+  	        url.username = encodeURIComponent(decodeURIComponent(url.username));
+
+  	        url.password = value.slice(index + 1);
+  	        url.password = encodeURIComponent(decodeURIComponent(url.password));
+  	      } else {
+  	        url.username = encodeURIComponent(decodeURIComponent(value));
+  	      }
+  	  }
+
+  	  for (var i = 0; i < rules.length; i++) {
+  	    var ins = rules[i];
+
+  	    if (ins[4]) url[ins[1]] = url[ins[1]].toLowerCase();
+  	  }
+
+  	  url.auth = url.password ? url.username +':'+ url.password : url.username;
+
+  	  url.origin = url.protocol !== 'file:' && isSpecial(url.protocol) && url.host
+  	    ? url.protocol +'//'+ url.host
+  	    : 'null';
+
+  	  url.href = url.toString();
+
+  	  return url;
+  	}
+
+  	/**
+  	 * Transform the properties back in to a valid and full URL string.
+  	 *
+  	 * @param {Function} stringify Optional query stringify function.
+  	 * @returns {String} Compiled version of the URL.
+  	 * @public
+  	 */
+  	function toString(stringify) {
+  	  if (!stringify || 'function' !== typeof stringify) stringify = qs.stringify;
+
+  	  var query
+  	    , url = this
+  	    , host = url.host
+  	    , protocol = url.protocol;
+
+  	  if (protocol && protocol.charAt(protocol.length - 1) !== ':') protocol += ':';
+
+  	  var result =
+  	    protocol +
+  	    ((url.protocol && url.slashes) || isSpecial(url.protocol) ? '//' : '');
+
+  	  if (url.username) {
+  	    result += url.username;
+  	    if (url.password) result += ':'+ url.password;
+  	    result += '@';
+  	  } else if (url.password) {
+  	    result += ':'+ url.password;
+  	    result += '@';
+  	  } else if (
+  	    url.protocol !== 'file:' &&
+  	    isSpecial(url.protocol) &&
+  	    !host &&
+  	    url.pathname !== '/'
+  	  ) {
+  	    //
+  	    // Add back the empty userinfo, otherwise the original invalid URL
+  	    // might be transformed into a valid one with `url.pathname` as host.
+  	    //
+  	    result += '@';
+  	  }
+
+  	  //
+  	  // Trailing colon is removed from `url.host` when it is parsed. If it still
+  	  // ends with a colon, then add back the trailing colon that was removed. This
+  	  // prevents an invalid URL from being transformed into a valid one.
+  	  //
+  	  if (host[host.length - 1] === ':' || (port.test(url.hostname) && !url.port)) {
+  	    host += ':';
+  	  }
+
+  	  result += host + url.pathname;
+
+  	  query = 'object' === typeof url.query ? stringify(url.query) : url.query;
+  	  if (query) result += '?' !== query.charAt(0) ? '?'+ query : query;
+
+  	  if (url.hash) result += url.hash;
+
+  	  return result;
+  	}
+
+  	Url.prototype = { set: set, toString: toString };
+
+  	//
+  	// Expose the URL parser and some additional properties that might be useful for
+  	// others or testing.
+  	//
+  	Url.extractProtocol = extractProtocol;
+  	Url.location = lolcation;
+  	Url.trimLeft = trimLeft;
+  	Url.qs = qs;
+
+  	urlParse = Url;
+  	return urlParse;
+  }
+
+  // Copyright Joyent, Inc. and other Node contributors.
+  //
+  // Permission is hereby granted, free of charge, to any person obtaining a
+  // copy of this software and associated documentation files (the
+  // "Software"), to deal in the Software without restriction, including
+  // without limitation the rights to use, copy, modify, merge, publish,
+  // distribute, sublicense, and/or sell copies of the Software, and to permit
+  // persons to whom the Software is furnished to do so, subject to the
+  // following conditions:
+  //
+  // The above copyright notice and this permission notice shall be included
+  // in all copies or substantial portions of the Software.
+  //
+  // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  // OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+  // NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+  // USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+  // If obj.hasOwnProperty has been overridden, then calling
+  // obj.hasOwnProperty(prop) will break.
+  // See: https://github.com/joyent/node/issues/1707
+  function hasOwnProperty(obj, prop) {
+    return Object.prototype.hasOwnProperty.call(obj, prop);
+  }
+  var isArray = Array.isArray || function (xs) {
+    return Object.prototype.toString.call(xs) === '[object Array]';
+  };
+  function stringifyPrimitive(v) {
+    switch (typeof v) {
+      case 'string':
+        return v;
+
+      case 'boolean':
+        return v ? 'true' : 'false';
+
+      case 'number':
+        return isFinite(v) ? v : '';
+
+      default:
+        return '';
+    }
+  }
+
+  function stringify$1 (obj, sep, eq, name) {
+    sep = sep || '&';
+    eq = eq || '=';
+    if (obj === null) {
+      obj = undefined;
+    }
+
+    if (typeof obj === 'object') {
+      return map(objectKeys$2(obj), function(k) {
+        var ks = encodeURIComponent(stringifyPrimitive(k)) + eq;
+        if (isArray(obj[k])) {
+          return map(obj[k], function(v) {
+            return ks + encodeURIComponent(stringifyPrimitive(v));
+          }).join(sep);
+        } else {
+          return ks + encodeURIComponent(stringifyPrimitive(obj[k]));
+        }
+      }).join(sep);
+
+    }
+
+    if (!name) return '';
+    return encodeURIComponent(stringifyPrimitive(name)) + eq +
+           encodeURIComponent(stringifyPrimitive(obj));
+  }
+  function map (xs, f) {
+    if (xs.map) return xs.map(f);
+    var res = [];
+    for (var i = 0; i < xs.length; i++) {
+      res.push(f(xs[i], i));
+    }
+    return res;
+  }
+
+  var objectKeys$2 = Object.keys || function (obj) {
+    var res = [];
+    for (var key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) res.push(key);
+    }
+    return res;
+  };
+
+  function parse$1(qs, sep, eq, options) {
+    sep = sep || '&';
+    eq = eq || '=';
+    var obj = {};
+
+    if (typeof qs !== 'string' || qs.length === 0) {
+      return obj;
+    }
+
+    var regexp = /\+/g;
+    qs = qs.split(sep);
+
+    var maxKeys = 1000;
+    if (options && typeof options.maxKeys === 'number') {
+      maxKeys = options.maxKeys;
+    }
+
+    var len = qs.length;
+    // maxKeys <= 0 means that we should not limit keys count
+    if (maxKeys > 0 && len > maxKeys) {
+      len = maxKeys;
+    }
+
+    for (var i = 0; i < len; ++i) {
+      var x = qs[i].replace(regexp, '%20'),
+          idx = x.indexOf(eq),
+          kstr, vstr, k, v;
+
+      if (idx >= 0) {
+        kstr = x.substr(0, idx);
+        vstr = x.substr(idx + 1);
+      } else {
+        kstr = x;
+        vstr = '';
+      }
+
+      k = decodeURIComponent(kstr);
+      v = decodeURIComponent(vstr);
+
+      if (!hasOwnProperty(obj, k)) {
+        obj[k] = v;
+      } else if (isArray(obj[k])) {
+        obj[k].push(v);
+      } else {
+        obj[k] = [obj[k], v];
+      }
+    }
+
+    return obj;
+  }var _polyfillNode_querystring = {
+    encode: stringify$1,
+    stringify: stringify$1,
+    decode: parse$1,
+    parse: parse$1
+  };
+
+  var _polyfillNode_querystring$1 = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    decode: parse$1,
+    default: _polyfillNode_querystring,
+    encode: stringify$1,
+    parse: parse$1,
+    stringify: stringify$1
+  });
+
+  var require$$1 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_querystring$1);
+
+  var connection = {};
+
+  var defs = {};
+
+  var codec = {};
+
+  var bufferMoreInts = {exports: {}};
+
+  bufferMoreInts.exports;
+
+  var hasRequiredBufferMoreInts;
+
+  function requireBufferMoreInts () {
+  	if (hasRequiredBufferMoreInts) return bufferMoreInts.exports;
+  	hasRequiredBufferMoreInts = 1;
+  	(function (module) {
+
+  		// JavaScript is numerically challenged
+  		var SHIFT_LEFT_32 = (1 << 16) * (1 << 16);
+  		var SHIFT_RIGHT_32 = 1 / SHIFT_LEFT_32;
+
+  		// The maximum contiguous integer that can be held in a IEEE754 double
+  		var MAX_INT = 0x1fffffffffffff;
+
+  		function isContiguousInt(val) {
+  		    return val <= MAX_INT && val >= -MAX_INT;
+  		}
+
+  		function assertContiguousInt(val) {
+  		    if (!isContiguousInt(val)) {
+  		        throw new TypeError("number cannot be represented as a contiguous integer");
+  		    }
+  		}
+
+  		module.exports.isContiguousInt = isContiguousInt;
+  		module.exports.assertContiguousInt = assertContiguousInt;
+
+  		// Fill in the regular procedures
+  		['UInt', 'Int'].forEach(function (sign) {
+  		  var suffix = sign + '8';
+  		  module.exports['read' + suffix] =
+  		    Buffer$1.prototype['read' + suffix].call;
+  		  module.exports['write' + suffix] =
+  		    Buffer$1.prototype['write' + suffix].call;
+
+  		  ['16', '32'].forEach(function (size) {
+  		    ['LE', 'BE'].forEach(function (endian) {
+  		      var suffix = sign + size + endian;
+  		      var read = Buffer$1.prototype['read' + suffix];
+  		      module.exports['read' + suffix] =
+  		        function (buf, offset) {
+  		          return read.call(buf, offset);
+  		        };
+  		      var write = Buffer$1.prototype['write' + suffix];
+  		      module.exports['write' + suffix] =
+  		        function (buf, val, offset) {
+  		          return write.call(buf, val, offset);
+  		        };
+  		    });
+  		  });
+  		});
+
+  		// Check that a value is an integer within the given range
+  		function check_value(val, min, max) {
+  		    val = +val;
+  		    if (typeof(val) != 'number' || val < min || val > max || Math.floor(val) !== val) {
+  		        throw new TypeError("\"value\" argument is out of bounds");
+  		    }
+  		    return val;
+  		}
+
+  		// Check that something is within the Buffer bounds
+  		function check_bounds(buf, offset, len) {
+  		    if (offset < 0 || offset + len > buf.length) {
+  		        throw new RangeError("Index out of range");
+  		    }
+  		}
+
+  		function readUInt24BE(buf, offset) {
+  		  return buf.readUInt8(offset) << 16 | buf.readUInt16BE(offset + 1);
+  		}
+  		module.exports.readUInt24BE = readUInt24BE;
+
+  		function writeUInt24BE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffff);
+  		    check_bounds(buf, offset, 3);
+  		    buf.writeUInt8(val >>> 16, offset);
+  		    buf.writeUInt16BE(val & 0xffff, offset + 1);
+  		}
+  		module.exports.writeUInt24BE = writeUInt24BE;
+
+  		function readUInt40BE(buf, offset) {
+  		    return (buf.readUInt8(offset) || 0) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 1);
+  		}
+  		module.exports.readUInt40BE = readUInt40BE;
+
+  		function writeUInt40BE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffff);
+  		    check_bounds(buf, offset, 5);
+  		    buf.writeUInt8(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		    buf.writeInt32BE(val & -1, offset + 1);
+  		}
+  		module.exports.writeUInt40BE = writeUInt40BE;
+
+  		function readUInt48BE(buf, offset) {
+  		    return buf.readUInt16BE(offset) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 2);
+  		}
+  		module.exports.readUInt48BE = readUInt48BE;
+
+  		function writeUInt48BE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffff);
+  		    check_bounds(buf, offset, 6);
+  		    buf.writeUInt16BE(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		    buf.writeInt32BE(val & -1, offset + 2);
+  		}
+  		module.exports.writeUInt48BE = writeUInt48BE;
+
+  		function readUInt56BE(buf, offset) {
+  		    return ((buf.readUInt8(offset) || 0) << 16 | buf.readUInt16BE(offset + 1)) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 3);
+  		}
+  		module.exports.readUInt56BE = readUInt56BE;
+
+  		function writeUInt56BE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffffff);
+  		    check_bounds(buf, offset, 7);
+
+  		    if (val < 0x100000000000000) {
+  		        var hi = Math.floor(val * SHIFT_RIGHT_32);
+  		        buf.writeUInt8(hi >>> 16, offset);
+  		        buf.writeUInt16BE(hi & 0xffff, offset + 1);
+  		        buf.writeInt32BE(val & -1, offset + 3);
+  		    } else {
+  		        // Special case because 2^56-1 gets rounded up to 2^56
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		    }
+  		}
+  		module.exports.writeUInt56BE = writeUInt56BE;
+
+  		function readUInt64BE(buf, offset) {
+  		    return buf.readUInt32BE(offset) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 4);
+  		}
+  		module.exports.readUInt64BE = readUInt64BE;
+
+  		function writeUInt64BE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffffffff);
+  		    check_bounds(buf, offset, 8);
+
+  		    if (val < 0x10000000000000000) {
+  		        buf.writeUInt32BE(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		        buf.writeInt32BE(val & -1, offset + 4);
+  		    } else {
+  		        // Special case because 2^64-1 gets rounded up to 2^64
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		        buf[offset+7] = 0xff;
+  		    }
+  		}
+  		module.exports.writeUInt64BE = writeUInt64BE;
+
+  		function readUInt24LE(buf, offset) {
+  		    return buf.readUInt8(offset + 2) << 16 | buf.readUInt16LE(offset);
+  		}
+  		module.exports.readUInt24LE = readUInt24LE;
+
+  		function writeUInt24LE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffff);
+  		    check_bounds(buf, offset, 3);
+
+  		    buf.writeUInt16LE(val & 0xffff, offset);
+  		    buf.writeUInt8(val >>> 16, offset + 2);
+  		}
+  		module.exports.writeUInt24LE = writeUInt24LE;
+
+  		function readUInt40LE(buf, offset) {
+  		    return (buf.readUInt8(offset + 4) || 0) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readUInt40LE = readUInt40LE;
+
+  		function writeUInt40LE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffff);
+  		    check_bounds(buf, offset, 5);
+  		    buf.writeInt32LE(val & -1, offset);
+  		    buf.writeUInt8(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		}
+  		module.exports.writeUInt40LE = writeUInt40LE;
+
+  		function readUInt48LE(buf, offset) {
+  		    return buf.readUInt16LE(offset + 4) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readUInt48LE = readUInt48LE;
+
+  		function writeUInt48LE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffff);
+  		    check_bounds(buf, offset, 6);
+  		    buf.writeInt32LE(val & -1, offset);
+  		    buf.writeUInt16LE(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		}
+  		module.exports.writeUInt48LE = writeUInt48LE;
+
+  		function readUInt56LE(buf, offset) {
+  		    return ((buf.readUInt8(offset + 6) || 0) << 16 | buf.readUInt16LE(offset + 4)) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readUInt56LE = readUInt56LE;
+
+  		function writeUInt56LE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffffff);
+  		    check_bounds(buf, offset, 7);
+
+  		    if (val < 0x100000000000000) {
+  		        buf.writeInt32LE(val & -1, offset);
+  		        var hi = Math.floor(val * SHIFT_RIGHT_32);
+  		        buf.writeUInt16LE(hi & 0xffff, offset + 4);
+  		        buf.writeUInt8(hi >>> 16, offset + 6);
+  		    } else {
+  		        // Special case because 2^56-1 gets rounded up to 2^56
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		    }
+  		}
+  		module.exports.writeUInt56LE = writeUInt56LE;
+
+  		function readUInt64LE(buf, offset) {
+  		    return buf.readUInt32LE(offset + 4) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readUInt64LE = readUInt64LE;
+
+  		function writeUInt64LE(buf, val, offset) {
+  		    val = check_value(val, 0, 0xffffffffffffffff);
+  		    check_bounds(buf, offset, 8);
+
+  		    if (val < 0x10000000000000000) {
+  		        buf.writeInt32LE(val & -1, offset);
+  		        buf.writeUInt32LE(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		    } else {
+  		        // Special case because 2^64-1 gets rounded up to 2^64
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		        buf[offset+7] = 0xff;
+  		    }
+  		}
+  		module.exports.writeUInt64LE = writeUInt64LE;
+
+
+  		function readInt24BE(buf, offset) {
+  		    return (buf.readInt8(offset) << 16) + buf.readUInt16BE(offset + 1);
+  		}
+  		module.exports.readInt24BE = readInt24BE;
+
+  		function writeInt24BE(buf, val, offset) {
+  		    val = check_value(val, -8388608, 0x7fffff);
+  		    check_bounds(buf, offset, 3);
+  		    buf.writeInt8(val >> 16, offset);
+  		    buf.writeUInt16BE(val & 0xffff, offset + 1);
+  		}
+  		module.exports.writeInt24BE = writeInt24BE;
+
+  		function readInt40BE(buf, offset) {
+  		    return (buf.readInt8(offset) || 0) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 1);
+  		}
+  		module.exports.readInt40BE = readInt40BE;
+
+  		function writeInt40BE(buf, val, offset) {
+  		    val = check_value(val, -549755813888, 0x7fffffffff);
+  		    check_bounds(buf, offset, 5);
+  		    buf.writeInt8(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		    buf.writeInt32BE(val & -1, offset + 1);
+  		}
+  		module.exports.writeInt40BE = writeInt40BE;
+
+  		function readInt48BE(buf, offset) {
+  		    return buf.readInt16BE(offset) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 2);
+  		}
+  		module.exports.readInt48BE = readInt48BE;
+
+  		function writeInt48BE(buf, val, offset) {
+  		    val = check_value(val, -140737488355328, 0x7fffffffffff);
+  		    check_bounds(buf, offset, 6);
+  		    buf.writeInt16BE(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		    buf.writeInt32BE(val & -1, offset + 2);
+  		}
+  		module.exports.writeInt48BE = writeInt48BE;
+
+  		function readInt56BE(buf, offset) {
+  		    return (((buf.readInt8(offset) || 0) << 16) + buf.readUInt16BE(offset + 1)) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 3);
+  		}
+  		module.exports.readInt56BE = readInt56BE;
+
+  		function writeInt56BE(buf, val, offset) {
+  		    val = check_value(val, -576460752303423500, 0x7fffffffffffff);
+  		    check_bounds(buf, offset, 7);
+
+  		    if (val < 0x80000000000000) {
+  		        var hi = Math.floor(val * SHIFT_RIGHT_32);
+  		        buf.writeInt8(hi >> 16, offset);
+  		        buf.writeUInt16BE(hi & 0xffff, offset + 1);
+  		        buf.writeInt32BE(val & -1, offset + 3);
+  		    } else {
+  		        // Special case because 2^55-1 gets rounded up to 2^55
+  		        buf[offset] = 0x7f;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		    }
+  		}
+  		module.exports.writeInt56BE = writeInt56BE;
+
+  		function readInt64BE(buf, offset) {
+  		    return buf.readInt32BE(offset) * SHIFT_LEFT_32 + buf.readUInt32BE(offset + 4);
+  		}
+  		module.exports.readInt64BE = readInt64BE;
+
+  		function writeInt64BE(buf, val, offset) {
+  		    val = check_value(val, -23611832414348226e5, 0x7fffffffffffffff);
+  		    check_bounds(buf, offset, 8);
+
+  		    if (val < 0x8000000000000000) {
+  		        buf.writeInt32BE(Math.floor(val * SHIFT_RIGHT_32), offset);
+  		        buf.writeInt32BE(val & -1, offset + 4);
+  		    } else {
+  		        // Special case because 2^63-1 gets rounded up to 2^63
+  		        buf[offset] = 0x7f;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		        buf[offset+7] = 0xff;
+  		    }
+  		}
+  		module.exports.writeInt64BE = writeInt64BE;
+
+  		function readInt24LE(buf, offset) {
+  		    return (buf.readInt8(offset + 2) << 16) + buf.readUInt16LE(offset);
+  		}
+  		module.exports.readInt24LE = readInt24LE;
+
+  		function writeInt24LE(buf, val, offset) {
+  		    val = check_value(val, -8388608, 0x7fffff);
+  		    check_bounds(buf, offset, 3);
+  		    buf.writeUInt16LE(val & 0xffff, offset);
+  		    buf.writeInt8(val >> 16, offset + 2);
+  		}
+  		module.exports.writeInt24LE = writeInt24LE;
+
+  		function readInt40LE(buf, offset) {
+  		    return (buf.readInt8(offset + 4) || 0) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readInt40LE = readInt40LE;
+
+  		function writeInt40LE(buf, val, offset) {
+  		    val = check_value(val, -549755813888, 0x7fffffffff);
+  		    check_bounds(buf, offset, 5);
+  		    buf.writeInt32LE(val & -1, offset);
+  		    buf.writeInt8(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		}
+  		module.exports.writeInt40LE = writeInt40LE;
+
+  		function readInt48LE(buf, offset) {
+  		    return buf.readInt16LE(offset + 4) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readInt48LE = readInt48LE;
+
+  		function writeInt48LE(buf, val, offset) {
+  		    val = check_value(val, -140737488355328, 0x7fffffffffff);
+  		    check_bounds(buf, offset, 6);
+  		    buf.writeInt32LE(val & -1, offset);
+  		    buf.writeInt16LE(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		}
+  		module.exports.writeInt48LE = writeInt48LE;
+
+  		function readInt56LE(buf, offset) {
+  		    return (((buf.readInt8(offset + 6) || 0) << 16) + buf.readUInt16LE(offset + 4)) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readInt56LE = readInt56LE;
+
+  		function writeInt56LE(buf, val, offset) {
+  		    val = check_value(val, -36028797018963970, 0x7fffffffffffff);
+  		    check_bounds(buf, offset, 7);
+
+  		    if (val < 0x80000000000000) {
+  		        buf.writeInt32LE(val & -1, offset);
+  		        var hi = Math.floor(val * SHIFT_RIGHT_32);
+  		        buf.writeUInt16LE(hi & 0xffff, offset + 4);
+  		        buf.writeInt8(hi >> 16, offset + 6);
+  		    } else {
+  		        // Special case because 2^55-1 gets rounded up to 2^55
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0x7f;
+  		    }
+  		}
+  		module.exports.writeInt56LE = writeInt56LE;
+
+  		function readInt64LE(buf, offset) {
+  		    return buf.readInt32LE(offset + 4) * SHIFT_LEFT_32 + buf.readUInt32LE(offset);
+  		}
+  		module.exports.readInt64LE = readInt64LE;
+
+  		function writeInt64LE(buf, val, offset) {
+  		    val = check_value(val, -9223372036854776e3, 0x7fffffffffffffff);
+  		    check_bounds(buf, offset, 8);
+
+  		    if (val < 0x8000000000000000) {
+  		        buf.writeInt32LE(val & -1, offset);
+  		        buf.writeInt32LE(Math.floor(val * SHIFT_RIGHT_32), offset + 4);
+  		    } else {
+  		        // Special case because 2^55-1 gets rounded up to 2^55
+  		        buf[offset] = 0xff;
+  		        buf[offset+1] = 0xff;
+  		        buf[offset+2] = 0xff;
+  		        buf[offset+3] = 0xff;
+  		        buf[offset+4] = 0xff;
+  		        buf[offset+5] = 0xff;
+  		        buf[offset+6] = 0xff;
+  		        buf[offset+7] = 0x7f;
+  		    }
+  		}
+  		module.exports.writeInt64LE = writeInt64LE; 
+  	} (bufferMoreInts));
+  	return bufferMoreInts.exports;
+  }
+
+  var hasRequiredCodec;
+
+  function requireCodec () {
+  	if (hasRequiredCodec) return codec;
+  	hasRequiredCodec = 1;
+
+  	var ints = requireBufferMoreInts();
+
+  	// JavaScript uses only doubles so what I'm testing for is whether
+  	// it's *better* to encode a number as a float or double. This really
+  	// just amounts to testing whether there's a fractional part to the
+  	// number, except that see below. NB I don't use bitwise operations to
+  	// do this 'efficiently' -- it would mask the number to 32 bits.
+  	//
+  	// At 2^50, doubles don't have sufficient precision to distinguish
+  	// between floating point and integer numbers (`Math.pow(2, 50) + 0.1
+  	// === Math.pow(2, 50)` (and, above 2^53, doubles cannot represent all
+  	// integers (`Math.pow(2, 53) + 1 === Math.pow(2, 53)`)). Hence
+  	// anything with a magnitude at or above 2^50 may as well be encoded
+  	// as a 64-bit integer. Except that only signed integers are supported
+  	// by RabbitMQ, so anything above 2^63 - 1 must be a double.
+  	function isFloatingPoint(n) {
+  	    return n >= 0x8000000000000000 ||
+  	        (Math.abs(n) < 0x4000000000000
+  	         && Math.floor(n) !== n);
+  	}
+
+  	function encodeTable(buffer, val, offset) {
+  	    var start = offset;
+  	    offset += 4; // leave room for the table length
+  	    for (var key in val) {
+  	        if (val[key] !== undefined) {
+  	          var len = Buffer$1.byteLength(key);
+  	          buffer.writeUInt8(len, offset); offset++;
+  	          buffer.write(key, offset, 'utf8'); offset += len;
+  	          offset += encodeFieldValue(buffer, val[key], offset);
+  	        }
+  	    }
+  	    var size = offset - start;
+  	    buffer.writeUInt32BE(size - 4, start);
+  	    return size;
+  	}
+
+  	function encodeArray(buffer, val, offset) {
+  	    var start = offset;
+  	    offset += 4;
+  	    for (var i=0, num=val.length; i < num; i++) {
+  	        offset += encodeFieldValue(buffer, val[i], offset);
+  	    }
+  	    var size = offset - start;
+  	    buffer.writeUInt32BE(size - 4, start);
+  	    return size;
+  	}
+
+  	function encodeFieldValue(buffer, value, offset) {
+  	    var start = offset;
+  	    var type = typeof value, val = value;
+  	    // A trapdoor for specifying a type, e.g., timestamp
+  	    if (value && type === 'object' && value.hasOwnProperty('!')) {
+  	        val = value.value;
+  	        type = value['!'];
+  	    }
+
+  	    // If it's a JS number, we'll have to guess what type to encode it
+  	    // as.
+  	    if (type == 'number') {
+  	        // Making assumptions about the kind of number (floating point
+  	        // v integer, signed, unsigned, size) desired is dangerous in
+  	        // general; however, in practice RabbitMQ uses only
+  	        // longstrings and unsigned integers in its arguments, and
+  	        // other clients generally conflate number types anyway. So
+  	        // the only distinction we care about is floating point vs
+  	        // integers, preferring integers since those can be promoted
+  	        // if necessary. If floating point is required, we may as well
+  	        // use double precision.
+  	        if (isFloatingPoint(val)) {
+  	            type = 'double';
+  	        }
+  	        else { // only signed values are used in tables by
+  	               // RabbitMQ. It *used* to (< v3.3.0) treat the byte 'b'
+  	               // type as unsigned, but most clients (and the spec)
+  	               // think it's signed, and now RabbitMQ does too.
+  	            if (val < 128 && val >= -128) {
+  	                type = 'byte';
+  	            }
+  	            else if (val >= -32768 && val < 0x8000) {
+  	                type = 'short';
+  	            }
+  	            else if (val >= -2147483648 && val < 0x80000000) {
+  	                type = 'int';
+  	            }
+  	            else {
+  	                type = 'long';
+  	            }
+  	        }
+  	    }
+
+  	    function tag(t) { buffer.write(t, offset); offset++; }
+
+  	    switch (type) {
+  	    case 'string': // no shortstr in field tables
+  	        var len = Buffer$1.byteLength(val, 'utf8');
+  	        tag('S');
+  	        buffer.writeUInt32BE(len, offset); offset += 4;
+  	        buffer.write(val, offset, 'utf8'); offset += len;
+  	        break;
+  	    case 'object':
+  	        if (val === null) {
+  	            tag('V');
+  	        }
+  	        else if (Array.isArray(val)) {
+  	            tag('A');
+  	            offset += encodeArray(buffer, val, offset);
+  	        }
+  	        else if (Buffer$1.isBuffer(val)) {
+  	            tag('x');
+  	            buffer.writeUInt32BE(val.length, offset); offset += 4;
+  	            val.copy(buffer, offset); offset += val.length;
+  	        }
+  	        else {
+  	            tag('F');
+  	            offset += encodeTable(buffer, val, offset);
+  	        }
+  	        break;
+  	    case 'boolean':
+  	        tag('t');
+  	        buffer.writeUInt8((val) ? 1 : 0, offset); offset++;
+  	        break;
+  	    // These are the types that are either guessed above, or
+  	    // explicitly given using the {'!': type} notation.
+  	    case 'double':
+  	    case 'float64':
+  	        tag('d');
+  	        buffer.writeDoubleBE(val, offset);
+  	        offset += 8;
+  	        break;
+  	    case 'byte':
+  	    case 'int8':
+  	        tag('b');
+  	        buffer.writeInt8(val, offset); offset++;
+  	        break;
+  	    case 'unsignedbyte':
+  	    case 'uint8':
+  	        tag('B');
+  	        buffer.writeUInt8(val, offset); offset++;
+  	        break;
+  	    case 'short':
+  	    case 'int16':
+  	        tag('s');
+  	        buffer.writeInt16BE(val, offset); offset += 2;
+  	        break;
+  	    case 'unsignedshort':
+  	    case 'uint16':
+  	        tag('u');
+  	        buffer.writeUInt16BE(val, offset); offset += 2;
+  	        break;
+  	    case 'int':
+  	    case 'int32':
+  	        tag('I');
+  	        buffer.writeInt32BE(val, offset); offset += 4;
+  	        break;
+  	    case 'unsignedint':
+  	    case 'uint32':
+  	        tag('i');
+  	        buffer.writeUInt32BE(val, offset); offset += 4;
+  	        break;
+  	    case 'long':
+  	    case 'int64':
+  	        tag('l');
+  	        ints.writeInt64BE(buffer, val, offset); offset += 8;
+  	        break;
+
+  	    // Now for exotic types, those can _only_ be denoted by using
+  	    // `{'!': type, value: val}
+  	    case 'timestamp':
+  	        tag('T');
+  	        ints.writeUInt64BE(buffer, val, offset); offset += 8;
+  	        break;
+  	    case 'float':
+  	        tag('f');
+  	        buffer.writeFloatBE(val, offset); offset += 4;
+  	        break;
+  	    case 'decimal':
+  	        tag('D');
+  	        if (val.hasOwnProperty('places') && val.hasOwnProperty('digits')
+  	            && val.places >= 0 && val.places < 256) {
+  	            buffer[offset] = val.places; offset++;
+  	            buffer.writeUInt32BE(val.digits, offset); offset += 4;
+  	        }
+  	        else throw new TypeError(
+  	            "Decimal value must be {'places': 0..255, 'digits': uint32}, " +
+  	                "got " + JSON.stringify(val));
+  	        break;
+  	    default:
+  	        throw new TypeError('Unknown type to encode: ' + type);
+  	    }
+  	    return offset - start;
+  	}
+
+  	// Assume we're given a slice of the buffer that contains just the
+  	// fields.
+  	function decodeFields(slice) {
+  	    var fields = {}, offset = 0, size = slice.length;
+  	    var len, key, val;
+
+  	    function decodeFieldValue() {
+  	        var tag = String.fromCharCode(slice[offset]); offset++;
+  	        switch (tag) {
+  	        case 'b':
+  	            val = slice.readInt8(offset); offset++;
+  	            break;
+  	        case 'B':
+  	            val = slice.readUInt8(offset); offset++;
+  	            break;
+  	        case 'S':
+  	            len = slice.readUInt32BE(offset); offset += 4;
+  	            val = slice.toString('utf8', offset, offset + len);
+  	            offset += len;
+  	            break;
+  	        case 'I':
+  	            val = slice.readInt32BE(offset); offset += 4;
+  	            break;
+  	        case 'i':
+  	            val = slice.readUInt32BE(offset); offset += 4;
+  	            break;
+  	        case 'D': // only positive decimals, apparently.
+  	            var places = slice[offset]; offset++;
+  	            var digits = slice.readUInt32BE(offset); offset += 4;
+  	            val = {'!': 'decimal', value: {places: places, digits: digits}};
+  	            break;
+  	        case 'T':
+  	            val = ints.readUInt64BE(slice, offset); offset += 8;
+  	            val = {'!': 'timestamp', value: val};
+  	            break;
+  	        case 'F':
+  	            len = slice.readUInt32BE(offset); offset += 4;
+  	            val = decodeFields(slice.subarray(offset, offset + len));
+  	            offset += len;
+  	            break;
+  	        case 'A':
+  	            len = slice.readUInt32BE(offset); offset += 4;
+  	            decodeArray(offset + len);
+  	            // NB decodeArray will itself update offset and val
+  	            break;
+  	        case 'd':
+  	            val = slice.readDoubleBE(offset); offset += 8;
+  	            break;
+  	        case 'f':
+  	            val = slice.readFloatBE(offset); offset += 4;
+  	            break;
+  	        case 'l':
+  	            val = ints.readInt64BE(slice, offset); offset += 8;
+  	            break;
+  	        case 's':
+  	            val = slice.readInt16BE(offset); offset += 2;
+  	            break;
+  	        case 'u':
+  	            val = slice.readUInt16BE(offset); offset += 2;
+  	            break;
+  	        case 't':
+  	            val = slice[offset] != 0; offset++;
+  	            break;
+  	        case 'V':
+  	            val = null;
+  	            break;
+  	        case 'x':
+  	            len = slice.readUInt32BE(offset); offset += 4;
+  	            val = slice.subarray(offset, offset + len);
+  	            offset += len;
+  	            break;
+  	        default:
+  	            throw new TypeError('Unexpected type tag "' + tag +'"');
+  	        }
+  	    }
+
+  	    function decodeArray(until) {
+  	        var vals = [];
+  	        while (offset < until) {
+  	            decodeFieldValue();
+  	            vals.push(val);
+  	        }
+  	        val = vals;
+  	    }
+
+  	    while (offset < size) {
+  	        len = slice.readUInt8(offset); offset++;
+  	        key = slice.toString('utf8', offset, offset + len);
+  	        offset += len;
+  	        decodeFieldValue();
+  	        fields[key] = val;
+  	    }
+  	    return fields;
+  	}
+
+  	codec.encodeTable = encodeTable;
+  	codec.decodeFields = decodeFields;
+  	return codec;
+  }
+
+  var hasRequiredDefs;
+
+  function requireDefs () {
+  	if (hasRequiredDefs) return defs;
+  	hasRequiredDefs = 1;
+
+  	function decodeBasicQos(buffer) {
+  	  var val, offset = 0, fields = {
+  	    prefetchSize: void 0,
+  	    prefetchCount: void 0,
+  	    global: void 0
+  	  };
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.prefetchSize = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.prefetchCount = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.global = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicQos(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(19);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932170, 7);
+  	  offset = 11;
+  	  val = fields.prefetchSize;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'prefetchSize' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  val = fields.prefetchCount;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'prefetchCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.global;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicQosOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeBasicQosOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932171, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicConsume(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    consumerTag: void 0,
+  	    noLocal: void 0,
+  	    noAck: void 0,
+  	    exclusive: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.consumerTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.noLocal = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.noAck = val;
+  	  val = !!(4 & buffer[offset]);
+  	  fields.exclusive = val;
+  	  val = !!(8 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicConsume(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  val = fields.consumerTag;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'consumerTag' is the wrong type; must be a string (up to 255 chars)");
+  	  var consumerTag_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += consumerTag_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932180, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.consumerTag;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = consumerTag_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += consumerTag_len;
+  	  val = fields.noLocal;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.noAck;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  val = fields.exclusive;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 4);
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 8);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicConsumeOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    consumerTag: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.consumerTag = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicConsumeOk(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.consumerTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'consumerTag'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'consumerTag' is the wrong type; must be a string (up to 255 chars)");
+  	  var consumerTag_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += consumerTag_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932181, 7);
+  	  offset = 11;
+  	  val = fields.consumerTag;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = consumerTag_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += consumerTag_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicCancel(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    consumerTag: void 0,
+  	    nowait: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.consumerTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.nowait = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicCancel(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.consumerTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'consumerTag'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'consumerTag' is the wrong type; must be a string (up to 255 chars)");
+  	  var consumerTag_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += consumerTag_len;
+  	  var buffer = Buffer$1.alloc(14 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932190, 7);
+  	  offset = 11;
+  	  val = fields.consumerTag;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = consumerTag_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += consumerTag_len;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicCancelOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    consumerTag: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.consumerTag = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicCancelOk(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.consumerTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'consumerTag'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'consumerTag' is the wrong type; must be a string (up to 255 chars)");
+  	  var consumerTag_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += consumerTag_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932191, 7);
+  	  offset = 11;
+  	  val = fields.consumerTag;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = consumerTag_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += consumerTag_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicPublish(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0,
+  	    mandatory: void 0,
+  	    immediate: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.mandatory = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.immediate = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicPublish(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.exchange;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932200, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  val = fields.mandatory;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.immediate;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicReturn(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    replyCode: void 0,
+  	    replyText: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.replyCode = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.replyText = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicReturn(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.replyText;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'replyText' is the wrong type; must be a string (up to 255 chars)");
+  	  var replyText_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += replyText_len;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'routingKey'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932210, 7);
+  	  offset = 11;
+  	  val = fields.replyCode;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'replyCode'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'replyCode' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.replyText;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = replyText_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += replyText_len;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicDeliver(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    consumerTag: void 0,
+  	    deliveryTag: void 0,
+  	    redelivered: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.consumerTag = val;
+  	  val = ints.readUInt64BE(buffer, offset);
+  	  offset += 8;
+  	  fields.deliveryTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.redelivered = val;
+  	  offset++;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicDeliver(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.consumerTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'consumerTag'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'consumerTag' is the wrong type; must be a string (up to 255 chars)");
+  	  var consumerTag_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += consumerTag_len;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'routingKey'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  var buffer = Buffer$1.alloc(24 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932220, 7);
+  	  offset = 11;
+  	  val = fields.consumerTag;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = consumerTag_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += consumerTag_len;
+  	  val = fields.deliveryTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'deliveryTag'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryTag' is the wrong type; must be a number (but not NaN)");
+  	  ints.writeUInt64BE(buffer, val, offset);
+  	  offset += 8;
+  	  val = fields.redelivered;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicGet(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    noAck: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.noAck = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicGet(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932230, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.noAck;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicGetOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    deliveryTag: void 0,
+  	    redelivered: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0,
+  	    messageCount: void 0
+  	  };
+  	  val = ints.readUInt64BE(buffer, offset);
+  	  offset += 8;
+  	  fields.deliveryTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.redelivered = val;
+  	  offset++;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.messageCount = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicGetOk(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'routingKey'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  var buffer = Buffer$1.alloc(27 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932231, 7);
+  	  offset = 11;
+  	  val = fields.deliveryTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'deliveryTag'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryTag' is the wrong type; must be a number (but not NaN)");
+  	  ints.writeUInt64BE(buffer, val, offset);
+  	  offset += 8;
+  	  val = fields.redelivered;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  val = fields.messageCount;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'messageCount'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'messageCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicGetEmpty(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    clusterId: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.clusterId = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicGetEmpty(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.clusterId;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'clusterId' is the wrong type; must be a string (up to 255 chars)");
+  	  var clusterId_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += clusterId_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932232, 7);
+  	  offset = 11;
+  	  val = fields.clusterId;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = clusterId_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += clusterId_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicAck(buffer) {
+  	  var val, offset = 0, fields = {
+  	    deliveryTag: void 0,
+  	    multiple: void 0
+  	  };
+  	  val = ints.readUInt64BE(buffer, offset);
+  	  offset += 8;
+  	  fields.deliveryTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.multiple = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicAck(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(21);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932240, 7);
+  	  offset = 11;
+  	  val = fields.deliveryTag;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryTag' is the wrong type; must be a number (but not NaN)");
+  	  ints.writeUInt64BE(buffer, val, offset);
+  	  offset += 8;
+  	  val = fields.multiple;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicReject(buffer) {
+  	  var val, offset = 0, fields = {
+  	    deliveryTag: void 0,
+  	    requeue: void 0
+  	  };
+  	  val = ints.readUInt64BE(buffer, offset);
+  	  offset += 8;
+  	  fields.deliveryTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.requeue = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicReject(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(21);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932250, 7);
+  	  offset = 11;
+  	  val = fields.deliveryTag;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'deliveryTag'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryTag' is the wrong type; must be a number (but not NaN)");
+  	  ints.writeUInt64BE(buffer, val, offset);
+  	  offset += 8;
+  	  val = fields.requeue;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicRecoverAsync(buffer) {
+  	  var val, fields = {
+  	    requeue: void 0
+  	  };
+  	  val = !!(1 & buffer[0]);
+  	  fields.requeue = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicRecoverAsync(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(13);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932260, 7);
+  	  offset = 11;
+  	  val = fields.requeue;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicRecover(buffer) {
+  	  var val, fields = {
+  	    requeue: void 0
+  	  };
+  	  val = !!(1 & buffer[0]);
+  	  fields.requeue = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicRecover(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(13);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932270, 7);
+  	  offset = 11;
+  	  val = fields.requeue;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicRecoverOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeBasicRecoverOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932271, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeBasicNack(buffer) {
+  	  var val, offset = 0, fields = {
+  	    deliveryTag: void 0,
+  	    multiple: void 0,
+  	    requeue: void 0
+  	  };
+  	  val = ints.readUInt64BE(buffer, offset);
+  	  offset += 8;
+  	  fields.deliveryTag = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.multiple = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.requeue = val;
+  	  return fields;
+  	}
+
+  	function encodeBasicNack(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(21);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932280, 7);
+  	  offset = 11;
+  	  val = fields.deliveryTag;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryTag' is the wrong type; must be a number (but not NaN)");
+  	  ints.writeUInt64BE(buffer, val, offset);
+  	  offset += 8;
+  	  val = fields.multiple;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.requeue;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 2);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionStart(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    versionMajor: void 0,
+  	    versionMinor: void 0,
+  	    serverProperties: void 0,
+  	    mechanisms: void 0,
+  	    locales: void 0
+  	  };
+  	  val = buffer[offset];
+  	  offset++;
+  	  fields.versionMajor = val;
+  	  val = buffer[offset];
+  	  offset++;
+  	  fields.versionMinor = val;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.serverProperties = val;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.mechanisms = val;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.locales = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionStart(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.serverProperties;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'serverProperties'");
+  	  if ("object" != typeof val) throw new TypeError("Field 'serverProperties' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var serverProperties_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += serverProperties_encoded.length;
+  	  val = fields.mechanisms;
+  	  if (void 0 === val) val = Buffer$1.from("PLAIN"); else if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'mechanisms' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  val = fields.locales;
+  	  if (void 0 === val) val = Buffer$1.from("en_US"); else if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'locales' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  var buffer = Buffer$1.alloc(22 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655370, 7);
+  	  offset = 11;
+  	  val = fields.versionMajor;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'versionMajor' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt8(val, offset);
+  	  offset++;
+  	  val = fields.versionMinor;
+  	  if (void 0 === val) val = 9; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'versionMinor' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt8(val, offset);
+  	  offset++;
+  	  offset += serverProperties_encoded.copy(buffer, offset);
+  	  val = fields.mechanisms;
+  	  void 0 === val && (val = Buffer$1.from("PLAIN"));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  val = fields.locales;
+  	  void 0 === val && (val = Buffer$1.from("en_US"));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionStartOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    clientProperties: void 0,
+  	    mechanism: void 0,
+  	    response: void 0,
+  	    locale: void 0
+  	  };
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.clientProperties = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.mechanism = val;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.response = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.locale = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionStartOk(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.clientProperties;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'clientProperties'");
+  	  if ("object" != typeof val) throw new TypeError("Field 'clientProperties' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var clientProperties_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += clientProperties_encoded.length;
+  	  val = fields.mechanism;
+  	  if (void 0 === val) val = "PLAIN"; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'mechanism' is the wrong type; must be a string (up to 255 chars)");
+  	  var mechanism_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += mechanism_len;
+  	  val = fields.response;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'response'");
+  	  if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'response' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  val = fields.locale;
+  	  if (void 0 === val) val = "en_US"; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'locale' is the wrong type; must be a string (up to 255 chars)");
+  	  var locale_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += locale_len;
+  	  var buffer = Buffer$1.alloc(18 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655371, 7);
+  	  offset = 11;
+  	  offset += clientProperties_encoded.copy(buffer, offset);
+  	  val = fields.mechanism;
+  	  void 0 === val && (val = "PLAIN");
+  	  buffer[offset] = mechanism_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += mechanism_len;
+  	  val = fields.response;
+  	  void 0 === val && (val = Buffer$1.from(void 0));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  val = fields.locale;
+  	  void 0 === val && (val = "en_US");
+  	  buffer[offset] = locale_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += locale_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionSecure(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    challenge: void 0
+  	  };
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.challenge = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionSecure(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0;
+  	  val = fields.challenge;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'challenge'");
+  	  if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'challenge' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655380, 7);
+  	  offset = 11;
+  	  val = fields.challenge;
+  	  void 0 === val && (val = Buffer$1.from(void 0));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionSecureOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    response: void 0
+  	  };
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.response = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionSecureOk(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0;
+  	  val = fields.response;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'response'");
+  	  if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'response' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655381, 7);
+  	  offset = 11;
+  	  val = fields.response;
+  	  void 0 === val && (val = Buffer$1.from(void 0));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionTune(buffer) {
+  	  var val, offset = 0, fields = {
+  	    channelMax: void 0,
+  	    frameMax: void 0,
+  	    heartbeat: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.channelMax = val;
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.frameMax = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.heartbeat = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionTune(channel, fields) {
+  	  var offset = 0, val = null, buffer = Buffer$1.alloc(20);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655390, 7);
+  	  offset = 11;
+  	  val = fields.channelMax;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'channelMax' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.frameMax;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'frameMax' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  val = fields.heartbeat;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'heartbeat' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionTuneOk(buffer) {
+  	  var val, offset = 0, fields = {
+  	    channelMax: void 0,
+  	    frameMax: void 0,
+  	    heartbeat: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.channelMax = val;
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.frameMax = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.heartbeat = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionTuneOk(channel, fields) {
+  	  var offset = 0, val = null, buffer = Buffer$1.alloc(20);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655391, 7);
+  	  offset = 11;
+  	  val = fields.channelMax;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'channelMax' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.frameMax;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'frameMax' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  val = fields.heartbeat;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'heartbeat' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionOpen(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    virtualHost: void 0,
+  	    capabilities: void 0,
+  	    insist: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.virtualHost = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.capabilities = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.insist = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionOpen(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.virtualHost;
+  	  if (void 0 === val) val = "/"; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'virtualHost' is the wrong type; must be a string (up to 255 chars)");
+  	  var virtualHost_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += virtualHost_len;
+  	  val = fields.capabilities;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'capabilities' is the wrong type; must be a string (up to 255 chars)");
+  	  var capabilities_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += capabilities_len;
+  	  var buffer = Buffer$1.alloc(15 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655400, 7);
+  	  offset = 11;
+  	  val = fields.virtualHost;
+  	  void 0 === val && (val = "/");
+  	  buffer[offset] = virtualHost_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += virtualHost_len;
+  	  val = fields.capabilities;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = capabilities_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += capabilities_len;
+  	  val = fields.insist;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionOpenOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    knownHosts: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.knownHosts = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionOpenOk(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.knownHosts;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'knownHosts' is the wrong type; must be a string (up to 255 chars)");
+  	  var knownHosts_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += knownHosts_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655401, 7);
+  	  offset = 11;
+  	  val = fields.knownHosts;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = knownHosts_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += knownHosts_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionClose(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    replyCode: void 0,
+  	    replyText: void 0,
+  	    classId: void 0,
+  	    methodId: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.replyCode = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.replyText = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.classId = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.methodId = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionClose(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.replyText;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'replyText' is the wrong type; must be a string (up to 255 chars)");
+  	  var replyText_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += replyText_len;
+  	  var buffer = Buffer$1.alloc(19 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655410, 7);
+  	  offset = 11;
+  	  val = fields.replyCode;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'replyCode'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'replyCode' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.replyText;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = replyText_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += replyText_len;
+  	  val = fields.classId;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'classId'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'classId' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.methodId;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'methodId'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'methodId' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionCloseOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeConnectionCloseOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655411, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionBlocked(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    reason: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.reason = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionBlocked(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.reason;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'reason' is the wrong type; must be a string (up to 255 chars)");
+  	  var reason_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += reason_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655420, 7);
+  	  offset = 11;
+  	  val = fields.reason;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = reason_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += reason_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionUnblocked(buffer) {
+  	  return {};
+  	}
+
+  	function encodeConnectionUnblocked(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655421, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionUpdateSecret(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    newSecret: void 0,
+  	    reason: void 0
+  	  };
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.newSecret = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.reason = val;
+  	  return fields;
+  	}
+
+  	function encodeConnectionUpdateSecret(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0;
+  	  val = fields.newSecret;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'newSecret'");
+  	  if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'newSecret' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  val = fields.reason;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'reason'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'reason' is the wrong type; must be a string (up to 255 chars)");
+  	  var reason_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += reason_len;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655430, 7);
+  	  offset = 11;
+  	  val = fields.newSecret;
+  	  void 0 === val && (val = Buffer$1.from(void 0));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  val = fields.reason;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = reason_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += reason_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConnectionUpdateSecretOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeConnectionUpdateSecretOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(655431, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelOpen(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    outOfBand: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.outOfBand = val;
+  	  return fields;
+  	}
+
+  	function encodeChannelOpen(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.outOfBand;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'outOfBand' is the wrong type; must be a string (up to 255 chars)");
+  	  var outOfBand_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += outOfBand_len;
+  	  var buffer = Buffer$1.alloc(13 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310730, 7);
+  	  offset = 11;
+  	  val = fields.outOfBand;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = outOfBand_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += outOfBand_len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelOpenOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    channelId: void 0
+  	  };
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = buffer.subarray(offset, offset + len);
+  	  offset += len;
+  	  fields.channelId = val;
+  	  return fields;
+  	}
+
+  	function encodeChannelOpenOk(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0;
+  	  val = fields.channelId;
+  	  if (void 0 === val) val = Buffer$1.from(""); else if (!Buffer$1.isBuffer(val)) throw new TypeError("Field 'channelId' is the wrong type; must be a Buffer");
+  	  varyingSize += val.length;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310731, 7);
+  	  offset = 11;
+  	  val = fields.channelId;
+  	  void 0 === val && (val = Buffer$1.from(""));
+  	  len = val.length;
+  	  buffer.writeUInt32BE(len, offset);
+  	  offset += 4;
+  	  val.copy(buffer, offset);
+  	  offset += len;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelFlow(buffer) {
+  	  var val, fields = {
+  	    active: void 0
+  	  };
+  	  val = !!(1 & buffer[0]);
+  	  fields.active = val;
+  	  return fields;
+  	}
+
+  	function encodeChannelFlow(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(13);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310740, 7);
+  	  offset = 11;
+  	  val = fields.active;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'active'");
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelFlowOk(buffer) {
+  	  var val, fields = {
+  	    active: void 0
+  	  };
+  	  val = !!(1 & buffer[0]);
+  	  fields.active = val;
+  	  return fields;
+  	}
+
+  	function encodeChannelFlowOk(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(13);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310741, 7);
+  	  offset = 11;
+  	  val = fields.active;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'active'");
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelClose(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    replyCode: void 0,
+  	    replyText: void 0,
+  	    classId: void 0,
+  	    methodId: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.replyCode = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.replyText = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.classId = val;
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.methodId = val;
+  	  return fields;
+  	}
+
+  	function encodeChannelClose(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.replyText;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'replyText' is the wrong type; must be a string (up to 255 chars)");
+  	  var replyText_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += replyText_len;
+  	  var buffer = Buffer$1.alloc(19 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310760, 7);
+  	  offset = 11;
+  	  val = fields.replyCode;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'replyCode'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'replyCode' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.replyText;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = replyText_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += replyText_len;
+  	  val = fields.classId;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'classId'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'classId' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.methodId;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'methodId'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'methodId' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeChannelCloseOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeChannelCloseOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1310761, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeAccessRequest(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    realm: void 0,
+  	    exclusive: void 0,
+  	    passive: void 0,
+  	    active: void 0,
+  	    write: void 0,
+  	    read: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.realm = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.exclusive = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.passive = val;
+  	  val = !!(4 & buffer[offset]);
+  	  fields.active = val;
+  	  val = !!(8 & buffer[offset]);
+  	  fields.write = val;
+  	  val = !!(16 & buffer[offset]);
+  	  fields.read = val;
+  	  return fields;
+  	}
+
+  	function encodeAccessRequest(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.realm;
+  	  if (void 0 === val) val = "/data"; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'realm' is the wrong type; must be a string (up to 255 chars)");
+  	  var realm_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += realm_len;
+  	  var buffer = Buffer$1.alloc(14 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1966090, 7);
+  	  offset = 11;
+  	  val = fields.realm;
+  	  void 0 === val && (val = "/data");
+  	  buffer[offset] = realm_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += realm_len;
+  	  val = fields.exclusive;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.passive;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 2);
+  	  val = fields.active;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 4);
+  	  val = fields.write;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 8);
+  	  val = fields.read;
+  	  void 0 === val && (val = true);
+  	  val && (bits += 16);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeAccessRequestOk(buffer) {
+  	  var val, offset = 0, fields = {
+  	    ticket: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  return fields;
+  	}
+
+  	function encodeAccessRequestOk(channel, fields) {
+  	  var offset = 0, val = null, buffer = Buffer$1.alloc(14);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(1966091, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 1; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeDeclare(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    exchange: void 0,
+  	    type: void 0,
+  	    passive: void 0,
+  	    durable: void 0,
+  	    autoDelete: void 0,
+  	    internal: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.type = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.passive = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.durable = val;
+  	  val = !!(4 & buffer[offset]);
+  	  fields.autoDelete = val;
+  	  val = !!(8 & buffer[offset]);
+  	  fields.internal = val;
+  	  val = !!(16 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeExchangeDeclare(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.type;
+  	  if (void 0 === val) val = "direct"; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'type' is the wrong type; must be a string (up to 255 chars)");
+  	  var type_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += type_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621450, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.type;
+  	  void 0 === val && (val = "direct");
+  	  buffer[offset] = type_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += type_len;
+  	  val = fields.passive;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.durable;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  val = fields.autoDelete;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 4);
+  	  val = fields.internal;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 8);
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 16);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeDeclareOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeExchangeDeclareOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621451, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeDelete(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    exchange: void 0,
+  	    ifUnused: void 0,
+  	    nowait: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.ifUnused = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.nowait = val;
+  	  return fields;
+  	}
+
+  	function encodeExchangeDelete(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621460, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.ifUnused;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeDeleteOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeExchangeDeleteOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621461, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeBind(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    destination: void 0,
+  	    source: void 0,
+  	    routingKey: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.destination = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.source = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeExchangeBind(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.destination;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'destination'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'destination' is the wrong type; must be a string (up to 255 chars)");
+  	  var destination_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += destination_len;
+  	  val = fields.source;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'source'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'source' is the wrong type; must be a string (up to 255 chars)");
+  	  var source_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += source_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(18 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621470, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.destination;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = destination_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += destination_len;
+  	  val = fields.source;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = source_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += source_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeBindOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeExchangeBindOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621471, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeUnbind(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    destination: void 0,
+  	    source: void 0,
+  	    routingKey: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.destination = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.source = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeExchangeUnbind(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.destination;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'destination'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'destination' is the wrong type; must be a string (up to 255 chars)");
+  	  var destination_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += destination_len;
+  	  val = fields.source;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'source'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'source' is the wrong type; must be a string (up to 255 chars)");
+  	  var source_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += source_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(18 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621480, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.destination;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = destination_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += destination_len;
+  	  val = fields.source;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = source_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += source_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeExchangeUnbindOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeExchangeUnbindOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(2621491, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueDeclare(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    passive: void 0,
+  	    durable: void 0,
+  	    exclusive: void 0,
+  	    autoDelete: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.passive = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.durable = val;
+  	  val = !!(4 & buffer[offset]);
+  	  fields.exclusive = val;
+  	  val = !!(8 & buffer[offset]);
+  	  fields.autoDelete = val;
+  	  val = !!(16 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueDeclare(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276810, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.passive;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.durable;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  val = fields.exclusive;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 4);
+  	  val = fields.autoDelete;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 8);
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 16);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueDeclareOk(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    queue: void 0,
+  	    messageCount: void 0,
+  	    consumerCount: void 0
+  	  };
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.messageCount = val;
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.consumerCount = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueDeclareOk(channel, fields) {
+  	  var offset = 0, val = null, varyingSize = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'queue'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  var buffer = Buffer$1.alloc(21 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276811, 7);
+  	  offset = 11;
+  	  val = fields.queue;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.messageCount;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'messageCount'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'messageCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  val = fields.consumerCount;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'consumerCount'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'consumerCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueBind(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0,
+  	    nowait: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.nowait = val;
+  	  offset++;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueBind(channel, fields) {
+  	  var len, offset = 0, val = null, bits = 0, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(18 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276820, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  bits = 0;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueBindOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeQueueBindOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276821, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueuePurge(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    nowait: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.nowait = val;
+  	  return fields;
+  	}
+
+  	function encodeQueuePurge(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276830, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueuePurgeOk(buffer) {
+  	  var val, offset = 0, fields = {
+  	    messageCount: void 0
+  	  };
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.messageCount = val;
+  	  return fields;
+  	}
+
+  	function encodeQueuePurgeOk(channel, fields) {
+  	  var offset = 0, val = null, buffer = Buffer$1.alloc(16);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276831, 7);
+  	  offset = 11;
+  	  val = fields.messageCount;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'messageCount'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'messageCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueDelete(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    ifUnused: void 0,
+  	    ifEmpty: void 0,
+  	    nowait: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  val = !!(1 & buffer[offset]);
+  	  fields.ifUnused = val;
+  	  val = !!(2 & buffer[offset]);
+  	  fields.ifEmpty = val;
+  	  val = !!(4 & buffer[offset]);
+  	  fields.nowait = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueDelete(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, varyingSize = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  var buffer = Buffer$1.alloc(16 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276840, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.ifUnused;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  val = fields.ifEmpty;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 2);
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 4);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueDeleteOk(buffer) {
+  	  var val, offset = 0, fields = {
+  	    messageCount: void 0
+  	  };
+  	  val = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  fields.messageCount = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueDeleteOk(channel, fields) {
+  	  var offset = 0, val = null, buffer = Buffer$1.alloc(16);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276841, 7);
+  	  offset = 11;
+  	  val = fields.messageCount;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'messageCount'");
+  	  if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'messageCount' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt32BE(val, offset);
+  	  offset += 4;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueUnbind(buffer) {
+  	  var val, len, offset = 0, fields = {
+  	    ticket: void 0,
+  	    queue: void 0,
+  	    exchange: void 0,
+  	    routingKey: void 0,
+  	    arguments: void 0
+  	  };
+  	  val = buffer.readUInt16BE(offset);
+  	  offset += 2;
+  	  fields.ticket = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.queue = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.exchange = val;
+  	  len = buffer.readUInt8(offset);
+  	  offset++;
+  	  val = buffer.toString("utf8", offset, offset + len);
+  	  offset += len;
+  	  fields.routingKey = val;
+  	  len = buffer.readUInt32BE(offset);
+  	  offset += 4;
+  	  val = decodeFields(buffer.subarray(offset, offset + len));
+  	  offset += len;
+  	  fields.arguments = val;
+  	  return fields;
+  	}
+
+  	function encodeQueueUnbind(channel, fields) {
+  	  var len, offset = 0, val = null, varyingSize = 0, scratchOffset = 0;
+  	  val = fields.queue;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'queue' is the wrong type; must be a string (up to 255 chars)");
+  	  var queue_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += queue_len;
+  	  val = fields.exchange;
+  	  if (void 0 === val) throw new Error("Missing value for mandatory field 'exchange'");
+  	  if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'exchange' is the wrong type; must be a string (up to 255 chars)");
+  	  var exchange_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += exchange_len;
+  	  val = fields.routingKey;
+  	  if (void 0 === val) val = ""; else if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'routingKey' is the wrong type; must be a string (up to 255 chars)");
+  	  var routingKey_len = Buffer$1.byteLength(val, "utf8");
+  	  varyingSize += routingKey_len;
+  	  val = fields.arguments;
+  	  if (void 0 === val) val = {}; else if ("object" != typeof val) throw new TypeError("Field 'arguments' is the wrong type; must be an object");
+  	  len = encodeTable(SCRATCH, val, scratchOffset);
+  	  var arguments_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	  scratchOffset += len;
+  	  varyingSize += arguments_encoded.length;
+  	  var buffer = Buffer$1.alloc(17 + varyingSize);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276850, 7);
+  	  offset = 11;
+  	  val = fields.ticket;
+  	  if (void 0 === val) val = 0; else if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'ticket' is the wrong type; must be a number (but not NaN)");
+  	  buffer.writeUInt16BE(val, offset);
+  	  offset += 2;
+  	  val = fields.queue;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = queue_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += queue_len;
+  	  val = fields.exchange;
+  	  void 0 === val && (val = void 0);
+  	  buffer[offset] = exchange_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += exchange_len;
+  	  val = fields.routingKey;
+  	  void 0 === val && (val = "");
+  	  buffer[offset] = routingKey_len;
+  	  offset++;
+  	  buffer.write(val, offset, "utf8");
+  	  offset += routingKey_len;
+  	  offset += arguments_encoded.copy(buffer, offset);
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeQueueUnbindOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeQueueUnbindOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3276851, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxSelect(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxSelect(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898250, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxSelectOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxSelectOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898251, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxCommit(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxCommit(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898260, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxCommitOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxCommitOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898261, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxRollback(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxRollback(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898270, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeTxRollbackOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeTxRollbackOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5898271, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConfirmSelect(buffer) {
+  	  var val, fields = {
+  	    nowait: void 0
+  	  };
+  	  val = !!(1 & buffer[0]);
+  	  fields.nowait = val;
+  	  return fields;
+  	}
+
+  	function encodeConfirmSelect(channel, fields) {
+  	  var offset = 0, val = null, bits = 0, buffer = Buffer$1.alloc(13);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5570570, 7);
+  	  offset = 11;
+  	  val = fields.nowait;
+  	  void 0 === val && (val = false);
+  	  val && (bits += 1);
+  	  buffer[offset] = bits;
+  	  offset++;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function decodeConfirmSelectOk(buffer) {
+  	  return {};
+  	}
+
+  	function encodeConfirmSelectOk(channel, fields) {
+  	  var offset = 0, buffer = Buffer$1.alloc(12);
+  	  buffer[0] = 1;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(5570571, 7);
+  	  offset = 11;
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  return buffer;
+  	}
+
+  	function encodeBasicProperties(channel, size, fields) {
+  	  var val, len, offset = 0, flags = 0, scratchOffset = 0, varyingSize = 0;
+  	  val = fields.contentType;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'contentType' is the wrong type; must be a string (up to 255 chars)");
+  	    var contentType_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += contentType_len;
+  	  }
+  	  val = fields.contentEncoding;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'contentEncoding' is the wrong type; must be a string (up to 255 chars)");
+  	    var contentEncoding_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += contentEncoding_len;
+  	  }
+  	  val = fields.headers;
+  	  if (void 0 != val) {
+  	    if ("object" != typeof val) throw new TypeError("Field 'headers' is the wrong type; must be an object");
+  	    len = encodeTable(SCRATCH, val, scratchOffset);
+  	    var headers_encoded = SCRATCH.slice(scratchOffset, scratchOffset + len);
+  	    scratchOffset += len;
+  	    varyingSize += headers_encoded.length;
+  	  }
+  	  val = fields.deliveryMode;
+  	  if (void 0 != val) {
+  	    if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'deliveryMode' is the wrong type; must be a number (but not NaN)");
+  	    varyingSize += 1;
+  	  }
+  	  val = fields.priority;
+  	  if (void 0 != val) {
+  	    if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'priority' is the wrong type; must be a number (but not NaN)");
+  	    varyingSize += 1;
+  	  }
+  	  val = fields.correlationId;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'correlationId' is the wrong type; must be a string (up to 255 chars)");
+  	    var correlationId_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += correlationId_len;
+  	  }
+  	  val = fields.replyTo;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'replyTo' is the wrong type; must be a string (up to 255 chars)");
+  	    var replyTo_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += replyTo_len;
+  	  }
+  	  val = fields.expiration;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'expiration' is the wrong type; must be a string (up to 255 chars)");
+  	    var expiration_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += expiration_len;
+  	  }
+  	  val = fields.messageId;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'messageId' is the wrong type; must be a string (up to 255 chars)");
+  	    var messageId_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += messageId_len;
+  	  }
+  	  val = fields.timestamp;
+  	  if (void 0 != val) {
+  	    if ("number" != typeof val || isNaN(val)) throw new TypeError("Field 'timestamp' is the wrong type; must be a number (but not NaN)");
+  	    varyingSize += 8;
+  	  }
+  	  val = fields.type;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'type' is the wrong type; must be a string (up to 255 chars)");
+  	    var type_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += type_len;
+  	  }
+  	  val = fields.userId;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'userId' is the wrong type; must be a string (up to 255 chars)");
+  	    var userId_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += userId_len;
+  	  }
+  	  val = fields.appId;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'appId' is the wrong type; must be a string (up to 255 chars)");
+  	    var appId_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += appId_len;
+  	  }
+  	  val = fields.clusterId;
+  	  if (void 0 != val) {
+  	    if (!("string" == typeof val && Buffer$1.byteLength(val) < 256)) throw new TypeError("Field 'clusterId' is the wrong type; must be a string (up to 255 chars)");
+  	    var clusterId_len = Buffer$1.byteLength(val, "utf8");
+  	    varyingSize += 1;
+  	    varyingSize += clusterId_len;
+  	  }
+  	  var buffer = Buffer$1.alloc(22 + varyingSize);
+  	  buffer[0] = 2;
+  	  buffer.writeUInt16BE(channel, 1);
+  	  buffer.writeUInt32BE(3932160, 7);
+  	  ints.writeUInt64BE(buffer, size, 11);
+  	  flags = 0;
+  	  offset = 21;
+  	  val = fields.contentType;
+  	  if (void 0 != val) {
+  	    flags += 32768;
+  	    buffer[offset] = contentType_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += contentType_len;
+  	  }
+  	  val = fields.contentEncoding;
+  	  if (void 0 != val) {
+  	    flags += 16384;
+  	    buffer[offset] = contentEncoding_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += contentEncoding_len;
+  	  }
+  	  val = fields.headers;
+  	  if (void 0 != val) {
+  	    flags += 8192;
+  	    offset += headers_encoded.copy(buffer, offset);
+  	  }
+  	  val = fields.deliveryMode;
+  	  if (void 0 != val) {
+  	    flags += 4096;
+  	    buffer.writeUInt8(val, offset);
+  	    offset++;
+  	  }
+  	  val = fields.priority;
+  	  if (void 0 != val) {
+  	    flags += 2048;
+  	    buffer.writeUInt8(val, offset);
+  	    offset++;
+  	  }
+  	  val = fields.correlationId;
+  	  if (void 0 != val) {
+  	    flags += 1024;
+  	    buffer[offset] = correlationId_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += correlationId_len;
+  	  }
+  	  val = fields.replyTo;
+  	  if (void 0 != val) {
+  	    flags += 512;
+  	    buffer[offset] = replyTo_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += replyTo_len;
+  	  }
+  	  val = fields.expiration;
+  	  if (void 0 != val) {
+  	    flags += 256;
+  	    buffer[offset] = expiration_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += expiration_len;
+  	  }
+  	  val = fields.messageId;
+  	  if (void 0 != val) {
+  	    flags += 128;
+  	    buffer[offset] = messageId_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += messageId_len;
+  	  }
+  	  val = fields.timestamp;
+  	  if (void 0 != val) {
+  	    flags += 64;
+  	    ints.writeUInt64BE(buffer, val, offset);
+  	    offset += 8;
+  	  }
+  	  val = fields.type;
+  	  if (void 0 != val) {
+  	    flags += 32;
+  	    buffer[offset] = type_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += type_len;
+  	  }
+  	  val = fields.userId;
+  	  if (void 0 != val) {
+  	    flags += 16;
+  	    buffer[offset] = userId_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += userId_len;
+  	  }
+  	  val = fields.appId;
+  	  if (void 0 != val) {
+  	    flags += 8;
+  	    buffer[offset] = appId_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += appId_len;
+  	  }
+  	  val = fields.clusterId;
+  	  if (void 0 != val) {
+  	    flags += 4;
+  	    buffer[offset] = clusterId_len;
+  	    offset++;
+  	    buffer.write(val, offset, "utf8");
+  	    offset += clusterId_len;
+  	  }
+  	  buffer[offset] = 206;
+  	  buffer.writeUInt32BE(offset - 7, 3);
+  	  buffer.writeUInt16BE(flags, 19);
+  	  return buffer.subarray(0, offset + 1);
+  	}
+
+  	function decodeBasicProperties(buffer) {
+  	  var flags, val, len, offset = 2;
+  	  flags = buffer.readUInt16BE(0);
+  	  if (0 === flags) return {};
+  	  var fields = {
+  	    contentType: void 0,
+  	    contentEncoding: void 0,
+  	    headers: void 0,
+  	    deliveryMode: void 0,
+  	    priority: void 0,
+  	    correlationId: void 0,
+  	    replyTo: void 0,
+  	    expiration: void 0,
+  	    messageId: void 0,
+  	    timestamp: void 0,
+  	    type: void 0,
+  	    userId: void 0,
+  	    appId: void 0,
+  	    clusterId: void 0
+  	  };
+  	  if (32768 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.contentType = val;
+  	  }
+  	  if (16384 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.contentEncoding = val;
+  	  }
+  	  if (8192 & flags) {
+  	    len = buffer.readUInt32BE(offset);
+  	    offset += 4;
+  	    val = decodeFields(buffer.subarray(offset, offset + len));
+  	    offset += len;
+  	    fields.headers = val;
+  	  }
+  	  if (4096 & flags) {
+  	    val = buffer[offset];
+  	    offset++;
+  	    fields.deliveryMode = val;
+  	  }
+  	  if (2048 & flags) {
+  	    val = buffer[offset];
+  	    offset++;
+  	    fields.priority = val;
+  	  }
+  	  if (1024 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.correlationId = val;
+  	  }
+  	  if (512 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.replyTo = val;
+  	  }
+  	  if (256 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.expiration = val;
+  	  }
+  	  if (128 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.messageId = val;
+  	  }
+  	  if (64 & flags) {
+  	    val = ints.readUInt64BE(buffer, offset);
+  	    offset += 8;
+  	    fields.timestamp = val;
+  	  }
+  	  if (32 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.type = val;
+  	  }
+  	  if (16 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.userId = val;
+  	  }
+  	  if (8 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.appId = val;
+  	  }
+  	  if (4 & flags) {
+  	    len = buffer.readUInt8(offset);
+  	    offset++;
+  	    val = buffer.toString("utf8", offset, offset + len);
+  	    offset += len;
+  	    fields.clusterId = val;
+  	  }
+  	  return fields;
+  	}
+
+  	var codec = requireCodec(), ints = requireBufferMoreInts(), encodeTable = codec.encodeTable, decodeFields = codec.decodeFields, SCRATCH = Buffer$1.alloc(65536);
+
+  	defs.constants = {
+  	  FRAME_METHOD: 1,
+  	  FRAME_HEADER: 2,
+  	  FRAME_BODY: 3,
+  	  FRAME_HEARTBEAT: 8,
+  	  FRAME_MIN_SIZE: 4096,
+  	  FRAME_END: 206,
+  	  REPLY_SUCCESS: 200,
+  	  CONTENT_TOO_LARGE: 311,
+  	  NO_ROUTE: 312,
+  	  NO_CONSUMERS: 313,
+  	  ACCESS_REFUSED: 403,
+  	  NOT_FOUND: 404,
+  	  RESOURCE_LOCKED: 405,
+  	  PRECONDITION_FAILED: 406,
+  	  CONNECTION_FORCED: 320,
+  	  INVALID_PATH: 402,
+  	  FRAME_ERROR: 501,
+  	  SYNTAX_ERROR: 502,
+  	  COMMAND_INVALID: 503,
+  	  CHANNEL_ERROR: 504,
+  	  UNEXPECTED_FRAME: 505,
+  	  RESOURCE_ERROR: 506,
+  	  NOT_ALLOWED: 530,
+  	  NOT_IMPLEMENTED: 540,
+  	  INTERNAL_ERROR: 541
+  	};
+
+  	defs.constant_strs = {
+  	  "1": "FRAME-METHOD",
+  	  "2": "FRAME-HEADER",
+  	  "3": "FRAME-BODY",
+  	  "8": "FRAME-HEARTBEAT",
+  	  "200": "REPLY-SUCCESS",
+  	  "206": "FRAME-END",
+  	  "311": "CONTENT-TOO-LARGE",
+  	  "312": "NO-ROUTE",
+  	  "313": "NO-CONSUMERS",
+  	  "320": "CONNECTION-FORCED",
+  	  "402": "INVALID-PATH",
+  	  "403": "ACCESS-REFUSED",
+  	  "404": "NOT-FOUND",
+  	  "405": "RESOURCE-LOCKED",
+  	  "406": "PRECONDITION-FAILED",
+  	  "501": "FRAME-ERROR",
+  	  "502": "SYNTAX-ERROR",
+  	  "503": "COMMAND-INVALID",
+  	  "504": "CHANNEL-ERROR",
+  	  "505": "UNEXPECTED-FRAME",
+  	  "506": "RESOURCE-ERROR",
+  	  "530": "NOT-ALLOWED",
+  	  "540": "NOT-IMPLEMENTED",
+  	  "541": "INTERNAL-ERROR",
+  	  "4096": "FRAME-MIN-SIZE"
+  	};
+
+  	defs.FRAME_OVERHEAD = 8;
+
+  	defs.decode = function(id, buf) {
+  	  switch (id) {
+  	   case 3932170:
+  	    return decodeBasicQos(buf);
+
+  	   case 3932171:
+  	    return decodeBasicQosOk();
+
+  	   case 3932180:
+  	    return decodeBasicConsume(buf);
+
+  	   case 3932181:
+  	    return decodeBasicConsumeOk(buf);
+
+  	   case 3932190:
+  	    return decodeBasicCancel(buf);
+
+  	   case 3932191:
+  	    return decodeBasicCancelOk(buf);
+
+  	   case 3932200:
+  	    return decodeBasicPublish(buf);
+
+  	   case 3932210:
+  	    return decodeBasicReturn(buf);
+
+  	   case 3932220:
+  	    return decodeBasicDeliver(buf);
+
+  	   case 3932230:
+  	    return decodeBasicGet(buf);
+
+  	   case 3932231:
+  	    return decodeBasicGetOk(buf);
+
+  	   case 3932232:
+  	    return decodeBasicGetEmpty(buf);
+
+  	   case 3932240:
+  	    return decodeBasicAck(buf);
+
+  	   case 3932250:
+  	    return decodeBasicReject(buf);
+
+  	   case 3932260:
+  	    return decodeBasicRecoverAsync(buf);
+
+  	   case 3932270:
+  	    return decodeBasicRecover(buf);
+
+  	   case 3932271:
+  	    return decodeBasicRecoverOk();
+
+  	   case 3932280:
+  	    return decodeBasicNack(buf);
+
+  	   case 655370:
+  	    return decodeConnectionStart(buf);
+
+  	   case 655371:
+  	    return decodeConnectionStartOk(buf);
+
+  	   case 655380:
+  	    return decodeConnectionSecure(buf);
+
+  	   case 655381:
+  	    return decodeConnectionSecureOk(buf);
+
+  	   case 655390:
+  	    return decodeConnectionTune(buf);
+
+  	   case 655391:
+  	    return decodeConnectionTuneOk(buf);
+
+  	   case 655400:
+  	    return decodeConnectionOpen(buf);
+
+  	   case 655401:
+  	    return decodeConnectionOpenOk(buf);
+
+  	   case 655410:
+  	    return decodeConnectionClose(buf);
+
+  	   case 655411:
+  	    return decodeConnectionCloseOk();
+
+  	   case 655420:
+  	    return decodeConnectionBlocked(buf);
+
+  	   case 655421:
+  	    return decodeConnectionUnblocked();
+
+  	   case 655430:
+  	    return decodeConnectionUpdateSecret(buf);
+
+  	   case 655431:
+  	    return decodeConnectionUpdateSecretOk();
+
+  	   case 1310730:
+  	    return decodeChannelOpen(buf);
+
+  	   case 1310731:
+  	    return decodeChannelOpenOk(buf);
+
+  	   case 1310740:
+  	    return decodeChannelFlow(buf);
+
+  	   case 1310741:
+  	    return decodeChannelFlowOk(buf);
+
+  	   case 1310760:
+  	    return decodeChannelClose(buf);
+
+  	   case 1310761:
+  	    return decodeChannelCloseOk();
+
+  	   case 1966090:
+  	    return decodeAccessRequest(buf);
+
+  	   case 1966091:
+  	    return decodeAccessRequestOk(buf);
+
+  	   case 2621450:
+  	    return decodeExchangeDeclare(buf);
+
+  	   case 2621451:
+  	    return decodeExchangeDeclareOk();
+
+  	   case 2621460:
+  	    return decodeExchangeDelete(buf);
+
+  	   case 2621461:
+  	    return decodeExchangeDeleteOk();
+
+  	   case 2621470:
+  	    return decodeExchangeBind(buf);
+
+  	   case 2621471:
+  	    return decodeExchangeBindOk();
+
+  	   case 2621480:
+  	    return decodeExchangeUnbind(buf);
+
+  	   case 2621491:
+  	    return decodeExchangeUnbindOk();
+
+  	   case 3276810:
+  	    return decodeQueueDeclare(buf);
+
+  	   case 3276811:
+  	    return decodeQueueDeclareOk(buf);
+
+  	   case 3276820:
+  	    return decodeQueueBind(buf);
+
+  	   case 3276821:
+  	    return decodeQueueBindOk();
+
+  	   case 3276830:
+  	    return decodeQueuePurge(buf);
+
+  	   case 3276831:
+  	    return decodeQueuePurgeOk(buf);
+
+  	   case 3276840:
+  	    return decodeQueueDelete(buf);
+
+  	   case 3276841:
+  	    return decodeQueueDeleteOk(buf);
+
+  	   case 3276850:
+  	    return decodeQueueUnbind(buf);
+
+  	   case 3276851:
+  	    return decodeQueueUnbindOk();
+
+  	   case 5898250:
+  	    return decodeTxSelect();
+
+  	   case 5898251:
+  	    return decodeTxSelectOk();
+
+  	   case 5898260:
+  	    return decodeTxCommit();
+
+  	   case 5898261:
+  	    return decodeTxCommitOk();
+
+  	   case 5898270:
+  	    return decodeTxRollback();
+
+  	   case 5898271:
+  	    return decodeTxRollbackOk();
+
+  	   case 5570570:
+  	    return decodeConfirmSelect(buf);
+
+  	   case 5570571:
+  	    return decodeConfirmSelectOk();
+
+  	   case 60:
+  	    return decodeBasicProperties(buf);
+
+  	   default:
+  	    throw new Error("Unknown class/method ID");
+  	  }
+  	};
+
+  	defs.encodeMethod = function(id, channel, fields) {
+  	  switch (id) {
+  	   case 3932170:
+  	    return encodeBasicQos(channel, fields);
+
+  	   case 3932171:
+  	    return encodeBasicQosOk(channel);
+
+  	   case 3932180:
+  	    return encodeBasicConsume(channel, fields);
+
+  	   case 3932181:
+  	    return encodeBasicConsumeOk(channel, fields);
+
+  	   case 3932190:
+  	    return encodeBasicCancel(channel, fields);
+
+  	   case 3932191:
+  	    return encodeBasicCancelOk(channel, fields);
+
+  	   case 3932200:
+  	    return encodeBasicPublish(channel, fields);
+
+  	   case 3932210:
+  	    return encodeBasicReturn(channel, fields);
+
+  	   case 3932220:
+  	    return encodeBasicDeliver(channel, fields);
+
+  	   case 3932230:
+  	    return encodeBasicGet(channel, fields);
+
+  	   case 3932231:
+  	    return encodeBasicGetOk(channel, fields);
+
+  	   case 3932232:
+  	    return encodeBasicGetEmpty(channel, fields);
+
+  	   case 3932240:
+  	    return encodeBasicAck(channel, fields);
+
+  	   case 3932250:
+  	    return encodeBasicReject(channel, fields);
+
+  	   case 3932260:
+  	    return encodeBasicRecoverAsync(channel, fields);
+
+  	   case 3932270:
+  	    return encodeBasicRecover(channel, fields);
+
+  	   case 3932271:
+  	    return encodeBasicRecoverOk(channel);
+
+  	   case 3932280:
+  	    return encodeBasicNack(channel, fields);
+
+  	   case 655370:
+  	    return encodeConnectionStart(channel, fields);
+
+  	   case 655371:
+  	    return encodeConnectionStartOk(channel, fields);
+
+  	   case 655380:
+  	    return encodeConnectionSecure(channel, fields);
+
+  	   case 655381:
+  	    return encodeConnectionSecureOk(channel, fields);
+
+  	   case 655390:
+  	    return encodeConnectionTune(channel, fields);
+
+  	   case 655391:
+  	    return encodeConnectionTuneOk(channel, fields);
+
+  	   case 655400:
+  	    return encodeConnectionOpen(channel, fields);
+
+  	   case 655401:
+  	    return encodeConnectionOpenOk(channel, fields);
+
+  	   case 655410:
+  	    return encodeConnectionClose(channel, fields);
+
+  	   case 655411:
+  	    return encodeConnectionCloseOk(channel);
+
+  	   case 655420:
+  	    return encodeConnectionBlocked(channel, fields);
+
+  	   case 655421:
+  	    return encodeConnectionUnblocked(channel);
+
+  	   case 655430:
+  	    return encodeConnectionUpdateSecret(channel, fields);
+
+  	   case 655431:
+  	    return encodeConnectionUpdateSecretOk(channel);
+
+  	   case 1310730:
+  	    return encodeChannelOpen(channel, fields);
+
+  	   case 1310731:
+  	    return encodeChannelOpenOk(channel, fields);
+
+  	   case 1310740:
+  	    return encodeChannelFlow(channel, fields);
+
+  	   case 1310741:
+  	    return encodeChannelFlowOk(channel, fields);
+
+  	   case 1310760:
+  	    return encodeChannelClose(channel, fields);
+
+  	   case 1310761:
+  	    return encodeChannelCloseOk(channel);
+
+  	   case 1966090:
+  	    return encodeAccessRequest(channel, fields);
+
+  	   case 1966091:
+  	    return encodeAccessRequestOk(channel, fields);
+
+  	   case 2621450:
+  	    return encodeExchangeDeclare(channel, fields);
+
+  	   case 2621451:
+  	    return encodeExchangeDeclareOk(channel);
+
+  	   case 2621460:
+  	    return encodeExchangeDelete(channel, fields);
+
+  	   case 2621461:
+  	    return encodeExchangeDeleteOk(channel);
+
+  	   case 2621470:
+  	    return encodeExchangeBind(channel, fields);
+
+  	   case 2621471:
+  	    return encodeExchangeBindOk(channel);
+
+  	   case 2621480:
+  	    return encodeExchangeUnbind(channel, fields);
+
+  	   case 2621491:
+  	    return encodeExchangeUnbindOk(channel);
+
+  	   case 3276810:
+  	    return encodeQueueDeclare(channel, fields);
+
+  	   case 3276811:
+  	    return encodeQueueDeclareOk(channel, fields);
+
+  	   case 3276820:
+  	    return encodeQueueBind(channel, fields);
+
+  	   case 3276821:
+  	    return encodeQueueBindOk(channel);
+
+  	   case 3276830:
+  	    return encodeQueuePurge(channel, fields);
+
+  	   case 3276831:
+  	    return encodeQueuePurgeOk(channel, fields);
+
+  	   case 3276840:
+  	    return encodeQueueDelete(channel, fields);
+
+  	   case 3276841:
+  	    return encodeQueueDeleteOk(channel, fields);
+
+  	   case 3276850:
+  	    return encodeQueueUnbind(channel, fields);
+
+  	   case 3276851:
+  	    return encodeQueueUnbindOk(channel);
+
+  	   case 5898250:
+  	    return encodeTxSelect(channel);
+
+  	   case 5898251:
+  	    return encodeTxSelectOk(channel);
+
+  	   case 5898260:
+  	    return encodeTxCommit(channel);
+
+  	   case 5898261:
+  	    return encodeTxCommitOk(channel);
+
+  	   case 5898270:
+  	    return encodeTxRollback(channel);
+
+  	   case 5898271:
+  	    return encodeTxRollbackOk(channel);
+
+  	   case 5570570:
+  	    return encodeConfirmSelect(channel, fields);
+
+  	   case 5570571:
+  	    return encodeConfirmSelectOk(channel);
+
+  	   default:
+  	    throw new Error("Unknown class/method ID");
+  	  }
+  	};
+
+  	defs.encodeProperties = function(id, channel, size, fields) {
+  	  switch (id) {
+  	   case 60:
+  	    return encodeBasicProperties(channel, size, fields);
+
+  	   default:
+  	    throw new Error("Unknown class/properties ID");
+  	  }
+  	};
+
+  	defs.info = function(id) {
+  	  switch (id) {
+  	   case 3932170:
+  	    return methodInfoBasicQos;
+
+  	   case 3932171:
+  	    return methodInfoBasicQosOk;
+
+  	   case 3932180:
+  	    return methodInfoBasicConsume;
+
+  	   case 3932181:
+  	    return methodInfoBasicConsumeOk;
+
+  	   case 3932190:
+  	    return methodInfoBasicCancel;
+
+  	   case 3932191:
+  	    return methodInfoBasicCancelOk;
+
+  	   case 3932200:
+  	    return methodInfoBasicPublish;
+
+  	   case 3932210:
+  	    return methodInfoBasicReturn;
+
+  	   case 3932220:
+  	    return methodInfoBasicDeliver;
+
+  	   case 3932230:
+  	    return methodInfoBasicGet;
+
+  	   case 3932231:
+  	    return methodInfoBasicGetOk;
+
+  	   case 3932232:
+  	    return methodInfoBasicGetEmpty;
+
+  	   case 3932240:
+  	    return methodInfoBasicAck;
+
+  	   case 3932250:
+  	    return methodInfoBasicReject;
+
+  	   case 3932260:
+  	    return methodInfoBasicRecoverAsync;
+
+  	   case 3932270:
+  	    return methodInfoBasicRecover;
+
+  	   case 3932271:
+  	    return methodInfoBasicRecoverOk;
+
+  	   case 3932280:
+  	    return methodInfoBasicNack;
+
+  	   case 655370:
+  	    return methodInfoConnectionStart;
+
+  	   case 655371:
+  	    return methodInfoConnectionStartOk;
+
+  	   case 655380:
+  	    return methodInfoConnectionSecure;
+
+  	   case 655381:
+  	    return methodInfoConnectionSecureOk;
+
+  	   case 655390:
+  	    return methodInfoConnectionTune;
+
+  	   case 655391:
+  	    return methodInfoConnectionTuneOk;
+
+  	   case 655400:
+  	    return methodInfoConnectionOpen;
+
+  	   case 655401:
+  	    return methodInfoConnectionOpenOk;
+
+  	   case 655410:
+  	    return methodInfoConnectionClose;
+
+  	   case 655411:
+  	    return methodInfoConnectionCloseOk;
+
+  	   case 655420:
+  	    return methodInfoConnectionBlocked;
+
+  	   case 655421:
+  	    return methodInfoConnectionUnblocked;
+
+  	   case 655430:
+  	    return methodInfoConnectionUpdateSecret;
+
+  	   case 655431:
+  	    return methodInfoConnectionUpdateSecretOk;
+
+  	   case 1310730:
+  	    return methodInfoChannelOpen;
+
+  	   case 1310731:
+  	    return methodInfoChannelOpenOk;
+
+  	   case 1310740:
+  	    return methodInfoChannelFlow;
+
+  	   case 1310741:
+  	    return methodInfoChannelFlowOk;
+
+  	   case 1310760:
+  	    return methodInfoChannelClose;
+
+  	   case 1310761:
+  	    return methodInfoChannelCloseOk;
+
+  	   case 1966090:
+  	    return methodInfoAccessRequest;
+
+  	   case 1966091:
+  	    return methodInfoAccessRequestOk;
+
+  	   case 2621450:
+  	    return methodInfoExchangeDeclare;
+
+  	   case 2621451:
+  	    return methodInfoExchangeDeclareOk;
+
+  	   case 2621460:
+  	    return methodInfoExchangeDelete;
+
+  	   case 2621461:
+  	    return methodInfoExchangeDeleteOk;
+
+  	   case 2621470:
+  	    return methodInfoExchangeBind;
+
+  	   case 2621471:
+  	    return methodInfoExchangeBindOk;
+
+  	   case 2621480:
+  	    return methodInfoExchangeUnbind;
+
+  	   case 2621491:
+  	    return methodInfoExchangeUnbindOk;
+
+  	   case 3276810:
+  	    return methodInfoQueueDeclare;
+
+  	   case 3276811:
+  	    return methodInfoQueueDeclareOk;
+
+  	   case 3276820:
+  	    return methodInfoQueueBind;
+
+  	   case 3276821:
+  	    return methodInfoQueueBindOk;
+
+  	   case 3276830:
+  	    return methodInfoQueuePurge;
+
+  	   case 3276831:
+  	    return methodInfoQueuePurgeOk;
+
+  	   case 3276840:
+  	    return methodInfoQueueDelete;
+
+  	   case 3276841:
+  	    return methodInfoQueueDeleteOk;
+
+  	   case 3276850:
+  	    return methodInfoQueueUnbind;
+
+  	   case 3276851:
+  	    return methodInfoQueueUnbindOk;
+
+  	   case 5898250:
+  	    return methodInfoTxSelect;
+
+  	   case 5898251:
+  	    return methodInfoTxSelectOk;
+
+  	   case 5898260:
+  	    return methodInfoTxCommit;
+
+  	   case 5898261:
+  	    return methodInfoTxCommitOk;
+
+  	   case 5898270:
+  	    return methodInfoTxRollback;
+
+  	   case 5898271:
+  	    return methodInfoTxRollbackOk;
+
+  	   case 5570570:
+  	    return methodInfoConfirmSelect;
+
+  	   case 5570571:
+  	    return methodInfoConfirmSelectOk;
+
+  	   case 60:
+  	    return propertiesInfoBasicProperties;
+
+  	   default:
+  	    throw new Error("Unknown class/method ID");
+  	  }
+  	};
+
+  	defs.BasicQos = 3932170;
+
+  	var methodInfoBasicQos = defs.methodInfoBasicQos = {
+  	  id: 3932170,
+  	  classId: 60,
+  	  methodId: 10,
+  	  name: "BasicQos",
+  	  args: [ {
+  	    type: "long",
+  	    name: "prefetchSize",
+  	    default: 0
+  	  }, {
+  	    type: "short",
+  	    name: "prefetchCount",
+  	    default: 0
+  	  }, {
+  	    type: "bit",
+  	    name: "global",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicQosOk = 3932171;
+
+  	var methodInfoBasicQosOk = defs.methodInfoBasicQosOk = {
+  	  id: 3932171,
+  	  classId: 60,
+  	  methodId: 11,
+  	  name: "BasicQosOk",
+  	  args: []
+  	};
+
+  	defs.BasicConsume = 3932180;
+
+  	var methodInfoBasicConsume = defs.methodInfoBasicConsume = {
+  	  id: 3932180,
+  	  classId: 60,
+  	  methodId: 20,
+  	  name: "BasicConsume",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "shortstr",
+  	    name: "consumerTag",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "noLocal",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "noAck",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "exclusive",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.BasicConsumeOk = 3932181;
+
+  	var methodInfoBasicConsumeOk = defs.methodInfoBasicConsumeOk = {
+  	  id: 3932181,
+  	  classId: 60,
+  	  methodId: 21,
+  	  name: "BasicConsumeOk",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "consumerTag"
+  	  } ]
+  	};
+
+  	defs.BasicCancel = 3932190;
+
+  	var methodInfoBasicCancel = defs.methodInfoBasicCancel = {
+  	  id: 3932190,
+  	  classId: 60,
+  	  methodId: 30,
+  	  name: "BasicCancel",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "consumerTag"
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicCancelOk = 3932191;
+
+  	var methodInfoBasicCancelOk = defs.methodInfoBasicCancelOk = {
+  	  id: 3932191,
+  	  classId: 60,
+  	  methodId: 31,
+  	  name: "BasicCancelOk",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "consumerTag"
+  	  } ]
+  	};
+
+  	defs.BasicPublish = 3932200;
+
+  	var methodInfoBasicPublish = defs.methodInfoBasicPublish = {
+  	  id: 3932200,
+  	  classId: 60,
+  	  methodId: 40,
+  	  name: "BasicPublish",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange",
+  	    default: ""
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "mandatory",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "immediate",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicReturn = 3932210;
+
+  	var methodInfoBasicReturn = defs.methodInfoBasicReturn = {
+  	  id: 3932210,
+  	  classId: 60,
+  	  methodId: 50,
+  	  name: "BasicReturn",
+  	  args: [ {
+  	    type: "short",
+  	    name: "replyCode"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "replyText",
+  	    default: ""
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey"
+  	  } ]
+  	};
+
+  	defs.BasicDeliver = 3932220;
+
+  	var methodInfoBasicDeliver = defs.methodInfoBasicDeliver = {
+  	  id: 3932220,
+  	  classId: 60,
+  	  methodId: 60,
+  	  name: "BasicDeliver",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "consumerTag"
+  	  }, {
+  	    type: "longlong",
+  	    name: "deliveryTag"
+  	  }, {
+  	    type: "bit",
+  	    name: "redelivered",
+  	    default: false
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey"
+  	  } ]
+  	};
+
+  	defs.BasicGet = 3932230;
+
+  	var methodInfoBasicGet = defs.methodInfoBasicGet = {
+  	  id: 3932230,
+  	  classId: 60,
+  	  methodId: 70,
+  	  name: "BasicGet",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "noAck",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicGetOk = 3932231;
+
+  	var methodInfoBasicGetOk = defs.methodInfoBasicGetOk = {
+  	  id: 3932231,
+  	  classId: 60,
+  	  methodId: 71,
+  	  name: "BasicGetOk",
+  	  args: [ {
+  	    type: "longlong",
+  	    name: "deliveryTag"
+  	  }, {
+  	    type: "bit",
+  	    name: "redelivered",
+  	    default: false
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey"
+  	  }, {
+  	    type: "long",
+  	    name: "messageCount"
+  	  } ]
+  	};
+
+  	defs.BasicGetEmpty = 3932232;
+
+  	var methodInfoBasicGetEmpty = defs.methodInfoBasicGetEmpty = {
+  	  id: 3932232,
+  	  classId: 60,
+  	  methodId: 72,
+  	  name: "BasicGetEmpty",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "clusterId",
+  	    default: ""
+  	  } ]
+  	};
+
+  	defs.BasicAck = 3932240;
+
+  	var methodInfoBasicAck = defs.methodInfoBasicAck = {
+  	  id: 3932240,
+  	  classId: 60,
+  	  methodId: 80,
+  	  name: "BasicAck",
+  	  args: [ {
+  	    type: "longlong",
+  	    name: "deliveryTag",
+  	    default: 0
+  	  }, {
+  	    type: "bit",
+  	    name: "multiple",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicReject = 3932250;
+
+  	var methodInfoBasicReject = defs.methodInfoBasicReject = {
+  	  id: 3932250,
+  	  classId: 60,
+  	  methodId: 90,
+  	  name: "BasicReject",
+  	  args: [ {
+  	    type: "longlong",
+  	    name: "deliveryTag"
+  	  }, {
+  	    type: "bit",
+  	    name: "requeue",
+  	    default: true
+  	  } ]
+  	};
+
+  	defs.BasicRecoverAsync = 3932260;
+
+  	var methodInfoBasicRecoverAsync = defs.methodInfoBasicRecoverAsync = {
+  	  id: 3932260,
+  	  classId: 60,
+  	  methodId: 100,
+  	  name: "BasicRecoverAsync",
+  	  args: [ {
+  	    type: "bit",
+  	    name: "requeue",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicRecover = 3932270;
+
+  	var methodInfoBasicRecover = defs.methodInfoBasicRecover = {
+  	  id: 3932270,
+  	  classId: 60,
+  	  methodId: 110,
+  	  name: "BasicRecover",
+  	  args: [ {
+  	    type: "bit",
+  	    name: "requeue",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.BasicRecoverOk = 3932271;
+
+  	var methodInfoBasicRecoverOk = defs.methodInfoBasicRecoverOk = {
+  	  id: 3932271,
+  	  classId: 60,
+  	  methodId: 111,
+  	  name: "BasicRecoverOk",
+  	  args: []
+  	};
+
+  	defs.BasicNack = 3932280;
+
+  	var methodInfoBasicNack = defs.methodInfoBasicNack = {
+  	  id: 3932280,
+  	  classId: 60,
+  	  methodId: 120,
+  	  name: "BasicNack",
+  	  args: [ {
+  	    type: "longlong",
+  	    name: "deliveryTag",
+  	    default: 0
+  	  }, {
+  	    type: "bit",
+  	    name: "multiple",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "requeue",
+  	    default: true
+  	  } ]
+  	};
+
+  	defs.ConnectionStart = 655370;
+
+  	var methodInfoConnectionStart = defs.methodInfoConnectionStart = {
+  	  id: 655370,
+  	  classId: 10,
+  	  methodId: 10,
+  	  name: "ConnectionStart",
+  	  args: [ {
+  	    type: "octet",
+  	    name: "versionMajor",
+  	    default: 0
+  	  }, {
+  	    type: "octet",
+  	    name: "versionMinor",
+  	    default: 9
+  	  }, {
+  	    type: "table",
+  	    name: "serverProperties"
+  	  }, {
+  	    type: "longstr",
+  	    name: "mechanisms",
+  	    default: "PLAIN"
+  	  }, {
+  	    type: "longstr",
+  	    name: "locales",
+  	    default: "en_US"
+  	  } ]
+  	};
+
+  	defs.ConnectionStartOk = 655371;
+
+  	var methodInfoConnectionStartOk = defs.methodInfoConnectionStartOk = {
+  	  id: 655371,
+  	  classId: 10,
+  	  methodId: 11,
+  	  name: "ConnectionStartOk",
+  	  args: [ {
+  	    type: "table",
+  	    name: "clientProperties"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "mechanism",
+  	    default: "PLAIN"
+  	  }, {
+  	    type: "longstr",
+  	    name: "response"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "locale",
+  	    default: "en_US"
+  	  } ]
+  	};
+
+  	defs.ConnectionSecure = 655380;
+
+  	var methodInfoConnectionSecure = defs.methodInfoConnectionSecure = {
+  	  id: 655380,
+  	  classId: 10,
+  	  methodId: 20,
+  	  name: "ConnectionSecure",
+  	  args: [ {
+  	    type: "longstr",
+  	    name: "challenge"
+  	  } ]
+  	};
+
+  	defs.ConnectionSecureOk = 655381;
+
+  	var methodInfoConnectionSecureOk = defs.methodInfoConnectionSecureOk = {
+  	  id: 655381,
+  	  classId: 10,
+  	  methodId: 21,
+  	  name: "ConnectionSecureOk",
+  	  args: [ {
+  	    type: "longstr",
+  	    name: "response"
+  	  } ]
+  	};
+
+  	defs.ConnectionTune = 655390;
+
+  	var methodInfoConnectionTune = defs.methodInfoConnectionTune = {
+  	  id: 655390,
+  	  classId: 10,
+  	  methodId: 30,
+  	  name: "ConnectionTune",
+  	  args: [ {
+  	    type: "short",
+  	    name: "channelMax",
+  	    default: 0
+  	  }, {
+  	    type: "long",
+  	    name: "frameMax",
+  	    default: 0
+  	  }, {
+  	    type: "short",
+  	    name: "heartbeat",
+  	    default: 0
+  	  } ]
+  	};
+
+  	defs.ConnectionTuneOk = 655391;
+
+  	var methodInfoConnectionTuneOk = defs.methodInfoConnectionTuneOk = {
+  	  id: 655391,
+  	  classId: 10,
+  	  methodId: 31,
+  	  name: "ConnectionTuneOk",
+  	  args: [ {
+  	    type: "short",
+  	    name: "channelMax",
+  	    default: 0
+  	  }, {
+  	    type: "long",
+  	    name: "frameMax",
+  	    default: 0
+  	  }, {
+  	    type: "short",
+  	    name: "heartbeat",
+  	    default: 0
+  	  } ]
+  	};
+
+  	defs.ConnectionOpen = 655400;
+
+  	var methodInfoConnectionOpen = defs.methodInfoConnectionOpen = {
+  	  id: 655400,
+  	  classId: 10,
+  	  methodId: 40,
+  	  name: "ConnectionOpen",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "virtualHost",
+  	    default: "/"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "capabilities",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "insist",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.ConnectionOpenOk = 655401;
+
+  	var methodInfoConnectionOpenOk = defs.methodInfoConnectionOpenOk = {
+  	  id: 655401,
+  	  classId: 10,
+  	  methodId: 41,
+  	  name: "ConnectionOpenOk",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "knownHosts",
+  	    default: ""
+  	  } ]
+  	};
+
+  	defs.ConnectionClose = 655410;
+
+  	var methodInfoConnectionClose = defs.methodInfoConnectionClose = {
+  	  id: 655410,
+  	  classId: 10,
+  	  methodId: 50,
+  	  name: "ConnectionClose",
+  	  args: [ {
+  	    type: "short",
+  	    name: "replyCode"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "replyText",
+  	    default: ""
+  	  }, {
+  	    type: "short",
+  	    name: "classId"
+  	  }, {
+  	    type: "short",
+  	    name: "methodId"
+  	  } ]
+  	};
+
+  	defs.ConnectionCloseOk = 655411;
+
+  	var methodInfoConnectionCloseOk = defs.methodInfoConnectionCloseOk = {
+  	  id: 655411,
+  	  classId: 10,
+  	  methodId: 51,
+  	  name: "ConnectionCloseOk",
+  	  args: []
+  	};
+
+  	defs.ConnectionBlocked = 655420;
+
+  	var methodInfoConnectionBlocked = defs.methodInfoConnectionBlocked = {
+  	  id: 655420,
+  	  classId: 10,
+  	  methodId: 60,
+  	  name: "ConnectionBlocked",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "reason",
+  	    default: ""
+  	  } ]
+  	};
+
+  	defs.ConnectionUnblocked = 655421;
+
+  	var methodInfoConnectionUnblocked = defs.methodInfoConnectionUnblocked = {
+  	  id: 655421,
+  	  classId: 10,
+  	  methodId: 61,
+  	  name: "ConnectionUnblocked",
+  	  args: []
+  	};
+
+  	defs.ConnectionUpdateSecret = 655430;
+
+  	var methodInfoConnectionUpdateSecret = defs.methodInfoConnectionUpdateSecret = {
+  	  id: 655430,
+  	  classId: 10,
+  	  methodId: 70,
+  	  name: "ConnectionUpdateSecret",
+  	  args: [ {
+  	    type: "longstr",
+  	    name: "newSecret"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "reason"
+  	  } ]
+  	};
+
+  	defs.ConnectionUpdateSecretOk = 655431;
+
+  	var methodInfoConnectionUpdateSecretOk = defs.methodInfoConnectionUpdateSecretOk = {
+  	  id: 655431,
+  	  classId: 10,
+  	  methodId: 71,
+  	  name: "ConnectionUpdateSecretOk",
+  	  args: []
+  	};
+
+  	defs.ChannelOpen = 1310730;
+
+  	var methodInfoChannelOpen = defs.methodInfoChannelOpen = {
+  	  id: 1310730,
+  	  classId: 20,
+  	  methodId: 10,
+  	  name: "ChannelOpen",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "outOfBand",
+  	    default: ""
+  	  } ]
+  	};
+
+  	defs.ChannelOpenOk = 1310731;
+
+  	var methodInfoChannelOpenOk = defs.methodInfoChannelOpenOk = {
+  	  id: 1310731,
+  	  classId: 20,
+  	  methodId: 11,
+  	  name: "ChannelOpenOk",
+  	  args: [ {
+  	    type: "longstr",
+  	    name: "channelId",
+  	    default: ""
+  	  } ]
+  	};
+
+  	defs.ChannelFlow = 1310740;
+
+  	var methodInfoChannelFlow = defs.methodInfoChannelFlow = {
+  	  id: 1310740,
+  	  classId: 20,
+  	  methodId: 20,
+  	  name: "ChannelFlow",
+  	  args: [ {
+  	    type: "bit",
+  	    name: "active"
+  	  } ]
+  	};
+
+  	defs.ChannelFlowOk = 1310741;
+
+  	var methodInfoChannelFlowOk = defs.methodInfoChannelFlowOk = {
+  	  id: 1310741,
+  	  classId: 20,
+  	  methodId: 21,
+  	  name: "ChannelFlowOk",
+  	  args: [ {
+  	    type: "bit",
+  	    name: "active"
+  	  } ]
+  	};
+
+  	defs.ChannelClose = 1310760;
+
+  	var methodInfoChannelClose = defs.methodInfoChannelClose = {
+  	  id: 1310760,
+  	  classId: 20,
+  	  methodId: 40,
+  	  name: "ChannelClose",
+  	  args: [ {
+  	    type: "short",
+  	    name: "replyCode"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "replyText",
+  	    default: ""
+  	  }, {
+  	    type: "short",
+  	    name: "classId"
+  	  }, {
+  	    type: "short",
+  	    name: "methodId"
+  	  } ]
+  	};
+
+  	defs.ChannelCloseOk = 1310761;
+
+  	var methodInfoChannelCloseOk = defs.methodInfoChannelCloseOk = {
+  	  id: 1310761,
+  	  classId: 20,
+  	  methodId: 41,
+  	  name: "ChannelCloseOk",
+  	  args: []
+  	};
+
+  	defs.AccessRequest = 1966090;
+
+  	var methodInfoAccessRequest = defs.methodInfoAccessRequest = {
+  	  id: 1966090,
+  	  classId: 30,
+  	  methodId: 10,
+  	  name: "AccessRequest",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "realm",
+  	    default: "/data"
+  	  }, {
+  	    type: "bit",
+  	    name: "exclusive",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "passive",
+  	    default: true
+  	  }, {
+  	    type: "bit",
+  	    name: "active",
+  	    default: true
+  	  }, {
+  	    type: "bit",
+  	    name: "write",
+  	    default: true
+  	  }, {
+  	    type: "bit",
+  	    name: "read",
+  	    default: true
+  	  } ]
+  	};
+
+  	defs.AccessRequestOk = 1966091;
+
+  	var methodInfoAccessRequestOk = defs.methodInfoAccessRequestOk = {
+  	  id: 1966091,
+  	  classId: 30,
+  	  methodId: 11,
+  	  name: "AccessRequestOk",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 1
+  	  } ]
+  	};
+
+  	defs.ExchangeDeclare = 2621450;
+
+  	var methodInfoExchangeDeclare = defs.methodInfoExchangeDeclare = {
+  	  id: 2621450,
+  	  classId: 40,
+  	  methodId: 10,
+  	  name: "ExchangeDeclare",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "type",
+  	    default: "direct"
+  	  }, {
+  	    type: "bit",
+  	    name: "passive",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "durable",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "autoDelete",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "internal",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.ExchangeDeclareOk = 2621451;
+
+  	var methodInfoExchangeDeclareOk = defs.methodInfoExchangeDeclareOk = {
+  	  id: 2621451,
+  	  classId: 40,
+  	  methodId: 11,
+  	  name: "ExchangeDeclareOk",
+  	  args: []
+  	};
+
+  	defs.ExchangeDelete = 2621460;
+
+  	var methodInfoExchangeDelete = defs.methodInfoExchangeDelete = {
+  	  id: 2621460,
+  	  classId: 40,
+  	  methodId: 20,
+  	  name: "ExchangeDelete",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "bit",
+  	    name: "ifUnused",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.ExchangeDeleteOk = 2621461;
+
+  	var methodInfoExchangeDeleteOk = defs.methodInfoExchangeDeleteOk = {
+  	  id: 2621461,
+  	  classId: 40,
+  	  methodId: 21,
+  	  name: "ExchangeDeleteOk",
+  	  args: []
+  	};
+
+  	defs.ExchangeBind = 2621470;
+
+  	var methodInfoExchangeBind = defs.methodInfoExchangeBind = {
+  	  id: 2621470,
+  	  classId: 40,
+  	  methodId: 30,
+  	  name: "ExchangeBind",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "destination"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "source"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.ExchangeBindOk = 2621471;
+
+  	var methodInfoExchangeBindOk = defs.methodInfoExchangeBindOk = {
+  	  id: 2621471,
+  	  classId: 40,
+  	  methodId: 31,
+  	  name: "ExchangeBindOk",
+  	  args: []
+  	};
+
+  	defs.ExchangeUnbind = 2621480;
+
+  	var methodInfoExchangeUnbind = defs.methodInfoExchangeUnbind = {
+  	  id: 2621480,
+  	  classId: 40,
+  	  methodId: 40,
+  	  name: "ExchangeUnbind",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "destination"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "source"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.ExchangeUnbindOk = 2621491;
+
+  	var methodInfoExchangeUnbindOk = defs.methodInfoExchangeUnbindOk = {
+  	  id: 2621491,
+  	  classId: 40,
+  	  methodId: 51,
+  	  name: "ExchangeUnbindOk",
+  	  args: []
+  	};
+
+  	defs.QueueDeclare = 3276810;
+
+  	var methodInfoQueueDeclare = defs.methodInfoQueueDeclare = {
+  	  id: 3276810,
+  	  classId: 50,
+  	  methodId: 10,
+  	  name: "QueueDeclare",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "passive",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "durable",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "exclusive",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "autoDelete",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.QueueDeclareOk = 3276811;
+
+  	var methodInfoQueueDeclareOk = defs.methodInfoQueueDeclareOk = {
+  	  id: 3276811,
+  	  classId: 50,
+  	  methodId: 11,
+  	  name: "QueueDeclareOk",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "queue"
+  	  }, {
+  	    type: "long",
+  	    name: "messageCount"
+  	  }, {
+  	    type: "long",
+  	    name: "consumerCount"
+  	  } ]
+  	};
+
+  	defs.QueueBind = 3276820;
+
+  	var methodInfoQueueBind = defs.methodInfoQueueBind = {
+  	  id: 3276820,
+  	  classId: 50,
+  	  methodId: 20,
+  	  name: "QueueBind",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.QueueBindOk = 3276821;
+
+  	var methodInfoQueueBindOk = defs.methodInfoQueueBindOk = {
+  	  id: 3276821,
+  	  classId: 50,
+  	  methodId: 21,
+  	  name: "QueueBindOk",
+  	  args: []
+  	};
+
+  	defs.QueuePurge = 3276830;
+
+  	var methodInfoQueuePurge = defs.methodInfoQueuePurge = {
+  	  id: 3276830,
+  	  classId: 50,
+  	  methodId: 30,
+  	  name: "QueuePurge",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.QueuePurgeOk = 3276831;
+
+  	var methodInfoQueuePurgeOk = defs.methodInfoQueuePurgeOk = {
+  	  id: 3276831,
+  	  classId: 50,
+  	  methodId: 31,
+  	  name: "QueuePurgeOk",
+  	  args: [ {
+  	    type: "long",
+  	    name: "messageCount"
+  	  } ]
+  	};
+
+  	defs.QueueDelete = 3276840;
+
+  	var methodInfoQueueDelete = defs.methodInfoQueueDelete = {
+  	  id: 3276840,
+  	  classId: 50,
+  	  methodId: 40,
+  	  name: "QueueDelete",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "bit",
+  	    name: "ifUnused",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "ifEmpty",
+  	    default: false
+  	  }, {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.QueueDeleteOk = 3276841;
+
+  	var methodInfoQueueDeleteOk = defs.methodInfoQueueDeleteOk = {
+  	  id: 3276841,
+  	  classId: 50,
+  	  methodId: 41,
+  	  name: "QueueDeleteOk",
+  	  args: [ {
+  	    type: "long",
+  	    name: "messageCount"
+  	  } ]
+  	};
+
+  	defs.QueueUnbind = 3276850;
+
+  	var methodInfoQueueUnbind = defs.methodInfoQueueUnbind = {
+  	  id: 3276850,
+  	  classId: 50,
+  	  methodId: 50,
+  	  name: "QueueUnbind",
+  	  args: [ {
+  	    type: "short",
+  	    name: "ticket",
+  	    default: 0
+  	  }, {
+  	    type: "shortstr",
+  	    name: "queue",
+  	    default: ""
+  	  }, {
+  	    type: "shortstr",
+  	    name: "exchange"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "routingKey",
+  	    default: ""
+  	  }, {
+  	    type: "table",
+  	    name: "arguments",
+  	    default: {}
+  	  } ]
+  	};
+
+  	defs.QueueUnbindOk = 3276851;
+
+  	var methodInfoQueueUnbindOk = defs.methodInfoQueueUnbindOk = {
+  	  id: 3276851,
+  	  classId: 50,
+  	  methodId: 51,
+  	  name: "QueueUnbindOk",
+  	  args: []
+  	};
+
+  	defs.TxSelect = 5898250;
+
+  	var methodInfoTxSelect = defs.methodInfoTxSelect = {
+  	  id: 5898250,
+  	  classId: 90,
+  	  methodId: 10,
+  	  name: "TxSelect",
+  	  args: []
+  	};
+
+  	defs.TxSelectOk = 5898251;
+
+  	var methodInfoTxSelectOk = defs.methodInfoTxSelectOk = {
+  	  id: 5898251,
+  	  classId: 90,
+  	  methodId: 11,
+  	  name: "TxSelectOk",
+  	  args: []
+  	};
+
+  	defs.TxCommit = 5898260;
+
+  	var methodInfoTxCommit = defs.methodInfoTxCommit = {
+  	  id: 5898260,
+  	  classId: 90,
+  	  methodId: 20,
+  	  name: "TxCommit",
+  	  args: []
+  	};
+
+  	defs.TxCommitOk = 5898261;
+
+  	var methodInfoTxCommitOk = defs.methodInfoTxCommitOk = {
+  	  id: 5898261,
+  	  classId: 90,
+  	  methodId: 21,
+  	  name: "TxCommitOk",
+  	  args: []
+  	};
+
+  	defs.TxRollback = 5898270;
+
+  	var methodInfoTxRollback = defs.methodInfoTxRollback = {
+  	  id: 5898270,
+  	  classId: 90,
+  	  methodId: 30,
+  	  name: "TxRollback",
+  	  args: []
+  	};
+
+  	defs.TxRollbackOk = 5898271;
+
+  	var methodInfoTxRollbackOk = defs.methodInfoTxRollbackOk = {
+  	  id: 5898271,
+  	  classId: 90,
+  	  methodId: 31,
+  	  name: "TxRollbackOk",
+  	  args: []
+  	};
+
+  	defs.ConfirmSelect = 5570570;
+
+  	var methodInfoConfirmSelect = defs.methodInfoConfirmSelect = {
+  	  id: 5570570,
+  	  classId: 85,
+  	  methodId: 10,
+  	  name: "ConfirmSelect",
+  	  args: [ {
+  	    type: "bit",
+  	    name: "nowait",
+  	    default: false
+  	  } ]
+  	};
+
+  	defs.ConfirmSelectOk = 5570571;
+
+  	var methodInfoConfirmSelectOk = defs.methodInfoConfirmSelectOk = {
+  	  id: 5570571,
+  	  classId: 85,
+  	  methodId: 11,
+  	  name: "ConfirmSelectOk",
+  	  args: []
+  	};
+
+  	defs.BasicProperties = 60;
+
+  	var propertiesInfoBasicProperties = defs.propertiesInfoBasicProperties = {
+  	  id: 60,
+  	  name: "BasicProperties",
+  	  args: [ {
+  	    type: "shortstr",
+  	    name: "contentType"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "contentEncoding"
+  	  }, {
+  	    type: "table",
+  	    name: "headers"
+  	  }, {
+  	    type: "octet",
+  	    name: "deliveryMode"
+  	  }, {
+  	    type: "octet",
+  	    name: "priority"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "correlationId"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "replyTo"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "expiration"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "messageId"
+  	  }, {
+  	    type: "timestamp",
+  	    name: "timestamp"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "type"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "userId"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "appId"
+  	  }, {
+  	    type: "shortstr",
+  	    name: "clusterId"
+  	  } ]
+  	};
+  	return defs;
+  }
+
+  var frame = {};
+
+  var hasRequiredFrame;
+
+  function requireFrame () {
+  	if (hasRequiredFrame) return frame;
+  	hasRequiredFrame = 1;
+
+  	const ints = requireBufferMoreInts();
+  	var defs = requireDefs();
+  	var constants = defs.constants;
+  	var decode = defs.decode;
+
+  	frame.PROTOCOL_HEADER = "AMQP" + String.fromCharCode(0, 0, 9, 1);
+
+  	/*
+  	  Frame format:
+
+  	  0      1         3             7                size+7 size+8
+  	  +------+---------+-------------+ +------------+ +-----------+
+  	  | type | channel | size        | | payload    | | frame-end |
+  	  +------+---------+-------------+ +------------+ +-----------+
+  	  octet   short     long            size octets    octet
+
+  	  In general I want to know those first three things straight away, so I
+  	  can discard frames early.
+
+  	*/
+
+  	// framing constants
+  	var FRAME_METHOD = constants.FRAME_METHOD,
+  	FRAME_HEARTBEAT = constants.FRAME_HEARTBEAT,
+  	FRAME_HEADER = constants.FRAME_HEADER,
+  	FRAME_BODY = constants.FRAME_BODY,
+  	FRAME_END = constants.FRAME_END;
+
+  	// expected byte sizes for frame parts
+  	const TYPE_BYTES = 1;
+  	const CHANNEL_BYTES = 2;
+  	const SIZE_BYTES = 4;
+  	const FRAME_HEADER_BYTES = TYPE_BYTES + CHANNEL_BYTES + SIZE_BYTES;
+  	const FRAME_END_BYTES = 1;
+
+  	/**
+  	 * @typedef {{
+  	 *   type: number,
+  	 *   channel: number,
+  	 *   size: number,
+  	 *   payload: Buffer,
+  	 *   rest: Buffer
+  	 * }} FrameStructure
+  	 */
+
+  	/**
+  	 * This is a polyfill which will read a big int 64 bit as a number.
+  	 * @arg { Buffer } buffer
+  	 * @arg { number } offset
+  	 * @returns { number }
+  	 */
+  	function readInt64BE(buffer, offset) {
+  	  /**
+  	   * We try to use native implementation if available here because
+  	   * buffer-more-ints does not
+  	   */
+  	  if (typeof Buffer$1.prototype.readBigInt64BE === 'function') {
+  	    return Number(buffer.readBigInt64BE(offset))
+  	  }
+
+  	  return ints.readInt64BE(buffer, offset)
+  	}
+
+  	// %%% TESTME possibly better to cons the first bit and write the
+  	// second directly, in the absence of IO lists
+  	/**
+  	 * Make a frame header
+  	 * @arg { number } channel
+  	 * @arg { Buffer } payload
+  	 */
+  	frame.makeBodyFrame = function (channel, payload) {
+  	  const frameSize = FRAME_HEADER_BYTES + payload.length + FRAME_END_BYTES;
+
+  	  const frame = Buffer$1.alloc(frameSize);
+
+  	  let offset = 0;
+
+  	  offset = frame.writeUInt8(FRAME_BODY, offset);
+  	  offset = frame.writeUInt16BE(channel, offset);
+  	  offset = frame.writeInt32BE(payload.length, offset);
+
+  	  payload.copy(frame, offset);
+  	  offset += payload.length;
+
+  	  frame.writeUInt8(FRAME_END, offset);
+
+  	  return frame
+  	};
+
+  	/**
+  	 * Parse an AMQP frame
+  	 * @arg { Buffer } bin
+  	 * @arg { number } max
+  	 * @returns { FrameStructure | boolean }
+  	 */
+  	function parseFrame(bin) {
+  	  if (bin.length < FRAME_HEADER_BYTES) {
+  	    return false
+  	  }
+
+  	  const type = bin.readUInt8(0);
+  	  const channel = bin.readUInt16BE(1);
+  	  const size = bin.readUInt32BE(3);
+
+  	  const totalSize = FRAME_HEADER_BYTES + size + FRAME_END_BYTES;
+
+  	  if (bin.length < totalSize) {
+  	    return false
+  	  }
+
+  	  const frameEnd = bin.readUInt8(FRAME_HEADER_BYTES + size);
+
+  	  if (frameEnd !== FRAME_END) {
+  	    throw new Error('Invalid frame')
+  	  }
+
+  	  return {
+  	    type,
+  	    channel,
+  	    size,
+  	    payload: bin.subarray(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + size),
+  	    rest: bin.subarray(totalSize)
+  	  }
+  	}
+
+  	frame.parseFrame = parseFrame;
+
+  	var HEARTBEAT = {channel: 0};
+
+  	/**
+  	 * Decode AMQP frame into JS object
+  	 * @param { FrameStructure } frame
+  	 * @returns
+  	 */
+  	frame.decodeFrame = (frame) => {
+  	  const payload = frame.payload;
+  	  const channel = frame.channel;
+
+  	  switch (frame.type) {
+  	    case FRAME_METHOD: {
+  	      const id = payload.readUInt32BE(0);
+  	      const args = payload.subarray(4);
+  	      const fields = decode(id, args);
+  	      return { id, channel, fields }
+  	    }
+  	    case FRAME_HEADER: {
+  	      const id = payload.readUInt16BE(0);
+  	      // const weight = payload.readUInt16BE(2)
+  	      const size = readInt64BE(payload, 4);
+  	      const flagsAndfields = payload.subarray(12);
+  	      const fields = decode(id, flagsAndfields);
+  	      return { id, channel, size, fields }
+  	    }
+  	    case FRAME_BODY:
+  	      return { channel, content: payload }
+  	    case FRAME_HEARTBEAT:
+  	      return HEARTBEAT
+  	    default:
+  	      throw new Error('Unknown frame type ' + frame.type)
+  	  }
+  	};
+
+  	// encoded heartbeat
+  	frame.HEARTBEAT_BUF = Buffer$1.from([constants.FRAME_HEARTBEAT,
+  	                                           0, 0, 0, 0, // size = 0
+  	                                           0, 0, // channel = 0
+  	                                           constants.FRAME_END]);
+
+  	frame.HEARTBEAT = HEARTBEAT;
+  	return frame;
+  }
+
+  var mux = {};
+
+  function compare(a, b) {
+    if (a === b) {
+      return 0;
+    }
+
+    var x = a.length;
+    var y = b.length;
+
+    for (var i = 0, len = Math.min(x, y); i < len; ++i) {
+      if (a[i] !== b[i]) {
+        x = a[i];
+        y = b[i];
+        break;
+      }
+    }
+
+    if (x < y) {
+      return -1;
+    }
+    if (y < x) {
+      return 1;
+    }
+    return 0;
+  }
+  var hasOwn = Object.prototype.hasOwnProperty;
+
+  var objectKeys$1 = Object.keys || function (obj) {
+    var keys = [];
+    for (var key in obj) {
+      if (hasOwn.call(obj, key)) keys.push(key);
+    }
+    return keys;
+  };
+  var pSlice = Array.prototype.slice;
+  var _functionsHaveNames;
+  function functionsHaveNames() {
+    if (typeof _functionsHaveNames !== 'undefined') {
+      return _functionsHaveNames;
+    }
+    return _functionsHaveNames = (function () {
+      return function foo() {}.name === 'foo';
+    }());
+  }
+  function pToString (obj) {
+    return Object.prototype.toString.call(obj);
+  }
+  function isView(arrbuf) {
+    if (isBuffer$1(arrbuf)) {
+      return false;
+    }
+    if (typeof global$1.ArrayBuffer !== 'function') {
+      return false;
+    }
+    if (typeof ArrayBuffer.isView === 'function') {
+      return ArrayBuffer.isView(arrbuf);
+    }
+    if (!arrbuf) {
+      return false;
+    }
+    if (arrbuf instanceof DataView) {
+      return true;
+    }
+    if (arrbuf.buffer && arrbuf.buffer instanceof ArrayBuffer) {
+      return true;
+    }
+    return false;
+  }
+  // 1. The assert module provides functions that throw
+  // AssertionError's when particular conditions are not met. The
+  // assert module must conform to the following interface.
+
+  function assert(value, message) {
+    if (!value) fail(value, true, message, '==', ok);
+  }
+
+  // 2. The AssertionError is defined in assert.
+  // new assert.AssertionError({ message: message,
+  //                             actual: actual,
+  //                             expected: expected })
+
+  var regex = /\s*function\s+([^\(\s]*)\s*/;
+  // based on https://github.com/ljharb/function.prototype.name/blob/adeeeec8bfcc6068b187d7d9fb3d5bb1d3a30899/implementation.js
+  function getName(func) {
+    if (!isFunction(func)) {
+      return;
+    }
+    if (functionsHaveNames()) {
+      return func.name;
+    }
+    var str = func.toString();
+    var match = str.match(regex);
+    return match && match[1];
+  }
+  assert.AssertionError = AssertionError;
+  function AssertionError(options) {
+    this.name = 'AssertionError';
+    this.actual = options.actual;
+    this.expected = options.expected;
+    this.operator = options.operator;
+    if (options.message) {
+      this.message = options.message;
+      this.generatedMessage = false;
+    } else {
+      this.message = getMessage(this);
+      this.generatedMessage = true;
+    }
+    var stackStartFunction = options.stackStartFunction || fail;
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, stackStartFunction);
+    } else {
+      // non v8 browsers so we can have a stacktrace
+      var err = new Error();
+      if (err.stack) {
+        var out = err.stack;
+
+        // try to strip useless frames
+        var fn_name = getName(stackStartFunction);
+        var idx = out.indexOf('\n' + fn_name);
+        if (idx >= 0) {
+          // once we have located the function frame
+          // we need to strip out everything before it (and its line)
+          var next_line = out.indexOf('\n', idx + 1);
+          out = out.substring(next_line + 1);
+        }
+
+        this.stack = out;
+      }
+    }
+  }
+
+  // assert.AssertionError instanceof Error
+  inherits(AssertionError, Error);
+
+  function truncate(s, n) {
+    if (typeof s === 'string') {
+      return s.length < n ? s : s.slice(0, n);
+    } else {
+      return s;
+    }
+  }
+  function inspect(something) {
+    if (functionsHaveNames() || !isFunction(something)) {
+      return inspect$1(something);
+    }
+    var rawname = getName(something);
+    var name = rawname ? ': ' + rawname : '';
+    return '[Function' +  name + ']';
+  }
+  function getMessage(self) {
+    return truncate(inspect(self.actual), 128) + ' ' +
+           self.operator + ' ' +
+           truncate(inspect(self.expected), 128);
+  }
+
+  // At present only the three keys mentioned above are used and
+  // understood by the spec. Implementations or sub modules can pass
+  // other keys to the AssertionError's constructor - they will be
+  // ignored.
+
+  // 3. All of the following functions must throw an AssertionError
+  // when a corresponding condition is not met, with a message that
+  // may be undefined if not provided.  All assertion methods provide
+  // both the actual and expected values to the assertion error for
+  // display purposes.
+
+  function fail(actual, expected, message, operator, stackStartFunction) {
+    throw new AssertionError({
+      message: message,
+      actual: actual,
+      expected: expected,
+      operator: operator,
+      stackStartFunction: stackStartFunction
+    });
+  }
+
+  // EXTENSION! allows for well behaved errors defined elsewhere.
+  assert.fail = fail;
+
+  // 4. Pure assertion tests whether a value is truthy, as determined
+  // by !!guard.
+  // assert.ok(guard, message_opt);
+  // This statement is equivalent to assert.equal(true, !!guard,
+  // message_opt);. To test strictly for the value true, use
+  // assert.strictEqual(true, guard, message_opt);.
+
+  function ok(value, message) {
+    if (!value) fail(value, true, message, '==', ok);
+  }
+  assert.ok = ok;
+
+  // 5. The equality assertion tests shallow, coercive equality with
+  // ==.
+  // assert.equal(actual, expected, message_opt);
+  assert.equal = equal;
+  function equal(actual, expected, message) {
+    if (actual != expected) fail(actual, expected, message, '==', equal);
+  }
+
+  // 6. The non-equality assertion tests for whether two objects are not equal
+  // with != assert.notEqual(actual, expected, message_opt);
+  assert.notEqual = notEqual;
+  function notEqual(actual, expected, message) {
+    if (actual == expected) {
+      fail(actual, expected, message, '!=', notEqual);
+    }
+  }
+
+  // 7. The equivalence assertion tests a deep equality relation.
+  // assert.deepEqual(actual, expected, message_opt);
+  assert.deepEqual = deepEqual;
+  function deepEqual(actual, expected, message) {
+    if (!_deepEqual(actual, expected, false)) {
+      fail(actual, expected, message, 'deepEqual', deepEqual);
+    }
+  }
+  assert.deepStrictEqual = deepStrictEqual;
+  function deepStrictEqual(actual, expected, message) {
+    if (!_deepEqual(actual, expected, true)) {
+      fail(actual, expected, message, 'deepStrictEqual', deepStrictEqual);
+    }
+  }
+
+  function _deepEqual(actual, expected, strict, memos) {
+    // 7.1. All identical values are equivalent, as determined by ===.
+    if (actual === expected) {
+      return true;
+    } else if (isBuffer$1(actual) && isBuffer$1(expected)) {
+      return compare(actual, expected) === 0;
+
+    // 7.2. If the expected value is a Date object, the actual value is
+    // equivalent if it is also a Date object that refers to the same time.
+    } else if (isDate(actual) && isDate(expected)) {
+      return actual.getTime() === expected.getTime();
+
+    // 7.3 If the expected value is a RegExp object, the actual value is
+    // equivalent if it is also a RegExp object with the same source and
+    // properties (`global`, `multiline`, `lastIndex`, `ignoreCase`).
+    } else if (isRegExp(actual) && isRegExp(expected)) {
+      return actual.source === expected.source &&
+             actual.global === expected.global &&
+             actual.multiline === expected.multiline &&
+             actual.lastIndex === expected.lastIndex &&
+             actual.ignoreCase === expected.ignoreCase;
+
+    // 7.4. Other pairs that do not both pass typeof value == 'object',
+    // equivalence is determined by ==.
+    } else if ((actual === null || typeof actual !== 'object') &&
+               (expected === null || typeof expected !== 'object')) {
+      return strict ? actual === expected : actual == expected;
+
+    // If both values are instances of typed arrays, wrap their underlying
+    // ArrayBuffers in a Buffer each to increase performance
+    // This optimization requires the arrays to have the same type as checked by
+    // Object.prototype.toString (aka pToString). Never perform binary
+    // comparisons for Float*Arrays, though, since e.g. +0 === -0 but their
+    // bit patterns are not identical.
+    } else if (isView(actual) && isView(expected) &&
+               pToString(actual) === pToString(expected) &&
+               !(actual instanceof Float32Array ||
+                 actual instanceof Float64Array)) {
+      return compare(new Uint8Array(actual.buffer),
+                     new Uint8Array(expected.buffer)) === 0;
+
+    // 7.5 For all other Object pairs, including Array objects, equivalence is
+    // determined by having the same number of owned properties (as verified
+    // with Object.prototype.hasOwnProperty.call), the same set of keys
+    // (although not necessarily the same order), equivalent values for every
+    // corresponding key, and an identical 'prototype' property. Note: this
+    // accounts for both named and indexed properties on Arrays.
+    } else if (isBuffer$1(actual) !== isBuffer$1(expected)) {
+      return false;
+    } else {
+      memos = memos || {actual: [], expected: []};
+
+      var actualIndex = memos.actual.indexOf(actual);
+      if (actualIndex !== -1) {
+        if (actualIndex === memos.expected.indexOf(expected)) {
+          return true;
+        }
+      }
+
+      memos.actual.push(actual);
+      memos.expected.push(expected);
+
+      return objEquiv(actual, expected, strict, memos);
+    }
+  }
+
+  function isArguments$1(object) {
+    return Object.prototype.toString.call(object) == '[object Arguments]';
+  }
+
+  function objEquiv(a, b, strict, actualVisitedObjects) {
+    if (a === null || a === undefined || b === null || b === undefined)
+      return false;
+    // if one is a primitive, the other must be same
+    if (isPrimitive(a) || isPrimitive(b))
+      return a === b;
+    if (strict && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b))
+      return false;
+    var aIsArgs = isArguments$1(a);
+    var bIsArgs = isArguments$1(b);
+    if ((aIsArgs && !bIsArgs) || (!aIsArgs && bIsArgs))
+      return false;
+    if (aIsArgs) {
+      a = pSlice.call(a);
+      b = pSlice.call(b);
+      return _deepEqual(a, b, strict);
+    }
+    var ka = objectKeys$1(a);
+    var kb = objectKeys$1(b);
+    var key, i;
+    // having the same number of owned properties (keys incorporates
+    // hasOwnProperty)
+    if (ka.length !== kb.length)
+      return false;
+    //the same set of keys (although not necessarily the same order),
+    ka.sort();
+    kb.sort();
+    //~~~cheap key test
+    for (i = ka.length - 1; i >= 0; i--) {
+      if (ka[i] !== kb[i])
+        return false;
+    }
+    //equivalent values for every corresponding key, and
+    //~~~possibly expensive deep test
+    for (i = ka.length - 1; i >= 0; i--) {
+      key = ka[i];
+      if (!_deepEqual(a[key], b[key], strict, actualVisitedObjects))
+        return false;
+    }
+    return true;
+  }
+
+  // 8. The non-equivalence assertion tests for any deep inequality.
+  // assert.notDeepEqual(actual, expected, message_opt);
+  assert.notDeepEqual = notDeepEqual;
+  function notDeepEqual(actual, expected, message) {
+    if (_deepEqual(actual, expected, false)) {
+      fail(actual, expected, message, 'notDeepEqual', notDeepEqual);
+    }
+  }
+
+  assert.notDeepStrictEqual = notDeepStrictEqual;
+  function notDeepStrictEqual(actual, expected, message) {
+    if (_deepEqual(actual, expected, true)) {
+      fail(actual, expected, message, 'notDeepStrictEqual', notDeepStrictEqual);
+    }
+  }
+
+
+  // 9. The strict equality assertion tests strict equality, as determined by ===.
+  // assert.strictEqual(actual, expected, message_opt);
+  assert.strictEqual = strictEqual;
+  function strictEqual(actual, expected, message) {
+    if (actual !== expected) {
+      fail(actual, expected, message, '===', strictEqual);
+    }
+  }
+
+  // 10. The strict non-equality assertion tests for strict inequality, as
+  // determined by !==.  assert.notStrictEqual(actual, expected, message_opt);
+  assert.notStrictEqual = notStrictEqual;
+  function notStrictEqual(actual, expected, message) {
+    if (actual === expected) {
+      fail(actual, expected, message, '!==', notStrictEqual);
+    }
+  }
+
+  function expectedException(actual, expected) {
+    if (!actual || !expected) {
+      return false;
+    }
+
+    if (Object.prototype.toString.call(expected) == '[object RegExp]') {
+      return expected.test(actual);
+    }
+
+    try {
+      if (actual instanceof expected) {
+        return true;
+      }
+    } catch (e) {
+      // Ignore.  The instanceof check doesn't work for arrow functions.
+    }
+
+    if (Error.isPrototypeOf(expected)) {
+      return false;
+    }
+
+    return expected.call({}, actual) === true;
+  }
+
+  function _tryBlock(block) {
+    var error;
+    try {
+      block();
+    } catch (e) {
+      error = e;
+    }
+    return error;
+  }
+
+  function _throws(shouldThrow, block, expected, message) {
+    var actual;
+
+    if (typeof block !== 'function') {
+      throw new TypeError('"block" argument must be a function');
+    }
+
+    if (typeof expected === 'string') {
+      message = expected;
+      expected = null;
+    }
+
+    actual = _tryBlock(block);
+
+    message = (expected && expected.name ? ' (' + expected.name + ').' : '.') +
+              (message ? ' ' + message : '.');
+
+    if (shouldThrow && !actual) {
+      fail(actual, expected, 'Missing expected exception' + message);
+    }
+
+    var userProvidedMessage = typeof message === 'string';
+    var isUnwantedException = !shouldThrow && isError(actual);
+    var isUnexpectedException = !shouldThrow && actual && !expected;
+
+    if ((isUnwantedException &&
+        userProvidedMessage &&
+        expectedException(actual, expected)) ||
+        isUnexpectedException) {
+      fail(actual, expected, 'Got unwanted exception' + message);
+    }
+
+    if ((shouldThrow && actual && expected &&
+        !expectedException(actual, expected)) || (!shouldThrow && actual)) {
+      throw actual;
+    }
+  }
+
+  // 11. Expected to throw an error:
+  // assert.throws(block, Error_opt, message_opt);
+  assert.throws = throws;
+  function throws(block, /*optional*/error, /*optional*/message) {
+    _throws(true, block, error, message);
+  }
+
+  // EXTENSION! This is annoying to write outside this module.
+  assert.doesNotThrow = doesNotThrow;
+  function doesNotThrow(block, /*optional*/error, /*optional*/message) {
+    _throws(false, block, error, message);
+  }
+
+  assert.ifError = ifError;
+  function ifError(err) {
+    if (err) throw err;
+  }
+
+  var _polyfillNode_assert = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    AssertionError: AssertionError,
+    assert: ok,
+    deepEqual: deepEqual,
+    deepStrictEqual: deepStrictEqual,
+    default: assert,
+    doesNotThrow: doesNotThrow,
+    equal: equal,
+    fail: fail,
+    ifError: ifError,
+    notDeepEqual: notDeepEqual,
+    notDeepStrictEqual: notDeepStrictEqual,
+    notEqual: notEqual,
+    notStrictEqual: notStrictEqual,
+    ok: ok,
+    strictEqual: strictEqual,
+    throws: throws
+  });
+
+  var require$$2$1 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_assert);
+
+  var hasRequiredMux;
+
+  function requireMux () {
+  	if (hasRequiredMux) return mux;
+  	hasRequiredMux = 1;
+
+  	// A Mux is an object into which other readable streams may be piped;
+  	// it then writes 'packets' from the upstreams to the given
+  	// downstream.
+
+  	var assert = require$$2$1;
+
+  	var schedule = (typeof setImmediate === 'function') ?
+  	  setImmediate : browser$1.nextTick;
+
+  	class Mux {
+  	  constructor (downstream) {
+  	    this.newStreams = [];
+  	    this.oldStreams = [];
+  	    this.blocked = false;
+  	    this.scheduledRead = false;
+
+  	    this.out = downstream;
+  	    var self = this;
+  	    downstream.on('drain', function () {
+  	      self.blocked = false;
+  	      self._readIncoming();
+  	    });
+  	  }
+
+  	  // There are 2 states we can be in:
+  	  // - waiting for outbound capacity, which will be signalled by a
+  	  // - 'drain' event on the downstream; or,
+  	  // - no packets to send, waiting for an inbound buffer to have
+  	  //   packets, which will be signalled by a 'readable' event
+  	  // If we write all packets available whenever there is outbound
+  	  // capacity, we will either run out of outbound capacity (`#write`
+  	  // returns false), or run out of packets (all calls to an
+  	  // `inbound.read()` have returned null).
+  	  _readIncoming () {
+
+  	    // We may be sent here speculatively, if an incoming stream has
+  	    // become readable
+  	    if (this.blocked) return;
+
+  	    var accepting = true;
+  	    var out = this.out;
+
+  	    // Try to read a chunk from each stream in turn, until all streams
+  	    // are empty, or we exhaust our ability to accept chunks.
+  	    function roundrobin (streams) {
+  	      var s;
+  	      while (accepting && (s = streams.shift())) {
+  	        var chunk = s.read();
+  	        if (chunk !== null) {
+  	          accepting = out.write(chunk);
+  	          streams.push(s);
+  	        }
+  	      }
+  	    }
+
+  	    roundrobin(this.newStreams);
+
+  	    // Either we exhausted the new queues, or we ran out of capacity. If
+  	    // we ran out of capacity, all the remaining new streams (i.e.,
+  	    // those with packets left) become old streams. This effectively
+  	    // prioritises streams that keep their buffers close to empty over
+  	    // those that are constantly near full.
+  	    if (accepting) { // all new queues are exhausted, write as many as
+  	      // we can from the old streams
+  	      assert.equal(0, this.newStreams.length);
+  	      roundrobin(this.oldStreams);
+  	    }
+  	    else { // ran out of room
+  	      assert(this.newStreams.length > 0, "Expect some new streams to remain");
+  	      Array.prototype.push.apply(this.oldStreams, this.newStreams);
+  	      this.newStreams = [];
+  	    }
+  	    // We may have exhausted all the old queues, or run out of room;
+  	    // either way, all we need to do is record whether we have capacity
+  	    // or not, so any speculative reads will know
+  	    this.blocked = !accepting;
+  	  }
+
+  	  _scheduleRead () {
+  	    var self = this;
+
+  	    if (!self.scheduledRead) {
+  	      schedule(function () {
+  	        self.scheduledRead = false;
+  	        self._readIncoming();
+  	      });
+  	      self.scheduledRead = true;
+  	    }
+  	  }
+
+  	  pipeFrom (readable) {
+  	    var self = this;
+
+  	    function enqueue () {
+  	      self.newStreams.push(readable);
+  	      self._scheduleRead();
+  	    }
+
+  	    function cleanup () {
+  	      readable.removeListener('readable', enqueue);
+  	      readable.removeListener('error', cleanup);
+  	      readable.removeListener('end', cleanup);
+  	      readable.removeListener('unpipeFrom', cleanupIfMe);
+  	    }
+  	    function cleanupIfMe (dest) {
+  	      if (dest === self) cleanup();
+  	    }
+
+  	    readable.on('unpipeFrom', cleanupIfMe);
+  	    readable.on('end', cleanup);
+  	    readable.on('error', cleanup);
+  	    readable.on('readable', enqueue);
+  	  }
+
+  	  unpipeFrom (readable) {
+  	    readable.emit('unpipeFrom', this);
+  	  }
+  	}
+
+  	mux.Mux = Mux;
+  	return mux;
+  }
+
+  var require$$3 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_stream);
+
+  var require$$0 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_events);
+
+  var heartbeat = {exports: {}};
+
+  var hasRequiredHeartbeat;
+
+  function requireHeartbeat () {
+  	if (hasRequiredHeartbeat) return heartbeat.exports;
+  	hasRequiredHeartbeat = 1;
+  	(function (module) {
+
+  		var EventEmitter = require$$0;
+
+  		// Exported so that we can mess with it in tests
+  		module.exports.UNITS_TO_MS = 1000;
+
+  		class Heart extends EventEmitter {
+  		  constructor (interval, checkSend, checkRecv) {
+  		    super();
+
+  		    this.interval = interval;
+
+  		    var intervalMs = interval * module.exports.UNITS_TO_MS;
+  		    // Function#bind is my new best friend
+  		    var beat = this.emit.bind(this, 'beat');
+  		    var timeout = this.emit.bind(this, 'timeout');
+
+  		    this.sendTimer = setInterval(
+  		      this.runHeartbeat.bind(this, checkSend, beat), intervalMs / 2);
+
+  		    // A timeout occurs if I see nothing for *two consecutive* intervals
+  		    var recvMissed = 0;
+  		    function missedTwo () {
+  		      if (!checkRecv())
+  		        return (++recvMissed < 2);
+  		      else { recvMissed = 0; return true; }
+  		    }
+  		    this.recvTimer = setInterval(
+  		      this.runHeartbeat.bind(this, missedTwo, timeout), intervalMs);
+  		  }
+
+  		  clear () {
+  		    clearInterval(this.sendTimer);
+  		    clearInterval(this.recvTimer);
+  		  }
+
+  		  runHeartbeat (check, fail) {
+  		    // Have we seen activity?
+  		    if (!check())
+  		      fail();
+  		  }
+  		}
+
+  		module.exports.Heart = Heart; 
+  	} (heartbeat));
+  	return heartbeat.exports;
+  }
+
+  var format = {};
+
+  var require$$2 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_util$1);
+
+  var hasRequiredFormat;
+
+  function requireFormat () {
+  	if (hasRequiredFormat) return format;
+  	hasRequiredFormat = 1;
+
+  	var defs = requireDefs();
+  	var format$1 = require$$2.format;
+  	var HEARTBEAT = requireFrame().HEARTBEAT;
+
+  	format.closeMessage = function(close) {
+  	  var code = close.fields.replyCode;
+  	  return format$1('%d (%s) with message "%s"',
+  	                code, defs.constant_strs[code],
+  	                close.fields.replyText);
+  	};
+
+  	format.methodName = function(id) {
+  	  return defs.info(id).name;
+  	};
+
+  	format.inspect = function(frame, showFields) {
+  	  if (frame === HEARTBEAT) {
+  	    return '<Heartbeat>';
+  	  }
+  	  else if (!frame.id) {
+  	    return format$1('<Content channel:%d size:%d>',
+  	                  frame.channel, frame.size);
+  	  }
+  	  else {
+  	    var info = defs.info(frame.id);
+  	    return format$1('<%s channel:%d%s>', info.name, frame.channel,
+  	                  (showFields)
+  	                  ? ' ' + JSON.stringify(frame.fields, undefined, 2)
+  	                  : '');
+  	  }
+  	};
+  	return format;
+  }
+
+  var bitset = {};
+
+  var hasRequiredBitset;
+
+  function requireBitset () {
+  	if (hasRequiredBitset) return bitset;
+  	hasRequiredBitset = 1;
+
+  	/**
+  	 * A bitset implementation, after that in java.util.  Yes there
+  	 * already exist such things, but none implement next{Clear|Set}Bit or
+  	 * equivalent, and none involved me tooling about for an evening.
+  	 */
+  	class BitSet {
+  	  /**
+  	   * @param {number} [size]
+  	   */
+  	  constructor(size) {
+  	    if (size) {
+  	      const numWords = Math.ceil(size / 32);
+  	      this.words = new Array(numWords);
+  	    }
+  	    else {
+  	      this.words = [];
+  	    }
+  	    this.wordsInUse = 0; // = number, not index
+  	  }
+
+  	  /**
+  	   * @param {number} numWords
+  	   */
+  	  ensureSize(numWords) {
+  	    const wordsPresent = this.words.length;
+  	    if (wordsPresent < numWords) {
+  	      this.words = this.words.concat(new Array(numWords - wordsPresent));
+  	    }
+  	  }
+
+  	  /**
+  	   * @param {number} bitIndex
+  	   */
+  	  set(bitIndex) {
+  	    const w = wordIndex(bitIndex);
+  	    if (w >= this.wordsInUse) {
+  	      this.ensureSize(w + 1);
+  	      this.wordsInUse = w + 1;
+  	    }
+  	    const bit = 1 << bitIndex;
+  	    this.words[w] |= bit;
+  	  }
+
+  	  /**
+  	   * @param {number} bitIndex
+  	   */
+  	  clear(bitIndex) {
+  	    const w = wordIndex(bitIndex);
+  	    if (w >= this.wordsInUse) return;
+  	    const mask = ~(1 << bitIndex);
+  	    this.words[w] &= mask;
+  	  }
+
+  	  /**
+  	   * @param {number} bitIndex
+  	   */
+  	  get(bitIndex) {
+  	    const w = wordIndex(bitIndex);
+  	    if (w >= this.wordsInUse) return false; // >= since index vs size
+  	    const bit = 1 << bitIndex;
+  	    return !!(this.words[w] & bit);
+  	  }
+
+  	  /**
+  	   * Give the next bit that is set on or after fromIndex, or -1 if no such bit
+  	   *
+  	   * @param {number} fromIndex
+  	   */
+  	  nextSetBit(fromIndex) {
+  	    let w = wordIndex(fromIndex);
+  	    if (w >= this.wordsInUse) return -1;
+
+  	    // the right-hand side is shifted to only test the bits of the first
+  	    // word that are > fromIndex
+  	    let word = this.words[w] & (0xffffffff << fromIndex);
+  	    while (true) {
+  	      if (word) return (w * 32) + trailingZeros(word);
+  	      w++;
+  	      if (w === this.wordsInUse) return -1;
+  	      word = this.words[w];
+  	    }
+  	  }
+
+  	  /**
+  	   * @param {number} fromIndex
+  	   */
+  	  nextClearBit(fromIndex) {
+  	    let w = wordIndex(fromIndex);
+  	    if (w >= this.wordsInUse) return fromIndex;
+
+  	    let word = ~(this.words[w]) & (0xffffffff << fromIndex);
+  	    while (true) {
+  	      if (word) return (w * 32) + trailingZeros(word);
+  	      w++;
+  	      if (w == this.wordsInUse) return w * 32;
+  	      word = ~(this.words[w]);
+  	    }
+  	  }
+  	}
+
+  	/**
+  	 * @param {number} bitIndex
+  	 */
+  	function wordIndex(bitIndex) {
+  	  return Math.floor(bitIndex / 32);
+  	}
+
+  	/**
+  	 * @param {number} i
+  	 */
+  	function trailingZeros(i) {
+  	  // From Hacker's Delight, via JDK. Probably far less effective here,
+  	  // since bit ops are not necessarily the quick way to do things in
+  	  // JS.
+  	  if (i === 0) return 32;
+  	  let y, n = 31;
+  	  y = i << 16; if (y != 0) { n = n -16; i = y; }
+  	  y = i << 8;  if (y != 0) { n = n - 8; i = y; }
+  	  y = i << 4;  if (y != 0) { n = n - 4; i = y; }
+  	  y = i << 2;  if (y != 0) { n = n - 2; i = y; }
+  	  return n - ((i << 1) >>> 31);
+  	}
+
+  	bitset.BitSet = BitSet;
+  	return bitset;
+  }
+
+  var error = {};
+
+  var hasRequiredError;
+
+  function requireError () {
+  	if (hasRequiredError) return error;
+  	hasRequiredError = 1;
+  	var inherits = require$$2.inherits;
+
+  	function trimStack(stack, num) {
+  	  return stack && stack.split('\n').slice(num).join('\n');
+  	}
+
+  	function IllegalOperationError(msg, stack) {
+  	  var tmp = new Error();
+  	  this.message = msg;
+  	  this.stack = this.toString() + '\n' + trimStack(tmp.stack, 2);
+  	  this.stackAtStateChange = stack;
+  	}
+  	inherits(IllegalOperationError, Error);
+
+  	IllegalOperationError.prototype.name = 'IllegalOperationError';
+
+  	function stackCapture(reason) {
+  	  var e = new Error();
+  	  return 'Stack capture: ' + reason + '\n' +
+  	    trimStack(e.stack, 2);
+  	}
+
+  	error.IllegalOperationError = IllegalOperationError;
+  	error.stackCapture = stackCapture;
+  	return error;
+  }
+
+  var hasRequiredConnection;
+
+  function requireConnection () {
+  	if (hasRequiredConnection) return connection;
+  	hasRequiredConnection = 1;
+
+  	var defs = requireDefs();
+  	var constants = defs.constants;
+  	var frame = requireFrame();
+  	var HEARTBEAT = frame.HEARTBEAT;
+  	var Mux = requireMux().Mux;
+
+  	var Duplex = require$$3.Duplex;
+  	var EventEmitter = require$$0;
+  	var Heart = requireHeartbeat().Heart;
+
+  	var methodName = requireFormat().methodName;
+  	var closeMsg = requireFormat().closeMessage;
+  	var inspect = requireFormat().inspect;
+
+  	var BitSet = requireBitset().BitSet;
+  	var fmt = require$$2.format;
+  	var PassThrough = require$$3.PassThrough;
+  	var IllegalOperationError = requireError().IllegalOperationError;
+  	var stackCapture = requireError().stackCapture;
+
+  	// High-water mark for channel write buffers, in 'objects' (which are
+  	// encoded frames as buffers).
+  	var DEFAULT_WRITE_HWM = 1024;
+  	// If all the frames of a message (method, properties, content) total
+  	// to less than this, copy them into a single buffer and write it all
+  	// at once. Note that this is less than the minimum frame size: if it
+  	// was greater, we might have to fragment the content.
+  	var SINGLE_CHUNK_THRESHOLD = 2048;
+
+  	class Connection extends EventEmitter {
+  	  constructor (underlying) {
+  	    super();
+
+  	    var stream = this.stream = wrapStream(underlying);
+  	    this.muxer = new Mux(stream);
+
+  	    // frames
+  	    this.rest = Buffer$1.alloc(0);
+  	    this.frameMax = constants.FRAME_MIN_SIZE;
+  	    this.sentSinceLastCheck = false;
+  	    this.recvSinceLastCheck = false;
+
+  	    this.expectSocketClose = false;
+  	    this.freeChannels = new BitSet();
+  	    this.channels = [{
+  	      channel: { accept: channel0(this) },
+  	      buffer: underlying
+  	    }];
+  	  }
+
+  	  // This changed between versions, as did the codec, methods, etc. AMQP
+  	  // 0-9-1 is fairly similar to 0.8, but better, and nothing implements
+  	  // 0.8 that doesn't implement 0-9-1. In other words, it doesn't make
+  	  // much sense to generalise here.
+  	  sendProtocolHeader () {
+  	    this.sendBytes(frame.PROTOCOL_HEADER);
+  	  }
+
+  	  /*
+  	    The frighteningly complicated opening protocol (spec section 2.2.4):
+
+  	       Client -> Server
+
+  	         protocol header ->
+  	           <- start
+  	         start-ok ->
+  	       .. next two zero or more times ..
+  	           <- secure
+  	         secure-ok ->
+  	           <- tune
+  	         tune-ok ->
+  	         open ->
+  	           <- open-ok
+
+  	  If I'm only supporting SASL's PLAIN mechanism (which I am for the time
+  	  being), it gets a bit easier since the server won't in general send
+  	  back a `secure`, it'll just send `tune` after the `start-ok`.
+  	  (SASL PLAIN: http://tools.ietf.org/html/rfc4616)
+
+  	  */
+  	  open (allFields, openCallback0) {
+  	    var self = this;
+  	    var openCallback = openCallback0 || function () { };
+
+  	    // This is where we'll put our negotiated values
+  	    var tunedOptions = Object.create(allFields);
+
+  	    function wait (k) {
+  	      self.step(function (err, frame) {
+  	        if (err !== null)
+  	          bail(err);
+  	        else if (frame.channel !== 0) {
+  	          bail(new Error(
+  	            fmt("Frame on channel != 0 during handshake: %s",
+  	              inspect(frame, false))));
+  	        }
+  	        else
+  	          k(frame);
+  	      });
+  	    }
+
+  	    function expect (Method, k) {
+  	      wait(function (frame) {
+  	        if (frame.id === Method)
+  	          k(frame);
+  	        else {
+  	          bail(new Error(
+  	            fmt("Expected %s; got %s",
+  	              methodName(Method), inspect(frame, false))));
+  	        }
+  	      });
+  	    }
+
+  	    function bail (err) {
+  	      openCallback(err);
+  	    }
+
+  	    function send (Method) {
+  	      // This can throw an exception if there's some problem with the
+  	      // options; e.g., something is a string instead of a number.
+  	      self.sendMethod(0, Method, tunedOptions);
+  	    }
+
+  	    function negotiate (server, desired) {
+  	      // We get sent values for channelMax, frameMax and heartbeat,
+  	      // which we may accept or lower (subject to a minimum for
+  	      // frameMax, but we'll leave that to the server to enforce). In
+  	      // all cases, `0` really means "no limit", or rather the highest
+  	      // value in the encoding, e.g., unsigned short for channelMax.
+  	      if (server === 0 || desired === 0) {
+  	        // i.e., whichever places a limit, if either
+  	        return Math.max(server, desired);
+  	      }
+  	      else {
+  	        return Math.min(server, desired);
+  	      }
+  	    }
+
+  	    function onStart (start) {
+  	      var mechanisms = start.fields.mechanisms.toString().split(' ');
+  	      if (mechanisms.indexOf(allFields.mechanism) < 0) {
+  	        bail(new Error(fmt('SASL mechanism %s is not provided by the server',
+  	          allFields.mechanism)));
+  	        return;
+  	      }
+  	      self.serverProperties = start.fields.serverProperties;
+  	      try {
+  	        send(defs.ConnectionStartOk);
+  	      } catch (err) {
+  	        bail(err);
+  	        return;
+  	      }
+  	      wait(afterStartOk);
+  	    }
+
+  	    function afterStartOk (reply) {
+  	      switch (reply.id) {
+  	        case defs.ConnectionSecure:
+  	          bail(new Error(
+  	            "Wasn't expecting to have to go through secure"));
+  	          break;
+  	        case defs.ConnectionClose:
+  	          bail(new Error(fmt("Handshake terminated by server: %s",
+  	            closeMsg(reply))));
+  	          break;
+  	        case defs.ConnectionTune:
+  	          var fields = reply.fields;
+  	          tunedOptions.frameMax =
+  	            negotiate(fields.frameMax, allFields.frameMax);
+  	          tunedOptions.channelMax =
+  	            negotiate(fields.channelMax, allFields.channelMax);
+  	          tunedOptions.heartbeat =
+  	            negotiate(fields.heartbeat, allFields.heartbeat);
+  	          try {
+  	            send(defs.ConnectionTuneOk);
+  	            send(defs.ConnectionOpen);
+  	          } catch (err) {
+  	            bail(err);
+  	            return;
+  	          }
+  	          expect(defs.ConnectionOpenOk, onOpenOk);
+  	          break;
+  	        default:
+  	          bail(new Error(
+  	            fmt("Expected connection.secure, connection.close, " +
+  	              "or connection.tune during handshake; got %s",
+  	              inspect(reply, false))));
+  	          break;
+  	      }
+  	    }
+
+  	    function onOpenOk (openOk) {
+  	      // Impose the maximum of the encoded value, if the negotiated
+  	      // value is zero, meaning "no, no limits"
+  	      self.channelMax = tunedOptions.channelMax || 0xffff;
+  	      self.frameMax = tunedOptions.frameMax || 0xffffffff;
+  	      // 0 means "no heartbeat", rather than "maximum period of
+  	      // heartbeating"
+  	      self.heartbeat = tunedOptions.heartbeat;
+  	      self.heartbeater = self.startHeartbeater();
+  	      self.accept = mainAccept;
+  	      succeed(openOk);
+  	    }
+
+  	    // If the server closes the connection, it's probably because of
+  	    // something we did
+  	    function endWhileOpening (err) {
+  	      bail(err || new Error('Socket closed abruptly ' +
+  	        'during opening handshake'));
+  	    }
+
+  	    this.stream.on('end', endWhileOpening);
+  	    this.stream.on('error', endWhileOpening);
+
+  	    function succeed (ok) {
+  	      self.stream.removeListener('end', endWhileOpening);
+  	      self.stream.removeListener('error', endWhileOpening);
+  	      self.stream.on('error', self.onSocketError.bind(self));
+  	      self.stream.on('end', self.onSocketError.bind(
+  	        self, new Error('Unexpected close')));
+  	      self.on('frameError', self.onSocketError.bind(self));
+  	      self.acceptLoop();
+  	      openCallback(null, ok);
+  	    }
+
+  	    // Now kick off the handshake by prompting the server
+  	    this.sendProtocolHeader();
+  	    expect(defs.ConnectionStart, onStart);
+  	  }
+
+  	  // Closing things: AMQP has a closing handshake that applies to
+  	  // closing both connects and channels. As the initiating party, I send
+  	  // Close, then ignore all frames until I see either CloseOK --
+  	  // which signifies that the other party has seen the Close and shut
+  	  // the connection or channel down, so it's fine to free resources; or
+  	  // Close, which means the other party also wanted to close the
+  	  // whatever, and I should send CloseOk so it can free resources,
+  	  // then go back to waiting for the CloseOk. If I receive a Close
+  	  // out of the blue, I should throw away any unsent frames (they will
+  	  // be ignored anyway) and send CloseOk, then clean up resources. In
+  	  // general, Close out of the blue signals an error (or a forced
+  	  // closure, which may as well be an error).
+  	  //
+  	  //  RUNNING [1] --- send Close ---> Closing [2] ---> recv Close --+
+  	  //     |                               |                         [3]
+  	  //     |                               +------ send CloseOk ------+
+  	  //  recv Close                   recv CloseOk
+  	  //     |                               |
+  	  //     V                               V
+  	  //  Ended [4] ---- send CloseOk ---> Closed [5]
+  	  //
+  	  // [1] All frames accepted; getting a Close frame from the server
+  	  // moves to Ended; client may initiate a close by sending Close
+  	  // itself.
+  	  // [2] Client has initiated a close; only CloseOk or (simulataneously
+  	  // sent) Close is accepted.
+  	  // [3] Simultaneous close
+  	  // [4] Server won't send any more frames; accept no more frames, send
+  	  // CloseOk.
+  	  // [5] Fully closed, client will send no more, server will send no
+  	  // more. Signal 'close' or 'error'.
+  	  //
+  	  // There are two signalling mechanisms used in the API. The first is
+  	  // that calling `close` will return a promise, that will either
+  	  // resolve once the connection or channel is cleanly shut down, or
+  	  // will reject if the shutdown times out.
+  	  //
+  	  // The second is the 'close' and 'error' events. These are
+  	  // emitted as above. The events will fire *before* promises are
+  	  // resolved.
+  	  // Close the connection without even giving a reason. Typical.
+  	  close (closeCallback) {
+  	    var k = closeCallback && function () { closeCallback(null); };
+  	    this.closeBecause("Cheers, thanks", constants.REPLY_SUCCESS, k);
+  	  }
+
+  	  // Close with a reason and a 'code'. I'm pretty sure RabbitMQ totally
+  	  // ignores these; maybe it logs them. The continuation will be invoked
+  	  // when the CloseOk has been received, and before the 'close' event.
+  	  closeBecause (reason, code, k) {
+  	    this.sendMethod(0, defs.ConnectionClose, {
+  	      replyText: reason,
+  	      replyCode: code,
+  	      methodId: 0, classId: 0
+  	    });
+  	    var s = stackCapture('closeBecause called: ' + reason);
+  	    this.toClosing(s, k);
+  	  }
+
+  	  closeWithError (reason, code, error) {
+  	    this.emit('error', error);
+  	    this.closeBecause(reason, code);
+  	  }
+
+  	  onSocketError (err) {
+  	    if (!this.expectSocketClose) {
+  	      // forestall any more calls to onSocketError, since we're signed
+  	      // up for `'error'` *and* `'end'`
+  	      this.expectSocketClose = true;
+  	      this.emit('error', err);
+  	      var s = stackCapture('Socket error');
+  	      this.toClosed(s, err);
+  	    }
+  	  }
+
+  	  // A close has been initiated. Repeat: a close has been initiated.
+  	  // This means we should not send more frames, anyway they will be
+  	  // ignored. We also have to shut down all the channels.
+  	  toClosing (capturedStack, k) {
+  	    var send = this.sendMethod.bind(this);
+
+  	    this.accept = function (f) {
+  	      if (f.id === defs.ConnectionCloseOk) {
+  	        if (k)
+  	          k();
+  	        var s = stackCapture('ConnectionCloseOk received');
+  	        this.toClosed(s, undefined);
+  	      }
+  	      else if (f.id === defs.ConnectionClose) {
+  	        send(0, defs.ConnectionCloseOk, {});
+  	      }
+  	      // else ignore frame
+  	    };
+  	    invalidateSend(this, 'Connection closing', capturedStack);
+  	  }
+
+  	  _closeChannels (capturedStack) {
+  	    for (var i = 1; i < this.channels.length; i++) {
+  	      var ch = this.channels[i];
+  	      if (ch !== null) {
+  	        ch.channel.toClosed(capturedStack); // %%% or with an error? not clear
+  	      }
+  	    }
+  	  }
+
+  	  // A close has been confirmed. Cease all communication.
+  	  toClosed (capturedStack, maybeErr) {
+  	    this._closeChannels(capturedStack);
+  	    var info = fmt('Connection closed (%s)',
+  	      (maybeErr) ? maybeErr.toString() : 'by client');
+  	    // Tidy up, invalidate enverything, dynamite the bridges.
+  	    invalidateSend(this, info, capturedStack);
+  	    this.accept = invalidOp(info, capturedStack);
+  	    this.close = function (cb) {
+  	      cb && cb(new IllegalOperationError(info, capturedStack));
+  	    };
+  	    if (this.heartbeater)
+  	      this.heartbeater.clear();
+  	    // This is certainly true now, if it wasn't before
+  	    this.expectSocketClose = true;
+  	    this.stream.end();
+  	    this.emit('close', maybeErr);
+  	  }
+
+  	  _updateSecret(newSecret, reason, cb) {
+  	    this.sendMethod(0, defs.ConnectionUpdateSecret, {
+  	      newSecret,
+  	      reason
+  	    });
+  	    this.once('update-secret-ok', cb);
+  	  }
+
+  	  // ===
+  	  startHeartbeater () {
+  	    if (this.heartbeat === 0)
+  	      return null;
+  	    else {
+  	      var self = this;
+  	      var hb = new Heart(this.heartbeat,
+  	        this.checkSend.bind(this),
+  	        this.checkRecv.bind(this));
+  	      hb.on('timeout', function () {
+  	        var hberr = new Error("Heartbeat timeout");
+  	        self.emit('error', hberr);
+  	        var s = stackCapture('Heartbeat timeout');
+  	        self.toClosed(s, hberr);
+  	      });
+  	      hb.on('beat', function () {
+  	        self.sendHeartbeat();
+  	      });
+  	      return hb;
+  	    }
+  	  }
+
+  	  // I use an array to keep track of the channels, rather than an
+  	  // object. The channel identifiers are numbers, and allocated by the
+  	  // connection. If I try to allocate low numbers when they are
+  	  // available (which I do, by looking from the start of the bitset),
+  	  // this ought to keep the array small, and out of 'sparse array
+  	  // storage'. I also set entries to null, rather than deleting them, in
+  	  // the expectation that the next channel allocation will fill the slot
+  	  // again rather than growing the array. See
+  	  // http://www.html5rocks.com/en/tutorials/speed/v8/
+  	  freshChannel (channel, options) {
+  	    var next = this.freeChannels.nextClearBit(1);
+  	    if (next < 0 || next > this.channelMax)
+  	      throw new Error("No channels left to allocate");
+  	    this.freeChannels.set(next);
+
+  	    var hwm = (options && options.highWaterMark) || DEFAULT_WRITE_HWM;
+  	    var writeBuffer = new PassThrough({
+  	      objectMode: true, highWaterMark: hwm
+  	    });
+  	    this.channels[next] = { channel: channel, buffer: writeBuffer };
+  	    writeBuffer.on('drain', function () {
+  	      channel.onBufferDrain();
+  	    });
+  	    this.muxer.pipeFrom(writeBuffer);
+  	    return next;
+  	  }
+
+  	  releaseChannel (channel) {
+  	    this.freeChannels.clear(channel);
+  	    var buffer = this.channels[channel].buffer;
+  	    buffer.end(); // will also cause it to be unpiped
+  	    this.channels[channel] = null;
+  	  }
+
+  	  acceptLoop () {
+  	    var self = this;
+
+  	    function go () {
+  	      try {
+  	        var f; while (f = self.recvFrame())
+  	          self.accept(f);
+  	      }
+  	      catch (e) {
+  	        self.emit('frameError', e);
+  	      }
+  	    }
+  	    self.stream.on('readable', go);
+  	    go();
+  	  }
+
+  	  step (cb) {
+  	    var self = this;
+  	    function recv () {
+  	      var f;
+  	      try {
+  	        f = self.recvFrame();
+  	      }
+  	      catch (e) {
+  	        cb(e, null);
+  	        return;
+  	      }
+  	      if (f)
+  	        cb(null, f);
+  	      else
+  	        self.stream.once('readable', recv);
+  	    }
+  	    recv();
+  	  }
+
+  	  checkSend () {
+  	    var check = this.sentSinceLastCheck;
+  	    this.sentSinceLastCheck = false;
+  	    return check;
+  	  }
+
+  	  checkRecv () {
+  	    var check = this.recvSinceLastCheck;
+  	    this.recvSinceLastCheck = false;
+  	    return check;
+  	  }
+
+  	  sendBytes (bytes) {
+  	    this.sentSinceLastCheck = true;
+  	    this.stream.write(bytes);
+  	  }
+
+  	  sendHeartbeat () {
+  	    return this.sendBytes(frame.HEARTBEAT_BUF);
+  	  }
+
+  	  sendMethod (channel, Method, fields) {
+  	    var frame = encodeMethod(Method, channel, fields);
+  	    this.sentSinceLastCheck = true;
+  	    var buffer = this.channels[channel].buffer;
+  	    return buffer.write(frame);
+  	  }
+
+  	  sendMessage (channel, Method, fields, Properties, props, content) {
+  	    if (!Buffer$1.isBuffer(content))
+  	      throw new TypeError('content is not a buffer');
+
+  	    var mframe = encodeMethod(Method, channel, fields);
+  	    var pframe = encodeProperties(Properties, channel,
+  	      content.length, props);
+  	    var buffer = this.channels[channel].buffer;
+  	    this.sentSinceLastCheck = true;
+
+  	    var methodHeaderLen = mframe.length + pframe.length;
+  	    var bodyLen = (content.length > 0) ?
+  	      content.length + FRAME_OVERHEAD : 0;
+  	    var allLen = methodHeaderLen + bodyLen;
+
+  	    if (allLen < SINGLE_CHUNK_THRESHOLD) {
+  	      // Use `allocUnsafe` to avoid excessive allocations and CPU usage
+  	      // from zeroing. The returned Buffer is not zeroed and so must be
+  	      // completely filled to be used safely.
+  	      // See https://github.com/amqp-node/amqplib/pull/695
+  	      var all = Buffer$1.allocUnsafe(allLen);
+  	      var offset = mframe.copy(all, 0);
+  	      offset += pframe.copy(all, offset);
+
+  	      if (bodyLen > 0)
+  	        makeBodyFrame(channel, content).copy(all, offset);
+  	      return buffer.write(all);
+  	    }
+  	    else {
+  	      if (methodHeaderLen < SINGLE_CHUNK_THRESHOLD) {
+  	        // Use `allocUnsafe` to avoid excessive allocations and CPU usage
+  	        // from zeroing. The returned Buffer is not zeroed and so must be
+  	        // completely filled to be used safely.
+  	        // See https://github.com/amqp-node/amqplib/pull/695
+  	        var both = Buffer$1.allocUnsafe(methodHeaderLen);
+  	        var offset = mframe.copy(both, 0);
+  	        pframe.copy(both, offset);
+  	        buffer.write(both);
+  	      }
+  	      else {
+  	        buffer.write(mframe);
+  	        buffer.write(pframe);
+  	      }
+  	      return this.sendContent(channel, content);
+  	    }
+  	  }
+
+  	  sendContent (channel, body) {
+  	    if (!Buffer$1.isBuffer(body)) {
+  	      throw new TypeError(fmt("Expected buffer; got %s", body));
+  	    }
+  	    var writeResult = true;
+  	    var buffer = this.channels[channel].buffer;
+
+  	    var maxBody = this.frameMax - FRAME_OVERHEAD;
+
+  	    for (var offset = 0; offset < body.length; offset += maxBody) {
+  	      var end = offset + maxBody;
+  	      var slice = (end > body.length) ? body.subarray(offset) : body.subarray(offset, end);
+  	      var bodyFrame = makeBodyFrame(channel, slice);
+  	      writeResult = buffer.write(bodyFrame);
+  	    }
+  	    this.sentSinceLastCheck = true;
+  	    return writeResult;
+  	  }
+
+  	  recvFrame () {
+  	    // %%% identifying invariants might help here?
+  	    var frame = parseFrame(this.rest);
+
+  	    if (!frame) {
+  	      var incoming = this.stream.read();
+  	      if (incoming === null) {
+  	        return false;
+  	      }
+  	      else {
+  	        this.recvSinceLastCheck = true;
+  	        this.rest = Buffer$1.concat([this.rest, incoming]);
+  	        return this.recvFrame();
+  	      }
+  	    }
+  	    else {
+  	      this.rest = frame.rest;
+  	      return decodeFrame(frame);
+  	    }
+  	  }
+  	}
+
+  	// Usual frame accept mode
+  	function mainAccept(frame) {
+  	  var rec = this.channels[frame.channel];
+  	  if (rec) { return rec.channel.accept(frame); }
+  	  // NB CHANNEL_ERROR may not be right, but I don't know what is ..
+  	  else
+  	    this.closeWithError(
+  	      fmt('Frame on unknown channel %d', frame.channel),
+  	      constants.CHANNEL_ERROR,
+  	      new Error(fmt("Frame on unknown channel: %s",
+  	                    inspect(frame, false))));
+  	}
+
+  	// Handle anything that comes through on channel 0, that's the
+  	// connection control channel. This is only used once mainAccept is
+  	// installed as the frame handler, after the opening handshake.
+  	function channel0(connection) {
+  	  return function(f) {
+  	    // Once we get a 'close', we know 1. we'll get no more frames, and
+  	    // 2. anything we send except close, or close-ok, will be
+  	    // ignored. If we already sent 'close', this won't be invoked since
+  	    // we're already in closing mode; if we didn't well we're not going
+  	    // to send it now are we.
+  	    if (f === HEARTBEAT); // ignore; it's already counted as activity
+  	                          // on the socket, which is its purpose
+  	    else if (f.id === defs.ConnectionClose) {
+  	      // Oh. OK. I guess we're done here then.
+  	      connection.sendMethod(0, defs.ConnectionCloseOk, {});
+  	      var emsg = fmt('Connection closed: %s', closeMsg(f));
+  	      var s = stackCapture(emsg);
+  	      var e = new Error(emsg);
+  	      e.code = f.fields.replyCode;
+  	      if (isFatalError(e)) {
+  	        connection.emit('error', e);
+  	      }
+  	      connection.toClosed(s, e);
+  	    }
+  	    else if (f.id === defs.ConnectionBlocked) {
+  	      connection.emit('blocked', f.fields.reason);
+  	    }
+  	    else if (f.id === defs.ConnectionUnblocked) {
+  	      connection.emit('unblocked');
+  	    }
+  	    else if (f.id === defs.ConnectionUpdateSecretOk) {
+  	      connection.emit('update-secret-ok');
+  	    }
+  	    else {
+  	      connection.closeWithError(
+  	        fmt("Unexpected frame on channel 0"),
+  	        constants.UNEXPECTED_FRAME,
+  	        new Error(fmt("Unexpected frame on channel 0: %s",
+  	                      inspect(f, false))));
+  	    }
+  	  };
+  	}
+
+  	function invalidOp(msg, stack) {
+  	  return function() {
+  	    throw new IllegalOperationError(msg, stack);
+  	  };
+  	}
+
+  	function invalidateSend(conn, msg, stack) {
+  	  conn.sendMethod = conn.sendContent = conn.sendMessage =
+  	    invalidOp(msg, stack);
+  	}
+
+  	var encodeMethod = defs.encodeMethod;
+  	var encodeProperties = defs.encodeProperties;
+
+  	var FRAME_OVERHEAD = defs.FRAME_OVERHEAD;
+  	var makeBodyFrame = frame.makeBodyFrame;
+
+  	var parseFrame = frame.parseFrame;
+  	var decodeFrame = frame.decodeFrame;
+
+  	function wrapStream(s) {
+  	  if (s instanceof Duplex) return s;
+  	  else {
+  	    var ws = new Duplex();
+  	    ws.wrap(s); //wraps the readable side of things
+  	    ws._write = function(chunk, encoding, callback) {
+  	      return s.write(chunk, encoding, callback);
+  	    };
+  	    return ws;
+  	  }
+  	}
+
+  	function isFatalError(error) {
+  	  switch (error && error.code) {
+  	  case defs.constants.CONNECTION_FORCED:
+  	  case defs.constants.REPLY_SUCCESS:
+  	    return false;
+  	  default:
+  	    return true;
+  	  }
+  	}
+
+  	connection.Connection = Connection;
+  	connection.isFatalError = isFatalError;
+  	return connection;
+  }
+
+  var credentials = {};
+
+  var hasRequiredCredentials;
+
+  function requireCredentials () {
+  	if (hasRequiredCredentials) return credentials;
+  	hasRequiredCredentials = 1;
+  	//
+  	//
+  	//
+
+  	// Different kind of credentials that can be supplied when opening a
+  	// connection, corresponding to SASL mechanisms There's only two
+  	// useful mechanisms that RabbitMQ implements:
+  	//  * PLAIN (send username and password in the plain)
+  	//  * EXTERNAL (assume the server will figure out who you are from
+  	//    context, i.e., your SSL certificate)
+  	var codec = requireCodec();
+
+  	credentials.plain = function(user, passwd) {
+  	  return {
+  	    mechanism: 'PLAIN',
+  	    response: function() {
+  	      return Buffer$1.from(['', user, passwd].join(String.fromCharCode(0)))
+  	    },
+  	    username: user,
+  	    password: passwd
+  	  }
+  	};
+
+  	credentials.amqplain = function(user, passwd) {
+  	  return {
+  	    mechanism: 'AMQPLAIN',
+  	    response: function() {
+  	      const buffer = Buffer$1.alloc(16384);
+  	      const size = codec.encodeTable(buffer, { LOGIN: user, PASSWORD: passwd}, 0);
+  	      return buffer.subarray(4, size);
+  	    },
+  	    username: user,
+  	    password: passwd
+  	  }
+  	};
+
+  	credentials.external = function() {
+  	  return {
+  	    mechanism: 'EXTERNAL',
+  	    response: function() { return Buffer$1.from(''); }
+  	  }
+  	};
+  	return credentials;
+  }
+
+  var version = "0.10.8";
+  var require$$5 = {
+  	version: version};
+
+  var _polyfillNode_net = {};
+
+  var _polyfillNode_net$1 = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    default: _polyfillNode_net
+  });
+
+  var require$$6 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_net$1);
+
+  var _polyfillNode_tls = {};
+
+  var _polyfillNode_tls$1 = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    default: _polyfillNode_tls
+  });
+
+  var require$$7 = /*@__PURE__*/getAugmentedNamespace(_polyfillNode_tls$1);
+
+  var hasRequiredConnect;
+
+  function requireConnect () {
+  	if (hasRequiredConnect) return connect;
+  	hasRequiredConnect = 1;
+
+  	var URL = requireUrlParse();
+  	var QS = require$$1;
+  	var Connection = requireConnection().Connection;
+  	var fmt = require$$2.format;
+  	var credentials = requireCredentials();
+
+  	function copyInto(obj, target) {
+  	  var keys = Object.keys(obj);
+  	  var i = keys.length;
+  	  while (i--) {
+  	    var k = keys[i];
+  	    target[k] = obj[k];
+  	  }
+  	  return target;
+  	}
+
+  	// Adapted from util._extend, which is too fringe to use.
+  	function clone(obj) {
+  	  return copyInto(obj, {});
+  	}
+
+  	var CLIENT_PROPERTIES = {
+  	  "product": "amqplib",
+  	  "version": require$$5.version,
+  	  "platform": fmt('Node.JS %s', browser$1.version),
+  	  "information": "https://amqp-node.github.io/amqplib/",
+  	  "capabilities": {
+  	    "publisher_confirms": true,
+  	    "exchange_exchange_bindings": true,
+  	    "basic.nack": true,
+  	    "consumer_cancel_notify": true,
+  	    "connection.blocked": true,
+  	    "authentication_failure_close": true
+  	  }
+  	};
+
+  	// Construct the main frames used in the opening handshake
+  	function openFrames(vhost, query, credentials, extraClientProperties) {
+  	  if (!vhost)
+  	    vhost = '/';
+  	  else
+  	    vhost = QS.unescape(vhost);
+
+  	  var query = query || {};
+
+  	  function intOrDefault(val, def) {
+  	    return (val === undefined) ? def : parseInt(val);
+  	  }
+
+  	  var clientProperties = Object.create(CLIENT_PROPERTIES);
+
+  	  return {
+  	    // start-ok
+  	    'clientProperties': copyInto(extraClientProperties, clientProperties),
+  	    'mechanism': credentials.mechanism,
+  	    'response': credentials.response(),
+  	    'locale': query.locale || 'en_US',
+
+  	    // tune-ok
+  	    'channelMax': intOrDefault(query.channelMax, 0),
+  	    'frameMax': intOrDefault(query.frameMax, 131072),
+  	    'heartbeat': intOrDefault(query.heartbeat, 0),
+
+  	    // open
+  	    'virtualHost': vhost,
+  	    'capabilities': '',
+  	    'insist': 0
+  	  };
+  	}
+
+  	// Decide on credentials based on what we're supplied.
+  	function credentialsFromUrl(parts) {
+  	  var user = 'guest', passwd = 'guest';
+  	  if (parts.username != '' || parts.password != '') {
+  	    user = (parts.username) ? unescape(parts.username) : '';
+  	    passwd = (parts.password) ? unescape(parts.password) : '';
+  	  }
+  	  return credentials.plain(user, passwd);
+  	}
+
+  	function connect$1(url, socketOptions, openCallback) {
+  	  // tls.connect uses `util._extend()` on the options given it, which
+  	  // copies only properties mentioned in `Object.keys()`, when
+  	  // processing the options. So I have to make copies too, rather
+  	  // than using `Object.create()`.
+  	  var sockopts = clone(socketOptions || {});
+  	  url = url || 'amqp://localhost';
+
+  	  var noDelay = !!sockopts.noDelay;
+  	  var timeout = sockopts.timeout;
+  	  var keepAlive = !!sockopts.keepAlive;
+  	  // 0 is default for node
+  	  var keepAliveDelay = sockopts.keepAliveDelay || 0;
+
+  	  var extraClientProperties = sockopts.clientProperties || {};
+
+  	  var protocol, fields;
+  	  if (typeof url === 'object') {
+  	    protocol = (url.protocol || 'amqp') + ':';
+  	    sockopts.host = url.hostname;
+  	    sockopts.servername = sockopts.servername || url.hostname;
+  	    sockopts.port = url.port || ((protocol === 'amqp:') ? 5672 : 5671);
+
+  	    var user, pass;
+  	    // Only default if both are missing, to have the same behaviour as
+  	    // the stringly URL.
+  	    if (url.username == undefined && url.password == undefined) {
+  	      user = 'guest'; pass = 'guest';
+  	    } else {
+  	      user = url.username || '';
+  	      pass = url.password || '';
+  	    }
+
+  	    var config = {
+  	      locale: url.locale,
+  	      channelMax: url.channelMax,
+  	      frameMax: url.frameMax,
+  	      heartbeat: url.heartbeat,
+  	    };
+
+  	    fields = openFrames(url.vhost, config, sockopts.credentials || credentials.plain(user, pass), extraClientProperties);
+  	  } else {
+  	    var parts = URL(url, true); // yes, parse the query string
+  	    protocol = parts.protocol;
+  	    sockopts.host = parts.hostname;
+  	    sockopts.servername = sockopts.servername || parts.hostname;
+  	    sockopts.port = parseInt(parts.port) || ((protocol === 'amqp:') ? 5672 : 5671);
+  	    var vhost = parts.pathname ? parts.pathname.substr(1) : null;
+  	    fields = openFrames(vhost, parts.query, sockopts.credentials || credentialsFromUrl(parts), extraClientProperties);
+  	  }
+
+  	  var sockok = false;
+  	  var sock;
+
+  	  function onConnect() {
+  	    sockok = true;
+  	    sock.setNoDelay(noDelay);
+  	    if (keepAlive) sock.setKeepAlive(keepAlive, keepAliveDelay);
+
+  	    var c = new Connection(sock);
+  	    c.open(fields, function(err, ok) {
+  	      // disable timeout once the connection is open, we don't want
+  	      // it fouling things
+  	      if (timeout) sock.setTimeout(0);
+  	      if (err === null) {
+  	        openCallback(null, c);
+  	      } else {
+  	        // The connection isn't closed by the server on e.g. wrong password
+  	        sock.end();
+  	        sock.destroy();
+  	        openCallback(err);
+  	      }
+  	    });
+  	  }
+
+  	  if (protocol === 'amqp:') {
+  	    sock = require$$6.connect(sockopts, onConnect);
+  	  }
+  	  else if (protocol === 'amqps:') {
+  	    sock = require$$7.connect(sockopts, onConnect);
+  	  }
+  	  else {
+  	    throw new Error("Expected amqp: or amqps: as the protocol; got " + protocol);
+  	  }
+
+  	  if (timeout) {
+  	    sock.setTimeout(timeout, function() {
+  	      sock.end();
+  	      sock.destroy();
+  	      openCallback(new Error('connect ETIMEDOUT'));
+  	    });
+  	  }
+
+  	  sock.once('error', function(err) {
+  	    if (!sockok) openCallback(err);
+  	  });
+
+  	}
+
+  	connect.connect = connect$1;
+  	connect.credentialsFromUrl = credentialsFromUrl;
+  	return connect;
+  }
+
+  var channel_model = {};
+
+  var channel = {};
+
+  var hasRequiredChannel;
+
+  function requireChannel () {
+  	if (hasRequiredChannel) return channel;
+  	hasRequiredChannel = 1;
+
+  	var defs = requireDefs();
+  	var closeMsg = requireFormat().closeMessage;
+  	var inspect = requireFormat().inspect;
+  	var methodName = requireFormat().methodName;
+  	var assert = require$$2$1;
+  	var EventEmitter = require$$0;
+  	var fmt = require$$2.format;
+  	var IllegalOperationError = requireError().IllegalOperationError;
+  	var stackCapture = requireError().stackCapture;
+
+  	class Channel extends EventEmitter {
+  	  constructor (connection) {
+  	    super();
+
+  	    this.connection = connection;
+  	    // for the presently outstanding RPC
+  	    this.reply = null;
+  	    // for the RPCs awaiting action
+  	    this.pending = [];
+  	    // for unconfirmed messages
+  	    this.lwm = 1; // the least, unconfirmed deliveryTag
+  	    this.unconfirmed = []; // rolling window of delivery callbacks
+  	    this.on('ack', this.handleConfirm.bind(this, function (cb) {
+  	      if (cb)
+  	        cb(null);
+  	    }));
+  	    this.on('nack', this.handleConfirm.bind(this, function (cb) {
+  	      if (cb)
+  	        cb(new Error('message nacked'));
+  	    }));
+  	    this.on('close', function () {
+  	      var cb;
+  	      while (cb = this.unconfirmed.shift()) {
+  	        if (cb)
+  	          cb(new Error('channel closed'));
+  	      }
+  	    });
+  	    // message frame state machine
+  	    this.handleMessage = acceptDeliveryOrReturn;
+  	  }
+
+  	  setOptions(options) {
+  	    this.options = options;
+  	  }
+
+  	  allocate () {
+  	    this.ch = this.connection.freshChannel(this, this.options);
+  	    return this;
+  	  }
+
+  	  // Incoming frames are either notifications of e.g., message delivery,
+  	  // or replies to something we've sent. In general I deal with the
+  	  // former by emitting an event, and with the latter by keeping a track
+  	  // of what's expecting a reply.
+  	  //
+  	  // The AMQP specification implies that RPCs can't be pipelined; that
+  	  // is, you can have only one outstanding RPC on a channel at a
+  	  // time. Certainly that's what RabbitMQ and its clients assume. For
+  	  // this reason, I buffer RPCs if the channel is already waiting for a
+  	  // reply.
+  	  // Just send the damn frame.
+  	  sendImmediately (method, fields) {
+  	    return this.connection.sendMethod(this.ch, method, fields);
+  	  }
+
+  	  // Invariant: !this.reply -> pending.length == 0. That is, whenever we
+  	  // clear a reply, we must send another RPC (and thereby fill
+  	  // this.reply) if there is one waiting. The invariant relevant here
+  	  // and in `accept`.
+  	  sendOrEnqueue (method, fields, reply) {
+  	    if (!this.reply) { // if no reply waiting, we can go
+  	      assert(this.pending.length === 0);
+  	      this.reply = reply;
+  	      this.sendImmediately(method, fields);
+  	    }
+  	    else {
+  	      this.pending.push({
+  	        method: method,
+  	        fields: fields,
+  	        reply: reply
+  	      });
+  	    }
+  	  }
+
+  	  sendMessage (fields, properties, content) {
+  	    return this.connection.sendMessage(
+  	      this.ch,
+  	      defs.BasicPublish, fields,
+  	      defs.BasicProperties, properties,
+  	      content);
+  	  }
+
+  	  // Internal, synchronously resolved RPC; the return value is resolved
+  	  // with the whole frame.
+  	  _rpc (method, fields, expect, cb) {
+  	    var self = this;
+
+  	    function reply (err, f) {
+  	      if (err === null) {
+  	        if (f.id === expect) {
+  	          return cb(null, f);
+  	        }
+  	        else {
+  	          // We have detected a problem, so it's up to us to close the
+  	          // channel
+  	          var expectedName = methodName(expect);
+
+  	          var e = new Error(fmt("Expected %s; got %s",
+  	            expectedName, inspect(f, false)));
+  	          self.closeWithError(f.id, fmt('Expected %s; got %s',
+  	            expectedName, methodName(f.id)),
+  	            defs.constants.UNEXPECTED_FRAME, e);
+  	          return cb(e);
+  	        }
+  	      }
+
+
+  	      // An error will be given if, for example, this is waiting to be
+  	      // sent and the connection closes
+  	      else if (err instanceof Error)
+  	        return cb(err);
+
+
+  	      // A close frame will be given if this is the RPC awaiting reply
+  	      // and the channel is closed by the server
+  	      else {
+  	        // otherwise, it's a close frame
+  	        var closeReason = (err.fields.classId << 16) + err.fields.methodId;
+  	        var e = (method === closeReason)
+  	          ? fmt("Operation failed: %s; %s",
+  	            methodName(method), closeMsg(err))
+  	          : fmt("Channel closed by server: %s", closeMsg(err));
+  	        var closeFrameError = new Error(e);
+  	        closeFrameError.code = err.fields.replyCode;
+  	        closeFrameError.classId = err.fields.classId;
+  	        closeFrameError.methodId = err.fields.methodId;
+  	        return cb(closeFrameError);
+  	      }
+  	    }
+
+  	    this.sendOrEnqueue(method, fields, reply);
+  	  }
+
+  	  // Move to entirely closed state.
+  	  toClosed (capturedStack) {
+  	    this._rejectPending();
+  	    invalidateSend(this, 'Channel closed', capturedStack);
+  	    this.accept = invalidOp('Channel closed', capturedStack);
+  	    this.connection.releaseChannel(this.ch);
+  	    this.emit('close');
+  	  }
+
+  	  // Stop being able to send and receive methods and content. Used when
+  	  // we close the channel. Invokes the continuation once the server has
+  	  // acknowledged the close, but before the channel is moved to the
+  	  // closed state.
+  	  toClosing (capturedStack, k) {
+  	    var send = this.sendImmediately.bind(this);
+  	    invalidateSend(this, 'Channel closing', capturedStack);
+
+  	    this.accept = function (f) {
+  	      if (f.id === defs.ChannelCloseOk) {
+  	        if (k)
+  	          k();
+  	        var s = stackCapture('ChannelCloseOk frame received');
+  	        this.toClosed(s);
+  	      }
+  	      else if (f.id === defs.ChannelClose) {
+  	        send(defs.ChannelCloseOk, {});
+  	      }
+  	      // else ignore frame
+  	    };
+  	  }
+
+  	  _rejectPending () {
+  	    function rej (r) {
+  	      r(new Error("Channel ended, no reply will be forthcoming"));
+  	    }
+  	    if (this.reply !== null)
+  	      rej(this.reply);
+  	    this.reply = null;
+
+  	    var discard;
+  	    while (discard = this.pending.shift())
+  	      rej(discard.reply);
+  	    this.pending = null; // so pushes will break
+  	  }
+
+  	  closeBecause (reason, code, k) {
+  	    this.sendImmediately(defs.ChannelClose, {
+  	      replyText: reason,
+  	      replyCode: code,
+  	      methodId: 0, classId: 0
+  	    });
+  	    var s = stackCapture('closeBecause called: ' + reason);
+  	    this.toClosing(s, k);
+  	  }
+
+  	  // If we close because there's been an error, we need to distinguish
+  	  // between what we tell the server (`reason`) and what we report as
+  	  // the cause in the client (`error`).
+  	  closeWithError (id, reason, code, error) {
+  	    var self = this;
+  	    this.closeBecause(reason, code, function () {
+  	      error.code = code;
+  	      // content frames and consumer errors do not provide a method a class/method ID
+  	      if (id) {
+  	        error.classId = defs.info(id).classId;
+  	        error.methodId = defs.info(id).methodId;
+  	      }
+  	      self.emit('error', error);
+  	    });
+  	  }
+
+  	  // A trampolining state machine for message frames on a channel. A
+  	  // message arrives in at least two frames: first, a method announcing
+  	  // the message (either a BasicDeliver or BasicGetOk); then, a message
+  	  // header with the message properties; then, zero or more content
+  	  // frames.
+  	  // Keep the try/catch localised, in an attempt to avoid disabling
+  	  // optimisation
+  	  acceptMessageFrame (f) {
+  	    try {
+  	      this.handleMessage = this.handleMessage(f);
+  	    }
+  	    catch (msg) {
+  	      if (typeof msg === 'string') {
+  	        this.closeWithError(f.id, msg, defs.constants.UNEXPECTED_FRAME,
+  	          new Error(msg));
+  	      }
+  	      else if (msg instanceof Error) {
+  	        this.closeWithError(f.id, 'Error while processing message',
+  	          defs.constants.INTERNAL_ERROR, msg);
+  	      }
+  	      else {
+  	        this.closeWithError(f.id, 'Internal error while processing message',
+  	          defs.constants.INTERNAL_ERROR,
+  	          new Error(msg.toString()));
+  	      }
+  	    }
+  	  }
+
+  	  handleConfirm (handle, f) {
+  	    var tag = f.deliveryTag;
+  	    var multi = f.multiple;
+
+  	    if (multi) {
+  	      var confirmed = this.unconfirmed.splice(0, tag - this.lwm + 1);
+  	      this.lwm = tag + 1;
+  	      confirmed.forEach(handle);
+  	    }
+  	    else {
+  	      var c;
+  	      if (tag === this.lwm) {
+  	        c = this.unconfirmed.shift();
+  	        this.lwm++;
+  	        // Advance the LWM and the window to the next non-gap, or
+  	        // possibly to the end
+  	        while (this.unconfirmed[0] === null) {
+  	          this.unconfirmed.shift();
+  	          this.lwm++;
+  	        }
+  	      }
+  	      else {
+  	        c = this.unconfirmed[tag - this.lwm];
+  	        this.unconfirmed[tag - this.lwm] = null;
+  	      }
+  	      // Technically, in the single-deliveryTag case, I should report a
+  	      // protocol breach if it's already been confirmed.
+  	      handle(c);
+  	    }
+  	  }
+
+  	  pushConfirmCallback (cb) {
+  	    // `null` is used specifically for marking already confirmed slots,
+  	    // so I coerce `undefined` and `null` to false; functions are never
+  	    // falsey.
+  	    this.unconfirmed.push(cb || false);
+  	  }
+
+  	  onBufferDrain () {
+  	    this.emit('drain');
+  	  }
+
+  	  accept(f) {
+
+  	    switch (f.id) {
+
+  	      // Message frames
+  	    case undefined: // content frame!
+  	    case defs.BasicDeliver:
+  	    case defs.BasicReturn:
+  	    case defs.BasicProperties:
+  	      return this.acceptMessageFrame(f);
+
+  	      // confirmations, need to do confirm.select first
+  	    case defs.BasicAck:
+  	      return this.emit('ack', f.fields);
+  	    case defs.BasicNack:
+  	      return this.emit('nack', f.fields);
+  	    case defs.BasicCancel:
+  	      // The broker can send this if e.g., the queue is deleted.
+  	      return this.emit('cancel', f.fields);
+
+  	    case defs.ChannelClose:
+  	      // Any remote closure is an error to us. Reject the pending reply
+  	      // with the close frame, so it can see whether it was that
+  	      // operation that caused it to close.
+  	      if (this.reply) {
+  	        var reply = this.reply; this.reply = null;
+  	        reply(f);
+  	      }
+  	      var emsg = "Channel closed by server: " + closeMsg(f);
+  	      this.sendImmediately(defs.ChannelCloseOk, {});
+
+  	      var error = new Error(emsg);
+  	      error.code = f.fields.replyCode;
+  	      error.classId = f.fields.classId;
+  	      error.methodId = f.fields.methodId;
+  	      this.emit('error', error);
+
+  	      var s = stackCapture(emsg);
+  	      this.toClosed(s);
+  	      return;
+
+  	    case defs.BasicFlow:
+  	      // RabbitMQ doesn't send this, it just blocks the TCP socket
+  	      return this.closeWithError(f.id, "Flow not implemented",
+  	                                 defs.constants.NOT_IMPLEMENTED,
+  	                                 new Error('Flow not implemented'));
+
+  	    default: // assume all other things are replies
+  	      // Resolving the reply may lead to another RPC; to make sure we
+  	      // don't hold that up, clear this.reply
+  	      var reply = this.reply; this.reply = null;
+  	      // however, maybe there's an RPC waiting to go? If so, that'll
+  	      // fill this.reply again, restoring the invariant. This does rely
+  	      // on any response being recv'ed after resolving the promise,
+  	      // below; hence, I use synchronous defer.
+  	      if (this.pending.length > 0) {
+  	        var send = this.pending.shift();
+  	        this.reply = send.reply;
+  	        this.sendImmediately(send.method, send.fields);
+  	      }
+  	      return reply(null, f);
+  	    }
+  	  }
+  	}
+
+  	// Shutdown protocol. There's three scenarios:
+  	//
+  	// 1. The application decides to shut the channel
+  	// 2. The server decides to shut the channel, possibly because of
+  	// something the application did
+  	// 3. The connection is closing, so there won't be any more frames
+  	// going back and forth.
+  	//
+  	// 1 and 2 involve an exchange of method frames (Close and CloseOk),
+  	// while 3 doesn't; the connection simply says "shutdown" to the
+  	// channel, which then acts as if it's closing, without going through
+  	// the exchange.
+
+  	function invalidOp(msg, stack) {
+  	  return function() {
+  	    throw new IllegalOperationError(msg, stack);
+  	  };
+  	}
+
+  	function invalidateSend(ch, msg, stack) {
+  	  ch.sendImmediately = ch.sendOrEnqueue = ch.sendMessage =
+  	    invalidOp(msg, stack);
+  	}
+
+  	// Kick off a message delivery given a BasicDeliver or BasicReturn
+  	// frame (BasicGet uses the RPC mechanism)
+  	function acceptDeliveryOrReturn(f) {
+  	  var event;
+  	  if (f.id === defs.BasicDeliver) event = 'delivery';
+  	  else if (f.id === defs.BasicReturn) event = 'return';
+  	  else throw fmt("Expected BasicDeliver or BasicReturn; got %s",
+  	                 inspect(f));
+
+  	  var self = this;
+  	  var fields = f.fields;
+  	  return acceptMessage(function(message) {
+  	    message.fields = fields;
+  	    self.emit(event, message);
+  	  });
+  	}
+
+  	// Move to the state of waiting for message frames (headers, then
+  	// one or more content frames)
+  	function acceptMessage(continuation) {
+  	  var totalSize = 0, remaining = 0;
+  	  var buffers = null;
+
+  	  var message = {
+  	    fields: null,
+  	    properties: null,
+  	    content: null
+  	  };
+
+  	  return headers;
+
+  	  // expect a headers frame
+  	  function headers(f) {
+  	    if (f.id === defs.BasicProperties) {
+  	      message.properties = f.fields;
+  	      totalSize = remaining = f.size;
+
+  	      // for zero-length messages, content frames aren't required.
+  	      if (totalSize === 0) {
+  	        message.content = Buffer$1.alloc(0);
+  	        continuation(message);
+  	        return acceptDeliveryOrReturn;
+  	      }
+  	      else {
+  	        return content;
+  	      }
+  	    }
+  	    else {
+  	      throw "Expected headers frame after delivery";
+  	    }
+  	  }
+
+  	  // expect a content frame
+  	  // %%% TODO cancelled messages (sent as zero-length content frame)
+  	  function content(f) {
+  	    if (f.content) {
+  	      var size = f.content.length;
+  	      remaining -= size;
+  	      if (remaining === 0) {
+  	        if (buffers !== null) {
+  	          buffers.push(f.content);
+  	          message.content = Buffer$1.concat(buffers);
+  	        }
+  	        else {
+  	          message.content = f.content;
+  	        }
+  	        continuation(message);
+  	        return acceptDeliveryOrReturn;
+  	      }
+  	      else if (remaining < 0) {
+  	        throw fmt("Too much content sent! Expected %d bytes",
+  	                  totalSize);
+  	      }
+  	      else {
+  	        if (buffers !== null)
+  	          buffers.push(f.content);
+  	        else
+  	          buffers = [f.content];
+  	        return content;
+  	      }
+  	    }
+  	    else throw "Expected content frame after headers"
+  	  }
+  	}
+
+  	// This adds just a bit more stuff useful for the APIs, but not
+  	// low-level machinery.
+  	class BaseChannel extends Channel {
+  	  constructor (connection) {
+  	    super(connection);
+  	    this.consumers = new Map();
+  	  }
+
+  	  // Not sure I like the ff, it's going to be changing hidden classes
+  	  // all over the place. On the other hand, whaddya do.
+  	  registerConsumer (tag, callback) {
+  	    this.consumers.set(tag, callback);
+  	  }
+
+  	  unregisterConsumer (tag) {
+  	    this.consumers.delete(tag);
+  	  }
+
+  	  dispatchMessage (fields, message) {
+  	    var consumerTag = fields.consumerTag;
+  	    var consumer = this.consumers.get(consumerTag);
+  	    if (consumer) {
+  	      return consumer(message);
+  	    }
+  	    else {
+  	      // %%% Surely a race here
+  	      throw new Error("Unknown consumer: " + consumerTag);
+  	    }
+  	  }
+
+  	  handleDelivery (message) {
+  	    return this.dispatchMessage(message.fields, message);
+  	  }
+
+  	  handleCancel (fields) {
+  	    var result = this.dispatchMessage(fields, null);
+  	    this.unregisterConsumer(fields.consumerTag);
+  	    return result;
+  	  }
+  	}
+
+  	channel.acceptMessage = acceptMessage;
+  	channel.BaseChannel = BaseChannel;
+  	channel.Channel = Channel;
+  	return channel;
+  }
+
+  var api_args;
+  var hasRequiredApi_args;
+
+  function requireApi_args () {
+  	if (hasRequiredApi_args) return api_args;
+  	hasRequiredApi_args = 1;
+
+  	/*
+  	The channel (promise) and callback APIs have similar signatures, and
+  	in particular, both need AMQP fields prepared from the same arguments
+  	and options. The arguments marshalling is done here. Each of the
+  	procedures below takes arguments and options (the latter in an object)
+  	particular to the operation it represents, and returns an object with
+  	fields for handing to the encoder.
+  	*/
+
+  	// A number of AMQP methods have a table-typed field called
+  	// `arguments`, that is intended to carry extension-specific
+  	// values. RabbitMQ uses this in a number of places; e.g., to specify
+  	// an 'alternate exchange'.
+  	//
+  	// Many of the methods in this API have an `options` argument, from
+  	// which I take both values that have a default in AMQP (e.g.,
+  	// autoDelete in QueueDeclare) *and* values that are specific to
+  	// RabbitMQ (e.g., 'alternate-exchange'), which would normally be
+  	// supplied in `arguments`. So that extensions I don't support yet can
+  	// be used, I include `arguments` itself among the options.
+  	//
+  	// The upshot of this is that I often need to prepare an `arguments`
+  	// value that has any values passed in `options.arguments` as well as
+  	// any I've promoted to being options themselves. Since I don't want
+  	// to mutate anything passed in, the general pattern is to create a
+  	// fresh object with the `arguments` value given as its prototype; all
+  	// fields in the supplied value will be serialised, as well as any I
+  	// set on the fresh object. What I don't want to do, however, is set a
+  	// field to undefined by copying possibly missing field values,
+  	// because that will mask a value in the prototype.
+  	//
+  	// NB the `arguments` field already has a default value of `{}`, so
+  	// there's no need to explicitly default it unless I'm setting values.
+  	function setIfDefined(obj, prop, value) {
+  	  if (value != undefined) obj[prop] = value;
+  	}
+
+  	var EMPTY_OPTIONS = Object.freeze({});
+
+  	var Args = {};
+
+  	Args.assertQueue = function(queue, options) {
+  	  queue = queue || '';
+  	  options = options || EMPTY_OPTIONS;
+
+  	  var argt = Object.create(options.arguments || null);
+  	  setIfDefined(argt, 'x-expires', options.expires);
+  	  setIfDefined(argt, 'x-message-ttl', options.messageTtl);
+  	  setIfDefined(argt, 'x-dead-letter-exchange',
+  	               options.deadLetterExchange);
+  	  setIfDefined(argt, 'x-dead-letter-routing-key',
+  	               options.deadLetterRoutingKey);
+  	  setIfDefined(argt, 'x-max-length', options.maxLength);
+  	  setIfDefined(argt, 'x-max-priority', options.maxPriority);
+  	  setIfDefined(argt, 'x-overflow', options.overflow);
+  	  setIfDefined(argt, 'x-queue-mode', options.queueMode);
+
+  	  return {
+  	    queue: queue,
+  	    exclusive: !!options.exclusive,
+  	    durable: (options.durable === undefined) ? true : options.durable,
+  	    autoDelete: !!options.autoDelete,
+  	    arguments: argt,
+  	    passive: false,
+  	    // deprecated but we have to include it
+  	    ticket: 0,
+  	    nowait: false
+  	  };
+  	};
+
+  	Args.checkQueue = function(queue) {
+  	  return {
+  	    queue: queue,
+  	    passive: true, // switch to "completely different" mode
+  	    nowait: false,
+  	    durable: true, autoDelete: false, exclusive: false, // ignored
+  	    ticket: 0,
+  	  };
+  	};
+
+  	Args.deleteQueue = function(queue, options) {
+  	  options = options || EMPTY_OPTIONS;
+  	  return {
+  	    queue: queue,
+  	    ifUnused: !!options.ifUnused,
+  	    ifEmpty: !!options.ifEmpty,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.purgeQueue = function(queue) {
+  	  return {
+  	    queue: queue,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.bindQueue = function(queue, source, pattern, argt) {
+  	  return {
+  	    queue: queue,
+  	    exchange: source,
+  	    routingKey: pattern,
+  	    arguments: argt,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.unbindQueue = function(queue, source, pattern, argt) {
+  	  return {
+  	    queue: queue,
+  	    exchange: source,
+  	    routingKey: pattern,
+  	    arguments: argt,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.assertExchange = function(exchange, type, options) {
+  	  options = options || EMPTY_OPTIONS;
+  	  var argt = Object.create(options.arguments || null);
+  	  setIfDefined(argt, 'alternate-exchange', options.alternateExchange);
+  	  return {
+  	    exchange: exchange,
+  	    ticket: 0,
+  	    type: type,
+  	    passive: false,
+  	    durable: (options.durable === undefined) ? true : options.durable,
+  	    autoDelete: !!options.autoDelete,
+  	    internal: !!options.internal,
+  	    nowait: false,
+  	    arguments: argt
+  	  };
+  	};
+
+  	Args.checkExchange = function(exchange) {
+  	  return {
+  	    exchange: exchange,
+  	    passive: true, // switch to 'may as well be another method' mode
+  	    nowait: false,
+  	    // ff are ignored
+  	    durable: true, internal: false,  type: '',  autoDelete: false,
+  	    ticket: 0
+  	  };
+  	};
+
+  	Args.deleteExchange = function(exchange, options) {
+  	  options = options || EMPTY_OPTIONS;
+  	  return {
+  	    exchange: exchange,
+  	    ifUnused: !!options.ifUnused,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.bindExchange = function(dest, source, pattern, argt) {
+  	  return {
+  	    source: source,
+  	    destination: dest,
+  	    routingKey: pattern,
+  	    arguments: argt,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	Args.unbindExchange = function(dest, source, pattern, argt) {
+  	  return {
+  	    source: source,
+  	    destination: dest,
+  	    routingKey: pattern,
+  	    arguments: argt,
+  	    ticket: 0, nowait: false
+  	  };
+  	};
+
+  	// It's convenient to construct the properties and the method fields
+  	// at the same time, since in the APIs, values for both can appear in
+  	// `options`. Since the property or mthod field names don't overlap, I
+  	// just return one big object that can be used for both purposes, and
+  	// the encoder will pick out what it wants.
+  	Args.publish = function(exchange, routingKey, options) {
+  	  options = options || EMPTY_OPTIONS;
+
+  	  // The CC and BCC fields expect an array of "longstr", which would
+  	  // normally be buffer values in JavaScript; however, since a field
+  	  // array (or table) cannot have shortstr values, the codec will
+  	  // encode all strings as longstrs anyway.
+  	  function convertCC(cc) {
+  	    if (cc === undefined) {
+  	      return undefined;
+  	    }
+  	    else if (Array.isArray(cc)) {
+  	      return cc.map(String);
+  	    }
+  	    else return [String(cc)];
+  	  }
+
+  	  var headers = Object.create(options.headers || null);
+  	  setIfDefined(headers, 'CC', convertCC(options.CC));
+  	  setIfDefined(headers, 'BCC', convertCC(options.BCC));
+
+  	  var deliveryMode; // undefined will default to 1 (non-persistent)
+
+  	  // Previously I overloaded deliveryMode be a boolean meaning
+  	  // 'persistent or not'; better is to name this option for what it
+  	  // is, but I need to have backwards compatibility for applications
+  	  // that either supply a numeric or boolean value.
+  	  if (options.persistent !== undefined)
+  	    deliveryMode = (options.persistent) ? 2 : 1;
+  	  else if (typeof options.deliveryMode === 'number')
+  	    deliveryMode = options.deliveryMode;
+  	  else if (options.deliveryMode) // is supplied and truthy
+  	    deliveryMode = 2;
+
+  	  var expiration = options.expiration;
+  	  if (expiration !== undefined) expiration = expiration.toString();
+
+  	  return {
+  	    // method fields
+  	    exchange: exchange,
+  	    routingKey: routingKey,
+  	    mandatory: !!options.mandatory,
+  	    immediate: false, // RabbitMQ doesn't implement this any more
+  	    ticket: undefined,
+  	    // properties
+  	    contentType: options.contentType,
+  	    contentEncoding: options.contentEncoding,
+  	    headers: headers,
+  	    deliveryMode: deliveryMode,
+  	    priority: options.priority,
+  	    correlationId: options.correlationId,
+  	    replyTo: options.replyTo,
+  	    expiration: expiration,
+  	    messageId: options.messageId,
+  	    timestamp: options.timestamp,
+  	    type: options.type,
+  	    userId: options.userId,
+  	    appId: options.appId,
+  	    clusterId: undefined
+  	  };
+  	};
+
+  	Args.consume = function(queue, options) {
+  	  options = options || EMPTY_OPTIONS;
+  	  var argt = Object.create(options.arguments || null);
+  	  setIfDefined(argt, 'x-priority', options.priority);
+  	  return {
+  	    ticket: 0,
+  	    queue: queue,
+  	    consumerTag: options.consumerTag || '',
+  	    noLocal: !!options.noLocal,
+  	    noAck: !!options.noAck,
+  	    exclusive: !!options.exclusive,
+  	    nowait: false,
+  	    arguments: argt
+  	  };
+  	};
+
+  	Args.cancel = function(consumerTag) {
+  	  return {
+  	    consumerTag: consumerTag,
+  	    nowait: false
+  	  };
+  	};
+
+  	Args.get = function(queue, options) {
+  	  options = options || EMPTY_OPTIONS;
+  	  return {
+  	    ticket: 0,
+  	    queue: queue,
+  	    noAck: !!options.noAck
+  	  };
+  	};
+
+  	Args.ack = function(tag, allUpTo) {
+  	  return {
+  	    deliveryTag: tag,
+  	    multiple: !!allUpTo
+  	  };
+  	};
+
+  	Args.nack = function(tag, allUpTo, requeue) {
+  	  return {
+  	    deliveryTag: tag,
+  	    multiple: !!allUpTo,
+  	    requeue: (requeue === undefined) ? true : requeue
+  	  };
+  	};
+
+  	Args.reject = function(tag, requeue) {
+  	  return {
+  	    deliveryTag: tag,
+  	    requeue: (requeue === undefined) ? true : requeue
+  	  };
+  	};
+
+  	Args.prefetch = function(count, global) {
+  	  return {
+  	    prefetchCount: count || 0,
+  	    prefetchSize: 0,
+  	    global: !!global
+  	  };
+  	};
+
+  	Args.recover = function() {
+  	  return {requeue: true};
+  	};
+
+  	api_args = Object.freeze(Args);
+  	return api_args;
+  }
+
+  var hasRequiredChannel_model;
+
+  function requireChannel_model () {
+  	if (hasRequiredChannel_model) return channel_model;
+  	hasRequiredChannel_model = 1;
+
+  	const EventEmitter = require$$0;
+  	const promisify = require$$2.promisify;
+  	const defs = requireDefs();
+  	const {BaseChannel} = requireChannel();
+  	const {acceptMessage} = requireChannel();
+  	const Args = requireApi_args();
+  	const {inspect} = requireFormat();
+
+  	class ChannelModel extends EventEmitter {
+  	  constructor(connection) {
+  	    super();
+  	    this.connection = connection;
+
+  	    ['error', 'close', 'blocked', 'unblocked'].forEach(ev => {
+  	      connection.on(ev, this.emit.bind(this, ev));
+  	    });
+  	  }
+
+  	  close() {
+  	    return promisify(this.connection.close.bind(this.connection))();
+  	  }
+
+  	  updateSecret(newSecret, reason) {
+  	    return promisify(this.connection._updateSecret.bind(this.connection))(newSecret, reason);
+  	  }
+
+  	  async createChannel(options) {
+  	    const channel = new Channel(this.connection);
+  	    channel.setOptions(options);
+  	    await channel.open();
+  	    return channel;
+  	  }
+
+  	  async createConfirmChannel(options) {
+  	    const channel = new ConfirmChannel(this.connection);
+  	    channel.setOptions(options);
+  	    await channel.open();
+  	    await channel.rpc(defs.ConfirmSelect, {nowait: false}, defs.ConfirmSelectOk);
+  	    return channel;
+  	  }
+  	}
+
+  	// Channels
+
+  	class Channel extends BaseChannel {
+  	  constructor(connection) {
+  	    super(connection);
+  	    this.on('delivery', this.handleDelivery.bind(this));
+  	    this.on('cancel', this.handleCancel.bind(this));
+  	  }
+
+  	  // An RPC that returns a 'proper' promise, which resolves to just the
+  	  // response's fields; this is intended to be suitable for implementing
+  	  // API procedures.
+  	  async rpc(method, fields, expect) {
+  	    const f = await promisify(cb => {
+  	      return this._rpc(method, fields, expect, cb);
+  	    })();
+
+  	    return f.fields;
+  	  }
+
+  	  // Do the remarkably simple channel open handshake
+  	  async open() {
+  	    const ch = await this.allocate.bind(this)();
+  	    return ch.rpc(defs.ChannelOpen, {outOfBand: ""},
+  	                  defs.ChannelOpenOk);
+  	  }
+
+  	  close() {
+  	    return promisify(cb => {
+  	      return this.closeBecause("Goodbye", defs.constants.REPLY_SUCCESS,
+  	                      cb);
+  	    })();
+  	  }
+
+  	  // === Public API, declaring queues and stuff ===
+
+  	  assertQueue(queue, options) {
+  	    return this.rpc(defs.QueueDeclare,
+  	                    Args.assertQueue(queue, options),
+  	                    defs.QueueDeclareOk);
+  	  }
+
+  	  checkQueue(queue) {
+  	    return this.rpc(defs.QueueDeclare,
+  	                    Args.checkQueue(queue),
+  	                    defs.QueueDeclareOk);
+  	  }
+
+  	  deleteQueue(queue, options) {
+  	    return this.rpc(defs.QueueDelete,
+  	                    Args.deleteQueue(queue, options),
+  	                    defs.QueueDeleteOk);
+  	  }
+
+  	  purgeQueue(queue) {
+  	    return this.rpc(defs.QueuePurge,
+  	                    Args.purgeQueue(queue),
+  	                    defs.QueuePurgeOk);
+  	  }
+
+  	  bindQueue(queue, source, pattern, argt) {
+  	    return this.rpc(defs.QueueBind,
+  	                    Args.bindQueue(queue, source, pattern, argt),
+  	                    defs.QueueBindOk);
+  	  }
+
+  	  unbindQueue(queue, source, pattern, argt) {
+  	    return this.rpc(defs.QueueUnbind,
+  	                    Args.unbindQueue(queue, source, pattern, argt),
+  	                    defs.QueueUnbindOk);
+  	  }
+
+  	  assertExchange(exchange, type, options) {
+  	    // The server reply is an empty set of fields, but it's convenient
+  	    // to have the exchange name handed to the continuation.
+  	    return this.rpc(defs.ExchangeDeclare,
+  	                    Args.assertExchange(exchange, type, options),
+  	                    defs.ExchangeDeclareOk)
+  	      .then(_ok => { return { exchange }; });
+  	  }
+
+  	  checkExchange(exchange) {
+  	    return this.rpc(defs.ExchangeDeclare,
+  	                    Args.checkExchange(exchange),
+  	                    defs.ExchangeDeclareOk);
+  	  }
+
+  	  deleteExchange(name, options) {
+  	    return this.rpc(defs.ExchangeDelete,
+  	                    Args.deleteExchange(name, options),
+  	                    defs.ExchangeDeleteOk);
+  	  }
+
+  	  bindExchange(dest, source, pattern, argt) {
+  	    return this.rpc(defs.ExchangeBind,
+  	                    Args.bindExchange(dest, source, pattern, argt),
+  	                    defs.ExchangeBindOk);
+  	  }
+
+  	  unbindExchange(dest, source, pattern, argt) {
+  	    return this.rpc(defs.ExchangeUnbind,
+  	                    Args.unbindExchange(dest, source, pattern, argt),
+  	                    defs.ExchangeUnbindOk);
+  	  }
+
+  	  // Working with messages
+
+  	  publish(exchange, routingKey, content, options) {
+  	    const fieldsAndProps = Args.publish(exchange, routingKey, options);
+  	    return this.sendMessage(fieldsAndProps, fieldsAndProps, content);
+  	  }
+
+  	  sendToQueue(queue, content, options) {
+  	    return this.publish('', queue, content, options);
+  	  }
+
+  	  consume(queue, callback, options) {
+  	    // NB we want the callback to be run synchronously, so that we've
+  	    // registered the consumerTag before any messages can arrive.
+  	    const fields = Args.consume(queue, options);
+  	    return new Promise((resolve, reject) => {
+  	      this._rpc(defs.BasicConsume, fields, defs.BasicConsumeOk, (err, ok) => {
+  	        if (err) return reject(err);
+  	        this.registerConsumer(ok.fields.consumerTag, callback);
+  	        resolve(ok.fields);
+  	      });
+  	    });
+  	  }
+
+  	  async cancel(consumerTag) {
+  	    await promisify(cb => {
+  	      this._rpc(defs.BasicCancel, Args.cancel(consumerTag),
+  	            defs.BasicCancelOk,
+  	            cb);
+  	    })()
+  	    .then(ok => {
+  	      this.unregisterConsumer(consumerTag);
+  	      return ok.fields;
+  	    });
+  	  }
+
+  	  get(queue, options) {
+  	    const fields = Args.get(queue, options);
+  	    return new Promise((resolve, reject) => {
+  	      this.sendOrEnqueue(defs.BasicGet, fields, (err, f) => {
+  	        if (err) return reject(err);
+  	        if (f.id === defs.BasicGetEmpty) {
+  	          return resolve(false);
+  	        }
+  	        else if (f.id === defs.BasicGetOk) {
+  	          const fields = f.fields;
+  	          this.handleMessage = acceptMessage(m => {
+  	            m.fields = fields;
+  	            resolve(m);
+  	          });
+  	        }
+  	        else {
+  	          reject(new Error(`Unexpected response to BasicGet: ${inspect(f)}`));
+  	        }
+  	      });
+  	    });
+  	  }
+
+  	  ack(message, allUpTo) {
+  	    this.sendImmediately(
+  	      defs.BasicAck,
+  	      Args.ack(message.fields.deliveryTag, allUpTo));
+  	  }
+
+  	  ackAll() {
+  	    this.sendImmediately(defs.BasicAck, Args.ack(0, true));
+  	  }
+
+  	  nack(message, allUpTo, requeue) {
+  	    this.sendImmediately(
+  	      defs.BasicNack,
+  	      Args.nack(message.fields.deliveryTag, allUpTo, requeue));
+  	  }
+
+  	  nackAll(requeue) {
+  	    this.sendImmediately(defs.BasicNack,
+  	                         Args.nack(0, true, requeue));
+  	  }
+
+  	  // `Basic.Nack` is not available in older RabbitMQ versions (or in the
+  	  // AMQP specification), so you have to use the one-at-a-time
+  	  // `Basic.Reject`. This is otherwise synonymous with
+  	  // `#nack(message, false, requeue)`.
+  	  reject(message, requeue) {
+  	    this.sendImmediately(
+  	      defs.BasicReject,
+  	      Args.reject(message.fields.deliveryTag, requeue));
+  	  }
+
+  	  recover() {
+  	    return this.rpc(defs.BasicRecover,
+  	                    Args.recover(),
+  	                    defs.BasicRecoverOk);
+  	  }
+
+  	  qos(count, global) {
+  	    return this.rpc(defs.BasicQos,
+  	                    Args.prefetch(count, global),
+  	                    defs.BasicQosOk);
+  	  }
+  	}
+
+  	// There are more options in AMQP than exposed here; RabbitMQ only
+  	// implements prefetch based on message count, and only for individual
+  	// channels or consumers. RabbitMQ v3.3.0 and after treat prefetch
+  	// (without `global` set) as per-consumer (for consumers following),
+  	// and prefetch with `global` set as per-channel.
+  	Channel.prototype.prefetch = Channel.prototype.qos;
+
+  	// Confirm channel. This is a channel with confirms 'switched on',
+  	// meaning sent messages will provoke a responding 'ack' or 'nack'
+  	// from the server. The upshot of this is that `publish` and
+  	// `sendToQueue` both take a callback, which will be called either
+  	// with `null` as its argument to signify 'ack', or an exception as
+  	// its argument to signify 'nack'.
+
+  	class ConfirmChannel extends Channel {
+  	  publish(exchange, routingKey, content, options, cb) {
+  	    this.pushConfirmCallback(cb);
+  	    return super.publish(exchange, routingKey, content, options);
+  	  }
+
+  	  sendToQueue(queue, content, options, cb) {
+  	    return this.publish('', queue, content, options, cb);
+  	  }
+
+  	  waitForConfirms() {
+  	    const awaiting = [];
+  	    const unconfirmed = this.unconfirmed;
+  	    unconfirmed.forEach((val, index) => {
+  	      if (val !== null) {
+  	        const confirmed = new Promise((resolve, reject) => {
+  	          unconfirmed[index] = err => {
+  	            if (val) val(err);
+  	            if (err === null) resolve();
+  	            else reject(err);
+  	          };
+  	        });
+  	        awaiting.push(confirmed);
+  	      }
+  	    });
+  	    // Channel closed
+  	    if (!this.pending) {
+  	      var cb;
+  	      while (cb = this.unconfirmed.shift()) {
+  	        if (cb) cb(new Error('channel closed'));
+  	      }
+  	    }
+  	    return Promise.all(awaiting);
+  	  }
+  	}
+
+  	channel_model.ConfirmChannel = ConfirmChannel;
+  	channel_model.Channel = Channel;
+  	channel_model.ChannelModel = ChannelModel;
+  	return channel_model;
+  }
+
+  var hasRequiredChannel_api;
+
+  function requireChannel_api () {
+  	if (hasRequiredChannel_api) return channel_api;
+  	hasRequiredChannel_api = 1;
+  	var raw_connect = requireConnect().connect;
+  	var ChannelModel = requireChannel_model().ChannelModel;
+  	var promisify = require$$2.promisify;
+
+  	function connect(url, connOptions) {
+  	  return promisify(function(cb) {
+  	    return raw_connect(url, connOptions, cb);
+  	  })()
+  	  .then(function(conn) {
+  	    return new ChannelModel(conn);
+  	  });
+  	}
+  	channel_api.connect = connect;
+  	channel_api.credentials = requireCredentials();
+  	channel_api.IllegalOperationError = requireError().IllegalOperationError;
+  	return channel_api;
+  }
+
+  requireChannel_api();
 
   class BaseReplicator extends EventEmitter {
     constructor(config = {}) {
@@ -21433,6 +25354,6272 @@ ${JSON.stringify(validation, null, 2)}`,
     }
   }
 
+  var jsonify = {};
+
+  var parse;
+  var hasRequiredParse;
+
+  function requireParse () {
+  	if (hasRequiredParse) return parse;
+  	hasRequiredParse = 1;
+
+  	var at; // The index of the current character
+  	var ch; // The current character
+  	var escapee = {
+  		'"': '"',
+  		'\\': '\\',
+  		'/': '/',
+  		b: '\b',
+  		f: '\f',
+  		n: '\n',
+  		r: '\r',
+  		t: '\t'
+  	};
+  	var text;
+
+  	// Call error when something is wrong.
+  	function error(m) {
+  		throw {
+  			name: 'SyntaxError',
+  			message: m,
+  			at: at,
+  			text: text
+  		};
+  	}
+
+  	function next(c) {
+  		// If a c parameter is provided, verify that it matches the current character.
+  		if (c && c !== ch) {
+  			error("Expected '" + c + "' instead of '" + ch + "'");
+  		}
+
+  		// Get the next character. When there are no more characters, return the empty string.
+
+  		ch = text.charAt(at);
+  		at += 1;
+  		return ch;
+  	}
+
+  	function number() {
+  		// Parse a number value.
+  		var num;
+  		var str = '';
+
+  		if (ch === '-') {
+  			str = '-';
+  			next('-');
+  		}
+  		while (ch >= '0' && ch <= '9') {
+  			str += ch;
+  			next();
+  		}
+  		if (ch === '.') {
+  			str += '.';
+  			while (next() && ch >= '0' && ch <= '9') {
+  				str += ch;
+  			}
+  		}
+  		if (ch === 'e' || ch === 'E') {
+  			str += ch;
+  			next();
+  			if (ch === '-' || ch === '+') {
+  				str += ch;
+  				next();
+  			}
+  			while (ch >= '0' && ch <= '9') {
+  				str += ch;
+  				next();
+  			}
+  		}
+  		num = Number(str);
+  		if (!isFinite(num)) {
+  			error('Bad number');
+  		}
+  		return num;
+  	}
+
+  	function string() {
+  		// Parse a string value.
+  		var hex;
+  		var i;
+  		var str = '';
+  		var uffff;
+
+  		// When parsing for string values, we must look for " and \ characters.
+  		if (ch === '"') {
+  			while (next()) {
+  				if (ch === '"') {
+  					next();
+  					return str;
+  				} else if (ch === '\\') {
+  					next();
+  					if (ch === 'u') {
+  						uffff = 0;
+  						for (i = 0; i < 4; i += 1) {
+  							hex = parseInt(next(), 16);
+  							if (!isFinite(hex)) {
+  								break;
+  							}
+  							uffff = (uffff * 16) + hex;
+  						}
+  						str += String.fromCharCode(uffff);
+  					} else if (typeof escapee[ch] === 'string') {
+  						str += escapee[ch];
+  					} else {
+  						break;
+  					}
+  				} else {
+  					str += ch;
+  				}
+  			}
+  		}
+  		error('Bad string');
+  	}
+
+  	// Skip whitespace.
+  	function white() {
+  		while (ch && ch <= ' ') {
+  			next();
+  		}
+  	}
+
+  	// true, false, or null.
+  	function word() {
+  		switch (ch) {
+  			case 't':
+  				next('t');
+  				next('r');
+  				next('u');
+  				next('e');
+  				return true;
+  			case 'f':
+  				next('f');
+  				next('a');
+  				next('l');
+  				next('s');
+  				next('e');
+  				return false;
+  			case 'n':
+  				next('n');
+  				next('u');
+  				next('l');
+  				next('l');
+  				return null;
+  			default:
+  				error("Unexpected '" + ch + "'");
+  		}
+  	}
+
+  	// Parse an array value.
+  	function array() {
+  		var arr = [];
+
+  		if (ch === '[') {
+  			next('[');
+  			white();
+  			if (ch === ']') {
+  				next(']');
+  				return arr; // empty array
+  			}
+  			while (ch) {
+  				arr.push(value()); // eslint-disable-line no-use-before-define
+  				white();
+  				if (ch === ']') {
+  					next(']');
+  					return arr;
+  				}
+  				next(',');
+  				white();
+  			}
+  		}
+  		error('Bad array');
+  	}
+
+  	// Parse an object value.
+  	function object() {
+  		var key;
+  		var obj = {};
+
+  		if (ch === '{') {
+  			next('{');
+  			white();
+  			if (ch === '}') {
+  				next('}');
+  				return obj; // empty object
+  			}
+  			while (ch) {
+  				key = string();
+  				white();
+  				next(':');
+  				if (Object.prototype.hasOwnProperty.call(obj, key)) {
+  					error('Duplicate key "' + key + '"');
+  				}
+  				obj[key] = value(); // eslint-disable-line no-use-before-define
+  				white();
+  				if (ch === '}') {
+  					next('}');
+  					return obj;
+  				}
+  				next(',');
+  				white();
+  			}
+  		}
+  		error('Bad object');
+  	}
+
+  	// Parse a JSON value. It could be an object, an array, a string, a number, or a word.
+  	function value() {
+  		white();
+  		switch (ch) {
+  			case '{':
+  				return object();
+  			case '[':
+  				return array();
+  			case '"':
+  				return string();
+  			case '-':
+  				return number();
+  			default:
+  				return ch >= '0' && ch <= '9' ? number() : word();
+  		}
+  	}
+
+  	// Return the json_parse function. It will have access to all of the above functions and variables.
+  	parse = function (source, reviver) {
+  		var result;
+
+  		text = source;
+  		at = 0;
+  		ch = ' ';
+  		result = value();
+  		white();
+  		if (ch) {
+  			error('Syntax error');
+  		}
+
+  		// If there is a reviver function, we recursively walk the new structure,
+  		// passing each name/value pair to the reviver function for possible
+  		// transformation, starting with a temporary root object that holds the result
+  		// in an empty key. If there is not a reviver function, we simply return the
+  		// result.
+
+  		return typeof reviver === 'function' ? (function walk(holder, key) {
+  			var k;
+  			var v;
+  			var val = holder[key];
+  			if (val && typeof val === 'object') {
+  				for (k in value) {
+  					if (Object.prototype.hasOwnProperty.call(val, k)) {
+  						v = walk(val, k);
+  						if (typeof v === 'undefined') {
+  							delete val[k];
+  						} else {
+  							val[k] = v;
+  						}
+  					}
+  				}
+  			}
+  			return reviver.call(holder, key, val);
+  		}({ '': result }, '')) : result;
+  	};
+  	return parse;
+  }
+
+  var stringify;
+  var hasRequiredStringify;
+
+  function requireStringify () {
+  	if (hasRequiredStringify) return stringify;
+  	hasRequiredStringify = 1;
+
+  	var escapable = /[\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g;
+  	var gap;
+  	var indent;
+  	var meta = { // table of character substitutions
+  		'\b': '\\b',
+  		'\t': '\\t',
+  		'\n': '\\n',
+  		'\f': '\\f',
+  		'\r': '\\r',
+  		'"': '\\"',
+  		'\\': '\\\\'
+  	};
+  	var rep;
+
+  	function quote(string) {
+  		// If the string contains no control characters, no quote characters, and no
+  		// backslash characters, then we can safely slap some quotes around it.
+  		// Otherwise we must also replace the offending characters with safe escape sequences.
+
+  		escapable.lastIndex = 0;
+  		return escapable.test(string) ? '"' + string.replace(escapable, function (a) {
+  			var c = meta[a];
+  			return typeof c === 'string' ? c
+  				: '\\u' + ('0000' + a.charCodeAt(0).toString(16)).slice(-4);
+  		}) + '"' : '"' + string + '"';
+  	}
+
+  	function str(key, holder) {
+  		// Produce a string from holder[key].
+  		var i; // The loop counter.
+  		var k; // The member key.
+  		var v; // The member value.
+  		var length;
+  		var mind = gap;
+  		var partial;
+  		var value = holder[key];
+
+  		// If the value has a toJSON method, call it to obtain a replacement value.
+  		if (value && typeof value === 'object' && typeof value.toJSON === 'function') {
+  			value = value.toJSON(key);
+  		}
+
+  		// If we were called with a replacer function, then call the replacer to obtain a replacement value.
+  		if (typeof rep === 'function') {
+  			value = rep.call(holder, key, value);
+  		}
+
+  		// What happens next depends on the value's type.
+  		switch (typeof value) {
+  			case 'string':
+  				return quote(value);
+
+  			case 'number':
+  				// JSON numbers must be finite. Encode non-finite numbers as null.
+  				return isFinite(value) ? String(value) : 'null';
+
+  			case 'boolean':
+  			case 'null':
+  				// If the value is a boolean or null, convert it to a string. Note:
+  				// typeof null does not produce 'null'. The case is included here in
+  				// the remote chance that this gets fixed someday.
+  				return String(value);
+
+  			case 'object':
+  				if (!value) {
+  					return 'null';
+  				}
+  				gap += indent;
+  				partial = [];
+
+  				// Array.isArray
+  				if (Object.prototype.toString.apply(value) === '[object Array]') {
+  					length = value.length;
+  					for (i = 0; i < length; i += 1) {
+  						partial[i] = str(i, value) || 'null';
+  					}
+
+  					// Join all of the elements together, separated with commas, and wrap them in brackets.
+  					v = partial.length === 0 ? '[]' : gap
+  						? '[\n' + gap + partial.join(',\n' + gap) + '\n' + mind + ']'
+  						: '[' + partial.join(',') + ']';
+  					gap = mind;
+  					return v;
+  				}
+
+  				// If the replacer is an array, use it to select the members to be stringified.
+  				if (rep && typeof rep === 'object') {
+  					length = rep.length;
+  					for (i = 0; i < length; i += 1) {
+  						k = rep[i];
+  						if (typeof k === 'string') {
+  							v = str(k, value);
+  							if (v) {
+  								partial.push(quote(k) + (gap ? ': ' : ':') + v);
+  							}
+  						}
+  					}
+  				} else {
+  					// Otherwise, iterate through all of the keys in the object.
+  					for (k in value) {
+  						if (Object.prototype.hasOwnProperty.call(value, k)) {
+  							v = str(k, value);
+  							if (v) {
+  								partial.push(quote(k) + (gap ? ': ' : ':') + v);
+  							}
+  						}
+  					}
+  				}
+
+  				// Join all of the member texts together, separated with commas, and wrap them in braces.
+
+  				v = partial.length === 0 ? '{}' : gap
+  					? '{\n' + gap + partial.join(',\n' + gap) + '\n' + mind + '}'
+  					: '{' + partial.join(',') + '}';
+  				gap = mind;
+  				return v;
+  		}
+  	}
+
+  	stringify = function (value, replacer, space) {
+  		var i;
+  		gap = '';
+  		indent = '';
+
+  		// If the space parameter is a number, make an indent string containing that many spaces.
+  		if (typeof space === 'number') {
+  			for (i = 0; i < space; i += 1) {
+  				indent += ' ';
+  			}
+  		} else if (typeof space === 'string') {
+  			// If the space parameter is a string, it will be used as the indent string.
+  			indent = space;
+  		}
+
+  		// If there is a replacer, it must be a function or an array. Otherwise, throw an error.
+  		rep = replacer;
+  		if (
+  			replacer
+  			&& typeof replacer !== 'function'
+  			&& (typeof replacer !== 'object' || typeof replacer.length !== 'number')
+  		) {
+  			throw new Error('JSON.stringify');
+  		}
+
+  		// Make a fake root object containing our value under the key of ''.
+  		// Return the result of stringifying the value.
+  		return str('', { '': value });
+  	};
+  	return stringify;
+  }
+
+  var hasRequiredJsonify;
+
+  function requireJsonify () {
+  	if (hasRequiredJsonify) return jsonify;
+  	hasRequiredJsonify = 1;
+
+  	jsonify.parse = requireParse();
+  	jsonify.stringify = requireStringify();
+  	return jsonify;
+  }
+
+  var isarray;
+  var hasRequiredIsarray;
+
+  function requireIsarray () {
+  	if (hasRequiredIsarray) return isarray;
+  	hasRequiredIsarray = 1;
+  	var toString = {}.toString;
+
+  	isarray = Array.isArray || function (arr) {
+  	  return toString.call(arr) == '[object Array]';
+  	};
+  	return isarray;
+  }
+
+  var isArguments;
+  var hasRequiredIsArguments;
+
+  function requireIsArguments () {
+  	if (hasRequiredIsArguments) return isArguments;
+  	hasRequiredIsArguments = 1;
+
+  	var toStr = Object.prototype.toString;
+
+  	isArguments = function isArguments(value) {
+  		var str = toStr.call(value);
+  		var isArgs = str === '[object Arguments]';
+  		if (!isArgs) {
+  			isArgs = str !== '[object Array]' &&
+  				value !== null &&
+  				typeof value === 'object' &&
+  				typeof value.length === 'number' &&
+  				value.length >= 0 &&
+  				toStr.call(value.callee) === '[object Function]';
+  		}
+  		return isArgs;
+  	};
+  	return isArguments;
+  }
+
+  var implementation$1;
+  var hasRequiredImplementation$1;
+
+  function requireImplementation$1 () {
+  	if (hasRequiredImplementation$1) return implementation$1;
+  	hasRequiredImplementation$1 = 1;
+
+  	var keysShim;
+  	if (!Object.keys) {
+  		// modified from https://github.com/es-shims/es5-shim
+  		var has = Object.prototype.hasOwnProperty;
+  		var toStr = Object.prototype.toString;
+  		var isArgs = requireIsArguments(); // eslint-disable-line global-require
+  		var isEnumerable = Object.prototype.propertyIsEnumerable;
+  		var hasDontEnumBug = !isEnumerable.call({ toString: null }, 'toString');
+  		var hasProtoEnumBug = isEnumerable.call(function () {}, 'prototype');
+  		var dontEnums = [
+  			'toString',
+  			'toLocaleString',
+  			'valueOf',
+  			'hasOwnProperty',
+  			'isPrototypeOf',
+  			'propertyIsEnumerable',
+  			'constructor'
+  		];
+  		var equalsConstructorPrototype = function (o) {
+  			var ctor = o.constructor;
+  			return ctor && ctor.prototype === o;
+  		};
+  		var excludedKeys = {
+  			$applicationCache: true,
+  			$console: true,
+  			$external: true,
+  			$frame: true,
+  			$frameElement: true,
+  			$frames: true,
+  			$innerHeight: true,
+  			$innerWidth: true,
+  			$onmozfullscreenchange: true,
+  			$onmozfullscreenerror: true,
+  			$outerHeight: true,
+  			$outerWidth: true,
+  			$pageXOffset: true,
+  			$pageYOffset: true,
+  			$parent: true,
+  			$scrollLeft: true,
+  			$scrollTop: true,
+  			$scrollX: true,
+  			$scrollY: true,
+  			$self: true,
+  			$webkitIndexedDB: true,
+  			$webkitStorageInfo: true,
+  			$window: true
+  		};
+  		var hasAutomationEqualityBug = (function () {
+  			/* global window */
+  			if (typeof window === 'undefined') { return false; }
+  			for (var k in window) {
+  				try {
+  					if (!excludedKeys['$' + k] && has.call(window, k) && window[k] !== null && typeof window[k] === 'object') {
+  						try {
+  							equalsConstructorPrototype(window[k]);
+  						} catch (e) {
+  							return true;
+  						}
+  					}
+  				} catch (e) {
+  					return true;
+  				}
+  			}
+  			return false;
+  		}());
+  		var equalsConstructorPrototypeIfNotBuggy = function (o) {
+  			/* global window */
+  			if (typeof window === 'undefined' || !hasAutomationEqualityBug) {
+  				return equalsConstructorPrototype(o);
+  			}
+  			try {
+  				return equalsConstructorPrototype(o);
+  			} catch (e) {
+  				return false;
+  			}
+  		};
+
+  		keysShim = function keys(object) {
+  			var isObject = object !== null && typeof object === 'object';
+  			var isFunction = toStr.call(object) === '[object Function]';
+  			var isArguments = isArgs(object);
+  			var isString = isObject && toStr.call(object) === '[object String]';
+  			var theKeys = [];
+
+  			if (!isObject && !isFunction && !isArguments) {
+  				throw new TypeError('Object.keys called on a non-object');
+  			}
+
+  			var skipProto = hasProtoEnumBug && isFunction;
+  			if (isString && object.length > 0 && !has.call(object, 0)) {
+  				for (var i = 0; i < object.length; ++i) {
+  					theKeys.push(String(i));
+  				}
+  			}
+
+  			if (isArguments && object.length > 0) {
+  				for (var j = 0; j < object.length; ++j) {
+  					theKeys.push(String(j));
+  				}
+  			} else {
+  				for (var name in object) {
+  					if (!(skipProto && name === 'prototype') && has.call(object, name)) {
+  						theKeys.push(String(name));
+  					}
+  				}
+  			}
+
+  			if (hasDontEnumBug) {
+  				var skipConstructor = equalsConstructorPrototypeIfNotBuggy(object);
+
+  				for (var k = 0; k < dontEnums.length; ++k) {
+  					if (!(skipConstructor && dontEnums[k] === 'constructor') && has.call(object, dontEnums[k])) {
+  						theKeys.push(dontEnums[k]);
+  					}
+  				}
+  			}
+  			return theKeys;
+  		};
+  	}
+  	implementation$1 = keysShim;
+  	return implementation$1;
+  }
+
+  var objectKeys;
+  var hasRequiredObjectKeys;
+
+  function requireObjectKeys () {
+  	if (hasRequiredObjectKeys) return objectKeys;
+  	hasRequiredObjectKeys = 1;
+
+  	var slice = Array.prototype.slice;
+  	var isArgs = requireIsArguments();
+
+  	var origKeys = Object.keys;
+  	var keysShim = origKeys ? function keys(o) { return origKeys(o); } : requireImplementation$1();
+
+  	var originalKeys = Object.keys;
+
+  	keysShim.shim = function shimObjectKeys() {
+  		if (Object.keys) {
+  			var keysWorksWithArguments = (function () {
+  				// Safari 5.0 bug
+  				var args = Object.keys(arguments);
+  				return args && args.length === arguments.length;
+  			}(1, 2));
+  			if (!keysWorksWithArguments) {
+  				Object.keys = function keys(object) { // eslint-disable-line func-name-matching
+  					if (isArgs(object)) {
+  						return originalKeys(slice.call(object));
+  					}
+  					return originalKeys(object);
+  				};
+  			}
+  		} else {
+  			Object.keys = keysShim;
+  		}
+  		return Object.keys || keysShim;
+  	};
+
+  	objectKeys = keysShim;
+  	return objectKeys;
+  }
+
+  var callBind = {exports: {}};
+
+  var esObjectAtoms;
+  var hasRequiredEsObjectAtoms;
+
+  function requireEsObjectAtoms () {
+  	if (hasRequiredEsObjectAtoms) return esObjectAtoms;
+  	hasRequiredEsObjectAtoms = 1;
+
+  	/** @type {import('.')} */
+  	esObjectAtoms = Object;
+  	return esObjectAtoms;
+  }
+
+  var esErrors;
+  var hasRequiredEsErrors;
+
+  function requireEsErrors () {
+  	if (hasRequiredEsErrors) return esErrors;
+  	hasRequiredEsErrors = 1;
+
+  	/** @type {import('.')} */
+  	esErrors = Error;
+  	return esErrors;
+  }
+
+  var _eval;
+  var hasRequired_eval;
+
+  function require_eval () {
+  	if (hasRequired_eval) return _eval;
+  	hasRequired_eval = 1;
+
+  	/** @type {import('./eval')} */
+  	_eval = EvalError;
+  	return _eval;
+  }
+
+  var range;
+  var hasRequiredRange;
+
+  function requireRange () {
+  	if (hasRequiredRange) return range;
+  	hasRequiredRange = 1;
+
+  	/** @type {import('./range')} */
+  	range = RangeError;
+  	return range;
+  }
+
+  var ref;
+  var hasRequiredRef;
+
+  function requireRef () {
+  	if (hasRequiredRef) return ref;
+  	hasRequiredRef = 1;
+
+  	/** @type {import('./ref')} */
+  	ref = ReferenceError;
+  	return ref;
+  }
+
+  var syntax;
+  var hasRequiredSyntax;
+
+  function requireSyntax () {
+  	if (hasRequiredSyntax) return syntax;
+  	hasRequiredSyntax = 1;
+
+  	/** @type {import('./syntax')} */
+  	syntax = SyntaxError;
+  	return syntax;
+  }
+
+  var type;
+  var hasRequiredType;
+
+  function requireType () {
+  	if (hasRequiredType) return type;
+  	hasRequiredType = 1;
+
+  	/** @type {import('./type')} */
+  	type = TypeError;
+  	return type;
+  }
+
+  var uri;
+  var hasRequiredUri;
+
+  function requireUri () {
+  	if (hasRequiredUri) return uri;
+  	hasRequiredUri = 1;
+
+  	/** @type {import('./uri')} */
+  	uri = URIError;
+  	return uri;
+  }
+
+  var abs;
+  var hasRequiredAbs;
+
+  function requireAbs () {
+  	if (hasRequiredAbs) return abs;
+  	hasRequiredAbs = 1;
+
+  	/** @type {import('./abs')} */
+  	abs = Math.abs;
+  	return abs;
+  }
+
+  var floor;
+  var hasRequiredFloor;
+
+  function requireFloor () {
+  	if (hasRequiredFloor) return floor;
+  	hasRequiredFloor = 1;
+
+  	/** @type {import('./floor')} */
+  	floor = Math.floor;
+  	return floor;
+  }
+
+  var max;
+  var hasRequiredMax;
+
+  function requireMax () {
+  	if (hasRequiredMax) return max;
+  	hasRequiredMax = 1;
+
+  	/** @type {import('./max')} */
+  	max = Math.max;
+  	return max;
+  }
+
+  var min;
+  var hasRequiredMin;
+
+  function requireMin () {
+  	if (hasRequiredMin) return min;
+  	hasRequiredMin = 1;
+
+  	/** @type {import('./min')} */
+  	min = Math.min;
+  	return min;
+  }
+
+  var pow;
+  var hasRequiredPow;
+
+  function requirePow () {
+  	if (hasRequiredPow) return pow;
+  	hasRequiredPow = 1;
+
+  	/** @type {import('./pow')} */
+  	pow = Math.pow;
+  	return pow;
+  }
+
+  var round;
+  var hasRequiredRound;
+
+  function requireRound () {
+  	if (hasRequiredRound) return round;
+  	hasRequiredRound = 1;
+
+  	/** @type {import('./round')} */
+  	round = Math.round;
+  	return round;
+  }
+
+  var _isNaN;
+  var hasRequired_isNaN;
+
+  function require_isNaN () {
+  	if (hasRequired_isNaN) return _isNaN;
+  	hasRequired_isNaN = 1;
+
+  	/** @type {import('./isNaN')} */
+  	_isNaN = Number.isNaN || function isNaN(a) {
+  		return a !== a;
+  	};
+  	return _isNaN;
+  }
+
+  var sign;
+  var hasRequiredSign;
+
+  function requireSign () {
+  	if (hasRequiredSign) return sign;
+  	hasRequiredSign = 1;
+
+  	var $isNaN = require_isNaN();
+
+  	/** @type {import('./sign')} */
+  	sign = function sign(number) {
+  		if ($isNaN(number) || number === 0) {
+  			return number;
+  		}
+  		return number < 0 ? -1 : 1;
+  	};
+  	return sign;
+  }
+
+  var gOPD;
+  var hasRequiredGOPD;
+
+  function requireGOPD () {
+  	if (hasRequiredGOPD) return gOPD;
+  	hasRequiredGOPD = 1;
+
+  	/** @type {import('./gOPD')} */
+  	gOPD = Object.getOwnPropertyDescriptor;
+  	return gOPD;
+  }
+
+  var gopd;
+  var hasRequiredGopd;
+
+  function requireGopd () {
+  	if (hasRequiredGopd) return gopd;
+  	hasRequiredGopd = 1;
+
+  	/** @type {import('.')} */
+  	var $gOPD = requireGOPD();
+
+  	if ($gOPD) {
+  		try {
+  			$gOPD([], 'length');
+  		} catch (e) {
+  			// IE 8 has a broken gOPD
+  			$gOPD = null;
+  		}
+  	}
+
+  	gopd = $gOPD;
+  	return gopd;
+  }
+
+  var esDefineProperty;
+  var hasRequiredEsDefineProperty;
+
+  function requireEsDefineProperty () {
+  	if (hasRequiredEsDefineProperty) return esDefineProperty;
+  	hasRequiredEsDefineProperty = 1;
+
+  	/** @type {import('.')} */
+  	var $defineProperty = Object.defineProperty || false;
+  	if ($defineProperty) {
+  		try {
+  			$defineProperty({}, 'a', { value: 1 });
+  		} catch (e) {
+  			// IE 8 has a broken defineProperty
+  			$defineProperty = false;
+  		}
+  	}
+
+  	esDefineProperty = $defineProperty;
+  	return esDefineProperty;
+  }
+
+  var shams;
+  var hasRequiredShams;
+
+  function requireShams () {
+  	if (hasRequiredShams) return shams;
+  	hasRequiredShams = 1;
+
+  	/** @type {import('./shams')} */
+  	/* eslint complexity: [2, 18], max-statements: [2, 33] */
+  	shams = function hasSymbols() {
+  		if (typeof Symbol !== 'function' || typeof Object.getOwnPropertySymbols !== 'function') { return false; }
+  		if (typeof Symbol.iterator === 'symbol') { return true; }
+
+  		/** @type {{ [k in symbol]?: unknown }} */
+  		var obj = {};
+  		var sym = Symbol('test');
+  		var symObj = Object(sym);
+  		if (typeof sym === 'string') { return false; }
+
+  		if (Object.prototype.toString.call(sym) !== '[object Symbol]') { return false; }
+  		if (Object.prototype.toString.call(symObj) !== '[object Symbol]') { return false; }
+
+  		// temp disabled per https://github.com/ljharb/object.assign/issues/17
+  		// if (sym instanceof Symbol) { return false; }
+  		// temp disabled per https://github.com/WebReflection/get-own-property-symbols/issues/4
+  		// if (!(symObj instanceof Symbol)) { return false; }
+
+  		// if (typeof Symbol.prototype.toString !== 'function') { return false; }
+  		// if (String(sym) !== Symbol.prototype.toString.call(sym)) { return false; }
+
+  		var symVal = 42;
+  		obj[sym] = symVal;
+  		for (var _ in obj) { return false; } // eslint-disable-line no-restricted-syntax, no-unreachable-loop
+  		if (typeof Object.keys === 'function' && Object.keys(obj).length !== 0) { return false; }
+
+  		if (typeof Object.getOwnPropertyNames === 'function' && Object.getOwnPropertyNames(obj).length !== 0) { return false; }
+
+  		var syms = Object.getOwnPropertySymbols(obj);
+  		if (syms.length !== 1 || syms[0] !== sym) { return false; }
+
+  		if (!Object.prototype.propertyIsEnumerable.call(obj, sym)) { return false; }
+
+  		if (typeof Object.getOwnPropertyDescriptor === 'function') {
+  			// eslint-disable-next-line no-extra-parens
+  			var descriptor = /** @type {PropertyDescriptor} */ (Object.getOwnPropertyDescriptor(obj, sym));
+  			if (descriptor.value !== symVal || descriptor.enumerable !== true) { return false; }
+  		}
+
+  		return true;
+  	};
+  	return shams;
+  }
+
+  var hasSymbols;
+  var hasRequiredHasSymbols;
+
+  function requireHasSymbols () {
+  	if (hasRequiredHasSymbols) return hasSymbols;
+  	hasRequiredHasSymbols = 1;
+
+  	var origSymbol = typeof Symbol !== 'undefined' && Symbol;
+  	var hasSymbolSham = requireShams();
+
+  	/** @type {import('.')} */
+  	hasSymbols = function hasNativeSymbols() {
+  		if (typeof origSymbol !== 'function') { return false; }
+  		if (typeof Symbol !== 'function') { return false; }
+  		if (typeof origSymbol('foo') !== 'symbol') { return false; }
+  		if (typeof Symbol('bar') !== 'symbol') { return false; }
+
+  		return hasSymbolSham();
+  	};
+  	return hasSymbols;
+  }
+
+  var Reflect_getPrototypeOf;
+  var hasRequiredReflect_getPrototypeOf;
+
+  function requireReflect_getPrototypeOf () {
+  	if (hasRequiredReflect_getPrototypeOf) return Reflect_getPrototypeOf;
+  	hasRequiredReflect_getPrototypeOf = 1;
+
+  	/** @type {import('./Reflect.getPrototypeOf')} */
+  	Reflect_getPrototypeOf = (typeof Reflect !== 'undefined' && Reflect.getPrototypeOf) || null;
+  	return Reflect_getPrototypeOf;
+  }
+
+  var Object_getPrototypeOf;
+  var hasRequiredObject_getPrototypeOf;
+
+  function requireObject_getPrototypeOf () {
+  	if (hasRequiredObject_getPrototypeOf) return Object_getPrototypeOf;
+  	hasRequiredObject_getPrototypeOf = 1;
+
+  	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
+
+  	/** @type {import('./Object.getPrototypeOf')} */
+  	Object_getPrototypeOf = $Object.getPrototypeOf || null;
+  	return Object_getPrototypeOf;
+  }
+
+  var implementation;
+  var hasRequiredImplementation;
+
+  function requireImplementation () {
+  	if (hasRequiredImplementation) return implementation;
+  	hasRequiredImplementation = 1;
+
+  	/* eslint no-invalid-this: 1 */
+
+  	var ERROR_MESSAGE = 'Function.prototype.bind called on incompatible ';
+  	var toStr = Object.prototype.toString;
+  	var max = Math.max;
+  	var funcType = '[object Function]';
+
+  	var concatty = function concatty(a, b) {
+  	    var arr = [];
+
+  	    for (var i = 0; i < a.length; i += 1) {
+  	        arr[i] = a[i];
+  	    }
+  	    for (var j = 0; j < b.length; j += 1) {
+  	        arr[j + a.length] = b[j];
+  	    }
+
+  	    return arr;
+  	};
+
+  	var slicy = function slicy(arrLike, offset) {
+  	    var arr = [];
+  	    for (var i = offset, j = 0; i < arrLike.length; i += 1, j += 1) {
+  	        arr[j] = arrLike[i];
+  	    }
+  	    return arr;
+  	};
+
+  	var joiny = function (arr, joiner) {
+  	    var str = '';
+  	    for (var i = 0; i < arr.length; i += 1) {
+  	        str += arr[i];
+  	        if (i + 1 < arr.length) {
+  	            str += joiner;
+  	        }
+  	    }
+  	    return str;
+  	};
+
+  	implementation = function bind(that) {
+  	    var target = this;
+  	    if (typeof target !== 'function' || toStr.apply(target) !== funcType) {
+  	        throw new TypeError(ERROR_MESSAGE + target);
+  	    }
+  	    var args = slicy(arguments, 1);
+
+  	    var bound;
+  	    var binder = function () {
+  	        if (this instanceof bound) {
+  	            var result = target.apply(
+  	                this,
+  	                concatty(args, arguments)
+  	            );
+  	            if (Object(result) === result) {
+  	                return result;
+  	            }
+  	            return this;
+  	        }
+  	        return target.apply(
+  	            that,
+  	            concatty(args, arguments)
+  	        );
+
+  	    };
+
+  	    var boundLength = max(0, target.length - args.length);
+  	    var boundArgs = [];
+  	    for (var i = 0; i < boundLength; i++) {
+  	        boundArgs[i] = '$' + i;
+  	    }
+
+  	    bound = Function('binder', 'return function (' + joiny(boundArgs, ',') + '){ return binder.apply(this,arguments); }')(binder);
+
+  	    if (target.prototype) {
+  	        var Empty = function Empty() {};
+  	        Empty.prototype = target.prototype;
+  	        bound.prototype = new Empty();
+  	        Empty.prototype = null;
+  	    }
+
+  	    return bound;
+  	};
+  	return implementation;
+  }
+
+  var functionBind;
+  var hasRequiredFunctionBind;
+
+  function requireFunctionBind () {
+  	if (hasRequiredFunctionBind) return functionBind;
+  	hasRequiredFunctionBind = 1;
+
+  	var implementation = requireImplementation();
+
+  	functionBind = Function.prototype.bind || implementation;
+  	return functionBind;
+  }
+
+  var functionCall;
+  var hasRequiredFunctionCall;
+
+  function requireFunctionCall () {
+  	if (hasRequiredFunctionCall) return functionCall;
+  	hasRequiredFunctionCall = 1;
+
+  	/** @type {import('./functionCall')} */
+  	functionCall = Function.prototype.call;
+  	return functionCall;
+  }
+
+  var functionApply;
+  var hasRequiredFunctionApply;
+
+  function requireFunctionApply () {
+  	if (hasRequiredFunctionApply) return functionApply;
+  	hasRequiredFunctionApply = 1;
+
+  	/** @type {import('./functionApply')} */
+  	functionApply = Function.prototype.apply;
+  	return functionApply;
+  }
+
+  var reflectApply;
+  var hasRequiredReflectApply;
+
+  function requireReflectApply () {
+  	if (hasRequiredReflectApply) return reflectApply;
+  	hasRequiredReflectApply = 1;
+
+  	/** @type {import('./reflectApply')} */
+  	reflectApply = typeof Reflect !== 'undefined' && Reflect && Reflect.apply;
+  	return reflectApply;
+  }
+
+  var actualApply;
+  var hasRequiredActualApply;
+
+  function requireActualApply () {
+  	if (hasRequiredActualApply) return actualApply;
+  	hasRequiredActualApply = 1;
+
+  	var bind = requireFunctionBind();
+
+  	var $apply = requireFunctionApply();
+  	var $call = requireFunctionCall();
+  	var $reflectApply = requireReflectApply();
+
+  	/** @type {import('./actualApply')} */
+  	actualApply = $reflectApply || bind.call($call, $apply);
+  	return actualApply;
+  }
+
+  var callBindApplyHelpers;
+  var hasRequiredCallBindApplyHelpers;
+
+  function requireCallBindApplyHelpers () {
+  	if (hasRequiredCallBindApplyHelpers) return callBindApplyHelpers;
+  	hasRequiredCallBindApplyHelpers = 1;
+
+  	var bind = requireFunctionBind();
+  	var $TypeError = /*@__PURE__*/ requireType();
+
+  	var $call = requireFunctionCall();
+  	var $actualApply = requireActualApply();
+
+  	/** @type {(args: [Function, thisArg?: unknown, ...args: unknown[]]) => Function} TODO FIXME, find a way to use import('.') */
+  	callBindApplyHelpers = function callBindBasic(args) {
+  		if (args.length < 1 || typeof args[0] !== 'function') {
+  			throw new $TypeError('a function is required');
+  		}
+  		return $actualApply(bind, $call, args);
+  	};
+  	return callBindApplyHelpers;
+  }
+
+  var get;
+  var hasRequiredGet;
+
+  function requireGet () {
+  	if (hasRequiredGet) return get;
+  	hasRequiredGet = 1;
+
+  	var callBind = requireCallBindApplyHelpers();
+  	var gOPD = /*@__PURE__*/ requireGopd();
+
+  	var hasProtoAccessor;
+  	try {
+  		// eslint-disable-next-line no-extra-parens, no-proto
+  		hasProtoAccessor = /** @type {{ __proto__?: typeof Array.prototype }} */ ([]).__proto__ === Array.prototype;
+  	} catch (e) {
+  		if (!e || typeof e !== 'object' || !('code' in e) || e.code !== 'ERR_PROTO_ACCESS') {
+  			throw e;
+  		}
+  	}
+
+  	// eslint-disable-next-line no-extra-parens
+  	var desc = !!hasProtoAccessor && gOPD && gOPD(Object.prototype, /** @type {keyof typeof Object.prototype} */ ('__proto__'));
+
+  	var $Object = Object;
+  	var $getPrototypeOf = $Object.getPrototypeOf;
+
+  	/** @type {import('./get')} */
+  	get = desc && typeof desc.get === 'function'
+  		? callBind([desc.get])
+  		: typeof $getPrototypeOf === 'function'
+  			? /** @type {import('./get')} */ function getDunder(value) {
+  				// eslint-disable-next-line eqeqeq
+  				return $getPrototypeOf(value == null ? value : $Object(value));
+  			}
+  			: false;
+  	return get;
+  }
+
+  var getProto;
+  var hasRequiredGetProto;
+
+  function requireGetProto () {
+  	if (hasRequiredGetProto) return getProto;
+  	hasRequiredGetProto = 1;
+
+  	var reflectGetProto = requireReflect_getPrototypeOf();
+  	var originalGetProto = requireObject_getPrototypeOf();
+
+  	var getDunderProto = /*@__PURE__*/ requireGet();
+
+  	/** @type {import('.')} */
+  	getProto = reflectGetProto
+  		? function getProto(O) {
+  			// @ts-expect-error TS can't narrow inside a closure, for some reason
+  			return reflectGetProto(O);
+  		}
+  		: originalGetProto
+  			? function getProto(O) {
+  				if (!O || (typeof O !== 'object' && typeof O !== 'function')) {
+  					throw new TypeError('getProto: not an object');
+  				}
+  				// @ts-expect-error TS can't narrow inside a closure, for some reason
+  				return originalGetProto(O);
+  			}
+  			: getDunderProto
+  				? function getProto(O) {
+  					// @ts-expect-error TS can't narrow inside a closure, for some reason
+  					return getDunderProto(O);
+  				}
+  				: null;
+  	return getProto;
+  }
+
+  var hasown;
+  var hasRequiredHasown;
+
+  function requireHasown () {
+  	if (hasRequiredHasown) return hasown;
+  	hasRequiredHasown = 1;
+
+  	var call = Function.prototype.call;
+  	var $hasOwn = Object.prototype.hasOwnProperty;
+  	var bind = requireFunctionBind();
+
+  	/** @type {import('.')} */
+  	hasown = bind.call(call, $hasOwn);
+  	return hasown;
+  }
+
+  var getIntrinsic;
+  var hasRequiredGetIntrinsic;
+
+  function requireGetIntrinsic () {
+  	if (hasRequiredGetIntrinsic) return getIntrinsic;
+  	hasRequiredGetIntrinsic = 1;
+
+  	var undefined$1;
+
+  	var $Object = /*@__PURE__*/ requireEsObjectAtoms();
+
+  	var $Error = /*@__PURE__*/ requireEsErrors();
+  	var $EvalError = /*@__PURE__*/ require_eval();
+  	var $RangeError = /*@__PURE__*/ requireRange();
+  	var $ReferenceError = /*@__PURE__*/ requireRef();
+  	var $SyntaxError = /*@__PURE__*/ requireSyntax();
+  	var $TypeError = /*@__PURE__*/ requireType();
+  	var $URIError = /*@__PURE__*/ requireUri();
+
+  	var abs = /*@__PURE__*/ requireAbs();
+  	var floor = /*@__PURE__*/ requireFloor();
+  	var max = /*@__PURE__*/ requireMax();
+  	var min = /*@__PURE__*/ requireMin();
+  	var pow = /*@__PURE__*/ requirePow();
+  	var round = /*@__PURE__*/ requireRound();
+  	var sign = /*@__PURE__*/ requireSign();
+
+  	var $Function = Function;
+
+  	// eslint-disable-next-line consistent-return
+  	var getEvalledConstructor = function (expressionSyntax) {
+  		try {
+  			return $Function('"use strict"; return (' + expressionSyntax + ').constructor;')();
+  		} catch (e) {}
+  	};
+
+  	var $gOPD = /*@__PURE__*/ requireGopd();
+  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+  	var throwTypeError = function () {
+  		throw new $TypeError();
+  	};
+  	var ThrowTypeError = $gOPD
+  		? (function () {
+  			try {
+  				// eslint-disable-next-line no-unused-expressions, no-caller, no-restricted-properties
+  				arguments.callee; // IE 8 does not throw here
+  				return throwTypeError;
+  			} catch (calleeThrows) {
+  				try {
+  					// IE 8 throws on Object.getOwnPropertyDescriptor(arguments, '')
+  					return $gOPD(arguments, 'callee').get;
+  				} catch (gOPDthrows) {
+  					return throwTypeError;
+  				}
+  			}
+  		}())
+  		: throwTypeError;
+
+  	var hasSymbols = requireHasSymbols()();
+
+  	var getProto = requireGetProto();
+  	var $ObjectGPO = requireObject_getPrototypeOf();
+  	var $ReflectGPO = requireReflect_getPrototypeOf();
+
+  	var $apply = requireFunctionApply();
+  	var $call = requireFunctionCall();
+
+  	var needsEval = {};
+
+  	var TypedArray = typeof Uint8Array === 'undefined' || !getProto ? undefined$1 : getProto(Uint8Array);
+
+  	var INTRINSICS = {
+  		__proto__: null,
+  		'%AggregateError%': typeof AggregateError === 'undefined' ? undefined$1 : AggregateError,
+  		'%Array%': Array,
+  		'%ArrayBuffer%': typeof ArrayBuffer === 'undefined' ? undefined$1 : ArrayBuffer,
+  		'%ArrayIteratorPrototype%': hasSymbols && getProto ? getProto([][Symbol.iterator]()) : undefined$1,
+  		'%AsyncFromSyncIteratorPrototype%': undefined$1,
+  		'%AsyncFunction%': needsEval,
+  		'%AsyncGenerator%': needsEval,
+  		'%AsyncGeneratorFunction%': needsEval,
+  		'%AsyncIteratorPrototype%': needsEval,
+  		'%Atomics%': typeof Atomics === 'undefined' ? undefined$1 : Atomics,
+  		'%BigInt%': typeof BigInt === 'undefined' ? undefined$1 : BigInt,
+  		'%BigInt64Array%': typeof BigInt64Array === 'undefined' ? undefined$1 : BigInt64Array,
+  		'%BigUint64Array%': typeof BigUint64Array === 'undefined' ? undefined$1 : BigUint64Array,
+  		'%Boolean%': Boolean,
+  		'%DataView%': typeof DataView === 'undefined' ? undefined$1 : DataView,
+  		'%Date%': Date,
+  		'%decodeURI%': decodeURI,
+  		'%decodeURIComponent%': decodeURIComponent,
+  		'%encodeURI%': encodeURI,
+  		'%encodeURIComponent%': encodeURIComponent,
+  		'%Error%': $Error,
+  		'%eval%': eval, // eslint-disable-line no-eval
+  		'%EvalError%': $EvalError,
+  		'%Float16Array%': typeof Float16Array === 'undefined' ? undefined$1 : Float16Array,
+  		'%Float32Array%': typeof Float32Array === 'undefined' ? undefined$1 : Float32Array,
+  		'%Float64Array%': typeof Float64Array === 'undefined' ? undefined$1 : Float64Array,
+  		'%FinalizationRegistry%': typeof FinalizationRegistry === 'undefined' ? undefined$1 : FinalizationRegistry,
+  		'%Function%': $Function,
+  		'%GeneratorFunction%': needsEval,
+  		'%Int8Array%': typeof Int8Array === 'undefined' ? undefined$1 : Int8Array,
+  		'%Int16Array%': typeof Int16Array === 'undefined' ? undefined$1 : Int16Array,
+  		'%Int32Array%': typeof Int32Array === 'undefined' ? undefined$1 : Int32Array,
+  		'%isFinite%': isFinite,
+  		'%isNaN%': isNaN,
+  		'%IteratorPrototype%': hasSymbols && getProto ? getProto(getProto([][Symbol.iterator]())) : undefined$1,
+  		'%JSON%': typeof JSON === 'object' ? JSON : undefined$1,
+  		'%Map%': typeof Map === 'undefined' ? undefined$1 : Map,
+  		'%MapIteratorPrototype%': typeof Map === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Map()[Symbol.iterator]()),
+  		'%Math%': Math,
+  		'%Number%': Number,
+  		'%Object%': $Object,
+  		'%Object.getOwnPropertyDescriptor%': $gOPD,
+  		'%parseFloat%': parseFloat,
+  		'%parseInt%': parseInt,
+  		'%Promise%': typeof Promise === 'undefined' ? undefined$1 : Promise,
+  		'%Proxy%': typeof Proxy === 'undefined' ? undefined$1 : Proxy,
+  		'%RangeError%': $RangeError,
+  		'%ReferenceError%': $ReferenceError,
+  		'%Reflect%': typeof Reflect === 'undefined' ? undefined$1 : Reflect,
+  		'%RegExp%': RegExp,
+  		'%Set%': typeof Set === 'undefined' ? undefined$1 : Set,
+  		'%SetIteratorPrototype%': typeof Set === 'undefined' || !hasSymbols || !getProto ? undefined$1 : getProto(new Set()[Symbol.iterator]()),
+  		'%SharedArrayBuffer%': typeof SharedArrayBuffer === 'undefined' ? undefined$1 : SharedArrayBuffer,
+  		'%String%': String,
+  		'%StringIteratorPrototype%': hasSymbols && getProto ? getProto(''[Symbol.iterator]()) : undefined$1,
+  		'%Symbol%': hasSymbols ? Symbol : undefined$1,
+  		'%SyntaxError%': $SyntaxError,
+  		'%ThrowTypeError%': ThrowTypeError,
+  		'%TypedArray%': TypedArray,
+  		'%TypeError%': $TypeError,
+  		'%Uint8Array%': typeof Uint8Array === 'undefined' ? undefined$1 : Uint8Array,
+  		'%Uint8ClampedArray%': typeof Uint8ClampedArray === 'undefined' ? undefined$1 : Uint8ClampedArray,
+  		'%Uint16Array%': typeof Uint16Array === 'undefined' ? undefined$1 : Uint16Array,
+  		'%Uint32Array%': typeof Uint32Array === 'undefined' ? undefined$1 : Uint32Array,
+  		'%URIError%': $URIError,
+  		'%WeakMap%': typeof WeakMap === 'undefined' ? undefined$1 : WeakMap,
+  		'%WeakRef%': typeof WeakRef === 'undefined' ? undefined$1 : WeakRef,
+  		'%WeakSet%': typeof WeakSet === 'undefined' ? undefined$1 : WeakSet,
+
+  		'%Function.prototype.call%': $call,
+  		'%Function.prototype.apply%': $apply,
+  		'%Object.defineProperty%': $defineProperty,
+  		'%Object.getPrototypeOf%': $ObjectGPO,
+  		'%Math.abs%': abs,
+  		'%Math.floor%': floor,
+  		'%Math.max%': max,
+  		'%Math.min%': min,
+  		'%Math.pow%': pow,
+  		'%Math.round%': round,
+  		'%Math.sign%': sign,
+  		'%Reflect.getPrototypeOf%': $ReflectGPO
+  	};
+
+  	if (getProto) {
+  		try {
+  			null.error; // eslint-disable-line no-unused-expressions
+  		} catch (e) {
+  			// https://github.com/tc39/proposal-shadowrealm/pull/384#issuecomment-1364264229
+  			var errorProto = getProto(getProto(e));
+  			INTRINSICS['%Error.prototype%'] = errorProto;
+  		}
+  	}
+
+  	var doEval = function doEval(name) {
+  		var value;
+  		if (name === '%AsyncFunction%') {
+  			value = getEvalledConstructor('async function () {}');
+  		} else if (name === '%GeneratorFunction%') {
+  			value = getEvalledConstructor('function* () {}');
+  		} else if (name === '%AsyncGeneratorFunction%') {
+  			value = getEvalledConstructor('async function* () {}');
+  		} else if (name === '%AsyncGenerator%') {
+  			var fn = doEval('%AsyncGeneratorFunction%');
+  			if (fn) {
+  				value = fn.prototype;
+  			}
+  		} else if (name === '%AsyncIteratorPrototype%') {
+  			var gen = doEval('%AsyncGenerator%');
+  			if (gen && getProto) {
+  				value = getProto(gen.prototype);
+  			}
+  		}
+
+  		INTRINSICS[name] = value;
+
+  		return value;
+  	};
+
+  	var LEGACY_ALIASES = {
+  		__proto__: null,
+  		'%ArrayBufferPrototype%': ['ArrayBuffer', 'prototype'],
+  		'%ArrayPrototype%': ['Array', 'prototype'],
+  		'%ArrayProto_entries%': ['Array', 'prototype', 'entries'],
+  		'%ArrayProto_forEach%': ['Array', 'prototype', 'forEach'],
+  		'%ArrayProto_keys%': ['Array', 'prototype', 'keys'],
+  		'%ArrayProto_values%': ['Array', 'prototype', 'values'],
+  		'%AsyncFunctionPrototype%': ['AsyncFunction', 'prototype'],
+  		'%AsyncGenerator%': ['AsyncGeneratorFunction', 'prototype'],
+  		'%AsyncGeneratorPrototype%': ['AsyncGeneratorFunction', 'prototype', 'prototype'],
+  		'%BooleanPrototype%': ['Boolean', 'prototype'],
+  		'%DataViewPrototype%': ['DataView', 'prototype'],
+  		'%DatePrototype%': ['Date', 'prototype'],
+  		'%ErrorPrototype%': ['Error', 'prototype'],
+  		'%EvalErrorPrototype%': ['EvalError', 'prototype'],
+  		'%Float32ArrayPrototype%': ['Float32Array', 'prototype'],
+  		'%Float64ArrayPrototype%': ['Float64Array', 'prototype'],
+  		'%FunctionPrototype%': ['Function', 'prototype'],
+  		'%Generator%': ['GeneratorFunction', 'prototype'],
+  		'%GeneratorPrototype%': ['GeneratorFunction', 'prototype', 'prototype'],
+  		'%Int8ArrayPrototype%': ['Int8Array', 'prototype'],
+  		'%Int16ArrayPrototype%': ['Int16Array', 'prototype'],
+  		'%Int32ArrayPrototype%': ['Int32Array', 'prototype'],
+  		'%JSONParse%': ['JSON', 'parse'],
+  		'%JSONStringify%': ['JSON', 'stringify'],
+  		'%MapPrototype%': ['Map', 'prototype'],
+  		'%NumberPrototype%': ['Number', 'prototype'],
+  		'%ObjectPrototype%': ['Object', 'prototype'],
+  		'%ObjProto_toString%': ['Object', 'prototype', 'toString'],
+  		'%ObjProto_valueOf%': ['Object', 'prototype', 'valueOf'],
+  		'%PromisePrototype%': ['Promise', 'prototype'],
+  		'%PromiseProto_then%': ['Promise', 'prototype', 'then'],
+  		'%Promise_all%': ['Promise', 'all'],
+  		'%Promise_reject%': ['Promise', 'reject'],
+  		'%Promise_resolve%': ['Promise', 'resolve'],
+  		'%RangeErrorPrototype%': ['RangeError', 'prototype'],
+  		'%ReferenceErrorPrototype%': ['ReferenceError', 'prototype'],
+  		'%RegExpPrototype%': ['RegExp', 'prototype'],
+  		'%SetPrototype%': ['Set', 'prototype'],
+  		'%SharedArrayBufferPrototype%': ['SharedArrayBuffer', 'prototype'],
+  		'%StringPrototype%': ['String', 'prototype'],
+  		'%SymbolPrototype%': ['Symbol', 'prototype'],
+  		'%SyntaxErrorPrototype%': ['SyntaxError', 'prototype'],
+  		'%TypedArrayPrototype%': ['TypedArray', 'prototype'],
+  		'%TypeErrorPrototype%': ['TypeError', 'prototype'],
+  		'%Uint8ArrayPrototype%': ['Uint8Array', 'prototype'],
+  		'%Uint8ClampedArrayPrototype%': ['Uint8ClampedArray', 'prototype'],
+  		'%Uint16ArrayPrototype%': ['Uint16Array', 'prototype'],
+  		'%Uint32ArrayPrototype%': ['Uint32Array', 'prototype'],
+  		'%URIErrorPrototype%': ['URIError', 'prototype'],
+  		'%WeakMapPrototype%': ['WeakMap', 'prototype'],
+  		'%WeakSetPrototype%': ['WeakSet', 'prototype']
+  	};
+
+  	var bind = requireFunctionBind();
+  	var hasOwn = /*@__PURE__*/ requireHasown();
+  	var $concat = bind.call($call, Array.prototype.concat);
+  	var $spliceApply = bind.call($apply, Array.prototype.splice);
+  	var $replace = bind.call($call, String.prototype.replace);
+  	var $strSlice = bind.call($call, String.prototype.slice);
+  	var $exec = bind.call($call, RegExp.prototype.exec);
+
+  	/* adapted from https://github.com/lodash/lodash/blob/4.17.15/dist/lodash.js#L6735-L6744 */
+  	var rePropName = /[^%.[\]]+|\[(?:(-?\d+(?:\.\d+)?)|(["'])((?:(?!\2)[^\\]|\\.)*?)\2)\]|(?=(?:\.|\[\])(?:\.|\[\]|%$))/g;
+  	var reEscapeChar = /\\(\\)?/g; /** Used to match backslashes in property paths. */
+  	var stringToPath = function stringToPath(string) {
+  		var first = $strSlice(string, 0, 1);
+  		var last = $strSlice(string, -1);
+  		if (first === '%' && last !== '%') {
+  			throw new $SyntaxError('invalid intrinsic syntax, expected closing `%`');
+  		} else if (last === '%' && first !== '%') {
+  			throw new $SyntaxError('invalid intrinsic syntax, expected opening `%`');
+  		}
+  		var result = [];
+  		$replace(string, rePropName, function (match, number, quote, subString) {
+  			result[result.length] = quote ? $replace(subString, reEscapeChar, '$1') : number || match;
+  		});
+  		return result;
+  	};
+  	/* end adaptation */
+
+  	var getBaseIntrinsic = function getBaseIntrinsic(name, allowMissing) {
+  		var intrinsicName = name;
+  		var alias;
+  		if (hasOwn(LEGACY_ALIASES, intrinsicName)) {
+  			alias = LEGACY_ALIASES[intrinsicName];
+  			intrinsicName = '%' + alias[0] + '%';
+  		}
+
+  		if (hasOwn(INTRINSICS, intrinsicName)) {
+  			var value = INTRINSICS[intrinsicName];
+  			if (value === needsEval) {
+  				value = doEval(intrinsicName);
+  			}
+  			if (typeof value === 'undefined' && !allowMissing) {
+  				throw new $TypeError('intrinsic ' + name + ' exists, but is not available. Please file an issue!');
+  			}
+
+  			return {
+  				alias: alias,
+  				name: intrinsicName,
+  				value: value
+  			};
+  		}
+
+  		throw new $SyntaxError('intrinsic ' + name + ' does not exist!');
+  	};
+
+  	getIntrinsic = function GetIntrinsic(name, allowMissing) {
+  		if (typeof name !== 'string' || name.length === 0) {
+  			throw new $TypeError('intrinsic name must be a non-empty string');
+  		}
+  		if (arguments.length > 1 && typeof allowMissing !== 'boolean') {
+  			throw new $TypeError('"allowMissing" argument must be a boolean');
+  		}
+
+  		if ($exec(/^%?[^%]*%?$/, name) === null) {
+  			throw new $SyntaxError('`%` may not be present anywhere but at the beginning and end of the intrinsic name');
+  		}
+  		var parts = stringToPath(name);
+  		var intrinsicBaseName = parts.length > 0 ? parts[0] : '';
+
+  		var intrinsic = getBaseIntrinsic('%' + intrinsicBaseName + '%', allowMissing);
+  		var intrinsicRealName = intrinsic.name;
+  		var value = intrinsic.value;
+  		var skipFurtherCaching = false;
+
+  		var alias = intrinsic.alias;
+  		if (alias) {
+  			intrinsicBaseName = alias[0];
+  			$spliceApply(parts, $concat([0, 1], alias));
+  		}
+
+  		for (var i = 1, isOwn = true; i < parts.length; i += 1) {
+  			var part = parts[i];
+  			var first = $strSlice(part, 0, 1);
+  			var last = $strSlice(part, -1);
+  			if (
+  				(
+  					(first === '"' || first === "'" || first === '`')
+  					|| (last === '"' || last === "'" || last === '`')
+  				)
+  				&& first !== last
+  			) {
+  				throw new $SyntaxError('property names with quotes must have matching quotes');
+  			}
+  			if (part === 'constructor' || !isOwn) {
+  				skipFurtherCaching = true;
+  			}
+
+  			intrinsicBaseName += '.' + part;
+  			intrinsicRealName = '%' + intrinsicBaseName + '%';
+
+  			if (hasOwn(INTRINSICS, intrinsicRealName)) {
+  				value = INTRINSICS[intrinsicRealName];
+  			} else if (value != null) {
+  				if (!(part in value)) {
+  					if (!allowMissing) {
+  						throw new $TypeError('base intrinsic for ' + name + ' exists, but the property is not available.');
+  					}
+  					return void undefined$1;
+  				}
+  				if ($gOPD && (i + 1) >= parts.length) {
+  					var desc = $gOPD(value, part);
+  					isOwn = !!desc;
+
+  					// By convention, when a data property is converted to an accessor
+  					// property to emulate a data property that does not suffer from
+  					// the override mistake, that accessor's getter is marked with
+  					// an `originalValue` property. Here, when we detect this, we
+  					// uphold the illusion by pretending to see that original data
+  					// property, i.e., returning the value rather than the getter
+  					// itself.
+  					if (isOwn && 'get' in desc && !('originalValue' in desc.get)) {
+  						value = desc.get;
+  					} else {
+  						value = value[part];
+  					}
+  				} else {
+  					isOwn = hasOwn(value, part);
+  					value = value[part];
+  				}
+
+  				if (isOwn && !skipFurtherCaching) {
+  					INTRINSICS[intrinsicRealName] = value;
+  				}
+  			}
+  		}
+  		return value;
+  	};
+  	return getIntrinsic;
+  }
+
+  var defineDataProperty;
+  var hasRequiredDefineDataProperty;
+
+  function requireDefineDataProperty () {
+  	if (hasRequiredDefineDataProperty) return defineDataProperty;
+  	hasRequiredDefineDataProperty = 1;
+
+  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+  	var $SyntaxError = /*@__PURE__*/ requireSyntax();
+  	var $TypeError = /*@__PURE__*/ requireType();
+
+  	var gopd = /*@__PURE__*/ requireGopd();
+
+  	/** @type {import('.')} */
+  	defineDataProperty = function defineDataProperty(
+  		obj,
+  		property,
+  		value
+  	) {
+  		if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) {
+  			throw new $TypeError('`obj` must be an object or a function`');
+  		}
+  		if (typeof property !== 'string' && typeof property !== 'symbol') {
+  			throw new $TypeError('`property` must be a string or a symbol`');
+  		}
+  		if (arguments.length > 3 && typeof arguments[3] !== 'boolean' && arguments[3] !== null) {
+  			throw new $TypeError('`nonEnumerable`, if provided, must be a boolean or null');
+  		}
+  		if (arguments.length > 4 && typeof arguments[4] !== 'boolean' && arguments[4] !== null) {
+  			throw new $TypeError('`nonWritable`, if provided, must be a boolean or null');
+  		}
+  		if (arguments.length > 5 && typeof arguments[5] !== 'boolean' && arguments[5] !== null) {
+  			throw new $TypeError('`nonConfigurable`, if provided, must be a boolean or null');
+  		}
+  		if (arguments.length > 6 && typeof arguments[6] !== 'boolean') {
+  			throw new $TypeError('`loose`, if provided, must be a boolean');
+  		}
+
+  		var nonEnumerable = arguments.length > 3 ? arguments[3] : null;
+  		var nonWritable = arguments.length > 4 ? arguments[4] : null;
+  		var nonConfigurable = arguments.length > 5 ? arguments[5] : null;
+  		var loose = arguments.length > 6 ? arguments[6] : false;
+
+  		/* @type {false | TypedPropertyDescriptor<unknown>} */
+  		var desc = !!gopd && gopd(obj, property);
+
+  		if ($defineProperty) {
+  			$defineProperty(obj, property, {
+  				configurable: nonConfigurable === null && desc ? desc.configurable : !nonConfigurable,
+  				enumerable: nonEnumerable === null && desc ? desc.enumerable : !nonEnumerable,
+  				value: value,
+  				writable: nonWritable === null && desc ? desc.writable : !nonWritable
+  			});
+  		} else if (loose || (!nonEnumerable && !nonWritable && !nonConfigurable)) {
+  			// must fall back to [[Set]], and was not explicitly asked to make non-enumerable, non-writable, or non-configurable
+  			obj[property] = value; // eslint-disable-line no-param-reassign
+  		} else {
+  			throw new $SyntaxError('This environment does not support defining a property as non-configurable, non-writable, or non-enumerable.');
+  		}
+  	};
+  	return defineDataProperty;
+  }
+
+  var hasPropertyDescriptors_1;
+  var hasRequiredHasPropertyDescriptors;
+
+  function requireHasPropertyDescriptors () {
+  	if (hasRequiredHasPropertyDescriptors) return hasPropertyDescriptors_1;
+  	hasRequiredHasPropertyDescriptors = 1;
+
+  	var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+  	var hasPropertyDescriptors = function hasPropertyDescriptors() {
+  		return !!$defineProperty;
+  	};
+
+  	hasPropertyDescriptors.hasArrayLengthDefineBug = function hasArrayLengthDefineBug() {
+  		// node v0.6 has a bug where array lengths can be Set but not Defined
+  		if (!$defineProperty) {
+  			return null;
+  		}
+  		try {
+  			return $defineProperty([], 'length', { value: 1 }).length !== 1;
+  		} catch (e) {
+  			// In Firefox 4-22, defining length on an array throws an exception.
+  			return true;
+  		}
+  	};
+
+  	hasPropertyDescriptors_1 = hasPropertyDescriptors;
+  	return hasPropertyDescriptors_1;
+  }
+
+  var setFunctionLength;
+  var hasRequiredSetFunctionLength;
+
+  function requireSetFunctionLength () {
+  	if (hasRequiredSetFunctionLength) return setFunctionLength;
+  	hasRequiredSetFunctionLength = 1;
+
+  	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
+  	var define = /*@__PURE__*/ requireDefineDataProperty();
+  	var hasDescriptors = /*@__PURE__*/ requireHasPropertyDescriptors()();
+  	var gOPD = /*@__PURE__*/ requireGopd();
+
+  	var $TypeError = /*@__PURE__*/ requireType();
+  	var $floor = GetIntrinsic('%Math.floor%');
+
+  	/** @type {import('.')} */
+  	setFunctionLength = function setFunctionLength(fn, length) {
+  		if (typeof fn !== 'function') {
+  			throw new $TypeError('`fn` is not a function');
+  		}
+  		if (typeof length !== 'number' || length < 0 || length > 0xFFFFFFFF || $floor(length) !== length) {
+  			throw new $TypeError('`length` must be a positive 32-bit integer');
+  		}
+
+  		var loose = arguments.length > 2 && !!arguments[2];
+
+  		var functionLengthIsConfigurable = true;
+  		var functionLengthIsWritable = true;
+  		if ('length' in fn && gOPD) {
+  			var desc = gOPD(fn, 'length');
+  			if (desc && !desc.configurable) {
+  				functionLengthIsConfigurable = false;
+  			}
+  			if (desc && !desc.writable) {
+  				functionLengthIsWritable = false;
+  			}
+  		}
+
+  		if (functionLengthIsConfigurable || functionLengthIsWritable || !loose) {
+  			if (hasDescriptors) {
+  				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length, true, true);
+  			} else {
+  				define(/** @type {Parameters<define>[0]} */ (fn), 'length', length);
+  			}
+  		}
+  		return fn;
+  	};
+  	return setFunctionLength;
+  }
+
+  var applyBind;
+  var hasRequiredApplyBind;
+
+  function requireApplyBind () {
+  	if (hasRequiredApplyBind) return applyBind;
+  	hasRequiredApplyBind = 1;
+
+  	var bind = requireFunctionBind();
+  	var $apply = requireFunctionApply();
+  	var actualApply = requireActualApply();
+
+  	/** @type {import('./applyBind')} */
+  	applyBind = function applyBind() {
+  		return actualApply(bind, $apply, arguments);
+  	};
+  	return applyBind;
+  }
+
+  var hasRequiredCallBind;
+
+  function requireCallBind () {
+  	if (hasRequiredCallBind) return callBind.exports;
+  	hasRequiredCallBind = 1;
+  	(function (module) {
+
+  		var setFunctionLength = /*@__PURE__*/ requireSetFunctionLength();
+
+  		var $defineProperty = /*@__PURE__*/ requireEsDefineProperty();
+
+  		var callBindBasic = requireCallBindApplyHelpers();
+  		var applyBind = requireApplyBind();
+
+  		module.exports = function callBind(originalFunction) {
+  			var func = callBindBasic(arguments);
+  			var adjustedLength = originalFunction.length - (arguments.length - 1);
+  			return setFunctionLength(
+  				func,
+  				1 + (adjustedLength > 0 ? adjustedLength : 0),
+  				true
+  			);
+  		};
+
+  		if ($defineProperty) {
+  			$defineProperty(module.exports, 'apply', { value: applyBind });
+  		} else {
+  			module.exports.apply = applyBind;
+  		} 
+  	} (callBind));
+  	return callBind.exports;
+  }
+
+  var callBound;
+  var hasRequiredCallBound;
+
+  function requireCallBound () {
+  	if (hasRequiredCallBound) return callBound;
+  	hasRequiredCallBound = 1;
+
+  	var GetIntrinsic = /*@__PURE__*/ requireGetIntrinsic();
+
+  	var callBindBasic = requireCallBindApplyHelpers();
+
+  	/** @type {(thisArg: string, searchString: string, position?: number) => number} */
+  	var $indexOf = callBindBasic([GetIntrinsic('%String.prototype.indexOf%')]);
+
+  	/** @type {import('.')} */
+  	callBound = function callBoundIntrinsic(name, allowMissing) {
+  		/* eslint no-extra-parens: 0 */
+
+  		var intrinsic = /** @type {(this: unknown, ...args: unknown[]) => unknown} */ (GetIntrinsic(name, !!allowMissing));
+  		if (typeof intrinsic === 'function' && $indexOf(name, '.prototype.') > -1) {
+  			return callBindBasic(/** @type {const} */ ([intrinsic]));
+  		}
+  		return intrinsic;
+  	};
+  	return callBound;
+  }
+
+  var jsonStableStringify$1;
+  var hasRequiredJsonStableStringify;
+
+  function requireJsonStableStringify () {
+  	if (hasRequiredJsonStableStringify) return jsonStableStringify$1;
+  	hasRequiredJsonStableStringify = 1;
+
+  	/** @type {typeof JSON.stringify} */
+  	var jsonStringify = (typeof JSON !== 'undefined' ? JSON : requireJsonify()).stringify;
+
+  	var isArray = requireIsarray();
+  	var objectKeys = requireObjectKeys();
+  	var callBind = requireCallBind();
+  	var callBound = /*@__PURE__*/ requireCallBound();
+
+  	var $join = callBound('Array.prototype.join');
+  	var $indexOf = callBound('Array.prototype.indexOf');
+  	var $splice = callBound('Array.prototype.splice');
+  	var $sort = callBound('Array.prototype.sort');
+
+  	/** @type {(n: number, char: string) => string} */
+  	var strRepeat = function repeat(n, char) {
+  		var str = '';
+  		for (var i = 0; i < n; i += 1) {
+  			str += char;
+  		}
+  		return str;
+  	};
+
+  	/** @type {(parent: import('.').Node, key: import('.').Key, value: unknown) => unknown} */
+  	var defaultReplacer = function (_parent, _key, value) { return value; };
+
+  	/** @type {import('.')} */
+  	jsonStableStringify$1 = function stableStringify(obj) {
+  		/** @type {Parameters<import('.')>[1]} */
+  		var opts = arguments.length > 1 ? arguments[1] : void undefined;
+  		var space = (opts && opts.space) || '';
+  		if (typeof space === 'number') { space = strRepeat(space, ' '); }
+  		var cycles = !!opts && typeof opts.cycles === 'boolean' && opts.cycles;
+  		/** @type {undefined | typeof defaultReplacer} */
+  		var replacer = opts && opts.replacer ? callBind(opts.replacer) : defaultReplacer;
+  		if (opts && typeof opts.collapseEmpty !== 'undefined' && typeof opts.collapseEmpty !== 'boolean') {
+  			throw new TypeError('`collapseEmpty` must be a boolean, if provided');
+  		}
+  		var collapseEmpty = !!opts && opts.collapseEmpty;
+
+  		var cmpOpt = typeof opts === 'function' ? opts : opts && opts.cmp;
+  		/** @type {undefined | (<T extends import('.').NonArrayNode>(node: T) => (a: Exclude<keyof T, symbol | number>, b: Exclude<keyof T, symbol | number>) => number)} */
+  		var cmp = cmpOpt && function (node) {
+  			// eslint-disable-next-line no-extra-parens
+  			var get = /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt).length > 2
+  				&& /** @type {import('.').Getter['get']} */ function get(k) { return node[k]; };
+  			return function (a, b) {
+  				// eslint-disable-next-line no-extra-parens
+  				return /** @type {NonNullable<typeof cmpOpt>} */ (cmpOpt)(
+  					{ key: a, value: node[a] },
+  					{ key: b, value: node[b] },
+  					// @ts-expect-error TS doesn't understand the optimization used here
+  					get ? /** @type {import('.').Getter} */ { __proto__: null, get: get } : void undefined
+  				);
+  			};
+  		};
+
+  		/** @type {import('.').Node[]} */
+  		var seen = [];
+  		return (/** @type {(parent: import('.').Node, key: string | number, node: unknown, level: number) => string | undefined} */
+  			function stringify(parent, key, node, level) {
+  				var indent = space ? '\n' + strRepeat(level, space) : '';
+  				var colonSeparator = space ? ': ' : ':';
+
+  				// eslint-disable-next-line no-extra-parens
+  				if (node && /** @type {{ toJSON?: unknown }} */ (node).toJSON && typeof /** @type {{ toJSON?: unknown }} */ (node).toJSON === 'function') {
+  					// eslint-disable-next-line no-extra-parens
+  					node = /** @type {{ toJSON: Function }} */ (node).toJSON();
+  				}
+
+  				node = replacer(parent, key, node);
+  				if (node === undefined) {
+  					return;
+  				}
+  				if (typeof node !== 'object' || node === null) {
+  					return jsonStringify(node);
+  				}
+
+  				/** @type {(out: string[], brackets: '[]' | '{}') => string} */
+  				var groupOutput = function (out, brackets) {
+  					return collapseEmpty && out.length === 0
+  						? brackets
+  						: (brackets === '[]' ? '[' : '{') + $join(out, ',') + indent + (brackets === '[]' ? ']' : '}');
+  				};
+
+  				if (isArray(node)) {
+  					var out = [];
+  					for (var i = 0; i < node.length; i++) {
+  						var item = stringify(node, i, node[i], level + 1) || jsonStringify(null);
+  						out[out.length] = indent + space + item;
+  					}
+  					return groupOutput(out, '[]');
+  				}
+
+  				if ($indexOf(seen, node) !== -1) {
+  					if (cycles) { return jsonStringify('__cycle__'); }
+  					throw new TypeError('Converting circular structure to JSON');
+  				} else {
+  					seen[seen.length] = /** @type {import('.').NonArrayNode} */ (node);
+  				}
+
+  				/** @type {import('.').Key[]} */
+  				// eslint-disable-next-line no-extra-parens
+  				var keys = $sort(objectKeys(node), cmp && cmp(/** @type {import('.').NonArrayNode} */ (node)));
+  				var out = [];
+  				for (var i = 0; i < keys.length; i++) {
+  					var key = keys[i];
+  					// eslint-disable-next-line no-extra-parens
+  					var value = stringify(/** @type {import('.').Node} */ (node), key, /** @type {import('.').NonArrayNode} */ (node)[key], level + 1);
+
+  					if (!value) { continue; }
+
+  					var keyValue = jsonStringify(key)
+  						+ colonSeparator
+  						+ value;
+
+  					out[out.length] = indent + space + keyValue;
+  				}
+  				$splice(seen, $indexOf(seen, node), 1);
+  				return groupOutput(out, '{}');
+  			}({ '': obj }, '', obj, 0)
+  		);
+  	};
+  	return jsonStableStringify$1;
+  }
+
+  var jsonStableStringifyExports = requireJsonStableStringify();
+  var jsonStableStringify = /*@__PURE__*/getDefaultExportFromCjs(jsonStableStringifyExports);
+
+  /******************************************************************************
+  Copyright (c) Microsoft Corporation.
+
+  Permission to use, copy, modify, and/or distribute this software for any
+  purpose with or without fee is hereby granted.
+
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+  REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+  INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+  LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+  PERFORMANCE OF THIS SOFTWARE.
+  ***************************************************************************** */
+  /* global Reflect, Promise, SuppressedError, Symbol, Iterator */
+
+
+  function __awaiter(thisArg, _arguments, P, generator) {
+      function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+      return new (P || (P = Promise))(function (resolve, reject) {
+          function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+          function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+          function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+          step((generator = generator.apply(thisArg, [])).next());
+      });
+  }
+
+  typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
+      var e = new Error(message);
+      return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+  };
+
+  class Mutex {
+      constructor() {
+          this.mutex = Promise.resolve();
+      }
+      lock() {
+          let begin = () => { };
+          this.mutex = this.mutex.then(() => new Promise(begin));
+          return new Promise((res) => {
+              begin = res;
+          });
+      }
+      dispatch(fn) {
+          return __awaiter(this, void 0, void 0, function* () {
+              const unlock = yield this.lock();
+              try {
+                  return yield Promise.resolve(fn());
+              }
+              finally {
+                  unlock();
+              }
+          });
+      }
+  }
+
+  var _a;
+  function getGlobal() {
+      if (typeof globalThis !== "undefined")
+          return globalThis;
+      if (typeof self !== "undefined")
+          return self;
+      if (typeof window !== "undefined")
+          return window;
+      return global$1;
+  }
+  const globalObject = getGlobal();
+  const nodeBuffer = (_a = globalObject.Buffer) !== null && _a !== void 0 ? _a : null;
+  const textEncoder = globalObject.TextEncoder
+      ? new globalObject.TextEncoder()
+      : null;
+  function hexCharCodesToInt(a, b) {
+      return ((((a & 0xf) + ((a >> 6) | ((a >> 3) & 0x8))) << 4) |
+          ((b & 0xf) + ((b >> 6) | ((b >> 3) & 0x8))));
+  }
+  function writeHexToUInt8(buf, str) {
+      const size = str.length >> 1;
+      for (let i = 0; i < size; i++) {
+          const index = i << 1;
+          buf[i] = hexCharCodesToInt(str.charCodeAt(index), str.charCodeAt(index + 1));
+      }
+  }
+  function hexStringEqualsUInt8(str, buf) {
+      if (str.length !== buf.length * 2) {
+          return false;
+      }
+      for (let i = 0; i < buf.length; i++) {
+          const strIndex = i << 1;
+          if (buf[i] !==
+              hexCharCodesToInt(str.charCodeAt(strIndex), str.charCodeAt(strIndex + 1))) {
+              return false;
+          }
+      }
+      return true;
+  }
+  const alpha = "a".charCodeAt(0) - 10;
+  const digit = "0".charCodeAt(0);
+  function getDigestHex(tmpBuffer, input, hashLength) {
+      let p = 0;
+      for (let i = 0; i < hashLength; i++) {
+          let nibble = input[i] >>> 4;
+          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+          nibble = input[i] & 0xf;
+          tmpBuffer[p++] = nibble > 9 ? nibble + alpha : nibble + digit;
+      }
+      return String.fromCharCode.apply(null, tmpBuffer);
+  }
+  const getUInt8Buffer = nodeBuffer !== null
+      ? (data) => {
+          if (typeof data === "string") {
+              const buf = nodeBuffer.from(data, "utf8");
+              return new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+          }
+          if (nodeBuffer.isBuffer(data)) {
+              return new Uint8Array(data.buffer, data.byteOffset, data.length);
+          }
+          if (ArrayBuffer.isView(data)) {
+              return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+          }
+          throw new Error("Invalid data type!");
+      }
+      : (data) => {
+          if (typeof data === "string") {
+              return textEncoder.encode(data);
+          }
+          if (ArrayBuffer.isView(data)) {
+              return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+          }
+          throw new Error("Invalid data type!");
+      };
+  const base64Chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const base64Lookup = new Uint8Array(256);
+  for (let i = 0; i < base64Chars.length; i++) {
+      base64Lookup[base64Chars.charCodeAt(i)] = i;
+  }
+  function getDecodeBase64Length(data) {
+      let bufferLength = Math.floor(data.length * 0.75);
+      const len = data.length;
+      if (data[len - 1] === "=") {
+          bufferLength -= 1;
+          if (data[len - 2] === "=") {
+              bufferLength -= 1;
+          }
+      }
+      return bufferLength;
+  }
+  function decodeBase64(data) {
+      const bufferLength = getDecodeBase64Length(data);
+      const len = data.length;
+      const bytes = new Uint8Array(bufferLength);
+      let p = 0;
+      for (let i = 0; i < len; i += 4) {
+          const encoded1 = base64Lookup[data.charCodeAt(i)];
+          const encoded2 = base64Lookup[data.charCodeAt(i + 1)];
+          const encoded3 = base64Lookup[data.charCodeAt(i + 2)];
+          const encoded4 = base64Lookup[data.charCodeAt(i + 3)];
+          bytes[p] = (encoded1 << 2) | (encoded2 >> 4);
+          p += 1;
+          bytes[p] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+          p += 1;
+          bytes[p] = ((encoded3 & 3) << 6) | (encoded4 & 63);
+          p += 1;
+      }
+      return bytes;
+  }
+
+  const MAX_HEAP = 16 * 1024;
+  const WASM_FUNC_HASH_LENGTH = 4;
+  const wasmMutex = new Mutex();
+  const wasmModuleCache = new Map();
+  function WASMInterface(binary, hashLength) {
+      return __awaiter(this, void 0, void 0, function* () {
+          let wasmInstance = null;
+          let memoryView = null;
+          let initialized = false;
+          if (typeof WebAssembly === "undefined") {
+              throw new Error("WebAssembly is not supported in this environment!");
+          }
+          const writeMemory = (data, offset = 0) => {
+              memoryView.set(data, offset);
+          };
+          const getMemory = () => memoryView;
+          const getExports = () => wasmInstance.exports;
+          const setMemorySize = (totalSize) => {
+              wasmInstance.exports.Hash_SetMemorySize(totalSize);
+              const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+              const memoryBuffer = wasmInstance.exports.memory.buffer;
+              memoryView = new Uint8Array(memoryBuffer, arrayOffset, totalSize);
+          };
+          const getStateSize = () => {
+              const view = new DataView(wasmInstance.exports.memory.buffer);
+              const stateSize = view.getUint32(wasmInstance.exports.STATE_SIZE, true);
+              return stateSize;
+          };
+          const loadWASMPromise = wasmMutex.dispatch(() => __awaiter(this, void 0, void 0, function* () {
+              if (!wasmModuleCache.has(binary.name)) {
+                  const asm = decodeBase64(binary.data);
+                  const promise = WebAssembly.compile(asm);
+                  wasmModuleCache.set(binary.name, promise);
+              }
+              const module = yield wasmModuleCache.get(binary.name);
+              wasmInstance = yield WebAssembly.instantiate(module, {
+              // env: {
+              //   emscripten_memcpy_big: (dest, src, num) => {
+              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+              //     const memView = new Uint8Array(memoryBuffer, 0);
+              //     memView.set(memView.subarray(src, src + num), dest);
+              //   },
+              //   print_memory: (offset, len) => {
+              //     const memoryBuffer = wasmInstance.exports.memory.buffer;
+              //     const memView = new Uint8Array(memoryBuffer, 0);
+              //     console.log('print_int32', memView.subarray(offset, offset + len));
+              //   },
+              // },
+              });
+              // wasmInstance.exports._start();
+          }));
+          const setupInterface = () => __awaiter(this, void 0, void 0, function* () {
+              if (!wasmInstance) {
+                  yield loadWASMPromise;
+              }
+              const arrayOffset = wasmInstance.exports.Hash_GetBuffer();
+              const memoryBuffer = wasmInstance.exports.memory.buffer;
+              memoryView = new Uint8Array(memoryBuffer, arrayOffset, MAX_HEAP);
+          });
+          const init = (bits = null) => {
+              initialized = true;
+              wasmInstance.exports.Hash_Init(bits);
+          };
+          const updateUInt8Array = (data) => {
+              let read = 0;
+              while (read < data.length) {
+                  const chunk = data.subarray(read, read + MAX_HEAP);
+                  read += chunk.length;
+                  memoryView.set(chunk);
+                  wasmInstance.exports.Hash_Update(chunk.length);
+              }
+          };
+          const update = (data) => {
+              if (!initialized) {
+                  throw new Error("update() called before init()");
+              }
+              const Uint8Buffer = getUInt8Buffer(data);
+              updateUInt8Array(Uint8Buffer);
+          };
+          const digestChars = new Uint8Array(hashLength * 2);
+          const digest = (outputType, padding = null) => {
+              if (!initialized) {
+                  throw new Error("digest() called before init()");
+              }
+              initialized = false;
+              wasmInstance.exports.Hash_Final(padding);
+              if (outputType === "binary") {
+                  // the data is copied to allow GC of the original memory object
+                  return memoryView.slice(0, hashLength);
+              }
+              return getDigestHex(digestChars, memoryView, hashLength);
+          };
+          const save = () => {
+              if (!initialized) {
+                  throw new Error("save() can only be called after init() and before digest()");
+              }
+              const stateOffset = wasmInstance.exports.Hash_GetState();
+              const stateLength = getStateSize();
+              const memoryBuffer = wasmInstance.exports.memory.buffer;
+              const internalState = new Uint8Array(memoryBuffer, stateOffset, stateLength);
+              // prefix is 4 bytes from SHA1 hash of the WASM binary
+              // it is used to detect incompatible internal states between different versions of hash-wasm
+              const prefixedState = new Uint8Array(WASM_FUNC_HASH_LENGTH + stateLength);
+              writeHexToUInt8(prefixedState, binary.hash);
+              prefixedState.set(internalState, WASM_FUNC_HASH_LENGTH);
+              return prefixedState;
+          };
+          const load = (state) => {
+              if (!(state instanceof Uint8Array)) {
+                  throw new Error("load() expects an Uint8Array generated by save()");
+              }
+              const stateOffset = wasmInstance.exports.Hash_GetState();
+              const stateLength = getStateSize();
+              const overallLength = WASM_FUNC_HASH_LENGTH + stateLength;
+              const memoryBuffer = wasmInstance.exports.memory.buffer;
+              if (state.length !== overallLength) {
+                  throw new Error(`Bad state length (expected ${overallLength} bytes, got ${state.length})`);
+              }
+              if (!hexStringEqualsUInt8(binary.hash, state.subarray(0, WASM_FUNC_HASH_LENGTH))) {
+                  throw new Error("This state was written by an incompatible hash implementation");
+              }
+              const internalState = state.subarray(WASM_FUNC_HASH_LENGTH);
+              new Uint8Array(memoryBuffer, stateOffset, stateLength).set(internalState);
+              initialized = true;
+          };
+          const isDataShort = (data) => {
+              if (typeof data === "string") {
+                  // worst case is 4 bytes / char
+                  return data.length < MAX_HEAP / 4;
+              }
+              return data.byteLength < MAX_HEAP;
+          };
+          let canSimplify = isDataShort;
+          switch (binary.name) {
+              case "argon2":
+              case "scrypt":
+                  canSimplify = () => true;
+                  break;
+              case "blake2b":
+              case "blake2s":
+                  // if there is a key at blake2 then cannot simplify
+                  canSimplify = (data, initParam) => initParam <= 512 && isDataShort(data);
+                  break;
+              case "blake3":
+                  // if there is a key at blake3 then cannot simplify
+                  canSimplify = (data, initParam) => initParam === 0 && isDataShort(data);
+                  break;
+              case "xxhash64": // cannot simplify
+              case "xxhash3":
+              case "xxhash128":
+              case "crc64":
+                  canSimplify = () => false;
+                  break;
+          }
+          // shorthand for (init + update + digest) for better performance
+          const calculate = (data, initParam = null, digestParam = null) => {
+              if (!canSimplify(data, initParam)) {
+                  init(initParam);
+                  update(data);
+                  return digest("hex", digestParam);
+              }
+              const buffer = getUInt8Buffer(data);
+              memoryView.set(buffer);
+              wasmInstance.exports.Hash_Calculate(buffer.length, initParam, digestParam);
+              return getDigestHex(digestChars, memoryView, hashLength);
+          };
+          yield setupInterface();
+          return {
+              getMemory,
+              writeMemory,
+              getExports,
+              setMemorySize,
+              init,
+              update,
+              digest,
+              save,
+              load,
+              calculate,
+              hashLength,
+          };
+      });
+  }
+
+  function lockedCreate(mutex, binary, hashLength) {
+      return __awaiter(this, void 0, void 0, function* () {
+          const unlock = yield mutex.lock();
+          const wasm = yield WASMInterface(binary, hashLength);
+          unlock();
+          return wasm;
+      });
+  }
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  var name$d = "md5";
+  var data$d = "AGFzbQEAAAABEgRgAAF/YAAAYAF/AGACf38BfwMIBwABAgMBAAIFBAEBAgIGDgJ/AUGgigULfwBBgAgLB3AIBm1lbW9yeQIADkhhc2hfR2V0QnVmZmVyAAAJSGFzaF9Jbml0AAELSGFzaF9VcGRhdGUAAgpIYXNoX0ZpbmFsAAQNSGFzaF9HZXRTdGF0ZQAFDkhhc2hfQ2FsY3VsYXRlAAYKU1RBVEVfU0laRQMBCoMaBwUAQYAJCy0AQQBC/rnrxemOlZkQNwKQiQFBAEKBxpS6lvHq5m83AoiJAUEAQgA3AoCJAQu+BQEHf0EAQQAoAoCJASIBIABqQf////8BcSICNgKAiQFBAEEAKAKEiQEgAiABSWogAEEddmo2AoSJAQJAAkACQAJAAkACQCABQT9xIgMNAEGACSEEDAELIABBwAAgA2siBUkNASAFQQNxIQZBACEBAkAgA0E/c0EDSQ0AIANBgIkBaiEEIAVB/ABxIQdBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAcgAUEEaiIBRw0ACwsCQCAGRQ0AIANBmIkBaiECA0AgAiABaiABQYAJai0AADoAACABQQFqIQEgBkF/aiIGDQALC0GYiQFBwAAQAxogACAFayEAIAVBgAlqIQQLIABBwABPDQEgACECDAILIABFDQIgAEEDcSEGQQAhAQJAIABBBEkNACADQYCJAWohBCAAQXxxIQBBACEBA0AgBCABaiICQRhqIAFBgAlqLQAAOgAAIAJBGWogAUGBCWotAAA6AAAgAkEaaiABQYIJai0AADoAACACQRtqIAFBgwlqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAiADQZiJAWohAgNAIAIgAWogAUGACWotAAA6AAAgAUEBaiEBIAZBf2oiBg0ADAMLCyAAQT9xIQIgBCAAQUBxEAMhBAsgAkUNACACQQNxIQZBACEBAkAgAkEESQ0AIAJBPHEhAEEAIQEDQCABQZiJAWogBCABaiICLQAAOgAAIAFBmYkBaiACQQFqLQAAOgAAIAFBmokBaiACQQJqLQAAOgAAIAFBm4kBaiACQQNqLQAAOgAAIAAgAUEEaiIBRw0ACwsgBkUNAANAIAFBmIkBaiAEIAFqLQAAOgAAIAFBAWohASAGQX9qIgYNAAsLC4cQARl/QQAoApSJASECQQAoApCJASEDQQAoAoyJASEEQQAoAoiJASEFA0AgACgCCCIGIAAoAhgiByAAKAIoIgggACgCOCIJIAAoAjwiCiAAKAIMIgsgACgCHCIMIAAoAiwiDSAMIAsgCiANIAkgCCAHIAMgBmogAiAAKAIEIg5qIAUgBCACIANzcSACc2ogACgCACIPakH4yKq7fWpBB3cgBGoiECAEIANzcSADc2pB1u6exn5qQQx3IBBqIhEgECAEc3EgBHNqQdvhgaECakERdyARaiISaiAAKAIUIhMgEWogACgCECIUIBBqIAQgC2ogEiARIBBzcSAQc2pB7p33jXxqQRZ3IBJqIhAgEiARc3EgEXNqQa+f8Kt/akEHdyAQaiIRIBAgEnNxIBJzakGqjJ+8BGpBDHcgEWoiEiARIBBzcSAQc2pBk4zBwXpqQRF3IBJqIhVqIAAoAiQiFiASaiAAKAIgIhcgEWogDCAQaiAVIBIgEXNxIBFzakGBqppqakEWdyAVaiIQIBUgEnNxIBJzakHYsYLMBmpBB3cgEGoiESAQIBVzcSAVc2pBr++T2nhqQQx3IBFqIhIgESAQc3EgEHNqQbG3fWpBEXcgEmoiFWogACgCNCIYIBJqIAAoAjAiGSARaiANIBBqIBUgEiARc3EgEXNqQb6v88p4akEWdyAVaiIQIBUgEnNxIBJzakGiosDcBmpBB3cgEGoiESAQIBVzcSAVc2pBk+PhbGpBDHcgEWoiFSARIBBzcSAQc2pBjofls3pqQRF3IBVqIhJqIAcgFWogDiARaiAKIBBqIBIgFSARc3EgEXNqQaGQ0M0EakEWdyASaiIQIBJzIBVxIBJzakHiyviwf2pBBXcgEGoiESAQcyAScSAQc2pBwOaCgnxqQQl3IBFqIhIgEXMgEHEgEXNqQdG0+bICakEOdyASaiIVaiAIIBJqIBMgEWogDyAQaiAVIBJzIBFxIBJzakGqj9vNfmpBFHcgFWoiECAVcyAScSAVc2pB3aC8sX1qQQV3IBBqIhEgEHMgFXEgEHNqQdOokBJqQQl3IBFqIhIgEXMgEHEgEXNqQYHNh8V9akEOdyASaiIVaiAJIBJqIBYgEWogFCAQaiAVIBJzIBFxIBJzakHI98++fmpBFHcgFWoiECAVcyAScSAVc2pB5puHjwJqQQV3IBBqIhEgEHMgFXEgEHNqQdaP3Jl8akEJdyARaiISIBFzIBBxIBFzakGHm9Smf2pBDncgEmoiFWogBiASaiAYIBFqIBcgEGogFSAScyARcSASc2pB7anoqgRqQRR3IBVqIhAgFXMgEnEgFXNqQYXSj896akEFdyAQaiIRIBBzIBVxIBBzakH4x75nakEJdyARaiISIBFzIBBxIBFzakHZhby7BmpBDncgEmoiFWogFyASaiATIBFqIBkgEGogFSAScyARcSASc2pBipmp6XhqQRR3IBVqIhAgFXMiFSASc2pBwvJoakEEdyAQaiIRIBVzakGB7ce7eGpBC3cgEWoiEiARcyIaIBBzakGiwvXsBmpBEHcgEmoiFWogFCASaiAOIBFqIAkgEGogFSAac2pBjPCUb2pBF3cgFWoiECAVcyIVIBJzakHE1PulempBBHcgEGoiESAVc2pBqZ/73gRqQQt3IBFqIhIgEXMiCSAQc2pB4JbttX9qQRB3IBJqIhVqIA8gEmogGCARaiAIIBBqIBUgCXNqQfD4/vV7akEXdyAVaiIQIBVzIhUgEnNqQcb97cQCakEEdyAQaiIRIBVzakH6z4TVfmpBC3cgEWoiEiARcyIIIBBzakGF4bynfWpBEHcgEmoiFWogGSASaiAWIBFqIAcgEGogFSAIc2pBhbqgJGpBF3cgFWoiESAVcyIQIBJzakG5oNPOfWpBBHcgEWoiEiAQc2pB5bPutn5qQQt3IBJqIhUgEnMiByARc2pB+PmJ/QFqQRB3IBVqIhBqIAwgFWogDyASaiAGIBFqIBAgB3NqQeWssaV8akEXdyAQaiIRIBVBf3NyIBBzakHExKShf2pBBncgEWoiEiAQQX9zciARc2pBl/+rmQRqQQp3IBJqIhAgEUF/c3IgEnNqQafH0Nx6akEPdyAQaiIVaiALIBBqIBkgEmogEyARaiAVIBJBf3NyIBBzakG5wM5kakEVdyAVaiIRIBBBf3NyIBVzakHDs+2qBmpBBncgEWoiECAVQX9zciARc2pBkpmz+HhqQQp3IBBqIhIgEUF/c3IgEHNqQf3ov39qQQ93IBJqIhVqIAogEmogFyAQaiAOIBFqIBUgEEF/c3IgEnNqQdG7kax4akEVdyAVaiIQIBJBf3NyIBVzakHP/KH9BmpBBncgEGoiESAVQX9zciAQc2pB4M2zcWpBCncgEWoiEiAQQX9zciARc2pBlIaFmHpqQQ93IBJqIhVqIA0gEmogFCARaiAYIBBqIBUgEUF/c3IgEnNqQaGjoPAEakEVdyAVaiIQIBJBf3NyIBVzakGC/c26f2pBBncgEGoiESAVQX9zciAQc2pBteTr6XtqQQp3IBFqIhIgEEF/c3IgEXNqQbul39YCakEPdyASaiIVIARqIBYgEGogFSARQX9zciASc2pBkaeb3H5qQRV3aiEEIBUgA2ohAyASIAJqIQIgESAFaiEFIABBwABqIQAgAUFAaiIBDQALQQAgAjYClIkBQQAgAzYCkIkBQQAgBDYCjIkBQQAgBTYCiIkBIAALyAMBBX9BACgCgIkBQT9xIgBBmIkBakGAAToAACAAQQFqIQECQAJAAkACQCAAQT9zIgJBB0sNACACRQ0BIAFBmIkBakEAOgAAIAJBAUYNASAAQZqJAWpBADoAACACQQJGDQEgAEGbiQFqQQA6AAAgAkEDRg0BIABBnIkBakEAOgAAIAJBBEYNASAAQZ2JAWpBADoAACACQQVGDQEgAEGeiQFqQQA6AAAgAkEGRg0BIABBn4kBakEAOgAADAELIAJBCEYNAkE2IABrIgMhBAJAIAJBA3EiAEUNAEEAIABrIQRBACEAA0AgAEHPiQFqQQA6AAAgBCAAQX9qIgBHDQALIAMgAGohBAsgA0EDSQ0CDAELQZiJAUHAABADGkEAIQFBNyEECyABQYCJAWohAEF/IQIDQCAAIARqQRVqQQA2AAAgAEF8aiEAIAQgAkEEaiICRw0ACwtBAEEAKAKEiQE2AtSJAUEAQQAoAoCJASIAQRV2OgDTiQFBACAAQQ12OgDSiQFBACAAQQV2OgDRiQFBACAAQQN0IgA6ANCJAUEAIAA2AoCJAUGYiQFBwAAQAxpBAEEAKQKIiQE3A4AJQQBBACkCkIkBNwOICQsGAEGAiQELMwBBAEL+uevF6Y6VmRA3ApCJAUEAQoHGlLqW8ermbzcCiIkBQQBCADcCgIkBIAAQAhAECwsLAQBBgAgLBJgAAAA=";
+  var hash$d = "e6508e4b";
+  var wasmJson$d = {
+  	name: name$d,
+  	data: data$d,
+  	hash: hash$d
+  };
+
+  const mutex$e = new Mutex();
+  let wasmCache$e = null;
+  /**
+   * Calculates MD5 hash
+   * @param data Input data (string, Buffer or TypedArray)
+   * @returns Computed hash as a hexadecimal string
+   */
+  function md5(data) {
+      if (wasmCache$e === null) {
+          return lockedCreate(mutex$e, wasmJson$d, 16).then((wasm) => {
+              wasmCache$e = wasm;
+              return wasmCache$e.calculate(data);
+          });
+      }
+      try {
+          const hash = wasmCache$e.calculate(data);
+          return Promise.resolve(hash);
+      }
+      catch (err) {
+          return Promise.reject(err);
+      }
+  }
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  new Mutex();
+
+  const S3_DEFAULT_REGION = "us-east-1";
+  const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
+  class ConnectionString {
+    constructor(connectionString) {
+      let uri;
+      const [ok, err, parsed] = tryFn(() => new URL(connectionString));
+      if (!ok) {
+        throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
+      }
+      uri = parsed;
+      this.region = S3_DEFAULT_REGION;
+      if (uri.protocol === "s3:") this.defineFromS3(uri);
+      else this.defineFromCustomUri(uri);
+      for (const [k, v] of uri.searchParams.entries()) {
+        this[k] = v;
+      }
+    }
+    defineFromS3(uri) {
+      const [okBucket, errBucket, bucket] = tryFnSync(() => decodeURIComponent(uri.hostname));
+      if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: uri.hostname });
+      this.bucket = bucket || "s3db";
+      const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+      if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+      this.accessKeyId = user;
+      const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+      if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+      this.secretAccessKey = pass;
+      this.endpoint = S3_DEFAULT_ENDPOINT;
+      if (["/", "", null].includes(uri.pathname)) {
+        this.keyPrefix = "";
+      } else {
+        let [, ...subpath] = uri.pathname.split("/");
+        this.keyPrefix = [...subpath || []].join("/");
+      }
+    }
+    defineFromCustomUri(uri) {
+      this.forcePathStyle = true;
+      this.endpoint = uri.origin;
+      const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+      if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+      this.accessKeyId = user;
+      const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+      if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+      this.secretAccessKey = pass;
+      if (["/", "", null].includes(uri.pathname)) {
+        this.bucket = "s3db";
+        this.keyPrefix = "";
+      } else {
+        let [, bucket, ...subpath] = uri.pathname.split("/");
+        if (!bucket) {
+          this.bucket = "s3db";
+        } else {
+          const [okBucket, errBucket, bucketDecoded] = tryFnSync(() => decodeURIComponent(bucket));
+          if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: bucket });
+          this.bucket = bucketDecoded;
+        }
+        this.keyPrefix = [...subpath || []].join("/");
+      }
+    }
+  }
+
+  class Client extends EventEmitter {
+    constructor({
+      verbose = false,
+      id = null,
+      AwsS3Client,
+      connectionString,
+      parallelism = 10
+    }) {
+      super();
+      this.verbose = verbose;
+      this.id = id ?? idGenerator();
+      this.parallelism = parallelism;
+      this.config = new ConnectionString(connectionString);
+      this.client = AwsS3Client || this.createClient();
+    }
+    createClient() {
+      let options = {
+        region: this.config.region,
+        endpoint: this.config.endpoint
+      };
+      if (this.config.forcePathStyle) options.forcePathStyle = true;
+      if (this.config.accessKeyId) {
+        options.credentials = {
+          accessKeyId: this.config.accessKeyId,
+          secretAccessKey: this.config.secretAccessKey
+        };
+      }
+      const client = new clientS3.S3Client(options);
+      client.middlewareStack.add(
+        (next, context) => async (args) => {
+          if (context.commandName === "DeleteObjectsCommand") {
+            const body = args.request.body;
+            if (body && typeof body === "string") {
+              const contentMd5 = Buffer.from(await md5(body), "hex").toString("base64");
+              args.request.headers["Content-MD5"] = contentMd5;
+            }
+          }
+          return next(args);
+        },
+        {
+          step: "build",
+          name: "addContentMd5ForDeleteObjects",
+          priority: "high"
+        }
+      );
+      return client;
+    }
+    async sendCommand(command) {
+      this.emit("command.request", command.constructor.name, command.input);
+      const [ok, err, response] = await tryFn(() => this.client.send(command));
+      if (!ok) {
+        const bucket = this.config.bucket;
+        const key = command.input && command.input.Key;
+        throw mapAwsError(err, {
+          bucket,
+          key,
+          commandName: command.constructor.name,
+          commandInput: command.input
+        });
+      }
+      this.emit("command.response", command.constructor.name, response, command.input);
+      return response;
+    }
+    async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      keyPrefix ? path.join(keyPrefix, key) : key;
+      const stringMetadata = {};
+      if (metadata) {
+        for (const [k, v] of Object.entries(metadata)) {
+          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
+          stringMetadata[validKey] = String(v);
+        }
+      }
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key,
+        Metadata: stringMetadata,
+        Body: body || Buffer.alloc(0)
+      };
+      if (contentType !== void 0) options.ContentType = contentType;
+      if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
+      if (contentLength !== void 0) options.ContentLength = contentLength;
+      let response, error;
+      try {
+        response = await this.sendCommand(new clientS3.PutObjectCommand(options));
+        return response;
+      } catch (err) {
+        error = err;
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: "PutObjectCommand",
+          commandInput: options
+        });
+      } finally {
+        this.emit("putObject", error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+      }
+    }
+    async getObject(key) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key
+      };
+      let response, error;
+      try {
+        response = await this.sendCommand(new clientS3.GetObjectCommand(options));
+        return response;
+      } catch (err) {
+        error = err;
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: "GetObjectCommand",
+          commandInput: options
+        });
+      } finally {
+        this.emit("getObject", error || response, { key });
+      }
+    }
+    async headObject(key) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key
+      };
+      let response, error;
+      try {
+        response = await this.sendCommand(new clientS3.HeadObjectCommand(options));
+        return response;
+      } catch (err) {
+        error = err;
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: "HeadObjectCommand",
+          commandInput: options
+        });
+      } finally {
+        this.emit("headObject", error || response, { key });
+      }
+    }
+    async copyObject({ from, to }) {
+      const options = {
+        Bucket: this.config.bucket,
+        Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
+        CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
+      };
+      let response, error;
+      try {
+        response = await this.sendCommand(new clientS3.CopyObjectCommand(options));
+        return response;
+      } catch (err) {
+        error = err;
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key: to,
+          commandName: "CopyObjectCommand",
+          commandInput: options
+        });
+      } finally {
+        this.emit("copyObject", error || response, { from, to });
+      }
+    }
+    async exists(key) {
+      const [ok, err] = await tryFn(() => this.headObject(key));
+      if (ok) return true;
+      if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
+      throw err;
+    }
+    async deleteObject(key) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      keyPrefix ? path.join(keyPrefix, key) : key;
+      const options = {
+        Bucket: this.config.bucket,
+        Key: keyPrefix ? path.join(keyPrefix, key) : key
+      };
+      let response, error;
+      try {
+        response = await this.sendCommand(new clientS3.DeleteObjectCommand(options));
+        return response;
+      } catch (err) {
+        error = err;
+        throw mapAwsError(err, {
+          bucket: this.config.bucket,
+          key,
+          commandName: "DeleteObjectCommand",
+          commandInput: options
+        });
+      } finally {
+        this.emit("deleteObject", error || response, { key });
+      }
+    }
+    async deleteObjects(keys) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      const packages = lodashEs.chunk(keys, 1e3);
+      const { results, errors } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
+        for (const key of keys2) {
+          keyPrefix ? path.join(keyPrefix, key) : key;
+          this.config.bucket;
+          await this.exists(key);
+        }
+        const options = {
+          Bucket: this.config.bucket,
+          Delete: {
+            Objects: keys2.map((key) => ({
+              Key: keyPrefix ? path.join(keyPrefix, key) : key
+            }))
+          }
+        };
+        let response;
+        const [ok, err, res] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
+        if (!ok) throw err;
+        response = res;
+        if (response && response.Errors && response.Errors.length > 0) ;
+        if (response && response.Deleted && response.Deleted.length !== keys2.length) ;
+        return response;
+      });
+      const report = {
+        deleted: results,
+        notFound: errors
+      };
+      this.emit("deleteObjects", report, keys);
+      return report;
+    }
+    /**
+     * Delete all objects under a specific prefix using efficient pagination
+     * @param {Object} options - Delete options
+     * @param {string} options.prefix - S3 prefix to delete
+     * @returns {Promise<number>} Number of objects deleted
+     */
+    async deleteAll({ prefix } = {}) {
+      const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+      let continuationToken;
+      let totalDeleted = 0;
+      do {
+        const listCommand = new clientS3.ListObjectsV2Command({
+          Bucket: this.config.bucket,
+          Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
+          ContinuationToken: continuationToken
+        });
+        const listResponse = await this.client.send(listCommand);
+        if (listResponse.Contents && listResponse.Contents.length > 0) {
+          const deleteCommand = new clientS3.DeleteObjectsCommand({
+            Bucket: this.config.bucket,
+            Delete: {
+              Objects: listResponse.Contents.map((obj) => ({ Key: obj.Key }))
+            }
+          });
+          const deleteResponse = await this.client.send(deleteCommand);
+          const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
+          totalDeleted += deletedCount;
+          this.emit("deleteAll", {
+            prefix,
+            batch: deletedCount,
+            total: totalDeleted
+          });
+        }
+        continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
+      } while (continuationToken);
+      this.emit("deleteAllComplete", {
+        prefix,
+        totalDeleted
+      });
+      return totalDeleted;
+    }
+    async moveObject({ from, to }) {
+      const [ok, err] = await tryFn(async () => {
+        await this.copyObject({ from, to });
+        await this.deleteObject(from);
+      });
+      if (!ok) {
+        throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
+      }
+      return true;
+    }
+    async listObjects({
+      prefix,
+      maxKeys = 1e3,
+      continuationToken
+    } = {}) {
+      const options = {
+        Bucket: this.config.bucket,
+        MaxKeys: maxKeys,
+        ContinuationToken: continuationToken,
+        Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
+      };
+      const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
+      if (!ok) {
+        throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
+      }
+      this.emit("listObjects", response, options);
+      return response;
+    }
+    async count({ prefix } = {}) {
+      let count = 0;
+      let truncated = true;
+      let continuationToken;
+      while (truncated) {
+        const options = {
+          prefix,
+          continuationToken
+        };
+        const response = await this.listObjects(options);
+        count += response.KeyCount || 0;
+        truncated = response.IsTruncated || false;
+        continuationToken = response.NextContinuationToken;
+      }
+      this.emit("count", count, { prefix });
+      return count;
+    }
+    async getAllKeys({ prefix } = {}) {
+      let keys = [];
+      let truncated = true;
+      let continuationToken;
+      while (truncated) {
+        const options = {
+          prefix,
+          continuationToken
+        };
+        const response = await this.listObjects(options);
+        if (response.Contents) {
+          keys = keys.concat(response.Contents.map((x) => x.Key));
+        }
+        truncated = response.IsTruncated || false;
+        continuationToken = response.NextContinuationToken;
+      }
+      if (this.config.keyPrefix) {
+        keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
+      }
+      this.emit("getAllKeys", keys, { prefix });
+      return keys;
+    }
+    async getContinuationTokenAfterOffset(params = {}) {
+      const {
+        prefix,
+        offset = 1e3
+      } = params;
+      if (offset === 0) return null;
+      let truncated = true;
+      let continuationToken;
+      let skipped = 0;
+      while (truncated) {
+        let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
+        const options = {
+          prefix,
+          maxKeys,
+          continuationToken
+        };
+        const res = await this.listObjects(options);
+        if (res.Contents) {
+          skipped += res.Contents.length;
+        }
+        truncated = res.IsTruncated || false;
+        continuationToken = res.NextContinuationToken;
+        if (skipped >= offset) {
+          break;
+        }
+      }
+      this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+      return continuationToken || null;
+    }
+    async getKeysPage(params = {}) {
+      const {
+        prefix,
+        offset = 0,
+        amount = 100
+      } = params;
+      let keys = [];
+      let truncated = true;
+      let continuationToken;
+      if (offset > 0) {
+        continuationToken = await this.getContinuationTokenAfterOffset({
+          prefix,
+          offset
+        });
+        if (!continuationToken) {
+          this.emit("getKeysPage", [], params);
+          return [];
+        }
+      }
+      while (truncated) {
+        const options = {
+          prefix,
+          continuationToken
+        };
+        const res = await this.listObjects(options);
+        if (res.Contents) {
+          keys = keys.concat(res.Contents.map((x) => x.Key));
+        }
+        truncated = res.IsTruncated || false;
+        continuationToken = res.NextContinuationToken;
+        if (keys.length >= amount) {
+          keys = keys.slice(0, amount);
+          break;
+        }
+      }
+      if (this.config.keyPrefix) {
+        keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
+      }
+      this.emit("getKeysPage", keys, params);
+      return keys;
+    }
+    async moveAllObjects({ prefixFrom, prefixTo }) {
+      const keys = await this.getAllKeys({ prefix: prefixFrom });
+      const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
+        const to = key.replace(prefixFrom, prefixTo);
+        const [ok, err] = await tryFn(async () => {
+          await this.moveObject({
+            from: key,
+            to
+          });
+        });
+        if (!ok) {
+          throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
+        }
+        return to;
+      });
+      this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+      if (errors.length > 0) {
+        throw new Error("Some objects could not be moved");
+      }
+      return results;
+    }
+  }
+
+  async function secretHandler(actual, errors, schema) {
+    if (!this.passphrase) {
+      errors.push(new ValidationError("Missing configuration for secrets encryption.", {
+        actual,
+        type: "encryptionKeyMissing",
+        suggestion: "Provide a passphrase for secret encryption."
+      }));
+      return actual;
+    }
+    const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+    if (ok) return res;
+    errors.push(new ValidationError("Problem encrypting secret.", {
+      actual,
+      type: "encryptionProblem",
+      error: err,
+      suggestion: "Check the passphrase and input value."
+    }));
+    return actual;
+  }
+  async function jsonHandler(actual, errors, schema) {
+    if (lodashEs.isString(actual)) return actual;
+    const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
+    if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
+    return json;
+  }
+  class Validator extends FastestValidator {
+    constructor({ options, passphrase, autoEncrypt = true } = {}) {
+      super(lodashEs.merge({}, {
+        useNewCustomCheckerFunction: true,
+        messages: {
+          encryptionKeyMissing: "Missing configuration for secrets encryption.",
+          encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}"
+        },
+        defaults: {
+          string: {
+            trim: true
+          },
+          object: {
+            strict: "remove"
+          },
+          number: {
+            convert: true
+          }
+        }
+      }, options));
+      this.passphrase = passphrase;
+      this.autoEncrypt = autoEncrypt;
+      this.alias("secret", {
+        type: "string",
+        custom: this.autoEncrypt ? secretHandler : void 0,
+        messages: {
+          string: "The '{field}' field must be a string.",
+          stringMin: "This secret '{field}' field length must be at least {expected} long."
+        }
+      });
+      this.alias("secretAny", {
+        type: "any",
+        custom: this.autoEncrypt ? secretHandler : void 0
+      });
+      this.alias("secretNumber", {
+        type: "number",
+        custom: this.autoEncrypt ? secretHandler : void 0
+      });
+      this.alias("json", {
+        type: "any",
+        custom: this.autoEncrypt ? jsonHandler : void 0
+      });
+    }
+  }
+  const ValidatorManager = new Proxy(Validator, {
+    instance: null,
+    construct(target, args) {
+      if (!this.instance) this.instance = new target(...args);
+      return this.instance;
+    }
+  });
+
+  function generateBase62Mapping(keys) {
+    const mapping = {};
+    const reversedMapping = {};
+    keys.forEach((key, index) => {
+      const base62Key = encode(index);
+      mapping[key] = base62Key;
+      reversedMapping[base62Key] = key;
+    });
+    return { mapping, reversedMapping };
+  }
+  const SchemaActions = {
+    trim: (value) => value == null ? value : value.trim(),
+    encrypt: async (value, { passphrase }) => {
+      if (value === null || value === void 0) return value;
+      const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
+      return ok ? res : value;
+    },
+    decrypt: async (value, { passphrase }) => {
+      if (value === null || value === void 0) return value;
+      const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
+      if (!ok) return value;
+      if (raw === "null") return null;
+      if (raw === "undefined") return void 0;
+      return raw;
+    },
+    toString: (value) => value == null ? value : String(value),
+    fromArray: (value, { separator }) => {
+      if (value === null || value === void 0 || !Array.isArray(value)) {
+        return value;
+      }
+      if (value.length === 0) {
+        return "";
+      }
+      const escapedItems = value.map((item) => {
+        if (typeof item === "string") {
+          return item.replace(/\\/g, "\\\\").replace(new RegExp(`\\${separator}`, "g"), `\\${separator}`);
+        }
+        return String(item);
+      });
+      return escapedItems.join(separator);
+    },
+    toArray: (value, { separator }) => {
+      if (Array.isArray(value)) {
+        return value;
+      }
+      if (value === null || value === void 0) {
+        return value;
+      }
+      if (value === "") {
+        return [];
+      }
+      const items = [];
+      let current = "";
+      let i = 0;
+      const str = String(value);
+      while (i < str.length) {
+        if (str[i] === "\\" && i + 1 < str.length) {
+          current += str[i + 1];
+          i += 2;
+        } else if (str[i] === separator) {
+          items.push(current);
+          current = "";
+          i++;
+        } else {
+          current += str[i];
+          i++;
+        }
+      }
+      items.push(current);
+      return items;
+    },
+    toJSON: (value) => {
+      if (value === null) return null;
+      if (value === void 0) return void 0;
+      if (typeof value === "string") {
+        const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(value));
+        if (ok2 && typeof parsed === "object") return value;
+        return value;
+      }
+      const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
+      return ok ? json : value;
+    },
+    fromJSON: (value) => {
+      if (value === null) return null;
+      if (value === void 0) return void 0;
+      if (typeof value !== "string") return value;
+      if (value === "") return "";
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+      return ok ? parsed : value;
+    },
+    toNumber: (value) => lodashEs.isString(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
+    toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
+    fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0",
+    fromBase62: (value) => {
+      if (value === null || value === void 0 || value === "") return value;
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
+        const n = decode(value);
+        return isNaN(n) ? void 0 : n;
+      }
+      return void 0;
+    },
+    toBase62: (value) => {
+      if (value === null || value === void 0 || value === "") return value;
+      if (typeof value === "number") {
+        return encode(value);
+      }
+      if (typeof value === "string") {
+        const n = Number(value);
+        return isNaN(n) ? value : encode(n);
+      }
+      return value;
+    },
+    fromBase62Decimal: (value) => {
+      if (value === null || value === void 0 || value === "") return value;
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
+        const n = decodeDecimal(value);
+        return isNaN(n) ? void 0 : n;
+      }
+      return void 0;
+    },
+    toBase62Decimal: (value) => {
+      if (value === null || value === void 0 || value === "") return value;
+      if (typeof value === "number") {
+        return encodeDecimal(value);
+      }
+      if (typeof value === "string") {
+        const n = Number(value);
+        return isNaN(n) ? value : encodeDecimal(n);
+      }
+      return value;
+    },
+    fromArrayOfNumbers: (value, { separator }) => {
+      if (value === null || value === void 0 || !Array.isArray(value)) {
+        return value;
+      }
+      if (value.length === 0) {
+        return "";
+      }
+      const base62Items = value.map((item) => {
+        if (typeof item === "number" && !isNaN(item)) {
+          return encode(item);
+        }
+        const n = Number(item);
+        return isNaN(n) ? "" : encode(n);
+      });
+      return base62Items.join(separator);
+    },
+    toArrayOfNumbers: (value, { separator }) => {
+      if (Array.isArray(value)) {
+        return value.map((v) => typeof v === "number" ? v : decode(v));
+      }
+      if (value === null || value === void 0) {
+        return value;
+      }
+      if (value === "") {
+        return [];
+      }
+      const str = String(value);
+      const items = [];
+      let current = "";
+      let i = 0;
+      while (i < str.length) {
+        if (str[i] === "\\" && i + 1 < str.length) {
+          current += str[i + 1];
+          i += 2;
+        } else if (str[i] === separator) {
+          items.push(current);
+          current = "";
+          i++;
+        } else {
+          current += str[i];
+          i++;
+        }
+      }
+      items.push(current);
+      return items.map((v) => {
+        if (typeof v === "number") return v;
+        if (typeof v === "string" && v !== "") {
+          const n = decode(v);
+          return isNaN(n) ? NaN : n;
+        }
+        return NaN;
+      });
+    },
+    fromArrayOfDecimals: (value, { separator }) => {
+      if (value === null || value === void 0 || !Array.isArray(value)) {
+        return value;
+      }
+      if (value.length === 0) {
+        return "";
+      }
+      const base62Items = value.map((item) => {
+        if (typeof item === "number" && !isNaN(item)) {
+          return encodeDecimal(item);
+        }
+        const n = Number(item);
+        return isNaN(n) ? "" : encodeDecimal(n);
+      });
+      return base62Items.join(separator);
+    },
+    toArrayOfDecimals: (value, { separator }) => {
+      if (Array.isArray(value)) {
+        return value.map((v) => typeof v === "number" ? v : decodeDecimal(v));
+      }
+      if (value === null || value === void 0) {
+        return value;
+      }
+      if (value === "") {
+        return [];
+      }
+      const str = String(value);
+      const items = [];
+      let current = "";
+      let i = 0;
+      while (i < str.length) {
+        if (str[i] === "\\" && i + 1 < str.length) {
+          current += str[i + 1];
+          i += 2;
+        } else if (str[i] === separator) {
+          items.push(current);
+          current = "";
+          i++;
+        } else {
+          current += str[i];
+          i++;
+        }
+      }
+      items.push(current);
+      return items.map((v) => {
+        if (typeof v === "number") return v;
+        if (typeof v === "string" && v !== "") {
+          const n = decodeDecimal(v);
+          return isNaN(n) ? NaN : n;
+        }
+        return NaN;
+      });
+    }
+  };
+  class Schema {
+    constructor(args) {
+      const {
+        map,
+        name,
+        attributes,
+        passphrase,
+        version = 1,
+        options = {}
+      } = args;
+      this.name = name;
+      this.version = version;
+      this.attributes = attributes || {};
+      this.passphrase = passphrase ?? "secret";
+      this.options = lodashEs.merge({}, this.defaultOptions(), options);
+      this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
+      const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
+      this.validator = new ValidatorManager({ autoEncrypt: false }).compile(lodashEs.merge(
+        { $$async: true },
+        processedAttributes
+      ));
+      if (this.options.generateAutoHooks) this.generateAutoHooks();
+      if (!lodashEs.isEmpty(map)) {
+        this.map = map;
+        this.reversedMap = lodashEs.invert(map);
+      } else {
+        const flatAttrs = flat.flatten(this.attributes, { safe: true });
+        const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
+        const objectKeys = this.extractObjectKeys(this.attributes);
+        const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
+        const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
+        this.map = mapping;
+        this.reversedMap = reversedMapping;
+      }
+    }
+    defaultOptions() {
+      return {
+        autoEncrypt: true,
+        autoDecrypt: true,
+        arraySeparator: "|",
+        generateAutoHooks: true,
+        hooks: {
+          beforeMap: {},
+          afterMap: {},
+          beforeUnmap: {},
+          afterUnmap: {}
+        }
+      };
+    }
+    addHook(hook, attribute, action) {
+      if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
+      this.options.hooks[hook][attribute] = lodashEs.uniq([...this.options.hooks[hook][attribute], action]);
+    }
+    extractObjectKeys(obj, prefix = "") {
+      const objectKeys = [];
+      for (const [key, value] of Object.entries(obj)) {
+        if (key.startsWith("$$")) continue;
+        const fullKey = prefix ? `${prefix}.${key}` : key;
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          objectKeys.push(fullKey);
+          if (value.$$type === "object") {
+            objectKeys.push(...this.extractObjectKeys(value, fullKey));
+          }
+        }
+      }
+      return objectKeys;
+    }
+    generateAutoHooks() {
+      const schema = flat.flatten(lodashEs.cloneDeep(this.attributes), { safe: true });
+      for (const [name, definition] of Object.entries(schema)) {
+        if (definition.includes("array")) {
+          if (definition.includes("items:string")) {
+            this.addHook("beforeMap", name, "fromArray");
+            this.addHook("afterUnmap", name, "toArray");
+          } else if (definition.includes("items:number")) {
+            const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+            if (isIntegerArray) {
+              this.addHook("beforeMap", name, "fromArrayOfNumbers");
+              this.addHook("afterUnmap", name, "toArrayOfNumbers");
+            } else {
+              this.addHook("beforeMap", name, "fromArrayOfDecimals");
+              this.addHook("afterUnmap", name, "toArrayOfDecimals");
+            }
+          }
+          continue;
+        }
+        if (definition.includes("secret")) {
+          if (this.options.autoEncrypt) {
+            this.addHook("beforeMap", name, "encrypt");
+          }
+          if (this.options.autoDecrypt) {
+            this.addHook("afterUnmap", name, "decrypt");
+          }
+          continue;
+        }
+        if (definition.includes("number")) {
+          const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+          if (isInteger) {
+            this.addHook("beforeMap", name, "toBase62");
+            this.addHook("afterUnmap", name, "fromBase62");
+          } else {
+            this.addHook("beforeMap", name, "toBase62Decimal");
+            this.addHook("afterUnmap", name, "fromBase62Decimal");
+          }
+          continue;
+        }
+        if (definition.includes("boolean")) {
+          this.addHook("beforeMap", name, "fromBool");
+          this.addHook("afterUnmap", name, "toBool");
+          continue;
+        }
+        if (definition.includes("json")) {
+          this.addHook("beforeMap", name, "toJSON");
+          this.addHook("afterUnmap", name, "fromJSON");
+          continue;
+        }
+        if (definition === "object" || definition.includes("object")) {
+          this.addHook("beforeMap", name, "toJSON");
+          this.addHook("afterUnmap", name, "fromJSON");
+          continue;
+        }
+      }
+    }
+    static import(data) {
+      let {
+        map,
+        name,
+        options,
+        version,
+        attributes
+      } = lodashEs.isString(data) ? JSON.parse(data) : data;
+      const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
+      if (!ok) throw new SchemaError("Failed to import schema attributes", { original: err, input: attributes });
+      attributes = attrs;
+      const schema = new Schema({
+        map,
+        name,
+        options,
+        version,
+        attributes
+      });
+      return schema;
+    }
+    /**
+     * Recursively import attributes, parsing only stringified objects (legacy)
+     */
+    static _importAttributes(attrs) {
+      if (typeof attrs === "string") {
+        const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
+        if (ok && typeof parsed === "object" && parsed !== null) {
+          const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
+          if (!okNested) throw new SchemaError("Failed to parse nested schema attribute", { original: errNested, input: attrs });
+          return nested;
+        }
+        return attrs;
+      }
+      if (Array.isArray(attrs)) {
+        const [okArr, errArr, arr] = tryFnSync(() => attrs.map((a) => Schema._importAttributes(a)));
+        if (!okArr) throw new SchemaError("Failed to import array schema attributes", { original: errArr, input: attrs });
+        return arr;
+      }
+      if (typeof attrs === "object" && attrs !== null) {
+        const out = {};
+        for (const [k, v] of Object.entries(attrs)) {
+          const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
+          if (!okObj) throw new SchemaError("Failed to import object schema attribute", { original: errObj, key: k, input: v });
+          out[k] = val;
+        }
+        return out;
+      }
+      return attrs;
+    }
+    export() {
+      const data = {
+        version: this.version,
+        name: this.name,
+        options: this.options,
+        attributes: this._exportAttributes(this.attributes),
+        map: this.map
+      };
+      return data;
+    }
+    /**
+     * Recursively export attributes, keeping objects as objects and only serializing leaves as string
+     */
+    _exportAttributes(attrs) {
+      if (typeof attrs === "string") {
+        return attrs;
+      }
+      if (Array.isArray(attrs)) {
+        return attrs.map((a) => this._exportAttributes(a));
+      }
+      if (typeof attrs === "object" && attrs !== null) {
+        const out = {};
+        for (const [k, v] of Object.entries(attrs)) {
+          out[k] = this._exportAttributes(v);
+        }
+        return out;
+      }
+      return attrs;
+    }
+    async applyHooksActions(resourceItem, hook) {
+      const cloned = lodashEs.cloneDeep(resourceItem);
+      for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
+        for (const action of actions) {
+          const value = lodashEs.get(cloned, attribute);
+          if (value !== void 0 && typeof SchemaActions[action] === "function") {
+            lodashEs.set(cloned, attribute, await SchemaActions[action](value, {
+              passphrase: this.passphrase,
+              separator: this.options.arraySeparator
+            }));
+          }
+        }
+      }
+      return cloned;
+    }
+    async validate(resourceItem, { mutateOriginal = false } = {}) {
+      let data = mutateOriginal ? resourceItem : lodashEs.cloneDeep(resourceItem);
+      const result = await this.validator(data);
+      return result;
+    }
+    async mapper(resourceItem) {
+      let obj = lodashEs.cloneDeep(resourceItem);
+      obj = await this.applyHooksActions(obj, "beforeMap");
+      const flattenedObj = flat.flatten(obj, { safe: true });
+      const rest = { "_v": this.version + "" };
+      for (const [key, value] of Object.entries(flattenedObj)) {
+        const mappedKey = this.map[key] || key;
+        const attrDef = this.getAttributeDefinition(key);
+        if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
+          rest[mappedKey] = encode(value);
+        } else if (typeof value === "string") {
+          if (value === "[object Object]") {
+            rest[mappedKey] = "{}";
+          } else if (value.startsWith("{") || value.startsWith("[")) {
+            rest[mappedKey] = value;
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else if (Array.isArray(value) || typeof value === "object" && value !== null) {
+          rest[mappedKey] = JSON.stringify(value);
+        } else {
+          rest[mappedKey] = value;
+        }
+      }
+      await this.applyHooksActions(rest, "afterMap");
+      return rest;
+    }
+    async unmapper(mappedResourceItem, mapOverride) {
+      let obj = lodashEs.cloneDeep(mappedResourceItem);
+      delete obj._v;
+      obj = await this.applyHooksActions(obj, "beforeUnmap");
+      const reversedMap = mapOverride ? lodashEs.invert(mapOverride) : this.reversedMap;
+      const rest = {};
+      for (const [key, value] of Object.entries(obj)) {
+        const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+        let parsedValue = value;
+        const attrDef = this.getAttributeDefinition(originalKey);
+        if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
+          if (typeof parsedValue === "string" && parsedValue !== "") {
+            parsedValue = decode(parsedValue);
+          } else if (typeof parsedValue === "number") ; else {
+            parsedValue = void 0;
+          }
+        } else if (typeof value === "string") {
+          if (value === "[object Object]") {
+            parsedValue = {};
+          } else if (value.startsWith("{") || value.startsWith("[")) {
+            const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+            if (ok) parsedValue = parsed;
+          }
+        }
+        if (this.attributes) {
+          if (typeof attrDef === "string" && attrDef.includes("array")) {
+            if (Array.isArray(parsedValue)) ; else if (typeof parsedValue === "string" && parsedValue.trim().startsWith("[")) {
+              const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
+              if (okArr && Array.isArray(arr)) {
+                parsedValue = arr;
+              }
+            } else {
+              parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
+            }
+          }
+        }
+        if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
+          for (const action of this.options.hooks.afterUnmap[originalKey]) {
+            if (typeof SchemaActions[action] === "function") {
+              parsedValue = await SchemaActions[action](parsedValue, {
+                passphrase: this.passphrase,
+                separator: this.options.arraySeparator
+              });
+            }
+          }
+        }
+        rest[originalKey] = parsedValue;
+      }
+      await this.applyHooksActions(rest, "afterUnmap");
+      const result = flat.unflatten(rest);
+      for (const [key, value] of Object.entries(mappedResourceItem)) {
+        if (key.startsWith("$")) {
+          result[key] = value;
+        }
+      }
+      return result;
+    }
+    // Helper to get attribute definition by dot notation key
+    getAttributeDefinition(key) {
+      const parts = key.split(".");
+      let def = this.attributes;
+      for (const part of parts) {
+        if (!def) return void 0;
+        def = def[part];
+      }
+      return def;
+    }
+    /**
+     * Preprocess attributes to convert nested objects into validator-compatible format
+     * @param {Object} attributes - Original attributes
+     * @returns {Object} Processed attributes for validator
+     */
+    preprocessAttributesForValidation(attributes) {
+      const processed = {};
+      for (const [key, value] of Object.entries(attributes)) {
+        if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          const isExplicitRequired = value.$$type && value.$$type.includes("required");
+          const isExplicitOptional = value.$$type && value.$$type.includes("optional");
+          const objectConfig = {
+            type: "object",
+            properties: this.preprocessAttributesForValidation(value),
+            strict: false
+          };
+          if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
+            objectConfig.optional = true;
+          }
+          processed[key] = objectConfig;
+        } else {
+          processed[key] = value;
+        }
+      }
+      return processed;
+    }
+  }
+
+  class Resource extends EventEmitter {
+    /**
+     * Create a new Resource instance
+     * @param {Object} config - Resource configuration
+     * @param {string} config.name - Resource name
+     * @param {Object} config.client - S3 client instance
+     * @param {string} [config.version='v0'] - Resource version
+     * @param {Object} [config.attributes={}] - Resource attributes schema
+     * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
+     * @param {string} [config.passphrase='secret'] - Encryption passphrase
+     * @param {number} [config.parallelism=10] - Parallelism for bulk operations
+     * @param {Array} [config.observers=[]] - Observer instances
+     * @param {boolean} [config.cache=false] - Enable caching
+     * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
+     * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
+     * @param {Object} [config.partitions={}] - Partition definitions
+     * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
+     * @param {boolean} [config.allNestedObjectsOptional=false] - Make nested objects optional
+     * @param {Object} [config.hooks={}] - Custom hooks
+     * @param {Object} [config.options={}] - Additional options
+     * @param {Function} [config.idGenerator] - Custom ID generator function
+     * @param {number} [config.idSize=22] - Size for auto-generated IDs
+     * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
+     * @example
+     * const users = new Resource({
+     *   name: 'users',
+     *   client: s3Client,
+     *   attributes: {
+     *     name: 'string|required',
+     *     email: 'string|required',
+     *     password: 'secret|required'
+     *   },
+     *   behavior: 'user-managed',
+     *   passphrase: 'my-secret-key',
+     *   timestamps: true,
+     *   partitions: {
+     *     byRegion: {
+     *       fields: { region: 'string' }
+     *     }
+     *   },
+     *   hooks: {
+     *     beforeInsert: [async (data) => {
+        *       return data;
+     *     }]
+     *   }
+     * });
+     * 
+     * // With custom ID size
+     * const shortIdUsers = new Resource({
+     *   name: 'users',
+     *   client: s3Client,
+     *   attributes: { name: 'string|required' },
+     *   idSize: 8 // Generate 8-character IDs
+     * });
+     * 
+     * // With custom ID generator function
+     * const customIdUsers = new Resource({
+     *   name: 'users',
+     *   client: s3Client,
+     *   attributes: { name: 'string|required' },
+     *   idGenerator: () => `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
+     * });
+     * 
+     * // With custom ID generator using size parameter
+     * const longIdUsers = new Resource({
+     *   name: 'users',
+     *   client: s3Client,
+     *   attributes: { name: 'string|required' },
+     *   idGenerator: 32 // Generate 32-character IDs (same as idSize: 32)
+     * });
+     */
+    constructor(config = {}) {
+      super();
+      this._instanceId = Math.random().toString(36).slice(2, 8);
+      const validation = validateResourceConfig(config);
+      if (!validation.isValid) {
+        throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: "constructor", suggestion: "Check resource config and attributes." });
+      }
+      const {
+        name,
+        client,
+        version = "1",
+        attributes = {},
+        behavior = DEFAULT_BEHAVIOR,
+        passphrase = "secret",
+        parallelism = 10,
+        observers = [],
+        cache = false,
+        autoDecrypt = true,
+        timestamps = false,
+        partitions = {},
+        paranoid = true,
+        allNestedObjectsOptional = true,
+        hooks = {},
+        idGenerator: customIdGenerator,
+        idSize = 22,
+        versioningEnabled = false
+      } = config;
+      this.name = name;
+      this.client = client;
+      this.version = version;
+      this.behavior = behavior;
+      this.observers = observers;
+      this.parallelism = parallelism;
+      this.passphrase = passphrase ?? "secret";
+      this.versioningEnabled = versioningEnabled;
+      this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
+      this.config = {
+        cache,
+        hooks,
+        paranoid,
+        timestamps,
+        partitions,
+        autoDecrypt,
+        allNestedObjectsOptional
+      };
+      this.hooks = {
+        beforeInsert: [],
+        afterInsert: [],
+        beforeUpdate: [],
+        afterUpdate: [],
+        beforeDelete: [],
+        afterDelete: []
+      };
+      this.attributes = attributes || {};
+      this.map = config.map;
+      this.applyConfiguration({ map: this.map });
+      if (hooks) {
+        for (const [event, hooksArr] of Object.entries(hooks)) {
+          if (Array.isArray(hooksArr) && this.hooks[event]) {
+            for (const fn of hooksArr) {
+              if (typeof fn === "function") {
+                this.hooks[event].push(fn.bind(this));
+              }
+            }
+          }
+        }
+      }
+      this._initMiddleware();
+    }
+    /**
+     * Configure ID generator based on provided options
+     * @param {Function|number} customIdGenerator - Custom ID generator function or size
+     * @param {number} idSize - Size for auto-generated IDs
+     * @returns {Function} Configured ID generator function
+     * @private
+     */
+    configureIdGenerator(customIdGenerator, idSize) {
+      if (typeof customIdGenerator === "function") {
+        return customIdGenerator;
+      }
+      if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
+        return nanoid.customAlphabet(nanoid.urlAlphabet, customIdGenerator);
+      }
+      if (typeof idSize === "number" && idSize > 0 && idSize !== 22) {
+        return nanoid.customAlphabet(nanoid.urlAlphabet, idSize);
+      }
+      return idGenerator;
+    }
+    /**
+     * Get resource options (for backward compatibility with tests)
+     */
+    get options() {
+      return {
+        timestamps: this.config.timestamps,
+        partitions: this.config.partitions || {},
+        cache: this.config.cache,
+        autoDecrypt: this.config.autoDecrypt,
+        paranoid: this.config.paranoid,
+        allNestedObjectsOptional: this.config.allNestedObjectsOptional
+      };
+    }
+    export() {
+      const exported = this.schema.export();
+      exported.behavior = this.behavior;
+      exported.timestamps = this.config.timestamps;
+      exported.partitions = this.config.partitions || {};
+      exported.paranoid = this.config.paranoid;
+      exported.allNestedObjectsOptional = this.config.allNestedObjectsOptional;
+      exported.autoDecrypt = this.config.autoDecrypt;
+      exported.cache = this.config.cache;
+      exported.hooks = this.hooks;
+      exported.map = this.map;
+      return exported;
+    }
+    /**
+     * Apply configuration settings (timestamps, partitions, hooks)
+     * This method ensures that all configuration-dependent features are properly set up
+     */
+    applyConfiguration({ map } = {}) {
+      if (this.config.timestamps) {
+        if (!this.attributes.createdAt) {
+          this.attributes.createdAt = "string|optional";
+        }
+        if (!this.attributes.updatedAt) {
+          this.attributes.updatedAt = "string|optional";
+        }
+        if (!this.config.partitions) {
+          this.config.partitions = {};
+        }
+        if (!this.config.partitions.byCreatedDate) {
+          this.config.partitions.byCreatedDate = {
+            fields: {
+              createdAt: "date|maxlength:10"
+            }
+          };
+        }
+        if (!this.config.partitions.byUpdatedDate) {
+          this.config.partitions.byUpdatedDate = {
+            fields: {
+              updatedAt: "date|maxlength:10"
+            }
+          };
+        }
+      }
+      this.setupPartitionHooks();
+      if (this.versioningEnabled) {
+        if (!this.config.partitions.byVersion) {
+          this.config.partitions.byVersion = {
+            fields: {
+              _v: "string"
+            }
+          };
+        }
+      }
+      this.schema = new Schema({
+        name: this.name,
+        attributes: this.attributes,
+        passphrase: this.passphrase,
+        version: this.version,
+        options: {
+          autoDecrypt: this.config.autoDecrypt,
+          allNestedObjectsOptional: this.config.allNestedObjectsOptional
+        },
+        map: map || this.map
+      });
+      this.validatePartitions();
+    }
+    /**
+     * Update resource attributes and rebuild schema
+     * @param {Object} newAttributes - New attributes definition
+     */
+    updateAttributes(newAttributes) {
+      const oldAttributes = this.attributes;
+      this.attributes = newAttributes;
+      this.applyConfiguration({ map: this.schema?.map });
+      return { oldAttributes, newAttributes };
+    }
+    /**
+     * Add a hook function for a specific event
+     * @param {string} event - Hook event (beforeInsert, afterInsert, etc.)
+     * @param {Function} fn - Hook function
+     */
+    addHook(event, fn) {
+      if (this.hooks[event]) {
+        this.hooks[event].push(fn.bind(this));
+      }
+    }
+    /**
+     * Execute hooks for a specific event
+     * @param {string} event - Hook event
+     * @param {*} data - Data to pass to hooks
+     * @returns {*} Modified data
+     */
+    async executeHooks(event, data) {
+      if (!this.hooks[event]) return data;
+      let result = data;
+      for (const hook of this.hooks[event]) {
+        result = await hook(result);
+      }
+      return result;
+    }
+    /**
+     * Setup automatic partition hooks
+     */
+    setupPartitionHooks() {
+      if (!this.config.partitions) {
+        return;
+      }
+      const partitions = this.config.partitions;
+      if (Object.keys(partitions).length === 0) {
+        return;
+      }
+      if (!this.hooks.afterInsert) {
+        this.hooks.afterInsert = [];
+      }
+      this.hooks.afterInsert.push(async (data) => {
+        await this.createPartitionReferences(data);
+        return data;
+      });
+      if (!this.hooks.afterDelete) {
+        this.hooks.afterDelete = [];
+      }
+      this.hooks.afterDelete.push(async (data) => {
+        await this.deletePartitionReferences(data);
+        return data;
+      });
+    }
+    async validate(data) {
+      const result = {
+        original: lodashEs.cloneDeep(data),
+        isValid: false,
+        errors: []
+      };
+      const check = await this.schema.validate(data, { mutateOriginal: false });
+      if (check === true) {
+        result.isValid = true;
+      } else {
+        result.errors = check;
+      }
+      result.data = data;
+      return result;
+    }
+    /**
+     * Validate that all partition fields exist in current resource attributes
+     * @throws {Error} If partition fields don't exist in current schema
+     */
+    validatePartitions() {
+      if (!this.config.partitions) {
+        return;
+      }
+      const partitions = this.config.partitions;
+      if (Object.keys(partitions).length === 0) {
+        return;
+      }
+      const currentAttributes = Object.keys(this.attributes || {});
+      for (const [partitionName, partitionDef] of Object.entries(partitions)) {
+        if (!partitionDef.fields) {
+          continue;
+        }
+        for (const fieldName of Object.keys(partitionDef.fields)) {
+          if (!this.fieldExistsInAttributes(fieldName)) {
+            throw new PartitionError(`Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(", ")}.`, { resourceName: this.name, partitionName, fieldName, availableFields: currentAttributes, operation: "validatePartitions" });
+          }
+        }
+      }
+    }
+    /**
+     * Check if a field (including nested fields) exists in the current attributes
+     * @param {string} fieldName - Field name (can be nested like 'utm.source')
+     * @returns {boolean} True if field exists
+     */
+    fieldExistsInAttributes(fieldName) {
+      if (fieldName.startsWith("_")) {
+        return true;
+      }
+      if (!fieldName.includes(".")) {
+        return Object.keys(this.attributes || {}).includes(fieldName);
+      }
+      const keys = fieldName.split(".");
+      let currentLevel = this.attributes || {};
+      for (const key of keys) {
+        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+          return false;
+        }
+        currentLevel = currentLevel[key];
+      }
+      return true;
+    }
+    /**
+     * Apply a single partition rule to a field value
+     * @param {*} value - The field value
+     * @param {string} rule - The partition rule
+     * @returns {*} Transformed value
+     */
+    applyPartitionRule(value, rule) {
+      if (value === void 0 || value === null) {
+        return value;
+      }
+      let transformedValue = value;
+      if (typeof rule === "string" && rule.includes("maxlength:")) {
+        const maxLengthMatch = rule.match(/maxlength:(\d+)/);
+        if (maxLengthMatch) {
+          const maxLength = parseInt(maxLengthMatch[1]);
+          if (typeof transformedValue === "string" && transformedValue.length > maxLength) {
+            transformedValue = transformedValue.substring(0, maxLength);
+          }
+        }
+      }
+      if (rule.includes("date")) {
+        if (transformedValue instanceof Date) {
+          transformedValue = transformedValue.toISOString().split("T")[0];
+        } else if (typeof transformedValue === "string") {
+          if (transformedValue.includes("T") && transformedValue.includes("Z")) {
+            transformedValue = transformedValue.split("T")[0];
+          } else {
+            const date = new Date(transformedValue);
+            if (!isNaN(date.getTime())) {
+              transformedValue = date.toISOString().split("T")[0];
+            }
+          }
+        }
+      }
+      return transformedValue;
+    }
+    /**
+     * Get the main resource key (new format without version in path)
+     * @param {string} id - Resource ID
+     * @returns {string} The main S3 key path
+     */
+    getResourceKey(id) {
+      const key = join("resource=" + this.name, "data", `id=${id}`);
+      return key;
+    }
+    /**
+     * Generate partition key for a resource in a specific partition
+     * @param {Object} params - Partition key parameters
+     * @param {string} params.partitionName - Name of the partition
+     * @param {string} params.id - Resource ID
+     * @param {Object} params.data - Resource data for partition value extraction
+     * @returns {string|null} The partition key path or null if required fields are missing
+     * @example
+     * const partitionKey = resource.getPartitionKey({
+     *   partitionName: 'byUtmSource',
+     *   id: 'user-123',
+     *   data: { utm: { source: 'google' } }
+     * });
+     * // Returns: 'resource=users/partition=byUtmSource/utm.source=google/id=user-123'
+     * 
+     * // Returns null if required field is missing
+     * const nullKey = resource.getPartitionKey({
+     *   partitionName: 'byUtmSource',
+     *   id: 'user-123',
+     *   data: { name: 'John' } // Missing utm.source
+     * });
+     * // Returns: null
+     */
+    getPartitionKey({ partitionName, id, data }) {
+      if (!this.config.partitions || !this.config.partitions[partitionName]) {
+        throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getPartitionKey" });
+      }
+      const partition = this.config.partitions[partitionName];
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const fieldValue = this.getNestedFieldValue(data, fieldName);
+        const transformedValue = this.applyPartitionRule(fieldValue, rule);
+        if (transformedValue === void 0 || transformedValue === null) {
+          return null;
+        }
+        partitionSegments.push(`${fieldName}=${transformedValue}`);
+      }
+      if (partitionSegments.length === 0) {
+        return null;
+      }
+      const finalId = id || data?.id;
+      if (!finalId) {
+        return null;
+      }
+      return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
+    }
+    /**
+     * Get nested field value from data object using dot notation
+     * @param {Object} data - Data object
+     * @param {string} fieldPath - Field path (e.g., "utm.source", "address.city")
+     * @returns {*} Field value
+     */
+    getNestedFieldValue(data, fieldPath) {
+      if (!fieldPath.includes(".")) {
+        return data[fieldPath];
+      }
+      const keys = fieldPath.split(".");
+      let currentLevel = data;
+      for (const key of keys) {
+        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+          return void 0;
+        }
+        currentLevel = currentLevel[key];
+      }
+      return currentLevel;
+    }
+    /**
+     * Calculate estimated content length for body data
+     * @param {string|Buffer} body - Body content
+     * @returns {number} Estimated content length in bytes
+     */
+    calculateContentLength(body) {
+      if (!body) return 0;
+      if (Buffer.isBuffer(body)) return body.length;
+      if (typeof body === "string") return Buffer.byteLength(body, "utf8");
+      if (typeof body === "object") return Buffer.byteLength(JSON.stringify(body), "utf8");
+      return Buffer.byteLength(String(body), "utf8");
+    }
+    /**
+     * Insert a new resource object
+     * @param {Object} attributes - Resource attributes
+     * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
+     * @returns {Promise<Object>} The created resource object with all attributes
+     * @example
+     * // Insert with auto-generated ID
+     * const user = await resource.insert({
+     *   name: 'John Doe',
+     *   email: 'john@example.com',
+     *   age: 30
+     * });
+        * 
+     * // Insert with custom ID
+     * const user = await resource.insert({
+     *   id: 'user-123',
+     *   name: 'John Doe',
+     *   email: 'john@example.com'
+     * });
+     */
+    async insert({ id, ...attributes }) {
+      const exists = await this.exists(id);
+      if (exists) throw new Error(`Resource with id '${id}' already exists`);
+      this.getResourceKey(id || "(auto)");
+      if (this.options.timestamps) {
+        attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
+        attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      }
+      const attributesWithDefaults = this.applyDefaults(attributes);
+      const completeData = { id, ...attributesWithDefaults };
+      const preProcessedData = await this.executeHooks("beforeInsert", completeData);
+      const extraProps = Object.keys(preProcessedData).filter(
+        (k) => !(k in completeData) || preProcessedData[k] !== completeData[k]
+      );
+      const extraData = {};
+      for (const k of extraProps) extraData[k] = preProcessedData[k];
+      const {
+        errors,
+        isValid,
+        data: validated
+      } = await this.validate(preProcessedData);
+      if (!isValid) {
+        const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Insert failed";
+        throw new InvalidResourceItem({
+          bucket: this.client.config.bucket,
+          resourceName: this.name,
+          attributes: preProcessedData,
+          validation: errors,
+          message: errorMsg
+        });
+      }
+      const { id: validatedId, ...validatedAttributes } = validated;
+      Object.assign(validatedAttributes, extraData);
+      const finalId = validatedId || id || this.idGenerator();
+      const mappedData = await this.schema.mapper(validatedAttributes);
+      mappedData._v = String(this.version);
+      const behaviorImpl = getBehavior(this.behavior);
+      const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+        resource: this,
+        data: validatedAttributes,
+        mappedData,
+        originalData: completeData
+      });
+      const finalMetadata = processedMetadata;
+      const key = this.getResourceKey(finalId);
+      let contentType = void 0;
+      if (body && body !== "") {
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        if (okParse) contentType = "application/json";
+      }
+      if (this.behavior === "body-only" && (!body || body === "")) {
+        throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
+      }
+      const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
+        key,
+        body,
+        contentType,
+        metadata: finalMetadata
+      }));
+      if (!okPut) {
+        const msg = errPut && errPut.message ? errPut.message : "";
+        if (msg.includes("metadata headers exceed") || msg.includes("Insert failed")) {
+          const totalSize = calculateTotalSize(finalMetadata);
+          const effectiveLimit = calculateEffectiveLimit({
+            s3Limit: 2047,
+            systemConfig: {
+              version: this.version,
+              timestamps: this.config.timestamps,
+              id: finalId
+            }
+          });
+          const excess = totalSize - effectiveLimit;
+          errPut.totalSize = totalSize;
+          errPut.limit = 2047;
+          errPut.effectiveLimit = effectiveLimit;
+          errPut.excess = excess;
+          throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "insert", id: finalId, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
+        }
+        throw mapAwsError(errPut, {
+          bucket: this.client.config.bucket,
+          key,
+          resourceName: this.name,
+          operation: "insert",
+          id: finalId
+        });
+      }
+      let insertedData = await this.composeFullObjectFromWrite({
+        id: finalId,
+        metadata: finalMetadata,
+        body,
+        behavior: this.behavior
+      });
+      const finalResult = await this.executeHooks("afterInsert", insertedData);
+      this.emit("insert", {
+        ...insertedData,
+        $before: { ...completeData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    }
+    /**
+     * Retrieve a resource object by ID
+     * @param {string} id - Resource ID
+     * @returns {Promise<Object>} The resource object with all attributes and metadata
+     * @example
+     * const user = await resource.get('user-123');
+              */
+    async get(id) {
+      if (lodashEs.isObject(id)) throw new Error(`id cannot be an object`);
+      if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
+      const key = this.getResourceKey(id);
+      const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+      if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.client.config.bucket,
+          key,
+          resourceName: this.name,
+          operation: "get",
+          id
+        });
+      }
+      if (request.ContentLength === 0) {
+        const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
+        noContentErr.name = "NoSuchKey";
+        throw mapAwsError(noContentErr, {
+          bucket: this.client.config.bucket,
+          key,
+          resourceName: this.name,
+          operation: "get",
+          id
+        });
+      }
+      const objectVersionRaw = request.Metadata?._v || this.version;
+      const objectVersion = typeof objectVersionRaw === "string" && objectVersionRaw.startsWith("v") ? objectVersionRaw.slice(1) : objectVersionRaw;
+      const schema = await this.getSchemaForVersion(objectVersion);
+      let metadata = await schema.unmapper(request.Metadata);
+      const behaviorImpl = getBehavior(this.behavior);
+      let body = "";
+      if (request.ContentLength > 0) {
+        const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
+        if (okBody) {
+          body = await streamToString(fullObject.Body);
+        } else {
+          body = "";
+        }
+      }
+      const { metadata: processedMetadata } = await behaviorImpl.handleGet({
+        resource: this,
+        metadata,
+        body
+      });
+      let data = await this.composeFullObjectFromWrite({
+        id,
+        metadata: processedMetadata,
+        body,
+        behavior: this.behavior
+      });
+      data._contentLength = request.ContentLength;
+      data._lastModified = request.LastModified;
+      data._hasContent = request.ContentLength > 0;
+      data._mimeType = request.ContentType || null;
+      data._v = objectVersion;
+      if (request.VersionId) data._versionId = request.VersionId;
+      if (request.Expiration) data._expiresAt = request.Expiration;
+      data._definitionHash = this.getDefinitionHash();
+      if (objectVersion !== this.version) {
+        data = await this.applyVersionMapping(data, objectVersion, this.version);
+      }
+      this.emit("get", data);
+      const value = data;
+      return value;
+    }
+    /**
+     * Check if a resource exists by ID
+     * @returns {Promise<boolean>} True if resource exists, false otherwise
+     */
+    async exists(id) {
+      const key = this.getResourceKey(id);
+      const [ok, err] = await tryFn(() => this.client.headObject(key));
+      return ok;
+    }
+    /**
+     * Update an existing resource object
+     * @param {string} id - Resource ID
+     * @param {Object} attributes - Attributes to update (partial update supported)
+     * @returns {Promise<Object>} The updated resource object with all attributes
+     * @example
+     * // Update specific fields
+     * const updatedUser = await resource.update('user-123', {
+     *   name: 'John Updated',
+     *   age: 31
+     * });
+     * 
+     * // Update with timestamps (if enabled)
+     * const updatedUser = await resource.update('user-123', {
+     *   email: 'newemail@example.com'
+     * });
+        */
+    async update(id, attributes) {
+      if (lodashEs.isEmpty(id)) {
+        throw new Error("id cannot be empty");
+      }
+      const exists = await this.exists(id);
+      if (!exists) {
+        throw new Error(`Resource with id '${id}' does not exist`);
+      }
+      const originalData = await this.get(id);
+      const attributesClone = lodashEs.cloneDeep(attributes);
+      let mergedData = lodashEs.cloneDeep(originalData);
+      for (const [key2, value] of Object.entries(attributesClone)) {
+        if (key2.includes(".")) {
+          let ref = mergedData;
+          const parts = key2.split(".");
+          for (let i = 0; i < parts.length - 1; i++) {
+            if (typeof ref[parts[i]] !== "object" || ref[parts[i]] === null) {
+              ref[parts[i]] = {};
+            }
+            ref = ref[parts[i]];
+          }
+          ref[parts[parts.length - 1]] = lodashEs.cloneDeep(value);
+        } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+          mergedData[key2] = lodashEs.merge({}, mergedData[key2], value);
+        } else {
+          mergedData[key2] = lodashEs.cloneDeep(value);
+        }
+      }
+      if (this.config.timestamps) {
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        mergedData.updatedAt = now;
+        if (!mergedData.metadata) mergedData.metadata = {};
+        mergedData.metadata.updatedAt = now;
+      }
+      const preProcessedData = await this.executeHooks("beforeUpdate", lodashEs.cloneDeep(mergedData));
+      const completeData = { ...originalData, ...preProcessedData, id };
+      const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData));
+      if (!isValid) {
+        throw new InvalidResourceItem({
+          bucket: this.client.config.bucket,
+          resourceName: this.name,
+          attributes: preProcessedData,
+          validation: errors,
+          message: "validation: " + (errors && errors.length ? JSON.stringify(errors) : "unknown")
+        });
+      }
+      await this.schema.mapper(data);
+      const earlyBehaviorImpl = getBehavior(this.behavior);
+      const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
+      tempMappedData._v = String(this.version);
+      await earlyBehaviorImpl.handleUpdate({
+        resource: this,
+        id,
+        data: { ...originalData, ...preProcessedData },
+        mappedData: tempMappedData,
+        originalData: { ...attributesClone, id }
+      });
+      const { id: validatedId, ...validatedAttributes } = data;
+      const oldData = { ...originalData, id };
+      const newData = { ...validatedAttributes, id };
+      await this.handlePartitionReferenceUpdates(oldData, newData);
+      const mappedData = await this.schema.mapper(validatedAttributes);
+      mappedData._v = String(this.version);
+      const behaviorImpl = getBehavior(this.behavior);
+      const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+        resource: this,
+        id,
+        data: validatedAttributes,
+        mappedData,
+        originalData: { ...attributesClone, id }
+      });
+      const finalMetadata = processedMetadata;
+      const key = this.getResourceKey(id);
+      let existingContentType = void 0;
+      let finalBody = body;
+      if (body === "" && this.behavior !== "body-overflow") {
+        const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+        if (ok2 && existingObject.ContentLength > 0) {
+          const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+          const existingBodyString = existingBodyBuffer.toString();
+          const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+          if (!okParse) {
+            finalBody = existingBodyBuffer;
+            existingContentType = existingObject.ContentType;
+          }
+        }
+      }
+      let finalContentType = existingContentType;
+      if (finalBody && finalBody !== "" && !finalContentType) {
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+        if (okParse) finalContentType = "application/json";
+      }
+      if (this.versioningEnabled && originalData._v !== this.version) {
+        await this.createHistoricalVersion(id, originalData);
+      }
+      const [ok, err] = await tryFn(() => this.client.putObject({
+        key,
+        body: finalBody,
+        contentType: finalContentType,
+        metadata: finalMetadata
+      }));
+      if (!ok && err && err.message && err.message.includes("metadata headers exceed")) {
+        const totalSize = calculateTotalSize(finalMetadata);
+        const effectiveLimit = calculateEffectiveLimit({
+          s3Limit: 2047,
+          systemConfig: {
+            version: this.version,
+            timestamps: this.config.timestamps,
+            id
+          }
+        });
+        const excess = totalSize - effectiveLimit;
+        err.totalSize = totalSize;
+        err.limit = 2047;
+        err.effectiveLimit = effectiveLimit;
+        err.excess = excess;
+        this.emit("exceedsLimit", {
+          operation: "update",
+          totalSize,
+          limit: 2047,
+          effectiveLimit,
+          excess,
+          data: validatedAttributes
+        });
+        throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "update", id, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
+      } else if (!ok) {
+        throw mapAwsError(err, {
+          bucket: this.client.config.bucket,
+          key,
+          resourceName: this.name,
+          operation: "update",
+          id
+        });
+      }
+      const updatedData = await this.composeFullObjectFromWrite({
+        id,
+        metadata: finalMetadata,
+        body: finalBody,
+        behavior: this.behavior
+      });
+      const finalResult = await this.executeHooks("afterUpdate", updatedData);
+      this.emit("update", {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    }
+    /**
+     * Delete a resource object by ID
+     * @param {string} id - Resource ID
+     * @returns {Promise<Object>} S3 delete response
+     * @example
+     * await resource.delete('user-123');
+     */
+    async delete(id) {
+      if (lodashEs.isEmpty(id)) {
+        throw new Error("id cannot be empty");
+      }
+      let objectData;
+      let deleteError = null;
+      const [ok, err, data] = await tryFn(() => this.get(id));
+      if (ok) {
+        objectData = data;
+      } else {
+        objectData = { id };
+        deleteError = err;
+      }
+      await this.executeHooks("beforeDelete", objectData);
+      const key = this.getResourceKey(id);
+      const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+      this.emit("delete", {
+        ...objectData,
+        $before: { ...objectData },
+        $after: null
+      });
+      if (deleteError) {
+        throw mapAwsError(deleteError, {
+          bucket: this.client.config.bucket,
+          key,
+          resourceName: this.name,
+          operation: "delete",
+          id
+        });
+      }
+      if (!ok2) throw mapAwsError(err2, {
+        key,
+        resourceName: this.name,
+        operation: "delete",
+        id
+      });
+      await this.executeHooks("afterDelete", objectData);
+      return response;
+    }
+    /**
+     * Insert or update a resource object (upsert operation)
+     * @param {Object} params - Upsert parameters
+     * @param {string} params.id - Resource ID (required for upsert)
+     * @param {...Object} params - Resource attributes (any additional properties)
+     * @returns {Promise<Object>} The inserted or updated resource object
+     * @example
+     * // Will insert if doesn't exist, update if exists
+     * const user = await resource.upsert({
+     *   id: 'user-123',
+     *   name: 'John Doe',
+     *   email: 'john@example.com'
+     * });
+     */
+    async upsert({ id, ...attributes }) {
+      const exists = await this.exists(id);
+      if (exists) {
+        return this.update(id, attributes);
+      }
+      return this.insert({ id, ...attributes });
+    }
+    /**
+     * Count resources with optional partition filtering
+     * @param {Object} [params] - Count parameters
+     * @param {string} [params.partition] - Partition name to count in
+     * @param {Object} [params.partitionValues] - Partition field values to filter by
+     * @returns {Promise<number>} Total count of matching resources
+     * @example
+     * // Count all resources
+     * const total = await resource.count();
+     * 
+     * // Count in specific partition
+     * const googleUsers = await resource.count({
+     *   partition: 'byUtmSource',
+     *   partitionValues: { 'utm.source': 'google' }
+     * });
+     * 
+     * // Count in multi-field partition
+     * const usElectronics = await resource.count({
+     *   partition: 'byCategoryRegion',
+     *   partitionValues: { category: 'electronics', region: 'US' }
+     * });
+     */
+    async count({ partition = null, partitionValues = {} } = {}) {
+      let prefix;
+      if (partition && Object.keys(partitionValues).length > 0) {
+        const partitionDef = this.config.partitions[partition];
+        if (!partitionDef) {
+          throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "count" });
+        }
+        const partitionSegments = [];
+        const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+        for (const [fieldName, rule] of sortedFields) {
+          const value = partitionValues[fieldName];
+          if (value !== void 0 && value !== null) {
+            const transformedValue = this.applyPartitionRule(value, rule);
+            partitionSegments.push(`${fieldName}=${transformedValue}`);
+          }
+        }
+        if (partitionSegments.length > 0) {
+          prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+        } else {
+          prefix = `resource=${this.name}/partition=${partition}`;
+        }
+      } else {
+        prefix = `resource=${this.name}/data`;
+      }
+      const count = await this.client.count({ prefix });
+      this.emit("count", count);
+      return count;
+    }
+    /**
+     * Insert multiple resources in parallel
+     * @param {Object[]} objects - Array of resource objects to insert
+     * @returns {Promise<Object[]>} Array of inserted resource objects
+     * @example
+     * const users = [
+     *   { name: 'John', email: 'john@example.com' },
+     *   { name: 'Jane', email: 'jane@example.com' },
+     *   { name: 'Bob', email: 'bob@example.com' }
+     * ];
+     * const insertedUsers = await resource.insertMany(users);
+        */
+    async insertMany(objects) {
+      const { results } = await promisePool.PromisePool.for(objects).withConcurrency(this.parallelism).handleError(async (error, content2) => {
+        this.emit("error", error, content2);
+        this.observers.map((x) => x.emit("error", this.name, error, content2));
+      }).process(async (attributes) => {
+        const result = await this.insert(attributes);
+        return result;
+      });
+      this.emit("insertMany", objects.length);
+      return results;
+    }
+    /**
+     * Delete multiple resources by their IDs in parallel
+     * @param {string[]} ids - Array of resource IDs to delete
+     * @returns {Promise<Object[]>} Array of S3 delete responses
+     * @example
+     * const deletedIds = ['user-1', 'user-2', 'user-3'];
+     * const results = await resource.deleteMany(deletedIds);
+        */
+    async deleteMany(ids) {
+      const packages = lodashEs.chunk(
+        ids.map((id) => this.getResourceKey(id)),
+        1e3
+      );
+      ids.map((id) => this.getResourceKey(id));
+      const { results } = await promisePool.PromisePool.for(packages).withConcurrency(this.parallelism).handleError(async (error, content2) => {
+        this.emit("error", error, content2);
+        this.observers.map((x) => x.emit("error", this.name, error, content2));
+      }).process(async (keys) => {
+        const response = await this.client.deleteObjects(keys);
+        keys.forEach((key) => {
+          const parts = key.split("/");
+          const idPart = parts.find((part) => part.startsWith("id="));
+          const id = idPart ? idPart.replace("id=", "") : null;
+          if (id) {
+            this.emit("deleted", id);
+            this.observers.map((x) => x.emit("deleted", this.name, id));
+          }
+        });
+        return response;
+      });
+      this.emit("deleteMany", ids.length);
+      return results;
+    }
+    async deleteAll() {
+      if (this.config.paranoid !== false) {
+        throw new ResourceError("deleteAll() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAll", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAll." });
+      }
+      const prefix = `resource=${this.name}/data`;
+      const deletedCount = await this.client.deleteAll({ prefix });
+      this.emit("deleteAll", {
+        version: this.version,
+        prefix,
+        deletedCount
+      });
+      return { deletedCount, version: this.version };
+    }
+    /**
+     * Delete all data for this resource across ALL versions
+     * @returns {Promise<Object>} Deletion report
+     */
+    async deleteAllData() {
+      if (this.config.paranoid !== false) {
+        throw new ResourceError("deleteAllData() is a dangerous operation and requires paranoid: false option.", { resourceName: this.name, operation: "deleteAllData", paranoid: this.config.paranoid, suggestion: "Set paranoid: false to allow deleteAllData." });
+      }
+      const prefix = `resource=${this.name}`;
+      const deletedCount = await this.client.deleteAll({ prefix });
+      this.emit("deleteAllData", {
+        resource: this.name,
+        prefix,
+        deletedCount
+      });
+      return { deletedCount, resource: this.name };
+    }
+    /**
+     * List resource IDs with optional partition filtering and pagination
+     * @param {Object} [params] - List parameters
+     * @param {string} [params.partition] - Partition name to list from
+     * @param {Object} [params.partitionValues] - Partition field values to filter by
+     * @param {number} [params.limit] - Maximum number of results to return
+     * @param {number} [params.offset=0] - Offset for pagination
+     * @returns {Promise<string[]>} Array of resource IDs (strings)
+     * @example
+     * // List all IDs
+     * const allIds = await resource.listIds();
+     * 
+     * // List IDs with pagination
+     * const firstPageIds = await resource.listIds({ limit: 10, offset: 0 });
+     * const secondPageIds = await resource.listIds({ limit: 10, offset: 10 });
+     * 
+     * // List IDs from specific partition
+     * const googleUserIds = await resource.listIds({
+     *   partition: 'byUtmSource',
+     *   partitionValues: { 'utm.source': 'google' }
+     * });
+     * 
+     * // List IDs from multi-field partition
+     * const usElectronicsIds = await resource.listIds({
+     *   partition: 'byCategoryRegion',
+     *   partitionValues: { category: 'electronics', region: 'US' }
+     * });
+     */
+    async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+      let prefix;
+      if (partition && Object.keys(partitionValues).length > 0) {
+        if (!this.config.partitions || !this.config.partitions[partition]) {
+          throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: "listIds" });
+        }
+        const partitionDef = this.config.partitions[partition];
+        const partitionSegments = [];
+        const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+        for (const [fieldName, rule] of sortedFields) {
+          const value = partitionValues[fieldName];
+          if (value !== void 0 && value !== null) {
+            const transformedValue = this.applyPartitionRule(value, rule);
+            partitionSegments.push(`${fieldName}=${transformedValue}`);
+          }
+        }
+        if (partitionSegments.length > 0) {
+          prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+        } else {
+          prefix = `resource=${this.name}/partition=${partition}`;
+        }
+      } else {
+        prefix = `resource=${this.name}/data`;
+      }
+      const keys = await this.client.getKeysPage({
+        prefix,
+        offset,
+        amount: limit || 1e3
+        // Default to 1000 if no limit specified
+      });
+      const ids = keys.map((key) => {
+        const parts = key.split("/");
+        const idPart = parts.find((part) => part.startsWith("id="));
+        return idPart ? idPart.replace("id=", "") : null;
+      }).filter(Boolean);
+      this.emit("listIds", ids.length);
+      return ids;
+    }
+    /**
+     * List resources with optional partition filtering and pagination
+     * @param {Object} [params] - List parameters
+     * @param {string} [params.partition] - Partition name to list from
+     * @param {Object} [params.partitionValues] - Partition field values to filter by
+     * @param {number} [params.limit] - Maximum number of results
+     * @param {number} [params.offset=0] - Number of results to skip
+     * @returns {Promise<Object[]>} Array of resource objects
+     * @example
+     * // List all resources
+     * const allUsers = await resource.list();
+     * 
+     * // List with pagination
+     * const first10 = await resource.list({ limit: 10, offset: 0 });
+     * 
+     * // List from specific partition
+     * const usUsers = await resource.list({
+     *   partition: 'byCountry',
+     *   partitionValues: { 'profile.country': 'US' }
+     * });
+     */
+    async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+      const [ok, err, result] = await tryFn(async () => {
+        if (!partition) {
+          return await this.listMain({ limit, offset });
+        }
+        return await this.listPartition({ partition, partitionValues, limit, offset });
+      });
+      if (!ok) {
+        return this.handleListError(err, { partition, partitionValues });
+      }
+      return result;
+    }
+    async listMain({ limit, offset = 0 }) {
+      const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
+      if (!ok) throw err;
+      const results = await this.processListResults(ids, "main");
+      this.emit("list", { count: results.length, errors: 0 });
+      return results;
+    }
+    async listPartition({ partition, partitionValues, limit, offset = 0 }) {
+      if (!this.config.partitions?.[partition]) {
+        this.emit("list", { partition, partitionValues, count: 0, errors: 0 });
+        return [];
+      }
+      const partitionDef = this.config.partitions[partition];
+      const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
+      const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+      if (!ok) throw err;
+      const ids = this.extractIdsFromKeys(keys).slice(offset);
+      const filteredIds = limit ? ids.slice(0, limit) : ids;
+      const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
+      this.emit("list", { partition, partitionValues, count: results.length, errors: 0 });
+      return results;
+    }
+    /**
+     * Build partition prefix from partition definition and values
+     */
+    buildPartitionPrefix(partition, partitionDef, partitionValues) {
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length > 0) {
+        return `resource=${this.name}/partition=${partition}/${partitionSegments.join("/")}`;
+      }
+      return `resource=${this.name}/partition=${partition}`;
+    }
+    /**
+     * Extract IDs from S3 keys
+     */
+    extractIdsFromKeys(keys) {
+      return keys.map((key) => {
+        const parts = key.split("/");
+        const idPart = parts.find((part) => part.startsWith("id="));
+        return idPart ? idPart.replace("id=", "") : null;
+      }).filter(Boolean);
+    }
+    /**
+     * Process list results with error handling
+     */
+    async processListResults(ids, context = "main") {
+      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
+      }).process(async (id) => {
+        const [ok, err, result] = await tryFn(() => this.get(id));
+        if (ok) {
+          return result;
+        }
+        return this.handleResourceError(err, id, context);
+      });
+      this.emit("list", { count: results.length, errors: 0 });
+      return results;
+    }
+    /**
+     * Process partition results with error handling
+     */
+    async processPartitionResults(ids, partition, partitionDef, keys) {
+      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
+      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.parallelism).handleError(async (error, id) => {
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
+      }).process(async (id) => {
+        const [ok, err, result] = await tryFn(async () => {
+          const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
+          return await this.getFromPartition({
+            id,
+            partitionName: partition,
+            partitionValues: actualPartitionValues
+          });
+        });
+        if (ok) return result;
+        return this.handleResourceError(err, id, "partition");
+      });
+      return results.filter((item) => item !== null);
+    }
+    /**
+     * Extract partition values from S3 key for specific ID
+     */
+    extractPartitionValuesFromKey(id, keys, sortedFields) {
+      const keyForId = keys.find((key) => key.includes(`id=${id}`));
+      if (!keyForId) {
+        throw new PartitionError(`Partition key not found for ID ${id}`, { resourceName: this.name, id, operation: "extractPartitionValuesFromKey" });
+      }
+      const keyParts = keyForId.split("/");
+      const actualPartitionValues = {};
+      for (const [fieldName] of sortedFields) {
+        const fieldPart = keyParts.find((part) => part.startsWith(`${fieldName}=`));
+        if (fieldPart) {
+          const value = fieldPart.replace(`${fieldName}=`, "");
+          actualPartitionValues[fieldName] = value;
+        }
+      }
+      return actualPartitionValues;
+    }
+    /**
+     * Handle resource-specific errors
+     */
+    handleResourceError(error, id, context) {
+      if (error.message.includes("Cipher job failed") || error.message.includes("OperationError")) {
+        return {
+          id,
+          _decryptionFailed: true,
+          _error: error.message,
+          ...context === "partition" && { _partition: context }
+        };
+      }
+      throw error;
+    }
+    /**
+     * Handle list method errors
+     */
+    handleListError(error, { partition, partitionValues }) {
+      if (error.message.includes("Partition '") && error.message.includes("' not found")) {
+        this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+        return [];
+      }
+      this.emit("list", { partition, partitionValues, count: 0, errors: 1 });
+      return [];
+    }
+    /**
+     * Get multiple resources by their IDs
+     * @param {string[]} ids - Array of resource IDs
+     * @returns {Promise<Object[]>} Array of resource objects
+     * @example
+     * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
+        */
+    async getMany(ids) {
+      const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
+        this.emit("error", error, content);
+        this.observers.map((x) => x.emit("error", this.name, error, content));
+        return {
+          id,
+          _error: error.message,
+          _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
+        };
+      }).process(async (id) => {
+        const [ok, err, data] = await tryFn(() => this.get(id));
+        if (ok) return data;
+        if (err.message.includes("Cipher job failed") || err.message.includes("OperationError")) {
+          return {
+            id,
+            _decryptionFailed: true,
+            _error: err.message
+          };
+        }
+        throw err;
+      });
+      this.emit("getMany", ids.length);
+      return results;
+    }
+    /**
+     * Get all resources (equivalent to list() without pagination)
+     * @returns {Promise<Object[]>} Array of all resource objects
+     * @example
+     * const allUsers = await resource.getAll();
+        */
+    async getAll() {
+      const [ok, err, ids] = await tryFn(() => this.listIds());
+      if (!ok) throw err;
+      const results = [];
+      for (const id of ids) {
+        const [ok2, err2, item] = await tryFn(() => this.get(id));
+        if (ok2) {
+          results.push(item);
+        }
+      }
+      return results;
+    }
+    /**
+     * Get a page of resources with pagination metadata
+     * @param {Object} [params] - Page parameters
+     * @param {number} [params.offset=0] - Offset for pagination
+     * @param {number} [params.size=100] - Page size
+     * @param {string} [params.partition] - Partition name to page from
+     * @param {Object} [params.partitionValues] - Partition field values to filter by
+     * @param {boolean} [params.skipCount=false] - Skip total count for performance (useful for large collections)
+     * @returns {Promise<Object>} Page result with items and pagination info
+     * @example
+     * // Get first page of all resources
+     * const page = await resource.page({ offset: 0, size: 10 });
+           * 
+     * // Get page from specific partition
+     * const googlePage = await resource.page({
+     *   partition: 'byUtmSource',
+     *   partitionValues: { 'utm.source': 'google' },
+     *   offset: 0,
+     *   size: 5
+     * });
+     * 
+     * // Skip count for performance in large collections
+     * const fastPage = await resource.page({ 
+     *   offset: 0, 
+     *   size: 100, 
+     *   skipCount: true 
+     * });
+        */
+    async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
+      const [ok, err, result] = await tryFn(async () => {
+        let totalItems = null;
+        let totalPages = null;
+        if (!skipCount) {
+          const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+          if (okCount) {
+            totalItems = count;
+            totalPages = Math.ceil(totalItems / size);
+          } else {
+            totalItems = null;
+            totalPages = null;
+          }
+        }
+        const page = Math.floor(offset / size);
+        let items = [];
+        if (size <= 0) {
+          items = [];
+        } else {
+          const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
+          items = okList ? listResult : [];
+        }
+        const result2 = {
+          items,
+          totalItems,
+          page,
+          pageSize: size,
+          totalPages,
+          hasMore: items.length === size && offset + size < (totalItems || Infinity),
+          _debug: {
+            requestedSize: size,
+            requestedOffset: offset,
+            actualItemsReturned: items.length,
+            skipCount,
+            hasTotalItems: totalItems !== null
+          }
+        };
+        this.emit("page", result2);
+        return result2;
+      });
+      if (ok) return result;
+      return {
+        items: [],
+        totalItems: null,
+        page: Math.floor(offset / size),
+        pageSize: size,
+        totalPages: null,
+        _debug: {
+          requestedSize: size,
+          requestedOffset: offset,
+          actualItemsReturned: 0,
+          skipCount,
+          hasTotalItems: false,
+          error: err.message
+        }
+      };
+    }
+    readable() {
+      const stream = new ResourceReader({ resource: this });
+      return stream.build();
+    }
+    writable() {
+      const stream = new ResourceWriter({ resource: this });
+      return stream.build();
+    }
+    /**
+     * Set binary content for a resource
+     * @param {Object} params - Content parameters
+     * @param {string} params.id - Resource ID
+     * @param {Buffer|string} params.buffer - Content buffer or string
+     * @param {string} [params.contentType='application/octet-stream'] - Content type
+     * @returns {Promise<Object>} Updated resource data
+     * @example
+     * // Set image content
+     * const imageBuffer = fs.readFileSync('image.jpg');
+     * await resource.setContent({
+     *   id: 'user-123',
+     *   buffer: imageBuffer,
+     *   contentType: 'image/jpeg'
+     * });
+     * 
+     * // Set text content
+     * await resource.setContent({
+     *   id: 'document-456',
+     *   buffer: 'Hello World',
+     *   contentType: 'text/plain'
+     * });
+     */
+    async setContent({ id, buffer, contentType = "application/octet-stream" }) {
+      const [ok, err, currentData] = await tryFn(() => this.get(id));
+      if (!ok || !currentData) {
+        throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: "setContent" });
+      }
+      const updatedData = {
+        ...currentData,
+        _hasContent: true,
+        _contentLength: buffer.length,
+        _mimeType: contentType
+      };
+      const mappedMetadata = await this.schema.mapper(updatedData);
+      const [ok2, err2] = await tryFn(() => this.client.putObject({
+        key: this.getResourceKey(id),
+        metadata: mappedMetadata,
+        body: buffer,
+        contentType
+      }));
+      if (!ok2) throw err2;
+      this.emit("setContent", { id, contentType, contentLength: buffer.length });
+      return updatedData;
+    }
+    /**
+     * Retrieve binary content associated with a resource
+     * @param {string} id - Resource ID
+     * @returns {Promise<Object>} Object with buffer and contentType
+     * @example
+     * const content = await resource.content('user-123');
+     * if (content.buffer) {
+           *   // Save to file
+     *   fs.writeFileSync('output.jpg', content.buffer);
+     * } else {
+        * }
+     */
+    async content(id) {
+      const key = this.getResourceKey(id);
+      const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+      if (!ok) {
+        if (err.name === "NoSuchKey") {
+          return {
+            buffer: null,
+            contentType: null
+          };
+        }
+        throw err;
+      }
+      const buffer = Buffer.from(await response.Body.transformToByteArray());
+      const contentType = response.ContentType || null;
+      this.emit("content", id, buffer.length, contentType);
+      return {
+        buffer,
+        contentType
+      };
+    }
+    /**
+     * Check if binary content exists for a resource
+     * @param {string} id - Resource ID
+     * @returns {boolean}
+     */
+    async hasContent(id) {
+      const key = this.getResourceKey(id);
+      const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+      if (!ok) return false;
+      return response.ContentLength > 0;
+    }
+    /**
+     * Delete binary content but preserve metadata
+     * @param {string} id - Resource ID
+     */
+    async deleteContent(id) {
+      const key = this.getResourceKey(id);
+      const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
+      if (!ok) throw err;
+      const existingMetadata = existingObject.Metadata || {};
+      const [ok2, err2, response] = await tryFn(() => this.client.putObject({
+        key,
+        body: "",
+        metadata: existingMetadata
+      }));
+      if (!ok2) throw err2;
+      this.emit("deleteContent", id);
+      return response;
+    }
+    /**
+     * Generate definition hash for this resource
+     * @returns {string} SHA256 hash of the resource definition (name + attributes)
+     */
+    getDefinitionHash() {
+      const definition = {
+        attributes: this.attributes,
+        behavior: this.behavior
+      };
+      const stableString = jsonStableStringify(definition);
+      return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    }
+    /**
+     * Extract version from S3 key
+     * @param {string} key - S3 object key
+     * @returns {string|null} Version string or null
+     */
+    extractVersionFromKey(key) {
+      const parts = key.split("/");
+      const versionPart = parts.find((part) => part.startsWith("v="));
+      return versionPart ? versionPart.replace("v=", "") : null;
+    }
+    /**
+     * Get schema for a specific version
+     * @param {string} version - Version string (e.g., 'v0', 'v1')
+     * @returns {Object} Schema object for the version
+     */
+    async getSchemaForVersion(version) {
+      if (version === this.version) {
+        return this.schema;
+      }
+      const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
+        name: this.name,
+        attributes: this.attributes,
+        passphrase: this.passphrase,
+        version,
+        options: {
+          ...this.config,
+          autoDecrypt: true,
+          autoEncrypt: true
+        }
+      })));
+      if (ok) return compatibleSchema;
+      return this.schema;
+    }
+    /**
+     * Create partition references after insert
+     * @param {Object} data - Inserted object data
+     */
+    async createPartitionReferences(data) {
+      const partitions = this.config.partitions;
+      if (!partitions || Object.keys(partitions).length === 0) {
+        return;
+      }
+      for (const [partitionName, partition] of Object.entries(partitions)) {
+        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
+        if (partitionKey) {
+          const partitionMetadata = {
+            _v: String(this.version)
+          };
+          await this.client.putObject({
+            key: partitionKey,
+            metadata: partitionMetadata,
+            body: "",
+            contentType: void 0
+          });
+        }
+      }
+    }
+    /**
+     * Delete partition references after delete
+     * @param {Object} data - Deleted object data
+     */
+    async deletePartitionReferences(data) {
+      const partitions = this.config.partitions;
+      if (!partitions || Object.keys(partitions).length === 0) {
+        return;
+      }
+      const keysToDelete = [];
+      for (const [partitionName, partition] of Object.entries(partitions)) {
+        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
+        if (partitionKey) {
+          keysToDelete.push(partitionKey);
+        }
+      }
+      if (keysToDelete.length > 0) {
+        const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
+      }
+    }
+    /**
+     * Query resources with simple filtering and pagination
+     * @param {Object} [filter={}] - Filter criteria (exact field matches)
+     * @param {Object} [options] - Query options
+     * @param {number} [options.limit=100] - Maximum number of results
+     * @param {number} [options.offset=0] - Offset for pagination
+     * @param {string} [options.partition] - Partition name to query from
+     * @param {Object} [options.partitionValues] - Partition field values to filter by
+     * @returns {Promise<Object[]>} Array of filtered resource objects
+     * @example
+     * // Query all resources (no filter)
+     * const allUsers = await resource.query();
+     * 
+     * // Query with simple filter
+     * const activeUsers = await resource.query({ status: 'active' });
+     * 
+     * // Query with multiple filters
+     * const usElectronics = await resource.query({
+     *   category: 'electronics',
+     *   region: 'US'
+     * });
+     * 
+     * // Query with pagination
+     * const firstPage = await resource.query(
+     *   { status: 'active' },
+     *   { limit: 10, offset: 0 }
+     * );
+     * 
+     * // Query within partition
+     * const googleUsers = await resource.query(
+     *   { status: 'active' },
+     *   {
+     *     partition: 'byUtmSource',
+     *     partitionValues: { 'utm.source': 'google' },
+     *     limit: 5
+     *   }
+     * );
+     */
+    async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
+      if (Object.keys(filter).length === 0) {
+        return await this.list({ partition, partitionValues, limit, offset });
+      }
+      const results = [];
+      let currentOffset = offset;
+      const batchSize = Math.min(limit, 50);
+      while (results.length < limit) {
+        const batch = await this.list({
+          partition,
+          partitionValues,
+          limit: batchSize,
+          offset: currentOffset
+        });
+        if (batch.length === 0) {
+          break;
+        }
+        const filteredBatch = batch.filter((doc) => {
+          return Object.entries(filter).every(([key, value]) => {
+            return doc[key] === value;
+          });
+        });
+        results.push(...filteredBatch);
+        currentOffset += batchSize;
+        if (batch.length < batchSize) {
+          break;
+        }
+      }
+      return results.slice(0, limit);
+    }
+    /**
+     * Handle partition reference updates with change detection
+     * @param {Object} oldData - Original object data before update
+     * @param {Object} newData - Updated object data
+     */
+    async handlePartitionReferenceUpdates(oldData, newData) {
+      const partitions = this.config.partitions;
+      if (!partitions || Object.keys(partitions).length === 0) {
+        return;
+      }
+      for (const [partitionName, partition] of Object.entries(partitions)) {
+        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
+      }
+      const id = newData.id || oldData.id;
+      for (const [partitionName, partition] of Object.entries(partitions)) {
+        const prefix = `resource=${this.name}/partition=${partitionName}`;
+        let allKeys = [];
+        const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+        if (okKeys) {
+          allKeys = keys;
+        } else {
+          continue;
+        }
+        const validKey = this.getPartitionKey({ partitionName, id, data: newData });
+        for (const key of allKeys) {
+          if (key.endsWith(`/id=${id}`) && key !== validKey) {
+            const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
+          }
+        }
+      }
+    }
+    /**
+     * Handle partition reference update for a specific partition
+     * @param {string} partitionName - Name of the partition
+     * @param {Object} partition - Partition definition
+     * @param {Object} oldData - Original object data before update
+     * @param {Object} newData - Updated object data
+     */
+    async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
+      const id = newData.id || oldData.id;
+      const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
+      const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
+      if (oldPartitionKey !== newPartitionKey) {
+        if (oldPartitionKey) {
+          const [ok, err] = await tryFn(async () => {
+            await this.client.deleteObject(oldPartitionKey);
+          });
+        }
+        if (newPartitionKey) {
+          const [ok, err] = await tryFn(async () => {
+            const partitionMetadata = {
+              _v: String(this.version)
+            };
+            await this.client.putObject({
+              key: newPartitionKey,
+              metadata: partitionMetadata,
+              body: "",
+              contentType: void 0
+            });
+          });
+        }
+      } else if (newPartitionKey) {
+        const [ok, err] = await tryFn(async () => {
+          const partitionMetadata = {
+            _v: String(this.version)
+          };
+          await this.client.putObject({
+            key: newPartitionKey,
+            metadata: partitionMetadata,
+            body: "",
+            contentType: void 0
+          });
+        });
+      }
+    }
+    /**
+     * Update partition objects to keep them in sync (legacy method for backward compatibility)
+     * @param {Object} data - Updated object data
+     */
+    async updatePartitionReferences(data) {
+      const partitions = this.config.partitions;
+      if (!partitions || Object.keys(partitions).length === 0) {
+        return;
+      }
+      for (const [partitionName, partition] of Object.entries(partitions)) {
+        if (!partition || !partition.fields || typeof partition.fields !== "object") {
+          continue;
+        }
+        const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
+        if (partitionKey) {
+          const partitionMetadata = {
+            _v: String(this.version)
+          };
+          const [ok, err] = await tryFn(async () => {
+            await this.client.putObject({
+              key: partitionKey,
+              metadata: partitionMetadata,
+              body: "",
+              contentType: void 0
+            });
+          });
+        }
+      }
+    }
+    /**
+     * Get a resource object directly from a specific partition
+     * @param {Object} params - Partition parameters
+     * @param {string} params.id - Resource ID
+     * @param {string} params.partitionName - Name of the partition
+     * @param {Object} params.partitionValues - Values for partition fields
+     * @returns {Promise<Object>} The resource object with partition metadata
+     * @example
+     * // Get user from UTM source partition
+     * const user = await resource.getFromPartition({
+     *   id: 'user-123',
+     *   partitionName: 'byUtmSource',
+     *   partitionValues: { 'utm.source': 'google' }
+     * });
+           * 
+     * // Get product from multi-field partition
+     * const product = await resource.getFromPartition({
+     *   id: 'product-456',
+     *   partitionName: 'byCategoryRegion',
+     *   partitionValues: { category: 'electronics', region: 'US' }
+     * });
+     */
+    async getFromPartition({ id, partitionName, partitionValues = {} }) {
+      if (!this.config.partitions || !this.config.partitions[partitionName]) {
+        throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
+      }
+      const partition = this.config.partitions[partitionName];
+      const partitionSegments = [];
+      const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
+      for (const [fieldName, rule] of sortedFields) {
+        const value = partitionValues[fieldName];
+        if (value !== void 0 && value !== null) {
+          const transformedValue = this.applyPartitionRule(value, rule);
+          partitionSegments.push(`${fieldName}=${transformedValue}`);
+        }
+      }
+      if (partitionSegments.length === 0) {
+        throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
+      }
+      const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
+      const [ok, err] = await tryFn(async () => {
+        await this.client.headObject(partitionKey);
+      });
+      if (!ok) {
+        throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, { resourceName: this.name, id, partitionName, operation: "getFromPartition" });
+      }
+      const data = await this.get(id);
+      data._partition = partitionName;
+      data._partitionValues = partitionValues;
+      this.emit("getFromPartition", data);
+      return data;
+    }
+    /**
+     * Create a historical version of an object
+     * @param {string} id - Resource ID
+     * @param {Object} data - Object data to store historically
+     */
+    async createHistoricalVersion(id, data) {
+      const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
+      const historicalData = {
+        ...data,
+        _v: data._v || this.version,
+        _historicalTimestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      const mappedData = await this.schema.mapper(historicalData);
+      const behaviorImpl = getBehavior(this.behavior);
+      const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+        resource: this,
+        data: historicalData,
+        mappedData
+      });
+      const finalMetadata = {
+        ...processedMetadata,
+        _v: data._v || this.version,
+        _historicalTimestamp: historicalData._historicalTimestamp
+      };
+      let contentType = void 0;
+      if (body && body !== "") {
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        if (okParse) contentType = "application/json";
+      }
+      await this.client.putObject({
+        key: historicalKey,
+        metadata: finalMetadata,
+        body,
+        contentType
+      });
+    }
+    /**
+     * Apply version mapping to convert an object from one version to another
+     * @param {Object} data - Object data to map
+     * @param {string} fromVersion - Source version
+     * @param {string} toVersion - Target version
+     * @returns {Object} Mapped object data
+     */
+    async applyVersionMapping(data, fromVersion, toVersion) {
+      if (fromVersion === toVersion) {
+        return data;
+      }
+      const mappedData = {
+        ...data,
+        _v: toVersion,
+        _originalVersion: fromVersion,
+        _versionMapped: true
+      };
+      return mappedData;
+    }
+    /**
+     * Compose the full object (metadata + body) as retornado por .get(),
+     * usando os dados em memória após insert/update, de acordo com o behavior
+     */
+    async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
+      const behaviorFlags = {};
+      if (metadata && metadata["$truncated"] === "true") {
+        behaviorFlags.$truncated = "true";
+      }
+      if (metadata && metadata["$overflow"] === "true") {
+        behaviorFlags.$overflow = "true";
+      }
+      let unmappedMetadata = {};
+      const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
+      unmappedMetadata = ok ? unmapped : metadata;
+      const filterInternalFields = (obj) => {
+        if (!obj || typeof obj !== "object") return obj;
+        const filtered2 = {};
+        for (const [key, value] of Object.entries(obj)) {
+          if (!key.startsWith("_")) {
+            filtered2[key] = value;
+          }
+        }
+        return filtered2;
+      };
+      const fixValue = (v) => {
+        if (typeof v === "object" && v !== null) {
+          return v;
+        }
+        if (typeof v === "string") {
+          if (v === "[object Object]") return {};
+          if (v.startsWith("{") || v.startsWith("[")) {
+            const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(v));
+            return ok2 ? parsed : v;
+          }
+          return v;
+        }
+        return v;
+      };
+      if (behavior === "body-overflow") {
+        const hasOverflow = metadata && metadata["$overflow"] === "true";
+        let bodyData = {};
+        if (hasOverflow && body) {
+          const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+          if (okBody) {
+            const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+            bodyData = okUnmap ? unmappedBody : {};
+          }
+        }
+        const merged = { ...unmappedMetadata, ...bodyData, id };
+        Object.keys(merged).forEach((k) => {
+          merged[k] = fixValue(merged[k]);
+        });
+        const result2 = filterInternalFields(merged);
+        if (hasOverflow) {
+          result2.$overflow = "true";
+        }
+        return result2;
+      }
+      if (behavior === "body-only") {
+        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
+        let mapFromMeta = this.schema.map;
+        if (metadata && metadata._map) {
+          const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
+          mapFromMeta = okMap ? parsedMap : this.schema.map;
+        }
+        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+        const result2 = okUnmap ? { ...unmappedBody, id } : { id };
+        Object.keys(result2).forEach((k) => {
+          result2[k] = fixValue(result2[k]);
+        });
+        return result2;
+      }
+      const result = { ...unmappedMetadata, id };
+      Object.keys(result).forEach((k) => {
+        result[k] = fixValue(result[k]);
+      });
+      const filtered = filterInternalFields(result);
+      if (behaviorFlags.$truncated) {
+        filtered.$truncated = behaviorFlags.$truncated;
+      }
+      if (behaviorFlags.$overflow) {
+        filtered.$overflow = behaviorFlags.$overflow;
+      }
+      return filtered;
+    }
+    emit(event, ...args) {
+      return super.emit(event, ...args);
+    }
+    async replace(id, attributes) {
+      await this.delete(id);
+      await new Promise((r) => setTimeout(r, 100));
+      const maxWait = 5e3;
+      const interval = 50;
+      const start = Date.now();
+      while (Date.now() - start < maxWait) {
+        const exists = await this.exists(id);
+        if (!exists) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, interval));
+      }
+      try {
+        const result = await this.insert({ ...attributes, id });
+        return result;
+      } catch (err) {
+        if (err && err.message && err.message.includes("already exists")) {
+          const result = await this.update(id, attributes);
+          return result;
+        }
+        throw err;
+      }
+    }
+    // --- MIDDLEWARE SYSTEM ---
+    _initMiddleware() {
+      this._middlewares = /* @__PURE__ */ new Map();
+      this._middlewareMethods = [
+        "get",
+        "list",
+        "listIds",
+        "getAll",
+        "count",
+        "page",
+        "insert",
+        "update",
+        "delete",
+        "deleteMany",
+        "exists",
+        "getMany"
+      ];
+      for (const method of this._middlewareMethods) {
+        this._middlewares.set(method, []);
+        if (!this[`_original_${method}`]) {
+          this[`_original_${method}`] = this[method].bind(this);
+          this[method] = async (...args) => {
+            const ctx = { resource: this, args, method };
+            let idx = -1;
+            const stack = this._middlewares.get(method);
+            const dispatch = async (i) => {
+              if (i <= idx) throw new Error("next() called multiple times");
+              idx = i;
+              if (i < stack.length) {
+                return await stack[i](ctx, () => dispatch(i + 1));
+              } else {
+                return await this[`_original_${method}`](...ctx.args);
+              }
+            };
+            return await dispatch(0);
+          };
+        }
+      }
+    }
+    useMiddleware(method, fn) {
+      if (!this._middlewares) this._initMiddleware();
+      if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: "useMiddleware", method });
+      this._middlewares.get(method).push(fn);
+    }
+    // Utilitário para aplicar valores default do schema
+    applyDefaults(data) {
+      const out = { ...data };
+      for (const [key, def] of Object.entries(this.attributes)) {
+        if (out[key] === void 0) {
+          if (typeof def === "string" && def.includes("default:")) {
+            const match = def.match(/default:([^|]+)/);
+            if (match) {
+              let val = match[1];
+              if (def.includes("boolean")) val = val === "true";
+              else if (def.includes("number")) val = Number(val);
+              out[key] = val;
+            }
+          }
+        }
+      }
+      return out;
+    }
+  }
+  function validateResourceConfig(config) {
+    const errors = [];
+    if (!config.name) {
+      errors.push("Resource 'name' is required");
+    } else if (typeof config.name !== "string") {
+      errors.push("Resource 'name' must be a string");
+    } else if (config.name.trim() === "") {
+      errors.push("Resource 'name' cannot be empty");
+    }
+    if (!config.client) {
+      errors.push("S3 'client' is required");
+    }
+    if (!config.attributes) {
+      errors.push("Resource 'attributes' are required");
+    } else if (typeof config.attributes !== "object" || Array.isArray(config.attributes)) {
+      errors.push("Resource 'attributes' must be an object");
+    } else if (Object.keys(config.attributes).length === 0) {
+      errors.push("Resource 'attributes' cannot be empty");
+    }
+    if (config.version !== void 0 && typeof config.version !== "string") {
+      errors.push("Resource 'version' must be a string");
+    }
+    if (config.behavior !== void 0 && typeof config.behavior !== "string") {
+      errors.push("Resource 'behavior' must be a string");
+    }
+    if (config.passphrase !== void 0 && typeof config.passphrase !== "string") {
+      errors.push("Resource 'passphrase' must be a string");
+    }
+    if (config.parallelism !== void 0) {
+      if (typeof config.parallelism !== "number" || !Number.isInteger(config.parallelism)) {
+        errors.push("Resource 'parallelism' must be an integer");
+      } else if (config.parallelism < 1) {
+        errors.push("Resource 'parallelism' must be greater than 0");
+      }
+    }
+    if (config.observers !== void 0 && !Array.isArray(config.observers)) {
+      errors.push("Resource 'observers' must be an array");
+    }
+    const booleanFields = ["cache", "autoDecrypt", "timestamps", "paranoid", "allNestedObjectsOptional"];
+    for (const field of booleanFields) {
+      if (config[field] !== void 0 && typeof config[field] !== "boolean") {
+        errors.push(`Resource '${field}' must be a boolean`);
+      }
+    }
+    if (config.idGenerator !== void 0) {
+      if (typeof config.idGenerator !== "function" && typeof config.idGenerator !== "number") {
+        errors.push("Resource 'idGenerator' must be a function or a number (size)");
+      } else if (typeof config.idGenerator === "number" && config.idGenerator <= 0) {
+        errors.push("Resource 'idGenerator' size must be greater than 0");
+      }
+    }
+    if (config.idSize !== void 0) {
+      if (typeof config.idSize !== "number" || !Number.isInteger(config.idSize)) {
+        errors.push("Resource 'idSize' must be an integer");
+      } else if (config.idSize <= 0) {
+        errors.push("Resource 'idSize' must be greater than 0");
+      }
+    }
+    if (config.partitions !== void 0) {
+      if (typeof config.partitions !== "object" || Array.isArray(config.partitions)) {
+        errors.push("Resource 'partitions' must be an object");
+      } else {
+        for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
+          if (typeof partitionDef !== "object" || Array.isArray(partitionDef)) {
+            errors.push(`Partition '${partitionName}' must be an object`);
+          } else if (!partitionDef.fields) {
+            errors.push(`Partition '${partitionName}' must have a 'fields' property`);
+          } else if (typeof partitionDef.fields !== "object" || Array.isArray(partitionDef.fields)) {
+            errors.push(`Partition '${partitionName}.fields' must be an object`);
+          } else {
+            for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
+              if (typeof fieldType !== "string") {
+                errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
+              }
+            }
+          }
+        }
+      }
+    }
+    if (config.hooks !== void 0) {
+      if (typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
+        errors.push("Resource 'hooks' must be an object");
+      } else {
+        const validHookEvents = ["beforeInsert", "afterInsert", "beforeUpdate", "afterUpdate", "beforeDelete", "afterDelete"];
+        for (const [event, hooksArr] of Object.entries(config.hooks)) {
+          if (!validHookEvents.includes(event)) {
+            errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(", ")}`);
+          } else if (!Array.isArray(hooksArr)) {
+            errors.push(`Resource 'hooks.${event}' must be an array`);
+          } else {
+            for (let i = 0; i < hooksArr.length; i++) {
+              const hook = hooksArr[i];
+              if (typeof hook !== "function") {
+                if (typeof hook === "string") continue;
+                continue;
+              }
+            }
+          }
+        }
+      }
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+
+  class Database extends EventEmitter {
+    constructor(options) {
+      super();
+      this.version = "1";
+      this.s3dbVersion = (() => {
+        const [ok, err, version] = tryFn(() => true ? "6.2.0" : "latest");
+        return ok ? version : "latest";
+      })();
+      this.resources = {};
+      this.savedMetadata = null;
+      this.options = options;
+      this.verbose = options.verbose || false;
+      this.parallelism = parseInt(options.parallelism + "") || 10;
+      this.plugins = options.plugins || [];
+      this.pluginList = options.plugins || [];
+      this.cache = options.cache;
+      this.passphrase = options.passphrase || "secret";
+      this.versioningEnabled = options.versioningEnabled || false;
+      let connectionString = options.connectionString;
+      if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
+        const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
+        if (endpoint) {
+          const url = new URL(endpoint);
+          if (accessKeyId) url.username = encodeURIComponent(accessKeyId);
+          if (secretAccessKey) url.password = encodeURIComponent(secretAccessKey);
+          url.pathname = `/${bucket || "s3db"}`;
+          if (forcePathStyle) {
+            url.searchParams.set("forcePathStyle", "true");
+          }
+          connectionString = url.toString();
+        } else if (accessKeyId && secretAccessKey) {
+          const params = new URLSearchParams();
+          params.set("region", region || "us-east-1");
+          if (forcePathStyle) {
+            params.set("forcePathStyle", "true");
+          }
+          connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || "s3db"}?${params.toString()}`;
+        }
+      }
+      this.client = options.client || new Client({
+        verbose: this.verbose,
+        parallelism: this.parallelism,
+        connectionString
+      });
+      this.bucket = this.client.bucket;
+      this.keyPrefix = this.client.keyPrefix;
+      if (!this._exitListenerRegistered) {
+        this._exitListenerRegistered = true;
+        process.on("exit", async () => {
+          if (this.isConnected()) {
+            try {
+              await this.disconnect();
+            } catch (err) {
+            }
+          }
+        });
+      }
+    }
+    async connect() {
+      await this.startPlugins();
+      let metadata = null;
+      if (await this.client.exists(`s3db.json`)) {
+        const request = await this.client.getObject(`s3db.json`);
+        metadata = JSON.parse(await streamToString(request?.Body));
+      } else {
+        metadata = this.blankMetadataStructure();
+        await this.uploadMetadataFile();
+      }
+      this.savedMetadata = metadata;
+      const definitionChanges = this.detectDefinitionChanges(metadata);
+      for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
+        const currentVersion = resourceMetadata.currentVersion || "v0";
+        const versionData = resourceMetadata.versions?.[currentVersion];
+        if (versionData) {
+          this.resources[name] = new Resource({
+            name,
+            client: this.client,
+            database: this,
+            // garantir referência
+            version: currentVersion,
+            attributes: versionData.attributes,
+            behavior: versionData.behavior || "user-managed",
+            parallelism: this.parallelism,
+            passphrase: this.passphrase,
+            observers: [this],
+            cache: this.cache,
+            timestamps: versionData.timestamps !== void 0 ? versionData.timestamps : false,
+            partitions: resourceMetadata.partitions || versionData.partitions || {},
+            paranoid: versionData.paranoid !== void 0 ? versionData.paranoid : true,
+            allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
+            autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
+            hooks: versionData.hooks || {},
+            versioningEnabled: this.versioningEnabled,
+            map: versionData.map
+          });
+        }
+      }
+      if (definitionChanges.length > 0) {
+        this.emit("resourceDefinitionsChanged", {
+          changes: definitionChanges,
+          metadata: this.savedMetadata
+        });
+      }
+      this.emit("connected", /* @__PURE__ */ new Date());
+    }
+    /**
+     * Detect changes in resource definitions compared to saved metadata
+     * @param {Object} savedMetadata - The metadata loaded from s3db.json
+     * @returns {Array} Array of change objects
+     */
+    detectDefinitionChanges(savedMetadata) {
+      const changes = [];
+      for (const [name, currentResource] of Object.entries(this.resources)) {
+        const currentHash = this.generateDefinitionHash(currentResource.export());
+        const savedResource = savedMetadata.resources?.[name];
+        if (!savedResource) {
+          changes.push({
+            type: "new",
+            resourceName: name,
+            currentHash,
+            savedHash: null
+          });
+        } else {
+          const currentVersion = savedResource.currentVersion || "v0";
+          const versionData = savedResource.versions?.[currentVersion];
+          const savedHash = versionData?.hash;
+          if (savedHash !== currentHash) {
+            changes.push({
+              type: "changed",
+              resourceName: name,
+              currentHash,
+              savedHash,
+              fromVersion: currentVersion,
+              toVersion: this.getNextVersion(savedResource.versions)
+            });
+          }
+        }
+      }
+      for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
+        if (!this.resources[name]) {
+          const currentVersion = savedResource.currentVersion || "v0";
+          const versionData = savedResource.versions?.[currentVersion];
+          changes.push({
+            type: "deleted",
+            resourceName: name,
+            currentHash: null,
+            savedHash: versionData?.hash,
+            deletedVersion: currentVersion
+          });
+        }
+      }
+      return changes;
+    }
+    /**
+     * Generate a consistent hash for a resource definition
+     * @param {Object} definition - Resource definition to hash
+     * @param {string} behavior - Resource behavior
+     * @returns {string} SHA256 hash
+     */
+    generateDefinitionHash(definition, behavior = void 0) {
+      const attributes = definition.attributes;
+      const stableAttributes = { ...attributes };
+      if (definition.timestamps) {
+        delete stableAttributes.createdAt;
+        delete stableAttributes.updatedAt;
+      }
+      const hashObj = {
+        attributes: stableAttributes,
+        behavior: behavior || definition.behavior || "user-managed",
+        partitions: definition.partitions || {}
+      };
+      const stableString = jsonStableStringify(hashObj);
+      return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    }
+    /**
+     * Get the next version number for a resource
+     * @param {Object} versions - Existing versions object
+     * @returns {string} Next version string (e.g., 'v1', 'v2')
+     */
+    getNextVersion(versions = {}) {
+      const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
+      const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+      return `v${maxVersion + 1}`;
+    }
+    async startPlugins() {
+      const db = this;
+      if (!lodashEs.isEmpty(this.pluginList)) {
+        const plugins = this.pluginList.map((p) => lodashEs.isFunction(p) ? new p(this) : p);
+        const setupProms = plugins.map(async (plugin) => {
+          if (plugin.beforeSetup) await plugin.beforeSetup();
+          await plugin.setup(db);
+          if (plugin.afterSetup) await plugin.afterSetup();
+        });
+        await Promise.all(setupProms);
+        const startProms = plugins.map(async (plugin) => {
+          if (plugin.beforeStart) await plugin.beforeStart();
+          await plugin.start();
+          if (plugin.afterStart) await plugin.afterStart();
+        });
+        await Promise.all(startProms);
+      }
+    }
+    /**
+     * Register and setup a plugin
+     * @param {Plugin} plugin - Plugin instance to register
+     * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
+     */
+    async usePlugin(plugin, name = null) {
+      const pluginName = name || plugin.constructor.name.replace("Plugin", "").toLowerCase();
+      this.plugins[pluginName] = plugin;
+      if (this.isConnected()) {
+        await plugin.setup(this);
+        await plugin.start();
+      }
+      return plugin;
+    }
+    async uploadMetadataFile() {
+      const metadata = {
+        version: this.version,
+        s3dbVersion: this.s3dbVersion,
+        lastUpdated: (/* @__PURE__ */ new Date()).toISOString(),
+        resources: {}
+      };
+      Object.entries(this.resources).forEach(([name, resource]) => {
+        const resourceDef = resource.export();
+        const definitionHash = this.generateDefinitionHash(resourceDef);
+        const existingResource = this.savedMetadata?.resources?.[name];
+        const currentVersion = existingResource?.currentVersion || "v0";
+        const existingVersionData = existingResource?.versions?.[currentVersion];
+        let version, isNewVersion;
+        if (!existingVersionData || existingVersionData.hash !== definitionHash) {
+          version = this.getNextVersion(existingResource?.versions);
+          isNewVersion = true;
+        } else {
+          version = currentVersion;
+          isNewVersion = false;
+        }
+        metadata.resources[name] = {
+          currentVersion: version,
+          partitions: resource.config.partitions || {},
+          versions: {
+            ...existingResource?.versions,
+            // Preserve previous versions
+            [version]: {
+              hash: definitionHash,
+              attributes: resourceDef.attributes,
+              behavior: resourceDef.behavior || "user-managed",
+              timestamps: resource.config.timestamps,
+              partitions: resource.config.partitions,
+              paranoid: resource.config.paranoid,
+              allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
+              autoDecrypt: resource.config.autoDecrypt,
+              cache: resource.config.cache,
+              hooks: resource.config.hooks,
+              createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
+            }
+          }
+        };
+        if (resource.version !== version) {
+          resource.version = version;
+          resource.emit("versionUpdated", { oldVersion: currentVersion, newVersion: version });
+        }
+      });
+      await this.client.putObject({
+        key: "s3db.json",
+        body: JSON.stringify(metadata, null, 2),
+        contentType: "application/json"
+      });
+      this.savedMetadata = metadata;
+      this.emit("metadataUploaded", metadata);
+    }
+    blankMetadataStructure() {
+      return {
+        version: `1`,
+        s3dbVersion: this.s3dbVersion,
+        resources: {}
+      };
+    }
+    /**
+     * Check if a resource exists by name
+     * @param {string} name - Resource name
+     * @returns {boolean} True if resource exists, false otherwise
+     */
+    resourceExists(name) {
+      return !!this.resources[name];
+    }
+    /**
+     * Check if a resource exists with the same definition hash
+     * @param {Object} config - Resource configuration
+     * @param {string} config.name - Resource name
+     * @param {Object} config.attributes - Resource attributes
+     * @param {string} [config.behavior] - Resource behavior
+     * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
+     * @returns {Object} Result with exists and hash information
+     */
+    resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", partitions = {}, options = {} }) {
+      if (!this.resources[name]) {
+        return { exists: false, sameHash: false, hash: null };
+      }
+      const existingResource = this.resources[name];
+      const existingHash = this.generateDefinitionHash(existingResource.export());
+      const mockResource = new Resource({
+        name,
+        attributes,
+        behavior,
+        partitions,
+        client: this.client,
+        version: existingResource.version,
+        passphrase: this.passphrase,
+        versioningEnabled: this.versioningEnabled,
+        ...options
+      });
+      const newHash = this.generateDefinitionHash(mockResource.export());
+      return {
+        exists: true,
+        sameHash: existingHash === newHash,
+        hash: newHash,
+        existingHash
+      };
+    }
+    async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
+      if (this.resources[name]) {
+        const existingResource = this.resources[name];
+        Object.assign(existingResource.config, {
+          cache: this.cache,
+          ...config
+        });
+        if (behavior) {
+          existingResource.behavior = behavior;
+        }
+        existingResource.versioningEnabled = this.versioningEnabled;
+        existingResource.updateAttributes(attributes);
+        if (hooks) {
+          for (const [event, hooksArr] of Object.entries(hooks)) {
+            if (Array.isArray(hooksArr) && existingResource.hooks[event]) {
+              for (const fn of hooksArr) {
+                if (typeof fn === "function") {
+                  existingResource.hooks[event].push(fn.bind(existingResource));
+                }
+              }
+            }
+          }
+        }
+        const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
+        const existingMetadata2 = this.savedMetadata?.resources?.[name];
+        const currentVersion = existingMetadata2?.currentVersion || "v0";
+        const existingVersionData = existingMetadata2?.versions?.[currentVersion];
+        if (!existingVersionData || existingVersionData.hash !== newHash) {
+          await this.uploadMetadataFile();
+        }
+        this.emit("s3db.resourceUpdated", name);
+        return existingResource;
+      }
+      const existingMetadata = this.savedMetadata?.resources?.[name];
+      const version = existingMetadata?.currentVersion || "v0";
+      const resource = new Resource({
+        name,
+        client: this.client,
+        version: config.version !== void 0 ? config.version : version,
+        attributes,
+        behavior,
+        parallelism: this.parallelism,
+        passphrase: config.passphrase !== void 0 ? config.passphrase : this.passphrase,
+        observers: [this],
+        cache: config.cache !== void 0 ? config.cache : this.cache,
+        timestamps: config.timestamps !== void 0 ? config.timestamps : false,
+        partitions: config.partitions || {},
+        paranoid: config.paranoid !== void 0 ? config.paranoid : true,
+        allNestedObjectsOptional: config.allNestedObjectsOptional !== void 0 ? config.allNestedObjectsOptional : true,
+        autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
+        hooks: hooks || {},
+        versioningEnabled: this.versioningEnabled,
+        map: config.map,
+        idGenerator: config.idGenerator,
+        idSize: config.idSize
+      });
+      resource.database = this;
+      this.resources[name] = resource;
+      await this.uploadMetadataFile();
+      this.emit("s3db.resourceCreated", name);
+      return resource;
+    }
+    resource(name) {
+      if (!this.resources[name]) {
+        return Promise.reject(`resource ${name} does not exist`);
+      }
+      return this.resources[name];
+    }
+    /**
+     * List all resource names
+     * @returns {Array} Array of resource names
+     */
+    async listResources() {
+      return Object.keys(this.resources).map((name) => ({ name }));
+    }
+    /**
+     * Get a specific resource by name
+     * @param {string} name - Resource name
+     * @returns {Resource} Resource instance
+     */
+    async getResource(name) {
+      if (!this.resources[name]) {
+        throw new ResourceNotFound({
+          bucket: this.client.config.bucket,
+          resourceName: name,
+          id: name
+        });
+      }
+      return this.resources[name];
+    }
+    /**
+     * Get database configuration
+     * @returns {Object} Configuration object
+     */
+    get config() {
+      return {
+        version: this.version,
+        s3dbVersion: this.s3dbVersion,
+        bucket: this.bucket,
+        keyPrefix: this.keyPrefix,
+        parallelism: this.parallelism,
+        verbose: this.verbose
+      };
+    }
+    isConnected() {
+      return !!this.savedMetadata;
+    }
+    async disconnect() {
+      try {
+        if (this.pluginList && this.pluginList.length > 0) {
+          for (const plugin of this.pluginList) {
+            if (plugin && typeof plugin.removeAllListeners === "function") {
+              plugin.removeAllListeners();
+            }
+          }
+          const stopProms = this.pluginList.map(async (plugin) => {
+            try {
+              if (plugin && typeof plugin.stop === "function") {
+                await plugin.stop();
+              }
+            } catch (err) {
+            }
+          });
+          await Promise.all(stopProms);
+        }
+        if (this.resources && Object.keys(this.resources).length > 0) {
+          for (const [name, resource] of Object.entries(this.resources)) {
+            try {
+              if (resource && typeof resource.removeAllListeners === "function") {
+                resource.removeAllListeners();
+              }
+              if (resource._pluginWrappers) {
+                resource._pluginWrappers.clear();
+              }
+              if (resource._pluginMiddlewares) {
+                resource._pluginMiddlewares = {};
+              }
+              if (resource.observers && Array.isArray(resource.observers)) {
+                resource.observers = [];
+              }
+            } catch (err) {
+            }
+          }
+          Object.keys(this.resources).forEach((k) => delete this.resources[k]);
+        }
+        if (this.client && typeof this.client.removeAllListeners === "function") {
+          this.client.removeAllListeners();
+        }
+        this.removeAllListeners();
+        this.savedMetadata = null;
+        this.plugins = {};
+        this.pluginList = [];
+        this.emit("disconnected", /* @__PURE__ */ new Date());
+      } catch (err) {
+      }
+    }
+  }
+  class S3db extends Database {
+  }
+
   function normalizeResourceName$1(name) {
     return typeof name === "string" ? name.trim().toLowerCase() : name;
   }
@@ -21441,6 +31628,7 @@ ${JSON.stringify(validation, null, 2)}`,
       super(config);
       this.instanceId = Math.random().toString(36).slice(2, 10);
       this.client = client;
+      this.connectionString = config.connectionString;
       let normalizedResources = resources;
       if (!resources) normalizedResources = {};
       else if (Array.isArray(resources)) {
@@ -21501,7 +31689,7 @@ ${JSON.stringify(validation, null, 2)}`,
       if (!this.client && !this.connectionString) {
         errors.push("You must provide a client or a connectionString");
       }
-      if (!this.resources || Array.isArray(this.resources) && this.resources.length === 0 || typeof this.resources === "object" && Object.keys(this.resources).length === 0) {
+      if (!this.resourcesMap || typeof this.resourcesMap === "object" && Object.keys(this.resourcesMap).length === 0) {
         errors.push("You must provide a resources map or array");
       }
       return { isValid: errors.length === 0, errors };
@@ -21515,7 +31703,6 @@ ${JSON.stringify(validation, null, 2)}`,
           const targetConfig = {
             connectionString: this.connectionString,
             region: this.region,
-            bucket: this.bucket,
             keyPrefix: this.keyPrefix,
             verbose: this.config.verbose || false
           };
@@ -21526,7 +31713,7 @@ ${JSON.stringify(validation, null, 2)}`,
         }
         this.emit("connected", {
           replicator: this.name,
-          target: this.connectionString || this.bucket
+          target: this.connectionString || "client-provided"
         });
       } catch (err) {
         throw err;
@@ -21545,6 +31732,8 @@ ${JSON.stringify(validation, null, 2)}`,
         result = await destResourceObj.update(explicitId, transformedData);
       } else if (operation === "delete") {
         result = await destResourceObj.delete(explicitId);
+      } else {
+        throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
       }
       return result;
     }
@@ -21598,13 +31787,13 @@ ${JSON.stringify(validation, null, 2)}`,
       const results = [];
       const errors = [];
       for (const record of records) {
-        const [ok, err, result] = await tryFn(() => this.replicate(
-          resourceName,
-          record.operation,
-          record.id,
-          record.data,
-          record.beforeData
-        ));
+        const [ok, err, result] = await tryFn(() => this.replicate({
+          resource: resourceName,
+          operation: record.operation,
+          id: record.id,
+          data: record.data,
+          beforeData: record.beforeData
+        }));
         if (ok) results.push(result);
         else errors.push({ id: record.id, error: err.message });
       }
@@ -21612,7 +31801,7 @@ ${JSON.stringify(validation, null, 2)}`,
         replicator: this.name,
         resourceName,
         total: records.length,
-        successful: results.filter((r) => r.success).length,
+        successful: results.length,
         errors: errors.length
       });
       return {
@@ -21642,8 +31831,8 @@ ${JSON.stringify(validation, null, 2)}`,
       return {
         ...baseStatus,
         connected: !!this.targetDatabase,
-        targetDatabase: this.connectionString || this.bucket,
-        resources: this.resources,
+        targetDatabase: this.connectionString || "client-provided",
+        resources: Object.keys(this.resourcesMap || {}),
         totalreplicators: this.listenerCount("replicated"),
         totalErrors: this.listenerCount("replicator_error")
       };
@@ -21658,6 +31847,7 @@ ${JSON.stringify(validation, null, 2)}`,
       const normResource = normalizeResourceName$1(resource);
       const entry = this.resourcesMap[normResource];
       if (!entry) return false;
+      if (!action) return true;
       if (Array.isArray(entry)) {
         for (const item of entry) {
           if (typeof item === "object" && item.resource) {
@@ -21877,7 +32067,12 @@ ${JSON.stringify(validation, null, 2)}`,
             const result2 = await this.sqsClient.send(command);
             results.push(result2);
           });
-          if (!okBatch) errors.push({ batch: batch.length, error: errBatch.message });
+          if (!okBatch) {
+            errors.push({ batch: batch.length, error: errBatch.message });
+            if (errBatch.message && (errBatch.message.includes("Batch error") || errBatch.message.includes("Connection") || errBatch.message.includes("Network"))) {
+              throw errBatch;
+            }
+          }
         }
         this.emit("batch_replicated", {
           replicator: this.name,
@@ -21898,12 +32093,13 @@ ${JSON.stringify(validation, null, 2)}`,
         };
       });
       if (ok) return result;
+      const errorMessage = err?.message || err || "Unknown error";
       this.emit("batch_replicator_error", {
         replicator: this.name,
         resource,
-        error: err.message
+        error: errorMessage
       });
-      return { success: false, error: err.message };
+      return { success: false, error: errorMessage };
     }
     async testConnection() {
       const [ok, err] = await tryFn(async () => {
@@ -21944,7 +32140,7 @@ ${JSON.stringify(validation, null, 2)}`,
       await super.cleanup();
     }
     shouldReplicateResource(resource) {
-      const result = this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource) || this.queues && Object.keys(this.queues).includes(resource) || (this.defaultQueue || this.queueUrl) || this.resources && Object.keys(this.resources).includes(resource) || false;
+      const result = this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource) || this.queues && Object.keys(this.queues).includes(resource) || !!(this.defaultQueue || this.queueUrl) || this.resources && Object.keys(this.resources).includes(resource) || false;
       return result;
     }
   }
@@ -21961,10 +32157,6 @@ ${JSON.stringify(validation, null, 2)}`,
       throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
     }
     return new ReplicatorClass(config, resources, client);
-  }
-  function validateReplicatorConfig(driver, config, resources = [], client = null) {
-    const replicator = createReplicator(driver, config, resources, client);
-    return replicator.validateConfig();
   }
 
   function normalizeResourceName(name) {
@@ -22176,6 +32368,12 @@ ${JSON.stringify(validation, null, 2)}`,
           this.installEventListeners(resource);
         }
       });
+      database.on("s3db.resourceUpdated", (resourceName) => {
+        const resource = database.resources[resourceName];
+        if (resource && resource.name !== this.config.replicatorLogResource) {
+          this.installEventListeners(resource);
+        }
+      });
     }
     async initializeReplicators() {
       console.log("[PLUGIN][INIT] initializeReplicators called");
@@ -22187,6 +32385,7 @@ ${JSON.stringify(validation, null, 2)}`,
           const client = replicatorConfig.client;
           const replicator = createReplicator(driver, replicatorConfig, resources, client);
           if (replicator) {
+            await replicator.initialize(this.database);
             this.replicators.push({
               id: Math.random().toString(36).slice(2),
               driver,
@@ -22530,9 +32729,6 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.AuditPlugin = AuditPlugin;
   exports.AuthenticationError = AuthenticationError;
   exports.BaseError = BaseError;
-  exports.BaseReplicator = BaseReplicator;
-  exports.BigqueryReplicator = BigqueryReplicator;
-  exports.Cache = Cache;
   exports.CachePlugin = CachePlugin;
   exports.Client = Client;
   exports.ConnectionString = ConnectionString;
@@ -22546,7 +32742,6 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.ErrorMap = ErrorMap;
   exports.FullTextPlugin = FullTextPlugin;
   exports.InvalidResourceItem = InvalidResourceItem;
-  exports.MemoryCache = MemoryCache;
   exports.MetricsPlugin = MetricsPlugin;
   exports.MissingMetadata = MissingMetadata;
   exports.NoSuchBucket = NoSuchBucket;
@@ -22556,8 +32751,6 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.PermissionError = PermissionError;
   exports.Plugin = Plugin;
   exports.PluginObject = PluginObject;
-  exports.PostgresReplicator = PostgresReplicator;
-  exports.REPLICATOR_DRIVERS = REPLICATOR_DRIVERS;
   exports.ReplicatorPlugin = ReplicatorPlugin;
   exports.Resource = Resource;
   exports.ResourceError = ResourceError;
@@ -22566,16 +32759,13 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.ResourceNotFound = ResourceNotFound;
   exports.ResourceReader = ResourceReader;
   exports.ResourceWriter = ResourceWriter;
-  exports.S3Cache = S3Cache;
   exports.S3_DEFAULT_ENDPOINT = S3_DEFAULT_ENDPOINT;
   exports.S3_DEFAULT_REGION = S3_DEFAULT_REGION;
   exports.S3db = S3db;
   exports.S3dbError = S3dbError;
-  exports.S3dbReplicator = S3dbReplicator;
   exports.Schema = Schema;
   exports.SchemaActions = SchemaActions;
   exports.SchemaError = SchemaError;
-  exports.SqsReplicator = SqsReplicator;
   exports.UnknownError = UnknownError;
   exports.ValidationError = ValidationError;
   exports.Validator = Validator;
@@ -22587,7 +32777,6 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.calculateSystemOverhead = calculateSystemOverhead;
   exports.calculateTotalSize = calculateTotalSize;
   exports.calculateUTF8Bytes = calculateUTF8Bytes;
-  exports.createReplicator = createReplicator;
   exports.decode = decode;
   exports.decodeDecimal = decodeDecimal;
   exports.decrypt = decrypt;
@@ -22605,10 +32794,9 @@ ${JSON.stringify(validation, null, 2)}`,
   exports.transformValue = transformValue;
   exports.tryFn = tryFn;
   exports.tryFnSync = tryFnSync;
-  exports.validateReplicatorConfig = validateReplicatorConfig;
 
   Object.defineProperty(exports, '__esModule', { value: true });
 
   return exports;
 
-})({}, lodashEs, promisePool, nanoid, clientS3, crypto, flat, FastestValidator, web);
+})({}, nanoid, promisePool, web, lodashEs, crypto, clientS3, flat, FastestValidator);
