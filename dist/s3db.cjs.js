@@ -7917,614 +7917,6 @@ class MetricsPlugin extends plugin_class_default {
   }
 }
 
-class BaseReplicator extends EventEmitter {
-  constructor(config = {}) {
-    super();
-    this.config = config;
-    this.name = this.constructor.name;
-    this.enabled = config.enabled !== false;
-  }
-  /**
-   * Initialize the replicator
-   * @param {Object} database - The s3db database instance
-   * @returns {Promise<void>}
-   */
-  async initialize(database) {
-    this.database = database;
-    this.emit("initialized", { replicator: this.name });
-  }
-  /**
-   * Replicate data to the target
-   * @param {string} resourceName - Name of the resource being replicated
-   * @param {string} operation - Operation type (insert, update, delete)
-   * @param {Object} data - The data to replicate
-   * @param {string} id - Record ID
-   * @returns {Promise<Object>} replicator result
-   */
-  async replicate(resourceName, operation, data, id) {
-    throw new Error(`replicate() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Replicate multiple records in batch
-   * @param {string} resourceName - Name of the resource being replicated
-   * @param {Array} records - Array of records to replicate
-   * @returns {Promise<Object>} Batch replicator result
-   */
-  async replicateBatch(resourceName, records) {
-    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Test the connection to the target
-   * @returns {Promise<boolean>} True if connection is successful
-   */
-  async testConnection() {
-    throw new Error(`testConnection() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Get replicator status and statistics
-   * @returns {Promise<Object>} Status information
-   */
-  async getStatus() {
-    return {
-      name: this.name,
-      // Removed: enabled: this.enabled,
-      config: this.config,
-      connected: false
-    };
-  }
-  /**
-   * Cleanup resources
-   * @returns {Promise<void>}
-   */
-  async cleanup() {
-    this.emit("cleanup", { replicator: this.name });
-  }
-  /**
-   * Validate replicator configuration
-   * @returns {Object} Validation result
-   */
-  validateConfig() {
-    return { isValid: true, errors: [] };
-  }
-}
-var base_replicator_class_default = BaseReplicator;
-
-class BigqueryReplicator extends base_replicator_class_default {
-  constructor(config = {}, resources = {}) {
-    super(config);
-    this.projectId = config.projectId;
-    this.datasetId = config.datasetId;
-    this.bigqueryClient = null;
-    this.credentials = config.credentials;
-    this.location = config.location || "US";
-    this.logTable = config.logTable;
-    this.resources = this.parseResourcesConfig(resources);
-  }
-  parseResourcesConfig(resources) {
-    const parsed = {};
-    for (const [resourceName, config] of Object.entries(resources)) {
-      if (typeof config === "string") {
-        parsed[resourceName] = [{
-          table: config,
-          actions: ["insert"],
-          transform: null
-        }];
-      } else if (Array.isArray(config)) {
-        parsed[resourceName] = config.map((item) => {
-          if (typeof item === "string") {
-            return { table: item, actions: ["insert"], transform: null };
-          }
-          return {
-            table: item.table,
-            actions: item.actions || ["insert"],
-            transform: item.transform || null
-          };
-        });
-      } else if (typeof config === "object") {
-        parsed[resourceName] = [{
-          table: config.table,
-          actions: config.actions || ["insert"],
-          transform: config.transform || null
-        }];
-      }
-    }
-    return parsed;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.projectId) errors.push("projectId is required");
-    if (!this.datasetId) errors.push("datasetId is required");
-    if (Object.keys(this.resources).length === 0) errors.push("At least one resource must be configured");
-    for (const [resourceName, tables] of Object.entries(this.resources)) {
-      for (const tableConfig of tables) {
-        if (!tableConfig.table) {
-          errors.push(`Table name is required for resource '${resourceName}'`);
-        }
-        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
-          errors.push(`Actions array is required for resource '${resourceName}'`);
-        }
-        const validActions = ["insert", "update", "delete"];
-        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
-        if (invalidActions.length > 0) {
-          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
-        }
-        if (tableConfig.transform && typeof tableConfig.transform !== "function") {
-          errors.push(`Transform must be a function for resource '${resourceName}'`);
-        }
-      }
-    }
-    return { isValid: errors.length === 0, errors };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    const [ok, err, sdk] = await try_fn_default(() => import('@google-cloud/bigquery'));
-    if (!ok) {
-      this.emit("initialization_error", { replicator: this.name, error: err.message });
-      throw err;
-    }
-    const { BigQuery } = sdk;
-    this.bigqueryClient = new BigQuery({
-      projectId: this.projectId,
-      credentials: this.credentials,
-      location: this.location
-    });
-    this.emit("initialized", {
-      replicator: this.name,
-      projectId: this.projectId,
-      datasetId: this.datasetId,
-      resources: Object.keys(this.resources)
-    });
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.hasOwnProperty(resourceName);
-  }
-  shouldReplicateAction(resourceName, operation) {
-    if (!this.resources[resourceName]) return false;
-    return this.resources[resourceName].some(
-      (tableConfig) => tableConfig.actions.includes(operation)
-    );
-  }
-  getTablesForResource(resourceName, operation) {
-    if (!this.resources[resourceName]) return [];
-    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => ({
-      table: tableConfig.table,
-      transform: tableConfig.transform
-    }));
-  }
-  applyTransform(data, transformFn) {
-    if (!transformFn) return data;
-    let transformedData = JSON.parse(JSON.stringify(data));
-    if (transformedData._length) delete transformedData._length;
-    return transformFn(transformedData);
-  }
-  async replicate(resourceName, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    if (!this.shouldReplicateAction(resourceName, operation)) {
-      return { skipped: true, reason: "action_not_included" };
-    }
-    const tableConfigs = this.getTablesForResource(resourceName, operation);
-    if (tableConfigs.length === 0) {
-      return { skipped: true, reason: "no_tables_for_action" };
-    }
-    const results = [];
-    const errors = [];
-    const [ok, err, result] = await try_fn_default(async () => {
-      const dataset = this.bigqueryClient.dataset(this.datasetId);
-      for (const tableConfig of tableConfigs) {
-        const [okTable, errTable] = await try_fn_default(async () => {
-          const table = dataset.table(tableConfig.table);
-          let job;
-          if (operation === "insert") {
-            const transformedData = this.applyTransform(data, tableConfig.transform);
-            job = await table.insert([transformedData]);
-          } else if (operation === "update") {
-            const transformedData = this.applyTransform(data, tableConfig.transform);
-            const keys = Object.keys(transformedData).filter((k) => k !== "id");
-            const setClause = keys.map((k) => `${k} = @${k}`).join(", ");
-            const params = { id, ...transformedData };
-            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` SET ${setClause} WHERE id = @id`;
-            const maxRetries = 2;
-            let lastError = null;
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              try {
-                const [updateJob] = await this.bigqueryClient.createQueryJob({
-                  query,
-                  params,
-                  location: this.location
-                });
-                await updateJob.getQueryResults();
-                job = [updateJob];
-                break;
-              } catch (error) {
-                lastError = error;
-                if (error?.message?.includes("streaming buffer") && attempt < maxRetries) {
-                  const delaySeconds = 30;
-                  await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1e3));
-                  continue;
-                }
-                throw error;
-              }
-            }
-            if (!job) throw lastError;
-          } else if (operation === "delete") {
-            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
-            const [deleteJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params: { id },
-              location: this.location
-            });
-            await deleteJob.getQueryResults();
-            job = [deleteJob];
-          } else {
-            throw new Error(`Unsupported operation: ${operation}`);
-          }
-          results.push({
-            table: tableConfig.table,
-            success: true,
-            jobId: job[0]?.id
-          });
-        });
-        if (!okTable) {
-          errors.push({
-            table: tableConfig.table,
-            error: errTable.message
-          });
-        }
-      }
-      if (this.logTable) {
-        const [okLog, errLog] = await try_fn_default(async () => {
-          const logTable = dataset.table(this.logTable);
-          await logTable.insert([{
-            resource_name: resourceName,
-            operation,
-            record_id: id,
-            data: JSON.stringify(data),
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            source: "s3db-replicator"
-          }]);
-        });
-        if (!okLog) {
-        }
-      }
-      const success = errors.length === 0;
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        tables: tableConfigs.map((t) => t.table),
-        results,
-        errors,
-        success
-      });
-      return {
-        success,
-        results,
-        errors,
-        tables: tableConfigs.map((t) => t.table)
-      };
-    });
-    if (ok) return result;
-    this.emit("replicator_error", {
-      replicator: this.name,
-      resourceName,
-      operation,
-      id,
-      error: err.message
-    });
-    return { success: false, error: err.message };
-  }
-  async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-    for (const record of records) {
-      const [ok, err, res] = await try_fn_default(() => this.replicate(
-        resourceName,
-        record.operation,
-        record.data,
-        record.id,
-        record.beforeData
-      ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
-    }
-    return {
-      success: errors.length === 0,
-      results,
-      errors
-    };
-  }
-  async testConnection() {
-    const [ok, err] = await try_fn_default(async () => {
-      if (!this.bigqueryClient) await this.initialize();
-      const dataset = this.bigqueryClient.dataset(this.datasetId);
-      await dataset.getMetadata();
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", { replicator: this.name, error: err.message });
-    return false;
-  }
-  async cleanup() {
-  }
-  getStatus() {
-    return {
-      ...super.getStatus(),
-      projectId: this.projectId,
-      datasetId: this.datasetId,
-      resources: this.resources,
-      logTable: this.logTable
-    };
-  }
-}
-var bigquery_replicator_class_default = BigqueryReplicator;
-
-class PostgresReplicator extends base_replicator_class_default {
-  constructor(config = {}, resources = {}) {
-    super(config);
-    this.connectionString = config.connectionString;
-    this.host = config.host;
-    this.port = config.port || 5432;
-    this.database = config.database;
-    this.user = config.user;
-    this.password = config.password;
-    this.client = null;
-    this.ssl = config.ssl;
-    this.logTable = config.logTable;
-    this.resources = this.parseResourcesConfig(resources);
-  }
-  parseResourcesConfig(resources) {
-    const parsed = {};
-    for (const [resourceName, config] of Object.entries(resources)) {
-      if (typeof config === "string") {
-        parsed[resourceName] = [{
-          table: config,
-          actions: ["insert"]
-        }];
-      } else if (Array.isArray(config)) {
-        parsed[resourceName] = config.map((item) => {
-          if (typeof item === "string") {
-            return { table: item, actions: ["insert"] };
-          }
-          return {
-            table: item.table,
-            actions: item.actions || ["insert"]
-          };
-        });
-      } else if (typeof config === "object") {
-        parsed[resourceName] = [{
-          table: config.table,
-          actions: config.actions || ["insert"]
-        }];
-      }
-    }
-    return parsed;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.connectionString && (!this.host || !this.database)) {
-      errors.push("Either connectionString or host+database must be provided");
-    }
-    if (Object.keys(this.resources).length === 0) {
-      errors.push("At least one resource must be configured");
-    }
-    for (const [resourceName, tables] of Object.entries(this.resources)) {
-      for (const tableConfig of tables) {
-        if (!tableConfig.table) {
-          errors.push(`Table name is required for resource '${resourceName}'`);
-        }
-        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
-          errors.push(`Actions array is required for resource '${resourceName}'`);
-        }
-        const validActions = ["insert", "update", "delete"];
-        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
-        if (invalidActions.length > 0) {
-          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
-        }
-      }
-    }
-    return { isValid: errors.length === 0, errors };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    const [ok, err, sdk] = await try_fn_default(() => import('pg'));
-    if (!ok) {
-      this.emit("initialization_error", {
-        replicator: this.name,
-        error: err.message
-      });
-      throw err;
-    }
-    const { Client } = sdk;
-    const config = this.connectionString ? {
-      connectionString: this.connectionString,
-      ssl: this.ssl
-    } : {
-      host: this.host,
-      port: this.port,
-      database: this.database,
-      user: this.user,
-      password: this.password,
-      ssl: this.ssl
-    };
-    this.client = new Client(config);
-    await this.client.connect();
-    if (this.logTable) {
-      await this.createLogTableIfNotExists();
-    }
-    this.emit("initialized", {
-      replicator: this.name,
-      database: this.database || "postgres",
-      resources: Object.keys(this.resources)
-    });
-  }
-  async createLogTableIfNotExists() {
-    const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS ${this.logTable} (
-        id SERIAL PRIMARY KEY,
-        resource_name VARCHAR(255) NOT NULL,
-        operation VARCHAR(50) NOT NULL,
-        record_id VARCHAR(255) NOT NULL,
-        data JSONB,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        source VARCHAR(100) DEFAULT 's3db-replicator',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_operation ON ${this.logTable}(operation);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_record_id ON ${this.logTable}(record_id);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
-    `;
-    await this.client.query(createTableQuery);
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.hasOwnProperty(resourceName);
-  }
-  shouldReplicateAction(resourceName, operation) {
-    if (!this.resources[resourceName]) return false;
-    return this.resources[resourceName].some(
-      (tableConfig) => tableConfig.actions.includes(operation)
-    );
-  }
-  getTablesForResource(resourceName, operation) {
-    if (!this.resources[resourceName]) return [];
-    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
-  }
-  async replicate(resourceName, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    if (!this.shouldReplicateAction(resourceName, operation)) {
-      return { skipped: true, reason: "action_not_included" };
-    }
-    const tables = this.getTablesForResource(resourceName, operation);
-    if (tables.length === 0) {
-      return { skipped: true, reason: "no_tables_for_action" };
-    }
-    const results = [];
-    const errors = [];
-    const [ok, err, result] = await try_fn_default(async () => {
-      for (const table of tables) {
-        const [okTable, errTable] = await try_fn_default(async () => {
-          let result2;
-          if (operation === "insert") {
-            const keys = Object.keys(data);
-            const values = keys.map((k) => data[k]);
-            const columns = keys.map((k) => `"${k}"`).join(", ");
-            const params = keys.map((_, i) => `$${i + 1}`).join(", ");
-            const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
-            result2 = await this.client.query(sql, values);
-          } else if (operation === "update") {
-            const keys = Object.keys(data).filter((k) => k !== "id");
-            const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
-            const values = keys.map((k) => data[k]);
-            values.push(id);
-            const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
-            result2 = await this.client.query(sql, values);
-          } else if (operation === "delete") {
-            const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
-            result2 = await this.client.query(sql, [id]);
-          } else {
-            throw new Error(`Unsupported operation: ${operation}`);
-          }
-          results.push({
-            table,
-            success: true,
-            rows: result2.rows,
-            rowCount: result2.rowCount
-          });
-        });
-        if (!okTable) {
-          errors.push({
-            table,
-            error: errTable.message
-          });
-        }
-      }
-      if (this.logTable) {
-        const [okLog, errLog] = await try_fn_default(async () => {
-          await this.client.query(
-            `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
-          );
-        });
-        if (!okLog) {
-        }
-      }
-      const success = errors.length === 0;
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        tables,
-        results,
-        errors,
-        success
-      });
-      return {
-        success,
-        results,
-        errors,
-        tables
-      };
-    });
-    if (ok) return result;
-    this.emit("replicator_error", {
-      replicator: this.name,
-      resourceName,
-      operation,
-      id,
-      error: err.message
-    });
-    return { success: false, error: err.message };
-  }
-  async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-    for (const record of records) {
-      const [ok, err, res] = await try_fn_default(() => this.replicate(
-        resourceName,
-        record.operation,
-        record.data,
-        record.id,
-        record.beforeData
-      ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
-    }
-    return {
-      success: errors.length === 0,
-      results,
-      errors
-    };
-  }
-  async testConnection() {
-    const [ok, err] = await try_fn_default(async () => {
-      if (!this.client) await this.initialize();
-      await this.client.query("SELECT 1");
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", { replicator: this.name, error: err.message });
-    return false;
-  }
-  async cleanup() {
-    if (this.client) await this.client.end();
-  }
-  getStatus() {
-    return {
-      ...super.getStatus(),
-      database: this.database || "postgres",
-      resources: this.resources,
-      logTable: this.logTable
-    };
-  }
-}
-var postgres_replicator_class_default = PostgresReplicator;
-
 const S3_DEFAULT_REGION = "us-east-1";
 const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
 class ConnectionString {
@@ -12717,580 +12109,34 @@ class Database extends EventEmitter {
 class S3db extends Database {
 }
 
-function normalizeResourceName$1(name) {
-  return typeof name === "string" ? name.trim().toLowerCase() : name;
-}
-class S3dbReplicator extends base_replicator_class_default {
-  constructor(config = {}, resources = [], client = null) {
-    super(config);
-    this.instanceId = Math.random().toString(36).slice(2, 10);
-    this.client = client;
-    this.connectionString = config.connectionString;
-    let normalizedResources = resources;
-    if (!resources) normalizedResources = {};
-    else if (Array.isArray(resources)) {
-      normalizedResources = {};
-      for (const res of resources) {
-        if (typeof res === "string") normalizedResources[normalizeResourceName$1(res)] = res;
-      }
-    } else if (typeof resources === "string") {
-      normalizedResources[normalizeResourceName$1(resources)] = resources;
-    }
-    this.resourcesMap = this._normalizeResources(normalizedResources);
-  }
-  _normalizeResources(resources) {
-    if (!resources) return {};
-    if (Array.isArray(resources)) {
-      const map = {};
-      for (const res of resources) {
-        if (typeof res === "string") map[normalizeResourceName$1(res)] = res;
-        else if (Array.isArray(res) && typeof res[0] === "string") map[normalizeResourceName$1(res[0])] = res;
-        else if (typeof res === "object" && res.resource) {
-          map[normalizeResourceName$1(res.resource)] = { ...res };
-        }
-      }
-      return map;
-    }
-    if (typeof resources === "object") {
-      const map = {};
-      for (const [src, dest] of Object.entries(resources)) {
-        const normSrc = normalizeResourceName$1(src);
-        if (typeof dest === "string") map[normSrc] = dest;
-        else if (Array.isArray(dest)) {
-          map[normSrc] = dest.map((item) => {
-            if (typeof item === "string") return item;
-            if (typeof item === "function") return item;
-            if (typeof item === "object" && item.resource) {
-              return { ...item };
-            }
-            return item;
-          });
-        } else if (typeof dest === "function") map[normSrc] = dest;
-        else if (typeof dest === "object" && dest.resource) {
-          map[normSrc] = { ...dest };
-        }
-      }
-      return map;
-    }
-    if (typeof resources === "function") {
-      return resources;
-    }
-    if (typeof resources === "string") {
-      const map = { [normalizeResourceName$1(resources)]: resources };
-      return map;
-    }
-    return {};
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.client && !this.connectionString) {
-      errors.push("You must provide a client or a connectionString");
-    }
-    if (!this.resourcesMap || typeof this.resourcesMap === "object" && Object.keys(this.resourcesMap).length === 0) {
-      errors.push("You must provide a resources map or array");
-    }
-    return { isValid: errors.length === 0, errors };
-  }
-  async initialize(database) {
-    try {
-      await super.initialize(database);
-      if (this.client) {
-        this.targetDatabase = this.client;
-      } else if (this.connectionString) {
-        const targetConfig = {
-          connectionString: this.connectionString,
-          region: this.region,
-          keyPrefix: this.keyPrefix,
-          verbose: this.config.verbose || false
-        };
-        this.targetDatabase = new S3db(targetConfig);
-        await this.targetDatabase.connect();
-      } else {
-        throw new Error("S3dbReplicator: No client or connectionString provided");
-      }
-      this.emit("connected", {
-        replicator: this.name,
-        target: this.connectionString || "client-provided"
-      });
-    } catch (err) {
-      throw err;
-    }
-  }
-  // Change signature to accept id
-  async replicate({ resource, operation, data, id: explicitId }) {
-    const normResource = normalizeResourceName$1(resource);
-    const destResource = this._resolveDestResource(normResource, data);
-    const destResourceObj = this._getDestResourceObj(destResource);
-    const transformedData = this._applyTransformer(normResource, data);
-    let result;
-    if (operation === "insert") {
-      result = await destResourceObj.insert(transformedData);
-    } else if (operation === "update") {
-      result = await destResourceObj.update(explicitId, transformedData);
-    } else if (operation === "delete") {
-      result = await destResourceObj.delete(explicitId);
-    } else {
-      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
-    }
-    return result;
-  }
-  _applyTransformer(resource, data) {
-    const normResource = normalizeResourceName$1(resource);
-    const entry = this.resourcesMap[normResource];
-    let result;
-    if (!entry) return data;
-    if (Array.isArray(entry) && typeof entry[1] === "function") {
-      result = entry[1](data);
-    } else if (typeof entry === "function") {
-      result = entry(data);
-    } else if (typeof entry === "object") {
-      if (typeof entry.transform === "function") result = entry.transform(data);
-      else if (typeof entry.transformer === "function") result = entry.transformer(data);
-    } else {
-      result = data;
-    }
-    if (result && data && data.id && !result.id) result.id = data.id;
-    if (!result && data) result = data;
-    return result;
-  }
-  _resolveDestResource(resource, data) {
-    const normResource = normalizeResourceName$1(resource);
-    const entry = this.resourcesMap[normResource];
-    if (!entry) return resource;
-    if (Array.isArray(entry)) {
-      if (typeof entry[0] === "string") return entry[0];
-      if (typeof entry[0] === "object" && entry[0].resource) return entry[0].resource;
-      if (typeof entry[0] === "function") return resource;
-    }
-    if (typeof entry === "string") return entry;
-    if (typeof entry === "function") return resource;
-    if (typeof entry === "object" && entry.resource) return entry.resource;
-    return resource;
-  }
-  _getDestResourceObj(resource) {
-    if (!this.client || !this.client.resources) return null;
-    const available = Object.keys(this.client.resources);
-    const norm = normalizeResourceName$1(resource);
-    const found = available.find((r) => normalizeResourceName$1(r) === norm);
-    if (!found) {
-      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(", ")}`);
-    }
-    return this.client.resources[found];
-  }
-  async replicateBatch(resourceName, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    const results = [];
-    const errors = [];
-    for (const record of records) {
-      const [ok, err, result] = await try_fn_default(() => this.replicate({
-        resource: resourceName,
-        operation: record.operation,
-        id: record.id,
-        data: record.data,
-        beforeData: record.beforeData
-      }));
-      if (ok) results.push(result);
-      else errors.push({ id: record.id, error: err.message });
-    }
-    this.emit("batch_replicated", {
-      replicator: this.name,
-      resourceName,
-      total: records.length,
-      successful: results.length,
-      errors: errors.length
-    });
-    return {
-      success: errors.length === 0,
-      results,
-      errors,
-      total: records.length
-    };
-  }
-  async testConnection() {
-    const [ok, err] = await try_fn_default(async () => {
-      if (!this.targetDatabase) {
-        await this.initialize(this.database);
-      }
-      await this.targetDatabase.listResources();
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", {
-      replicator: this.name,
-      error: err.message
-    });
-    return false;
-  }
-  async getStatus() {
-    const baseStatus = await super.getStatus();
-    return {
-      ...baseStatus,
-      connected: !!this.targetDatabase,
-      targetDatabase: this.connectionString || "client-provided",
-      resources: Object.keys(this.resourcesMap || {}),
-      totalreplicators: this.listenerCount("replicated"),
-      totalErrors: this.listenerCount("replicator_error")
-    };
-  }
-  async cleanup() {
-    if (this.targetDatabase) {
-      this.targetDatabase.removeAllListeners();
-    }
-    await super.cleanup();
-  }
-  shouldReplicateResource(resource, action) {
-    const normResource = normalizeResourceName$1(resource);
-    const entry = this.resourcesMap[normResource];
-    if (!entry) return false;
-    if (!action) return true;
-    if (Array.isArray(entry)) {
-      for (const item of entry) {
-        if (typeof item === "object" && item.resource) {
-          if (item.actions && Array.isArray(item.actions)) {
-            if (item.actions.includes(action)) return true;
-          } else {
-            return true;
-          }
-        } else if (typeof item === "string" || typeof item === "function") {
-          return true;
-        }
-      }
-      return false;
-    }
-    if (typeof entry === "object" && entry.resource) {
-      if (entry.actions && Array.isArray(entry.actions)) {
-        return entry.actions.includes(action);
-      }
-      return true;
-    }
-    if (typeof entry === "string" || typeof entry === "function") {
-      return true;
-    }
-    return false;
-  }
-}
-var s3db_replicator_class_default = S3dbReplicator;
-
-class SqsReplicator extends base_replicator_class_default {
-  constructor(config = {}, resources = [], client = null) {
-    super(config);
-    this.resources = resources;
-    this.client = client;
-    this.queueUrl = config.queueUrl;
-    this.queues = config.queues || {};
-    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
-    this.region = config.region || "us-east-1";
-    this.sqsClient = client || null;
-    this.messageGroupId = config.messageGroupId;
-    this.deduplicationId = config.deduplicationId;
-    if (resources && typeof resources === "object") {
-      for (const [resourceName, resourceConfig] of Object.entries(resources)) {
-        if (resourceConfig.queueUrl) {
-          this.queues[resourceName] = resourceConfig.queueUrl;
-        }
-      }
-    }
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueue && !this.resourceQueueMap) {
-      errors.push("Either queueUrl, queues object, defaultQueue, or resourceQueueMap must be provided");
-    }
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-  getQueueUrlsForResource(resource) {
-    if (this.resourceQueueMap && this.resourceQueueMap[resource]) {
-      return this.resourceQueueMap[resource];
-    }
-    if (this.queues[resource]) {
-      return [this.queues[resource]];
-    }
-    if (this.queueUrl) {
-      return [this.queueUrl];
-    }
-    if (this.defaultQueue) {
-      return [this.defaultQueue];
-    }
-    throw new Error(`No queue URL found for resource '${resource}'`);
-  }
-  _applyTransformer(resource, data) {
-    const entry = this.resources[resource];
-    let result = data;
-    if (!entry) return data;
-    if (typeof entry.transform === "function") {
-      result = entry.transform(data);
-    } else if (typeof entry.transformer === "function") {
-      result = entry.transformer(data);
-    }
-    return result || data;
-  }
-  /**
-   * Create standardized message structure
-   */
-  createMessage(resource, operation, data, id, beforeData = null) {
-    const baseMessage = {
-      resource,
-      // padronizado para 'resource'
-      action: operation,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      source: "s3db-replicator"
-    };
-    switch (operation) {
-      case "insert":
-        return {
-          ...baseMessage,
-          data
-        };
-      case "update":
-        return {
-          ...baseMessage,
-          before: beforeData,
-          data
-        };
-      case "delete":
-        return {
-          ...baseMessage,
-          data
-        };
-      default:
-        return {
-          ...baseMessage,
-          data
-        };
-    }
-  }
-  async initialize(database, client) {
-    await super.initialize(database);
-    if (!this.sqsClient) {
-      const [ok, err, sdk] = await try_fn_default(() => import('@aws-sdk/client-sqs'));
-      if (!ok) {
-        this.emit("initialization_error", {
-          replicator: this.name,
-          error: err.message
-        });
-        throw err;
-      }
-      const { SQSClient } = sdk;
-      this.sqsClient = client || new SQSClient({
-        region: this.region,
-        credentials: this.config.credentials
-      });
-      this.emit("initialized", {
-        replicator: this.name,
-        queueUrl: this.queueUrl,
-        queues: this.queues,
-        defaultQueue: this.defaultQueue
-      });
-    }
-  }
-  async replicate(resource, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    const [ok, err, result] = await try_fn_default(async () => {
-      const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
-      const queueUrls = this.getQueueUrlsForResource(resource);
-      const transformedData = this._applyTransformer(resource, data);
-      const message = this.createMessage(resource, operation, transformedData, id, beforeData);
-      const results = [];
-      for (const queueUrl of queueUrls) {
-        const command = new SendMessageCommand({
-          QueueUrl: queueUrl,
-          MessageBody: JSON.stringify(message),
-          MessageGroupId: this.messageGroupId,
-          MessageDeduplicationId: this.deduplicationId ? `${resource}:${operation}:${id}` : void 0
-        });
-        const result2 = await this.sqsClient.send(command);
-        results.push({ queueUrl, messageId: result2.MessageId });
-        this.emit("replicated", {
-          replicator: this.name,
-          resource,
-          operation,
-          id,
-          queueUrl,
-          messageId: result2.MessageId,
-          success: true
-        });
-      }
-      return { success: true, results };
-    });
-    if (ok) return result;
-    this.emit("replicator_error", {
-      replicator: this.name,
-      resource,
-      operation,
-      id,
-      error: err.message
-    });
-    return { success: false, error: err.message };
-  }
-  async replicateBatch(resource, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    const [ok, err, result] = await try_fn_default(async () => {
-      const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
-      const queueUrls = this.getQueueUrlsForResource(resource);
-      const batchSize = 10;
-      const batches = [];
-      for (let i = 0; i < records.length; i += batchSize) {
-        batches.push(records.slice(i, i + batchSize));
-      }
-      const results = [];
-      const errors = [];
-      for (const batch of batches) {
-        const [okBatch, errBatch] = await try_fn_default(async () => {
-          const entries = batch.map((record, index) => ({
-            Id: `${record.id}-${index}`,
-            MessageBody: JSON.stringify(this.createMessage(
-              resource,
-              record.operation,
-              record.data,
-              record.id,
-              record.beforeData
-            )),
-            MessageGroupId: this.messageGroupId,
-            MessageDeduplicationId: this.deduplicationId ? `${resource}:${record.operation}:${record.id}` : void 0
-          }));
-          const command = new SendMessageBatchCommand({
-            QueueUrl: queueUrls[0],
-            // Assuming all queueUrls in a batch are the same for batching
-            Entries: entries
-          });
-          const result2 = await this.sqsClient.send(command);
-          results.push(result2);
-        });
-        if (!okBatch) {
-          errors.push({ batch: batch.length, error: errBatch.message });
-          if (errBatch.message && (errBatch.message.includes("Batch error") || errBatch.message.includes("Connection") || errBatch.message.includes("Network"))) {
-            throw errBatch;
-          }
-        }
-      }
-      this.emit("batch_replicated", {
-        replicator: this.name,
-        resource,
-        queueUrl: queueUrls[0],
-        // Assuming all queueUrls in a batch are the same for batching
-        total: records.length,
-        successful: results.length,
-        errors: errors.length
-      });
-      return {
-        success: errors.length === 0,
-        results,
-        errors,
-        total: records.length,
-        queueUrl: queueUrls[0]
-        // Assuming all queueUrls in a batch are the same for batching
-      };
-    });
-    if (ok) return result;
-    const errorMessage = err?.message || err || "Unknown error";
-    this.emit("batch_replicator_error", {
-      replicator: this.name,
-      resource,
-      error: errorMessage
-    });
-    return { success: false, error: errorMessage };
-  }
-  async testConnection() {
-    const [ok, err] = await try_fn_default(async () => {
-      if (!this.sqsClient) {
-        await this.initialize(this.database);
-      }
-      const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
-      const command = new GetQueueAttributesCommand({
-        QueueUrl: this.queueUrl,
-        AttributeNames: ["QueueArn"]
-      });
-      await this.sqsClient.send(command);
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", {
-      replicator: this.name,
-      error: err.message
-    });
-    return false;
-  }
-  async getStatus() {
-    const baseStatus = await super.getStatus();
-    return {
-      ...baseStatus,
-      connected: !!this.sqsClient,
-      queueUrl: this.queueUrl,
-      region: this.region,
-      resources: this.resources,
-      totalreplicators: this.listenerCount("replicated"),
-      totalErrors: this.listenerCount("replicator_error")
-    };
-  }
-  async cleanup() {
-    if (this.sqsClient) {
-      this.sqsClient.destroy();
-    }
-    await super.cleanup();
-  }
-  shouldReplicateResource(resource) {
-    const result = this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource) || this.queues && Object.keys(this.queues).includes(resource) || !!(this.defaultQueue || this.queueUrl) || this.resources && Object.keys(this.resources).includes(resource) || false;
-    return result;
-  }
-}
-var sqs_replicator_class_default = SqsReplicator;
-
-const REPLICATOR_DRIVERS = {
-  s3db: s3db_replicator_class_default,
-  sqs: sqs_replicator_class_default,
-  bigquery: bigquery_replicator_class_default,
-  postgres: postgres_replicator_class_default
-};
-function createReplicator(driver, config = {}, resources = [], client = null) {
-  const ReplicatorClass = REPLICATOR_DRIVERS[driver];
-  if (!ReplicatorClass) {
-    throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
-  }
-  return new ReplicatorClass(config, resources, client);
-}
-
 function normalizeResourceName(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : name;
 }
 class ReplicatorPlugin extends plugin_class_default {
   constructor(options = {}) {
     super();
-    if (options.verbose) {
-      console.log("[PLUGIN][CONSTRUCTOR] ReplicatorPlugin constructor called");
-    }
-    if (options.verbose) {
-      console.log("[PLUGIN][constructor] New ReplicatorPlugin instance created with config:", options);
-    }
     if (!options.replicators || !Array.isArray(options.replicators)) {
       throw new Error("ReplicatorPlugin: replicators array is required");
     }
     for (const rep of options.replicators) {
       if (!rep.driver) throw new Error("ReplicatorPlugin: each replicator must have a driver");
+      if (!rep.resources || typeof rep.resources !== "object") throw new Error("ReplicatorPlugin: each replicator must have resources config");
+      if (Object.keys(rep.resources).length === 0) throw new Error("ReplicatorPlugin: each replicator must have at least one resource configured");
     }
     this.config = {
-      verbose: options.verbose ?? false,
-      persistReplicatorLog: options.persistReplicatorLog ?? false,
-      replicatorLogResource: options.replicatorLogResource ?? "replicator_logs",
-      replicators: options.replicators || []
+      replicators: options.replicators || [],
+      logErrors: options.logErrors !== false,
+      replicatorLogResource: options.replicatorLogResource || "replicator_log",
+      enabled: options.enabled !== false,
+      batchSize: options.batchSize || 100,
+      maxRetries: options.maxRetries || 3,
+      timeout: options.timeout || 3e4,
+      verbose: options.verbose || false,
+      ...options
     };
     this.replicators = [];
-    this.queue = [];
-    this.isProcessing = false;
-    this.stats = {
-      totalOperations: 0,
-      totalErrors: 0,
-      lastError: null
-    };
-    this._installedListeners = [];
+    this.database = null;
+    this.eventListenersInstalled = /* @__PURE__ */ new Set();
   }
   /**
    * Decompress data if it was compressed
@@ -13309,79 +12155,34 @@ class ReplicatorPlugin extends plugin_class_default {
     }
     return filtered;
   }
-  installEventListeners(resource) {
-    const plugin = this;
-    if (plugin.config.verbose) {
-      console.log("[PLUGIN] installEventListeners called for:", resource && resource.name, {
-        hasDatabase: !!resource.database,
-        sameDatabase: resource.database === plugin.database,
-        alreadyInstalled: resource._replicatorListenersInstalled,
-        resourceObj: resource,
-        resourceObjId: resource && resource.id,
-        resourceObjType: typeof resource,
-        resourceObjIs: resource && Object.is(resource, plugin.database.resources && plugin.database.resources[resource.name]),
-        resourceObjEq: resource === (plugin.database.resources && plugin.database.resources[resource.name])
-      });
-    }
-    if (!resource || resource.name === plugin.config.replicatorLogResource || !resource.database || resource.database !== plugin.database) return;
-    if (resource._replicatorListenersInstalled) return;
-    resource._replicatorListenersInstalled = true;
-    this._installedListeners.push(resource);
-    if (plugin.config.verbose) {
-      console.log(`[PLUGIN] installEventListeners INSTALLED for resource: ${resource && resource.name}`);
+  installEventListeners(resource, database, plugin) {
+    if (!resource || this.eventListenersInstalled.has(resource.name)) {
+      return;
     }
     resource.on("insert", async (data) => {
-      if (plugin.config.verbose) {
-        console.log("[PLUGIN] Listener INSERT on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })));
-      }
       try {
-        const completeData = await plugin.getCompleteData(resource, data);
-        if (plugin.config.verbose) {
-          console.log(`[PLUGIN] Listener INSERT completeData for ${resource.name} id=${data && data.id}:`, completeData);
-        }
-        await plugin.processReplicatorEvent(resource.name, "insert", data.id, completeData, null);
-      } catch (err) {
-        if (plugin.config.verbose) {
-          console.error(`[PLUGIN] Listener INSERT error on ${resource.name} id=${data && data.id}:`, err);
-        }
+        const completeData = { ...data, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+        await plugin.processReplicatorEvent("insert", resource.name, completeData.id, completeData);
+      } catch (error) {
+        this.emit("error", { operation: "insert", error: error.message, resource: resource.name });
       }
     });
-    resource.on("update", async (data) => {
-      console.log("[PLUGIN][Listener][UPDATE][START] triggered for resource:", resource.name, "data:", data);
-      const beforeData = data && data.$before;
-      if (plugin.config.verbose) {
-        console.log("[PLUGIN] Listener UPDATE on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })), "data:", data, "beforeData:", beforeData);
-      }
+    resource.on("update", async (data, beforeData) => {
       try {
-        let completeData;
-        const [ok, err, record] = await try_fn_default(() => resource.get(data.id));
-        if (ok && record) {
-          completeData = record;
-        } else {
-          completeData = data;
-        }
-        await plugin.processReplicatorEvent(resource.name, "update", data.id, completeData, beforeData);
-      } catch (err) {
-        if (plugin.config.verbose) {
-          console.error(`[PLUGIN] Listener UPDATE erro em ${resource.name} id=${data && data.id}:`, err);
-        }
+        const completeData = { ...data, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        await plugin.processReplicatorEvent("update", resource.name, completeData.id, completeData, beforeData);
+      } catch (error) {
+        this.emit("error", { operation: "update", error: error.message, resource: resource.name });
       }
     });
-    resource.on("delete", async (data, beforeData) => {
-      if (plugin.config.verbose) {
-        console.log("[PLUGIN] Listener DELETE on", resource.name, "plugin.replicators.length:", plugin.replicators.length, plugin.replicators.map((r) => ({ id: r.id, driver: r.driver })));
-      }
+    resource.on("delete", async (data) => {
       try {
-        await plugin.processReplicatorEvent(resource.name, "delete", data.id, null, beforeData);
-      } catch (err) {
-        if (plugin.config.verbose) {
-          console.error(`[PLUGIN] Listener DELETE erro em ${resource.name} id=${data && data.id}:`, err);
-        }
+        await plugin.processReplicatorEvent("delete", resource.name, data.id, data);
+      } catch (error) {
+        this.emit("error", { operation: "delete", error: error.message, resource: resource.name });
       }
     });
-    if (plugin.config.verbose) {
-      console.log(`[PLUGIN] Listeners instalados para resource: ${resource && resource.name} (insert: ${resource.listenerCount("insert")}, update: ${resource.listenerCount("update")}, delete: ${resource.listenerCount("delete")})`);
-    }
+    this.eventListenersInstalled.add(resource.name);
   }
   /**
    * Get complete data by always fetching the full record from the resource
@@ -13392,112 +12193,53 @@ class ReplicatorPlugin extends plugin_class_default {
     return ok ? completeRecord : data;
   }
   async setup(database) {
-    console.log("[PLUGIN][SETUP] setup called");
-    if (this.config.verbose) {
-      console.log("[PLUGIN][setup] called with database:", database && database.name);
-    }
     this.database = database;
-    if (this.config.persistReplicatorLog) {
-      let logRes = database.resources[normalizeResourceName(this.config.replicatorLogResource)];
-      if (!logRes) {
-        logRes = await database.createResource({
+    try {
+      await this.initializeReplicators(database);
+    } catch (error) {
+      this.emit("error", { operation: "setup", error: error.message });
+      throw error;
+    }
+    try {
+      if (this.config.replicatorLogResource) {
+        const logRes = await database.createResource({
           name: this.config.replicatorLogResource,
-          behavior: "truncate-data",
+          behavior: "body-overflow",
           attributes: {
-            id: "string|required",
-            resource: "string|required",
-            action: "string|required",
-            data: "object",
-            timestamp: "number|required",
-            createdAt: "string|required"
-          },
-          partitions: {
-            byDate: { fields: { "createdAt": "string|maxlength:10" } }
+            operation: "string",
+            resourceName: "string",
+            recordId: "string",
+            data: "string",
+            error: "string|optional",
+            replicator: "string",
+            timestamp: "string",
+            status: "string"
           }
         });
-        if (this.config.verbose) {
-          console.log("[PLUGIN] Log resource created:", this.config.replicatorLogResource, !!logRes);
-        }
       }
-      database.resources[normalizeResourceName(this.config.replicatorLogResource)] = logRes;
-      this.replicatorLog = logRes;
-      if (this.config.verbose) {
-        console.log("[PLUGIN] Log resource created and registered:", this.config.replicatorLogResource, !!database.resources[normalizeResourceName(this.config.replicatorLogResource)]);
-      }
-      if (typeof database.uploadMetadataFile === "function") {
-        await database.uploadMetadataFile();
-        if (this.config.verbose) {
-          console.log("[PLUGIN] uploadMetadataFile called. database.resources keys:", Object.keys(database.resources));
-        }
-      }
+    } catch (error) {
     }
-    if (this.config.replicators && this.config.replicators.length > 0 && this.replicators.length === 0) {
-      await this.initializeReplicators();
-      console.log("[PLUGIN][SETUP] after initializeReplicators, replicators.length:", this.replicators.length);
-      if (this.config.verbose) {
-        console.log("[PLUGIN][setup] After initializeReplicators, replicators.length:", this.replicators.length, this.replicators.map((r) => ({ id: r.id, driver: r.driver })));
-      }
-    }
-    for (const resourceName in database.resources) {
-      if (normalizeResourceName(resourceName) !== normalizeResourceName(this.config.replicatorLogResource)) {
-        this.installEventListeners(database.resources[resourceName]);
-      }
-    }
-    database.on("connected", () => {
-      for (const resourceName in database.resources) {
-        if (normalizeResourceName(resourceName) !== normalizeResourceName(this.config.replicatorLogResource)) {
-          this.installEventListeners(database.resources[resourceName]);
-        }
-      }
-    });
+    await this.uploadMetadataFile(database);
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
-      if (this.config.verbose) {
-        console.log("[PLUGIN] createResource proxy called for:", config && config.name);
-      }
       const resource = await originalCreateResource(config);
-      if (resource && resource.name !== this.config.replicatorLogResource) {
-        this.installEventListeners(resource);
+      if (resource) {
+        this.installEventListeners(resource, database, this);
       }
       return resource;
     };
-    database.on("s3db.resourceCreated", (resourceName) => {
+    for (const resourceName in database.resources) {
       const resource = database.resources[resourceName];
-      if (resource && resource.name !== this.config.replicatorLogResource) {
-        this.installEventListeners(resource);
-      }
-    });
-    database.on("s3db.resourceUpdated", (resourceName) => {
-      const resource = database.resources[resourceName];
-      if (resource && resource.name !== this.config.replicatorLogResource) {
-        this.installEventListeners(resource);
-      }
-    });
+      this.installEventListeners(resource, database, this);
+    }
   }
-  async initializeReplicators() {
-    console.log("[PLUGIN][INIT] initializeReplicators called");
+  async initializeReplicators(database) {
     for (const replicatorConfig of this.config.replicators) {
-      try {
-        console.log("[PLUGIN][INIT] processing replicatorConfig:", replicatorConfig);
-        const driver = replicatorConfig.driver;
-        const resources = replicatorConfig.resources;
-        const client = replicatorConfig.client;
-        const replicator = createReplicator(driver, replicatorConfig, resources, client);
-        if (replicator) {
-          await replicator.initialize(this.database);
-          this.replicators.push({
-            id: Math.random().toString(36).slice(2),
-            driver,
-            config: replicatorConfig,
-            resources,
-            instance: replicator
-          });
-          console.log("[PLUGIN][INIT] pushed replicator:", driver, resources);
-        } else {
-          console.log("[PLUGIN][INIT] createReplicator returned null/undefined for driver:", driver);
-        }
-      } catch (err) {
-        console.error("[PLUGIN][INIT] Error creating replicator:", err);
+      const { driver, config, resources } = replicatorConfig;
+      const replicator = this.createReplicator(driver, config, resources);
+      if (replicator) {
+        await replicator.initialize(database);
+        this.replicators.push(replicator);
       }
     }
   }
@@ -13505,160 +12247,102 @@ class ReplicatorPlugin extends plugin_class_default {
   }
   async stop() {
   }
-  async processReplicatorEvent(resourceName, operation, recordId, data, beforeData = null) {
-    if (this.config.verbose) {
-      console.log("[PLUGIN][processReplicatorEvent] replicators.length:", this.replicators.length, this.replicators.map((r) => ({ id: r.id, driver: r.driver })));
-      console.log(`[PLUGIN][processReplicatorEvent] operation: ${operation}, resource: ${resourceName}, recordId: ${recordId}, data:`, data, "beforeData:", beforeData);
-    }
-    if (this.config.verbose) {
-      console.log(`[PLUGIN] processReplicatorEvent: resource=${resourceName} op=${operation} id=${recordId} data=`, data);
-    }
-    if (this.config.verbose) {
-      console.log(`[PLUGIN] processReplicatorEvent: resource=${resourceName} op=${operation} replicators=${this.replicators.length}`);
-    }
-    if (this.replicators.length === 0) {
-      if (this.config.verbose) {
-        console.log("[PLUGIN] No replicators registered");
-      }
-      return;
-    }
+  async processReplicatorEvent(operation, resourceName, recordId, data, beforeData = null) {
+    if (!this.config.enabled) return;
     const applicableReplicators = this.replicators.filter((replicator) => {
-      const should = replicator.instance.shouldReplicateResource(resourceName, operation);
-      if (this.config.verbose) {
-        console.log(`[PLUGIN] Replicator ${replicator.driver} shouldReplicateResource(${resourceName}, ${operation}):`, should);
-      }
+      const should = replicator.shouldReplicateResource && replicator.shouldReplicateResource(resourceName, operation);
       return should;
     });
-    if (this.config.verbose) {
-      console.log(`[PLUGIN] processReplicatorEvent: applicableReplicators for resource=${resourceName}:`, applicableReplicators.map((r) => r.driver));
-    }
     if (applicableReplicators.length === 0) {
-      if (this.config.verbose) {
-        console.log("[PLUGIN] No applicable replicators for resource", resourceName);
-      }
       return;
     }
-    const filteredData = this.filterInternalFields(lodashEs.isPlainObject(data) ? data : { raw: data });
-    const filteredBeforeData = beforeData ? this.filterInternalFields(lodashEs.isPlainObject(beforeData) ? beforeData : { raw: beforeData }) : null;
-    const item = {
-      id: `repl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      resourceName,
-      operation,
-      recordId,
-      data: filteredData,
-      beforeData: filteredBeforeData,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      attempts: 0
-    };
-    const logId = await this.logreplicator(item);
-    const [ok, err, result] = await try_fn_default(async () => this.processreplicatorItem(item));
-    if (ok) {
-      if (logId) {
-        await this.updatereplicatorLog(logId, {
-          status: result.success ? "success" : "failed",
-          attempts: 1,
-          error: result.success ? "" : JSON.stringify(result.results)
+    const promises = applicableReplicators.map(async (replicator) => {
+      try {
+        const result = await this.retryWithBackoff(
+          () => replicator.replicate(resourceName, operation, data, recordId, beforeData),
+          this.config.maxRetries
+        );
+        this.emit("replicated", {
+          replicator: replicator.name || replicator.id,
+          resourceName,
+          operation,
+          recordId,
+          result,
+          success: true
         });
-      }
-      this.stats.totalOperations++;
-      if (result.success) {
-        this.stats.successfulOperations++;
-      } else {
-        this.stats.failedOperations++;
-      }
-    } else {
-      if (logId) {
-        await this.updatereplicatorLog(logId, {
-          status: "failed",
-          attempts: 1,
-          error: err.message
+        return result;
+      } catch (error) {
+        this.emit("replicator_error", {
+          replicator: replicator.name || replicator.id,
+          resourceName,
+          operation,
+          recordId,
+          error: error.message
         });
+        if (this.config.logErrors && this.database) {
+          await this.logError(replicator, resourceName, operation, recordId, data, error);
+        }
+        throw error;
       }
-      this.stats.failedOperations++;
-    }
+    });
+    return Promise.allSettled(promises);
   }
   async processreplicatorItem(item) {
-    if (this.config.verbose) {
-      console.log("[PLUGIN][processreplicatorItem] called with item:", item);
-    }
     const applicableReplicators = this.replicators.filter((replicator) => {
-      const should = replicator.instance.shouldReplicateResource(item.resourceName, item.operation);
-      if (this.config.verbose) {
-        console.log(`[PLUGIN] processreplicatorItem: Replicator ${replicator.driver} shouldReplicateResource(${item.resourceName}, ${item.operation}):`, should);
-      }
+      const should = replicator.shouldReplicateResource && replicator.shouldReplicateResource(item.resourceName, item.operation);
       return should;
     });
-    if (this.config.verbose) {
-      console.log(`[PLUGIN] processreplicatorItem: applicableReplicators for resource=${item.resourceName}:`, applicableReplicators.map((r) => r.driver));
-    }
     if (applicableReplicators.length === 0) {
-      if (this.config.verbose) {
-        console.log("[PLUGIN] processreplicatorItem: No applicable replicators for resource", item.resourceName);
-      }
-      return { success: true, skipped: true, reason: "no_applicable_replicators" };
+      return;
     }
-    const results = [];
-    for (const replicator of applicableReplicators) {
-      let result;
-      let ok, err;
-      if (this.config.verbose) {
-        console.log("[PLUGIN] processReplicatorItem", {
-          resource: item.resourceName,
-          operation: item.operation,
-          data: item.data,
-          beforeData: item.beforeData,
-          replicator: replicator.instance?.constructor?.name
-        });
-      }
-      if (replicator.instance && replicator.instance.constructor && replicator.instance.constructor.name === "S3dbReplicator") {
-        [ok, err, result] = await try_fn_default(
-          () => replicator.instance.replicate({
-            resource: item.resourceName,
+    const promises = applicableReplicators.map(async (replicator) => {
+      try {
+        const [ok, err, result] = await try_fn_default(
+          () => replicator.replicate(item.resourceName, item.operation, item.data, item.recordId, item.beforeData)
+        );
+        if (!ok) {
+          this.emit("replicator_error", {
+            replicator: replicator.name || replicator.id,
+            resourceName: item.resourceName,
             operation: item.operation,
-            data: item.data,
-            id: item.recordId,
-            beforeData: item.beforeData
-          })
-        );
-      } else {
-        [ok, err, result] = await try_fn_default(
-          () => replicator.instance.replicate(
-            item.resourceName,
-            item.operation,
-            item.data,
-            item.recordId,
-            item.beforeData
-          )
-        );
+            recordId: item.recordId,
+            error: err.message
+          });
+          if (this.config.logErrors && this.database) {
+            await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, err);
+          }
+          return { success: false, error: err.message };
+        }
+        this.emit("replicated", {
+          replicator: replicator.name || replicator.id,
+          resourceName: item.resourceName,
+          operation: item.operation,
+          recordId: item.recordId,
+          result,
+          success: true
+        });
+        return { success: true, result };
+      } catch (error) {
+        this.emit("replicator_error", {
+          replicator: replicator.name || replicator.id,
+          resourceName: item.resourceName,
+          operation: item.operation,
+          recordId: item.recordId,
+          error: error.message
+        });
+        if (this.config.logErrors && this.database) {
+          await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, error);
+        }
+        return { success: false, error: error.message };
       }
-      results.push({
-        replicatorId: replicator.id,
-        driver: replicator.driver,
-        success: result && result.success,
-        error: result && result.error,
-        skipped: result && result.skipped
-      });
-    }
-    return {
-      success: results.every((r) => r.success || r.skipped),
-      results
-    };
+    });
+    return Promise.allSettled(promises);
   }
   async logreplicator(item) {
     const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
     if (!logRes) {
-      if (this.config.verbose) {
-        console.error("[PLUGIN] replicator log resource not found!");
-      }
       if (this.database) {
-        if (this.config.verbose) {
-          console.warn("[PLUGIN] database.resources keys:", Object.keys(this.database.resources));
-        }
-        if (this.database.options && this.database.options.connectionString) {
-          if (this.config.verbose) {
-            console.warn("[PLUGIN] database connectionString:", this.database.options.connectionString);
-          }
-        }
+        if (this.database.options && this.database.options.connectionString) ;
       }
       this.emit("replicator.log.failed", { error: "replicator log resource not found", item });
       return;
@@ -13674,9 +12358,6 @@ class ReplicatorPlugin extends plugin_class_default {
     try {
       await logRes.insert(logItem);
     } catch (err) {
-      if (this.config.verbose) {
-        console.error("[PLUGIN] Error writing to replicator log:", err);
-      }
       this.emit("replicator.log.failed", { error: err, item });
     }
   }
@@ -13758,10 +12439,6 @@ class ReplicatorPlugin extends plugin_class_default {
       });
       if (ok) {
         retried++;
-      } else {
-        if (this.config.verbose) {
-          console.error("Failed to retry replicator:", err);
-        }
       }
     }
     return { retried };
@@ -13786,40 +12463,23 @@ class ReplicatorPlugin extends plugin_class_default {
     this.emit("replicator.sync.completed", { replicatorId, stats: this.stats });
   }
   async cleanup() {
-    if (this.config.verbose) {
-      console.log("[PLUGIN][CLEANUP] Cleaning up ReplicatorPlugin");
-    }
-    if (this._installedListeners && Array.isArray(this._installedListeners)) {
-      for (const resource of this._installedListeners) {
-        if (resource && typeof resource.removeAllListeners === "function") {
-          resource.removeAllListeners("insert");
-          resource.removeAllListeners("update");
-          resource.removeAllListeners("delete");
-        }
-        resource._replicatorListenersInstalled = false;
-      }
-      this._installedListeners = [];
-    }
-    if (this.database && typeof this.database.removeAllListeners === "function") {
-      this.database.removeAllListeners();
-    }
-    if (this.replicators && Array.isArray(this.replicators)) {
-      for (const rep of this.replicators) {
-        if (rep.instance && typeof rep.instance.cleanup === "function") {
-          await rep.instance.cleanup();
-        }
+    try {
+      if (this.replicators && this.replicators.length > 0) {
+        const cleanupPromises = this.replicators.map(async (replicator) => {
+          try {
+            if (replicator && typeof replicator.cleanup === "function") {
+              await replicator.cleanup();
+            }
+          } catch (error) {
+          }
+        });
+        await Promise.allSettled(cleanupPromises);
       }
       this.replicators = [];
-    }
-    this.queue = [];
-    this.isProcessing = false;
-    this.stats = {
-      totalOperations: 0,
-      totalErrors: 0,
-      lastError: null
-    };
-    if (this.config.verbose) {
-      console.log("[PLUGIN][CLEANUP] ReplicatorPlugin cleanup complete");
+      this.database = null;
+      this.eventListenersInstalled.clear();
+      this.removeAllListeners();
+    } catch (error) {
     }
   }
 }
