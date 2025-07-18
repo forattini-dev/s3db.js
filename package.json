@@ -24,6 +24,7 @@
     "database"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "import": "./dist/s3db.es.js",
