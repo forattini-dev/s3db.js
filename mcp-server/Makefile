@@ -278,9 +278,9 @@ health: ## Check service health
 .PHONY: docs
 docs: ## Generate documentation
 	@echo "$(BLUE)Documentation available:$(NC)"
-	@echo "• README.md - Main documentation"
-	@echo "• cursor_rules.md - AI agent usage rules"
+	@echo "• README.md - Complete documentation with examples and configuration"
 	@echo "• .env.example - Configuration template"
+	@echo "• examples/ - Test scripts and usage examples"
 
 .PHONY: readme
 readme: ## Open README in browser

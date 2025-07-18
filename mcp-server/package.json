@@ -56,7 +56,9 @@
     "README.md",
     "Dockerfile",
     "docker-compose.yml",
-    ".env.example"
+    ".env.example",
+    "Makefile",
+    "examples/"
   ],
   "publishConfig": {
     "access": "public"

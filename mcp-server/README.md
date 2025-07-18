@@ -17,115 +17,21 @@
   <a href="https://github.com/forattini-dev/s3db.js/blob/main/UNLICENSE"><img src="https://img.shields.io/badge/license-Unlicense-blue.svg?style=flat" alt="License"></a>
 </p>
 
-<p align="center">
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Runtime-Node.js-339933.svg?style=flat&logo=node.js" alt="Node.js Runtime"></a>
-  &nbsp;
-  <a href="https://aws.amazon.com/s3/"><img src="https://img.shields.io/badge/Powered_by-AWS_S3-FF9900.svg?style=flat&logo=amazon-aws" alt="Powered by AWS S3"></a>
-  &nbsp;
-  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/Protocol-MCP-007ACC.svg?style=flat" alt="MCP Protocol"></a>
-</p>
-
 ---
 
-## 🚀 What is S3DB MCP Server?
+## 🚀 Quick Start (5 minutes)
 
-The **S3DB MCP Server** is a Model Context Protocol implementation that allows AI agents to interact with S3DB databases through a standardized interface. S3DB transforms AWS S3 into a powerful document database, and this MCP server exposes all its capabilities to AI assistants and agents.
-
-**Perfect for:**
-- 🤖 **AI Agent Applications** - Give your agents persistent memory and data storage
-- 🌐 **Serverless AI Systems** - No database servers to manage, just S3
-- 💰 **Cost-Effective AI Solutions** - Pay only for what you store and access
-- 🔒 **Secure AI Data** - Built-in encryption and AWS security
-- 📊 **AI Analytics** - Efficient data processing and streaming
-- 🚀 **Rapid AI Prototyping** - Get started in minutes, not hours
-
----
-
-## ✨ Key Features
-
-<table>
-<tr>
-<td width="50%">
-
-### 🎯 **Database Operations**
-- **Connect/Disconnect** - Manage database connections
-- **Resource Management** - Create and manage collections
-- **Status Monitoring** - Real-time connection status
-- **Multi-tenant Support** - Namespace isolation
-
-</td>
-<td width="50%">
-
-### 📝 **CRUD Operations**
-- **Insert/Update/Delete** - Full document lifecycle
-- **Batch Operations** - Handle multiple documents
-- **Upsert Support** - Insert or update in one call
-- **Existence Checking** - Verify document presence
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🔍 **Query & Retrieval**
-- **Pagination** - Efficient large dataset handling
-- **Partition Filtering** - Organized data access
-- **Count Operations** - Quick statistics
-- **Bulk Retrieval** - Get multiple documents
-
-</td>
-<td width="50%">
-
-### 🔧 **Advanced Features**
-- **Schema Validation** - Automatic data validation
-- **Partitioning** - Organized data storage
-- **Timestamps** - Automatic time tracking
-- **Encryption** - Field-level security
-
-</td>
-</tr>
-</table>
-
----
-
-## 📋 Table of Contents
-
-- [🚀 Quick Start](#-quick-start)
-- [💾 Installation](#-installation)
-- [🎯 Usage](#-usage)
-- [🐳 Docker Deployment](#-docker-deployment)
-- [🔧 Configuration](#-configuration)
-- [🛠️ Available Tools](#️-available-tools)
-- [🤖 AI Agent Integration](#-ai-agent-integration)
-- [📖 Examples](#-examples)
-- [🔒 Security](#-security)
-- [🚀 Development](#-development)
-
----
-
-## 🚀 Quick Start
-
-Get your AI agents connected to S3DB in less than 5 minutes!
-
-### 1. Install via NPX (Recommended)
-
+### 1. Instant Start with NPX
 ```bash
-# Start the MCP server instantly
+# Start immediately (no installation required)
 npx s3db-mcp-server --transport=sse
+
+# Server running at: http://localhost:8000/sse
 ```
 
-### 2. Or Install Globally
+### 2. Configure Your AI Client
 
-```bash
-# Install globally
-npm install -g s3db-mcp-server
-
-# Start the server
-s3db-mcp --transport=sse
-```
-
-### 3. Configure Your AI Client
-
+**Claude Desktop** (`claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
@@ -137,202 +43,117 @@ s3db-mcp --transport=sse
 }
 ```
 
-### 4. Start Using S3DB
+**Cursor IDE**:
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
 
-Your AI agent can now:
-- Connect to S3DB databases
-- Create and manage document collections
-- Perform CRUD operations
-- Query and analyze data
+### 3. Test with Your AI Agent
+Your agent can now use these commands:
+```javascript
+// Connect to S3DB
+dbConnect({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET/databases/myapp"
+})
+
+// Create a collection
+dbCreateResource({
+  name: "users",
+  attributes: { name: "string|required", email: "email|unique" }
+})
+
+// Insert data
+resourceInsert({
+  resourceName: "users", 
+  data: { name: "John", email: "john@example.com" }
+})
+```
+
+---
+
+## 📋 Table of Contents
+
+- [🚀 Quick Start](#-quick-start-5-minutes)
+- [💾 Installation](#-installation)
+- [⚙️ Configuration](#️-configuration)
+- [🛠️ Available Tools](#️-available-tools)
+- [📖 Usage Examples](#-usage-examples)
+- [🗂️ Partitions & Performance](#️-partitions--performance)
+- [🐳 Docker Deployment](#-docker-deployment)
+- [🤖 AI Agent Integration](#-ai-agent-integration)
+- [🔒 Security](#-security)
+- [🚨 Troubleshooting](#-troubleshooting)
 
 ---
 
 ## 💾 Installation
 
-### NPX (No Installation Required)
-
+### Option 1: NPX (Recommended)
 ```bash
-# SSE transport (recommended for web clients)
+# SSE transport (web clients)
 npx s3db-mcp-server --transport=sse
 
-# STDIO transport (for desktop clients)
+# STDIO transport (desktop clients)
 npx s3db-mcp-server --transport=stdio
 ```
 
-### Global Installation
-
+### Option 2: Global Installation
 ```bash
 npm install -g s3db-mcp-server
+s3db-mcp --transport=sse
 ```
 
-### Local Project Installation
-
+### Option 3: Docker
 ```bash
-npm install s3db-mcp-server
-```
-
-### Docker Installation
-
-```bash
-# Quick start with Docker
-docker run -p 8000:8000 -e S3DB_CONNECTION_STRING="your-connection-string" s3db-mcp-server
-
-# Or use Docker Compose
-docker compose up
+docker run -p 8000:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp-server
 ```
 
 ---
 
-## 🎯 Usage
-
-### Command Line Options
-
-```bash
-# Start with SSE transport (HTTP-based)
-s3db-mcp --transport=sse --host=0.0.0.0 --port=8000
-
-# Start with STDIO transport (pipe-based)
-s3db-mcp --transport=stdio
-
-# Development mode with auto-reload
-npm run dev
-```
+## ⚙️ Configuration
 
 ### Environment Variables
 
-Create a `.env` file:
+Create a `.env` file or set these environment variables:
 
-```env
-# S3DB Configuration
-S3DB_CONNECTION_STRING=s3://ACCESS_KEY:SECRET_KEY@BUCKET/databases/myapp
-S3DB_VERBOSE=false
-S3DB_PARALLELISM=10
+#### **Server Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NODE_ENV` | `development` | Environment mode |
+| `MCP_SERVER_HOST` | `0.0.0.0` | Server bind address |
+| `MCP_SERVER_PORT` | `8000` | Server port |
+| `MCP_TRANSPORT` | `sse` | Transport method (`sse` or `stdio`) |
 
-# Server Configuration
-MCP_SERVER_HOST=0.0.0.0
-MCP_SERVER_PORT=8000
-MCP_TRANSPORT=sse
-```
+#### **S3DB Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `S3DB_CONNECTION_STRING` | **Required** | S3DB connection string |
+| `S3DB_VERBOSE` | `false` | Enable verbose logging |
+| `S3DB_PARALLELISM` | `10` | Number of parallel S3 operations |
+| `S3DB_PASSPHRASE` | `secret` | Encryption passphrase |
+| `S3DB_VERSIONING_ENABLED` | `false` | Enable resource versioning |
 
-### Basic Workflow
+#### **AWS Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AWS_ACCESS_KEY_ID` | - | AWS access key (optional with IAM roles) |
+| `AWS_SECRET_ACCESS_KEY` | - | AWS secret key (optional with IAM roles) |
+| `AWS_SESSION_TOKEN` | - | AWS session token (for temporary credentials) |
+| `AWS_REGION` | `us-east-1` | AWS region |
 
-1. **Connect to Database**
-   ```javascript
-   // AI agent calls dbConnect tool
-   {
-     "name": "dbConnect",
-     "arguments": {
-       "connectionString": "s3://key:secret@bucket/databases/myapp"
-     }
-   }
-   ```
+#### **S3-Compatible Services**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `S3_ENDPOINT` | - | Custom S3 endpoint (MinIO, DigitalOcean, etc.) |
+| `S3_FORCE_PATH_STYLE` | `false` | Use path-style URLs |
 
-2. **Create a Resource**
-   ```javascript
-   // AI agent calls dbCreateResource tool
-   {
-     "name": "dbCreateResource", 
-     "arguments": {
-       "name": "users",
-       "attributes": {
-         "name": "string|required",
-         "email": "email|unique", 
-         "age": "number|positive"
-       },
-       "timestamps": true
-     }
-   }
-   ```
-
-3. **Insert Data**
-   ```javascript
-   // AI agent calls resourceInsert tool
-   {
-     "name": "resourceInsert",
-     "arguments": {
-       "resourceName": "users",
-       "data": {
-         "name": "John Doe",
-         "email": "john@example.com",
-         "age": 30
-       }
-     }
-   }
-   ```
-
-4. **Query Data**
-   ```javascript
-   // AI agent calls resourceList tool
-   {
-     "name": "resourceList",
-     "arguments": {
-       "resourceName": "users",
-       "limit": 10,
-       "offset": 0
-     }
-   }
-   ```
-
----
-
-## 🐳 Docker Deployment
-
-### Quick Start with Docker
-
-```bash
-# 1. Clone or create directory
-mkdir s3db-mcp && cd s3db-mcp
-
-# 2. Download docker-compose.yml
-curl -O https://raw.githubusercontent.com/forattini-dev/s3db.js/main/mcp-server/docker-compose.yml
-
-# 3. Create .env file
-cp .env.example .env
-# Edit .env with your configuration
-
-# 4. Start services
-docker compose up
-```
-
-### Production Docker Setup
-
-```yaml
-services:
-  s3db-mcp-server:
-    image: s3db-mcp-server:latest
-    restart: unless-stopped
-    environment:
-      - S3DB_CONNECTION_STRING=s3://bucket/databases/prod
-      - NODE_ENV=production
-      - MCP_TRANSPORT=sse
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-```
-
-### Local Development with MinIO
-
-```bash
-# Start with local MinIO for testing
-docker compose --profile local-testing up
-```
-
-This includes:
-- S3DB MCP Server on port 8000
-- MinIO S3-compatible storage on port 9000
-- MinIO Console on port 9001
-
----
-
-## 🔧 Configuration
-
-### Connection Strings
-
-S3DB supports various S3 providers through connection strings:
+### Connection String Examples
 
 ```bash
 # AWS S3 with credentials
@@ -347,66 +168,446 @@ S3DB_CONNECTION_STRING="s3://minioadmin:minioadmin@test-bucket/databases/dev?end
 # DigitalOcean Spaces
 S3DB_CONNECTION_STRING="s3://DO_KEY:DO_SECRET@space-name/databases/prod?endpoint=https://nyc3.digitaloceanspaces.com"
 
-# LocalStack (local AWS simulation)
+# LocalStack (AWS simulation)
 S3DB_CONNECTION_STRING="s3://test:test@test-bucket/databases/local?endpoint=http://localhost:4566&forcePathStyle=true"
 ```
 
-### Advanced Configuration
+### Command Line Options
 
-```env
-# Performance tuning
-S3DB_PARALLELISM=20
-S3DB_VERBOSE=true
+```bash
+# Transport options
+s3db-mcp --transport=sse          # HTTP-based transport
+s3db-mcp --transport=stdio        # Pipe-based transport
 
-# Security
-S3DB_PASSPHRASE=your-strong-encryption-passphrase
-S3DB_VERSIONING_ENABLED=true
+# Network options  
+s3db-mcp --host=0.0.0.0 --port=8000
 
-# Networking
-MCP_SERVER_HOST=0.0.0.0
-MCP_SERVER_PORT=8000
-MCP_TRANSPORT=sse
+# Example with environment
+S3DB_CONNECTION_STRING="s3://..." s3db-mcp --transport=sse
 ```
 
 ---
 
 ## 🛠️ Available Tools
 
-The S3DB MCP Server exposes the following tools to AI agents:
-
 ### Database Management
 
-| Tool | Description | Required Args |
-|------|-------------|---------------|
-| `dbConnect` | Connect to S3DB database | `connectionString` |
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `dbConnect` | Connect to S3DB database | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?` |
 | `dbDisconnect` | Disconnect from database | - |
 | `dbStatus` | Get connection status | - |
-| `dbCreateResource` | Create new resource/collection | `name`, `attributes` |
+| `dbCreateResource` | Create resource/collection | `name`, `attributes`, `behavior?`, `timestamps?`, `partitions?`, `paranoid?` |
 | `dbListResources` | List all resources | - |
 
 ### Document Operations
 
-| Tool | Description | Required Args |
-|------|-------------|---------------|
-| `resourceInsert` | Insert new document | `resourceName`, `data` |
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `resourceInsert` | Insert single document | `resourceName`, `data` |
 | `resourceInsertMany` | Insert multiple documents | `resourceName`, `data[]` |
 | `resourceGet` | Get document by ID | `resourceName`, `id` |
 | `resourceGetMany` | Get multiple documents | `resourceName`, `ids[]` |
 | `resourceUpdate` | Update document | `resourceName`, `id`, `data` |
-| `resourceUpsert` | Insert or update document | `resourceName`, `data` |
+| `resourceUpsert` | Insert or update | `resourceName`, `data` |
 | `resourceDelete` | Delete document | `resourceName`, `id` |
 | `resourceDeleteMany` | Delete multiple documents | `resourceName`, `ids[]` |
 
 ### Query Operations
 
-| Tool | Description | Required Args |
-|------|-------------|---------------|
+| Tool | Description | Parameters |
+|------|-------------|------------|
 | `resourceExists` | Check if document exists | `resourceName`, `id` |
-| `resourceList` | List documents with pagination | `resourceName` |
-| `resourceListIds` | List document IDs | `resourceName` |
-| `resourceCount` | Count documents | `resourceName` |
-| `resourceGetAll` | Get all documents (use carefully) | `resourceName` |
+| `resourceList` | List with pagination | `resourceName`, `limit?`, `offset?`, `partition?`, `partitionValues?` |
+| `resourceListIds` | List document IDs only | `resourceName`, `limit?`, `offset?` |
+| `resourceCount` | Count documents | `resourceName`, `partition?`, `partitionValues?` |
+| `resourceGetAll` | Get all documents | `resourceName` |
 | `resourceDeleteAll` | Delete all documents | `resourceName`, `confirm: true` |
+
+---
+
+## 📖 Usage Examples
+
+### Basic CRUD Operations
+
+```javascript
+// 1. Connect to database
+await agent.callTool('dbConnect', {
+  connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket/databases/blog',
+  verbose: false,
+  parallelism: 10
+});
+
+// 2. Create a resource with schema validation
+await agent.callTool('dbCreateResource', {
+  name: 'posts',
+  attributes: {
+    title: 'string|required|min:3|max:200',
+    content: 'string|required',
+    author: 'string|required',
+    tags: 'array|items:string',
+    published: 'boolean',
+    publishDate: 'date',
+    metadata: {
+      views: 'number|positive',
+      likes: 'number|positive'
+    }
+  },
+  behavior: 'user-managed',
+  timestamps: true,  // Adds createdAt/updatedAt automatically
+  paranoid: true     // Soft deletes
+});
+
+// 3. Insert a blog post
+const post = await agent.callTool('resourceInsert', {
+  resourceName: 'posts',
+  data: {
+    title: 'Getting Started with S3DB MCP',
+    content: 'S3DB transforms AWS S3 into a powerful document database...',
+    author: 'john-doe',
+    tags: ['tutorial', 's3db', 'mcp', 'ai'],
+    published: true,
+    publishDate: '2024-01-15',
+    metadata: {
+      views: 0,
+      likes: 0
+    }
+  }
+});
+
+// 4. Update the post
+await agent.callTool('resourceUpdate', {
+  resourceName: 'posts',
+  id: post.data.id,
+  data: {
+    metadata: {
+      views: 150,
+      likes: 12
+    }
+  }
+});
+
+// 5. Query posts with pagination
+const posts = await agent.callTool('resourceList', {
+  resourceName: 'posts',
+  limit: 10,
+  offset: 0
+});
+
+// 6. Check if post exists
+const exists = await agent.callTool('resourceExists', {
+  resourceName: 'posts',
+  id: post.data.id
+});
+```
+
+### Batch Operations
+
+```javascript
+// Insert multiple documents at once
+await agent.callTool('resourceInsertMany', {
+  resourceName: 'posts',
+  data: [
+    {
+      title: 'AI and Databases',
+      content: 'Exploring the intersection...',
+      author: 'jane-smith',
+      published: true
+    },
+    {
+      title: 'S3DB Performance Tips',
+      content: 'Best practices for...',
+      author: 'bob-wilson',
+      published: false
+    }
+  ]
+});
+
+// Get multiple documents by ID
+const multiplePosts = await agent.callTool('resourceGetMany', {
+  resourceName: 'posts',
+  ids: ['post_123', 'post_456', 'post_789']
+});
+
+// Delete multiple documents
+await agent.callTool('resourceDeleteMany', {
+  resourceName: 'posts',
+  ids: ['post_old1', 'post_old2']
+});
+```
+
+### E-commerce Example with Complex Schema
+
+```javascript
+// Create products resource
+await agent.callTool('dbCreateResource', {
+  name: 'products',
+  attributes: {
+    sku: 'string|required|unique',
+    name: 'string|required|min:2|max:200',
+    description: 'string|required',
+    price: 'number|positive|required',
+    category: 'string|required',
+    subcategory: 'string|optional',
+    inStock: 'boolean',
+    inventory: {
+      quantity: 'number|integer|min:0',
+      reserved: 'number|integer|min:0',
+      warehouse: 'string|required'
+    },
+    specifications: {
+      weight: 'number|positive|optional',
+      dimensions: {
+        length: 'number|positive',
+        width: 'number|positive', 
+        height: 'number|positive'
+      },
+      color: 'string|optional',
+      material: 'string|optional'
+    },
+    pricing: {
+      cost: 'number|positive',
+      markup: 'number|positive',
+      discountPercent: 'number|min:0|max:100'
+    },
+    tags: 'array|items:string',
+    images: 'array|items:url'
+  },
+  partitions: {
+    byCategory: {
+      fields: { category: 'string' },
+      description: 'Partition products by main category'
+    },
+    byCategoryAndSubcategory: {
+      fields: { 
+        category: 'string',
+        subcategory: 'string'
+      },
+      description: 'Fine-grained category partitioning'
+    }
+  },
+  timestamps: true
+});
+
+// Insert a complex product
+await agent.callTool('resourceInsert', {
+  resourceName: 'products',
+  data: {
+    sku: 'LAP-GAMING-001',
+    name: 'Gaming Laptop Pro 15"',
+    description: 'High-performance gaming laptop with RTX graphics',
+    price: 1299.99,
+    category: 'electronics',
+    subcategory: 'laptops',
+    inStock: true,
+    inventory: {
+      quantity: 25,
+      reserved: 3,
+      warehouse: 'US-WEST-1'
+    },
+    specifications: {
+      weight: 2.3,
+      dimensions: {
+        length: 35.5,
+        width: 25.0,
+        height: 2.2
+      },
+      color: 'black',
+      material: 'aluminum'
+    },
+    pricing: {
+      cost: 850.00,
+      markup: 0.53,
+      discountPercent: 0
+    },
+    tags: ['gaming', 'laptop', 'rtx', 'high-performance'],
+    images: [
+      'https://example.com/laptop-1.jpg',
+      'https://example.com/laptop-2.jpg'
+    ]
+  }
+});
+```
+
+---
+
+## 🗂️ Partitions & Performance
+
+Partitions organize data for better performance and logical separation.
+
+### Creating Partitioned Resources
+
+```javascript
+await agent.callTool('dbCreateResource', {
+  name: 'orders',
+  attributes: {
+    orderId: 'string|required|unique',
+    customerId: 'string|required',
+    amount: 'number|positive|required',
+    status: 'string|enum:pending,paid,shipped,delivered,cancelled',
+    region: 'string|required',
+    orderDate: 'date|required',
+    items: 'array|items:object'
+  },
+  partitions: {
+    // Single field partitions
+    byRegion: {
+      fields: { region: 'string' },
+      description: 'Geographic distribution'
+    },
+    byStatus: {
+      fields: { status: 'string' },
+      description: 'Order status tracking'
+    },
+    byMonth: {
+      fields: { orderDate: 'date|maxlength:7' }, // YYYY-MM format
+      description: 'Monthly order archives'
+    },
+    
+    // Multi-field partitions
+    byRegionAndStatus: {
+      fields: { 
+        region: 'string',
+        status: 'string'
+      },
+      description: 'Regional status tracking'
+    },
+    byRegionAndMonth: {
+      fields: {
+        region: 'string',
+        orderDate: 'date|maxlength:7'
+      },
+      description: 'Regional monthly reports'
+    }
+  },
+  timestamps: true
+});
+```
+
+### Querying with Partitions
+
+```javascript
+// Query specific partition - much faster than full scan
+const northernOrders = await agent.callTool('resourceList', {
+  resourceName: 'orders',
+  partition: 'byRegion',
+  partitionValues: { region: 'north' },
+  limit: 100
+});
+
+// Multi-field partition query
+const northPendingOrders = await agent.callTool('resourceList', {
+  resourceName: 'orders', 
+  partition: 'byRegionAndStatus',
+  partitionValues: {
+    region: 'north',
+    status: 'pending'
+  }
+});
+
+// Time-based partition query
+const januaryOrders = await agent.callTool('resourceList', {
+  resourceName: 'orders',
+  partition: 'byMonth', 
+  partitionValues: { orderDate: '2024-01' }
+});
+
+// Count documents in partition
+const pendingCount = await agent.callTool('resourceCount', {
+  resourceName: 'orders',
+  partition: 'byStatus',
+  partitionValues: { status: 'pending' }
+});
+```
+
+### Partition Best Practices
+
+**Common Partition Patterns:**
+- **By Date**: `{ orderDate: 'date|maxlength:10' }` (YYYY-MM-DD)
+- **By Month**: `{ orderDate: 'date|maxlength:7' }` (YYYY-MM)
+- **By Category**: `{ category: 'string' }`
+- **By User**: `{ userId: 'string' }`
+- **By Status**: `{ status: 'string' }`
+- **By Geographic Region**: `{ region: 'string', country: 'string' }`
+
+**Performance Benefits:**
+- ⚡ **Faster queries** - scans only relevant partition
+- 💰 **Lower S3 costs** - fewer requests and data transfer
+- 📊 **Better analytics** - efficient aggregations
+- 🔄 **Easier maintenance** - targeted operations
+
+---
+
+## 🐳 Docker Deployment
+
+### Quick Start with Docker Compose
+
+```bash
+# 1. Create project directory
+mkdir s3db-mcp && cd s3db-mcp
+
+# 2. Create docker-compose.yml
+curl -o docker-compose.yml https://raw.githubusercontent.com/forattini-dev/s3db.js/main/mcp-server/docker-compose.yml
+
+# 3. Create .env file
+curl -o .env.example https://raw.githubusercontent.com/forattini-dev/s3db.js/main/mcp-server/.env.example
+cp .env.example .env
+
+# 4. Edit .env with your configuration
+# 5. Start services
+docker compose up
+```
+
+### Production Docker Setup
+
+```yaml
+services:
+  s3db-mcp-server:
+    image: s3db-mcp-server:latest
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - S3DB_CONNECTION_STRING=s3://bucket/databases/prod
+      - MCP_TRANSPORT=sse
+      - MCP_SERVER_PORT=8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+### Local Development with MinIO
+
+```bash
+# Start with MinIO for local S3 testing
+docker compose --profile local-testing up
+
+# Access:
+# - MCP Server: http://localhost:8000/sse  
+# - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
+# - Health Check: http://localhost:8001/health
+```
+
+### Docker Environment Variables
+
+All the configuration variables mentioned above can be used in Docker:
+
+```bash
+docker run -p 8000:8000 \
+  -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" \
+  -e S3DB_VERBOSE=true \
+  -e S3DB_PARALLELISM=20 \
+  -e MCP_TRANSPORT=sse \
+  s3db-mcp-server
+```
 
 ---
 
@@ -414,6 +615,11 @@ The S3DB MCP Server exposes the following tools to AI agents:
 
 ### Claude Desktop Integration
 
+1. **Locate config file:**
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+2. **Add S3DB MCP server:**
 ```json
 {
   "mcpServers": {
@@ -425,25 +631,12 @@ The S3DB MCP Server exposes the following tools to AI agents:
 }
 ```
 
-### Cursor IDE Integration
-
+3. **For STDIO transport:**
 ```json
 {
   "mcpServers": {
     "s3db": {
-      "url": "http://localhost:8000/sse"
-    }
-  }
-}
-```
-
-### STDIO Transport (Desktop Clients)
-
-```json
-{
-  "mcpServers": {
-    "s3db": {
-      "transport": "stdio", 
+      "transport": "stdio",
       "command": "npx",
       "args": ["s3db-mcp-server", "--transport=stdio"],
       "env": {
@@ -454,168 +647,51 @@ The S3DB MCP Server exposes the following tools to AI agents:
 }
 ```
 
----
+### Cursor IDE Integration
 
-## 📖 Examples
-
-### Basic Usage Example
-
-```javascript
-// 1. Connect to database
-await agent.callTool('dbConnect', {
-  connectionString: 's3://bucket/databases/blog'
-});
-
-// 2. Create a posts resource
-await agent.callTool('dbCreateResource', {
-  name: 'posts',
-  attributes: {
-    title: 'string|required',
-    content: 'string|required', 
-    author: 'string|required',
-    tags: 'array|items:string',
-    published: 'boolean'
-  },
-  timestamps: true
-});
-
-// 3. Insert a blog post
-const post = await agent.callTool('resourceInsert', {
-  resourceName: 'posts',
-  data: {
-    title: 'Getting Started with S3DB',
-    content: 'S3DB is a powerful document database...',
-    author: 'John Doe',
-    tags: ['tutorial', 's3db', 'database'],
-    published: true
-  }
-});
-
-// 4. Query posts
-const posts = await agent.callTool('resourceList', {
-  resourceName: 'posts',
-  limit: 10
-});
-```
-
-### E-commerce Example
-
-```javascript
-// Create products resource with partitioning
-await agent.callTool('dbCreateResource', {
-  name: 'products',
-  attributes: {
-    name: 'string|required',
-    price: 'number|positive|required',
-    category: 'string|required',
-    sku: 'string|required|unique',
-    inStock: 'boolean'
-  },
-  partitions: {
-    byCategory: {
-      fields: { category: 'string' }
-    }
-  },
-  timestamps: true
-});
-
-// Insert products
-await agent.callTool('resourceInsertMany', {
-  resourceName: 'products',
-  data: [
-    {
-      name: 'Laptop Pro',
-      price: 1299.99,
-      category: 'electronics',
-      sku: 'LAP-001',
-      inStock: true
-    },
-    {
-      name: 'Coffee Mug',
-      price: 15.99,
-      category: 'kitchen',
-      sku: 'MUG-001', 
-      inStock: true
-    }
-  ]
-});
-
-// Query electronics products
-const electronics = await agent.callTool('resourceList', {
-  resourceName: 'products',
-  partition: 'byCategory',
-  partitionValues: { category: 'electronics' }
-});
-```
-
-### User Management Example
-
-```javascript
-// Create users resource
-await agent.callTool('dbCreateResource', {
-  name: 'users',
-  attributes: {
-    username: 'string|required|unique',
-    email: 'email|required|unique',
-    profile: {
-      firstName: 'string|required',
-      lastName: 'string|required',
-      bio: 'string|optional'
-    },
-    settings: {
-      theme: 'string|enum:light,dark',
-      notifications: 'boolean'
-    }
-  },
-  behavior: 'enforce-limits',
-  timestamps: true
-});
-
-// Create user
-const user = await agent.callTool('resourceInsert', {
-  resourceName: 'users',
-  data: {
-    username: 'johndoe',
-    email: 'john@example.com',
-    profile: {
-      firstName: 'John',
-      lastName: 'Doe',
-      bio: 'Software developer and AI enthusiast'
-    },
-    settings: {
-      theme: 'dark',
-      notifications: true
+Add to your MCP settings:
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "url": "http://localhost:8000/sse"
     }
   }
-});
-
-// Update user profile
-await agent.callTool('resourceUpdate', {
-  resourceName: 'users',
-  id: user.data.id,
-  data: {
-    profile: {
-      bio: 'Senior software developer and AI researcher'
-    }
-  }
-});
+}
 ```
+
+### AI Agent Usage Rules
+
+**Before any task:**
+1. Always use `dbConnect` first to establish connection
+2. Use `dbStatus` to verify connection and see resources
+3. Use `dbListResources` to see available collections
+
+**For data operations:**
+1. Use `resourceExists` to check if documents exist before operations
+2. Prefer batch operations (`resourceInsertMany`, `resourceGetMany`) for efficiency
+3. Use partitions for performance when querying large datasets
+4. Always use pagination (`resourceList` with `limit`/`offset`) for large results
+
+**Schema design:**
+- Define validation rules: `"email": "email|required|unique"`
+- Use nested objects for complex data structures
+- Enable timestamps for audit trails
+- Consider partitioning strategy upfront
+
+**Error handling:**
+- Check connection status before operations
+- Validate data structure matches schema
+- Handle resource not found errors gracefully
+- Use appropriate error messages for users
 
 ---
 
 ## 🔒 Security
 
-### Best Practices
+### AWS IAM Policy
 
-1. **Use IAM Roles** when possible instead of access keys
-2. **Rotate credentials** regularly
-3. **Use least-privilege** access policies
-4. **Enable encryption** with strong passphrases
-5. **Monitor access** logs and CloudTrail events
-6. **Use HTTPS** for all connections
-7. **Secure environment** variables and configuration
-
-### IAM Policy Example
+Minimal S3 permissions required:
 
 ```json
 {
@@ -625,9 +701,10 @@ await agent.callTool('resourceUpdate', {
       "Effect": "Allow",
       "Action": [
         "s3:GetObject",
-        "s3:PutObject", 
+        "s3:PutObject",
         "s3:DeleteObject",
-        "s3:ListBucket"
+        "s3:ListBucket",
+        "s3:HeadObject"
       ],
       "Resource": [
         "arn:aws:s3:::your-s3db-bucket",
@@ -638,80 +715,135 @@ await agent.callTool('resourceUpdate', {
 }
 ```
 
-### Encryption
+### Security Best Practices
 
-S3DB supports field-level encryption:
+1. **Use IAM roles** when possible instead of access keys
+2. **Rotate credentials** regularly  
+3. **Use environment variables** never hardcode credentials
+4. **Enable S3 bucket encryption** and versioning
+5. **Monitor access logs** and set up CloudTrail
+6. **Use strong passphrases** for S3DB encryption
+7. **Restrict network access** with security groups
+8. **Enable HTTPS** for all connections
+
+### Field-Level Encryption
 
 ```javascript
 await agent.callTool('dbCreateResource', {
   name: 'sensitive_data',
   attributes: {
-    publicData: 'string',
-    secretData: 'secret' // Automatically encrypted
-  },
-  passphrase: 'your-strong-encryption-key'
+    publicInfo: 'string',
+    privateData: 'secret',  // Automatically encrypted
+    ssn: 'secret',          // Encrypted with passphrase
+    creditCard: 'secret'    // Encrypted
+  }
 });
 ```
 
 ---
 
-## 🚀 Development
+## 🚨 Troubleshooting
 
-### Local Development Setup
+### Common Issues
 
+**Connection Problems:**
 ```bash
-# 1. Clone the repository
-git clone https://github.com/forattini-dev/s3db.js.git
-cd s3db.js/mcp-server
+# Check if server is running
+curl http://localhost:8001/health
 
-# 2. Install dependencies
-npm install
-
-# 3. Create environment file
-cp .env.example .env
-# Edit .env with your configuration
-
-# 4. Start development server
-npm run dev
-```
-
-### Testing with MinIO
-
-```bash
-# Start MinIO and MCP server
-docker compose --profile local-testing up
-
-# MinIO Console: http://localhost:9001
-# MCP Server: http://localhost:8000/sse
-```
-
-### Building Docker Image
-
-```bash
-# Build image
-npm run docker:build
-
-# Run container
-npm run docker:run
-```
-
-### Testing the MCP Server
-
-```bash
-# Test SSE endpoint
+# Check MCP endpoint
 curl http://localhost:8000/sse
 
-# Test with MCP client
-npx @modelcontextprotocol/inspector http://localhost:8000/sse
+# View server logs
+docker compose logs -f s3db-mcp-server
 ```
 
-### Contributing
+**S3 Access Issues:**
+```bash
+# Test S3 connection
+aws s3 ls s3://your-bucket
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+# Check credentials
+aws sts get-caller-identity
+
+# Test with MinIO
+mc alias set local http://localhost:9000 minioadmin minioadmin
+mc ls local
+```
+
+**Performance Issues:**
+- Increase `S3DB_PARALLELISM` for better throughput
+- Use partitions to reduce query scope
+- Implement proper pagination 
+- Monitor S3 request patterns
+
+**Memory Issues:**
+- Avoid `resourceGetAll` on large datasets
+- Use `resourceList` with pagination instead
+- Increase Docker memory limits if needed
+
+### Error Messages
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Database not connected" | No `dbConnect` called | Call `dbConnect` tool first |
+| "Resource not found" | Invalid resource name | Check with `dbListResources` |
+| "Validation failed" | Data doesn't match schema | Review attribute definitions |
+| "Connection string invalid" | Malformed connection string | Check format: `s3://key:secret@bucket/path` |
+| "Health check failed" | Server not responding | Check if process is running on correct port |
+
+### Debug Mode
+
+Enable verbose logging:
+```bash
+# Environment variable
+export S3DB_VERBOSE=true
+
+# Command line
+s3db-mcp --transport=sse
+
+# Docker
+docker run -e S3DB_VERBOSE=true s3db-mcp-server
+```
+
+### Health Monitoring
+
+```bash
+# Check server health
+curl http://localhost:8001/health
+
+# Response includes:
+{
+  "status": "healthy",
+  "database": {
+    "connected": true,
+    "bucket": "my-bucket", 
+    "resourceCount": 5
+  },
+  "memory": { "rss": 45000000 },
+  "uptime": 3600
+}
+```
+
+---
+
+## 📊 Performance Tips
+
+1. **Use partitions** for large datasets
+2. **Batch operations** when possible
+3. **Proper pagination** - don't load everything at once
+4. **Connection reuse** - keep connections alive
+5. **Appropriate parallelism** - tune `S3DB_PARALLELISM`
+6. **Monitor costs** - track S3 requests and data transfer
+
+---
+
+## 🔗 Resources
+
+- **S3DB Documentation**: [github.com/forattini-dev/s3db.js](https://github.com/forattini-dev/s3db.js)
+- **Model Context Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
+- **Issues & Support**: [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/forattini-dev/s3db.js/discussions)
 
 ---
 
@@ -721,23 +853,7 @@ This project is licensed under the same license as the parent S3DB project.
 
 ---
 
-## 🤝 Support
-
-- **Documentation**: [S3DB.js Documentation](https://github.com/forattini-dev/s3db.js)
-- **Issues**: [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/forattini-dev/s3db.js/discussions)
-
----
-
-## 🌟 Acknowledgments
-
-- Built on top of [S3DB.js](https://github.com/forattini-dev/s3db.js)
-- Implements [Model Context Protocol](https://modelcontextprotocol.io/)
-- Powered by [AWS S3](https://aws.amazon.com/s3/) and compatible services
-
----
-
 <p align="center">
-  <strong>Transform your AI agents with persistent, scalable data storage!</strong><br>
-  <em>Start using S3DB MCP Server today</em>
+  <strong>🎉 Ready to supercharge your AI agents with persistent data storage!</strong><br>
+  <em>Start building with S3DB MCP Server today</em>
 </p>
