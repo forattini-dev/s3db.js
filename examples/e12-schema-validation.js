@@ -1,13 +1,15 @@
 import S3db from '../src/index.js';
+import { setupDatabase, teardownDatabase } from './database.js';
 
 // Test configuration loading after reboot
 async function testConfigurationLoading() {
   console.log('🔧 Testing Resource Configuration Loading...\n');
 
-  const db = await setupDatabase());
+  const db = await setupDatabase();
 
   try {
-    // Connect to databaseconsole.log('✅ Connected to database');
+    // Connect to database
+    console.log('✅ Connected to database');
 
     // Create a resource with specific configurations
     const testResource = await db.createResource({
@@ -70,7 +72,8 @@ async function testConfigurationLoading() {
     // Simulate database reboot by creating a new instance
     console.log('\n🔄 Simulating database reboot...');
     
-    const db2 = await setupDatabase());console.log('✅ Reconnected to database');
+    const db2 = await setupDatabase();
+    console.log('✅ Reconnected to database');
 
     // Get the resource from the "rebooted" database
     const reloadedResource = await db2.getResource('test-config');
@@ -122,7 +125,7 @@ async function testConfigurationLoading() {
 
   } catch (error) {
     console.error('❌ Error during configuration test:', error);
-  }  } finally {
+  } finally {
     await teardownDatabase();
   }
 }
