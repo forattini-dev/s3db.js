@@ -13,6 +13,64 @@ var clientS3 = require('@aws-sdk/client-s3');
 var flat = require('flat');
 var FastestValidator = require('fastest-validator');
 
+const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const base = alphabet.length;
+const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
+const encode = (n) => {
+  if (typeof n !== "number" || isNaN(n)) return "undefined";
+  if (!isFinite(n)) return "undefined";
+  if (n === 0) return alphabet[0];
+  if (n < 0) return "-" + encode(-Math.floor(n));
+  n = Math.floor(n);
+  let s = "";
+  while (n) {
+    s = alphabet[n % base] + s;
+    n = Math.floor(n / base);
+  }
+  return s;
+};
+const decode = (s) => {
+  if (typeof s !== "string") return NaN;
+  if (s === "") return 0;
+  let negative = false;
+  if (s[0] === "-") {
+    negative = true;
+    s = s.slice(1);
+  }
+  let r = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = charToValue[s[i]];
+    if (idx === void 0) return NaN;
+    r = r * base + idx;
+  }
+  return negative ? -r : r;
+};
+const encodeDecimal = (n) => {
+  if (typeof n !== "number" || isNaN(n)) return "undefined";
+  if (!isFinite(n)) return "undefined";
+  const negative = n < 0;
+  n = Math.abs(n);
+  const [intPart, decPart] = n.toString().split(".");
+  const encodedInt = encode(Number(intPart));
+  if (decPart) {
+    return (negative ? "-" : "") + encodedInt + "." + decPart;
+  }
+  return (negative ? "-" : "") + encodedInt;
+};
+const decodeDecimal = (s) => {
+  if (typeof s !== "string") return NaN;
+  let negative = false;
+  if (s[0] === "-") {
+    negative = true;
+    s = s.slice(1);
+  }
+  const [intPart, decPart] = s.split(".");
+  const decodedInt = decode(intPart);
+  if (isNaN(decodedInt)) return NaN;
+  const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
+  return negative ? -num : num;
+};
+
 function calculateUTF8Bytes(str) {
   if (typeof str !== "string") {
     str = String(str);
@@ -129,508 +187,6 @@ function calculateEffectiveLimit(config = {}) {
   const overhead = calculateSystemOverhead(systemConfig);
   return s3Limit - overhead;
 }
-
-const S3_METADATA_LIMIT_BYTES = 2047;
-async function handleInsert$4({ resource, data, mappedData, originalData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id: data.id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-  }
-  return { mappedData, body: JSON.stringify(mappedData) };
-}
-async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-  }
-  return { mappedData, body: JSON.stringify(mappedData) };
-}
-async function handleUpsert$4({ resource, id, data, mappedData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
-  }
-  return { mappedData, body: "" };
-}
-async function handleGet$4({ resource, metadata, body }) {
-  return { metadata, body };
-}
-
-var enforceLimits = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
-  handleGet: handleGet$4,
-  handleInsert: handleInsert$4,
-  handleUpdate: handleUpdate$4,
-  handleUpsert: handleUpsert$4
-});
-
-async function handleInsert$3({ resource, data, mappedData, originalData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id: data.id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    resource.emit("exceedsLimit", {
-      operation: "insert",
-      totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
-      data: originalData || data
-    });
-  }
-  return { mappedData, body: JSON.stringify(data) };
-}
-async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    resource.emit("exceedsLimit", {
-      operation: "update",
-      id,
-      totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
-      data: originalData || data
-    });
-  }
-  return { mappedData, body: JSON.stringify(data) };
-}
-async function handleUpsert$3({ resource, id, data, mappedData, originalData }) {
-  const totalSize = calculateTotalSize(mappedData);
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id
-    }
-  });
-  if (totalSize > effectiveLimit) {
-    resource.emit("exceedsLimit", {
-      operation: "upsert",
-      id,
-      totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
-      data: originalData || data
-    });
-  }
-  return { mappedData, body: JSON.stringify(data) };
-}
-async function handleGet$3({ resource, metadata, body }) {
-  return { metadata, body };
-}
-
-var userManaged = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  handleGet: handleGet$3,
-  handleInsert: handleInsert$3,
-  handleUpdate: handleUpdate$3,
-  handleUpsert: handleUpsert$3
-});
-
-const TRUNCATED_FLAG = "$truncated";
-const TRUNCATED_FLAG_VALUE = "true";
-const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8Bytes(TRUNCATED_FLAG_VALUE);
-async function handleInsert$2({ resource, data, mappedData, originalData }) {
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id: data.id
-    }
-  });
-  const attributeSizes = calculateAttributeSizes(mappedData);
-  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
-  const resultFields = {};
-  let currentSize = 0;
-  let truncated = false;
-  if (mappedData._v) {
-    resultFields._v = mappedData._v;
-    currentSize += attributeSizes._v;
-  }
-  for (const [fieldName, size] of sortedFields) {
-    if (fieldName === "_v") continue;
-    const fieldValue = mappedData[fieldName];
-    const spaceNeeded = size + (truncated ? 0 : TRUNCATED_FLAG_BYTES);
-    if (currentSize + spaceNeeded <= effectiveLimit) {
-      resultFields[fieldName] = fieldValue;
-      currentSize += size;
-    } else {
-      const availableSpace = effectiveLimit - currentSize - (truncated ? 0 : TRUNCATED_FLAG_BYTES);
-      if (availableSpace > 0) {
-        const truncatedValue = truncateValue(fieldValue, availableSpace);
-        resultFields[fieldName] = truncatedValue;
-        truncated = true;
-        currentSize += calculateUTF8Bytes(truncatedValue);
-      } else {
-        resultFields[fieldName] = "";
-        truncated = true;
-      }
-      break;
-    }
-  }
-  let finalSize = calculateTotalSize(resultFields) + (truncated ? TRUNCATED_FLAG_BYTES : 0);
-  while (finalSize > effectiveLimit) {
-    const fieldNames = Object.keys(resultFields).filter((f) => f !== "_v" && f !== "$truncated");
-    if (fieldNames.length === 0) {
-      break;
-    }
-    const lastField = fieldNames[fieldNames.length - 1];
-    resultFields[lastField] = "";
-    finalSize = calculateTotalSize(resultFields) + TRUNCATED_FLAG_BYTES;
-    truncated = true;
-  }
-  if (truncated) {
-    resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
-  }
-  return { mappedData: resultFields, body: JSON.stringify(mappedData) };
-}
-async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
-  return handleInsert$2({ resource, data, mappedData, originalData });
-}
-async function handleUpsert$2({ resource, id, data, mappedData }) {
-  return handleInsert$2({ resource, data, mappedData });
-}
-async function handleGet$2({ resource, metadata, body }) {
-  return { metadata, body };
-}
-function truncateValue(value, maxBytes) {
-  if (typeof value === "string") {
-    return truncateString(value, maxBytes);
-  } else if (typeof value === "object" && value !== null) {
-    const jsonStr = JSON.stringify(value);
-    return truncateString(jsonStr, maxBytes);
-  } else {
-    const stringValue = String(value);
-    return truncateString(stringValue, maxBytes);
-  }
-}
-function truncateString(str, maxBytes) {
-  const encoder = new TextEncoder();
-  let bytes = encoder.encode(str);
-  if (bytes.length <= maxBytes) {
-    return str;
-  }
-  let length = str.length;
-  while (length > 0) {
-    const truncated = str.substring(0, length);
-    bytes = encoder.encode(truncated);
-    if (bytes.length <= maxBytes) {
-      return truncated;
-    }
-    length--;
-  }
-  return "";
-}
-
-var dataTruncate = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  handleGet: handleGet$2,
-  handleInsert: handleInsert$2,
-  handleUpdate: handleUpdate$2,
-  handleUpsert: handleUpsert$2
-});
-
-function tryFn(fnOrPromise) {
-  if (fnOrPromise == null) {
-    const err = new Error("fnOrPromise cannot be null or undefined");
-    err.stack = new Error().stack;
-    return [false, err, void 0];
-  }
-  if (typeof fnOrPromise === "function") {
-    try {
-      const result = fnOrPromise();
-      if (result == null) {
-        return [true, null, result];
-      }
-      if (typeof result.then === "function") {
-        return result.then((data) => [true, null, data]).catch((error) => {
-          if (error instanceof Error && Object.isExtensible(error)) {
-            const desc = Object.getOwnPropertyDescriptor(error, "stack");
-            if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-              try {
-                error.stack = new Error().stack;
-              } catch (_) {
-              }
-            }
-          }
-          return [false, error, void 0];
-        });
-      }
-      return [true, null, result];
-    } catch (error) {
-      if (error instanceof Error && Object.isExtensible(error)) {
-        const desc = Object.getOwnPropertyDescriptor(error, "stack");
-        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-          try {
-            error.stack = new Error().stack;
-          } catch (_) {
-          }
-        }
-      }
-      return [false, error, void 0];
-    }
-  }
-  if (typeof fnOrPromise.then === "function") {
-    return Promise.resolve(fnOrPromise).then((data) => [true, null, data]).catch((error) => {
-      if (error instanceof Error && Object.isExtensible(error)) {
-        const desc = Object.getOwnPropertyDescriptor(error, "stack");
-        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
-          try {
-            error.stack = new Error().stack;
-          } catch (_) {
-          }
-        }
-      }
-      return [false, error, void 0];
-    });
-  }
-  return [true, null, fnOrPromise];
-}
-function tryFnSync(fn) {
-  try {
-    const result = fn();
-    return [true, null, result];
-  } catch (err) {
-    return [false, err, null];
-  }
-}
-
-const OVERFLOW_FLAG = "$overflow";
-const OVERFLOW_FLAG_VALUE = "true";
-const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
-async function handleInsert$1({ resource, data, mappedData, originalData }) {
-  const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
-    systemConfig: {
-      version: resource.version,
-      timestamps: resource.config.timestamps,
-      id: data.id
-    }
-  });
-  const attributeSizes = calculateAttributeSizes(mappedData);
-  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
-  const metadataFields = {};
-  const bodyFields = {};
-  let currentSize = 0;
-  let willOverflow = false;
-  if (mappedData._v) {
-    metadataFields._v = mappedData._v;
-    currentSize += attributeSizes._v;
-  }
-  let reservedLimit = effectiveLimit;
-  for (const [fieldName, size] of sortedFields) {
-    if (fieldName === "_v") continue;
-    if (!willOverflow && currentSize + size > effectiveLimit) {
-      reservedLimit -= OVERFLOW_FLAG_BYTES;
-      willOverflow = true;
-    }
-    if (!willOverflow && currentSize + size <= reservedLimit) {
-      metadataFields[fieldName] = mappedData[fieldName];
-      currentSize += size;
-    } else {
-      bodyFields[fieldName] = mappedData[fieldName];
-      willOverflow = true;
-    }
-  }
-  if (willOverflow) {
-    metadataFields[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
-  }
-  const hasOverflow = Object.keys(bodyFields).length > 0;
-  let body = hasOverflow ? JSON.stringify(bodyFields) : "";
-  if (!hasOverflow) body = "{}";
-  return { mappedData: metadataFields, body };
-}
-async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
-  return handleInsert$1({ resource, data, mappedData, originalData });
-}
-async function handleUpsert$1({ resource, id, data, mappedData }) {
-  return handleInsert$1({ resource, data, mappedData });
-}
-async function handleGet$1({ resource, metadata, body }) {
-  let bodyData = {};
-  if (body && body.trim() !== "") {
-    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
-    if (ok) {
-      bodyData = parsed;
-    } else {
-      bodyData = {};
-    }
-  }
-  const mergedData = {
-    ...bodyData,
-    ...metadata
-  };
-  delete mergedData.$overflow;
-  return { metadata: mergedData, body };
-}
-
-var bodyOverflow = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  handleGet: handleGet$1,
-  handleInsert: handleInsert$1,
-  handleUpdate: handleUpdate$1,
-  handleUpsert: handleUpsert$1
-});
-
-async function handleInsert({ resource, data, mappedData }) {
-  const metadataOnly = {
-    "_v": mappedData._v || String(resource.version)
-  };
-  metadataOnly._map = JSON.stringify(resource.schema.map);
-  const body = JSON.stringify(mappedData);
-  return { mappedData: metadataOnly, body };
-}
-async function handleUpdate({ resource, id, data, mappedData }) {
-  const metadataOnly = {
-    "_v": mappedData._v || String(resource.version)
-  };
-  metadataOnly._map = JSON.stringify(resource.schema.map);
-  const body = JSON.stringify(mappedData);
-  return { mappedData: metadataOnly, body };
-}
-async function handleUpsert({ resource, id, data, mappedData }) {
-  return handleInsert({ resource, data, mappedData });
-}
-async function handleGet({ resource, metadata, body }) {
-  let bodyData = {};
-  if (body && body.trim() !== "") {
-    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
-    if (ok) {
-      bodyData = parsed;
-    } else {
-      bodyData = {};
-    }
-  }
-  const mergedData = {
-    ...bodyData,
-    ...metadata
-    // metadata contains _v
-  };
-  return { metadata: mergedData, body };
-}
-
-var bodyOnly = /*#__PURE__*/Object.freeze({
-  __proto__: null,
-  handleGet: handleGet,
-  handleInsert: handleInsert,
-  handleUpdate: handleUpdate,
-  handleUpsert: handleUpsert
-});
-
-const behaviors = {
-  "user-managed": userManaged,
-  "enforce-limits": enforceLimits,
-  "truncate-data": dataTruncate,
-  "body-overflow": bodyOverflow,
-  "body-only": bodyOnly
-};
-function getBehavior(behaviorName) {
-  const behavior = behaviors[behaviorName];
-  if (!behavior) {
-    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
-  }
-  return behavior;
-}
-const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
-const DEFAULT_BEHAVIOR = "user-managed";
-
-const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const base = alphabet.length;
-const charToValue = Object.fromEntries([...alphabet].map((c, i) => [c, i]));
-const encode = (n) => {
-  if (typeof n !== "number" || isNaN(n)) return "undefined";
-  if (!isFinite(n)) return "undefined";
-  if (n === 0) return alphabet[0];
-  if (n < 0) return "-" + encode(-Math.floor(n));
-  n = Math.floor(n);
-  let s = "";
-  while (n) {
-    s = alphabet[n % base] + s;
-    n = Math.floor(n / base);
-  }
-  return s;
-};
-const decode = (s) => {
-  if (typeof s !== "string") return NaN;
-  if (s === "") return 0;
-  let negative = false;
-  if (s[0] === "-") {
-    negative = true;
-    s = s.slice(1);
-  }
-  let r = 0;
-  for (let i = 0; i < s.length; i++) {
-    const idx = charToValue[s[i]];
-    if (idx === void 0) return NaN;
-    r = r * base + idx;
-  }
-  return negative ? -r : r;
-};
-const encodeDecimal = (n) => {
-  if (typeof n !== "number" || isNaN(n)) return "undefined";
-  if (!isFinite(n)) return "undefined";
-  const negative = n < 0;
-  n = Math.abs(n);
-  const [intPart, decPart] = n.toString().split(".");
-  const encodedInt = encode(Number(intPart));
-  if (decPart) {
-    return (negative ? "-" : "") + encodedInt + "." + decPart;
-  }
-  return (negative ? "-" : "") + encodedInt;
-};
-const decodeDecimal = (s) => {
-  if (typeof s !== "string") return NaN;
-  let negative = false;
-  if (s[0] === "-") {
-    negative = true;
-    s = s.slice(1);
-  }
-  const [intPart, decPart] = s.split(".");
-  const decodedInt = decode(intPart);
-  if (isNaN(decodedInt)) return NaN;
-  const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
-  return negative ? -num : num;
-};
 
 class BaseError extends Error {
   constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
@@ -866,10 +422,76 @@ class PartitionError extends S3dbError {
   }
 }
 
+function tryFn(fnOrPromise) {
+  if (fnOrPromise == null) {
+    const err = new Error("fnOrPromise cannot be null or undefined");
+    err.stack = new Error().stack;
+    return [false, err, void 0];
+  }
+  if (typeof fnOrPromise === "function") {
+    try {
+      const result = fnOrPromise();
+      if (result == null) {
+        return [true, null, result];
+      }
+      if (typeof result.then === "function") {
+        return result.then((data) => [true, null, data]).catch((error) => {
+          if (error instanceof Error && Object.isExtensible(error)) {
+            const desc = Object.getOwnPropertyDescriptor(error, "stack");
+            if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+              try {
+                error.stack = new Error().stack;
+              } catch (_) {
+              }
+            }
+          }
+          return [false, error, void 0];
+        });
+      }
+      return [true, null, result];
+    } catch (error) {
+      if (error instanceof Error && Object.isExtensible(error)) {
+        const desc = Object.getOwnPropertyDescriptor(error, "stack");
+        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+          try {
+            error.stack = new Error().stack;
+          } catch (_) {
+          }
+        }
+      }
+      return [false, error, void 0];
+    }
+  }
+  if (typeof fnOrPromise.then === "function") {
+    return Promise.resolve(fnOrPromise).then((data) => [true, null, data]).catch((error) => {
+      if (error instanceof Error && Object.isExtensible(error)) {
+        const desc = Object.getOwnPropertyDescriptor(error, "stack");
+        if (desc && desc.writable && desc.configurable && error.hasOwnProperty("stack")) {
+          try {
+            error.stack = new Error().stack;
+          } catch (_) {
+          }
+        }
+      }
+      return [false, error, void 0];
+    });
+  }
+  return [true, null, fnOrPromise];
+}
+function tryFnSync(fn) {
+  try {
+    const result = fn();
+    return [true, null, result];
+  } catch (err) {
+    return [false, err, null];
+  }
+}
+var try_fn_default = tryFn;
+
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const { webcrypto } = await import('crypto');
       return webcrypto;
     });
@@ -885,26 +507,26 @@ async function dynamicCrypto() {
   return lib;
 }
 async function sha256(message) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await try_fn_default(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const data = encoder.encode(message);
-  const [ok, err, hashBuffer] = await tryFn(() => cryptoLib.subtle.digest("SHA-256", data));
+  const [ok, err, hashBuffer] = await try_fn_default(() => cryptoLib.subtle.digest("SHA-256", data));
   if (!ok) throw new CryptoError("SHA-256 digest failed", { original: err, input: message });
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   return hashHex;
 }
 async function encrypt(content, passphrase) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await try_fn_default(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const salt = cryptoLib.getRandomValues(new Uint8Array(16));
-  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  const [okKey, errKey, key] = await try_fn_default(() => getKeyMaterial(passphrase, salt));
   if (!okKey) throw new CryptoError("Key derivation failed", { original: errKey, passphrase, salt });
   const iv = cryptoLib.getRandomValues(new Uint8Array(12));
   const encoder = new TextEncoder();
   const encodedContent = encoder.encode(content);
-  const [okEnc, errEnc, encryptedContent] = await tryFn(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
+  const [okEnc, errEnc, encryptedContent] = await try_fn_default(() => cryptoLib.subtle.encrypt({ name: "AES-GCM", iv }, key, encodedContent));
   if (!okEnc) throw new CryptoError("Encryption failed", { original: errEnc, content });
   const encryptedData = new Uint8Array(salt.length + iv.length + encryptedContent.byteLength);
   encryptedData.set(salt);
@@ -913,15 +535,15 @@ async function encrypt(content, passphrase) {
   return arrayBufferToBase64(encryptedData);
 }
 async function decrypt(encryptedBase64, passphrase) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await try_fn_default(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encryptedData = base64ToArrayBuffer(encryptedBase64);
   const salt = encryptedData.slice(0, 16);
   const iv = encryptedData.slice(16, 28);
   const encryptedContent = encryptedData.slice(28);
-  const [okKey, errKey, key] = await tryFn(() => getKeyMaterial(passphrase, salt));
+  const [okKey, errKey, key] = await try_fn_default(() => getKeyMaterial(passphrase, salt));
   if (!okKey) throw new CryptoError("Key derivation failed (decrypt)", { original: errKey, passphrase, salt });
-  const [okDec, errDec, decryptedContent] = await tryFn(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
+  const [okDec, errDec, decryptedContent] = await try_fn_default(() => cryptoLib.subtle.decrypt({ name: "AES-GCM", iv }, key, encryptedContent));
   if (!okDec) throw new CryptoError("Decryption failed", { original: errDec, encryptedBase64 });
   const decoder = new TextDecoder();
   return decoder.decode(decryptedContent);
@@ -930,7 +552,7 @@ async function md5(data) {
   if (typeof process === "undefined") {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
-  const [ok, err, result] = await tryFn(async () => {
+  const [ok, err, result] = await try_fn_default(async () => {
     const { createHash } = await import('crypto');
     return createHash("md5").update(data).digest("base64");
   });
@@ -940,11 +562,11 @@ async function md5(data) {
   return result;
 }
 async function getKeyMaterial(passphrase, salt) {
-  const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
+  const [okCrypto, errCrypto, cryptoLib] = await try_fn_default(dynamicCrypto);
   if (!okCrypto) throw new CryptoError("Crypto API not available", { original: errCrypto });
   const encoder = new TextEncoder();
   const keyMaterial = encoder.encode(passphrase);
-  const [okImport, errImport, baseKey] = await tryFn(() => cryptoLib.subtle.importKey(
+  const [okImport, errImport, baseKey] = await try_fn_default(() => cryptoLib.subtle.importKey(
     "raw",
     keyMaterial,
     { name: "PBKDF2" },
@@ -952,7 +574,7 @@ async function getKeyMaterial(passphrase, salt) {
     ["deriveKey"]
   ));
   if (!okImport) throw new CryptoError("importKey failed", { original: errImport, passphrase });
-  const [okDerive, errDerive, derivedKey] = await tryFn(() => cryptoLib.subtle.deriveKey(
+  const [okDerive, errDerive, derivedKey] = await try_fn_default(() => cryptoLib.subtle.deriveKey(
     {
       name: "PBKDF2",
       salt,
@@ -1629,6 +1251,7 @@ class Plugin extends EventEmitter {
     this.emit("plugin.afterStop", /* @__PURE__ */ new Date());
   }
 }
+var plugin_class_default = Plugin;
 
 const PluginObject = {
   setup(database) {
@@ -1639,7 +1262,7 @@ const PluginObject = {
   }
 };
 
-class AuditPlugin extends Plugin {
+class AuditPlugin extends plugin_class_default {
   constructor(options = {}) {
     super(options);
     this.auditResource = null;
@@ -1652,7 +1275,7 @@ class AuditPlugin extends Plugin {
     };
   }
   async onSetup() {
-    const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
+    const [ok, err, auditResource] = await try_fn_default(() => this.database.createResource({
       name: "audits",
       attributes: {
         id: "string|required",
@@ -1728,7 +1351,7 @@ class AuditPlugin extends Plugin {
       const recordId = data.id;
       let oldData = data.$before;
       if (this.config.includeData && !oldData) {
-        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        const [ok, err, fetched] = await try_fn_default(() => resource.get(recordId));
         if (ok) oldData = fetched;
       }
       const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
@@ -1754,7 +1377,7 @@ class AuditPlugin extends Plugin {
       const recordId = data.id;
       let oldData = data;
       if (this.config.includeData && !oldData) {
-        const [ok, err, fetched] = await tryFn(() => resource.get(recordId));
+        const [ok, err, fetched] = await try_fn_default(() => resource.get(recordId));
         if (ok) oldData = fetched;
       }
       const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
@@ -1781,7 +1404,7 @@ class AuditPlugin extends Plugin {
       const oldDataMap = {};
       if (this.config.includeData) {
         for (const id of ids) {
-          const [ok, err, data] = await tryFn(() => resource.get(id));
+          const [ok, err, data] = await try_fn_default(() => resource.get(id));
           oldDataMap[id] = ok ? data : null;
         }
       }
@@ -1899,7 +1522,7 @@ class AuditPlugin extends Plugin {
   // Utility methods for querying audit logs
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const {
         resourceName,
         operation,
@@ -2271,9 +1894,673 @@ class Cache extends EventEmitter {
   }
 }
 
-var global$1 = (typeof global !== "undefined" ? global :
-  typeof self !== "undefined" ? self :
-  typeof window !== "undefined" ? window : {});
+// shim for using process in browser
+// based off https://github.com/defunctzombie/node-process/blob/master/browser.js
+
+function defaultSetTimout() {
+    throw new Error('setTimeout has not been defined');
+}
+function defaultClearTimeout () {
+    throw new Error('clearTimeout has not been defined');
+}
+var cachedSetTimeout = defaultSetTimout;
+var cachedClearTimeout = defaultClearTimeout;
+if (typeof global.setTimeout === 'function') {
+    cachedSetTimeout = setTimeout;
+}
+if (typeof global.clearTimeout === 'function') {
+    cachedClearTimeout = clearTimeout;
+}
+
+function runTimeout(fun) {
+    if (cachedSetTimeout === setTimeout) {
+        //normal enviroments in sane situations
+        return setTimeout(fun, 0);
+    }
+    // if setTimeout wasn't available but was latter defined
+    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
+        cachedSetTimeout = setTimeout;
+        return setTimeout(fun, 0);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedSetTimeout(fun, 0);
+    } catch(e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
+            return cachedSetTimeout.call(null, fun, 0);
+        } catch(e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
+            return cachedSetTimeout.call(this, fun, 0);
+        }
+    }
+
+
+}
+function runClearTimeout(marker) {
+    if (cachedClearTimeout === clearTimeout) {
+        //normal enviroments in sane situations
+        return clearTimeout(marker);
+    }
+    // if clearTimeout wasn't available but was latter defined
+    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
+        cachedClearTimeout = clearTimeout;
+        return clearTimeout(marker);
+    }
+    try {
+        // when when somebody has screwed with setTimeout but no I.E. maddness
+        return cachedClearTimeout(marker);
+    } catch (e){
+        try {
+            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
+            return cachedClearTimeout.call(null, marker);
+        } catch (e){
+            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
+            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
+            return cachedClearTimeout.call(this, marker);
+        }
+    }
+
+
+
+}
+var queue = [];
+var draining = false;
+var currentQueue;
+var queueIndex = -1;
+
+function cleanUpNextTick() {
+    if (!draining || !currentQueue) {
+        return;
+    }
+    draining = false;
+    if (currentQueue.length) {
+        queue = currentQueue.concat(queue);
+    } else {
+        queueIndex = -1;
+    }
+    if (queue.length) {
+        drainQueue();
+    }
+}
+
+function drainQueue() {
+    if (draining) {
+        return;
+    }
+    var timeout = runTimeout(cleanUpNextTick);
+    draining = true;
+
+    var len = queue.length;
+    while(len) {
+        currentQueue = queue;
+        queue = [];
+        while (++queueIndex < len) {
+            if (currentQueue) {
+                currentQueue[queueIndex].run();
+            }
+        }
+        queueIndex = -1;
+        len = queue.length;
+    }
+    currentQueue = null;
+    draining = false;
+    runClearTimeout(timeout);
+}
+function nextTick(fun) {
+    var args = new Array(arguments.length - 1);
+    if (arguments.length > 1) {
+        for (var i = 1; i < arguments.length; i++) {
+            args[i - 1] = arguments[i];
+        }
+    }
+    queue.push(new Item(fun, args));
+    if (queue.length === 1 && !draining) {
+        runTimeout(drainQueue);
+    }
+}
+// v8 likes predictible objects
+function Item(fun, array) {
+    this.fun = fun;
+    this.array = array;
+}
+Item.prototype.run = function () {
+    this.fun.apply(null, this.array);
+};
+var env = {};
+
+var browser$1 = {
+  env: env};
+
+var inherits;
+if (typeof Object.create === 'function'){
+  inherits = function inherits(ctor, superCtor) {
+    // implementation from standard node.js 'util' module
+    ctor.super_ = superCtor;
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+} else {
+  inherits = function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor;
+    var TempCtor = function () {};
+    TempCtor.prototype = superCtor.prototype;
+    ctor.prototype = new TempCtor();
+    ctor.prototype.constructor = ctor;
+  };
+}
+
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+var formatRegExp = /%[sdj%]/g;
+function format(f) {
+  if (!isString(f)) {
+    var objects = [];
+    for (var i = 0; i < arguments.length; i++) {
+      objects.push(inspect(arguments[i]));
+    }
+    return objects.join(' ');
+  }
+
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  var str = String(f).replace(formatRegExp, function(x) {
+    if (x === '%%') return '%';
+    if (i >= len) return x;
+    switch (x) {
+      case '%s': return String(args[i++]);
+      case '%d': return Number(args[i++]);
+      case '%j':
+        try {
+          return JSON.stringify(args[i++]);
+        } catch (_) {
+          return '[Circular]';
+        }
+      default:
+        return x;
+    }
+  });
+  for (var x = args[i]; i < len; x = args[++i]) {
+    if (isNull(x) || !isObject(x)) {
+      str += ' ' + x;
+    } else {
+      str += ' ' + inspect(x);
+    }
+  }
+  return str;
+}
+
+// Mark that a method should not be used.
+// Returns a modified function which warns once by default.
+// If --no-deprecation is set, then it is a no-op.
+function deprecate(fn, msg) {
+  // Allow for deprecating things in the process of starting up.
+  if (isUndefined(global.process)) {
+    return function() {
+      return deprecate(fn, msg).apply(this, arguments);
+    };
+  }
+
+  if (browser$1.noDeprecation === true) {
+    return fn;
+  }
+
+  var warned = false;
+  function deprecated() {
+    if (!warned) {
+      if (browser$1.throwDeprecation) {
+        throw new Error(msg);
+      } else if (browser$1.traceDeprecation) {
+        console.trace(msg);
+      } else {
+        console.error(msg);
+      }
+      warned = true;
+    }
+    return fn.apply(this, arguments);
+  }
+
+  return deprecated;
+}
+
+var debugs = {};
+var debugEnviron;
+function debuglog(set) {
+  if (isUndefined(debugEnviron))
+    debugEnviron = browser$1.env.NODE_DEBUG || '';
+  set = set.toUpperCase();
+  if (!debugs[set]) {
+    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
+      var pid = 0;
+      debugs[set] = function() {
+        var msg = format.apply(null, arguments);
+        console.error('%s %d: %s', set, pid, msg);
+      };
+    } else {
+      debugs[set] = function() {};
+    }
+  }
+  return debugs[set];
+}
+
+/**
+ * Echos the value of a value. Trys to print the value out
+ * in the best way possible given the different types.
+ *
+ * @param {Object} obj The object to print out.
+ * @param {Object} opts Optional options object that alters the output.
+ */
+/* legacy: obj, showHidden, depth, colors*/
+function inspect(obj, opts) {
+  // default options
+  var ctx = {
+    seen: [],
+    stylize: stylizeNoColor
+  };
+  // legacy...
+  if (arguments.length >= 3) ctx.depth = arguments[2];
+  if (arguments.length >= 4) ctx.colors = arguments[3];
+  if (isBoolean(opts)) {
+    // legacy...
+    ctx.showHidden = opts;
+  } else if (opts) {
+    // got an "options" object
+    _extend(ctx, opts);
+  }
+  // set default options
+  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
+  if (isUndefined(ctx.depth)) ctx.depth = 2;
+  if (isUndefined(ctx.colors)) ctx.colors = false;
+  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
+  if (ctx.colors) ctx.stylize = stylizeWithColor;
+  return formatValue(ctx, obj, ctx.depth);
+}
+
+// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
+inspect.colors = {
+  'bold' : [1, 22],
+  'italic' : [3, 23],
+  'underline' : [4, 24],
+  'inverse' : [7, 27],
+  'white' : [37, 39],
+  'grey' : [90, 39],
+  'black' : [30, 39],
+  'blue' : [34, 39],
+  'cyan' : [36, 39],
+  'green' : [32, 39],
+  'magenta' : [35, 39],
+  'red' : [31, 39],
+  'yellow' : [33, 39]
+};
+
+// Don't use 'blue' not visible on cmd.exe
+inspect.styles = {
+  'special': 'cyan',
+  'number': 'yellow',
+  'boolean': 'yellow',
+  'undefined': 'grey',
+  'null': 'bold',
+  'string': 'green',
+  'date': 'magenta',
+  // "name": intentionally not styling
+  'regexp': 'red'
+};
+
+
+function stylizeWithColor(str, styleType) {
+  var style = inspect.styles[styleType];
+
+  if (style) {
+    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
+           '\u001b[' + inspect.colors[style][1] + 'm';
+  } else {
+    return str;
+  }
+}
+
+
+function stylizeNoColor(str, styleType) {
+  return str;
+}
+
+
+function arrayToHash(array) {
+  var hash = {};
+
+  array.forEach(function(val, idx) {
+    hash[val] = true;
+  });
+
+  return hash;
+}
+
+
+function formatValue(ctx, value, recurseTimes) {
+  // Provide a hook for user-specified inspect functions.
+  // Check that value is an object with an inspect function on it
+  if (ctx.customInspect &&
+      value &&
+      isFunction(value.inspect) &&
+      // Filter out the util module, it's inspect function is special
+      value.inspect !== inspect &&
+      // Also filter out any prototype objects using the circular check.
+      !(value.constructor && value.constructor.prototype === value)) {
+    var ret = value.inspect(recurseTimes, ctx);
+    if (!isString(ret)) {
+      ret = formatValue(ctx, ret, recurseTimes);
+    }
+    return ret;
+  }
+
+  // Primitive types cannot have properties
+  var primitive = formatPrimitive(ctx, value);
+  if (primitive) {
+    return primitive;
+  }
+
+  // Look up the keys of the object.
+  var keys = Object.keys(value);
+  var visibleKeys = arrayToHash(keys);
+
+  if (ctx.showHidden) {
+    keys = Object.getOwnPropertyNames(value);
+  }
+
+  // IE doesn't make error fields non-enumerable
+  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
+  if (isError(value)
+      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
+    return formatError(value);
+  }
+
+  // Some type of object without properties can be shortcutted.
+  if (keys.length === 0) {
+    if (isFunction(value)) {
+      var name = value.name ? ': ' + value.name : '';
+      return ctx.stylize('[Function' + name + ']', 'special');
+    }
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    }
+    if (isDate(value)) {
+      return ctx.stylize(Date.prototype.toString.call(value), 'date');
+    }
+    if (isError(value)) {
+      return formatError(value);
+    }
+  }
+
+  var base = '', array = false, braces = ['{', '}'];
+
+  // Make Array say that they are Array
+  if (isArray$1(value)) {
+    array = true;
+    braces = ['[', ']'];
+  }
+
+  // Make functions say that they are functions
+  if (isFunction(value)) {
+    var n = value.name ? ': ' + value.name : '';
+    base = ' [Function' + n + ']';
+  }
+
+  // Make RegExps say that they are RegExps
+  if (isRegExp(value)) {
+    base = ' ' + RegExp.prototype.toString.call(value);
+  }
+
+  // Make dates with properties first say the date
+  if (isDate(value)) {
+    base = ' ' + Date.prototype.toUTCString.call(value);
+  }
+
+  // Make error with message first say the error
+  if (isError(value)) {
+    base = ' ' + formatError(value);
+  }
+
+  if (keys.length === 0 && (!array || value.length == 0)) {
+    return braces[0] + base + braces[1];
+  }
+
+  if (recurseTimes < 0) {
+    if (isRegExp(value)) {
+      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
+    } else {
+      return ctx.stylize('[Object]', 'special');
+    }
+  }
+
+  ctx.seen.push(value);
+
+  var output;
+  if (array) {
+    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
+  } else {
+    output = keys.map(function(key) {
+      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
+    });
+  }
+
+  ctx.seen.pop();
+
+  return reduceToSingleString(output, base, braces);
+}
+
+
+function formatPrimitive(ctx, value) {
+  if (isUndefined(value))
+    return ctx.stylize('undefined', 'undefined');
+  if (isString(value)) {
+    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
+                                             .replace(/'/g, "\\'")
+                                             .replace(/\\"/g, '"') + '\'';
+    return ctx.stylize(simple, 'string');
+  }
+  if (isNumber(value))
+    return ctx.stylize('' + value, 'number');
+  if (isBoolean(value))
+    return ctx.stylize('' + value, 'boolean');
+  // For some reason typeof null is "object", so special case here.
+  if (isNull(value))
+    return ctx.stylize('null', 'null');
+}
+
+
+function formatError(value) {
+  return '[' + Error.prototype.toString.call(value) + ']';
+}
+
+
+function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
+  var output = [];
+  for (var i = 0, l = value.length; i < l; ++i) {
+    if (hasOwnProperty(value, String(i))) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          String(i), true));
+    } else {
+      output.push('');
+    }
+  }
+  keys.forEach(function(key) {
+    if (!key.match(/^\d+$/)) {
+      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
+          key, true));
+    }
+  });
+  return output;
+}
+
+
+function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
+  var name, str, desc;
+  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
+  if (desc.get) {
+    if (desc.set) {
+      str = ctx.stylize('[Getter/Setter]', 'special');
+    } else {
+      str = ctx.stylize('[Getter]', 'special');
+    }
+  } else {
+    if (desc.set) {
+      str = ctx.stylize('[Setter]', 'special');
+    }
+  }
+  if (!hasOwnProperty(visibleKeys, key)) {
+    name = '[' + key + ']';
+  }
+  if (!str) {
+    if (ctx.seen.indexOf(desc.value) < 0) {
+      if (isNull(recurseTimes)) {
+        str = formatValue(ctx, desc.value, null);
+      } else {
+        str = formatValue(ctx, desc.value, recurseTimes - 1);
+      }
+      if (str.indexOf('\n') > -1) {
+        if (array) {
+          str = str.split('\n').map(function(line) {
+            return '  ' + line;
+          }).join('\n').substr(2);
+        } else {
+          str = '\n' + str.split('\n').map(function(line) {
+            return '   ' + line;
+          }).join('\n');
+        }
+      }
+    } else {
+      str = ctx.stylize('[Circular]', 'special');
+    }
+  }
+  if (isUndefined(name)) {
+    if (array && key.match(/^\d+$/)) {
+      return str;
+    }
+    name = JSON.stringify('' + key);
+    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
+      name = name.substr(1, name.length - 2);
+      name = ctx.stylize(name, 'name');
+    } else {
+      name = name.replace(/'/g, "\\'")
+                 .replace(/\\"/g, '"')
+                 .replace(/(^"|"$)/g, "'");
+      name = ctx.stylize(name, 'string');
+    }
+  }
+
+  return name + ': ' + str;
+}
+
+
+function reduceToSingleString(output, base, braces) {
+  var length = output.reduce(function(prev, cur) {
+    if (cur.indexOf('\n') >= 0) ;
+    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
+  }, 0);
+
+  if (length > 60) {
+    return braces[0] +
+           (base === '' ? '' : base + '\n ') +
+           ' ' +
+           output.join(',\n  ') +
+           ' ' +
+           braces[1];
+  }
+
+  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
+}
+
+
+// NOTE: These type checking functions intentionally don't use `instanceof`
+// because it is fragile and can be easily faked with `Object.create()`.
+function isArray$1(ar) {
+  return Array.isArray(ar);
+}
+
+function isBoolean(arg) {
+  return typeof arg === 'boolean';
+}
+
+function isNull(arg) {
+  return arg === null;
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isString(arg) {
+  return typeof arg === 'string';
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+function isRegExp(re) {
+  return isObject(re) && objectToString(re) === '[object RegExp]';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isDate(d) {
+  return isObject(d) && objectToString(d) === '[object Date]';
+}
+
+function isError(e) {
+  return isObject(e) &&
+      (objectToString(e) === '[object Error]' || e instanceof Error);
+}
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function objectToString(o) {
+  return Object.prototype.toString.call(o);
+}
+
+function _extend(origin, add) {
+  // Don't do anything if add isn't an object
+  if (!add || !isObject(add)) return origin;
+
+  var keys = Object.keys(add);
+  var i = keys.length;
+  while (i--) {
+    origin[keys[i]] = add[keys[i]];
+  }
+  return origin;
+}
+function hasOwnProperty(obj, prop) {
+  return Object.prototype.hasOwnProperty.call(obj, prop);
+}
 
 var lookup = [];
 var revLookup = [];
@@ -2472,7 +2759,7 @@ function write (buffer, value, offset, isLE, mLen, nBytes) {
 
 var toString = {}.toString;
 
-var isArray$1 = Array.isArray || function (arr) {
+var isArray = Array.isArray || function (arr) {
   return toString.call(arr) == '[object Array]';
 };
 
@@ -2511,8 +2798,8 @@ var INSPECT_MAX_BYTES = 50;
  * We detect these buggy browsers and set `Buffer.TYPED_ARRAY_SUPPORT` to `false` so they
  * get the Object implementation, which is slower but behaves correctly.
  */
-Buffer$1.TYPED_ARRAY_SUPPORT = global$1.TYPED_ARRAY_SUPPORT !== undefined
-  ? global$1.TYPED_ARRAY_SUPPORT
+Buffer$1.TYPED_ARRAY_SUPPORT = global.TYPED_ARRAY_SUPPORT !== undefined
+  ? global.TYPED_ARRAY_SUPPORT
   : true;
 
 /*
@@ -2756,7 +3043,7 @@ function fromObject (that, obj) {
       return fromArrayLike(that, obj)
     }
 
-    if (obj.type === 'Buffer' && isArray$1(obj.data)) {
+    if (obj.type === 'Buffer' && isArray(obj.data)) {
       return fromArrayLike(that, obj.data)
     }
   }
@@ -2821,7 +3108,7 @@ Buffer$1.isEncoding = function isEncoding (encoding) {
 };
 
 Buffer$1.concat = function concat (list, length) {
-  if (!isArray$1(list)) {
+  if (!isArray(list)) {
     throw new TypeError('"list" argument must be an Array of Buffers')
   }
 
@@ -4252,662 +4539,6 @@ function isSlowBuffer (obj) {
   return typeof obj.readFloatLE === 'function' && typeof obj.slice === 'function' && isFastBuffer(obj.slice(0, 0))
 }
 
-// shim for using process in browser
-// based off https://github.com/defunctzombie/node-process/blob/master/browser.js
-
-function defaultSetTimout() {
-    throw new Error('setTimeout has not been defined');
-}
-function defaultClearTimeout () {
-    throw new Error('clearTimeout has not been defined');
-}
-var cachedSetTimeout = defaultSetTimout;
-var cachedClearTimeout = defaultClearTimeout;
-if (typeof global$1.setTimeout === 'function') {
-    cachedSetTimeout = setTimeout;
-}
-if (typeof global$1.clearTimeout === 'function') {
-    cachedClearTimeout = clearTimeout;
-}
-
-function runTimeout(fun) {
-    if (cachedSetTimeout === setTimeout) {
-        //normal enviroments in sane situations
-        return setTimeout(fun, 0);
-    }
-    // if setTimeout wasn't available but was latter defined
-    if ((cachedSetTimeout === defaultSetTimout || !cachedSetTimeout) && setTimeout) {
-        cachedSetTimeout = setTimeout;
-        return setTimeout(fun, 0);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedSetTimeout(fun, 0);
-    } catch(e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't trust the global object when called normally
-            return cachedSetTimeout.call(null, fun, 0);
-        } catch(e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error
-            return cachedSetTimeout.call(this, fun, 0);
-        }
-    }
-
-
-}
-function runClearTimeout(marker) {
-    if (cachedClearTimeout === clearTimeout) {
-        //normal enviroments in sane situations
-        return clearTimeout(marker);
-    }
-    // if clearTimeout wasn't available but was latter defined
-    if ((cachedClearTimeout === defaultClearTimeout || !cachedClearTimeout) && clearTimeout) {
-        cachedClearTimeout = clearTimeout;
-        return clearTimeout(marker);
-    }
-    try {
-        // when when somebody has screwed with setTimeout but no I.E. maddness
-        return cachedClearTimeout(marker);
-    } catch (e){
-        try {
-            // When we are in I.E. but the script has been evaled so I.E. doesn't  trust the global object when called normally
-            return cachedClearTimeout.call(null, marker);
-        } catch (e){
-            // same as above but when it's a version of I.E. that must have the global object for 'this', hopfully our context correct otherwise it will throw a global error.
-            // Some versions of I.E. have different rules for clearTimeout vs setTimeout
-            return cachedClearTimeout.call(this, marker);
-        }
-    }
-
-
-
-}
-var queue = [];
-var draining = false;
-var currentQueue;
-var queueIndex = -1;
-
-function cleanUpNextTick() {
-    if (!draining || !currentQueue) {
-        return;
-    }
-    draining = false;
-    if (currentQueue.length) {
-        queue = currentQueue.concat(queue);
-    } else {
-        queueIndex = -1;
-    }
-    if (queue.length) {
-        drainQueue();
-    }
-}
-
-function drainQueue() {
-    if (draining) {
-        return;
-    }
-    var timeout = runTimeout(cleanUpNextTick);
-    draining = true;
-
-    var len = queue.length;
-    while(len) {
-        currentQueue = queue;
-        queue = [];
-        while (++queueIndex < len) {
-            if (currentQueue) {
-                currentQueue[queueIndex].run();
-            }
-        }
-        queueIndex = -1;
-        len = queue.length;
-    }
-    currentQueue = null;
-    draining = false;
-    runClearTimeout(timeout);
-}
-function nextTick(fun) {
-    var args = new Array(arguments.length - 1);
-    if (arguments.length > 1) {
-        for (var i = 1; i < arguments.length; i++) {
-            args[i - 1] = arguments[i];
-        }
-    }
-    queue.push(new Item(fun, args));
-    if (queue.length === 1 && !draining) {
-        runTimeout(drainQueue);
-    }
-}
-// v8 likes predictible objects
-function Item(fun, array) {
-    this.fun = fun;
-    this.array = array;
-}
-Item.prototype.run = function () {
-    this.fun.apply(null, this.array);
-};
-var env = {};
-
-// from https://github.com/kumavis/browser-process-hrtime/blob/master/index.js
-var performance = global$1.performance || {};
-performance.now        ||
-  performance.mozNow     ||
-  performance.msNow      ||
-  performance.oNow       ||
-  performance.webkitNow  ||
-  function(){ return (new Date()).getTime() };
-
-var browser$1 = {
-  env: env};
-
-var inherits;
-if (typeof Object.create === 'function'){
-  inherits = function inherits(ctor, superCtor) {
-    // implementation from standard node.js 'util' module
-    ctor.super_ = superCtor;
-    ctor.prototype = Object.create(superCtor.prototype, {
-      constructor: {
-        value: ctor,
-        enumerable: false,
-        writable: true,
-        configurable: true
-      }
-    });
-  };
-} else {
-  inherits = function inherits(ctor, superCtor) {
-    ctor.super_ = superCtor;
-    var TempCtor = function () {};
-    TempCtor.prototype = superCtor.prototype;
-    ctor.prototype = new TempCtor();
-    ctor.prototype.constructor = ctor;
-  };
-}
-
-var formatRegExp = /%[sdj%]/g;
-function format(f) {
-  if (!isString(f)) {
-    var objects = [];
-    for (var i = 0; i < arguments.length; i++) {
-      objects.push(inspect(arguments[i]));
-    }
-    return objects.join(' ');
-  }
-
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  var str = String(f).replace(formatRegExp, function(x) {
-    if (x === '%%') return '%';
-    if (i >= len) return x;
-    switch (x) {
-      case '%s': return String(args[i++]);
-      case '%d': return Number(args[i++]);
-      case '%j':
-        try {
-          return JSON.stringify(args[i++]);
-        } catch (_) {
-          return '[Circular]';
-        }
-      default:
-        return x;
-    }
-  });
-  for (var x = args[i]; i < len; x = args[++i]) {
-    if (isNull(x) || !isObject(x)) {
-      str += ' ' + x;
-    } else {
-      str += ' ' + inspect(x);
-    }
-  }
-  return str;
-}
-
-// Mark that a method should not be used.
-// Returns a modified function which warns once by default.
-// If --no-deprecation is set, then it is a no-op.
-function deprecate(fn, msg) {
-  // Allow for deprecating things in the process of starting up.
-  if (isUndefined(global$1.process)) {
-    return function() {
-      return deprecate(fn, msg).apply(this, arguments);
-    };
-  }
-
-  if (browser$1.noDeprecation === true) {
-    return fn;
-  }
-
-  var warned = false;
-  function deprecated() {
-    if (!warned) {
-      if (browser$1.throwDeprecation) {
-        throw new Error(msg);
-      } else if (browser$1.traceDeprecation) {
-        console.trace(msg);
-      } else {
-        console.error(msg);
-      }
-      warned = true;
-    }
-    return fn.apply(this, arguments);
-  }
-
-  return deprecated;
-}
-
-var debugs = {};
-var debugEnviron;
-function debuglog(set) {
-  if (isUndefined(debugEnviron))
-    debugEnviron = browser$1.env.NODE_DEBUG || '';
-  set = set.toUpperCase();
-  if (!debugs[set]) {
-    if (new RegExp('\\b' + set + '\\b', 'i').test(debugEnviron)) {
-      var pid = 0;
-      debugs[set] = function() {
-        var msg = format.apply(null, arguments);
-        console.error('%s %d: %s', set, pid, msg);
-      };
-    } else {
-      debugs[set] = function() {};
-    }
-  }
-  return debugs[set];
-}
-
-/**
- * Echos the value of a value. Trys to print the value out
- * in the best way possible given the different types.
- *
- * @param {Object} obj The object to print out.
- * @param {Object} opts Optional options object that alters the output.
- */
-/* legacy: obj, showHidden, depth, colors*/
-function inspect(obj, opts) {
-  // default options
-  var ctx = {
-    seen: [],
-    stylize: stylizeNoColor
-  };
-  // legacy...
-  if (arguments.length >= 3) ctx.depth = arguments[2];
-  if (arguments.length >= 4) ctx.colors = arguments[3];
-  if (isBoolean(opts)) {
-    // legacy...
-    ctx.showHidden = opts;
-  } else if (opts) {
-    // got an "options" object
-    _extend(ctx, opts);
-  }
-  // set default options
-  if (isUndefined(ctx.showHidden)) ctx.showHidden = false;
-  if (isUndefined(ctx.depth)) ctx.depth = 2;
-  if (isUndefined(ctx.colors)) ctx.colors = false;
-  if (isUndefined(ctx.customInspect)) ctx.customInspect = true;
-  if (ctx.colors) ctx.stylize = stylizeWithColor;
-  return formatValue(ctx, obj, ctx.depth);
-}
-
-// http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-inspect.colors = {
-  'bold' : [1, 22],
-  'italic' : [3, 23],
-  'underline' : [4, 24],
-  'inverse' : [7, 27],
-  'white' : [37, 39],
-  'grey' : [90, 39],
-  'black' : [30, 39],
-  'blue' : [34, 39],
-  'cyan' : [36, 39],
-  'green' : [32, 39],
-  'magenta' : [35, 39],
-  'red' : [31, 39],
-  'yellow' : [33, 39]
-};
-
-// Don't use 'blue' not visible on cmd.exe
-inspect.styles = {
-  'special': 'cyan',
-  'number': 'yellow',
-  'boolean': 'yellow',
-  'undefined': 'grey',
-  'null': 'bold',
-  'string': 'green',
-  'date': 'magenta',
-  // "name": intentionally not styling
-  'regexp': 'red'
-};
-
-
-function stylizeWithColor(str, styleType) {
-  var style = inspect.styles[styleType];
-
-  if (style) {
-    return '\u001b[' + inspect.colors[style][0] + 'm' + str +
-           '\u001b[' + inspect.colors[style][1] + 'm';
-  } else {
-    return str;
-  }
-}
-
-
-function stylizeNoColor(str, styleType) {
-  return str;
-}
-
-
-function arrayToHash(array) {
-  var hash = {};
-
-  array.forEach(function(val, idx) {
-    hash[val] = true;
-  });
-
-  return hash;
-}
-
-
-function formatValue(ctx, value, recurseTimes) {
-  // Provide a hook for user-specified inspect functions.
-  // Check that value is an object with an inspect function on it
-  if (ctx.customInspect &&
-      value &&
-      isFunction(value.inspect) &&
-      // Filter out the util module, it's inspect function is special
-      value.inspect !== inspect &&
-      // Also filter out any prototype objects using the circular check.
-      !(value.constructor && value.constructor.prototype === value)) {
-    var ret = value.inspect(recurseTimes, ctx);
-    if (!isString(ret)) {
-      ret = formatValue(ctx, ret, recurseTimes);
-    }
-    return ret;
-  }
-
-  // Primitive types cannot have properties
-  var primitive = formatPrimitive(ctx, value);
-  if (primitive) {
-    return primitive;
-  }
-
-  // Look up the keys of the object.
-  var keys = Object.keys(value);
-  var visibleKeys = arrayToHash(keys);
-
-  if (ctx.showHidden) {
-    keys = Object.getOwnPropertyNames(value);
-  }
-
-  // IE doesn't make error fields non-enumerable
-  // http://msdn.microsoft.com/en-us/library/ie/dww52sbt(v=vs.94).aspx
-  if (isError(value)
-      && (keys.indexOf('message') >= 0 || keys.indexOf('description') >= 0)) {
-    return formatError(value);
-  }
-
-  // Some type of object without properties can be shortcutted.
-  if (keys.length === 0) {
-    if (isFunction(value)) {
-      var name = value.name ? ': ' + value.name : '';
-      return ctx.stylize('[Function' + name + ']', 'special');
-    }
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    }
-    if (isDate(value)) {
-      return ctx.stylize(Date.prototype.toString.call(value), 'date');
-    }
-    if (isError(value)) {
-      return formatError(value);
-    }
-  }
-
-  var base = '', array = false, braces = ['{', '}'];
-
-  // Make Array say that they are Array
-  if (isArray(value)) {
-    array = true;
-    braces = ['[', ']'];
-  }
-
-  // Make functions say that they are functions
-  if (isFunction(value)) {
-    var n = value.name ? ': ' + value.name : '';
-    base = ' [Function' + n + ']';
-  }
-
-  // Make RegExps say that they are RegExps
-  if (isRegExp(value)) {
-    base = ' ' + RegExp.prototype.toString.call(value);
-  }
-
-  // Make dates with properties first say the date
-  if (isDate(value)) {
-    base = ' ' + Date.prototype.toUTCString.call(value);
-  }
-
-  // Make error with message first say the error
-  if (isError(value)) {
-    base = ' ' + formatError(value);
-  }
-
-  if (keys.length === 0 && (!array || value.length == 0)) {
-    return braces[0] + base + braces[1];
-  }
-
-  if (recurseTimes < 0) {
-    if (isRegExp(value)) {
-      return ctx.stylize(RegExp.prototype.toString.call(value), 'regexp');
-    } else {
-      return ctx.stylize('[Object]', 'special');
-    }
-  }
-
-  ctx.seen.push(value);
-
-  var output;
-  if (array) {
-    output = formatArray(ctx, value, recurseTimes, visibleKeys, keys);
-  } else {
-    output = keys.map(function(key) {
-      return formatProperty(ctx, value, recurseTimes, visibleKeys, key, array);
-    });
-  }
-
-  ctx.seen.pop();
-
-  return reduceToSingleString(output, base, braces);
-}
-
-
-function formatPrimitive(ctx, value) {
-  if (isUndefined(value))
-    return ctx.stylize('undefined', 'undefined');
-  if (isString(value)) {
-    var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-                                             .replace(/'/g, "\\'")
-                                             .replace(/\\"/g, '"') + '\'';
-    return ctx.stylize(simple, 'string');
-  }
-  if (isNumber(value))
-    return ctx.stylize('' + value, 'number');
-  if (isBoolean(value))
-    return ctx.stylize('' + value, 'boolean');
-  // For some reason typeof null is "object", so special case here.
-  if (isNull(value))
-    return ctx.stylize('null', 'null');
-}
-
-
-function formatError(value) {
-  return '[' + Error.prototype.toString.call(value) + ']';
-}
-
-
-function formatArray(ctx, value, recurseTimes, visibleKeys, keys) {
-  var output = [];
-  for (var i = 0, l = value.length; i < l; ++i) {
-    if (hasOwnProperty(value, String(i))) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          String(i), true));
-    } else {
-      output.push('');
-    }
-  }
-  keys.forEach(function(key) {
-    if (!key.match(/^\d+$/)) {
-      output.push(formatProperty(ctx, value, recurseTimes, visibleKeys,
-          key, true));
-    }
-  });
-  return output;
-}
-
-
-function formatProperty(ctx, value, recurseTimes, visibleKeys, key, array) {
-  var name, str, desc;
-  desc = Object.getOwnPropertyDescriptor(value, key) || { value: value[key] };
-  if (desc.get) {
-    if (desc.set) {
-      str = ctx.stylize('[Getter/Setter]', 'special');
-    } else {
-      str = ctx.stylize('[Getter]', 'special');
-    }
-  } else {
-    if (desc.set) {
-      str = ctx.stylize('[Setter]', 'special');
-    }
-  }
-  if (!hasOwnProperty(visibleKeys, key)) {
-    name = '[' + key + ']';
-  }
-  if (!str) {
-    if (ctx.seen.indexOf(desc.value) < 0) {
-      if (isNull(recurseTimes)) {
-        str = formatValue(ctx, desc.value, null);
-      } else {
-        str = formatValue(ctx, desc.value, recurseTimes - 1);
-      }
-      if (str.indexOf('\n') > -1) {
-        if (array) {
-          str = str.split('\n').map(function(line) {
-            return '  ' + line;
-          }).join('\n').substr(2);
-        } else {
-          str = '\n' + str.split('\n').map(function(line) {
-            return '   ' + line;
-          }).join('\n');
-        }
-      }
-    } else {
-      str = ctx.stylize('[Circular]', 'special');
-    }
-  }
-  if (isUndefined(name)) {
-    if (array && key.match(/^\d+$/)) {
-      return str;
-    }
-    name = JSON.stringify('' + key);
-    if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
-      name = name.substr(1, name.length - 2);
-      name = ctx.stylize(name, 'name');
-    } else {
-      name = name.replace(/'/g, "\\'")
-                 .replace(/\\"/g, '"')
-                 .replace(/(^"|"$)/g, "'");
-      name = ctx.stylize(name, 'string');
-    }
-  }
-
-  return name + ': ' + str;
-}
-
-
-function reduceToSingleString(output, base, braces) {
-  var length = output.reduce(function(prev, cur) {
-    if (cur.indexOf('\n') >= 0) ;
-    return prev + cur.replace(/\u001b\[\d\d?m/g, '').length + 1;
-  }, 0);
-
-  if (length > 60) {
-    return braces[0] +
-           (base === '' ? '' : base + '\n ') +
-           ' ' +
-           output.join(',\n  ') +
-           ' ' +
-           braces[1];
-  }
-
-  return braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
-}
-
-
-// NOTE: These type checking functions intentionally don't use `instanceof`
-// because it is fragile and can be easily faked with `Object.create()`.
-function isArray(ar) {
-  return Array.isArray(ar);
-}
-
-function isBoolean(arg) {
-  return typeof arg === 'boolean';
-}
-
-function isNull(arg) {
-  return arg === null;
-}
-
-function isNumber(arg) {
-  return typeof arg === 'number';
-}
-
-function isString(arg) {
-  return typeof arg === 'string';
-}
-
-function isUndefined(arg) {
-  return arg === void 0;
-}
-
-function isRegExp(re) {
-  return isObject(re) && objectToString(re) === '[object RegExp]';
-}
-
-function isObject(arg) {
-  return typeof arg === 'object' && arg !== null;
-}
-
-function isDate(d) {
-  return isObject(d) && objectToString(d) === '[object Date]';
-}
-
-function isError(e) {
-  return isObject(e) &&
-      (objectToString(e) === '[object Error]' || e instanceof Error);
-}
-
-function isFunction(arg) {
-  return typeof arg === 'function';
-}
-
-function objectToString(o) {
-  return Object.prototype.toString.call(o);
-}
-
-function _extend(origin, add) {
-  // Don't do anything if add isn't an object
-  if (!add || !isObject(add)) return origin;
-
-  var keys = Object.keys(add);
-  var i = keys.length;
-  while (i--) {
-    origin[keys[i]] = add[keys[i]];
-  }
-  return origin;
-}
-function hasOwnProperty(obj, prop) {
-  return Object.prototype.hasOwnProperty.call(obj, prop);
-}
-
 function BufferList() {
   this.head = null;
   this.tail = null;
@@ -5299,7 +4930,7 @@ Readable.prototype.push = function (chunk, encoding) {
   if (!state.objectMode && typeof chunk === 'string') {
     encoding = encoding || state.defaultEncoding;
     if (encoding !== state.encoding) {
-      chunk = Buffer$1.from(chunk, encoding);
+      chunk = Buffer.from(chunk, encoding);
       encoding = '';
     }
   }
@@ -5525,7 +5156,7 @@ Readable.prototype.read = function (n) {
 
 function chunkInvalid(state, chunk) {
   var er = null;
-  if (!Buffer$1.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
+  if (!Buffer.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
     er = new TypeError('Invalid non-string/buffer chunk');
   }
   return er;
@@ -6009,7 +5640,7 @@ function copyFromBufferString(n, list) {
 // This function is designed to be inlinable, so please take care when making
 // changes to the function body.
 function copyFromBuffer(n, list) {
-  var ret = Buffer$1.allocUnsafe(n);
+  var ret = Buffer.allocUnsafe(n);
   var p = list.head;
   var c = 1;
   p.data.copy(ret);
@@ -6907,8 +6538,9 @@ class ResourceIdsReader extends EventEmitter {
   _cancel(reason) {
   }
 }
+var resource_ids_reader_class_default = ResourceIdsReader;
 
-class ResourceIdsPageReader extends ResourceIdsReader {
+class ResourceIdsPageReader extends resource_ids_reader_class_default {
   enqueue(ids) {
     this.controller.enqueue(ids);
     this.emit("page", ids);
@@ -6953,7 +6585,7 @@ class ResourceReader extends EventEmitter {
     return this;
   }
   async _transform(chunk, encoding, callback) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
         this.emit("error", error, content);
       }).process(async (id) => {
@@ -7011,11 +6643,11 @@ class ResourceWriter extends EventEmitter {
     this.writing = true;
     while (this.buffer.length > 0) {
       const batch = this.buffer.splice(0, this.batchSize);
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await try_fn_default(async () => {
         await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
           this.emit("error", error, content);
         }).process(async (item) => {
-          const [ok2, err2, result] = await tryFn(async () => {
+          const [ok2, err2, result] = await try_fn_default(async () => {
             const res = await this.resource.insert(item);
             return res;
           });
@@ -7086,7 +6718,7 @@ class S3Cache extends Cache {
     });
   }
   async _get(key) {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const { Body } = await this.client.getObject(join(this.keyPrefix, key));
       let content = await streamToString(Body);
       content = Buffer.from(content, "base64");
@@ -7117,6 +6749,7 @@ class S3Cache extends Cache {
     return allKeys.map((k) => k.startsWith(prefix) ? k.slice(prefix.length) : k);
   }
 }
+var s3_cache_class_default = S3Cache;
 
 class MemoryCache extends Cache {
   constructor(config = {}) {
@@ -7177,8 +6810,9 @@ class MemoryCache extends Cache {
     return Object.keys(this.cache);
   }
 }
+var memory_cache_class_default = MemoryCache;
 
-class CachePlugin extends Plugin {
+class CachePlugin extends plugin_class_default {
   constructor(options = {}) {
     super(options);
     this.driver = options.driver;
@@ -7194,9 +6828,9 @@ class CachePlugin extends Plugin {
     if (this.config.driver) {
       this.driver = this.config.driver;
     } else if (this.config.driverType === "memory") {
-      this.driver = new MemoryCache(this.config.memoryOptions || {});
+      this.driver = new memory_cache_class_default(this.config.memoryOptions || {});
     } else {
-      this.driver = new S3Cache({ client: this.database.client, ...this.config.s3Options || {} });
+      this.driver = new s3_cache_class_default({ client: this.database.client, ...this.config.s3Options || {} });
     }
     this.installDatabaseProxy();
     this.installResourceHooks();
@@ -7260,7 +6894,7 @@ class CachePlugin extends Plugin {
         } else if (method === "get") {
           key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
-        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
+        const [ok, err, cached] = await try_fn_default(() => resource.cache.get(key));
         if (ok && cached !== null && cached !== void 0) return cached;
         if (!ok && err.name !== "NoSuchKey") throw err;
         const result = await next();
@@ -7279,7 +6913,7 @@ class CachePlugin extends Plugin {
         } else if (method === "delete") {
           let data = { id: ctx.args[0] };
           if (typeof resource.get === "function") {
-            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
+            const [ok, err, full] = await try_fn_default(() => resource.get(ctx.args[0]));
             if (ok && full) data = full;
           }
           await this.clearCacheForResource(resource, data);
@@ -7453,7 +7087,7 @@ const CostsPlugin = {
   }
 };
 
-class FullTextPlugin extends Plugin {
+class FullTextPlugin extends plugin_class_default {
   constructor(options = {}) {
     super();
     this.indexResource = null;
@@ -7466,7 +7100,7 @@ class FullTextPlugin extends Plugin {
   }
   async setup(database) {
     this.database = database;
-    const [ok, err, indexResource] = await tryFn(() => database.createResource({
+    const [ok, err, indexResource] = await try_fn_default(() => database.createResource({
       name: "fulltext_indexes",
       attributes: {
         id: "string|required",
@@ -7490,7 +7124,7 @@ class FullTextPlugin extends Plugin {
   }
   async loadIndexes() {
     if (!this.indexResource) return;
-    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
+    const [ok, err, allIndexes] = await try_fn_default(() => this.indexResource.getAll());
     if (ok) {
       for (const indexRecord of allIndexes) {
         const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
@@ -7503,7 +7137,7 @@ class FullTextPlugin extends Plugin {
   }
   async saveIndexes() {
     if (!this.indexResource) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       const existingIndexes = await this.indexResource.getAll();
       for (const index of existingIndexes) {
         await this.indexResource.delete(index.id);
@@ -7732,7 +7366,7 @@ class FullTextPlugin extends Plugin {
     for (let i = 0; i < allRecords.length; i += batchSize) {
       const batch = allRecords.slice(i, i + batchSize);
       for (const record of batch) {
-        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
+        const [ok, err] = await try_fn_default(() => this.indexRecord(resourceName, record.id, record));
       }
     }
     await this.saveIndexes();
@@ -7783,7 +7417,7 @@ class FullTextPlugin extends Plugin {
   async _rebuildAllIndexesInternal() {
     const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
     for (const resourceName of resourceNames) {
-      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
+      const [ok, err] = await try_fn_default(() => this.rebuildIndex(resourceName));
     }
   }
   async clearIndex(resourceName) {
@@ -7800,7 +7434,7 @@ class FullTextPlugin extends Plugin {
   }
 }
 
-class MetricsPlugin extends Plugin {
+class MetricsPlugin extends plugin_class_default {
   constructor(options = {}) {
     super();
     this.config = {
@@ -7831,8 +7465,8 @@ class MetricsPlugin extends Plugin {
   async setup(database) {
     this.database = database;
     if (process.env.NODE_ENV === "test") return;
-    const [ok, err] = await tryFn(async () => {
-      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
+    const [ok, err] = await try_fn_default(async () => {
+      const [ok1, err1, metricsResource] = await try_fn_default(() => database.createResource({
         name: "metrics",
         attributes: {
           id: "string|required",
@@ -7849,7 +7483,7 @@ class MetricsPlugin extends Plugin {
         }
       }));
       this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
-      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
+      const [ok2, err2, errorsResource] = await try_fn_default(() => database.createResource({
         name: "error_logs",
         attributes: {
           id: "string|required",
@@ -7861,7 +7495,7 @@ class MetricsPlugin extends Plugin {
         }
       }));
       this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
-      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
+      const [ok3, err3, performanceResource] = await try_fn_default(() => database.createResource({
         name: "performance_logs",
         attributes: {
           id: "string|required",
@@ -7925,7 +7559,7 @@ class MetricsPlugin extends Plugin {
     resource._page = resource.page;
     resource.insert = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._insert(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._insert(...args));
       this.recordOperation(resource.name, "insert", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "insert", err);
       if (!ok) throw err;
@@ -7933,7 +7567,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.update = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._update(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._update(...args));
       this.recordOperation(resource.name, "update", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "update", err);
       if (!ok) throw err;
@@ -7941,7 +7575,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.delete = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._delete(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._delete(...args));
       this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "delete", err);
       if (!ok) throw err;
@@ -7949,7 +7583,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.deleteMany = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._deleteMany(...args));
       this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "delete", err);
       if (!ok) throw err;
@@ -7957,7 +7591,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.get = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._get(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._get(...args));
       this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "get", err);
       if (!ok) throw err;
@@ -7965,7 +7599,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.getMany = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._getMany(...args));
       this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "get", err);
       if (!ok) throw err;
@@ -7973,7 +7607,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.getAll = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._getAll(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -7981,7 +7615,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.list = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._list(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._list(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -7989,7 +7623,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.listIds = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._listIds(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -7997,7 +7631,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.count = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._count(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._count(...args));
       this.recordOperation(resource.name, "count", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "count", err);
       if (!ok) throw err;
@@ -8005,7 +7639,7 @@ class MetricsPlugin extends Plugin {
     }.bind(this);
     resource.page = async function(...args) {
       const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._page(...args));
+      const [ok, err, result] = await try_fn_default(() => resource._page(...args));
       this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
       if (!ok) this.recordError(resource.name, "list", err);
       if (!ok) throw err;
@@ -8068,7 +7702,7 @@ class MetricsPlugin extends Plugin {
   }
   async flushMetrics() {
     if (!this.metricsResource) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
       const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
       const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
@@ -8353,8 +7987,9 @@ class BaseReplicator extends EventEmitter {
     return { isValid: true, errors: [] };
   }
 }
+var base_replicator_class_default = BaseReplicator;
 
-class BigqueryReplicator extends BaseReplicator {
+class BigqueryReplicator extends base_replicator_class_default {
   constructor(config = {}, resources = {}) {
     super(config);
     this.projectId = config.projectId;
@@ -8416,7 +8051,7 @@ class BigqueryReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
-    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
+    const [ok, err, sdk] = await try_fn_default(() => import('@google-cloud/bigquery'));
     if (!ok) {
       this.emit("initialization_error", { replicator: this.name, error: err.message });
       throw err;
@@ -8460,10 +8095,10 @@ class BigqueryReplicator extends BaseReplicator {
     }
     const results = [];
     const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       for (const tableId of tables) {
-        const [okTable, errTable] = await tryFn(async () => {
+        const [okTable, errTable] = await try_fn_default(async () => {
           const table = dataset.table(tableId);
           let job;
           if (operation === "insert") {
@@ -8508,7 +8143,7 @@ class BigqueryReplicator extends BaseReplicator {
         }
       }
       if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
+        const [okLog, errLog] = await try_fn_default(async () => {
           const logTable = dataset.table(this.logTable);
           await logTable.insert([{
             resource_name: resourceName,
@@ -8554,7 +8189,7 @@ class BigqueryReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
+      const [ok, err, res] = await try_fn_default(() => this.replicate(
         resourceName,
         record.operation,
         record.data,
@@ -8571,7 +8206,7 @@ class BigqueryReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       if (!this.bigqueryClient) await this.initialize();
       const dataset = this.bigqueryClient.dataset(this.datasetId);
       await dataset.getMetadata();
@@ -8593,8 +8228,9 @@ class BigqueryReplicator extends BaseReplicator {
     };
   }
 }
+var bigquery_replicator_class_default = BigqueryReplicator;
 
-class PostgresReplicator extends BaseReplicator {
+class PostgresReplicator extends base_replicator_class_default {
   constructor(config = {}, resources = {}) {
     super(config);
     this.connectionString = config.connectionString;
@@ -8662,7 +8298,7 @@ class PostgresReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
-    const [ok, err, sdk] = await tryFn(() => import('pg'));
+    const [ok, err, sdk] = await try_fn_default(() => import('pg'));
     if (!ok) {
       this.emit("initialization_error", {
         replicator: this.name,
@@ -8738,9 +8374,9 @@ class PostgresReplicator extends BaseReplicator {
     }
     const results = [];
     const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       for (const table of tables) {
-        const [okTable, errTable] = await tryFn(async () => {
+        const [okTable, errTable] = await try_fn_default(async () => {
           let result2;
           if (operation === "insert") {
             const keys = Object.keys(data);
@@ -8777,7 +8413,7 @@ class PostgresReplicator extends BaseReplicator {
         }
       }
       if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
+        const [okLog, errLog] = await try_fn_default(async () => {
           await this.client.query(
             `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
             [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
@@ -8818,7 +8454,7 @@ class PostgresReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
+      const [ok, err, res] = await try_fn_default(() => this.replicate(
         resourceName,
         record.operation,
         record.data,
@@ -8835,7 +8471,7 @@ class PostgresReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       if (!this.client) await this.initialize();
       await this.client.query("SELECT 1");
       return true;
@@ -8856,13 +8492,14 @@ class PostgresReplicator extends BaseReplicator {
     };
   }
 }
+var postgres_replicator_class_default = PostgresReplicator;
 
 const S3_DEFAULT_REGION = "us-east-1";
 const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
 class ConnectionString {
   constructor(connectionString) {
     let uri;
-    const [ok, err, parsed] = tryFn(() => new URL(connectionString));
+    const [ok, err, parsed] = try_fn_default(() => new URL(connectionString));
     if (!ok) {
       throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
     }
@@ -8967,7 +8604,7 @@ class Client extends EventEmitter {
   }
   async sendCommand(command) {
     this.emit("command.request", command.constructor.name, command.input);
-    const [ok, err, response] = await tryFn(() => this.client.send(command));
+    const [ok, err, response] = await try_fn_default(() => this.client.send(command));
     if (!ok) {
       const bucket = this.config.bucket;
       const key = command.input && command.input.Key;
@@ -9083,7 +8720,7 @@ class Client extends EventEmitter {
     }
   }
   async exists(key) {
-    const [ok, err] = await tryFn(() => this.headObject(key));
+    const [ok, err] = await try_fn_default(() => this.headObject(key));
     if (ok) return true;
     if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
     throw err;
@@ -9129,7 +8766,7 @@ class Client extends EventEmitter {
         }
       };
       let response;
-      const [ok, err, res] = await tryFn(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
+      const [ok, err, res] = await try_fn_default(() => this.sendCommand(new clientS3.DeleteObjectsCommand(options)));
       if (!ok) throw err;
       response = res;
       if (response && response.Errors && response.Errors.length > 0) ;
@@ -9185,7 +8822,7 @@ class Client extends EventEmitter {
     return totalDeleted;
   }
   async moveObject({ from, to }) {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       await this.copyObject({ from, to });
       await this.deleteObject(from);
     });
@@ -9205,7 +8842,7 @@ class Client extends EventEmitter {
       ContinuationToken: continuationToken,
       Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
     };
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
+    const [ok, err, response] = await try_fn_default(() => this.sendCommand(new clientS3.ListObjectsV2Command(options)));
     if (!ok) {
       throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
@@ -9325,7 +8962,7 @@ class Client extends EventEmitter {
     const keys = await this.getAllKeys({ prefix: prefixFrom });
     const { results, errors } = await promisePool.PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
       const to = key.replace(prefixFrom, prefixTo);
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await try_fn_default(async () => {
         await this.moveObject({
           from: key,
           to
@@ -9343,6 +8980,7 @@ class Client extends EventEmitter {
     return results;
   }
 }
+var client_class_default = Client;
 
 async function secretHandler(actual, errors, schema) {
   if (!this.passphrase) {
@@ -9353,7 +8991,7 @@ async function secretHandler(actual, errors, schema) {
     }));
     return actual;
   }
-  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+  const [ok, err, res] = await try_fn_default(() => encrypt(String(actual), this.passphrase));
   if (ok) return res;
   errors.push(new ValidationError("Problem encrypting secret.", {
     actual,
@@ -10003,6 +9641,386 @@ class Schema {
     return processed;
   }
 }
+var schema_class_default = Schema;
+
+const S3_METADATA_LIMIT_BYTES = 2047;
+async function handleInsert$4({ resource, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  }
+  return { mappedData, body: JSON.stringify(mappedData) };
+}
+async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  }
+  return { mappedData, body: JSON.stringify(mappedData) };
+}
+async function handleUpsert$4({ resource, id, data, mappedData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+  }
+  return { mappedData, body: "" };
+}
+async function handleGet$4({ resource, metadata, body }) {
+  return { metadata, body };
+}
+
+var enforceLimits = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  S3_METADATA_LIMIT_BYTES: S3_METADATA_LIMIT_BYTES,
+  handleGet: handleGet$4,
+  handleInsert: handleInsert$4,
+  handleUpdate: handleUpdate$4,
+  handleUpsert: handleUpsert$4
+});
+
+async function handleInsert$3({ resource, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    resource.emit("exceedsLimit", {
+      operation: "insert",
+      totalSize,
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
+    });
+  }
+  return { mappedData, body: JSON.stringify(data) };
+}
+async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    resource.emit("exceedsLimit", {
+      operation: "update",
+      id,
+      totalSize,
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
+    });
+  }
+  return { mappedData, body: JSON.stringify(data) };
+}
+async function handleUpsert$3({ resource, id, data, mappedData, originalData }) {
+  const totalSize = calculateTotalSize(mappedData);
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id
+    }
+  });
+  if (totalSize > effectiveLimit) {
+    resource.emit("exceedsLimit", {
+      operation: "upsert",
+      id,
+      totalSize,
+      limit: 2047,
+      excess: totalSize - 2047,
+      data: originalData || data
+    });
+  }
+  return { mappedData, body: JSON.stringify(data) };
+}
+async function handleGet$3({ resource, metadata, body }) {
+  return { metadata, body };
+}
+
+var userManaged = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$3,
+  handleInsert: handleInsert$3,
+  handleUpdate: handleUpdate$3,
+  handleUpsert: handleUpsert$3
+});
+
+const TRUNCATED_FLAG = "$truncated";
+const TRUNCATED_FLAG_VALUE = "true";
+const TRUNCATED_FLAG_BYTES = calculateUTF8Bytes(TRUNCATED_FLAG) + calculateUTF8Bytes(TRUNCATED_FLAG_VALUE);
+async function handleInsert$2({ resource, data, mappedData, originalData }) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+  const resultFields = {};
+  let currentSize = 0;
+  let truncated = false;
+  if (mappedData._v) {
+    resultFields._v = mappedData._v;
+    currentSize += attributeSizes._v;
+  }
+  for (const [fieldName, size] of sortedFields) {
+    if (fieldName === "_v") continue;
+    const fieldValue = mappedData[fieldName];
+    const spaceNeeded = size + (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+    if (currentSize + spaceNeeded <= effectiveLimit) {
+      resultFields[fieldName] = fieldValue;
+      currentSize += size;
+    } else {
+      const availableSpace = effectiveLimit - currentSize - (truncated ? 0 : TRUNCATED_FLAG_BYTES);
+      if (availableSpace > 0) {
+        const truncatedValue = truncateValue(fieldValue, availableSpace);
+        resultFields[fieldName] = truncatedValue;
+        truncated = true;
+        currentSize += calculateUTF8Bytes(truncatedValue);
+      } else {
+        resultFields[fieldName] = "";
+        truncated = true;
+      }
+      break;
+    }
+  }
+  let finalSize = calculateTotalSize(resultFields) + (truncated ? TRUNCATED_FLAG_BYTES : 0);
+  while (finalSize > effectiveLimit) {
+    const fieldNames = Object.keys(resultFields).filter((f) => f !== "_v" && f !== "$truncated");
+    if (fieldNames.length === 0) {
+      break;
+    }
+    const lastField = fieldNames[fieldNames.length - 1];
+    resultFields[lastField] = "";
+    finalSize = calculateTotalSize(resultFields) + TRUNCATED_FLAG_BYTES;
+    truncated = true;
+  }
+  if (truncated) {
+    resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
+  }
+  return { mappedData: resultFields, body: JSON.stringify(mappedData) };
+}
+async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
+  return handleInsert$2({ resource, data, mappedData, originalData });
+}
+async function handleUpsert$2({ resource, id, data, mappedData }) {
+  return handleInsert$2({ resource, data, mappedData });
+}
+async function handleGet$2({ resource, metadata, body }) {
+  return { metadata, body };
+}
+function truncateValue(value, maxBytes) {
+  if (typeof value === "string") {
+    return truncateString(value, maxBytes);
+  } else if (typeof value === "object" && value !== null) {
+    const jsonStr = JSON.stringify(value);
+    return truncateString(jsonStr, maxBytes);
+  } else {
+    const stringValue = String(value);
+    return truncateString(stringValue, maxBytes);
+  }
+}
+function truncateString(str, maxBytes) {
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(str);
+  if (bytes.length <= maxBytes) {
+    return str;
+  }
+  let length = str.length;
+  while (length > 0) {
+    const truncated = str.substring(0, length);
+    bytes = encoder.encode(truncated);
+    if (bytes.length <= maxBytes) {
+      return truncated;
+    }
+    length--;
+  }
+  return "";
+}
+
+var dataTruncate = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$2,
+  handleInsert: handleInsert$2,
+  handleUpdate: handleUpdate$2,
+  handleUpsert: handleUpsert$2
+});
+
+const OVERFLOW_FLAG = "$overflow";
+const OVERFLOW_FLAG_VALUE = "true";
+const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Bytes(OVERFLOW_FLAG_VALUE);
+async function handleInsert$1({ resource, data, mappedData, originalData }) {
+  const effectiveLimit = calculateEffectiveLimit({
+    s3Limit: S3_METADATA_LIMIT_BYTES,
+    systemConfig: {
+      version: resource.version,
+      timestamps: resource.config.timestamps,
+      id: data.id
+    }
+  });
+  const attributeSizes = calculateAttributeSizes(mappedData);
+  const sortedFields = Object.entries(attributeSizes).sort(([, a], [, b]) => a - b);
+  const metadataFields = {};
+  const bodyFields = {};
+  let currentSize = 0;
+  let willOverflow = false;
+  if (mappedData._v) {
+    metadataFields._v = mappedData._v;
+    currentSize += attributeSizes._v;
+  }
+  let reservedLimit = effectiveLimit;
+  for (const [fieldName, size] of sortedFields) {
+    if (fieldName === "_v") continue;
+    if (!willOverflow && currentSize + size > effectiveLimit) {
+      reservedLimit -= OVERFLOW_FLAG_BYTES;
+      willOverflow = true;
+    }
+    if (!willOverflow && currentSize + size <= reservedLimit) {
+      metadataFields[fieldName] = mappedData[fieldName];
+      currentSize += size;
+    } else {
+      bodyFields[fieldName] = mappedData[fieldName];
+      willOverflow = true;
+    }
+  }
+  if (willOverflow) {
+    metadataFields[OVERFLOW_FLAG] = OVERFLOW_FLAG_VALUE;
+  }
+  const hasOverflow = Object.keys(bodyFields).length > 0;
+  let body = hasOverflow ? JSON.stringify(bodyFields) : "";
+  if (!hasOverflow) body = "{}";
+  return { mappedData: metadataFields, body };
+}
+async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
+  return handleInsert$1({ resource, data, mappedData, originalData });
+}
+async function handleUpsert$1({ resource, id, data, mappedData }) {
+  return handleInsert$1({ resource, data, mappedData });
+}
+async function handleGet$1({ resource, metadata, body }) {
+  let bodyData = {};
+  if (body && body.trim() !== "") {
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
+    } else {
+      bodyData = {};
+    }
+  }
+  const mergedData = {
+    ...bodyData,
+    ...metadata
+  };
+  delete mergedData.$overflow;
+  return { metadata: mergedData, body };
+}
+
+var bodyOverflow = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet$1,
+  handleInsert: handleInsert$1,
+  handleUpdate: handleUpdate$1,
+  handleUpsert: handleUpsert$1
+});
+
+async function handleInsert({ resource, data, mappedData }) {
+  const metadataOnly = {
+    "_v": mappedData._v || String(resource.version)
+  };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  const body = JSON.stringify(mappedData);
+  return { mappedData: metadataOnly, body };
+}
+async function handleUpdate({ resource, id, data, mappedData }) {
+  const metadataOnly = {
+    "_v": mappedData._v || String(resource.version)
+  };
+  metadataOnly._map = JSON.stringify(resource.schema.map);
+  const body = JSON.stringify(mappedData);
+  return { mappedData: metadataOnly, body };
+}
+async function handleUpsert({ resource, id, data, mappedData }) {
+  return handleInsert({ resource, data, mappedData });
+}
+async function handleGet({ resource, metadata, body }) {
+  let bodyData = {};
+  if (body && body.trim() !== "") {
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(body));
+    if (ok) {
+      bodyData = parsed;
+    } else {
+      bodyData = {};
+    }
+  }
+  const mergedData = {
+    ...bodyData,
+    ...metadata
+    // metadata contains _v
+  };
+  return { metadata: mergedData, body };
+}
+
+var bodyOnly = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  handleGet: handleGet,
+  handleInsert: handleInsert,
+  handleUpdate: handleUpdate,
+  handleUpsert: handleUpsert
+});
+
+const behaviors = {
+  "user-managed": userManaged,
+  "enforce-limits": enforceLimits,
+  "truncate-data": dataTruncate,
+  "body-overflow": bodyOverflow,
+  "body-only": bodyOnly
+};
+function getBehavior(behaviorName) {
+  const behavior = behaviors[behaviorName];
+  if (!behavior) {
+    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
+  }
+  return behavior;
+}
+const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
+const DEFAULT_BEHAVIOR = "user-managed";
 
 class Resource extends EventEmitter {
   /**
@@ -10229,7 +10247,7 @@ class Resource extends EventEmitter {
         };
       }
     }
-    this.schema = new Schema({
+    this.schema = new schema_class_default({
       name: this.name,
       attributes: this.attributes,
       passphrase: this.passphrase,
@@ -10554,13 +10572,13 @@ class Resource extends EventEmitter {
     const key = this.getResourceKey(finalId);
     let contentType = void 0;
     if (body && body !== "") {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okParse, errParse] = await try_fn_default(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
       throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
     }
-    const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
+    const [okPut, errPut, putResult] = await try_fn_default(() => this.client.putObject({
       key,
       body,
       contentType,
@@ -10618,7 +10636,7 @@ class Resource extends EventEmitter {
     if (lodashEs.isObject(id)) throw new Error(`id cannot be an object`);
     if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
     const key = this.getResourceKey(id);
-    const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, request] = await try_fn_default(() => this.client.getObject(key));
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.client.config.bucket,
@@ -10646,7 +10664,7 @@ class Resource extends EventEmitter {
     const behaviorImpl = getBehavior(this.behavior);
     let body = "";
     if (request.ContentLength > 0) {
-      const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
+      const [okBody, errBody, fullObject] = await try_fn_default(() => this.client.getObject(key));
       if (okBody) {
         body = await streamToString(fullObject.Body);
       } else {
@@ -10685,7 +10703,7 @@ class Resource extends EventEmitter {
    */
   async exists(id) {
     const key = this.getResourceKey(id);
-    const [ok, err] = await tryFn(() => this.client.headObject(key));
+    const [ok, err] = await try_fn_default(() => this.client.headObject(key));
     return ok;
   }
   /**
@@ -10781,11 +10799,11 @@ class Resource extends EventEmitter {
     let existingContentType = void 0;
     let finalBody = body;
     if (body === "" && this.behavior !== "body-overflow") {
-      const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+      const [ok2, err2, existingObject] = await try_fn_default(() => this.client.getObject(key));
       if (ok2 && existingObject.ContentLength > 0) {
         const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
         const existingBodyString = existingBodyBuffer.toString();
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        const [okParse, errParse] = await try_fn_default(() => Promise.resolve(JSON.parse(existingBodyString)));
         if (!okParse) {
           finalBody = existingBodyBuffer;
           existingContentType = existingObject.ContentType;
@@ -10794,13 +10812,13 @@ class Resource extends EventEmitter {
     }
     let finalContentType = existingContentType;
     if (finalBody && finalBody !== "" && !finalContentType) {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      const [okParse, errParse] = await try_fn_default(() => Promise.resolve(JSON.parse(finalBody)));
       if (okParse) finalContentType = "application/json";
     }
     if (this.versioningEnabled && originalData._v !== this.version) {
       await this.createHistoricalVersion(id, originalData);
     }
-    const [ok, err] = await tryFn(() => this.client.putObject({
+    const [ok, err] = await try_fn_default(() => this.client.putObject({
       key,
       body: finalBody,
       contentType: finalContentType,
@@ -10866,7 +10884,7 @@ class Resource extends EventEmitter {
     }
     let objectData;
     let deleteError = null;
-    const [ok, err, data] = await tryFn(() => this.get(id));
+    const [ok, err, data] = await try_fn_default(() => this.get(id));
     if (ok) {
       objectData = data;
     } else {
@@ -10875,7 +10893,7 @@ class Resource extends EventEmitter {
     }
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
-    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+    const [ok2, err2, response] = await try_fn_default(() => this.client.deleteObject(key));
     this.emit("delete", {
       ...objectData,
       $before: { ...objectData },
@@ -11144,7 +11162,7 @@ class Resource extends EventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
       }
@@ -11156,7 +11174,7 @@ class Resource extends EventEmitter {
     return result;
   }
   async listMain({ limit, offset = 0 }) {
-    const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
+    const [ok, err, ids] = await try_fn_default(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, "main");
     this.emit("list", { count: results.length, errors: 0 });
@@ -11169,7 +11187,7 @@ class Resource extends EventEmitter {
     }
     const partitionDef = this.config.partitions[partition];
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+    const [ok, err, keys] = await try_fn_default(() => this.client.getAllKeys({ prefix }));
     if (!ok) throw err;
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
@@ -11213,7 +11231,7 @@ class Resource extends EventEmitter {
       this.emit("error", error, content);
       this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      const [ok, err, result] = await tryFn(() => this.get(id));
+      const [ok, err, result] = await try_fn_default(() => this.get(id));
       if (ok) {
         return result;
       }
@@ -11231,7 +11249,7 @@ class Resource extends EventEmitter {
       this.emit("error", error, content);
       this.observers.map((x) => x.emit("error", this.name, error, content));
     }).process(async (id) => {
-      const [ok, err, result] = await tryFn(async () => {
+      const [ok, err, result] = await try_fn_default(async () => {
         const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
         return await this.getFromPartition({
           id,
@@ -11305,7 +11323,7 @@ class Resource extends EventEmitter {
         _decryptionFailed: error.message.includes("Cipher job failed") || error.message.includes("OperationError")
       };
     }).process(async (id) => {
-      const [ok, err, data] = await tryFn(() => this.get(id));
+      const [ok, err, data] = await try_fn_default(() => this.get(id));
       if (ok) return data;
       if (err.message.includes("Cipher job failed") || err.message.includes("OperationError")) {
         return {
@@ -11326,11 +11344,11 @@ class Resource extends EventEmitter {
    * const allUsers = await resource.getAll();
       */
   async getAll() {
-    const [ok, err, ids] = await tryFn(() => this.listIds());
+    const [ok, err, ids] = await try_fn_default(() => this.listIds());
     if (!ok) throw err;
     const results = [];
     for (const id of ids) {
-      const [ok2, err2, item] = await tryFn(() => this.get(id));
+      const [ok2, err2, item] = await try_fn_default(() => this.get(id));
       if (ok2) {
         results.push(item);
       }
@@ -11366,11 +11384,11 @@ class Resource extends EventEmitter {
    * });
       */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       let totalItems = null;
       let totalPages = null;
       if (!skipCount) {
-        const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+        const [okCount, errCount, count] = await try_fn_default(() => this.count({ partition, partitionValues }));
         if (okCount) {
           totalItems = count;
           totalPages = Math.ceil(totalItems / size);
@@ -11384,7 +11402,7 @@ class Resource extends EventEmitter {
       if (size <= 0) {
         items = [];
       } else {
-        const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
+        const [okList, errList, listResult] = await try_fn_default(() => this.list({ partition, partitionValues, limit: size, offset }));
         items = okList ? listResult : [];
       }
       const result2 = {
@@ -11454,7 +11472,7 @@ class Resource extends EventEmitter {
    * });
    */
   async setContent({ id, buffer, contentType = "application/octet-stream" }) {
-    const [ok, err, currentData] = await tryFn(() => this.get(id));
+    const [ok, err, currentData] = await try_fn_default(() => this.get(id));
     if (!ok || !currentData) {
       throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: "setContent" });
     }
@@ -11465,7 +11483,7 @@ class Resource extends EventEmitter {
       _mimeType: contentType
     };
     const mappedMetadata = await this.schema.mapper(updatedData);
-    const [ok2, err2] = await tryFn(() => this.client.putObject({
+    const [ok2, err2] = await try_fn_default(() => this.client.putObject({
       key: this.getResourceKey(id),
       metadata: mappedMetadata,
       body: buffer,
@@ -11489,7 +11507,7 @@ class Resource extends EventEmitter {
    */
   async content(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await try_fn_default(() => this.client.getObject(key));
     if (!ok) {
       if (err.name === "NoSuchKey") {
         return {
@@ -11514,7 +11532,7 @@ class Resource extends EventEmitter {
    */
   async hasContent(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    const [ok, err, response] = await try_fn_default(() => this.client.headObject(key));
     if (!ok) return false;
     return response.ContentLength > 0;
   }
@@ -11524,10 +11542,10 @@ class Resource extends EventEmitter {
    */
   async deleteContent(id) {
     const key = this.getResourceKey(id);
-    const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
+    const [ok, err, existingObject] = await try_fn_default(() => this.client.headObject(key));
     if (!ok) throw err;
     const existingMetadata = existingObject.Metadata || {};
-    const [ok2, err2, response] = await tryFn(() => this.client.putObject({
+    const [ok2, err2, response] = await try_fn_default(() => this.client.putObject({
       key,
       body: "",
       metadata: existingMetadata
@@ -11567,7 +11585,7 @@ class Resource extends EventEmitter {
     if (version === this.version) {
       return this.schema;
     }
-    const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
+    const [ok, err, compatibleSchema] = await try_fn_default(() => Promise.resolve(new schema_class_default({
       name: this.name,
       attributes: this.attributes,
       passphrase: this.passphrase,
@@ -11622,7 +11640,7 @@ class Resource extends EventEmitter {
       }
     }
     if (keysToDelete.length > 0) {
-      const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
+      const [ok, err] = await try_fn_default(() => this.client.deleteObjects(keysToDelete));
     }
   }
   /**
@@ -11704,13 +11722,13 @@ class Resource extends EventEmitter {
       return;
     }
     for (const [partitionName, partition] of Object.entries(partitions)) {
-      const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
+      const [ok, err] = await try_fn_default(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
     }
     const id = newData.id || oldData.id;
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
       let allKeys = [];
-      const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
+      const [okKeys, errKeys, keys] = await try_fn_default(() => this.client.getAllKeys({ prefix }));
       if (okKeys) {
         allKeys = keys;
       } else {
@@ -11719,7 +11737,7 @@ class Resource extends EventEmitter {
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
       for (const key of allKeys) {
         if (key.endsWith(`/id=${id}`) && key !== validKey) {
-          const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
+          const [okDel, errDel] = await try_fn_default(() => this.client.deleteObject(key));
         }
       }
     }
@@ -11737,12 +11755,12 @@ class Resource extends EventEmitter {
     const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
     if (oldPartitionKey !== newPartitionKey) {
       if (oldPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await try_fn_default(async () => {
           await this.client.deleteObject(oldPartitionKey);
         });
       }
       if (newPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await try_fn_default(async () => {
           const partitionMetadata = {
             _v: String(this.version)
           };
@@ -11755,7 +11773,7 @@ class Resource extends EventEmitter {
         });
       }
     } else if (newPartitionKey) {
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await try_fn_default(async () => {
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -11786,7 +11804,7 @@ class Resource extends EventEmitter {
         const partitionMetadata = {
           _v: String(this.version)
         };
-        const [ok, err] = await tryFn(async () => {
+        const [ok, err] = await try_fn_default(async () => {
           await this.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
@@ -11837,7 +11855,7 @@ class Resource extends EventEmitter {
       throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: "getFromPartition" });
     }
     const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       await this.client.headObject(partitionKey);
     });
     if (!ok) {
@@ -11875,7 +11893,7 @@ class Resource extends EventEmitter {
     };
     let contentType = void 0;
     if (body && body !== "") {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      const [okParse, errParse] = await try_fn_default(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = "application/json";
     }
     await this.client.putObject({
@@ -11917,7 +11935,7 @@ class Resource extends EventEmitter {
       behaviorFlags.$overflow = "true";
     }
     let unmappedMetadata = {};
-    const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
+    const [ok, err, unmapped] = await try_fn_default(() => this.schema.unmapper(metadata));
     unmappedMetadata = ok ? unmapped : metadata;
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
@@ -11947,9 +11965,9 @@ class Resource extends EventEmitter {
       const hasOverflow = metadata && metadata["$overflow"] === "true";
       let bodyData = {};
       if (hasOverflow && body) {
-        const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+        const [okBody, errBody, parsedBody] = await try_fn_default(() => Promise.resolve(JSON.parse(body)));
         if (okBody) {
-          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+          const [okUnmap, errUnmap, unmappedBody] = await try_fn_default(() => this.schema.unmapper(parsedBody));
           bodyData = okUnmap ? unmappedBody : {};
         }
       }
@@ -11964,13 +11982,13 @@ class Resource extends EventEmitter {
       return result2;
     }
     if (behavior === "body-only") {
-      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
+      const [okBody, errBody, parsedBody] = await try_fn_default(() => Promise.resolve(body ? JSON.parse(body) : {}));
       let mapFromMeta = this.schema.map;
       if (metadata && metadata._map) {
-        const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
+        const [okMap, errMap, parsedMap] = await try_fn_default(() => Promise.resolve(typeof metadata._map === "string" ? JSON.parse(metadata._map) : metadata._map));
         mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
-      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+      const [okUnmap, errUnmap, unmappedBody] = await try_fn_default(() => this.schema.unmapper(parsedBody, mapFromMeta));
       const result2 = okUnmap ? { ...unmappedBody, id } : { id };
       Object.keys(result2).forEach((k) => {
         result2[k] = fixValue(result2[k]);
@@ -12186,13 +12204,14 @@ function validateResourceConfig(config) {
     errors
   };
 }
+var resource_class_default = Resource;
 
 class Database extends EventEmitter {
   constructor(options) {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "7.0.2" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.0.3" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -12226,7 +12245,7 @@ class Database extends EventEmitter {
         connectionString = `s3://${encodeURIComponent(accessKeyId)}:${encodeURIComponent(secretAccessKey)}@${bucket || "s3db"}?${params.toString()}`;
       }
     }
-    this.client = options.client || new Client({
+    this.client = options.client || new client_class_default({
       verbose: this.verbose,
       parallelism: this.parallelism,
       connectionString
@@ -12261,7 +12280,7 @@ class Database extends EventEmitter {
       const currentVersion = resourceMetadata.currentVersion || "v0";
       const versionData = resourceMetadata.versions?.[currentVersion];
       if (versionData) {
-        this.resources[name] = new Resource({
+        this.resources[name] = new resource_class_default({
           name,
           client: this.client,
           database: this,
@@ -12488,7 +12507,7 @@ class Database extends EventEmitter {
     }
     const existingResource = this.resources[name];
     const existingHash = this.generateDefinitionHash(existingResource.export());
-    const mockResource = new Resource({
+    const mockResource = new resource_class_default({
       name,
       attributes,
       behavior,
@@ -12542,7 +12561,7 @@ class Database extends EventEmitter {
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || "v0";
-    const resource = new Resource({
+    const resource = new resource_class_default({
       name,
       client: this.client,
       version: config.version !== void 0 ? config.version : version,
@@ -12670,7 +12689,7 @@ class S3db extends Database {
 function normalizeResourceName$1(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : name;
 }
-class S3dbReplicator extends BaseReplicator {
+class S3dbReplicator extends base_replicator_class_default {
   constructor(config = {}, resources = [], client = null) {
     super(config);
     this.instanceId = Math.random().toString(36).slice(2, 10);
@@ -12834,7 +12853,7 @@ class S3dbReplicator extends BaseReplicator {
     const results = [];
     const errors = [];
     for (const record of records) {
-      const [ok, err, result] = await tryFn(() => this.replicate({
+      const [ok, err, result] = await try_fn_default(() => this.replicate({
         resource: resourceName,
         operation: record.operation,
         id: record.id,
@@ -12859,7 +12878,7 @@ class S3dbReplicator extends BaseReplicator {
     };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       if (!this.targetDatabase) {
         await this.initialize(this.database);
       }
@@ -12921,8 +12940,9 @@ class S3dbReplicator extends BaseReplicator {
     return false;
   }
 }
+var s3db_replicator_class_default = S3dbReplicator;
 
-class SqsReplicator extends BaseReplicator {
+class SqsReplicator extends base_replicator_class_default {
   constructor(config = {}, resources = [], client = null) {
     super(config);
     this.resources = resources;
@@ -13016,7 +13036,7 @@ class SqsReplicator extends BaseReplicator {
   async initialize(database, client) {
     await super.initialize(database);
     if (!this.sqsClient) {
-      const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+      const [ok, err, sdk] = await try_fn_default(() => import('@aws-sdk/client-sqs'));
       if (!ok) {
         this.emit("initialization_error", {
           replicator: this.name,
@@ -13041,7 +13061,7 @@ class SqsReplicator extends BaseReplicator {
     if (!this.enabled || !this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
       const queueUrls = this.getQueueUrlsForResource(resource);
       const transformedData = this._applyTransformer(resource, data);
@@ -13082,7 +13102,7 @@ class SqsReplicator extends BaseReplicator {
     if (!this.enabled || !this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
-    const [ok, err, result] = await tryFn(async () => {
+    const [ok, err, result] = await try_fn_default(async () => {
       const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
       const queueUrls = this.getQueueUrlsForResource(resource);
       const batchSize = 10;
@@ -13093,7 +13113,7 @@ class SqsReplicator extends BaseReplicator {
       const results = [];
       const errors = [];
       for (const batch of batches) {
-        const [okBatch, errBatch] = await tryFn(async () => {
+        const [okBatch, errBatch] = await try_fn_default(async () => {
           const entries = batch.map((record, index) => ({
             Id: `${record.id}-${index}`,
             MessageBody: JSON.stringify(this.createMessage(
@@ -13149,7 +13169,7 @@ class SqsReplicator extends BaseReplicator {
     return { success: false, error: errorMessage };
   }
   async testConnection() {
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       if (!this.sqsClient) {
         await this.initialize(this.database);
       }
@@ -13191,12 +13211,13 @@ class SqsReplicator extends BaseReplicator {
     return result;
   }
 }
+var sqs_replicator_class_default = SqsReplicator;
 
 const REPLICATOR_DRIVERS = {
-  s3db: S3dbReplicator,
-  sqs: SqsReplicator,
-  bigquery: BigqueryReplicator,
-  postgres: PostgresReplicator
+  s3db: s3db_replicator_class_default,
+  sqs: sqs_replicator_class_default,
+  bigquery: bigquery_replicator_class_default,
+  postgres: postgres_replicator_class_default
 };
 function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
@@ -13209,7 +13230,7 @@ function createReplicator(driver, config = {}, resources = [], client = null) {
 function normalizeResourceName(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : name;
 }
-class ReplicatorPlugin extends Plugin {
+class ReplicatorPlugin extends plugin_class_default {
   constructor(options = {}) {
     super();
     if (options.verbose) {
@@ -13302,7 +13323,7 @@ class ReplicatorPlugin extends Plugin {
       }
       try {
         let completeData;
-        const [ok, err, record] = await tryFn(() => resource.get(data.id));
+        const [ok, err, record] = await try_fn_default(() => resource.get(data.id));
         if (ok && record) {
           completeData = record;
         } else {
@@ -13336,7 +13357,7 @@ class ReplicatorPlugin extends Plugin {
    * This ensures we always have the complete data regardless of behavior or data size
    */
   async getCompleteData(resource, data) {
-    const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
+    const [ok, err, completeRecord] = await try_fn_default(() => resource.get(data.id));
     return ok ? completeRecord : data;
   }
   async setup(database) {
@@ -13499,7 +13520,7 @@ class ReplicatorPlugin extends Plugin {
       attempts: 0
     };
     const logId = await this.logreplicator(item);
-    const [ok, err, result] = await tryFn(async () => this.processreplicatorItem(item));
+    const [ok, err, result] = await try_fn_default(async () => this.processreplicatorItem(item));
     if (ok) {
       if (logId) {
         await this.updatereplicatorLog(logId, {
@@ -13559,7 +13580,7 @@ class ReplicatorPlugin extends Plugin {
         });
       }
       if (replicator.instance && replicator.instance.constructor && replicator.instance.constructor.name === "S3dbReplicator") {
-        [ok, err, result] = await tryFn(
+        [ok, err, result] = await try_fn_default(
           () => replicator.instance.replicate({
             resource: item.resourceName,
             operation: item.operation,
@@ -13569,7 +13590,7 @@ class ReplicatorPlugin extends Plugin {
           })
         );
       } else {
-        [ok, err, result] = await tryFn(
+        [ok, err, result] = await try_fn_default(
           () => replicator.instance.replicate(
             item.resourceName,
             item.operation,
@@ -13630,7 +13651,7 @@ class ReplicatorPlugin extends Plugin {
   }
   async updatereplicatorLog(logId, updates) {
     if (!this.replicatorLog) return;
-    const [ok, err] = await tryFn(async () => {
+    const [ok, err] = await try_fn_default(async () => {
       await this.replicatorLog.update(logId, {
         ...updates,
         lastAttempt: (/* @__PURE__ */ new Date()).toISOString()
@@ -13696,7 +13717,7 @@ class ReplicatorPlugin extends Plugin {
     });
     let retried = 0;
     for (const log of failedLogs) {
-      const [ok, err] = await tryFn(async () => {
+      const [ok, err] = await try_fn_default(async () => {
         await this.processReplicatorEvent(
           log.resourceName,
           log.operation,
@@ -13796,7 +13817,7 @@ exports.NoSuchKey = NoSuchKey;
 exports.NotFound = NotFound;
 exports.PartitionError = PartitionError;
 exports.PermissionError = PermissionError;
-exports.Plugin = Plugin;
+exports.Plugin = plugin_class_default;
 exports.PluginObject = PluginObject;
 exports.ReplicatorPlugin = ReplicatorPlugin;
 exports.Resource = Resource;
@@ -13806,17 +13827,13 @@ exports.ResourceIdsReader = ResourceIdsReader;
 exports.ResourceNotFound = ResourceNotFound;
 exports.ResourceReader = ResourceReader;
 exports.ResourceWriter = ResourceWriter;
-exports.S3_DEFAULT_ENDPOINT = S3_DEFAULT_ENDPOINT;
-exports.S3_DEFAULT_REGION = S3_DEFAULT_REGION;
-exports.S3db = S3db;
+exports.S3db = Database;
 exports.S3dbError = S3dbError;
 exports.Schema = Schema;
-exports.SchemaActions = SchemaActions;
 exports.SchemaError = SchemaError;
 exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;
-exports.ValidatorManager = ValidatorManager;
 exports.behaviors = behaviors;
 exports.calculateAttributeNamesSize = calculateAttributeNamesSize;
 exports.calculateAttributeSizes = calculateAttributeSizes;
