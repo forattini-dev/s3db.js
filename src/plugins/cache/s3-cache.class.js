@@ -108,7 +108,7 @@ import zlib from "zlib";
 import { join } from "path";
 
 import { Cache } from "./cache.class.js"
-import { streamToString } from "#src/stream/index.js";
+import { streamToString } from "../../stream/index.js";
 import tryFn from "../../concerns/try-fn.js";
 
 export class S3Cache extends Cache {
