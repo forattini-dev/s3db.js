@@ -350,6 +350,13 @@ export class ReplicatorPlugin extends Plugin {
         this.installEventListeners(resource);
       }
     });
+    
+    database.on('s3db.resourceUpdated', (resourceName) => {
+      const resource = database.resources[resourceName];
+      if (resource && resource.name !== this.config.replicatorLogResource) {
+        this.installEventListeners(resource);
+      }
+    });
   }
 
   async initializeReplicators() {
@@ -362,6 +369,9 @@ export class ReplicatorPlugin extends Plugin {
         const client = replicatorConfig.client;
         const replicator = createReplicator(driver, replicatorConfig, resources, client);
         if (replicator) {
+          // Initialize the replicator with the database
+          await replicator.initialize(this.database);
+          
           this.replicators.push({
             id: Math.random().toString(36).slice(2),
             driver,

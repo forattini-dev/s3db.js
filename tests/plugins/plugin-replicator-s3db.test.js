@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest, sleep } from '../config.js';
 import { ReplicatorPlugin } from '#src/plugins/replicator.plugin.js';
+import S3dbReplicator from '#src/plugins/replicators/s3db-replicator.class.js';
 
 // Adiciona função utilitária de polling para aguardar replicação
 async function waitForReplication(getFn, id, { timeout = 5000, interval = 200 } = {}) {
@@ -1025,4 +1026,443 @@ describe('S3dbReplicator - error handling', () => {
     // The bad one should not be replicated
     await expect(dbB.resources.users.get('bad')).rejects.toThrow();
   }, 15000);
+});
+
+describe('S3DB Replicator - Configuration and Validation Tests', () => {
+  let dbA, dbB;
+
+  beforeEach(async () => {
+    dbA = createDatabaseForTest('s3db-config-src');
+    dbB = createDatabaseForTest('s3db-config-dst');
+    await Promise.all([dbA.connect(), dbB.connect()]);
+  });
+
+  afterEach(async () => {
+    await Promise.all([
+      dbA?.disconnect?.(),
+      dbB?.disconnect?.()
+    ]);
+  });
+
+  test('validateConfig should return errors for missing client and connectionString', () => {
+    const replicator = new S3dbReplicator({}, [], null);
+    const validation = replicator.validateConfig();
+    
+    expect(validation.isValid).toBe(false);
+    expect(validation.errors).toContain('You must provide a client or a connectionString');
+    expect(validation.errors).toContain('You must provide a resources map or array');
+  });
+
+  test('validateConfig should pass with valid client', () => {
+    
+    const replicator = new S3dbReplicator({}, ['users'], dbB);
+    const validation = replicator.validateConfig();
+    
+    expect(validation.isValid).toBe(true);
+    expect(validation.errors).toHaveLength(0);
+  });
+
+  test('validateConfig should pass with connectionString', () => {
+    
+    const replicator = new S3dbReplicator({
+      connectionString: 's3://test-bucket/test-path'
+    }, ['users']);
+    const validation = replicator.validateConfig();
+    
+    expect(validation.isValid).toBe(true);
+    expect(validation.errors).toHaveLength(0);
+  });
+
+  test('should normalize resources correctly - array format', () => {
+    
+    const replicator = new S3dbReplicator({}, ['users', 'orders'], dbB);
+    
+    expect(replicator.resourcesMap).toHaveProperty('users');
+    expect(replicator.resourcesMap).toHaveProperty('orders');
+  });
+
+  test('should normalize resources correctly - string format', () => {
+    
+    const replicator = new S3dbReplicator({}, { users: 'users' }, dbB);
+    
+    expect(replicator.resourcesMap).toHaveProperty('users');
+  });
+
+  test('should normalize resources correctly - function format', () => {
+    
+    const transformFn = (data) => ({ ...data, transformed: true });
+    const replicator = new S3dbReplicator({}, { users: transformFn }, dbB);
+    
+    expect(replicator.resourcesMap.users).toBe(transformFn);
+  });
+
+  test('should normalize resources correctly - object with transformer', () => {
+    
+    const config = {
+      users: { 
+        resource: 'people', 
+        transformer: (data) => ({ ...data, transformed: true }),
+        actions: ['insert', 'update']
+      }
+    };
+    const replicator = new S3dbReplicator({}, config, dbB);
+    
+    expect(replicator.resourcesMap.users).toEqual(expect.objectContaining({
+      resource: 'people',
+      transformer: expect.any(Function),
+      actions: ['insert', 'update']
+    }));
+  });
+
+  test('should handle null/undefined resources gracefully', () => {
+    
+    const replicator = new S3dbReplicator({}, null, dbB);
+    
+    expect(replicator.resourcesMap).toEqual({});
+  });
+});
+
+describe('S3DB Replicator - Internal Methods Tests', () => {
+  let dbA, dbB, replicator;
+
+  beforeEach(async () => {
+    dbA = createDatabaseForTest('s3db-internal-src');
+    dbB = createDatabaseForTest('s3db-internal-dst');
+    await Promise.all([dbA.connect(), dbB.connect()]);
+    
+    await dbB.createResource({
+      name: 'users',
+      attributes: { id: 'string', name: 'string', fullName: 'string|optional' }
+    });
+
+    
+    replicator = new S3dbReplicator({}, {
+      users: {
+        resource: 'users',
+        transformer: (data) => ({ ...data, fullName: `${data.name} (transformed)` })
+      }
+    }, dbB);
+  });
+
+  afterEach(async () => {
+    await Promise.all([
+      dbA?.disconnect?.(),
+      dbB?.disconnect?.()
+    ]);
+  });
+
+  test('_applyTransformer should transform data correctly', () => {
+    const data = { id: 'test', name: 'John' };
+    const transformed = replicator._applyTransformer('users', data);
+    
+    expect(transformed).toEqual({
+      id: 'test',
+      name: 'John',
+      fullName: 'John (transformed)'
+    });
+  });
+
+  test('_applyTransformer should preserve id when transformer result lacks id', () => {
+    
+    const testReplicator = new S3dbReplicator({}, {
+      users: {
+        resource: 'users',
+        transformer: (data) => ({ name: data.name }) // Doesn't include id
+      }
+    }, dbB);
+    
+    const data = { id: 'test', name: 'John' };
+    const transformed = testReplicator._applyTransformer('users', data);
+    
+    expect(transformed.id).toBe('test');
+  });
+
+  test('_applyTransformer should return original data if transformer returns null', () => {
+    
+    const testReplicator = new S3dbReplicator({}, {
+      users: {
+        resource: 'users',
+        transformer: () => null
+      }
+    }, dbB);
+    
+    const data = { id: 'test', name: 'John' };
+    const transformed = testReplicator._applyTransformer('users', data);
+    
+    expect(transformed).toEqual(data);
+  });
+
+  test('_resolveDestResource should resolve destination resource correctly', () => {
+    const destResource = replicator._resolveDestResource('users', {});
+    expect(destResource).toBe('users');
+  });
+
+  test('_resolveDestResource should handle array format', () => {
+    
+    const testReplicator = new S3dbReplicator({}, {
+      users: ['people', (data) => data]
+    }, dbB);
+    
+    const destResource = testReplicator._resolveDestResource('users', {});
+    expect(destResource).toBe('people');
+  });
+
+  test('_resolveDestResource should handle string mapping', () => {
+    
+    const testReplicator = new S3dbReplicator({}, {
+      users: 'people'
+    }, dbB);
+    
+    const destResource = testReplicator._resolveDestResource('users', {});
+    expect(destResource).toBe('people');
+  });
+
+  test('_getDestResourceObj should return resource object', () => {
+    const resourceObj = replicator._getDestResourceObj('users');
+    expect(resourceObj).toBe(dbB.resources.users);
+  });
+
+  test('_getDestResourceObj should throw error for non-existent resource', () => {
+    expect(() => {
+      replicator._getDestResourceObj('nonexistent');
+    }).toThrow('[S3dbReplicator] Destination resource not found: nonexistent');
+  });
+
+  test('shouldReplicateResource should return true for mapped resources', () => {
+    expect(replicator.shouldReplicateResource('users')).toBe(true);
+  });
+
+  test('shouldReplicateResource should return false for unmapped resources', () => {
+    expect(replicator.shouldReplicateResource('orders')).toBe(false);
+  });
+
+  test('shouldReplicateResource should respect actions filter', () => {
+    
+    const testReplicator = new S3dbReplicator({}, {
+      users: {
+        resource: 'users',
+        actions: ['insert']
+      }
+    }, dbB);
+    
+    expect(testReplicator.shouldReplicateResource('users', 'insert')).toBe(true);
+    expect(testReplicator.shouldReplicateResource('users', 'update')).toBe(false);
+  });
+
+  test('shouldReplicateResource should accept all actions when actions not specified', () => {
+    expect(replicator.shouldReplicateResource('users', 'insert')).toBe(true);
+    expect(replicator.shouldReplicateResource('users', 'update')).toBe(true);
+    expect(replicator.shouldReplicateResource('users', 'delete')).toBe(true);
+  });
+});
+
+describe('S3DB Replicator - Lifecycle Methods Tests', () => {
+  let dbA, dbB, replicator;
+
+  beforeEach(async () => {
+    dbA = createDatabaseForTest('s3db-lifecycle-src');
+    dbB = createDatabaseForTest('s3db-lifecycle-dst');
+    await Promise.all([dbA.connect(), dbB.connect()]);
+
+    
+    replicator = new S3dbReplicator({}, ['users'], dbB);
+  });
+
+  afterEach(async () => {
+    if (replicator) {
+      await replicator.cleanup();
+    }
+    await Promise.all([
+      dbA?.disconnect?.(),
+      dbB?.disconnect?.()
+    ]);
+  });
+
+  test('initialize should setup target database with client', async () => {
+    await replicator.initialize(dbA);
+    expect(replicator.targetDatabase).toBe(dbB);
+  });
+
+  test('initialize should throw error when no client or connectionString', async () => {
+    
+    const badReplicator = new S3dbReplicator({}, ['users'], null);
+    
+    await expect(badReplicator.initialize(dbA)).rejects.toThrow(
+      'S3dbReplicator: No client or connectionString provided'
+    );
+  });
+
+  test('testConnection should return true for valid connection', async () => {
+    await replicator.initialize(dbA);
+    const result = await replicator.testConnection();
+    expect(result).toBe(true);
+  });
+
+  test('testConnection should return false and emit error for invalid connection', async () => {
+    
+    const badReplicator = new S3dbReplicator({}, ['users'], null);
+    
+    let errorEmitted = false;
+    badReplicator.on('connection_error', () => {
+      errorEmitted = true;
+    });
+    
+    const result = await badReplicator.testConnection();
+    expect(result).toBe(false);
+    expect(errorEmitted).toBe(true);
+  });
+
+  test('getStatus should return comprehensive status', async () => {
+    await replicator.initialize(dbA);
+    const status = await replicator.getStatus();
+    
+    expect(status).toEqual(expect.objectContaining({
+      connected: true,
+      targetDatabase: expect.any(String),
+      resources: ['users'],
+      totalreplicators: expect.any(Number),
+      totalErrors: expect.any(Number)
+    }));
+  });
+
+  test('cleanup should properly cleanup target database', async () => {
+    await replicator.initialize(dbA);
+    expect(replicator.targetDatabase).toBeDefined();
+    
+    await replicator.cleanup();
+    // Verify cleanup was called
+    expect(replicator.targetDatabase.listenerCount()).toBe(0);
+  });
+});
+
+describe('S3DB Replicator - Batch Operations Tests', () => {
+  let dbA, dbB, plugin;
+
+  beforeEach(async () => {
+    dbA = createDatabaseForTest('s3db-batch-src');
+    dbB = createDatabaseForTest('s3db-batch-dst');
+    await Promise.all([dbA.connect(), dbB.connect()]);
+    
+    await Promise.all([
+      dbA.createResource({
+        name: 'users',
+        attributes: { id: 'string', name: 'string' }
+      }),
+      dbB.createResource({
+        name: 'users',
+        attributes: { id: 'string', name: 'string' }
+      })
+    ]);
+
+    plugin = new ReplicatorPlugin({
+      verbose: false,
+      persistReplicatorLog: false,
+      replicators: [
+        {
+          driver: 's3db',
+          client: dbB,
+          resources: {
+            users: { resource: 'users', actions: ['insert', 'update', 'delete'] }
+          }
+        }
+      ]
+    });
+    await plugin.setup(dbA);
+  });
+
+  afterEach(async () => {
+    if (plugin) {
+      await plugin.cleanup();
+    }
+    await Promise.all([
+      dbA?.disconnect?.(),
+      dbB?.disconnect?.()
+    ]);
+  });
+
+  test('replicateBatch should skip when resource not included', async () => {
+    const s3dbReplicator = plugin.replicators[0].instance;
+    const records = [
+      { id: 'test1', operation: 'insert', data: { id: 'test1', name: 'Test 1' } }
+    ];
+    
+    const result = await s3dbReplicator.replicateBatch('orders', records);
+    expect(result).toEqual({ skipped: true, reason: 'resource_not_included' });
+  });
+
+  test('replicateBatch should process multiple records successfully', async () => {
+    const s3dbReplicator = plugin.replicators[0].instance;
+    const records = [
+      { id: 'batch1', operation: 'insert', data: { id: 'batch1', name: 'Batch User 1' } },
+      { id: 'batch2', operation: 'insert', data: { id: 'batch2', name: 'Batch User 2' } }
+    ];
+
+    let batchEmitted = false;
+    s3dbReplicator.on('batch_replicated', (event) => {
+      batchEmitted = true;
+      expect(event.resourceName).toBe('users');
+      expect(event.total).toBe(2);
+    });
+    
+    const result = await s3dbReplicator.replicateBatch('users', records);
+    
+    expect(result).toBeDefined();
+    expect(result.success).toBe(true);
+    expect(result.total).toBe(2);
+    expect(result.errors).toHaveLength(0);
+    expect(batchEmitted).toBe(true);
+  });
+
+  test('replicateBatch should handle errors gracefully', async () => {
+    const s3dbReplicator = plugin.replicators[0].instance;
+    const records = [
+      { id: 'good', operation: 'insert', data: { id: 'good', name: 'Good User' } },
+      { id: 'bad', operation: 'invalid_op', data: { id: 'bad', name: 'Bad User' } }
+    ];
+    
+    const result = await s3dbReplicator.replicateBatch('users', records);
+    
+    expect(result.success).toBe(false);
+    expect(result.total).toBe(2);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('S3DB Replicator - Error Handling Tests', () => {
+  test('should handle initialize errors gracefully', async () => {
+    
+    const replicator = new S3dbReplicator({
+      connectionString: 'invalid://connection/string'
+    }, ['users']);
+    
+    await expect(replicator.initialize(null)).rejects.toThrow();
+  });
+
+  test('should emit connected event on successful initialization', async () => {
+    const dbA = createDatabaseForTest('s3db-event-src');
+    const dbB = createDatabaseForTest('s3db-event-dst');
+    
+    try {
+      await Promise.all([dbA.connect(), dbB.connect()]);
+      
+      
+      const replicator = new S3dbReplicator({}, ['users'], dbB);
+      
+      let eventEmitted = false;
+      replicator.on('connected', (event) => {
+        eventEmitted = true;
+        expect(event.replicator).toBeDefined();
+      });
+      
+      await replicator.initialize(dbA);
+      expect(eventEmitted).toBe(true);
+      
+      await replicator.cleanup();
+    } finally {
+      await Promise.all([
+        dbA?.disconnect?.(),
+        dbB?.disconnect?.()
+      ]);
+    }
+  });
 });

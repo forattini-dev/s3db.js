@@ -16,8 +16,6 @@ export class FullTextPlugin extends Plugin {
   async setup(database) {
     this.database = database;
     
-    if (!this.config.enabled) return;
-
     // Create index resource if it doesn't exist
     const [ok, err, indexResource] = await tryFn(() => database.createResource({
         name: 'fulltext_indexes',
