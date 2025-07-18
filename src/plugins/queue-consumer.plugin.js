@@ -22,7 +22,6 @@ import tryFn from "../concerns/try-fn.js";
 
 export default class QueueConsumerPlugin {
   constructor(options = {}) {
-
     this.options = options;
     // Novo padrão: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
@@ -31,7 +30,6 @@ export default class QueueConsumerPlugin {
 
   async setup(database) {
     this.database = database;
-    if (!this.enabled) return;
     
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;

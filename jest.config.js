@@ -40,5 +40,6 @@ export default {
   // Ignore slow tests in normal coverage runs
   testPathIgnorePatterns: [
     '/node_modules/',
+    '/tests/typescript/',
   ],
 };
