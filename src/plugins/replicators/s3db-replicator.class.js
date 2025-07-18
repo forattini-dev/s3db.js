@@ -60,6 +60,7 @@ class S3dbReplicator extends BaseReplicator {
     super(config);
     this.instanceId = Math.random().toString(36).slice(2, 10);
     this.client = client;
+    this.connectionString = config.connectionString;
     // Robustness: ensure object
     let normalizedResources = resources;
     if (!resources) normalizedResources = {};
@@ -130,7 +131,7 @@ class S3dbReplicator extends BaseReplicator {
     if (!this.client && !this.connectionString) {
       errors.push('You must provide a client or a connectionString');
     }
-    if (!this.resources || (Array.isArray(this.resources) && this.resources.length === 0) || (typeof this.resources === 'object' && Object.keys(this.resources).length === 0)) {
+    if (!this.resourcesMap || (typeof this.resourcesMap === 'object' && Object.keys(this.resourcesMap).length === 0)) {
       errors.push('You must provide a resources map or array');
     }
     return { isValid: errors.length === 0, errors };
@@ -145,7 +146,6 @@ class S3dbReplicator extends BaseReplicator {
     const targetConfig = {
       connectionString: this.connectionString,
       region: this.region,
-      bucket: this.bucket,
       keyPrefix: this.keyPrefix,
       verbose: this.config.verbose || false
     };
@@ -156,7 +156,7 @@ class S3dbReplicator extends BaseReplicator {
       }
     this.emit('connected', { 
       replicator: this.name, 
-      target: this.connectionString || this.bucket 
+      target: this.connectionString || 'client-provided'
     });
     } catch (err) {
       throw err;
@@ -179,6 +179,8 @@ class S3dbReplicator extends BaseReplicator {
       result = await destResourceObj.update(explicitId, transformedData);
     } else if (operation === 'delete') {
       result = await destResourceObj.delete(explicitId);
+    } else {
+      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
     }
     
     return result;
@@ -246,13 +248,13 @@ class S3dbReplicator extends BaseReplicator {
     const errors = [];
 
     for (const record of records) {
-      const [ok, err, result] = await tryFn(() => this.replicate(
-        resourceName, 
-        record.operation, 
-        record.id, 
-        record.data, 
-        record.beforeData
-      ));
+      const [ok, err, result] = await tryFn(() => this.replicate({
+        resource: resourceName, 
+        operation: record.operation, 
+        id: record.id, 
+        data: record.data, 
+        beforeData: record.beforeData
+      }));
       if (ok) results.push(result);
       else errors.push({ id: record.id, error: err.message });
     }
@@ -261,7 +263,7 @@ class S3dbReplicator extends BaseReplicator {
       replicator: this.name,
       resourceName,
       total: records.length,
-      successful: results.filter(r => r.success).length,
+      successful: results.length,
       errors: errors.length
     });
 
@@ -295,8 +297,8 @@ class S3dbReplicator extends BaseReplicator {
     return {
       ...baseStatus,
       connected: !!this.targetDatabase,
-      targetDatabase: this.connectionString || this.bucket,
-      resources: this.resources,
+      targetDatabase: this.connectionString || 'client-provided',
+      resources: Object.keys(this.resourcesMap || {}),
       totalreplicators: this.listenerCount('replicated'),
       totalErrors: this.listenerCount('replicator_error')
     };
@@ -314,6 +316,10 @@ class S3dbReplicator extends BaseReplicator {
     const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) return false;
+    
+    // If no action is specified, just check if resource is configured
+    if (!action) return true;
+    
     // Suporte a todos os estilos de configuração
     // Se for array de objetos, checar actions
     if (Array.isArray(entry)) {

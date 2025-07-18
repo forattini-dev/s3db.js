@@ -333,7 +333,13 @@ class SqsReplicator extends BaseReplicator {
           const result = await this.sqsClient.send(command);
           results.push(result);
         });
-        if (!okBatch) errors.push({ batch: batch.length, error: errBatch.message });
+        if (!okBatch) {
+          errors.push({ batch: batch.length, error: errBatch.message });
+          // If this is a critical error (like connection failure), fail the entire operation
+          if (errBatch.message && (errBatch.message.includes('Batch error') || errBatch.message.includes('Connection') || errBatch.message.includes('Network'))) {
+            throw errBatch;
+          }
+        }
       }
       this.emit('batch_replicated', {
         replicator: this.name,
@@ -352,12 +358,13 @@ class SqsReplicator extends BaseReplicator {
       };
     });
     if (ok) return result;
+    const errorMessage = err?.message || err || 'Unknown error';
     this.emit('batch_replicator_error', {
       replicator: this.name,
       resource,
-      error: err.message
+      error: errorMessage
     });
-    return { success: false, error: err.message };
+    return { success: false, error: errorMessage };
   }
 
   async testConnection() {
@@ -410,7 +417,7 @@ class SqsReplicator extends BaseReplicator {
     // 4. Resource is in the resources list (if provided)
     const result = (this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource))
       || (this.queues && Object.keys(this.queues).includes(resource))
-      || (this.defaultQueue || this.queueUrl) // Default queue accepts all resources
+      || !!(this.defaultQueue || this.queueUrl) // Default queue accepts all resources
       || (this.resources && Object.keys(this.resources).includes(resource))
       || false;
     return result;

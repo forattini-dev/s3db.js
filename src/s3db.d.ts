@@ -1,4 +1,7 @@
 declare module 's3db.js' {
+  import { EventEmitter } from 'events';
+  import { Readable, Writable } from 'stream';
+
   // ============================================================================
   // CORE TYPES
   // ============================================================================
@@ -17,8 +20,8 @@ declare module 's3db.js' {
     parallelism?: number | string;
     passphrase?: string;
     versioningEnabled?: boolean;
-    cache?: CacheConfig;
-    plugins?: Plugin[] | PluginFunction[];
+    cache?: CacheConfig | boolean;
+    plugins?: (PluginInterface | PluginFunction)[];
     client?: Client;
   }
 
@@ -26,8 +29,9 @@ declare module 's3db.js' {
   export interface ResourceConfig {
     name: string;
     client: Client;
+    database?: Database;
     version?: string;
-    attributes?: Record<string, any>;
+    attributes: Record<string, any>;
     behavior?: BehaviorName;
     passphrase?: string;
     parallelism?: number;
@@ -42,6 +46,7 @@ declare module 's3db.js' {
     idGenerator?: Function | number;
     idSize?: number;
     versioningEnabled?: boolean;
+    map?: any;
   }
 
   /** Partition configuration */
@@ -52,11 +57,11 @@ declare module 's3db.js' {
 
   /** Hook configuration */
   export interface HookConfig {
-    preInsert?: Function[];
+    beforeInsert?: Function[];
     afterInsert?: Function[];
-    preUpdate?: Function[];
+    beforeUpdate?: Function[];
     afterUpdate?: Function[];
-    preDelete?: Function[];
+    beforeDelete?: Function[];
     afterDelete?: Function[];
   }
 
@@ -158,9 +163,11 @@ declare module 's3db.js' {
   /** Data Truncate Behavior config */
   export interface DataTruncateBehaviorConfig {
     enabled?: boolean;
+    truncateIndicator?: string;
+    priorityFields?: string[];
+    preserveStructure?: boolean;
     fieldLimits?: Record<string, number>;
     defaultLimit?: number;
-    truncateIndicator?: string;
     truncateMode?: 'end' | 'start' | 'middle';
     preserveWords?: boolean;
     preserveSentences?: boolean;
@@ -184,12 +191,14 @@ declare module 's3db.js' {
   /** Body Overflow Behavior config */
   export interface BodyOverflowBehaviorConfig {
     enabled?: boolean;
+    metadataReserve?: number;
+    priorityFields?: string[];
+    preserveOrder?: boolean;
     maxBodySize?: number;
     overflowStrategy?: 'truncate' | 'split' | 'reject';
     truncateMode?: 'end' | 'start' | 'middle';
     truncateIndicator?: string;
     preserveStructure?: boolean;
-    priorityFields?: string[];
     overflowFields?: string[];
     overflowStorage?: {
       type?: 's3' | 'local' | 'memory';
@@ -229,10 +238,10 @@ declare module 's3db.js' {
   // ============================================================================
 
   /** Plugin function type */
-  export type PluginFunction = (database: Database) => Plugin;
+  export type PluginFunction = (database: Database) => PluginInterface;
 
   /** Plugin base interface */
-  export interface Plugin {
+  export interface PluginInterface {
     name?: string;
     setup?: (database: Database) => Promise<void> | void;
     start?: () => Promise<void> | void;
@@ -297,9 +306,59 @@ declare module 's3db.js' {
     exportToCloudWatch?: boolean;
   }
 
-  /** replicator Plugin config */
+  /** Queue Consumer Plugin config */
+  export interface QueueConsumerPluginConfig extends PluginConfig {
+    consumers?: QueueConsumerConfig[];
+  }
+
+  /** Replicator Plugin config */
   export interface ReplicatorPluginConfig extends PluginConfig {
     replicators?: ReplicatorConfig[];
+  }
+
+  // ============================================================================
+  // QUEUE CONSUMER TYPES
+  // ============================================================================
+
+  /** Queue Consumer configuration */
+  export interface QueueConsumerConfig {
+    driver: 'sqs' | 'rabbitmq';
+    config: SQSConsumerConfig | RabbitMQConsumerConfig;
+    resources?: string[];
+  }
+
+  /** SQS Consumer config */
+  export interface SQSConsumerConfig {
+    region: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
+    queueUrl: string;
+    maxNumberOfMessages?: number;
+    waitTimeSeconds?: number;
+    visibilityTimeout?: number;
+    messageRetentionPeriod?: number;
+    maxReceiveCount?: number;
+    deadLetterQueueUrl?: string;
+    logMessages?: boolean;
+    autoDeleteMessages?: boolean;
+    sqsClientOptions?: Record<string, any>;
+  }
+
+  /** RabbitMQ Consumer config */
+  export interface RabbitMQConsumerConfig {
+    connectionUrl: string;
+    queueName: string;
+    exchangeName?: string;
+    routingKey?: string;
+    durable?: boolean;
+    autoDelete?: boolean;
+    exclusive?: boolean;
+    arguments?: Record<string, any>;
+    prefetch?: number;
+    autoAck?: boolean;
+    logMessages?: boolean;
+    connectionOptions?: Record<string, any>;
   }
 
   // ============================================================================
@@ -518,9 +577,9 @@ declare module 's3db.js' {
     options: DatabaseConfig;
     verbose: boolean;
     parallelism: number;
-    plugins: Plugin[];
-    pluginList: Plugin[];
-    cache: CacheConfig;
+    plugins: Record<string, PluginInterface>;
+    pluginList: PluginInterface[];
+    cache: CacheConfig | boolean;
     passphrase: string;
     versioningEnabled: boolean;
     client: Client;
@@ -529,33 +588,51 @@ declare module 's3db.js' {
     
     // Connection methods
     connect(): Promise<void>;
+    disconnect(): Promise<void>;
     isConnected(): boolean;
     
     // Resource methods
     createResource(config: ResourceConfig): Promise<Resource>;
     resource(name: string): Resource;
-    getResource(name: string): Resource;
-    listResources(): Promise<string[]>;
+    getResource(name: string): Promise<Resource>;
+    listResources(): Promise<Array<{ name: string }>>;
+    resourceExists(name: string): boolean;
+    resourceExistsWithSameHash(config: { 
+      name: string; 
+      attributes: any; 
+      behavior?: string; 
+      partitions?: Record<string, PartitionConfig>;
+      options?: any;
+    }): { exists: boolean; sameHash: boolean; hash: string | null; existingHash?: string };
     
     // Plugin methods
     startPlugins(): Promise<void>;
-    usePlugin(plugin: Plugin | PluginFunction, name?: string): Promise<void>;
+    usePlugin(plugin: PluginInterface | PluginFunction, name?: string): Promise<PluginInterface>;
     
     // Utility methods
     generateDefinitionHash(definition: any, behavior?: string): string;
     getNextVersion(versions?: Record<string, any>): string;
     detectDefinitionChanges(savedMetadata: any): DefinitionChangeEvent[];
-    resourceExists(name: string): boolean;
-    resourceExistsWithSameHash(config: { name: string; attributes: any; behavior?: string; options?: any }): boolean;
     uploadMetadataFile(): Promise<void>;
     blankMetadataStructure(): any;
     
     // Configuration
-    get config(): DatabaseConfig;
+    get config(): {
+      version: string;
+      s3dbVersion: string;
+      bucket: string;
+      keyPrefix: string;
+      parallelism: number;
+      verbose: boolean;
+    };
     
     // Events
     on(event: 'connected', handler: (date: Date) => void): this;
+    on(event: 'disconnected', handler: (date: Date) => void): this;
+    on(event: 'metadataUploaded', handler: (metadata: any) => void): this;
     on(event: 'resourceDefinitionsChanged', handler: (data: { changes: DefinitionChangeEvent[]; metadata: any }) => void): this;
+    on(event: 's3db.resourceCreated', handler: (name: string) => void): this;
+    on(event: 's3db.resourceUpdated', handler: (name: string) => void): this;
     on(event: string, handler: (...args: any[]) => void): this;
   }
 
@@ -569,6 +646,7 @@ declare module 's3db.js' {
     // Properties
     name: string;
     client: Client;
+    database?: Database;
     version: string;
     behavior: BehaviorName;
     observers: any[];
@@ -586,17 +664,19 @@ declare module 's3db.js' {
       allNestedObjectsOptional: boolean;
     };
     hooks: {
-      preInsert: Function[];
+      beforeInsert: Function[];
       afterInsert: Function[];
-      preUpdate: Function[];
+      beforeUpdate: Function[];
       afterUpdate: Function[];
-      preDelete: Function[];
+      beforeDelete: Function[];
       afterDelete: Function[];
     };
     attributes: Record<string, any>;
+    schema: Schema;
+    map: any;
     
     // CRUD operations
-    insert(data: any, options?: InsertOptions): Promise<any>;
+    insert(data: any): Promise<any>;
     insertMany(objects: any[]): Promise<any[]>;
     get(id: string): Promise<any>;
     exists(id: string): Promise<boolean>;
@@ -619,11 +699,26 @@ declare module 's3db.js' {
     getAll(): Promise<any[]>;
     
     // Pagination
-    page(options?: PageOptions): Promise<{ data: any[]; total?: number; offset: number; size: number; hasMore: boolean }>;
+    page(options?: PageOptions): Promise<{ 
+      items: any[]; 
+      totalItems?: number; 
+      page: number; 
+      pageSize: number; 
+      totalPages?: number; 
+      hasMore: boolean;
+      _debug: {
+        requestedSize: number;
+        requestedOffset: number;
+        actualItemsReturned: number;
+        skipCount: boolean;
+        hasTotalItems: boolean;
+        error?: string;
+      };
+    }>;
     
     // Stream operations
-    readable(): Promise<NodeJS.ReadableStream>;
-    writable(): Promise<NodeJS.WritableStream>;
+    readable(): Promise<Readable>;
+    writable(): Promise<Writable>;
     
     // Content operations
     setContent(options: { id: string; buffer: Buffer; contentType?: string }): Promise<void>;
@@ -632,8 +727,13 @@ declare module 's3db.js' {
     deleteContent(id: string): Promise<void>;
     
     // Schema and validation
-    updateAttributes(newAttributes: Record<string, any>): void;
-    validate(data: any): Promise<boolean>;
+    updateAttributes(newAttributes: Record<string, any>): { oldAttributes: Record<string, any>; newAttributes: Record<string, any> };
+    validate(data: any): Promise<{ 
+      original: any; 
+      isValid: boolean; 
+      errors: any[]; 
+      data: any; 
+    }>;
     validatePartitions(): void;
     
     // Partition operations
@@ -646,6 +746,7 @@ declare module 's3db.js' {
     // Versioning operations
     createHistoricalVersion(id: string, data: any): Promise<void>;
     applyVersionMapping(data: any, fromVersion: string, toVersion: string): any;
+    getSchemaForVersion(version: string): Promise<Schema>;
     
     // Hook operations
     addHook(event: string, fn: Function): void;
@@ -656,11 +757,15 @@ declare module 's3db.js' {
     getDefinitionHash(): string;
     export(): any;
     get options(): any;
+    applyDefaults(data: any): any;
     
     // Events
     on(event: 'exceedsLimit', handler: (event: ExceedsLimitEvent) => void): this;
     on(event: 'truncate', handler: (event: TruncateEvent) => void): this;
     on(event: 'overflow', handler: (event: OverflowEvent) => void): this;
+    on(event: 'versionUpdated', handler: (event: { oldVersion: string; newVersion: string }) => void): this;
+    on(event: 'get', handler: (data: any) => void): this;
+    on(event: 'page', handler: (result: any) => void): this;
     on(event: string, handler: (...args: any[]) => void): this;
   }
 
@@ -682,28 +787,47 @@ declare module 's3db.js' {
     client: any;
     
     // S3 operations
-    putObject(options: { key: string; metadata?: Record<string, any>; contentType?: string; body?: Buffer; contentEncoding?: string; contentLength?: number }): Promise<any>;
+    putObject(options: { 
+      key: string; 
+      metadata?: Record<string, any>; 
+      contentType?: string; 
+      body?: Buffer; 
+      contentEncoding?: string; 
+      contentLength?: number;
+    }): Promise<any>;
     getObject(key: string): Promise<any>;
     headObject(key: string): Promise<any>;
     copyObject(options: { from: string; to: string }): Promise<any>;
     exists(key: string): Promise<boolean>;
     deleteObject(key: string): Promise<any>;
-    deleteObjects(keys: string[]): Promise<any>;
-    deleteAll(options?: { prefix?: string }): Promise<any>;
-    moveObject(options: { from: string; to: string }): Promise<any>;
-    moveAllObjects(options: { prefixFrom: string; prefixTo: string }): Promise<any>;
+    deleteObjects(keys: string[]): Promise<{ deleted: any[]; notFound: any[] }>;
+    deleteAll(options?: { prefix?: string }): Promise<number>;
+    moveObject(options: { from: string; to: string }): Promise<boolean>;
+    moveAllObjects(options: { prefixFrom: string; prefixTo: string }): Promise<string[]>;
     
     // List operations
-    listObjects(options?: { prefix?: string; maxKeys?: number; continuationToken?: string }): Promise<any>;
+    listObjects(options?: { 
+      prefix?: string; 
+      maxKeys?: number; 
+      continuationToken?: string;
+    }): Promise<any>;
     count(options?: { prefix?: string }): Promise<number>;
     getAllKeys(options?: { prefix?: string }): Promise<string[]>;
-    getContinuationTokenAfterOffset(params?: { prefix?: string; offset?: number; maxKeys?: number; continuationToken?: string }): Promise<string | null>;
-    getKeysPage(params?: { prefix?: string; offset?: number; amount?: number; continuationToken?: string }): Promise<{ keys: string[]; continuationToken?: string }>;
+    getContinuationTokenAfterOffset(params?: { 
+      prefix?: string; 
+      offset?: number; 
+      maxKeys?: number; 
+      continuationToken?: string;
+    }): Promise<string | null>;
+    getKeysPage(params?: { 
+      prefix?: string; 
+      offset?: number; 
+      amount?: number;
+    }): Promise<string[]>;
     
     // Utility methods
     createClient(): any;
     sendCommand(command: any): Promise<any>;
-    errorProxy(error: any, data: any): Error;
     
     // Events
     on(event: 'command.request', handler: (commandName: string, input: any) => void): this;
@@ -712,6 +836,15 @@ declare module 's3db.js' {
     on(event: 'getObject', handler: (response: any, options: any) => void): this;
     on(event: 'headObject', handler: (response: any, options: any) => void): this;
     on(event: 'copyObject', handler: (response: any, options: any) => void): this;
+    on(event: 'deleteObjects', handler: (report: any, keys: string[]) => void): this;
+    on(event: 'deleteAll', handler: (data: { prefix?: string; batch: number; total: number }) => void): this;
+    on(event: 'deleteAllComplete', handler: (data: { prefix?: string; totalDeleted: number }) => void): this;
+    on(event: 'listObjects', handler: (response: any, options: any) => void): this;
+    on(event: 'count', handler: (count: number, options: any) => void): this;
+    on(event: 'getAllKeys', handler: (keys: string[], options: any) => void): this;
+    on(event: 'getContinuationTokenAfterOffset', handler: (token: string | null, params: any) => void): this;
+    on(event: 'getKeysPage', handler: (keys: string[], params: any) => void): this;
+    on(event: 'moveAllObjects', handler: (result: { results: string[]; errors: any[] }, options: any) => void): this;
     on(event: string, handler: (...args: any[]) => void): this;
   }
 
@@ -732,8 +865,16 @@ declare module 's3db.js' {
 
   /** Schema class */
   export class Schema {
-    constructor(attributes?: Record<string, any>, options?: any);
-    validate(data: any, options?: any): boolean;
+    constructor(config: {
+      name?: string;
+      attributes?: Record<string, any>;
+      passphrase?: string;
+      version?: string;
+      options?: any;
+      map?: any;
+    });
+    
+    validate(data: any, options?: any): Promise<boolean | any[]>;
     migrate(data: any, fromVersion: string, toVersion: string): any;
     export(): any;
     import(data: any): void;
@@ -747,6 +888,8 @@ declare module 's3db.js' {
     toBool(value: any): boolean;
     fromBool(value: any): boolean;
     extractObjectKeys(obj: any): string[];
+    unmapper(metadata: any): Promise<any>;
+    map: any;
   }
 
   /** Validator class */
@@ -755,6 +898,10 @@ declare module 's3db.js' {
     validate(data: any): boolean;
     getErrors(): string[];
   }
+
+  // ============================================================================
+  // CACHE CLASSES
+  // ============================================================================
 
   /** Cache base class */
   export class Cache {
@@ -773,7 +920,7 @@ declare module 's3db.js' {
 
   /** S3 Cache class */
   export class S3Cache extends Cache {
-    constructor(config?: S3CacheConfig);
+    constructor(config: S3CacheConfig);
   }
 
   // ============================================================================
@@ -781,7 +928,7 @@ declare module 's3db.js' {
   // ============================================================================
 
   /** Plugin base class */
-  export class PluginBase extends EventEmitter implements Plugin {
+  export class Plugin extends EventEmitter implements PluginInterface {
     constructor(options?: any);
     name: string;
     options: any;
@@ -806,7 +953,7 @@ declare module 's3db.js' {
   }
 
   /** Audit Plugin */
-  export class AuditPlugin extends PluginBase {
+  export class AuditPlugin extends Plugin {
     constructor(config?: AuditPluginConfig);
     logAudit(operation: string, resourceName: string, recordId: string, data?: any, oldData?: any): Promise<void>;
     getAuditLogs(filters?: any): Promise<any[]>;
@@ -814,7 +961,7 @@ declare module 's3db.js' {
   }
 
   /** Cache Plugin */
-  export class CachePlugin extends PluginBase {
+  export class CachePlugin extends Plugin {
     constructor(config?: CachePluginConfig);
     cacheKeyFor(action: string, params?: any): string;
     getCacheStats(): any;
@@ -823,7 +970,7 @@ declare module 's3db.js' {
   }
 
   /** Costs Plugin */
-  export class CostsPlugin extends PluginBase {
+  export class CostsPlugin extends Plugin {
     constructor(config?: CostsPluginConfig);
     trackOperation(operation: string, size: number, metadata?: any): void;
     getCosts(): any;
@@ -831,7 +978,7 @@ declare module 's3db.js' {
   }
 
   /** Fulltext Plugin */
-  export class FulltextPlugin extends PluginBase {
+  export class FullTextPlugin extends Plugin {
     constructor(config?: FulltextPluginConfig);
     search(query: string, options?: any): Promise<any[]>;
     indexResource(resourceName: string): Promise<void>;
@@ -840,7 +987,7 @@ declare module 's3db.js' {
   }
 
   /** Metrics Plugin */
-  export class MetricsPlugin extends PluginBase {
+  export class MetricsPlugin extends Plugin {
     constructor(config?: MetricsPluginConfig);
     trackOperation(operation: string, duration: number, success: boolean): void;
     getMetrics(): any;
@@ -849,14 +996,57 @@ declare module 's3db.js' {
     getStats(): any;
   }
 
-  /** replicator Plugin */
-  export class ReplicatorPlugin extends PluginBase {
+  /** Queue Consumer Plugin */
+  export class QueueConsumerPlugin {
+    constructor(config?: QueueConsumerPluginConfig);
+    setup(database: Database): Promise<void>;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    getConsumerStats(): any;
+    getConsumerLogs(filters?: any): Promise<any[]>;
+  }
+
+  /** Replicator Plugin */
+  export class ReplicatorPlugin extends Plugin {
     constructor(config?: ReplicatorPluginConfig);
     replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
-    getreplicatorStats(): any;
-    getreplicatorLogs(filters?: any): Promise<any[]>;
-    retryFailedreplicators(): Promise<void>;
+    getReplicatorStats(): any;
+    getReplicatorLogs(filters?: any): Promise<any[]>;
+    retryFailedReplications(): Promise<void>;
     syncAllData(targetName: string): Promise<void>;
+  }
+
+  // ============================================================================
+  // REPLICATOR CLASSES
+  // ============================================================================
+
+  /** Base Replicator class */
+  export class BaseReplicator {
+    constructor(config: any);
+    replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
+    syncData(resourceName: string, data: any[]): Promise<void>;
+    getStats(): any;
+    getLogs(filters?: any): Promise<any[]>;
+  }
+
+  /** S3DB Replicator class */
+  export class S3dbReplicator extends BaseReplicator {
+    constructor(config: S3dbReplicatorConfig);
+  }
+
+  /** SQS Replicator class */
+  export class SqsReplicator extends BaseReplicator {
+    constructor(config: SQSReplicatorConfig);
+  }
+
+  /** BigQuery Replicator class */
+  export class BigqueryReplicator extends BaseReplicator {
+    constructor(config: BigQueryReplicatorConfig);
+  }
+
+  /** Postgres Replicator class */
+  export class PostgresReplicator extends BaseReplicator {
+    constructor(config: PostgresReplicatorConfig);
   }
 
   // ============================================================================
@@ -864,23 +1054,27 @@ declare module 's3db.js' {
   // ============================================================================
 
   /** Resource Reader Stream */
-  export class ResourceReader extends NodeJS.ReadableStream {
-    constructor(resource: Resource, options?: any);
+  export class ResourceReader extends Readable {
+    constructor(config: { resource: Resource; options?: any });
+    build(): Promise<Readable>;
   }
 
   /** Resource Writer Stream */
-  export class ResourceWriter extends NodeJS.WritableStream {
-    constructor(resource: Resource, options?: any);
+  export class ResourceWriter extends Writable {
+    constructor(config: { resource: Resource; options?: any });
+    build(): Promise<Writable>;
   }
 
   /** Resource IDs Reader Stream */
-  export class ResourceIdsReader extends NodeJS.ReadableStream {
-    constructor(resource: Resource, options?: any);
+  export class ResourceIdsReader extends Readable {
+    constructor(config: { resource: Resource; options?: any });
+    build(): Promise<Readable>;
   }
 
   /** Resource IDs Page Reader Stream */
-  export class ResourceIdsPageReader extends NodeJS.ReadableStream {
-    constructor(resource: Resource, options?: any);
+  export class ResourceIdsPageReader extends Readable {
+    constructor(config: { resource: Resource; options?: any });
+    build(): Promise<Readable>;
   }
 
   // ============================================================================
@@ -889,37 +1083,88 @@ declare module 's3db.js' {
 
   /** Base S3db error */
   export class BaseError extends Error {
-    constructor(message: string, code?: string);
+    constructor(config: {
+      verbose?: boolean;
+      bucket?: string;
+      key?: string;
+      message: string;
+      code?: string;
+      statusCode?: number;
+      requestId?: string;
+      awsMessage?: string;
+      original?: Error;
+      commandName?: string;
+      commandInput?: any;
+      metadata?: any;
+      suggestion?: string;
+      [key: string]: any;
+    });
+    
+    bucket?: string;
+    key?: string;
+    thrownAt: Date;
+    code?: string;
+    statusCode?: number;
+    requestId?: string;
+    awsMessage?: string;
+    original?: Error;
+    commandName?: string;
+    commandInput?: any;
+    metadata?: any;
+    suggestion?: string;
+    data: any;
+    
+    toJson(): any;
   }
 
   /** Not Found error */
   export class NotFound extends BaseError {
-    constructor(message: string);
+    constructor(config: any);
   }
 
   /** No Such Key error */
   export class NoSuchKey extends BaseError {
-    constructor(message: string);
+    constructor(config: any);
   }
 
   /** No Such Bucket error */
   export class NoSuchBucket extends BaseError {
-    constructor(message: string);
+    constructor(config: any);
   }
 
   /** Unknown Error */
   export class UnknownError extends BaseError {
-    constructor(message: string);
+    constructor(message: string, config?: any);
   }
 
   /** Missing Metadata error */
   export class MissingMetadata extends BaseError {
-    constructor(message: string);
+    constructor(config: any);
   }
 
   /** Invalid Resource Item error */
   export class InvalidResourceItem extends BaseError {
-    constructor(message: string);
+    constructor(config: any);
+  }
+
+  /** Resource Error */
+  export class ResourceError extends BaseError {
+    constructor(message: string, config?: any);
+  }
+
+  /** Resource Not Found error */
+  export class ResourceNotFound extends BaseError {
+    constructor(config: any);
+  }
+
+  /** Partition Error */
+  export class PartitionError extends BaseError {
+    constructor(config: any);
+  }
+
+  /** Crypto Error */
+  export class CryptoError extends BaseError {
+    constructor(message: string, config?: any);
   }
 
   // ============================================================================
@@ -927,7 +1172,7 @@ declare module 's3db.js' {
   // ============================================================================
 
   /** Convert stream to string */
-  export function streamToString(stream: NodeJS.ReadableStream): Promise<string>;
+  export function streamToString(stream: Readable): Promise<string>;
 
   /** Encrypt data */
   export function encrypt(data: any, passphrase: string): Promise<string>;
@@ -935,14 +1180,47 @@ declare module 's3db.js' {
   /** Decrypt data */
   export function decrypt(encryptedData: string, passphrase: string): Promise<any>;
 
+  /** SHA256 hash function */
+  export function sha256(message: string): Promise<ArrayBuffer>;
+
   /** Generate ID */
   export function idGenerator(): string;
 
   /** Generate password */
   export function passwordGenerator(length?: number): string;
 
+  /** Try function wrapper */
+  export function tryFn<T>(fn: () => Promise<T>): Promise<[boolean, Error | null, T | null]>;
+  export function tryFnSync<T>(fn: () => T): [boolean, Error | null, T | null];
+
+  /** Calculate total size in bytes */
+  export function calculateTotalSize(data: any): number;
+
+  /** Calculate effective limit */
+  export function calculateEffectiveLimit(config: {
+    s3Limit: number;
+    systemConfig: {
+      version?: string;
+      timestamps?: boolean;
+      id?: string;
+    };
+  }): number;
+
+  /** Calculate attribute sizes */
+  export function calculateAttributeSizes(data: any): Record<string, number>;
+
+  /** Calculate UTF-8 bytes */
+  export function calculateUTF8Bytes(str: string): number;
+
+  /** Map AWS error to s3db error */
+  export function mapAwsError(error: Error, context: any): Error;
+
+  /** Base62 encoding */
+  export function base62Encode(num: number): string;
+  export function base62Decode(str: string): number;
+
   // ============================================================================
-  // CONSTANTS
+  // BEHAVIOR FUNCTIONS
   // ============================================================================
 
   /** Available behavior names */
@@ -952,7 +1230,30 @@ declare module 's3db.js' {
   export const DEFAULT_BEHAVIOR: BehaviorName;
 
   /** Get behavior implementation */
-  export function getBehavior(behaviorName: BehaviorName): any;
+  export function getBehavior(behaviorName: BehaviorName): {
+    handleInsert: (params: { resource: Resource; data: any; mappedData: any; originalData?: any }) => Promise<{ mappedData: any; body: string }>;
+    handleUpdate: (params: { resource: Resource; id: string; data: any; mappedData: any; originalData?: any }) => Promise<{ mappedData: any; body: string }>;
+    handleUpsert: (params: { resource: Resource; id: string; data: any; mappedData: any; originalData?: any }) => Promise<{ mappedData: any; body: string }>;
+    handleGet: (params: { resource: Resource; metadata: any; body: string }) => Promise<{ metadata: any; body: string }>;
+  };
+
+  /** Available behaviors object */
+  export const behaviors: Record<BehaviorName, any>;
+
+  // ============================================================================
+  // REPLICATOR CONSTANTS
+  // ============================================================================
+
+  /** Available replicator drivers */
+  export const REPLICATOR_DRIVERS: {
+    s3db: typeof S3dbReplicator;
+    sqs: typeof SqsReplicator;
+    bigquery: typeof BigqueryReplicator;
+    postgres: typeof PostgresReplicator;
+  };
+
+  /** Create replicator instance */
+  export function createReplicator(driver: string, config: any): BaseReplicator;
 
   // ============================================================================
   // DEFAULT EXPORT
