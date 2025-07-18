@@ -31156,7 +31156,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "6.2.0" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "7.0.0" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
