@@ -80,6 +80,27 @@ describe('base62 encode/decode', () => {
     expect(fromBase62(undefined)).toBeNaN();
     expect(fromBase62(123)).toBeNaN();
   });
+
+  // New tests to cover missing lines
+  test('encode with Infinity and -Infinity should return undefined', () => {
+    expect(toBase62(Infinity)).toBe('undefined');
+    expect(toBase62(-Infinity)).toBe('undefined');
+  });
+
+  test('encodeDecimal with Infinity and -Infinity should return undefined', () => {
+    expect(encodeDecimal(Infinity)).toBe('undefined');
+    expect(encodeDecimal(-Infinity)).toBe('undefined');
+  });
+
+  test('encodeDecimal with NaN should return undefined', () => {
+    expect(encodeDecimal(NaN)).toBe('undefined');
+  });
+
+  test('encodeDecimal with non-number should return undefined', () => {
+    expect(encodeDecimal('abc')).toBe('undefined');
+    expect(encodeDecimal(null)).toBe('undefined');
+    expect(encodeDecimal(undefined)).toBe('undefined');
+  });
 });
 
 describe('base62 decimal encode/decode', () => {

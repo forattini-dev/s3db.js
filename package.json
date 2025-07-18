@@ -48,8 +48,15 @@
     "coverage:serve": "npx http-server ./coverage/lcov-report",
     "test": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles",
     "test:ai": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles --runInBand",
-    "test:full": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles",
-    "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watch --detectOpenHandles"
+    "test:full": "pnpm run test:coverage",
+    "test:watch": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watch --detectOpenHandles",
+    "test:fast": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles tests/functions tests/classes --exclude='tests/resources/resource-behavior.test.js'",
+    "test:heavy": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles --runInBand tests/resources tests/plugins",
+    "test:unit": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles tests/functions tests/classes tests/libs --testNamePattern='(^(?!.*integration).*|.*unit.*)'",
+    "test:integration": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles --runInBand tests/resources tests/plugins",
+    "test:full-fast": "pnpm run test:unit && pnpm run test:integration --testPathIgnorePatterns=plugin-replicator-s3db.test.js",
+    "test:coverage": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --detectOpenHandles --runInBand",
+    "test:slow-only": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --detectOpenHandles --runInBand tests/plugins/plugin-replicator-s3db.test.js --testTimeout=120000"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.846.0",

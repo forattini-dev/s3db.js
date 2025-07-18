@@ -1,7 +1,7 @@
 // single
 export * from './client.class.js'
 export * from './connection-string.class.js'
-export * from './crypto.js'
+export * from './concerns/crypto.js'
 export * from './database.class.js'
 export * from './errors.js'
 export * from './resource.class.js'

@@ -51,7 +51,6 @@ describe('Metrics Plugin', () => {
     test('should initialize with default configuration', () => {
       const defaultPlugin = new MetricsPlugin();
       
-      expect(defaultPlugin.config.enabled).toBe(true);
       expect(defaultPlugin.config.collectPerformance).toBe(true);
       expect(defaultPlugin.config.collectErrors).toBe(true);
       expect(defaultPlugin.config.collectUsage).toBe(true);

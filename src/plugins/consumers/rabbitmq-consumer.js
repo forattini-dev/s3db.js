@@ -21,7 +21,7 @@ export class RabbitMqConsumer {
   }
 
   async stop() {
-    this._stopped = true;
+    this._stopped = true;https://github.com/browserbase/stagehand
     if (this.channel) await this.channel.close();
     if (this.connection) await this.connection.close();
   }
