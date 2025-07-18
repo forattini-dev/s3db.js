@@ -9,59 +9,15 @@
 
 ## 📋 Table of Contents
 
-- [🚀 Getting Started with Plugins](#-getting-started-with-plugins)
+- [🚀 Getting Started](#-getting-started-with-plugins)
 - [🧩 Available Plugins](#-available-plugins)
-
-### 💾 Cache Plugin
-- [📖 Overview](#-cache-plugin)
-- [⚡ Quick Start](#quick-start)
-- [⚙️ Configuration Parameters](#configuration-parameters)
-- [🔧 Easy Example](#easy-example)
-- [🚀 Advanced Configuration](#advanced-configuration-example)
-
-### 💰 Costs Plugin
-- [📖 Overview](#-costs-plugin)
-- [⚡ Quick Start](#quick-start-1)
-- [⚙️ Configuration Parameters](#configuration-parameters-1)
-- [🔧 Easy Example](#easy-example-1)
-- [🚀 Advanced Configuration](#advanced-monitoring-example)
-
-### 📝 Audit Plugin
-- [📖 Overview](#-audit-plugin)
-- [⚡ Quick Start](#quick-start-2)
-- [⚙️ Configuration Parameters](#configuration-parameters-2)
-- [🔧 Easy Example](#easy-example-2)
-- [🚀 Advanced Configuration](#advanced-configuration-example-1)
-
-### 🔍 FullText Plugin
-- [📖 Overview](#-fulltext-plugin)
-- [⚡ Quick Start](#quick-start-3)
-- [⚙️ Configuration Parameters](#configuration-parameters-3)
-- [🔧 Easy Example](#easy-example-3)
-- [🚀 Advanced Configuration](#advanced-configuration-example-2)
-
-### 📊 Metrics Plugin
-- [📖 Overview](#-metrics-plugin)
-- [⚡ Quick Start](#quick-start-4)
-- [⚙️ Configuration Parameters](#configuration-parameters-4)
-- [🔧 Easy Example](#easy-example-4)
-- [🚀 Advanced Configuration](#advanced-configuration-example-3)
-
-### 🔄 Replicator Plugin
-- [📖 Overview](#-replicator-plugin)
-- [⚡ Quick Start](#quick-start-5)
-- [⚙️ Configuration Parameters](#configuration-parameters-5)
-- [🔧 Easy Example](#easy-example-5)
-- [🚀 Advanced Configuration](#advanced-multi-driver-example)
-
-### 📬 Queue Consumer Plugin
-- [📖 Overview](#-queue-consumer-plugin)
-- [⚡ Quick Start](#quick-start-6)
-- [⚙️ Configuration Parameters](#configuration-parameters-6)
-- [🔧 Easy Example](#easy-example-6)
-- [🚀 Advanced Configuration](#advanced-multi-driver-example-1)
-
-### 🔧 Additional Resources
+  - [💾 Cache Plugin](#-cache-plugin)
+  - [💰 Costs Plugin](#-costs-plugin)
+  - [📝 Audit Plugin](#-audit-plugin)
+  - [🔍 FullText Plugin](#-fulltext-plugin)
+  - [📊 Metrics Plugin](#-metrics-plugin)
+  - [🔄 Replicator Plugin](#-replicator-plugin)
+  - [📬 Queue Consumer Plugin](#-queue-consumer-plugin)
 - [🔧 Plugin Development](#-plugin-development)
 - [💡 Plugin Combinations](#-plugin-combinations)
 - [🎯 Best Practices](#-best-practices)
