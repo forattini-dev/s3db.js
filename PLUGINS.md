@@ -1608,17 +1608,146 @@ await users.insert({ name: 'John', email: 'john@example.com' });
 
 #### S3DB Replicator
 
-Replicate to another S3DB instance:
+Replicate to another S3DB instance with flexible resource mapping and transformation capabilities:
 
 ```javascript
 {
   driver: 's3db',
-  resources: ['users', 'products'],
   config: {
     connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup"
+  },
+  resources: {
+    // Simple resource mapping (replicate to same name)
+    users: 'users',
+    
+    // Map source → destination resource name
+    products: 'backup_products',
+    
+    // Advanced mapping with transformer
+    orders: {
+      resource: 'order_backup',
+      transformer: (data) => ({
+        ...data,
+        backup_timestamp: new Date().toISOString(),
+        original_source: 'production'
+      })
+    },
+    
+    // Multi-destination replication
+    analytics: [
+      'analytics_backup',
+      { 
+        resource: 'analytics_processed', 
+        transformer: (data) => ({
+          ...data,
+          processed_date: data.createdAt?.split('T')[0],
+          data_source: 'analytics'
+        })
+      }
+    ]
   }
 }
 ```
+
+**Resource Configuration Syntaxes:**
+
+The S3DB replicator supports highly flexible resource mapping configurations:
+
+**1. Array of resource names** (replicate to same name):
+```javascript
+resources: ['users', 'products', 'orders']
+// Replicates each resource to itself in the destination database
+```
+
+**2. Object mapping** (source → destination):
+```javascript
+resources: { 
+  users: 'people',           // users → people
+  products: 'items',         // products → items  
+  orders: 'order_history'    // orders → order_history
+}
+```
+
+**3. Array with transformer** (resource + transformation):
+```javascript
+resources: { 
+  users: ['people', (data) => ({ ...data, fullName: `${data.firstName} ${data.lastName}` })]
+  // Replicates 'users' to 'people' with transformation
+}
+```
+
+**4. Object with resource and transformer**:
+```javascript
+resources: { 
+  users: { 
+    resource: 'people', 
+    transformer: (data) => ({ 
+      ...data, 
+      fullName: `${data.firstName} ${data.lastName}`,
+      migrated_at: new Date().toISOString()
+    })
+  }
+}
+```
+
+**5. Multi-destination arrays**:
+```javascript
+resources: { 
+  users: [
+    'people',                    // Simple copy
+    { 
+      resource: 'user_analytics', 
+      transformer: (data) => ({
+        id: data.id,
+        signup_date: data.createdAt,
+        user_type: data.role || 'standard'
+      })
+    }
+  ]
+}
+```
+
+**6. Function-only transformation** (transform to same resource):
+```javascript
+resources: { 
+  users: (data) => ({ 
+    ...data, 
+    processed: true,
+    backup_date: new Date().toISOString()
+  })
+}
+```
+
+**Mixed Configuration Example:**
+```javascript
+resources: {
+  users: [
+    'people',                                    // Simple copy
+    { 
+      resource: 'user_profiles', 
+      transformer: (data) => ({ 
+        ...data, 
+        profile_complete: !!(data.name && data.email)
+      })
+    }
+  ],
+  orders: 'order_backup',                        // Rename only
+  products: { resource: 'product_catalog' },     // Object form
+  analytics: (data) => ({ ...data, processed: true })  // Transform only
+}
+```
+
+**Configuration Options:**
+- `connectionString`: S3DB connection string for destination database (required)
+- `client`: Pre-configured S3DB client instance (alternative to connectionString)
+- `resources`: Resource mapping configuration (see syntaxes above)
+
+**Transformer Features:**
+- **Data Transformation**: Apply custom logic before replication
+- **Field Mapping**: Rename, combine, or derive new fields  
+- **Data Enrichment**: Add metadata, timestamps, or computed values
+- **Conditional Logic**: Apply transformations based on data content
+- **Multi-destination**: Send different transformed versions to multiple targets
 
 #### SQS Replicator
 
@@ -1639,22 +1768,83 @@ Send changes to AWS SQS queues:
 
 #### BigQuery Replicator
 
-Replicate to Google BigQuery:
+Replicate to Google BigQuery with advanced data transformation capabilities:
 
 ```javascript
 {
   driver: 'bigquery',
-  resources: {
-    users: [{ actions: ['insert', 'update'], table: 'users_table' }],
-    orders: 'orders_table'
-  },
   config: {
-    projectId: 'my-project',
-    datasetId: 'analytics',
-    credentials: { /* service account */ }
+    location: 'US',
+    projectId: 'my-gcp-project',
+    datasetId: 'analytics', 
+    credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString()),
+    logTable: 'replication_log'  // Optional: table for operation logging
+  },
+  resources: {
+    // Simple table mapping
+    clicks: 'mrt-shortner__clicks',
+    fingerprints: 'mrt-shortner__fingerprints',
+    scans: 'mrt-shortner__scans',
+    sessions: 'mrt-shortner__sessions',
+    shares: 'mrt-shortner__shares', 
+    urls: 'mrt-shortner__urls',
+    views: 'mrt-shortner__views',
+    
+    // Advanced configuration with transform functions
+    users: {
+      table: 'mrt-shortner__users',
+      actions: ['insert', 'update'],
+      transform: (data) => {
+        return {
+          ...data,
+          ip: data.ip || 'unknown',
+          userIp: data.userIp || 'unknown',
+        }
+      }
+    },
+    
+    // Multiple destinations for a single resource
+    orders: [
+      { actions: ['insert'], table: 'fact_orders' },
+      { 
+        actions: ['insert'], 
+        table: 'daily_revenue',
+        transform: (data) => ({
+          date: data.createdAt?.split('T')[0],
+          revenue: data.amount,
+          customer_id: data.userId,
+          order_count: 1
+        })
+      }
+    ]
   }
 }
 ```
+
+**Transform Function Features:**
+- **Data Transformation**: Apply custom logic before sending to BigQuery
+- **Field Mapping**: Rename, combine, or derive new fields
+- **Data Enrichment**: Add computed fields, defaults, or metadata
+- **Format Conversion**: Convert data types or formats for BigQuery compatibility
+- **Multiple Destinations**: Send transformed data to different tables
+
+**Configuration Options:**
+- `projectId`: Google Cloud project ID (required)
+- `datasetId`: BigQuery dataset ID (required) 
+- `credentials`: Service account credentials object (optional, uses default if omitted)
+- `location`: BigQuery dataset location/region (default: 'US')
+- `logTable`: Table name for operation logging (optional)
+
+**Resource Configuration:**
+- **String**: Simple table mapping (e.g., `'table_name'`)
+- **Object**: Advanced configuration with actions and transforms
+- **Array**: Multiple destination tables with different configurations
+
+**Automatic Features:**
+- **Retry Logic**: Handles BigQuery streaming buffer limitations with 30-second retry delays
+- **Error Handling**: Graceful handling of schema mismatches and quota limits
+- **Operation Logging**: Optional audit trail of all replication operations
+- **Schema Compatibility**: Automatic handling of missing fields
 
 #### PostgreSQL Replicator
 

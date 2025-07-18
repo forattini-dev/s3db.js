@@ -1,59 +1,31 @@
-/**
- * S3DB Replicator Configuration Documentation
- * 
- * This replicator supports highly flexible resource mapping and transformer configuration. You can specify the resources to replicate using any of the following syntaxes:
- *
- * 1. Array of resource names (replicate resource to itself):
- *    resources: ['users']
- *    // Replicates 'users' to 'users' in the destination
- *
- * 2. Map: source resource → destination resource name:
- *    resources: { users: 'people' }
- *    // Replicates 'users' to 'people' in the destination
- *
- * 3. Map: source resource → array of destination resource names and/or transformers:
- *    resources: { users: ['people', (el) => ({ ...el, fullName: el.name })] }
- *    // Replicates 'users' to 'people' and also applies the transformer
- *
- * 4. Map: source resource → object with resource and transformer:
- *    resources: { users: { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) } }
- *    // Replicates 'users' to 'people' with a custom transformer
- *
- * 5. Map: source resource → array of objects with resource and transformer (multi-destination):
- *    resources: { users: [ { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) } ] }
- *    // Replicates 'users' to multiple destinations, each with its own transformer
- *
- * 6. Map: source resource → function (rare, but supported):
- *    resources: { users: (el) => ... }
- *    // Replicates 'users' to 'users' with a custom transformer
- * 
- * All forms can be mixed and matched for different resources. The transformer is always available (default: identity function).
- *
- * Example:
- *   resources: {
- *     users: [
- *       'people',
- *       { resource: 'people', transformer: (el) => ({ ...el, fullName: el.name }) },
- *       (el) => ({ ...el, fullName: el.name })
- *     ],
- *     orders: 'orders_copy',
- *     products: { resource: 'products_copy' }
- *   }
- *
- * The replicator always uses the provided client as the destination.
- *
- * See tests/examples for all supported syntaxes.
- */
+import tryFn from "#src/concerns/try-fn.js";
+import { S3db } from '#src/database.class.js';
 import BaseReplicator from './base-replicator.class.js';
-import { S3db } from '../../database.class.js';
-import tryFn from "../../concerns/try-fn.js";
 
 function normalizeResourceName(name) {
   return typeof name === 'string' ? name.trim().toLowerCase() : name;
 }
 
 /**
- * S3DB Replicator - Replicates data to another s3db instance
+ * S3DB Replicator - Replicate data to another S3DB instance
+ * 
+ * Configuration:
+ * @param {string} connectionString - S3DB connection string for destination database (required)
+ * @param {Object} client - Pre-configured S3DB client instance (alternative to connectionString)
+ * @param {Object} resources - Resource mapping configuration
+ * 
+ * @example
+ * new S3dbReplicator({
+ *   connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup"
+ * }, {
+ *   users: 'backup_users',
+ *   orders: {
+ *     resource: 'order_backup',
+ *     transformer: (data) => ({ ...data, backup_timestamp: new Date().toISOString() })
+ *   }
+ * })
+ * 
+ * See PLUGINS.md for comprehensive configuration documentation.
  */
 class S3dbReplicator extends BaseReplicator {
   constructor(config = {}, resources = [], client = null) {

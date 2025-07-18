@@ -55,11 +55,13 @@ describe('BigQuery Replicator Tests', () => {
 
       expect(replicator.resources.users).toEqual([{
         table: 'users_table',
-        actions: ['insert']
+        actions: ['insert'],
+        transform: null
       }]);
       expect(replicator.resources.orders).toEqual([{
         table: 'orders_table', 
-        actions: ['insert']
+        actions: ['insert'],
+        transform: null
       }]);
     });
 
@@ -76,7 +78,8 @@ describe('BigQuery Replicator Tests', () => {
 
       expect(replicator.resources.users).toEqual([{
         table: 'users_table',
-        actions: ['insert', 'update', 'delete']
+        actions: ['insert', 'update', 'delete'],
+        transform: null
       }]);
     });
   });
@@ -125,6 +128,67 @@ describe('BigQuery Replicator Tests', () => {
       }, { users: 'users_table' });
 
       expect(replicator.location).toBe('US');
+    });
+  });
+
+  describe('Transform Function Tests', () => {
+    test('should parse and store transform function', () => {
+      const transformFn = (data) => ({ ...data, ip: data.ip || 'unknown' });
+      
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset'
+      }, {
+        users: {
+          table: 'users_table',
+          actions: ['insert', 'update'],
+          transform: transformFn
+        }
+      });
+
+      expect(replicator.resources.users).toEqual([{
+        table: 'users_table',
+        actions: ['insert', 'update'],
+        transform: transformFn
+      }]);
+    });
+
+    test('should apply transform function correctly', () => {
+      const transformFn = (data) => ({ ...data, ip: data.ip || 'unknown', processed: true });
+      
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset'
+      }, {
+        users: {
+          table: 'users_table',
+          transform: transformFn
+        }
+      });
+
+      const originalData = { id: 'user1', name: 'John' };
+      const transformedData = replicator.applyTransform(originalData, transformFn);
+
+      expect(transformedData).toEqual({
+        id: 'user1',
+        name: 'John',
+        ip: 'unknown',
+        processed: true
+      });
+    });
+
+    test('should return original data when no transform function provided', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset'
+      }, {
+        users: 'users_table'
+      });
+
+      const originalData = { id: 'user1', name: 'John' };
+      const transformedData = replicator.applyTransform(originalData, null);
+
+      expect(transformedData).toEqual(originalData);
     });
   });
 
