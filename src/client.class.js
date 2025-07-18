@@ -16,7 +16,7 @@ import {
   DeleteObjectsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
-import { md5 } from 'hash-wasm';
+import { md5 } from "./concerns/crypto.js";
 
 import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
 import { ConnectionString } from "./connection-string.class.js";
@@ -60,7 +60,7 @@ export class Client extends EventEmitter {
         if (context.commandName === 'DeleteObjectsCommand') {
           const body = args.request.body;
           if (body && typeof body === 'string') {
-            const contentMd5 = Buffer.from(await md5(body), 'hex').toString('base64');
+            const contentMd5 = await md5(body);
             args.request.headers['Content-MD5'] = contentMd5;
           }
         }
