@@ -51,8 +51,7 @@
     "test:types:direct": "tsc --noEmit tests/typescript/direct-type-test.ts",
     "test:types:watch": "tsc --noEmit --watch --project tests/typescript/tsconfig.json",
     "validate:types": "npm run test:types && echo 'TypeScript definitions are valid!'",
-    "prepare:types": "mkdir -p dist && cp src/s3db.d.ts dist/s3db.d.ts",
-    "prepublishOnly": "npm run build && npm run prepare:types && npm run test:types"
+    "prepublishOnly": "npm run build && npm run test:types"
   },
   "peerDependencies": {},
   "dependencies": {
