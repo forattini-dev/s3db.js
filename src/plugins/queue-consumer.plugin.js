@@ -22,7 +22,7 @@ import tryFn from "../concerns/try-fn.js";
 
 export default class QueueConsumerPlugin {
   constructor(options = {}) {
-    this.enabled = options.enabled !== false;
+
     this.options = options;
     // Novo padrão: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
@@ -98,6 +98,8 @@ export default class QueueConsumerPlugin {
     let resource = body.resource || msg.resource;
     let action = body.action || msg.action;
     let data = body.data || msg.data;
+    
+
     
     if (!resource) {
       throw new Error('QueueConsumerPlugin: resource not found in message');

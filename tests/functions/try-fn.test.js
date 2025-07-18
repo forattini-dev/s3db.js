@@ -146,4 +146,86 @@ describe('tryFn', () => {
     expect(result[1].message).toBe('promise fail');
     expect(result[2]).toBeUndefined();
   });
+
+  // New tests to cover missing lines related to error stack handling
+  it('should handle error without stack property in sync function', () => {
+    const customError = { message: 'custom error', name: 'CustomError' };
+    Object.preventExtensions(customError); // Make it non-extensible
+    
+    const [ok, err, data] = tryFn(() => { throw customError; });
+    expect(ok).toBe(false);
+    expect(err).toBe(customError);
+    expect(data).toBeUndefined();
+  });
+
+  it('should handle error without stack property in async function', async () => {
+    const customError = { message: 'custom async error', name: 'CustomAsyncError' };
+    Object.preventExtensions(customError); // Make it non-extensible
+    
+    const result = await tryFn(() => Promise.reject(customError));
+    expect(result[0]).toBe(false);
+    expect(result[1]).toBe(customError);
+    expect(result[2]).toBeUndefined();
+  });
+
+  it('should handle error with non-writable stack property', () => {
+    const errorWithReadOnlyStack = new Error('readonly stack');
+    Object.defineProperty(errorWithReadOnlyStack, 'stack', {
+      value: 'original stack',
+      writable: false,
+      configurable: true
+    });
+    
+    const [ok, err, data] = tryFn(() => { throw errorWithReadOnlyStack; });
+    expect(ok).toBe(false);
+    expect(err).toBe(errorWithReadOnlyStack);
+    expect(data).toBeUndefined();
+  });
+
+  it('should handle error with non-configurable stack property', () => {
+    const errorWithNonConfigurableStack = new Error('non-configurable stack');
+    Object.defineProperty(errorWithNonConfigurableStack, 'stack', {
+      value: 'original stack',
+      writable: true,
+      configurable: false
+    });
+    
+    const [ok, err, data] = tryFn(() => { throw errorWithNonConfigurableStack; });
+    expect(ok).toBe(false);
+    expect(err).toBe(errorWithNonConfigurableStack);
+    expect(data).toBeUndefined();
+  });
+
+  it('should handle error that throws when setting stack property', () => {
+    const errorWithStackSetter = new Error('stack setter error');
+    Object.defineProperty(errorWithStackSetter, 'stack', {
+      get() { return 'original stack'; },
+      set() { throw new Error('Cannot set stack'); },
+      configurable: true
+    });
+    
+    const [ok, err, data] = tryFn(() => { throw errorWithStackSetter; });
+    expect(ok).toBe(false);
+    expect(err).toBe(errorWithStackSetter);
+    expect(data).toBeUndefined();
+  });
+
+  it('should handle non-Error objects being thrown', () => {
+    const stringError = 'This is a string error';
+    const [ok, err, data] = tryFn(() => { throw stringError; });
+    expect(ok).toBe(false);
+    expect(err).toBe(stringError);
+    expect(data).toBeUndefined();
+  });
+
+  it('should handle error without hasOwnProperty method', () => {
+    const errorWithoutHasOwnProperty = Object.create(null);
+    errorWithoutHasOwnProperty.message = 'error without hasOwnProperty';
+    errorWithoutHasOwnProperty.stack = 'original stack';
+    
+    const [ok, err, data] = tryFn(() => { throw errorWithoutHasOwnProperty; });
+    expect(ok).toBe(false);
+    expect(err).toBe(errorWithoutHasOwnProperty);
+    expect(data).toBeUndefined();
+  });
 }); 
