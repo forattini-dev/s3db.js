@@ -82,6 +82,23 @@ export async function decrypt(encryptedBase64, passphrase) {
   return decoder.decode(decryptedContent);
 }
 
+export async function md5(data) {
+  if (typeof process === 'undefined') {
+    throw new CryptoError('MD5 hashing is only available in Node.js environment', { context: 'md5' });
+  }
+  
+  const [ok, err, result] = await tryFn(async () => {
+    const { createHash } = await import('crypto');
+    return createHash('md5').update(data).digest('base64');
+  });
+  
+  if (!ok) {
+    throw new CryptoError('MD5 hashing failed', { original: err, data });
+  }
+  
+  return result;
+}
+
 async function getKeyMaterial(passphrase, salt) {
   const [okCrypto, errCrypto, cryptoLib] = await tryFn(dynamicCrypto);
   if (!okCrypto) throw new CryptoError('Crypto API not available', { original: errCrypto });

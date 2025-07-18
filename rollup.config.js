@@ -107,17 +107,20 @@ export default {
   ],
 
   external: [
-    'crypto',
     '@aws-sdk/client-s3',
     '@aws-sdk/client-sqs',
     '@google-cloud/bigquery',
     '@supercharge/promise-pool',
     'avsc',
+    'amqplib',
+    'crypto',
     'fastest-validator',
+    'json-stable-stringify',
     'flat',
     'lodash-es',
     'nanoid',
     'pg',
-    'uuid'
+    'uuid',
+    'zlib',
   ],
 };
