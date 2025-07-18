@@ -1,10 +1,10 @@
 export default {
+  silent: true,
+  maxWorkers: 1,
   verbose: false,
-  testEnvironment: 'node',
+  testTimeout: 30000,
   injectGlobals: true,
-  maxWorkers: 1, // Run tests serially to avoid resource contention with MinIO
-  testTimeout: 30000, // 30 second default timeout
-  silent: true, // Suppress console output during tests for better performance
+  testEnvironment: 'node',
 
   setupFiles: [
     '<rootDir>/tests/jest.setup.js'
