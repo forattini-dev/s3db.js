@@ -25,6 +25,10 @@
   ],
   "type": "module",
   "sideEffects": false,
+  "imports": {
+    "#src/*": "./src/*",
+    "#tests/*": "./tests/*"
+  },
   "exports": {
     ".": {
       "import": "./dist/s3db.es.js",

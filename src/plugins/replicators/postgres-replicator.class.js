@@ -1,124 +1,34 @@
-/**
- * Postgres Replicator Configuration Documentation
- * 
- * This replicator executes real SQL operations (INSERT, UPDATE, DELETE) on PostgreSQL tables
- * using the official pg (node-postgres) library. It maps s3db resources to database tables
- * and performs actual database operations for each replicator event.
- * 
- * ⚠️  REQUIRED DEPENDENCY: You must install the PostgreSQL client library to use this replicator:
- * 
- * ```bash
- * npm install pg
- * # or
- * yarn add pg
- * # or
- * pnpm add pg
- * ```
- * 
- * @typedef {Object} PostgresReplicatorConfig
- * @property {string} database - The name of the PostgreSQL database to connect to
- * @property {string} resourceArn - The ARN of the Aurora Serverless cluster or RDS instance
- * @property {string} secretArn - The ARN of the Secrets Manager secret containing database credentials
- * @property {string} [region='us-east-1'] - AWS region where the database is located
- * @property {Object.<string, string>} [tableMapping] - Maps s3db resource names to PostgreSQL table names
- *   - Key: s3db resource name (e.g., 'users', 'orders')
- *   - Value: PostgreSQL table name (e.g., 'public.users', 'analytics.orders')
- *   - If not provided, resource names are used as table names
- * @property {boolean} [logOperations=false] - Whether to log SQL operations to console for debugging
- * @property {string} [schema='public'] - Default database schema to use when tableMapping doesn't specify schema
- * @property {number} [maxRetries=3] - Maximum number of retry attempts for failed operations
- * @property {number} [retryDelay=1000] - Delay in milliseconds between retry attempts
- * @property {boolean} [useUpsert=true] - Whether to use UPSERT (INSERT ... ON CONFLICT) for updates
- * @property {string} [conflictColumn='id'] - Column name to use for conflict resolution in UPSERT operations
- * 
- * @example
- * // Basic configuration with table mapping
- * {
- *   database: 'analytics_db',
- *   resourceArn: 'arn:aws:rds:us-east-1:123456789012:cluster:my-aurora-cluster',
- *   secretArn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:db-credentials',
- *   region: 'us-east-1',
- *   tableMapping: {
- *     'users': 'public.users',
- *     'orders': 'analytics.orders',
- *     'products': 'inventory.products'
- *   },
- *   logOperations: true,
- *   useUpsert: true,
- *   conflictColumn: 'id'
- * }
- * 
- * @example
- * // Minimal configuration using default settings
- * {
- *   database: 'my_database',
- *   resourceArn: 'arn:aws:rds:us-east-1:123456789012:cluster:my-cluster',
- *   secretArn: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:db-secret'
- * }
- * 
- * @notes
- * - Requires AWS credentials with RDS Data Service permissions
- * - Database tables must exist before replicator starts
- * - For UPSERT operations, the conflict column must have a unique constraint
- * - All data is automatically converted to JSON format for storage
- * - Timestamps are stored as ISO strings in the database
- * - Failed operations are retried with exponential backoff
- * - Operations are executed within database transactions for consistency
- */
+import tryFn from "#src/concerns/try-fn.js";
 import BaseReplicator from './base-replicator.class.js';
-import tryFn from "../../concerns/try-fn.js";
 
 /**
- * PostgreSQL Replicator
- *
- * Replicates data to PostgreSQL tables, supporting per-resource table mapping and action filtering.
- *
- * ⚠️  REQUIRED DEPENDENCY: You must install the PostgreSQL client library to use this replicator:
- *
+ * PostgreSQL Replicator - Replicate data to PostgreSQL tables
+ * 
+ * ⚠️  REQUIRED DEPENDENCY: You must install the PostgreSQL client library:
  * ```bash
- * npm install pg
- * # or
- * yarn add pg
- * # or
  * pnpm add pg
  * ```
- *
- * @config {Object} config - Configuration object for the replicator
- * @config {string} [config.connectionString] - PostgreSQL connection string (alternative to individual params)
- * @config {string} [config.host] - Database host (required if not using connectionString)
- * @config {number} [config.port=5432] - Database port
- * @config {string} [config.database] - Database name (required if not using connectionString)
- * @config {string} [config.user] - Database user (required if not using connectionString)
- * @config {string} [config.password] - Database password (required if not using connectionString)
- * @config {Object} [config.ssl] - SSL configuration
- * @config {string} [config.logTable] - Table name for operation logging. If omitted, no logging is performed.
- * @config {Object} resources - Resource configuration mapping
- * @config {Object|string} resources[resourceName] - Resource configuration
- * @config {string} resources[resourceName].table - Table name for this resource
- * @config {Array} resources[resourceName].actions - Array of actions to replicate (insert, update, delete)
- * @config {string} resources[resourceName] - Short form: just the table name (equivalent to { actions: ['insert'], table: tableName })
- *
+ * 
+ * Configuration:
+ * @param {string} connectionString - PostgreSQL connection string (required)
+ * @param {string} host - Database host (alternative to connectionString)
+ * @param {number} port - Database port (default: 5432)
+ * @param {string} database - Database name
+ * @param {string} user - Database user
+ * @param {string} password - Database password
+ * @param {Object} ssl - SSL configuration (optional)
+ * @param {string} logTable - Table name for operation logging (optional)
+ * 
  * @example
  * new PostgresReplicator({
  *   connectionString: 'postgresql://user:password@localhost:5432/analytics',
- *   ssl: false,
- *   logTable: 's3db_replicator_log'
+ *   logTable: 'replication_log'
  * }, {
- *   users: [
- *     { actions: ['insert', 'update', 'delete'], table: 'users_table' },
- *   ],
- *   orders: [
- *     { actions: ['insert'], table: 'orders_table' },
- *     { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
- *   ],
- *   products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
+ *   users: [{ actions: ['insert', 'update'], table: 'users_table' }],
+ *   orders: 'orders_table'
  * })
- *
- * Notes:
- * - The target tables must exist and have columns matching the resource attributes (id is required as primary key)
- * - The log table must have columns: resource_name, operation, record_id, data, timestamp, source
- * - Uses pg (node-postgres) library
- * - Supports UPSERT operations with ON CONFLICT handling
+ * 
+ * See PLUGINS.md for comprehensive configuration documentation.
  */
 class PostgresReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {

@@ -418,23 +418,22 @@ declare module 's3db.js' {
   export interface BigQueryReplicatorConfig {
     projectId: string;
     datasetId: string;
-    keyFilename?: string;
     credentials?: Record<string, any>;
-    tableMapping?: Record<string, string>;
-    logOperations?: boolean;
+    location?: string;
+    logTable?: string;
     batchSize?: number;
     maxRetries?: number;
-    retryDelay?: number;
-    writeDisposition?: 'WRITE_TRUNCATE' | 'WRITE_APPEND' | 'WRITE_EMPTY';
-    createDisposition?: 'CREATE_IF_NEEDED' | 'CREATE_NEVER';
-    schema?: Record<string, any>[];
-    location?: string;
-    clustering?: string[];
-    partitioning?: {
-      type: 'DAY' | 'HOUR' | 'MONTH' | 'YEAR';
-      field?: string;
-    };
-    labels?: Record<string, string>;
+    writeDisposition?: string;
+    createDisposition?: string;
+    tableMapping?: Record<string, string>;
+    logOperations?: boolean;
+  }
+
+  /** BigQuery Resource Configuration */
+  export interface BigQueryResourceConfig {
+    table: string;
+    actions?: ('insert' | 'update' | 'delete')[];
+    transform?: (data: any) => any;
   }
 
   /** Postgres Replicator config */
@@ -1041,7 +1040,7 @@ declare module 's3db.js' {
 
   /** BigQuery Replicator class */
   export class BigqueryReplicator extends BaseReplicator {
-    constructor(config: BigQueryReplicatorConfig);
+    constructor(config: BigQueryReplicatorConfig, resources: Record<string, string | BigQueryResourceConfig | BigQueryResourceConfig[]>);
   }
 
   /** Postgres Replicator class */
