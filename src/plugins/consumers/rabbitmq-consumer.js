@@ -1,4 +1,3 @@
-import amqp from 'amqplib';
 import tryFn from "../../concerns/try-fn.js";
 
 export class RabbitMqConsumer {
@@ -21,13 +20,14 @@ export class RabbitMqConsumer {
   }
 
   async stop() {
-    this._stopped = true;https://github.com/browserbase/stagehand
+    this._stopped = true;
     if (this.channel) await this.channel.close();
     if (this.connection) await this.connection.close();
   }
 
   async _connect() {
     const [ok, err] = await tryFn(async () => {
+      const amqp = (await import('amqplib')).default;
       this.connection = await amqp.connect(this.amqpUrl);
       this.channel = await this.connection.createChannel();
       await this.channel.assertQueue(this.queue, { durable: true });

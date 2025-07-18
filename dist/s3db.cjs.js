@@ -6,7 +6,6 @@ var nanoid = require('nanoid');
 var zlib = require('zlib');
 var promisePool = require('@supercharge/promise-pool');
 var web = require('node:stream/web');
-require('amqplib');
 var lodashEs = require('lodash-es');
 var crypto = require('crypto');
 var jsonStableStringify = require('json-stable-stringify');
