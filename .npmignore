@@ -12,5 +12,5 @@ tests/
 *.log
 docker-compose.yml
 jest.config.js
+*.md
 rollup.config.js
-README.md
