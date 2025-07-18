@@ -1,55 +1,36 @@
+import tryFn from "#src/concerns/try-fn.js";
+
 import BaseReplicator from './base-replicator.class.js';
-import tryFn from "../../concerns/try-fn.js";
 
 /**
- * BigQuery Replicator
- *
- * Replicates data to Google BigQuery tables, supporting per-resource table mapping and action filtering.
- *
- * ⚠️  REQUIRED DEPENDENCY: You must install the Google Cloud BigQuery SDK to use this replicator:
- *
+ * BigQuery Replicator - Replicate data to Google BigQuery tables
+ * 
+ * ⚠️  REQUIRED DEPENDENCY: You must install the Google Cloud BigQuery SDK:
  * ```bash
- * npm install @google-cloud/bigquery
- * # or
- * yarn add @google-cloud/bigquery
- * # or
  * pnpm add @google-cloud/bigquery
  * ```
- *
- * @config {Object} config - Configuration object for the replicator
- * @config {string} config.projectId - (Required) Google Cloud project ID
- * @config {string} config.datasetId - (Required) BigQuery dataset ID
- * @config {Object} [config.credentials] - (Optional) Google service account credentials object (JSON). If omitted, uses default credentials.
- * @config {string} [config.location='US'] - (Optional) BigQuery dataset location/region
- * @config {string} [config.logTable] - (Optional) Table name for operation logging. If omitted, no logging is performed.
- * @config {Object} resources - Resource configuration mapping
- * @config {Object|string} resources[resourceName] - Resource configuration
- * @config {string} resources[resourceName].table - Table name for this resource
- * @config {Array} resources[resourceName].actions - Array of actions to replicate (insert, update, delete)
- * @config {string} resources[resourceName] - Short form: just the table name (equivalent to { actions: ['insert'], table: tableName })
- *
+ * 
+ * Configuration:
+ * @param {string} projectId - Google Cloud project ID (required)
+ * @param {string} datasetId - BigQuery dataset ID (required) 
+ * @param {Object} credentials - Service account credentials object (optional)
+ * @param {string} location - BigQuery dataset location/region (default: 'US')
+ * @param {string} logTable - Table name for operation logging (optional)
+ * 
  * @example
  * new BigqueryReplicator({
  *   projectId: 'my-gcp-project',
  *   datasetId: 'analytics',
- *   location: 'US',
- *   credentials: require('./gcp-service-account.json'),
- *   logTable: 's3db_replicator_log'
+ *   credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString())
  * }, {
- *   users: [
- *     { actions: ['insert', 'update', 'delete'], table: 'users_table' },
- *   ],
- *   urls: [
- *     { actions: ['insert'], table: 'urls_table' },
- *     { actions: ['insert'], table: 'urls_table_v2' },
- *   ],
- *   clicks: 'clicks_table' // equivalent to { actions: ['insert'], table: 'clicks_table' }
+ *   users: {
+ *     table: 'users_table',
+ *     transform: (data) => ({ ...data, ip: data.ip || 'unknown' })
+ *   },
+ *   orders: 'orders_table'
  * })
- *
- * Notes:
- * - The target tables must exist and have columns matching the resource attributes (id is required as primary key)
- * - The log table must have columns: resource_name, operation, record_id, data, timestamp, source
- * - Uses @google-cloud/bigquery SDK
+ * 
+ * See PLUGINS.md for comprehensive configuration documentation.
  */
 class BigqueryReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {
@@ -73,24 +54,27 @@ class BigqueryReplicator extends BaseReplicator {
         // Short form: just table name
         parsed[resourceName] = [{
           table: config,
-          actions: ['insert']
+          actions: ['insert'],
+          transform: null
         }];
       } else if (Array.isArray(config)) {
         // Array form: multiple table mappings
         parsed[resourceName] = config.map(item => {
           if (typeof item === 'string') {
-            return { table: item, actions: ['insert'] };
+            return { table: item, actions: ['insert'], transform: null };
           }
           return {
             table: item.table,
-            actions: item.actions || ['insert']
+            actions: item.actions || ['insert'],
+            transform: item.transform || null
           };
         });
       } else if (typeof config === 'object') {
         // Single object form
         parsed[resourceName] = [{
           table: config.table,
-          actions: config.actions || ['insert']
+          actions: config.actions || ['insert'],
+          transform: config.transform || null
         }];
       }
     }
@@ -117,6 +101,9 @@ class BigqueryReplicator extends BaseReplicator {
         const invalidActions = tableConfig.actions.filter(action => !validActions.includes(action));
         if (invalidActions.length > 0) {
           errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(', ')}. Valid actions: ${validActions.join(', ')}`);
+        }
+        if (tableConfig.transform && typeof tableConfig.transform !== 'function') {
+          errors.push(`Transform must be a function for resource '${resourceName}'`);
         }
       }
     }
@@ -162,7 +149,19 @@ class BigqueryReplicator extends BaseReplicator {
     
     return this.resources[resourceName]
       .filter(tableConfig => tableConfig.actions.includes(operation))
-      .map(tableConfig => tableConfig.table);
+      .map(tableConfig => ({
+        table: tableConfig.table,
+        transform: tableConfig.transform
+      }));
+  }
+
+  applyTransform(data, transformFn) {
+    if (!transformFn) return data;
+    
+    let transformedData = JSON.parse(JSON.stringify(data));
+    if (transformedData._length) delete transformedData._length;
+    
+    return transformFn(transformedData);
   }
 
   async replicate(resourceName, operation, data, id, beforeData = null) {
@@ -175,8 +174,8 @@ class BigqueryReplicator extends BaseReplicator {
       return { skipped: true, reason: 'action_not_included' };
     }
 
-    const tables = this.getTablesForResource(resourceName, operation);
-    if (tables.length === 0) {
+    const tableConfigs = this.getTablesForResource(resourceName, operation);
+    if (tableConfigs.length === 0) {
       return { skipped: true, reason: 'no_tables_for_action' };
     }
 
@@ -185,50 +184,80 @@ class BigqueryReplicator extends BaseReplicator {
 
     const [ok, err, result] = await tryFn(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
+      
       // Replicate to all applicable tables
-      for (const tableId of tables) {
+      for (const tableConfig of tableConfigs) {
         const [okTable, errTable] = await tryFn(async () => {
-          const table = dataset.table(tableId);
+          const table = dataset.table(tableConfig.table);
           let job;
+          
           if (operation === 'insert') {
-            const row = { ...data };
-            job = await table.insert([row]);
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            job = await table.insert([transformedData]);
           } else if (operation === 'update') {
-            const keys = Object.keys(data).filter(k => k !== 'id');
-            const setClause = keys.map(k => `${k}=@${k}`).join(', ');
-            const params = { id };
-            keys.forEach(k => { params[k] = data[k]; });
-            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
-            const [updateJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params
-            });
-            await updateJob.getQueryResults();
-            job = [updateJob];
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            const keys = Object.keys(transformedData).filter(k => k !== 'id');
+            const setClause = keys.map(k => `${k} = @${k}`).join(', ');
+            const params = { id, ...transformedData };
+            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` SET ${setClause} WHERE id = @id`;
+            
+            // Retry logic for streaming buffer issues
+            const maxRetries = 2;
+            let lastError = null;
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                const [updateJob] = await this.bigqueryClient.createQueryJob({
+                  query,
+                  params,
+                  location: this.location
+                });
+                await updateJob.getQueryResults();
+                job = [updateJob];
+                break;
+              } catch (error) {
+                lastError = error;
+                
+                // If it's streaming buffer error and not the last attempt
+                if (error?.message?.includes('streaming buffer') && attempt < maxRetries) {
+                  const delaySeconds = 30;
+                  await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+                  continue;
+                }
+                
+                throw error;
+              }
+            }
+            
+            if (!job) throw lastError;
           } else if (operation === 'delete') {
-            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableId}\` WHERE id=@id`;
+            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
             const [deleteJob] = await this.bigqueryClient.createQueryJob({
               query,
-              params: { id }
+              params: { id },
+              location: this.location
             });
             await deleteJob.getQueryResults();
             job = [deleteJob];
           } else {
             throw new Error(`Unsupported operation: ${operation}`);
           }
+          
           results.push({
-            table: tableId,
+            table: tableConfig.table,
             success: true,
             jobId: job[0]?.id
           });
         });
+        
         if (!okTable) {
           errors.push({
-            table: tableId,
+            table: tableConfig.table,
             error: errTable.message
           });
         }
       }
+      
       // Log operation if logTable is configured
       if (this.logTable) {
         const [okLog, errLog] = await tryFn(async () => {
@@ -246,25 +275,29 @@ class BigqueryReplicator extends BaseReplicator {
           // Don't fail the main operation if logging fails
         }
       }
+      
       const success = errors.length === 0;
       this.emit('replicated', {
         replicator: this.name,
         resourceName,
         operation,
         id,
-        tables,
+        tables: tableConfigs.map(t => t.table),
         results,
         errors,
         success
       });
+      
       return { 
         success, 
         results, 
         errors,
-        tables 
+        tables: tableConfigs.map(t => t.table)
       };
     });
+    
     if (ok) return result;
+    
     this.emit('replicator_error', {
       replicator: this.name,
       resourceName,
@@ -272,6 +305,7 @@ class BigqueryReplicator extends BaseReplicator {
       id,
       error: err.message
     });
+    
     return { success: false, error: err.message };
   }
 

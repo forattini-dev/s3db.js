@@ -1,129 +1,30 @@
+import tryFn from "#src/concerns/try-fn.js";
+import BaseReplicator from './base-replicator.class.js';
+
 /**
- * SQS Replicator Configuration Documentation
+ * SQS Replicator - Send data changes to AWS SQS queues
  * 
- * This replicator sends replicator events to Amazon SQS queues. It supports both
- * resource-specific queues and a single queue for all events, with a flexible message
- * structure that includes operation details and data.
- * 
- * ⚠️  REQUIRED DEPENDENCY: You must install the AWS SQS SDK to use this replicator:
- * 
+ * ⚠️  REQUIRED DEPENDENCY: You must install the AWS SQS SDK:
  * ```bash
- * npm install @aws-sdk/client-sqs
- * # or
- * yarn add @aws-sdk/client-sqs
- * # or
  * pnpm add @aws-sdk/client-sqs
  * ```
  * 
- * @typedef {Object} SQSReplicatorConfig
- * @property {string} region - AWS region where the SQS queues are located
- * @property {string} [accessKeyId] - AWS access key ID (if not using IAM roles)
- * @property {string} [secretAccessKey] - AWS secret access key (if not using IAM roles)
- * @property {string} [sessionToken] - AWS session token for temporary credentials
- * @property {string} [defaultQueueUrl] - Default SQS queue URL for all events when resource-specific queues are not configured
- * @property {Object.<string, string>} [resourceQueues] - Maps s3db resource names to specific SQS queue URLs
- *   - Key: s3db resource name (e.g., 'users', 'orders')
- *   - Value: SQS queue URL (e.g., 'https://sqs.us-east-1.amazonaws.com/123456789012/users-queue')
- *   - If not provided, defaultQueueUrl is used for all resources
- * @property {number} [maxRetries=3] - Maximum number of retry attempts for failed message sends
- * @property {number} [retryDelay=1000] - Delay in milliseconds between retry attempts
- * @property {boolean} [logMessages=false] - Whether to log message details to console for debugging
- * @property {number} [messageDelaySeconds=0] - Delay in seconds before messages become visible in queue
- * @property {Object} [messageAttributes] - Additional attributes to include with every SQS message
- *   - Key: attribute name (e.g., 'environment', 'version')
- *   - Value: attribute value (e.g., 'production', '1.0.0')
- * @property {string} [messageGroupId] - Message group ID for FIFO queues (required for FIFO queues)
- * @property {boolean} [useFIFO=false] - Whether the target queues are FIFO queues
- * @property {number} [batchSize=10] - Number of messages to send in a single batch (for batch operations)
- * @property {boolean} [compressMessages=false] - Whether to compress message bodies using gzip
- * @property {string} [messageFormat='json'] - Format for message body: 'json' or 'stringified'
- * @property {Object} [sqsClientOptions] - Additional options to pass to the SQS client constructor
+ * Configuration:
+ * @param {string} region - AWS region (required)
+ * @param {string} queueUrl - Single queue URL for all resources
+ * @param {Object} queues - Resource-specific queue mapping { resource: queueUrl }
+ * @param {string} defaultQueueUrl - Fallback queue URL
+ * @param {string} messageGroupId - Message group ID for FIFO queues
+ * @param {boolean} deduplicationId - Enable deduplication for FIFO queues
+ * @param {Object} credentials - AWS credentials (optional, uses default if omitted)
  * 
  * @example
- * // Configuration with resource-specific queues
- * {
+ * new SqsReplicator({
  *   region: 'us-east-1',
- *   accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
- *   secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
- *   resourceQueues: {
- *     'users': 'https://sqs.us-east-1.amazonaws.com/123456789012/users-events',
- *     'orders': 'https://sqs.us-east-1.amazonaws.com/123456789012/orders-events',
- *     'products': 'https://sqs.us-east-1.amazonaws.com/123456789012/products-events'
- *   },
- *   logMessages: true,
- *   messageAttributes: {
- *     'environment': 'production',
- *     'source': 's3db-replicator'
- *   }
- * }
+ *   queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/events-queue'
+ * }, ['users', 'orders'])
  * 
- * @example
- * // Configuration with single default queue
- * {
- *   region: 'us-west-2',
- *   defaultQueueUrl: 'https://sqs.us-west-2.amazonaws.com/123456789012/all-events',
- *   maxRetries: 5,
- *   retryDelay: 2000,
- *   compressMessages: true
- * }
- * 
- * @example
- * // FIFO queue configuration
- * {
- *   region: 'eu-west-1',
- *   defaultQueueUrl: 'https://sqs.eu-west-1.amazonaws.com/123456789012/events.fifo',
- *   useFIFO: true,
- *   messageGroupId: 's3db-events',
- *   messageDelaySeconds: 5
- * }
- * 
- * @example
- * // Minimal configuration using IAM roles
- * {
- *   region: 'us-east-1',
- *   defaultQueueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue'
- * }
- * 
- * @notes
- * - Requires AWS credentials with SQS SendMessage permissions
- * - Resource-specific queues take precedence over defaultQueueUrl
- * - Message structure includes: resource, action, data, before (for updates), timestamp, source
- * - FIFO queues require messageGroupId and ensure strict ordering
- * - Message compression reduces bandwidth but increases CPU usage
- * - Batch operations improve performance but may fail if any message in batch fails
- * - Retry mechanism uses exponential backoff for failed sends
- * - Message attributes are useful for filtering and routing in SQS
- * - Message delay is useful for implementing eventual consistency patterns
- * - SQS client options allow for custom endpoint, credentials, etc.
- */
-import BaseReplicator from './base-replicator.class.js';
-import tryFn from "../../concerns/try-fn.js";
-
-/**
- * SQS Replicator - Sends data to AWS SQS queues with support for resource-specific queues
- * 
- * Configuration options:
- * - queueUrl: Single queue URL for all resources
- * - queues: Object mapping resource names to specific queue URLs
- * - defaultQueueUrl: Fallback queue URL when resource-specific queue is not found
- * - messageGroupId: For FIFO queues
- * - deduplicationId: For FIFO queues
- * 
- * Example configurations:
- * 
- * // Single queue for all resources
- * {
- *   queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue'
- * }
- * 
- * // Resource-specific queues
- * {
- *   queues: {
- *     users: 'https://sqs.us-east-1.amazonaws.com/123456789012/users-queue',
- *     orders: 'https://sqs.us-east-1.amazonaws.com/123456789012/orders-queue'
- *   },
- *   defaultQueueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/default-queue'
- * }
+ * See PLUGINS.md for comprehensive configuration documentation.
  */
 class SqsReplicator extends BaseReplicator {
   constructor(config = {}, resources = [], client = null) {

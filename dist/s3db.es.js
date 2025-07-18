@@ -8002,22 +8002,25 @@ class BigqueryReplicator extends base_replicator_class_default {
       if (typeof config === "string") {
         parsed[resourceName] = [{
           table: config,
-          actions: ["insert"]
+          actions: ["insert"],
+          transform: null
         }];
       } else if (Array.isArray(config)) {
         parsed[resourceName] = config.map((item) => {
           if (typeof item === "string") {
-            return { table: item, actions: ["insert"] };
+            return { table: item, actions: ["insert"], transform: null };
           }
           return {
             table: item.table,
-            actions: item.actions || ["insert"]
+            actions: item.actions || ["insert"],
+            transform: item.transform || null
           };
         });
       } else if (typeof config === "object") {
         parsed[resourceName] = [{
           table: config.table,
-          actions: config.actions || ["insert"]
+          actions: config.actions || ["insert"],
+          transform: config.transform || null
         }];
       }
     }
@@ -8040,6 +8043,9 @@ class BigqueryReplicator extends base_replicator_class_default {
         const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
         if (invalidActions.length > 0) {
           errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+        if (tableConfig.transform && typeof tableConfig.transform !== "function") {
+          errors.push(`Transform must be a function for resource '${resourceName}'`);
         }
       }
     }
@@ -8076,7 +8082,16 @@ class BigqueryReplicator extends base_replicator_class_default {
   }
   getTablesForResource(resourceName, operation) {
     if (!this.resources[resourceName]) return [];
-    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => ({
+      table: tableConfig.table,
+      transform: tableConfig.transform
+    }));
+  }
+  applyTransform(data, transformFn) {
+    if (!transformFn) return data;
+    let transformedData = JSON.parse(JSON.stringify(data));
+    if (transformedData._length) delete transformedData._length;
+    return transformFn(transformedData);
   }
   async replicate(resourceName, operation, data, id, beforeData = null) {
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
@@ -8085,40 +8100,56 @@ class BigqueryReplicator extends base_replicator_class_default {
     if (!this.shouldReplicateAction(resourceName, operation)) {
       return { skipped: true, reason: "action_not_included" };
     }
-    const tables = this.getTablesForResource(resourceName, operation);
-    if (tables.length === 0) {
+    const tableConfigs = this.getTablesForResource(resourceName, operation);
+    if (tableConfigs.length === 0) {
       return { skipped: true, reason: "no_tables_for_action" };
     }
     const results = [];
     const errors = [];
     const [ok, err, result] = await try_fn_default(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
-      for (const tableId of tables) {
+      for (const tableConfig of tableConfigs) {
         const [okTable, errTable] = await try_fn_default(async () => {
-          const table = dataset.table(tableId);
+          const table = dataset.table(tableConfig.table);
           let job;
           if (operation === "insert") {
-            const row = { ...data };
-            job = await table.insert([row]);
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            job = await table.insert([transformedData]);
           } else if (operation === "update") {
-            const keys = Object.keys(data).filter((k) => k !== "id");
-            const setClause = keys.map((k) => `${k}=@${k}`).join(", ");
-            const params = { id };
-            keys.forEach((k) => {
-              params[k] = data[k];
-            });
-            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
-            const [updateJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params
-            });
-            await updateJob.getQueryResults();
-            job = [updateJob];
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            const keys = Object.keys(transformedData).filter((k) => k !== "id");
+            const setClause = keys.map((k) => `${k} = @${k}`).join(", ");
+            const params = { id, ...transformedData };
+            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` SET ${setClause} WHERE id = @id`;
+            const maxRetries = 2;
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                const [updateJob] = await this.bigqueryClient.createQueryJob({
+                  query,
+                  params,
+                  location: this.location
+                });
+                await updateJob.getQueryResults();
+                job = [updateJob];
+                break;
+              } catch (error) {
+                lastError = error;
+                if (error?.message?.includes("streaming buffer") && attempt < maxRetries) {
+                  const delaySeconds = 30;
+                  await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1e3));
+                  continue;
+                }
+                throw error;
+              }
+            }
+            if (!job) throw lastError;
           } else if (operation === "delete") {
-            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableId}\` WHERE id=@id`;
+            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
             const [deleteJob] = await this.bigqueryClient.createQueryJob({
               query,
-              params: { id }
+              params: { id },
+              location: this.location
             });
             await deleteJob.getQueryResults();
             job = [deleteJob];
@@ -8126,14 +8157,14 @@ class BigqueryReplicator extends base_replicator_class_default {
             throw new Error(`Unsupported operation: ${operation}`);
           }
           results.push({
-            table: tableId,
+            table: tableConfig.table,
             success: true,
             jobId: job[0]?.id
           });
         });
         if (!okTable) {
           errors.push({
-            table: tableId,
+            table: tableConfig.table,
             error: errTable.message
           });
         }
@@ -8159,7 +8190,7 @@ class BigqueryReplicator extends base_replicator_class_default {
         resourceName,
         operation,
         id,
-        tables,
+        tables: tableConfigs.map((t) => t.table),
         results,
         errors,
         success
@@ -8168,7 +8199,7 @@ class BigqueryReplicator extends base_replicator_class_default {
         success,
         results,
         errors,
-        tables
+        tables: tableConfigs.map((t) => t.table)
       };
     });
     if (ok) return result;
