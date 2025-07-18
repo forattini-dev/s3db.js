@@ -61,8 +61,8 @@ describe('S3dbReplicator - s3db to s3db replication', () => {
     }
     // Construct and setup plugin here
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -186,8 +186,8 @@ describe('S3dbReplicator - a2: same resource name/attributes', () => {
   });
   test('replicates insert from users to users', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -211,8 +211,8 @@ describe('S3dbReplicator - a2: same resource name/attributes', () => {
 
   test('replicates update from users to users', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -241,8 +241,8 @@ describe('S3dbReplicator - a2: same resource name/attributes', () => {
 
   test('replicates delete from users to users', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -267,8 +267,8 @@ describe('S3dbReplicator - a2: same resource name/attributes', () => {
 
   test('replicates insert, update, and delete from users to users', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -347,8 +347,8 @@ describe('S3dbReplicator - a3: different resources, insert with transform', () =
   });
   test('replicates insert from users to people with transform', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -378,8 +378,8 @@ describe('S3dbReplicator - a3: different resources, insert with transform', () =
 
   test('replicates update from users to people with transform', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -416,8 +416,8 @@ describe('S3dbReplicator - a3: different resources, insert with transform', () =
 
   test('replicates delete from users to people with transform', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -450,8 +450,8 @@ describe('S3dbReplicator - a3: different resources, insert with transform', () =
 
   test('replicates insert, update, and delete from users to people with transform', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -525,8 +525,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('does not replicate when id is null', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -542,8 +542,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('does not replicate when id is undefined', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -560,8 +560,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('does not replicate when id is an object', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -577,8 +577,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('update and delete of non-existent id does not break replicator', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -598,8 +598,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('duplicate insert does not break replicator', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -619,8 +619,8 @@ describe('S3dbReplicator - edge cases', () => {
 
   test('insert with missing/extra attributes', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -698,8 +698,8 @@ describe('S3dbReplicator - multi-resource replication', () => {
 
   test('should replicate inserts, updates, and deletes independently for users and products', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -793,8 +793,8 @@ describe('S3dbReplicator - transformation replication', () => {
 
   test('should replicate with transformation (rename and modify fields)', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -901,8 +901,8 @@ describe('S3dbReplicator - isolation between tests', () => {
     
     // Setup replicator for both resources, but they should be isolated
     plugin1 = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -972,8 +972,8 @@ describe('S3dbReplicator - error handling', () => {
 
   test('should report error if destination resource does not exist', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',
@@ -996,8 +996,8 @@ describe('S3dbReplicator - error handling', () => {
 
   test('should report error if transformer throws, but continue for other items', async () => {
     plugin = new ReplicatorPlugin({
-      verbose: true,
-      persistReplicatorLog: true,
+      verbose: false,
+      persistReplicatorLog: false,
       replicators: [
         {
           driver: 's3db',

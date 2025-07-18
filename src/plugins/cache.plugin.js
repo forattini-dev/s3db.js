@@ -1,6 +1,6 @@
 import { join } from "path";
 
-import { sha256 } from "../crypto.js";
+import { sha256 } from "../concerns/crypto.js";
 import Plugin from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
@@ -11,18 +11,12 @@ export class CachePlugin extends Plugin {
     super(options);
     this.driver = options.driver;
     this.config = {
-      enabled: options.enabled !== false,
       includePartitions: options.includePartitions !== false,
       ...options
     };
   }
 
   async setup(database) {
-    if (!this.config.enabled) {
-      return; // Don't setup when disabled
-    }
-    
-    // Call parent setup only when enabled
     await super.setup(database);
   }
 

@@ -11,7 +11,7 @@ import {
   cloneDeep,
 } from "lodash-es";
 
-import { encrypt, decrypt } from "./crypto.js";
+import { encrypt, decrypt } from "./concerns/crypto.js";
 import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";

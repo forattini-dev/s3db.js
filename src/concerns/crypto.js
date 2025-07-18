@@ -1,5 +1,5 @@
-import tryFn, { tryFnSync } from "./concerns/try-fn.js";
-import { CryptoError } from "./errors.js";
+import { CryptoError } from "../errors.js";
+import tryFn, { tryFnSync } from "./try-fn.js";
 
 async function dynamicCrypto() {
   let lib;

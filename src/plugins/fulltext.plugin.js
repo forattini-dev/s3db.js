@@ -6,7 +6,6 @@ export class FullTextPlugin extends Plugin {
     super();
     this.indexResource = null;
     this.config = {
-      enabled: options.enabled !== false,
       minWordLength: options.minWordLength || 3,
       maxResults: options.maxResults || 100,
       ...options
