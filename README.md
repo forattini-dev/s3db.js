@@ -303,7 +303,7 @@ const users = await s3db.createResource({
     password: "secret"
   },
   timestamps: true,
-        behavior: "user-managed",
+  behavior: "user-managed",
   partitions: {
     byRegion: { fields: { region: "string" } }
   }
@@ -351,7 +351,7 @@ const products = await s3db.createResource({
   name: "products",
   attributes: { name: "string", price: "number" },
   hooks: {
-    preInsert: [async (data) => {
+    beforeInsert: [async (data) => {
       data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
       return data;
     }],
@@ -377,21 +377,6 @@ readableStream.on("end", () => console.log("✅ Export completed"));
 const writableStream = await users.writable();
 importData.forEach(userData => writableStream.write(userData));
 writableStream.end();
-```
-    value: "string"
-  },
-  behavior: "enforce-limits" // Ensures data stays within 2KB
-});
-
-// Smart truncation - preserves structure, truncates content
-const summaries = await s3db.createResource({
-  name: "summaries",
-  attributes: {
-    title: "string",
-    description: "string"
-  },
-  behavior: "truncate-data" // Truncates to fit within limits
-});
 ```
 
 ### 🔄 Resource Versioning System
@@ -496,7 +481,7 @@ s3db.js automatically compresses numeric data using **Base62 encoding** to maxim
 
 ### 🔌 Plugin System
 
-Extend functionality with powerful plugins. s3db.js supports multiple plugins working together seamlessly:
+Extend s3db.js with powerful plugins for caching, monitoring, replication, search, and more:
 
 ```javascript
 import { 
@@ -511,437 +496,40 @@ import {
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [
-    new CachePlugin({ enabled: true }), // CachePlugin needs instantiation
-    CostsPlugin, // CostsPlugin is a static object
-    new FullTextPlugin({ fields: ['name', 'description'] }),
-    new MetricsPlugin({ enabled: true }),
-    new ReplicatorPlugin({ 
-      enabled: true, 
-      replicators: [
-        {
-          driver: 's3db',
-          resources: ['users', 'products'],
-          config: {
-            connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup"
-          }
-        }
-      ]
+    new CachePlugin(),                        // 💾 Intelligent caching
+    CostsPlugin,                              // 💰 Cost tracking
+    new FullTextPlugin({ fields: ['name'] }), // 🔍 Full-text search
+    new MetricsPlugin(),                      // 📊 Performance monitoring
+    new ReplicatorPlugin({                    // 🔄 Data replication
+      replicators: [{
+        driver: 's3db',
+        resources: ['users'],
+        config: { connectionString: "s3://backup-bucket/backup" }
+      }]
     }),
-    new AuditPlugin({ enabled: true })
+    new AuditPlugin()                         // 📝 Audit logging
   ]
 });
 
+await s3db.connect();
+
 // All plugins work together seamlessly
 await users.insert({ name: "John", email: "john@example.com" });
-// - Cache: Caches the operation
-// - Costs: Tracks S3 costs
-// - FullText: Indexes the data for search
-// - Metrics: Records performance metrics
-// - replicator: Syncs to configured replicators
-// - Audit: Logs the operation
+// ✅ Data cached, costs tracked, indexed for search, metrics recorded, replicated, and audited
 ```
 
-### 🔄 Replicator System
+#### Available Plugins
 
-The replicator Plugin now supports a flexible driver-based system for replicating data to different targets. Each replicator driver handles a specific type of target system.
+- **💾 Cache Plugin** - Intelligent caching (memory/S3) for performance
+- **💰 Costs Plugin** - Real-time AWS S3 cost tracking  
+- **🔍 FullText Plugin** - Advanced search with automatic indexing
+- **📊 Metrics Plugin** - Performance monitoring and analytics
+- **🔄 Replicator Plugin** - Multi-target replication (S3DB, SQS, BigQuery, PostgreSQL)
+- **📝 Audit Plugin** - Comprehensive audit logging for compliance
+- **📬 Queue Consumer Plugin** - Message consumption from SQS/RabbitMQ
 
-#### Available Replicators
-
-**S3DB Replicator** - Replicates data to another s3db instance:
-```javascript
-{
-  driver: 's3db',
-  resources: ['users', 'products'], // <-- root level
-  config: {
-    connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup",
-  }
-}
-```
-
-**SQS Replicator** - Sends data to AWS SQS queues:
-```javascript
-{
-  driver: 'sqs',
-  resources: ['orders'],
-  config: {
-    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
-    region: 'us-east-1',
-    messageGroupId: 's3db-replicator', // For FIFO queues
-    deduplicationId: true // Enable deduplication
-  }
-}
-```
-
-**BigQuery Replicator** - Sends data to Google BigQuery:
-```javascript
-{
-  driver: 'bigquery',
-  config: {
-    projectId: 'my-project',
-    datasetId: 'analytics',
-    location: 'US',
-    logTable: 's3db_replicator_log',
-    credentials: {
-      // Your Google Cloud service account credentials
-      client_email: 'service-account@project.iam.gserviceaccount.com',
-      private_key: '-----BEGIN PRIVATE KEY-----\n...'
-    }
-  },
-  resources: {
-    users: [
-      { actions: ['insert', 'update', 'delete'], table: 'users_table' },
-    ],
-    orders: [
-      { actions: ['insert'], table: 'orders_table' },
-      { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
-    ],
-    products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
-  }
-}
-```
-
-**PostgreSQL Replicator** - Sends data to PostgreSQL databases:
-```javascript
-{
-  driver: 'postgres',
-  config: {
-    connectionString: 'postgresql://user:pass@localhost:5432/analytics',
-    // OR individual parameters:
-    // host: 'localhost',
-    // port: 5432,
-    // database: 'analytics',
-    // user: 'user',
-    // password: 'pass',
-    ssl: false,
-    logTable: 's3db_replicator_log'
-  },
-  resources: {
-    users: [
-      { actions: ['insert', 'update', 'delete'], table: 'users_table' },
-    ],
-    orders: [
-      { actions: ['insert'], table: 'orders_table' },
-      { actions: ['insert'], table: 'orders_analytics' }, // Also replicate to analytics table
-    ],
-    products: 'products_table' // Short form: equivalent to { actions: ['insert'], table: 'products_table' }
-  }
-}
-```
-
-#### Replicator Features
-
-- **Resource Filtering**: Each replicator can be configured to handle specific resources only
-- **Event Emission**: All replicators emit events for monitoring and debugging
-- **Connection Testing**: Test connections to replicators before use
-- **Batch Operations**: Support for batch replicator operations
-- **Error Handling**: Comprehensive error handling and retry logic
-- **Status Monitoring**: Get detailed status and statistics for each replicator
-
-
-**⚠️ Important:** These dependencies are marked as `peerDependencies` in the package.json, which means they are not automatically installed with s3db.js. You must install them manually if you plan to use the corresponding replicators. If you don't install the required dependency, the replicator will throw an error when trying to initialize.
-
-**Example error without dependency:**
-```
-Error: Cannot find module '@aws-sdk/client-sqs'
-```
-
-**Solution:** Install the missing dependency as shown above.
-
-#### Example Usage
-
-See `examples/e34-replicators.js` for a complete example using all four replicator types.
-
-**Prerequisites:** Make sure to install the required dependencies before running the example:
-
-```bash
-# Install all replicator dependencies for the full example
-npm install @aws-sdk/client-sqs @google-cloud/bigquery pg
-```
-
-#### 🔄 Cache Plugin
-Intelligent caching to reduce API calls and improve performance:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new CachePlugin({
-    enabled: true,
-    ttl: 300000, // 5 minutes cache
-    maxSize: 1000, // Max 1000 items in cache
-    driverType: 'memory' // 'memory' or 's3'
-  })]
-});
-
-// Automatic caching for reads
-await users.count(); // Cached for 5 minutes
-await users.list();  // Cached for 5 minutes
-await users.insert({...}); // Automatically clears cache
-```
-
-#### 💰 Costs Plugin
-Track and monitor AWS S3 costs in real-time:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [CostsPlugin]
-});
-
-// Track costs automatically
-await users.insert({ name: "John", email: "john@example.com" });
-await users.list();
-
-// Get cost information
-console.log(s3db.client.costs); 
-// { total: 0.000009, requests: { total: 3, get: 1, put: 1, list: 1 } }
-```
-
-#### 🔍 Full-Text Search Plugin
-Powerful text search with automatic indexing:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new FullTextPlugin({
-    enabled: true,
-    fields: ['name', 'description', 'content'], // Fields to index
-    minWordLength: 3,
-    maxResults: 50,
-    language: 'en-US'
-  })]
-});
-
-// Create resource with searchable fields
-const products = await s3db.createResource({
-  name: "products",
-  attributes: {
-    name: "string|required",
-    description: "string",
-    content: "string"
-  }
-});
-
-// Insert data (automatically indexed)
-await products.insert({
-  name: "JavaScript Book",
-  description: "Learn JavaScript programming",
-  content: "Comprehensive guide to modern JavaScript"
-});
-
-// Search across all indexed fields
-const results = await s3db.plugins.fulltext.searchRecords('products', 'javascript');
-console.log(results); // Returns products with search scores
-
-// Example of search results:
-// [
-//   {
-//     id: "prod-123",
-//     name: "JavaScript Book",
-//     description: "Learn JavaScript programming",
-//     content: "Comprehensive guide to modern JavaScript",
-//     _searchScore: 0.85,
-//     _matchedFields: ["name", "description", "content"],
-//     _matchedWords: ["javascript"]
-//   },
-//   {
-//     id: "prod-456", 
-//     name: "Web Development Guide",
-//     description: "Includes JavaScript, HTML, and CSS",
-//     content: "Complete web development with JavaScript",
-//     _searchScore: 0.72,
-//     _matchedFields: ["description", "content"],
-//     _matchedWords: ["javascript"]
-//   }
-// ]
-```
-
-#### 📊 Metrics Plugin
-Monitor performance and usage metrics:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new MetricsPlugin({
-    enabled: true,
-    collectPerformance: true,
-    collectErrors: true,
-    collectUsage: true,
-    flushInterval: 60000 // Flush every minute
-  })]
-});
-
-// Metrics are collected automatically
-await users.insert({ name: "John" });
-await users.list();
-
-// Get metrics
-const metrics = await s3db.plugins.metrics.getMetrics();
-console.log(metrics); // Performance and usage data
-
-// Example of metrics object:
-// {
-//   performance: {
-//     averageResponseTime: 245, // milliseconds
-//     totalRequests: 1250,
-//     requestsPerSecond: 12.5,
-//     slowestOperations: [
-//       { operation: "list", resource: "users", avgTime: 450, count: 50 },
-//       { operation: "get", resource: "products", avgTime: 320, count: 200 }
-//     ]
-//   },
-//   usage: {
-//     resources: {
-//       users: { inserts: 150, updates: 75, deletes: 10, reads: 800 },
-//       products: { inserts: 300, updates: 120, deletes: 25, reads: 1200 }
-//     },
-//     totalOperations: 2680,
-//     mostActiveResource: "products",
-//     peakUsageHour: "14:00"
-//   },
-//   errors: {
-//     total: 15,
-//     byType: {
-//       "ValidationError": 8,
-//       "NotFoundError": 5,
-//       "PermissionError": 2
-//     },
-//     byResource: {
-//       users: 10,
-//       products: 5
-//     }
-//   },
-//   cache: {
-//     hitRate: 0.78, // 78% cache hit rate
-//     totalHits: 980,
-//     totalMisses: 270,
-//     averageCacheTime: 120 // milliseconds
-//   }
-// }
-```
-
-#### 🔄 replicator Plugin
-Replicate data to other buckets or regions:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new ReplicatorPlugin({
-    enabled: true,
-    replicators: [
-      {
-        driver: 's3db',
-        resources: ['users', 'products'],
-        config: {
-          connectionString: "s3://BACKUP_KEY:BACKUP_SECRET@BACKUP_BUCKET/backup"
-        }
-      },
-      {
-        driver: 'sqs',
-        resources: ['orders', 'users', 'products'],
-        config: {
-          // Resource-specific queues
-          queues: {
-            users: 'https://sqs.us-east-1.amazonaws.com/123456789012/users-events.fifo',
-            orders: 'https://sqs.us-east-1.amazonaws.com/123456789012/orders-events.fifo',
-            products: 'https://sqs.us-east-1.amazonaws.com/123456789012/products-events.fifo'
-          },
-          // Fallback queue for unspecified resources
-          defaultQueueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/default-events.fifo',
-          messageGroupId: 's3db-replicator', // For FIFO queues
-          deduplicationId: true // Enable deduplication
-        }
-      },
-      {
-        driver: 'bigquery',
-        resources: ['users', 'orders'],
-        config: {
-          projectId: 'my-project',
-          datasetId: 'analytics',
-          tableId: 's3db_replicator'
-        }
-      },
-      {
-        driver: 'postgres',
-        resources: ['users'],
-        config: {
-          connectionString: 'postgresql://user:pass@localhost:5432/analytics',
-          tableName: 's3db_replicator'
-        }
-      }
-    ],
-    syncInterval: 300000 // Sync every 5 minutes
-  })]
-});
-
-// Data is automatically replicated to all configured targets
-await users.insert({ name: "John" }); // Synced to all replicators
-```
-
-**SQS Message Structure:**
-
-The SQS replicator sends standardized messages with the following structure:
-
-```javascript
-// INSERT operation
-{
-  resource: "users",
-  action: "insert",
-  data: { _v: 0, id: "user-001", name: "John", email: "john@example.com" },
-  timestamp: "2024-01-01T10:00:00.000Z",
-  source: "s3db-replicator"
-}
-
-// UPDATE operation (includes before/after data)
-{
-  resource: "users",
-  action: "update",
-  before: { _v: 0, id: "user-001", name: "John", age: 30 },
-  data: { _v: 1, id: "user-001", name: "John", age: 31 },
-  timestamp: "2024-01-01T10:05:00.000Z",
-  source: "s3db-replicator"
-}
-
-// DELETE operation
-{
-  resource: "users",
-  action: "delete",
-  data: { _v: 1, id: "user-001", name: "John", age: 31 },
-  timestamp: "2024-01-01T10:10:00.000Z",
-  source: "s3db-replicator"
-}
-```
-
-**Queue Routing:**
-- Each resource can have its own dedicated queue
-- Unspecified resources use the default queue
-- FIFO queues supported with deduplication
-- Messages are automatically routed to the appropriate queue
-
-#### 📝 Audit Plugin
-Log all operations for compliance and traceability:
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new AuditPlugin({
-    enabled: true,
-    trackOperations: ['insert', 'update', 'delete', 'get'],
-    includeData: false, // Don't log sensitive data
-    retentionDays: 90
-  })]
-});
-
-// All operations are logged
-await users.insert({ name: "John" });
-await users.update(userId, { age: 31 });
-
-// Get audit logs
-const logs = await s3db.plugins.audit.getAuditLogs({
-  resourceName: 'users',
-  operation: 'insert'
-});
-console.log(logs); // Audit trail
-```
+**📖 For detailed documentation, configuration options, and advanced examples, see:**
+**[📋 Complete Plugin Documentation](https://github.com/forattini-dev/s3db.js/blob/main/PLUGINS.md)**
 
 ### 🎛️ Resource Behaviors
 
@@ -1346,6 +934,7 @@ const usUsers = await users.list({
 
 // Note: The system automatically manages partition references internally
 // Users should use standard list() method with partition parameters
+```
 
 #### Automatic Timestamp Partitions
 
@@ -1403,14 +992,14 @@ const users = await s3db.createResource({
   name: "users",
   attributes: { name: "string", email: "string" },
   hooks: {
-    preInsert: [
+    beforeInsert: [
       async (data) => {
-        console.log('1. Pre-insert hook 1');
+        console.log('1. Before-insert hook 1');
         data.timestamp = new Date().toISOString();
         return data;
       },
       async (data) => {
-        console.log('2. Pre-insert hook 2');
+        console.log('2. Before-insert hook 2');
         data.processed = true;
         return data;
       }
@@ -1428,7 +1017,7 @@ const users = await s3db.createResource({
   }
 });
 
-// Execution order: preInsert hooks → insert → afterInsert hooks
+// Execution order: beforeInsert hooks → insert → afterInsert hooks
 ```
 
 #### Version-Specific Hooks
@@ -1440,7 +1029,7 @@ const users = await s3db.createResource({
   attributes: { name: "string", email: "string" },
   versioningEnabled: true,
   hooks: {
-    preInsert: [
+    beforeInsert: [
       async (data) => {
         // Access resource context
         console.log('Current version:', this.version);
@@ -1462,19 +1051,19 @@ users.on('versionUpdated', ({ oldVersion, newVersion }) => {
 const users = await s3db.createResource({
   name: "users",
   attributes: { name: "string", email: "string" },
-  hooks: {
-    preInsert: [
-      async (data) => {
-        try {
-          // Validate external service
-          await validateEmail(data.email);
-          return data;
-        } catch (error) {
-          // Transform error or add context
-          throw new Error(`Email validation failed: ${error.message}`);
+      hooks: {
+      beforeInsert: [
+        async (data) => {
+          try {
+            // Validate external service
+            await validateEmail(data.email);
+            return data;
+          } catch (error) {
+            // Transform error or add context
+            throw new Error(`Email validation failed: ${error.message}`);
+          }
         }
-      }
-    ],
+      ],
     afterInsert: [
       async (data) => {
         try {
@@ -1496,7 +1085,7 @@ const users = await s3db.createResource({
   name: "users",
   attributes: { name: "string", email: "string" },
   hooks: {
-    preInsert: [
+    beforeInsert: [
       async function(data) {
         // 'this' is bound to the resource instance
         console.log('Resource name:', this.name);
@@ -1582,10 +1171,10 @@ users.useMiddleware('update', async (ctx, next) => {
 Here's a practical example showing how to implement authentication and audit logging with middleware:
 
 ```js
-import s3db from 's3db.js';
+import { S3db } from 's3db.js';
 
 // Create database and resources
-const database = new s3db.Database('s3://my-bucket/my-app');
+const database = new S3db({ connectionString: 's3://my-bucket/my-app' });
 await database.connect();
 
 const orders = await database.createResource({
@@ -1733,7 +1322,9 @@ s3db.js supports **both hooks and middlewares** for resources. They are compleme
 - Hooks are functions that run **before or after** specific operations (e.g., `beforeInsert`, `afterUpdate`).
 - They are ideal for **side effects**: logging, notifications, analytics, validation, etc.
 - Hooks **cannot block or replace** the original operation—they can only observe or modify the data passed to them.
-- Hooks are registered with `addHook(event, fn)` or via the `hooks` config.
+- Hooks are registered with `addHook(hookName, fn)` or via the `hooks` config.
+
+> **📝 Note:** Don't confuse hooks with **events**. Hooks are lifecycle functions (`beforeInsert`, `afterUpdate`, etc.) while events are actual EventEmitter events (`exceedsLimit`, `truncate`, `overflow`) that you listen to with `.on(eventName, handler)`.
 
 **Example:**
 ```js
@@ -1765,7 +1356,7 @@ users.useMiddleware('insert', async (ctx, next) => {
 | Placement      | Before/after operation       | Wraps the entire method      |
 | Control        | Cannot block/replace op      | Can block/replace op         |
 | Use case       | Side effects, logging, etc.  | Access control, transform    |
-| Registration   | `addHook(event, fn)`         | `useMiddleware(method, fn)`  |
+| Registration   | `addHook(hookName, fn)`      | `useMiddleware(method, fn)`  |
 | Data access    | Receives data only           | Full context (args, method)  |
 | Chaining       | Runs in order, always passes | Runs in order, can short-circuit |
 
@@ -1896,4 +1487,5 @@ console.log(`Total users: ${allUsers.length}`);
 
 | Method | Description | Example |
 |--------|-------------|---------|
-| `
+| `readable(options?)` | Create readable stream | `await users.readable()` |
+| `writable(options?)` | Create writable stream | `await users.writable()` |

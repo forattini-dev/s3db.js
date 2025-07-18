@@ -1,7 +1,7 @@
 import { merge, isString } from "lodash-es";
 import FastestValidator from "fastest-validator";
 
-import { encrypt } from "./crypto.js";
+import { encrypt } from "./concerns/crypto.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ValidationError } from "./errors.js";
 

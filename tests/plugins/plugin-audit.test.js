@@ -120,9 +120,7 @@ describe('Audit Plugin', () => {
 
       const isolatedDatabase = new Database({ client: isolatedClient });
 
-      const disabledPlugin = new AuditPlugin({ enabled: false });
-      await disabledPlugin.setup(isolatedDatabase);
-      expect(disabledPlugin.auditResource).toBeNull();
+
     });
 
     test('should handle existing audit resource', async () => {

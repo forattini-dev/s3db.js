@@ -43,7 +43,6 @@ describe('Cache Plugin', () => {
 
     beforeEach(async () => {
       cachePlugin = new CachePlugin({
-        enabled: true,
         driverType: 'memory',
         ttl: 60000, // 60 seconds TTL in ms
         maxSize: 100 // Limit cache size
@@ -99,7 +98,6 @@ describe('Cache Plugin', () => {
 
     describe('Setup and Initialization', () => {
       test('should setup cache plugin with memory driver', async () => {
-        expect(cachePlugin.config.enabled).toBe(true);
         expect(cachePlugin.driver).toBeInstanceOf(MemoryCache);
         expect(cachePlugin.database).toBe(database);
       });
@@ -111,13 +109,7 @@ describe('Cache Plugin', () => {
         expect(typeof products.cacheKeyFor).toBe('function');
       });
 
-      test('should handle disabled configuration', async () => {
-        const disabledPlugin = new CachePlugin({ enabled: false });
-        await disabledPlugin.setup(database);
 
-        expect(disabledPlugin.config.enabled).toBe(false);
-        expect(disabledPlugin.database).toBeUndefined();
-      });
     });
 
     describe('Cache Key Generation', () => {

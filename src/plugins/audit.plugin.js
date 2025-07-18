@@ -6,7 +6,6 @@ export class AuditPlugin extends Plugin {
     super(options);
     this.auditResource = null;
     this.config = {
-      enabled: options.enabled !== false,
       includeData: options.includeData !== false,
       includePartitions: options.includePartitions !== false,
       maxDataSize: options.maxDataSize || 10000, // 10KB limit
@@ -15,10 +14,6 @@ export class AuditPlugin extends Plugin {
   }
 
   async onSetup() {
-    if (!this.config.enabled) {
-      this.auditResource = null;
-      return;
-    }
 
     // Create audit resource if it doesn't exist
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({

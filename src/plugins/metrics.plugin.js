@@ -5,7 +5,6 @@ export class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
     this.config = {
-      enabled: options.enabled !== false,
       collectPerformance: options.collectPerformance !== false,
       collectErrors: options.collectErrors !== false,
       collectUsage: options.collectUsage !== false,
@@ -34,7 +33,7 @@ export class MetricsPlugin extends Plugin {
 
   async setup(database) {
     this.database = database;
-    if (!this.config.enabled || process.env.NODE_ENV === 'test') return;
+    if (process.env.NODE_ENV === 'test') return;
 
     const [ok, err] = await tryFn(async () => {
       const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({

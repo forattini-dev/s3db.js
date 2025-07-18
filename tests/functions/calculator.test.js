@@ -463,6 +463,30 @@ describe('Calculator Tests', () => {
       expect(sizes['low_surrogate']).toBe(3); // Incomplete surrogate
       expect(sizes['mixed_surrogates']).toBe(16); // Mixed ASCII and surrogate pair
     });
+
+    test('should handle multiple surrogate pairs in sequence', () => {
+      // Test string with multiple consecutive 4-byte characters to trigger line 77 (i++)
+      const multipleEmojis = '🌍🚀🔥💻'; // 4 emojis, each 4 bytes, should trigger surrogate pair handling
+      const mappedObject = {
+        '_v': '1',
+        'multiple_emojis': multipleEmojis
+      };
+      
+      const sizes = calculateAttributeSizes(mappedObject);
+      expect(sizes['multiple_emojis']).toBe(16); // 4 emojis * 4 bytes each
+    });
+
+    test('should handle string with high codepoints that require surrogate pairs', () => {
+      // Test specifically with characters that have codePoint > 0xFFFF to trigger i++ on line 77
+      const highCodepointString = '𝓗𝓮𝓵𝓵𝓸 𝓦𝓸𝓻𝓵𝓭'; // Mathematical script letters
+      const mappedObject = {
+        '_v': '1',
+        'high_codepoint': highCodepointString
+      };
+      
+      const sizes = calculateAttributeSizes(mappedObject);
+      expect(sizes['high_codepoint']).toBeGreaterThan(20); // Should be larger due to 4-byte characters
+    });
   });
 
   describe('Performance Tests', () => {
