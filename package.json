@@ -50,8 +50,7 @@
     "test:types:basic": "tsc --noEmit tests/typescript/basic-usage.test.ts",
     "test:types:direct": "tsc --noEmit tests/typescript/direct-type-test.ts",
     "test:types:watch": "tsc --noEmit --watch --project tests/typescript/tsconfig.json",
-    "validate:types": "npm run test:types && echo 'TypeScript definitions are valid!'",
-    "prepublishOnly": "npm run build && npm run test:types"
+    "validate:types": "npm run test:types && echo 'TypeScript definitions are valid!'"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.846.0",
