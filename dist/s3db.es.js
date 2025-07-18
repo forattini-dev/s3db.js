@@ -1,15 +1,14 @@
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import zlib from 'zlib';
-import { streamToString as streamToString$1 } from '#src/stream/index.js';
+import { PromisePool } from '@supercharge/promise-pool';
+import { ReadableStream } from 'node:stream/web';
 import 'amqplib';
 import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get, set, isObject as isObject$1, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
-import { PromisePool } from '@supercharge/promise-pool';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { flatten, unflatten } from 'flat';
 import FastestValidator from 'fastest-validator';
-import { ReadableStream } from 'node:stream/web';
 
 function calculateUTF8Bytes(str) {
   if (typeof str !== "string") {
@@ -2266,2958 +2265,6 @@ class Cache extends EventEmitter {
     const data = await this._clear(prefix);
     this.emit("clear", data);
     return data;
-  }
-}
-
-class S3Cache extends Cache {
-  constructor({
-    client,
-    keyPrefix = "cache",
-    ttl = 0,
-    prefix = void 0
-  }) {
-    super({ client, keyPrefix, ttl, prefix });
-    this.client = client;
-    this.keyPrefix = keyPrefix;
-    this.config.ttl = ttl;
-    this.config.client = client;
-    this.config.prefix = prefix !== void 0 ? prefix : keyPrefix + (keyPrefix.endsWith("/") ? "" : "/");
-  }
-  async _set(key, data) {
-    let body = JSON.stringify(data);
-    const lengthSerialized = body.length;
-    body = zlib.gzipSync(body).toString("base64");
-    return this.client.putObject({
-      key: join(this.keyPrefix, key),
-      body,
-      contentEncoding: "gzip",
-      contentType: "application/gzip",
-      metadata: {
-        compressor: "zlib",
-        compressed: "true",
-        "client-id": this.client.id,
-        "length-serialized": String(lengthSerialized),
-        "length-compressed": String(body.length),
-        "compression-gain": (body.length / lengthSerialized).toFixed(2)
-      }
-    });
-  }
-  async _get(key) {
-    const [ok, err, result] = await tryFn(async () => {
-      const { Body } = await this.client.getObject(join(this.keyPrefix, key));
-      let content = await streamToString$1(Body);
-      content = Buffer.from(content, "base64");
-      content = zlib.unzipSync(content).toString();
-      return JSON.parse(content);
-    });
-    if (ok) return result;
-    if (err.name === "NoSuchKey" || err.name === "NotFound") return null;
-    throw err;
-  }
-  async _del(key) {
-    await this.client.deleteObject(join(this.keyPrefix, key));
-    return true;
-  }
-  async _clear() {
-    const keys = await this.client.getAllKeys({
-      prefix: this.keyPrefix
-    });
-    await this.client.deleteObjects(keys);
-  }
-  async size() {
-    const keys = await this.keys();
-    return keys.length;
-  }
-  async keys() {
-    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
-    const prefix = this.keyPrefix.endsWith("/") ? this.keyPrefix : this.keyPrefix + "/";
-    return allKeys.map((k) => k.startsWith(prefix) ? k.slice(prefix.length) : k);
-  }
-}
-
-class MemoryCache extends Cache {
-  constructor(config = {}) {
-    super(config);
-    this.cache = {};
-    this.meta = {};
-    this.maxSize = config.maxSize || 0;
-    this.ttl = config.ttl || 0;
-  }
-  async _set(key, data) {
-    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
-      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-      if (oldestKey) {
-        delete this.cache[oldestKey];
-        delete this.meta[oldestKey];
-      }
-    }
-    this.cache[key] = data;
-    this.meta[key] = { ts: Date.now() };
-    return data;
-  }
-  async _get(key) {
-    if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
-    if (this.ttl > 0) {
-      const now = Date.now();
-      const meta = this.meta[key];
-      if (meta && now - meta.ts > this.ttl * 1e3) {
-        delete this.cache[key];
-        delete this.meta[key];
-        return null;
-      }
-    }
-    return this.cache[key];
-  }
-  async _del(key) {
-    delete this.cache[key];
-    delete this.meta[key];
-    return true;
-  }
-  async _clear(prefix) {
-    if (!prefix) {
-      this.cache = {};
-      this.meta = {};
-      return true;
-    }
-    for (const key of Object.keys(this.cache)) {
-      if (key.startsWith(prefix)) {
-        delete this.cache[key];
-        delete this.meta[key];
-      }
-    }
-    return true;
-  }
-  async size() {
-    return Object.keys(this.cache).length;
-  }
-  async keys() {
-    return Object.keys(this.cache);
-  }
-}
-
-class CachePlugin extends Plugin {
-  constructor(options = {}) {
-    super(options);
-    this.driver = options.driver;
-    this.config = {
-      includePartitions: options.includePartitions !== false,
-      ...options
-    };
-  }
-  async setup(database) {
-    await super.setup(database);
-  }
-  async onSetup() {
-    if (this.config.driver) {
-      this.driver = this.config.driver;
-    } else if (this.config.driverType === "memory") {
-      this.driver = new MemoryCache(this.config.memoryOptions || {});
-    } else {
-      this.driver = new S3Cache({ client: this.database.client, ...this.config.s3Options || {} });
-    }
-    this.installDatabaseProxy();
-    this.installResourceHooks();
-  }
-  async onStart() {
-  }
-  async onStop() {
-  }
-  installDatabaseProxy() {
-    if (this.database._cacheProxyInstalled) {
-      return;
-    }
-    const installResourceHooks = this.installResourceHooks.bind(this);
-    this.database._originalCreateResourceForCache = this.database.createResource;
-    this.database.createResource = async function(...args) {
-      const resource = await this._originalCreateResourceForCache(...args);
-      installResourceHooks(resource);
-      return resource;
-    };
-    this.database._cacheProxyInstalled = true;
-  }
-  installResourceHooks() {
-    for (const resource of Object.values(this.database.resources)) {
-      this.installResourceHooksForResource(resource);
-    }
-  }
-  installResourceHooksForResource(resource) {
-    if (!this.driver) return;
-    Object.defineProperty(resource, "cache", {
-      value: this.driver,
-      writable: true,
-      configurable: true,
-      enumerable: false
-    });
-    resource.cacheKeyFor = async (options = {}) => {
-      const { action, params = {}, partition, partitionValues } = options;
-      return this.generateCacheKey(resource, action, params, partition, partitionValues);
-    };
-    const cacheMethods = [
-      "count",
-      "listIds",
-      "getMany",
-      "getAll",
-      "page",
-      "list",
-      "get"
-    ];
-    for (const method of cacheMethods) {
-      resource.useMiddleware(method, async (ctx, next) => {
-        let key;
-        if (method === "getMany") {
-          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
-        } else if (method === "page") {
-          const { offset, size, partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
-        } else if (method === "list" || method === "listIds" || method === "count") {
-          const { partition, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
-        } else if (method === "getAll") {
-          key = await resource.cacheKeyFor({ action: method });
-        } else if (method === "get") {
-          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
-        }
-        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
-        if (ok && cached !== null && cached !== void 0) return cached;
-        if (!ok && err.name !== "NoSuchKey") throw err;
-        const result = await next();
-        await resource.cache.set(key, result);
-        return result;
-      });
-    }
-    const writeMethods = ["insert", "update", "delete", "deleteMany"];
-    for (const method of writeMethods) {
-      resource.useMiddleware(method, async (ctx, next) => {
-        const result = await next();
-        if (method === "insert") {
-          await this.clearCacheForResource(resource, ctx.args[0]);
-        } else if (method === "update") {
-          await this.clearCacheForResource(resource, { id: ctx.args[0], ...ctx.args[1] });
-        } else if (method === "delete") {
-          let data = { id: ctx.args[0] };
-          if (typeof resource.get === "function") {
-            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
-            if (ok && full) data = full;
-          }
-          await this.clearCacheForResource(resource, data);
-        } else if (method === "deleteMany") {
-          await this.clearCacheForResource(resource);
-        }
-        return result;
-      });
-    }
-  }
-  async clearCacheForResource(resource, data) {
-    if (!resource.cache) return;
-    const keyPrefix = `resource=${resource.name}`;
-    await resource.cache.clear(keyPrefix);
-    if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
-      if (!data) {
-        for (const partitionName of Object.keys(resource.config.partitions)) {
-          const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-          await resource.cache.clear(partitionKeyPrefix);
-        }
-      } else {
-        const partitionValues = this.getPartitionValues(data, resource);
-        for (const [partitionName, values] of Object.entries(partitionValues)) {
-          if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
-            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-            await resource.cache.clear(partitionKeyPrefix);
-          }
-        }
-      }
-    }
-  }
-  async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
-    const keyParts = [
-      `resource=${resource.name}`,
-      `action=${action}`
-    ];
-    if (partition && partitionValues && Object.keys(partitionValues).length > 0) {
-      keyParts.push(`partition:${partition}`);
-      for (const [field, value] of Object.entries(partitionValues)) {
-        if (value !== null && value !== void 0) {
-          keyParts.push(`${field}:${value}`);
-        }
-      }
-    }
-    if (Object.keys(params).length > 0) {
-      const paramsHash = await this.hashParams(params);
-      keyParts.push(paramsHash);
-    }
-    return join(...keyParts) + ".json.gz";
-  }
-  async hashParams(params) {
-    const sortedParams = Object.keys(params).sort().map((key) => `${key}:${params[key]}`).join("|") || "empty";
-    return await sha256(sortedParams);
-  }
-  // Utility methods
-  async getCacheStats() {
-    if (!this.driver) return null;
-    return {
-      size: await this.driver.size(),
-      keys: await this.driver.keys(),
-      driver: this.driver.constructor.name
-    };
-  }
-  async clearAllCache() {
-    if (!this.driver) return;
-    for (const resource of Object.values(this.database.resources)) {
-      if (resource.cache) {
-        const keyPrefix = `resource=${resource.name}`;
-        await resource.cache.clear(keyPrefix);
-      }
-    }
-  }
-  async warmCache(resourceName, options = {}) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
-    }
-    const { includePartitions = true } = options;
-    await resource.getAll();
-    if (includePartitions && resource.config.partitions) {
-      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
-        if (partitionDef.fields) {
-          const allRecords = await resource.getAll();
-          const recordsArray = Array.isArray(allRecords) ? allRecords : [];
-          const partitionValues = /* @__PURE__ */ new Set();
-          for (const record of recordsArray.slice(0, 10)) {
-            const values = this.getPartitionValues(record, resource);
-            if (values[partitionName]) {
-              partitionValues.add(JSON.stringify(values[partitionName]));
-            }
-          }
-          for (const partitionValueStr of partitionValues) {
-            const partitionValues2 = JSON.parse(partitionValueStr);
-            await resource.list({ partition: partitionName, partitionValues: partitionValues2 });
-          }
-        }
-      }
-    }
-  }
-}
-
-const CostsPlugin = {
-  async setup(db) {
-    if (!db || !db.client) {
-      return;
-    }
-    this.client = db.client;
-    this.map = {
-      PutObjectCommand: "put",
-      GetObjectCommand: "get",
-      HeadObjectCommand: "head",
-      DeleteObjectCommand: "delete",
-      DeleteObjectsCommand: "delete",
-      ListObjectsV2Command: "list"
-    };
-    this.costs = {
-      total: 0,
-      prices: {
-        put: 5e-3 / 1e3,
-        copy: 5e-3 / 1e3,
-        list: 5e-3 / 1e3,
-        post: 5e-3 / 1e3,
-        get: 4e-4 / 1e3,
-        select: 4e-4 / 1e3,
-        delete: 4e-4 / 1e3,
-        head: 4e-4 / 1e3
-      },
-      requests: {
-        total: 0,
-        put: 0,
-        post: 0,
-        copy: 0,
-        list: 0,
-        get: 0,
-        select: 0,
-        delete: 0,
-        head: 0
-      },
-      events: {
-        total: 0,
-        PutObjectCommand: 0,
-        GetObjectCommand: 0,
-        HeadObjectCommand: 0,
-        DeleteObjectCommand: 0,
-        DeleteObjectsCommand: 0,
-        ListObjectsV2Command: 0
-      }
-    };
-    this.client.costs = JSON.parse(JSON.stringify(this.costs));
-  },
-  async start() {
-    if (this.client) {
-      this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
-      this.client.on("command.error", (name) => this.addRequest(name, this.map[name]));
-    }
-  },
-  addRequest(name, method) {
-    if (!method) return;
-    this.costs.events[name]++;
-    this.costs.events.total++;
-    this.costs.requests.total++;
-    this.costs.requests[method]++;
-    this.costs.total += this.costs.prices[method];
-    if (this.client && this.client.costs) {
-      this.client.costs.events[name]++;
-      this.client.costs.events.total++;
-      this.client.costs.requests.total++;
-      this.client.costs.requests[method]++;
-      this.client.costs.total += this.client.costs.prices[method];
-    }
-  }
-};
-
-class FullTextPlugin extends Plugin {
-  constructor(options = {}) {
-    super();
-    this.indexResource = null;
-    this.config = {
-      minWordLength: options.minWordLength || 3,
-      maxResults: options.maxResults || 100,
-      ...options
-    };
-    this.indexes = /* @__PURE__ */ new Map();
-  }
-  async setup(database) {
-    this.database = database;
-    const [ok, err, indexResource] = await tryFn(() => database.createResource({
-      name: "fulltext_indexes",
-      attributes: {
-        id: "string|required",
-        resourceName: "string|required",
-        fieldName: "string|required",
-        word: "string|required",
-        recordIds: "json|required",
-        // Array of record IDs containing this word
-        count: "number|required",
-        lastUpdated: "string|required"
-      }
-    }));
-    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
-    await this.loadIndexes();
-    this.installIndexingHooks();
-  }
-  async start() {
-  }
-  async stop() {
-    await this.saveIndexes();
-  }
-  async loadIndexes() {
-    if (!this.indexResource) return;
-    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
-    if (ok) {
-      for (const indexRecord of allIndexes) {
-        const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
-        this.indexes.set(key, {
-          recordIds: indexRecord.recordIds || [],
-          count: indexRecord.count || 0
-        });
-      }
-    }
-  }
-  async saveIndexes() {
-    if (!this.indexResource) return;
-    const [ok, err] = await tryFn(async () => {
-      const existingIndexes = await this.indexResource.getAll();
-      for (const index of existingIndexes) {
-        await this.indexResource.delete(index.id);
-      }
-      for (const [key, data] of this.indexes.entries()) {
-        const [resourceName, fieldName, word] = key.split(":");
-        await this.indexResource.insert({
-          id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          resourceName,
-          fieldName,
-          word,
-          recordIds: data.recordIds,
-          count: data.count,
-          lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
-        });
-      }
-    });
-  }
-  installIndexingHooks() {
-    if (!this.database.plugins) {
-      this.database.plugins = {};
-    }
-    this.database.plugins.fulltext = this;
-    for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === "fulltext_indexes") continue;
-      this.installResourceHooks(resource);
-    }
-    if (!this.database._fulltextProxyInstalled) {
-      this.database._previousCreateResourceForFullText = this.database.createResource;
-      this.database.createResource = async function(...args) {
-        const resource = await this._previousCreateResourceForFullText(...args);
-        if (this.plugins?.fulltext && resource.name !== "fulltext_indexes") {
-          this.plugins.fulltext.installResourceHooks(resource);
-        }
-        return resource;
-      };
-      this.database._fulltextProxyInstalled = true;
-    }
-    for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== "fulltext_indexes") {
-        this.installResourceHooks(resource);
-      }
-    }
-  }
-  installResourceHooks(resource) {
-    resource._insert = resource.insert;
-    resource._update = resource.update;
-    resource._delete = resource.delete;
-    resource._deleteMany = resource.deleteMany;
-    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
-      const [data] = args;
-      this.indexRecord(resource.name, result.id, data).catch(console.error);
-      return result;
-    });
-    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
-      const [id, data] = args;
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
-      this.indexRecord(resource.name, id, result).catch(console.error);
-      return result;
-    });
-    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
-      const [id] = args;
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
-      return result;
-    });
-    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
-      const [ids] = args;
-      for (const id of ids) {
-        this.removeRecordFromIndex(resource.name, id).catch(console.error);
-      }
-      return result;
-    });
-  }
-  async indexRecord(resourceName, recordId, data) {
-    const indexedFields = this.getIndexedFields(resourceName);
-    if (!indexedFields || indexedFields.length === 0) {
-      return;
-    }
-    for (const fieldName of indexedFields) {
-      const fieldValue = this.getFieldValue(data, fieldName);
-      if (!fieldValue) {
-        continue;
-      }
-      const words = this.tokenize(fieldValue);
-      for (const word of words) {
-        if (word.length < this.config.minWordLength) {
-          continue;
-        }
-        const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
-        const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
-        if (!existing.recordIds.includes(recordId)) {
-          existing.recordIds.push(recordId);
-          existing.count = existing.recordIds.length;
-        }
-        this.indexes.set(key, existing);
-      }
-    }
-  }
-  async removeRecordFromIndex(resourceName, recordId) {
-    for (const [key, data] of this.indexes.entries()) {
-      if (key.startsWith(`${resourceName}:`)) {
-        const index = data.recordIds.indexOf(recordId);
-        if (index > -1) {
-          data.recordIds.splice(index, 1);
-          data.count = data.recordIds.length;
-          if (data.recordIds.length === 0) {
-            this.indexes.delete(key);
-          } else {
-            this.indexes.set(key, data);
-          }
-        }
-      }
-    }
-  }
-  getFieldValue(data, fieldPath) {
-    if (!fieldPath.includes(".")) {
-      return data && data[fieldPath] !== void 0 ? data[fieldPath] : null;
-    }
-    const keys = fieldPath.split(".");
-    let value = data;
-    for (const key of keys) {
-      if (value && typeof value === "object" && key in value) {
-        value = value[key];
-      } else {
-        return null;
-      }
-    }
-    return value;
-  }
-  tokenize(text) {
-    if (!text) return [];
-    const str = String(text).toLowerCase();
-    return str.replace(/[^\w\s\u00C0-\u017F]/g, " ").split(/\s+/).filter((word) => word.length > 0);
-  }
-  getIndexedFields(resourceName) {
-    if (this.config.fields) {
-      return this.config.fields;
-    }
-    const fieldMappings = {
-      users: ["name", "email"],
-      products: ["name", "description"],
-      articles: ["title", "content"]
-      // Add more mappings as needed
-    };
-    return fieldMappings[resourceName] || [];
-  }
-  // Main search method
-  async search(resourceName, query, options = {}) {
-    const {
-      fields = null,
-      // Specific fields to search in
-      limit = this.config.maxResults,
-      offset = 0,
-      exactMatch = false
-    } = options;
-    if (!query || query.trim().length === 0) {
-      return [];
-    }
-    const searchWords = this.tokenize(query);
-    const results = /* @__PURE__ */ new Map();
-    const searchFields = fields || this.getIndexedFields(resourceName);
-    if (searchFields.length === 0) {
-      return [];
-    }
-    for (const word of searchWords) {
-      if (word.length < this.config.minWordLength) continue;
-      for (const fieldName of searchFields) {
-        if (exactMatch) {
-          const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
-          const indexData = this.indexes.get(key);
-          if (indexData) {
-            for (const recordId of indexData.recordIds) {
-              const currentScore = results.get(recordId) || 0;
-              results.set(recordId, currentScore + 1);
-            }
-          }
-        } else {
-          for (const [key, indexData] of this.indexes.entries()) {
-            if (key.startsWith(`${resourceName}:${fieldName}:${word.toLowerCase()}`)) {
-              for (const recordId of indexData.recordIds) {
-                const currentScore = results.get(recordId) || 0;
-                results.set(recordId, currentScore + 1);
-              }
-            }
-          }
-        }
-      }
-    }
-    const sortedResults = Array.from(results.entries()).map(([recordId, score]) => ({ recordId, score })).sort((a, b) => b.score - a.score).slice(offset, offset + limit);
-    return sortedResults;
-  }
-  // Search and return full records
-  async searchRecords(resourceName, query, options = {}) {
-    const searchResults = await this.search(resourceName, query, options);
-    if (searchResults.length === 0) {
-      return [];
-    }
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
-    }
-    const recordIds = searchResults.map((result2) => result2.recordId);
-    const records = await resource.getMany(recordIds);
-    const result = records.filter((record) => record && typeof record === "object").map((record) => {
-      const searchResult = searchResults.find((sr) => sr.recordId === record.id);
-      return {
-        ...record,
-        _searchScore: searchResult ? searchResult.score : 0
-      };
-    }).sort((a, b) => b._searchScore - a._searchScore);
-    return result;
-  }
-  // Utility methods
-  async rebuildIndex(resourceName) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
-    }
-    for (const [key] of this.indexes.entries()) {
-      if (key.startsWith(`${resourceName}:`)) {
-        this.indexes.delete(key);
-      }
-    }
-    const allRecords = await resource.getAll();
-    const batchSize = 100;
-    for (let i = 0; i < allRecords.length; i += batchSize) {
-      const batch = allRecords.slice(i, i + batchSize);
-      for (const record of batch) {
-        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
-      }
-    }
-    await this.saveIndexes();
-  }
-  async getIndexStats() {
-    const stats = {
-      totalIndexes: this.indexes.size,
-      resources: {},
-      totalWords: 0
-    };
-    for (const [key, data] of this.indexes.entries()) {
-      const [resourceName, fieldName] = key.split(":");
-      if (!stats.resources[resourceName]) {
-        stats.resources[resourceName] = {
-          fields: {},
-          totalRecords: /* @__PURE__ */ new Set(),
-          totalWords: 0
-        };
-      }
-      if (!stats.resources[resourceName].fields[fieldName]) {
-        stats.resources[resourceName].fields[fieldName] = {
-          words: 0,
-          totalOccurrences: 0
-        };
-      }
-      stats.resources[resourceName].fields[fieldName].words++;
-      stats.resources[resourceName].fields[fieldName].totalOccurrences += data.count;
-      stats.resources[resourceName].totalWords++;
-      for (const recordId of data.recordIds) {
-        stats.resources[resourceName].totalRecords.add(recordId);
-      }
-      stats.totalWords++;
-    }
-    for (const resourceName in stats.resources) {
-      stats.resources[resourceName].totalRecords = stats.resources[resourceName].totalRecords.size;
-    }
-    return stats;
-  }
-  async rebuildAllIndexes({ timeout } = {}) {
-    if (timeout) {
-      return Promise.race([
-        this._rebuildAllIndexesInternal(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
-      ]);
-    }
-    return this._rebuildAllIndexesInternal();
-  }
-  async _rebuildAllIndexesInternal() {
-    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
-    for (const resourceName of resourceNames) {
-      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
-    }
-  }
-  async clearIndex(resourceName) {
-    for (const [key] of this.indexes.entries()) {
-      if (key.startsWith(`${resourceName}:`)) {
-        this.indexes.delete(key);
-      }
-    }
-    await this.saveIndexes();
-  }
-  async clearAllIndexes() {
-    this.indexes.clear();
-    await this.saveIndexes();
-  }
-}
-
-class MetricsPlugin extends Plugin {
-  constructor(options = {}) {
-    super();
-    this.config = {
-      collectPerformance: options.collectPerformance !== false,
-      collectErrors: options.collectErrors !== false,
-      collectUsage: options.collectUsage !== false,
-      retentionDays: options.retentionDays || 30,
-      flushInterval: options.flushInterval || 6e4,
-      // 1 minute
-      ...options
-    };
-    this.metrics = {
-      operations: {
-        insert: { count: 0, totalTime: 0, errors: 0 },
-        update: { count: 0, totalTime: 0, errors: 0 },
-        delete: { count: 0, totalTime: 0, errors: 0 },
-        get: { count: 0, totalTime: 0, errors: 0 },
-        list: { count: 0, totalTime: 0, errors: 0 },
-        count: { count: 0, totalTime: 0, errors: 0 }
-      },
-      resources: {},
-      errors: [],
-      performance: [],
-      startTime: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.flushTimer = null;
-  }
-  async setup(database) {
-    this.database = database;
-    if (process.env.NODE_ENV === "test") return;
-    const [ok, err] = await tryFn(async () => {
-      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
-        name: "metrics",
-        attributes: {
-          id: "string|required",
-          type: "string|required",
-          // 'operation', 'error', 'performance'
-          resourceName: "string",
-          operation: "string",
-          count: "number|required",
-          totalTime: "number|required",
-          errors: "number|required",
-          avgTime: "number|required",
-          timestamp: "string|required",
-          metadata: "json"
-        }
-      }));
-      this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
-      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
-        name: "error_logs",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          operation: "string|required",
-          error: "string|required",
-          timestamp: "string|required",
-          metadata: "json"
-        }
-      }));
-      this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
-      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
-        name: "performance_logs",
-        attributes: {
-          id: "string|required",
-          resourceName: "string|required",
-          operation: "string|required",
-          duration: "number|required",
-          timestamp: "string|required",
-          metadata: "json"
-        }
-      }));
-      this.performanceResource = ok3 ? performanceResource : database.resources.performance_logs;
-    });
-    if (!ok) {
-      this.metricsResource = database.resources.metrics;
-      this.errorsResource = database.resources.error_logs;
-      this.performanceResource = database.resources.performance_logs;
-    }
-    this.installMetricsHooks();
-    if (process.env.NODE_ENV !== "test") {
-      this.startFlushTimer();
-    }
-  }
-  async start() {
-  }
-  async stop() {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
-    }
-    if (process.env.NODE_ENV !== "test") {
-      await this.flushMetrics();
-    }
-  }
-  installMetricsHooks() {
-    for (const resource of Object.values(this.database.resources)) {
-      if (["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
-        continue;
-      }
-      this.installResourceHooks(resource);
-    }
-    this.database._createResource = this.database.createResource;
-    this.database.createResource = async function(...args) {
-      const resource = await this._createResource(...args);
-      if (this.plugins?.metrics && !["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
-        this.plugins.metrics.installResourceHooks(resource);
-      }
-      return resource;
-    };
-  }
-  installResourceHooks(resource) {
-    resource._insert = resource.insert;
-    resource._update = resource.update;
-    resource._delete = resource.delete;
-    resource._deleteMany = resource.deleteMany;
-    resource._get = resource.get;
-    resource._getMany = resource.getMany;
-    resource._getAll = resource.getAll;
-    resource._list = resource.list;
-    resource._listIds = resource.listIds;
-    resource._count = resource.count;
-    resource._page = resource.page;
-    resource.insert = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._insert(...args));
-      this.recordOperation(resource.name, "insert", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "insert", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.update = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._update(...args));
-      this.recordOperation(resource.name, "update", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "update", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.delete = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._delete(...args));
-      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "delete", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.deleteMany = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
-      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "delete", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.get = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._get(...args));
-      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "get", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.getMany = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
-      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "get", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.getAll = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
-      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "list", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.list = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._list(...args));
-      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "list", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.listIds = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
-      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "list", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.count = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._count(...args));
-      this.recordOperation(resource.name, "count", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "count", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-    resource.page = async function(...args) {
-      const startTime = Date.now();
-      const [ok, err, result] = await tryFn(() => resource._page(...args));
-      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
-      if (!ok) this.recordError(resource.name, "list", err);
-      if (!ok) throw err;
-      return result;
-    }.bind(this);
-  }
-  recordOperation(resourceName, operation, duration, isError) {
-    if (this.metrics.operations[operation]) {
-      this.metrics.operations[operation].count++;
-      this.metrics.operations[operation].totalTime += duration;
-      if (isError) {
-        this.metrics.operations[operation].errors++;
-      }
-    }
-    if (!this.metrics.resources[resourceName]) {
-      this.metrics.resources[resourceName] = {
-        insert: { count: 0, totalTime: 0, errors: 0 },
-        update: { count: 0, totalTime: 0, errors: 0 },
-        delete: { count: 0, totalTime: 0, errors: 0 },
-        get: { count: 0, totalTime: 0, errors: 0 },
-        list: { count: 0, totalTime: 0, errors: 0 },
-        count: { count: 0, totalTime: 0, errors: 0 }
-      };
-    }
-    if (this.metrics.resources[resourceName][operation]) {
-      this.metrics.resources[resourceName][operation].count++;
-      this.metrics.resources[resourceName][operation].totalTime += duration;
-      if (isError) {
-        this.metrics.resources[resourceName][operation].errors++;
-      }
-    }
-    if (this.config.collectPerformance) {
-      this.metrics.performance.push({
-        resourceName,
-        operation,
-        duration,
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
-      });
-    }
-  }
-  recordError(resourceName, operation, error) {
-    if (!this.config.collectErrors) return;
-    this.metrics.errors.push({
-      resourceName,
-      operation,
-      error: error.message,
-      stack: error.stack,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    });
-  }
-  startFlushTimer() {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-    }
-    if (this.config.flushInterval > 0) {
-      this.flushTimer = setInterval(() => {
-        this.flushMetrics().catch(console.error);
-      }, this.config.flushInterval);
-    }
-  }
-  async flushMetrics() {
-    if (!this.metricsResource) return;
-    const [ok, err] = await tryFn(async () => {
-      const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
-      const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
-      const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
-      const resourceMetadata = process.env.NODE_ENV === "test" ? {} : { resource: "true" };
-      for (const [operation, data] of Object.entries(this.metrics.operations)) {
-        if (data.count > 0) {
-          await this.metricsResource.insert({
-            id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            type: "operation",
-            resourceName: "global",
-            operation,
-            count: data.count,
-            totalTime: data.totalTime,
-            errors: data.errors,
-            avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            metadata
-          });
-        }
-      }
-      for (const [resourceName, operations] of Object.entries(this.metrics.resources)) {
-        for (const [operation, data] of Object.entries(operations)) {
-          if (data.count > 0) {
-            await this.metricsResource.insert({
-              id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              type: "operation",
-              resourceName,
-              operation,
-              count: data.count,
-              totalTime: data.totalTime,
-              errors: data.errors,
-              avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-              metadata: resourceMetadata
-            });
-          }
-        }
-      }
-      if (this.config.collectPerformance && this.metrics.performance.length > 0) {
-        for (const perf of this.metrics.performance) {
-          await this.performanceResource.insert({
-            id: `perf-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            resourceName: perf.resourceName,
-            operation: perf.operation,
-            duration: perf.duration,
-            timestamp: perf.timestamp,
-            metadata: perfMetadata
-          });
-        }
-      }
-      if (this.config.collectErrors && this.metrics.errors.length > 0) {
-        for (const error of this.metrics.errors) {
-          await this.errorsResource.insert({
-            id: `error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            resourceName: error.resourceName,
-            operation: error.operation,
-            error: error.error,
-            stack: error.stack,
-            timestamp: error.timestamp,
-            metadata: errorMetadata
-          });
-        }
-      }
-      this.resetMetrics();
-    });
-    if (!ok) {
-      console.error("Failed to flush metrics:", err);
-    }
-  }
-  resetMetrics() {
-    for (const operation of Object.keys(this.metrics.operations)) {
-      this.metrics.operations[operation] = { count: 0, totalTime: 0, errors: 0 };
-    }
-    for (const resourceName of Object.keys(this.metrics.resources)) {
-      for (const operation of Object.keys(this.metrics.resources[resourceName])) {
-        this.metrics.resources[resourceName][operation] = { count: 0, totalTime: 0, errors: 0 };
-      }
-    }
-    this.metrics.performance = [];
-    this.metrics.errors = [];
-  }
-  // Utility methods
-  async getMetrics(options = {}) {
-    const {
-      type = "operation",
-      resourceName,
-      operation,
-      startDate,
-      endDate,
-      limit = 100,
-      offset = 0
-    } = options;
-    if (!this.metricsResource) return [];
-    const allMetrics = await this.metricsResource.getAll();
-    let filtered = allMetrics.filter((metric) => {
-      if (type && metric.type !== type) return false;
-      if (resourceName && metric.resourceName !== resourceName) return false;
-      if (operation && metric.operation !== operation) return false;
-      if (startDate && new Date(metric.timestamp) < new Date(startDate)) return false;
-      if (endDate && new Date(metric.timestamp) > new Date(endDate)) return false;
-      return true;
-    });
-    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    return filtered.slice(offset, offset + limit);
-  }
-  async getErrorLogs(options = {}) {
-    if (!this.errorsResource) return [];
-    const {
-      resourceName,
-      operation,
-      startDate,
-      endDate,
-      limit = 100,
-      offset = 0
-    } = options;
-    const allErrors = await this.errorsResource.getAll();
-    let filtered = allErrors.filter((error) => {
-      if (resourceName && error.resourceName !== resourceName) return false;
-      if (operation && error.operation !== operation) return false;
-      if (startDate && new Date(error.timestamp) < new Date(startDate)) return false;
-      if (endDate && new Date(error.timestamp) > new Date(endDate)) return false;
-      return true;
-    });
-    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    return filtered.slice(offset, offset + limit);
-  }
-  async getPerformanceLogs(options = {}) {
-    if (!this.performanceResource) return [];
-    const {
-      resourceName,
-      operation,
-      startDate,
-      endDate,
-      limit = 100,
-      offset = 0
-    } = options;
-    const allPerformance = await this.performanceResource.getAll();
-    let filtered = allPerformance.filter((perf) => {
-      if (resourceName && perf.resourceName !== resourceName) return false;
-      if (operation && perf.operation !== operation) return false;
-      if (startDate && new Date(perf.timestamp) < new Date(startDate)) return false;
-      if (endDate && new Date(perf.timestamp) > new Date(endDate)) return false;
-      return true;
-    });
-    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    return filtered.slice(offset, offset + limit);
-  }
-  async getStats() {
-    const now = /* @__PURE__ */ new Date();
-    const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
-    const [metrics, errors, performance] = await Promise.all([
-      this.getMetrics({ startDate: startDate.toISOString() }),
-      this.getErrorLogs({ startDate: startDate.toISOString() }),
-      this.getPerformanceLogs({ startDate: startDate.toISOString() })
-    ]);
-    const stats = {
-      period: "24h",
-      totalOperations: 0,
-      totalErrors: errors.length,
-      avgResponseTime: 0,
-      operationsByType: {},
-      resources: {},
-      uptime: {
-        startTime: this.metrics.startTime,
-        duration: now.getTime() - new Date(this.metrics.startTime).getTime()
-      }
-    };
-    for (const metric of metrics) {
-      if (metric.type === "operation") {
-        stats.totalOperations += metric.count;
-        if (!stats.operationsByType[metric.operation]) {
-          stats.operationsByType[metric.operation] = {
-            count: 0,
-            errors: 0,
-            avgTime: 0
-          };
-        }
-        stats.operationsByType[metric.operation].count += metric.count;
-        stats.operationsByType[metric.operation].errors += metric.errors;
-        const current = stats.operationsByType[metric.operation];
-        const totalCount2 = current.count;
-        const newAvg = (current.avgTime * (totalCount2 - metric.count) + metric.totalTime) / totalCount2;
-        current.avgTime = newAvg;
-      }
-    }
-    const totalTime = metrics.reduce((sum, m) => sum + m.totalTime, 0);
-    const totalCount = metrics.reduce((sum, m) => sum + m.count, 0);
-    stats.avgResponseTime = totalCount > 0 ? totalTime / totalCount : 0;
-    return stats;
-  }
-  async cleanupOldData() {
-    const cutoffDate = /* @__PURE__ */ new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
-    if (this.metricsResource) {
-      const oldMetrics = await this.getMetrics({ endDate: cutoffDate.toISOString() });
-      for (const metric of oldMetrics) {
-        await this.metricsResource.delete(metric.id);
-      }
-    }
-    if (this.errorsResource) {
-      const oldErrors = await this.getErrorLogs({ endDate: cutoffDate.toISOString() });
-      for (const error of oldErrors) {
-        await this.errorsResource.delete(error.id);
-      }
-    }
-    if (this.performanceResource) {
-      const oldPerformance = await this.getPerformanceLogs({ endDate: cutoffDate.toISOString() });
-      for (const perf of oldPerformance) {
-        await this.performanceResource.delete(perf.id);
-      }
-    }
-  }
-}
-
-class BaseReplicator extends EventEmitter {
-  constructor(config = {}) {
-    super();
-    this.config = config;
-    this.name = this.constructor.name;
-    this.enabled = config.enabled !== false;
-  }
-  /**
-   * Initialize the replicator
-   * @param {Object} database - The s3db database instance
-   * @returns {Promise<void>}
-   */
-  async initialize(database) {
-    this.database = database;
-    this.emit("initialized", { replicator: this.name });
-  }
-  /**
-   * Replicate data to the target
-   * @param {string} resourceName - Name of the resource being replicated
-   * @param {string} operation - Operation type (insert, update, delete)
-   * @param {Object} data - The data to replicate
-   * @param {string} id - Record ID
-   * @returns {Promise<Object>} replicator result
-   */
-  async replicate(resourceName, operation, data, id) {
-    throw new Error(`replicate() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Replicate multiple records in batch
-   * @param {string} resourceName - Name of the resource being replicated
-   * @param {Array} records - Array of records to replicate
-   * @returns {Promise<Object>} Batch replicator result
-   */
-  async replicateBatch(resourceName, records) {
-    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Test the connection to the target
-   * @returns {Promise<boolean>} True if connection is successful
-   */
-  async testConnection() {
-    throw new Error(`testConnection() method must be implemented by ${this.name}`);
-  }
-  /**
-   * Get replicator status and statistics
-   * @returns {Promise<Object>} Status information
-   */
-  async getStatus() {
-    return {
-      name: this.name,
-      // Removed: enabled: this.enabled,
-      config: this.config,
-      connected: false
-    };
-  }
-  /**
-   * Cleanup resources
-   * @returns {Promise<void>}
-   */
-  async cleanup() {
-    this.emit("cleanup", { replicator: this.name });
-  }
-  /**
-   * Validate replicator configuration
-   * @returns {Object} Validation result
-   */
-  validateConfig() {
-    return { isValid: true, errors: [] };
-  }
-}
-
-class BigqueryReplicator extends BaseReplicator {
-  constructor(config = {}, resources = {}) {
-    super(config);
-    this.projectId = config.projectId;
-    this.datasetId = config.datasetId;
-    this.bigqueryClient = null;
-    this.credentials = config.credentials;
-    this.location = config.location || "US";
-    this.logTable = config.logTable;
-    this.resources = this.parseResourcesConfig(resources);
-  }
-  parseResourcesConfig(resources) {
-    const parsed = {};
-    for (const [resourceName, config] of Object.entries(resources)) {
-      if (typeof config === "string") {
-        parsed[resourceName] = [{
-          table: config,
-          actions: ["insert"]
-        }];
-      } else if (Array.isArray(config)) {
-        parsed[resourceName] = config.map((item) => {
-          if (typeof item === "string") {
-            return { table: item, actions: ["insert"] };
-          }
-          return {
-            table: item.table,
-            actions: item.actions || ["insert"]
-          };
-        });
-      } else if (typeof config === "object") {
-        parsed[resourceName] = [{
-          table: config.table,
-          actions: config.actions || ["insert"]
-        }];
-      }
-    }
-    return parsed;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.projectId) errors.push("projectId is required");
-    if (!this.datasetId) errors.push("datasetId is required");
-    if (Object.keys(this.resources).length === 0) errors.push("At least one resource must be configured");
-    for (const [resourceName, tables] of Object.entries(this.resources)) {
-      for (const tableConfig of tables) {
-        if (!tableConfig.table) {
-          errors.push(`Table name is required for resource '${resourceName}'`);
-        }
-        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
-          errors.push(`Actions array is required for resource '${resourceName}'`);
-        }
-        const validActions = ["insert", "update", "delete"];
-        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
-        if (invalidActions.length > 0) {
-          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
-        }
-      }
-    }
-    return { isValid: errors.length === 0, errors };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
-    if (!ok) {
-      this.emit("initialization_error", { replicator: this.name, error: err.message });
-      throw err;
-    }
-    const { BigQuery } = sdk;
-    this.bigqueryClient = new BigQuery({
-      projectId: this.projectId,
-      credentials: this.credentials,
-      location: this.location
-    });
-    this.emit("initialized", {
-      replicator: this.name,
-      projectId: this.projectId,
-      datasetId: this.datasetId,
-      resources: Object.keys(this.resources)
-    });
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.hasOwnProperty(resourceName);
-  }
-  shouldReplicateAction(resourceName, operation) {
-    if (!this.resources[resourceName]) return false;
-    return this.resources[resourceName].some(
-      (tableConfig) => tableConfig.actions.includes(operation)
-    );
-  }
-  getTablesForResource(resourceName, operation) {
-    if (!this.resources[resourceName]) return [];
-    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
-  }
-  async replicate(resourceName, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    if (!this.shouldReplicateAction(resourceName, operation)) {
-      return { skipped: true, reason: "action_not_included" };
-    }
-    const tables = this.getTablesForResource(resourceName, operation);
-    if (tables.length === 0) {
-      return { skipped: true, reason: "no_tables_for_action" };
-    }
-    const results = [];
-    const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
-      const dataset = this.bigqueryClient.dataset(this.datasetId);
-      for (const tableId of tables) {
-        const [okTable, errTable] = await tryFn(async () => {
-          const table = dataset.table(tableId);
-          let job;
-          if (operation === "insert") {
-            const row = { ...data };
-            job = await table.insert([row]);
-          } else if (operation === "update") {
-            const keys = Object.keys(data).filter((k) => k !== "id");
-            const setClause = keys.map((k) => `${k}=@${k}`).join(", ");
-            const params = { id };
-            keys.forEach((k) => {
-              params[k] = data[k];
-            });
-            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
-            const [updateJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params
-            });
-            await updateJob.getQueryResults();
-            job = [updateJob];
-          } else if (operation === "delete") {
-            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableId}\` WHERE id=@id`;
-            const [deleteJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params: { id }
-            });
-            await deleteJob.getQueryResults();
-            job = [deleteJob];
-          } else {
-            throw new Error(`Unsupported operation: ${operation}`);
-          }
-          results.push({
-            table: tableId,
-            success: true,
-            jobId: job[0]?.id
-          });
-        });
-        if (!okTable) {
-          errors.push({
-            table: tableId,
-            error: errTable.message
-          });
-        }
-      }
-      if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
-          const logTable = dataset.table(this.logTable);
-          await logTable.insert([{
-            resource_name: resourceName,
-            operation,
-            record_id: id,
-            data: JSON.stringify(data),
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-            source: "s3db-replicator"
-          }]);
-        });
-        if (!okLog) {
-        }
-      }
-      const success = errors.length === 0;
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        tables,
-        results,
-        errors,
-        success
-      });
-      return {
-        success,
-        results,
-        errors,
-        tables
-      };
-    });
-    if (ok) return result;
-    this.emit("replicator_error", {
-      replicator: this.name,
-      resourceName,
-      operation,
-      id,
-      error: err.message
-    });
-    return { success: false, error: err.message };
-  }
-  async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-    for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
-        resourceName,
-        record.operation,
-        record.data,
-        record.id,
-        record.beforeData
-      ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
-    }
-    return {
-      success: errors.length === 0,
-      results,
-      errors
-    };
-  }
-  async testConnection() {
-    const [ok, err] = await tryFn(async () => {
-      if (!this.bigqueryClient) await this.initialize();
-      const dataset = this.bigqueryClient.dataset(this.datasetId);
-      await dataset.getMetadata();
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", { replicator: this.name, error: err.message });
-    return false;
-  }
-  async cleanup() {
-  }
-  getStatus() {
-    return {
-      ...super.getStatus(),
-      projectId: this.projectId,
-      datasetId: this.datasetId,
-      resources: this.resources,
-      logTable: this.logTable
-    };
-  }
-}
-
-class PostgresReplicator extends BaseReplicator {
-  constructor(config = {}, resources = {}) {
-    super(config);
-    this.connectionString = config.connectionString;
-    this.host = config.host;
-    this.port = config.port || 5432;
-    this.database = config.database;
-    this.user = config.user;
-    this.password = config.password;
-    this.client = null;
-    this.ssl = config.ssl;
-    this.logTable = config.logTable;
-    this.resources = this.parseResourcesConfig(resources);
-  }
-  parseResourcesConfig(resources) {
-    const parsed = {};
-    for (const [resourceName, config] of Object.entries(resources)) {
-      if (typeof config === "string") {
-        parsed[resourceName] = [{
-          table: config,
-          actions: ["insert"]
-        }];
-      } else if (Array.isArray(config)) {
-        parsed[resourceName] = config.map((item) => {
-          if (typeof item === "string") {
-            return { table: item, actions: ["insert"] };
-          }
-          return {
-            table: item.table,
-            actions: item.actions || ["insert"]
-          };
-        });
-      } else if (typeof config === "object") {
-        parsed[resourceName] = [{
-          table: config.table,
-          actions: config.actions || ["insert"]
-        }];
-      }
-    }
-    return parsed;
-  }
-  validateConfig() {
-    const errors = [];
-    if (!this.connectionString && (!this.host || !this.database)) {
-      errors.push("Either connectionString or host+database must be provided");
-    }
-    if (Object.keys(this.resources).length === 0) {
-      errors.push("At least one resource must be configured");
-    }
-    for (const [resourceName, tables] of Object.entries(this.resources)) {
-      for (const tableConfig of tables) {
-        if (!tableConfig.table) {
-          errors.push(`Table name is required for resource '${resourceName}'`);
-        }
-        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
-          errors.push(`Actions array is required for resource '${resourceName}'`);
-        }
-        const validActions = ["insert", "update", "delete"];
-        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
-        if (invalidActions.length > 0) {
-          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
-        }
-      }
-    }
-    return { isValid: errors.length === 0, errors };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    const [ok, err, sdk] = await tryFn(() => import('pg'));
-    if (!ok) {
-      this.emit("initialization_error", {
-        replicator: this.name,
-        error: err.message
-      });
-      throw err;
-    }
-    const { Client } = sdk;
-    const config = this.connectionString ? {
-      connectionString: this.connectionString,
-      ssl: this.ssl
-    } : {
-      host: this.host,
-      port: this.port,
-      database: this.database,
-      user: this.user,
-      password: this.password,
-      ssl: this.ssl
-    };
-    this.client = new Client(config);
-    await this.client.connect();
-    if (this.logTable) {
-      await this.createLogTableIfNotExists();
-    }
-    this.emit("initialized", {
-      replicator: this.name,
-      database: this.database || "postgres",
-      resources: Object.keys(this.resources)
-    });
-  }
-  async createLogTableIfNotExists() {
-    const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS ${this.logTable} (
-        id SERIAL PRIMARY KEY,
-        resource_name VARCHAR(255) NOT NULL,
-        operation VARCHAR(50) NOT NULL,
-        record_id VARCHAR(255) NOT NULL,
-        data JSONB,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        source VARCHAR(100) DEFAULT 's3db-replicator',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_operation ON ${this.logTable}(operation);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_record_id ON ${this.logTable}(record_id);
-      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
-    `;
-    await this.client.query(createTableQuery);
-  }
-  shouldReplicateResource(resourceName) {
-    return this.resources.hasOwnProperty(resourceName);
-  }
-  shouldReplicateAction(resourceName, operation) {
-    if (!this.resources[resourceName]) return false;
-    return this.resources[resourceName].some(
-      (tableConfig) => tableConfig.actions.includes(operation)
-    );
-  }
-  getTablesForResource(resourceName, operation) {
-    if (!this.resources[resourceName]) return [];
-    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
-  }
-  async replicate(resourceName, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
-      return { skipped: true, reason: "resource_not_included" };
-    }
-    if (!this.shouldReplicateAction(resourceName, operation)) {
-      return { skipped: true, reason: "action_not_included" };
-    }
-    const tables = this.getTablesForResource(resourceName, operation);
-    if (tables.length === 0) {
-      return { skipped: true, reason: "no_tables_for_action" };
-    }
-    const results = [];
-    const errors = [];
-    const [ok, err, result] = await tryFn(async () => {
-      for (const table of tables) {
-        const [okTable, errTable] = await tryFn(async () => {
-          let result2;
-          if (operation === "insert") {
-            const keys = Object.keys(data);
-            const values = keys.map((k) => data[k]);
-            const columns = keys.map((k) => `"${k}"`).join(", ");
-            const params = keys.map((_, i) => `$${i + 1}`).join(", ");
-            const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
-            result2 = await this.client.query(sql, values);
-          } else if (operation === "update") {
-            const keys = Object.keys(data).filter((k) => k !== "id");
-            const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
-            const values = keys.map((k) => data[k]);
-            values.push(id);
-            const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
-            result2 = await this.client.query(sql, values);
-          } else if (operation === "delete") {
-            const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
-            result2 = await this.client.query(sql, [id]);
-          } else {
-            throw new Error(`Unsupported operation: ${operation}`);
-          }
-          results.push({
-            table,
-            success: true,
-            rows: result2.rows,
-            rowCount: result2.rowCount
-          });
-        });
-        if (!okTable) {
-          errors.push({
-            table,
-            error: errTable.message
-          });
-        }
-      }
-      if (this.logTable) {
-        const [okLog, errLog] = await tryFn(async () => {
-          await this.client.query(
-            `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
-            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
-          );
-        });
-        if (!okLog) {
-        }
-      }
-      const success = errors.length === 0;
-      this.emit("replicated", {
-        replicator: this.name,
-        resourceName,
-        operation,
-        id,
-        tables,
-        results,
-        errors,
-        success
-      });
-      return {
-        success,
-        results,
-        errors,
-        tables
-      };
-    });
-    if (ok) return result;
-    this.emit("replicator_error", {
-      replicator: this.name,
-      resourceName,
-      operation,
-      id,
-      error: err.message
-    });
-    return { success: false, error: err.message };
-  }
-  async replicateBatch(resourceName, records) {
-    const results = [];
-    const errors = [];
-    for (const record of records) {
-      const [ok, err, res] = await tryFn(() => this.replicate(
-        resourceName,
-        record.operation,
-        record.data,
-        record.id,
-        record.beforeData
-      ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
-    }
-    return {
-      success: errors.length === 0,
-      results,
-      errors
-    };
-  }
-  async testConnection() {
-    const [ok, err] = await tryFn(async () => {
-      if (!this.client) await this.initialize();
-      await this.client.query("SELECT 1");
-      return true;
-    });
-    if (ok) return true;
-    this.emit("connection_error", { replicator: this.name, error: err.message });
-    return false;
-  }
-  async cleanup() {
-    if (this.client) await this.client.end();
-  }
-  getStatus() {
-    return {
-      ...super.getStatus(),
-      database: this.database || "postgres",
-      resources: this.resources,
-      logTable: this.logTable
-    };
-  }
-}
-
-const S3_DEFAULT_REGION = "us-east-1";
-const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
-class ConnectionString {
-  constructor(connectionString) {
-    let uri;
-    const [ok, err, parsed] = tryFn(() => new URL(connectionString));
-    if (!ok) {
-      throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
-    }
-    uri = parsed;
-    this.region = S3_DEFAULT_REGION;
-    if (uri.protocol === "s3:") this.defineFromS3(uri);
-    else this.defineFromCustomUri(uri);
-    for (const [k, v] of uri.searchParams.entries()) {
-      this[k] = v;
-    }
-  }
-  defineFromS3(uri) {
-    const [okBucket, errBucket, bucket] = tryFnSync(() => decodeURIComponent(uri.hostname));
-    if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: uri.hostname });
-    this.bucket = bucket || "s3db";
-    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
-    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
-    this.accessKeyId = user;
-    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
-    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
-    this.secretAccessKey = pass;
-    this.endpoint = S3_DEFAULT_ENDPOINT;
-    if (["/", "", null].includes(uri.pathname)) {
-      this.keyPrefix = "";
-    } else {
-      let [, ...subpath] = uri.pathname.split("/");
-      this.keyPrefix = [...subpath || []].join("/");
-    }
-  }
-  defineFromCustomUri(uri) {
-    this.forcePathStyle = true;
-    this.endpoint = uri.origin;
-    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
-    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
-    this.accessKeyId = user;
-    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
-    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
-    this.secretAccessKey = pass;
-    if (["/", "", null].includes(uri.pathname)) {
-      this.bucket = "s3db";
-      this.keyPrefix = "";
-    } else {
-      let [, bucket, ...subpath] = uri.pathname.split("/");
-      if (!bucket) {
-        this.bucket = "s3db";
-      } else {
-        const [okBucket, errBucket, bucketDecoded] = tryFnSync(() => decodeURIComponent(bucket));
-        if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: bucket });
-        this.bucket = bucketDecoded;
-      }
-      this.keyPrefix = [...subpath || []].join("/");
-    }
-  }
-}
-
-class Client extends EventEmitter {
-  constructor({
-    verbose = false,
-    id = null,
-    AwsS3Client,
-    connectionString,
-    parallelism = 10
-  }) {
-    super();
-    this.verbose = verbose;
-    this.id = id ?? idGenerator();
-    this.parallelism = parallelism;
-    this.config = new ConnectionString(connectionString);
-    this.client = AwsS3Client || this.createClient();
-  }
-  createClient() {
-    let options = {
-      region: this.config.region,
-      endpoint: this.config.endpoint
-    };
-    if (this.config.forcePathStyle) options.forcePathStyle = true;
-    if (this.config.accessKeyId) {
-      options.credentials = {
-        accessKeyId: this.config.accessKeyId,
-        secretAccessKey: this.config.secretAccessKey
-      };
-    }
-    const client = new S3Client(options);
-    client.middlewareStack.add(
-      (next, context) => async (args) => {
-        if (context.commandName === "DeleteObjectsCommand") {
-          const body = args.request.body;
-          if (body && typeof body === "string") {
-            const contentMd5 = await md5(body);
-            args.request.headers["Content-MD5"] = contentMd5;
-          }
-        }
-        return next(args);
-      },
-      {
-        step: "build",
-        name: "addContentMd5ForDeleteObjects",
-        priority: "high"
-      }
-    );
-    return client;
-  }
-  async sendCommand(command) {
-    this.emit("command.request", command.constructor.name, command.input);
-    const [ok, err, response] = await tryFn(() => this.client.send(command));
-    if (!ok) {
-      const bucket = this.config.bucket;
-      const key = command.input && command.input.Key;
-      throw mapAwsError(err, {
-        bucket,
-        key,
-        commandName: command.constructor.name,
-        commandInput: command.input
-      });
-    }
-    this.emit("command.response", command.constructor.name, response, command.input);
-    return response;
-  }
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    keyPrefix ? path.join(keyPrefix, key) : key;
-    const stringMetadata = {};
-    if (metadata) {
-      for (const [k, v] of Object.entries(metadata)) {
-        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
-        stringMetadata[validKey] = String(v);
-      }
-    }
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key,
-      Metadata: stringMetadata,
-      Body: body || Buffer.alloc(0)
-    };
-    if (contentType !== void 0) options.ContentType = contentType;
-    if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
-    if (contentLength !== void 0) options.ContentLength = contentLength;
-    let response, error;
-    try {
-      response = await this.sendCommand(new PutObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: "PutObjectCommand",
-        commandInput: options
-      });
-    } finally {
-      this.emit("putObject", error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
-    }
-  }
-  async getObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key
-    };
-    let response, error;
-    try {
-      response = await this.sendCommand(new GetObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: "GetObjectCommand",
-        commandInput: options
-      });
-    } finally {
-      this.emit("getObject", error || response, { key });
-    }
-  }
-  async headObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key
-    };
-    let response, error;
-    try {
-      response = await this.sendCommand(new HeadObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: "HeadObjectCommand",
-        commandInput: options
-      });
-    } finally {
-      this.emit("headObject", error || response, { key });
-    }
-  }
-  async copyObject({ from, to }) {
-    const options = {
-      Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
-      CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
-    };
-    let response, error;
-    try {
-      response = await this.sendCommand(new CopyObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key: to,
-        commandName: "CopyObjectCommand",
-        commandInput: options
-      });
-    } finally {
-      this.emit("copyObject", error || response, { from, to });
-    }
-  }
-  async exists(key) {
-    const [ok, err] = await tryFn(() => this.headObject(key));
-    if (ok) return true;
-    if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
-    throw err;
-  }
-  async deleteObject(key) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    keyPrefix ? path.join(keyPrefix, key) : key;
-    const options = {
-      Bucket: this.config.bucket,
-      Key: keyPrefix ? path.join(keyPrefix, key) : key
-    };
-    let response, error;
-    try {
-      response = await this.sendCommand(new DeleteObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
-      throw mapAwsError(err, {
-        bucket: this.config.bucket,
-        key,
-        commandName: "DeleteObjectCommand",
-        commandInput: options
-      });
-    } finally {
-      this.emit("deleteObject", error || response, { key });
-    }
-  }
-  async deleteObjects(keys) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    const packages = chunk(keys, 1e3);
-    const { results, errors } = await PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
-      for (const key of keys2) {
-        keyPrefix ? path.join(keyPrefix, key) : key;
-        this.config.bucket;
-        await this.exists(key);
-      }
-      const options = {
-        Bucket: this.config.bucket,
-        Delete: {
-          Objects: keys2.map((key) => ({
-            Key: keyPrefix ? path.join(keyPrefix, key) : key
-          }))
-        }
-      };
-      let response;
-      const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
-      if (!ok) throw err;
-      response = res;
-      if (response && response.Errors && response.Errors.length > 0) ;
-      if (response && response.Deleted && response.Deleted.length !== keys2.length) ;
-      return response;
-    });
-    const report = {
-      deleted: results,
-      notFound: errors
-    };
-    this.emit("deleteObjects", report, keys);
-    return report;
-  }
-  /**
-   * Delete all objects under a specific prefix using efficient pagination
-   * @param {Object} options - Delete options
-   * @param {string} options.prefix - S3 prefix to delete
-   * @returns {Promise<number>} Number of objects deleted
-   */
-  async deleteAll({ prefix } = {}) {
-    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    let continuationToken;
-    let totalDeleted = 0;
-    do {
-      const listCommand = new ListObjectsV2Command({
-        Bucket: this.config.bucket,
-        Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
-        ContinuationToken: continuationToken
-      });
-      const listResponse = await this.client.send(listCommand);
-      if (listResponse.Contents && listResponse.Contents.length > 0) {
-        const deleteCommand = new DeleteObjectsCommand({
-          Bucket: this.config.bucket,
-          Delete: {
-            Objects: listResponse.Contents.map((obj) => ({ Key: obj.Key }))
-          }
-        });
-        const deleteResponse = await this.client.send(deleteCommand);
-        const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
-        totalDeleted += deletedCount;
-        this.emit("deleteAll", {
-          prefix,
-          batch: deletedCount,
-          total: totalDeleted
-        });
-      }
-      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
-    } while (continuationToken);
-    this.emit("deleteAllComplete", {
-      prefix,
-      totalDeleted
-    });
-    return totalDeleted;
-  }
-  async moveObject({ from, to }) {
-    const [ok, err] = await tryFn(async () => {
-      await this.copyObject({ from, to });
-      await this.deleteObject(from);
-    });
-    if (!ok) {
-      throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
-    }
-    return true;
-  }
-  async listObjects({
-    prefix,
-    maxKeys = 1e3,
-    continuationToken
-  } = {}) {
-    const options = {
-      Bucket: this.config.bucket,
-      MaxKeys: maxKeys,
-      ContinuationToken: continuationToken,
-      Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
-    };
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
-    if (!ok) {
-      throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
-    }
-    this.emit("listObjects", response, options);
-    return response;
-  }
-  async count({ prefix } = {}) {
-    let count = 0;
-    let truncated = true;
-    let continuationToken;
-    while (truncated) {
-      const options = {
-        prefix,
-        continuationToken
-      };
-      const response = await this.listObjects(options);
-      count += response.KeyCount || 0;
-      truncated = response.IsTruncated || false;
-      continuationToken = response.NextContinuationToken;
-    }
-    this.emit("count", count, { prefix });
-    return count;
-  }
-  async getAllKeys({ prefix } = {}) {
-    let keys = [];
-    let truncated = true;
-    let continuationToken;
-    while (truncated) {
-      const options = {
-        prefix,
-        continuationToken
-      };
-      const response = await this.listObjects(options);
-      if (response.Contents) {
-        keys = keys.concat(response.Contents.map((x) => x.Key));
-      }
-      truncated = response.IsTruncated || false;
-      continuationToken = response.NextContinuationToken;
-    }
-    if (this.config.keyPrefix) {
-      keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
-    }
-    this.emit("getAllKeys", keys, { prefix });
-    return keys;
-  }
-  async getContinuationTokenAfterOffset(params = {}) {
-    const {
-      prefix,
-      offset = 1e3
-    } = params;
-    if (offset === 0) return null;
-    let truncated = true;
-    let continuationToken;
-    let skipped = 0;
-    while (truncated) {
-      let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
-      const options = {
-        prefix,
-        maxKeys,
-        continuationToken
-      };
-      const res = await this.listObjects(options);
-      if (res.Contents) {
-        skipped += res.Contents.length;
-      }
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
-      if (skipped >= offset) {
-        break;
-      }
-    }
-    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
-    return continuationToken || null;
-  }
-  async getKeysPage(params = {}) {
-    const {
-      prefix,
-      offset = 0,
-      amount = 100
-    } = params;
-    let keys = [];
-    let truncated = true;
-    let continuationToken;
-    if (offset > 0) {
-      continuationToken = await this.getContinuationTokenAfterOffset({
-        prefix,
-        offset
-      });
-      if (!continuationToken) {
-        this.emit("getKeysPage", [], params);
-        return [];
-      }
-    }
-    while (truncated) {
-      const options = {
-        prefix,
-        continuationToken
-      };
-      const res = await this.listObjects(options);
-      if (res.Contents) {
-        keys = keys.concat(res.Contents.map((x) => x.Key));
-      }
-      truncated = res.IsTruncated || false;
-      continuationToken = res.NextContinuationToken;
-      if (keys.length >= amount) {
-        keys = keys.slice(0, amount);
-        break;
-      }
-    }
-    if (this.config.keyPrefix) {
-      keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
-    }
-    this.emit("getKeysPage", keys, params);
-    return keys;
-  }
-  async moveAllObjects({ prefixFrom, prefixTo }) {
-    const keys = await this.getAllKeys({ prefix: prefixFrom });
-    const { results, errors } = await PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
-      const to = key.replace(prefixFrom, prefixTo);
-      const [ok, err] = await tryFn(async () => {
-        await this.moveObject({
-          from: key,
-          to
-        });
-      });
-      if (!ok) {
-        throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
-      }
-      return to;
-    });
-    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
-    if (errors.length > 0) {
-      throw new Error("Some objects could not be moved");
-    }
-    return results;
-  }
-}
-
-async function secretHandler(actual, errors, schema) {
-  if (!this.passphrase) {
-    errors.push(new ValidationError("Missing configuration for secrets encryption.", {
-      actual,
-      type: "encryptionKeyMissing",
-      suggestion: "Provide a passphrase for secret encryption."
-    }));
-    return actual;
-  }
-  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
-  if (ok) return res;
-  errors.push(new ValidationError("Problem encrypting secret.", {
-    actual,
-    type: "encryptionProblem",
-    error: err,
-    suggestion: "Check the passphrase and input value."
-  }));
-  return actual;
-}
-async function jsonHandler(actual, errors, schema) {
-  if (isString$1(actual)) return actual;
-  const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
-  if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
-  return json;
-}
-class Validator extends FastestValidator {
-  constructor({ options, passphrase, autoEncrypt = true } = {}) {
-    super(merge({}, {
-      useNewCustomCheckerFunction: true,
-      messages: {
-        encryptionKeyMissing: "Missing configuration for secrets encryption.",
-        encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}"
-      },
-      defaults: {
-        string: {
-          trim: true
-        },
-        object: {
-          strict: "remove"
-        },
-        number: {
-          convert: true
-        }
-      }
-    }, options));
-    this.passphrase = passphrase;
-    this.autoEncrypt = autoEncrypt;
-    this.alias("secret", {
-      type: "string",
-      custom: this.autoEncrypt ? secretHandler : void 0,
-      messages: {
-        string: "The '{field}' field must be a string.",
-        stringMin: "This secret '{field}' field length must be at least {expected} long."
-      }
-    });
-    this.alias("secretAny", {
-      type: "any",
-      custom: this.autoEncrypt ? secretHandler : void 0
-    });
-    this.alias("secretNumber", {
-      type: "number",
-      custom: this.autoEncrypt ? secretHandler : void 0
-    });
-    this.alias("json", {
-      type: "any",
-      custom: this.autoEncrypt ? jsonHandler : void 0
-    });
-  }
-}
-const ValidatorManager = new Proxy(Validator, {
-  instance: null,
-  construct(target, args) {
-    if (!this.instance) this.instance = new target(...args);
-    return this.instance;
-  }
-});
-
-function generateBase62Mapping(keys) {
-  const mapping = {};
-  const reversedMapping = {};
-  keys.forEach((key, index) => {
-    const base62Key = encode(index);
-    mapping[key] = base62Key;
-    reversedMapping[base62Key] = key;
-  });
-  return { mapping, reversedMapping };
-}
-const SchemaActions = {
-  trim: (value) => value == null ? value : value.trim(),
-  encrypt: async (value, { passphrase }) => {
-    if (value === null || value === void 0) return value;
-    const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
-    return ok ? res : value;
-  },
-  decrypt: async (value, { passphrase }) => {
-    if (value === null || value === void 0) return value;
-    const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
-    if (!ok) return value;
-    if (raw === "null") return null;
-    if (raw === "undefined") return void 0;
-    return raw;
-  },
-  toString: (value) => value == null ? value : String(value),
-  fromArray: (value, { separator }) => {
-    if (value === null || value === void 0 || !Array.isArray(value)) {
-      return value;
-    }
-    if (value.length === 0) {
-      return "";
-    }
-    const escapedItems = value.map((item) => {
-      if (typeof item === "string") {
-        return item.replace(/\\/g, "\\\\").replace(new RegExp(`\\${separator}`, "g"), `\\${separator}`);
-      }
-      return String(item);
-    });
-    return escapedItems.join(separator);
-  },
-  toArray: (value, { separator }) => {
-    if (Array.isArray(value)) {
-      return value;
-    }
-    if (value === null || value === void 0) {
-      return value;
-    }
-    if (value === "") {
-      return [];
-    }
-    const items = [];
-    let current = "";
-    let i = 0;
-    const str = String(value);
-    while (i < str.length) {
-      if (str[i] === "\\" && i + 1 < str.length) {
-        current += str[i + 1];
-        i += 2;
-      } else if (str[i] === separator) {
-        items.push(current);
-        current = "";
-        i++;
-      } else {
-        current += str[i];
-        i++;
-      }
-    }
-    items.push(current);
-    return items;
-  },
-  toJSON: (value) => {
-    if (value === null) return null;
-    if (value === void 0) return void 0;
-    if (typeof value === "string") {
-      const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(value));
-      if (ok2 && typeof parsed === "object") return value;
-      return value;
-    }
-    const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
-    return ok ? json : value;
-  },
-  fromJSON: (value) => {
-    if (value === null) return null;
-    if (value === void 0) return void 0;
-    if (typeof value !== "string") return value;
-    if (value === "") return "";
-    const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
-    return ok ? parsed : value;
-  },
-  toNumber: (value) => isString$1(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
-  toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
-  fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0",
-  fromBase62: (value) => {
-    if (value === null || value === void 0 || value === "") return value;
-    if (typeof value === "number") return value;
-    if (typeof value === "string") {
-      const n = decode(value);
-      return isNaN(n) ? void 0 : n;
-    }
-    return void 0;
-  },
-  toBase62: (value) => {
-    if (value === null || value === void 0 || value === "") return value;
-    if (typeof value === "number") {
-      return encode(value);
-    }
-    if (typeof value === "string") {
-      const n = Number(value);
-      return isNaN(n) ? value : encode(n);
-    }
-    return value;
-  },
-  fromBase62Decimal: (value) => {
-    if (value === null || value === void 0 || value === "") return value;
-    if (typeof value === "number") return value;
-    if (typeof value === "string") {
-      const n = decodeDecimal(value);
-      return isNaN(n) ? void 0 : n;
-    }
-    return void 0;
-  },
-  toBase62Decimal: (value) => {
-    if (value === null || value === void 0 || value === "") return value;
-    if (typeof value === "number") {
-      return encodeDecimal(value);
-    }
-    if (typeof value === "string") {
-      const n = Number(value);
-      return isNaN(n) ? value : encodeDecimal(n);
-    }
-    return value;
-  },
-  fromArrayOfNumbers: (value, { separator }) => {
-    if (value === null || value === void 0 || !Array.isArray(value)) {
-      return value;
-    }
-    if (value.length === 0) {
-      return "";
-    }
-    const base62Items = value.map((item) => {
-      if (typeof item === "number" && !isNaN(item)) {
-        return encode(item);
-      }
-      const n = Number(item);
-      return isNaN(n) ? "" : encode(n);
-    });
-    return base62Items.join(separator);
-  },
-  toArrayOfNumbers: (value, { separator }) => {
-    if (Array.isArray(value)) {
-      return value.map((v) => typeof v === "number" ? v : decode(v));
-    }
-    if (value === null || value === void 0) {
-      return value;
-    }
-    if (value === "") {
-      return [];
-    }
-    const str = String(value);
-    const items = [];
-    let current = "";
-    let i = 0;
-    while (i < str.length) {
-      if (str[i] === "\\" && i + 1 < str.length) {
-        current += str[i + 1];
-        i += 2;
-      } else if (str[i] === separator) {
-        items.push(current);
-        current = "";
-        i++;
-      } else {
-        current += str[i];
-        i++;
-      }
-    }
-    items.push(current);
-    return items.map((v) => {
-      if (typeof v === "number") return v;
-      if (typeof v === "string" && v !== "") {
-        const n = decode(v);
-        return isNaN(n) ? NaN : n;
-      }
-      return NaN;
-    });
-  },
-  fromArrayOfDecimals: (value, { separator }) => {
-    if (value === null || value === void 0 || !Array.isArray(value)) {
-      return value;
-    }
-    if (value.length === 0) {
-      return "";
-    }
-    const base62Items = value.map((item) => {
-      if (typeof item === "number" && !isNaN(item)) {
-        return encodeDecimal(item);
-      }
-      const n = Number(item);
-      return isNaN(n) ? "" : encodeDecimal(n);
-    });
-    return base62Items.join(separator);
-  },
-  toArrayOfDecimals: (value, { separator }) => {
-    if (Array.isArray(value)) {
-      return value.map((v) => typeof v === "number" ? v : decodeDecimal(v));
-    }
-    if (value === null || value === void 0) {
-      return value;
-    }
-    if (value === "") {
-      return [];
-    }
-    const str = String(value);
-    const items = [];
-    let current = "";
-    let i = 0;
-    while (i < str.length) {
-      if (str[i] === "\\" && i + 1 < str.length) {
-        current += str[i + 1];
-        i += 2;
-      } else if (str[i] === separator) {
-        items.push(current);
-        current = "";
-        i++;
-      } else {
-        current += str[i];
-        i++;
-      }
-    }
-    items.push(current);
-    return items.map((v) => {
-      if (typeof v === "number") return v;
-      if (typeof v === "string" && v !== "") {
-        const n = decodeDecimal(v);
-        return isNaN(n) ? NaN : n;
-      }
-      return NaN;
-    });
-  }
-};
-class Schema {
-  constructor(args) {
-    const {
-      map,
-      name,
-      attributes,
-      passphrase,
-      version = 1,
-      options = {}
-    } = args;
-    this.name = name;
-    this.version = version;
-    this.attributes = attributes || {};
-    this.passphrase = passphrase ?? "secret";
-    this.options = merge({}, this.defaultOptions(), options);
-    this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
-    const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
-    this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
-      { $$async: true },
-      processedAttributes
-    ));
-    if (this.options.generateAutoHooks) this.generateAutoHooks();
-    if (!isEmpty(map)) {
-      this.map = map;
-      this.reversedMap = invert(map);
-    } else {
-      const flatAttrs = flatten(this.attributes, { safe: true });
-      const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
-      const objectKeys = this.extractObjectKeys(this.attributes);
-      const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
-      this.map = mapping;
-      this.reversedMap = reversedMapping;
-    }
-  }
-  defaultOptions() {
-    return {
-      autoEncrypt: true,
-      autoDecrypt: true,
-      arraySeparator: "|",
-      generateAutoHooks: true,
-      hooks: {
-        beforeMap: {},
-        afterMap: {},
-        beforeUnmap: {},
-        afterUnmap: {}
-      }
-    };
-  }
-  addHook(hook, attribute, action) {
-    if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
-    this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action]);
-  }
-  extractObjectKeys(obj, prefix = "") {
-    const objectKeys = [];
-    for (const [key, value] of Object.entries(obj)) {
-      if (key.startsWith("$$")) continue;
-      const fullKey = prefix ? `${prefix}.${key}` : key;
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        objectKeys.push(fullKey);
-        if (value.$$type === "object") {
-          objectKeys.push(...this.extractObjectKeys(value, fullKey));
-        }
-      }
-    }
-    return objectKeys;
-  }
-  generateAutoHooks() {
-    const schema = flatten(cloneDeep(this.attributes), { safe: true });
-    for (const [name, definition] of Object.entries(schema)) {
-      if (definition.includes("array")) {
-        if (definition.includes("items:string")) {
-          this.addHook("beforeMap", name, "fromArray");
-          this.addHook("afterUnmap", name, "toArray");
-        } else if (definition.includes("items:number")) {
-          const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
-          if (isIntegerArray) {
-            this.addHook("beforeMap", name, "fromArrayOfNumbers");
-            this.addHook("afterUnmap", name, "toArrayOfNumbers");
-          } else {
-            this.addHook("beforeMap", name, "fromArrayOfDecimals");
-            this.addHook("afterUnmap", name, "toArrayOfDecimals");
-          }
-        }
-        continue;
-      }
-      if (definition.includes("secret")) {
-        if (this.options.autoEncrypt) {
-          this.addHook("beforeMap", name, "encrypt");
-        }
-        if (this.options.autoDecrypt) {
-          this.addHook("afterUnmap", name, "decrypt");
-        }
-        continue;
-      }
-      if (definition.includes("number")) {
-        const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
-        if (isInteger) {
-          this.addHook("beforeMap", name, "toBase62");
-          this.addHook("afterUnmap", name, "fromBase62");
-        } else {
-          this.addHook("beforeMap", name, "toBase62Decimal");
-          this.addHook("afterUnmap", name, "fromBase62Decimal");
-        }
-        continue;
-      }
-      if (definition.includes("boolean")) {
-        this.addHook("beforeMap", name, "fromBool");
-        this.addHook("afterUnmap", name, "toBool");
-        continue;
-      }
-      if (definition.includes("json")) {
-        this.addHook("beforeMap", name, "toJSON");
-        this.addHook("afterUnmap", name, "fromJSON");
-        continue;
-      }
-      if (definition === "object" || definition.includes("object")) {
-        this.addHook("beforeMap", name, "toJSON");
-        this.addHook("afterUnmap", name, "fromJSON");
-        continue;
-      }
-    }
-  }
-  static import(data) {
-    let {
-      map,
-      name,
-      options,
-      version,
-      attributes
-    } = isString$1(data) ? JSON.parse(data) : data;
-    const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
-    if (!ok) throw new SchemaError("Failed to import schema attributes", { original: err, input: attributes });
-    attributes = attrs;
-    const schema = new Schema({
-      map,
-      name,
-      options,
-      version,
-      attributes
-    });
-    return schema;
-  }
-  /**
-   * Recursively import attributes, parsing only stringified objects (legacy)
-   */
-  static _importAttributes(attrs) {
-    if (typeof attrs === "string") {
-      const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
-      if (ok && typeof parsed === "object" && parsed !== null) {
-        const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
-        if (!okNested) throw new SchemaError("Failed to parse nested schema attribute", { original: errNested, input: attrs });
-        return nested;
-      }
-      return attrs;
-    }
-    if (Array.isArray(attrs)) {
-      const [okArr, errArr, arr] = tryFnSync(() => attrs.map((a) => Schema._importAttributes(a)));
-      if (!okArr) throw new SchemaError("Failed to import array schema attributes", { original: errArr, input: attrs });
-      return arr;
-    }
-    if (typeof attrs === "object" && attrs !== null) {
-      const out = {};
-      for (const [k, v] of Object.entries(attrs)) {
-        const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
-        if (!okObj) throw new SchemaError("Failed to import object schema attribute", { original: errObj, key: k, input: v });
-        out[k] = val;
-      }
-      return out;
-    }
-    return attrs;
-  }
-  export() {
-    const data = {
-      version: this.version,
-      name: this.name,
-      options: this.options,
-      attributes: this._exportAttributes(this.attributes),
-      map: this.map
-    };
-    return data;
-  }
-  /**
-   * Recursively export attributes, keeping objects as objects and only serializing leaves as string
-   */
-  _exportAttributes(attrs) {
-    if (typeof attrs === "string") {
-      return attrs;
-    }
-    if (Array.isArray(attrs)) {
-      return attrs.map((a) => this._exportAttributes(a));
-    }
-    if (typeof attrs === "object" && attrs !== null) {
-      const out = {};
-      for (const [k, v] of Object.entries(attrs)) {
-        out[k] = this._exportAttributes(v);
-      }
-      return out;
-    }
-    return attrs;
-  }
-  async applyHooksActions(resourceItem, hook) {
-    const cloned = cloneDeep(resourceItem);
-    for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
-      for (const action of actions) {
-        const value = get(cloned, attribute);
-        if (value !== void 0 && typeof SchemaActions[action] === "function") {
-          set(cloned, attribute, await SchemaActions[action](value, {
-            passphrase: this.passphrase,
-            separator: this.options.arraySeparator
-          }));
-        }
-      }
-    }
-    return cloned;
-  }
-  async validate(resourceItem, { mutateOriginal = false } = {}) {
-    let data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);
-    const result = await this.validator(data);
-    return result;
-  }
-  async mapper(resourceItem) {
-    let obj = cloneDeep(resourceItem);
-    obj = await this.applyHooksActions(obj, "beforeMap");
-    const flattenedObj = flatten(obj, { safe: true });
-    const rest = { "_v": this.version + "" };
-    for (const [key, value] of Object.entries(flattenedObj)) {
-      const mappedKey = this.map[key] || key;
-      const attrDef = this.getAttributeDefinition(key);
-      if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
-        rest[mappedKey] = encode(value);
-      } else if (typeof value === "string") {
-        if (value === "[object Object]") {
-          rest[mappedKey] = "{}";
-        } else if (value.startsWith("{") || value.startsWith("[")) {
-          rest[mappedKey] = value;
-        } else {
-          rest[mappedKey] = value;
-        }
-      } else if (Array.isArray(value) || typeof value === "object" && value !== null) {
-        rest[mappedKey] = JSON.stringify(value);
-      } else {
-        rest[mappedKey] = value;
-      }
-    }
-    await this.applyHooksActions(rest, "afterMap");
-    return rest;
-  }
-  async unmapper(mappedResourceItem, mapOverride) {
-    let obj = cloneDeep(mappedResourceItem);
-    delete obj._v;
-    obj = await this.applyHooksActions(obj, "beforeUnmap");
-    const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
-    const rest = {};
-    for (const [key, value] of Object.entries(obj)) {
-      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
-      let parsedValue = value;
-      const attrDef = this.getAttributeDefinition(originalKey);
-      if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
-        if (typeof parsedValue === "string" && parsedValue !== "") {
-          parsedValue = decode(parsedValue);
-        } else if (typeof parsedValue === "number") ; else {
-          parsedValue = void 0;
-        }
-      } else if (typeof value === "string") {
-        if (value === "[object Object]") {
-          parsedValue = {};
-        } else if (value.startsWith("{") || value.startsWith("[")) {
-          const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
-          if (ok) parsedValue = parsed;
-        }
-      }
-      if (this.attributes) {
-        if (typeof attrDef === "string" && attrDef.includes("array")) {
-          if (Array.isArray(parsedValue)) ; else if (typeof parsedValue === "string" && parsedValue.trim().startsWith("[")) {
-            const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
-            if (okArr && Array.isArray(arr)) {
-              parsedValue = arr;
-            }
-          } else {
-            parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
-          }
-        }
-      }
-      if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
-        for (const action of this.options.hooks.afterUnmap[originalKey]) {
-          if (typeof SchemaActions[action] === "function") {
-            parsedValue = await SchemaActions[action](parsedValue, {
-              passphrase: this.passphrase,
-              separator: this.options.arraySeparator
-            });
-          }
-        }
-      }
-      rest[originalKey] = parsedValue;
-    }
-    await this.applyHooksActions(rest, "afterUnmap");
-    const result = unflatten(rest);
-    for (const [key, value] of Object.entries(mappedResourceItem)) {
-      if (key.startsWith("$")) {
-        result[key] = value;
-      }
-    }
-    return result;
-  }
-  // Helper to get attribute definition by dot notation key
-  getAttributeDefinition(key) {
-    const parts = key.split(".");
-    let def = this.attributes;
-    for (const part of parts) {
-      if (!def) return void 0;
-      def = def[part];
-    }
-    return def;
-  }
-  /**
-   * Preprocess attributes to convert nested objects into validator-compatible format
-   * @param {Object} attributes - Original attributes
-   * @returns {Object} Processed attributes for validator
-   */
-  preprocessAttributesForValidation(attributes) {
-    const processed = {};
-    for (const [key, value] of Object.entries(attributes)) {
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        const isExplicitRequired = value.$$type && value.$$type.includes("required");
-        const isExplicitOptional = value.$$type && value.$$type.includes("optional");
-        const objectConfig = {
-          type: "object",
-          properties: this.preprocessAttributesForValidation(value),
-          strict: false
-        };
-        if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
-          objectConfig.optional = true;
-        }
-        processed[key] = objectConfig;
-      } else {
-        processed[key] = value;
-      }
-    }
-    return processed;
   }
 }
 
@@ -10000,6 +7047,2958 @@ function streamToString(stream) {
     stream.on("error", reject);
     stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
   });
+}
+
+class S3Cache extends Cache {
+  constructor({
+    client,
+    keyPrefix = "cache",
+    ttl = 0,
+    prefix = void 0
+  }) {
+    super({ client, keyPrefix, ttl, prefix });
+    this.client = client;
+    this.keyPrefix = keyPrefix;
+    this.config.ttl = ttl;
+    this.config.client = client;
+    this.config.prefix = prefix !== void 0 ? prefix : keyPrefix + (keyPrefix.endsWith("/") ? "" : "/");
+  }
+  async _set(key, data) {
+    let body = JSON.stringify(data);
+    const lengthSerialized = body.length;
+    body = zlib.gzipSync(body).toString("base64");
+    return this.client.putObject({
+      key: join(this.keyPrefix, key),
+      body,
+      contentEncoding: "gzip",
+      contentType: "application/gzip",
+      metadata: {
+        compressor: "zlib",
+        compressed: "true",
+        "client-id": this.client.id,
+        "length-serialized": String(lengthSerialized),
+        "length-compressed": String(body.length),
+        "compression-gain": (body.length / lengthSerialized).toFixed(2)
+      }
+    });
+  }
+  async _get(key) {
+    const [ok, err, result] = await tryFn(async () => {
+      const { Body } = await this.client.getObject(join(this.keyPrefix, key));
+      let content = await streamToString(Body);
+      content = Buffer.from(content, "base64");
+      content = zlib.unzipSync(content).toString();
+      return JSON.parse(content);
+    });
+    if (ok) return result;
+    if (err.name === "NoSuchKey" || err.name === "NotFound") return null;
+    throw err;
+  }
+  async _del(key) {
+    await this.client.deleteObject(join(this.keyPrefix, key));
+    return true;
+  }
+  async _clear() {
+    const keys = await this.client.getAllKeys({
+      prefix: this.keyPrefix
+    });
+    await this.client.deleteObjects(keys);
+  }
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+  async keys() {
+    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
+    const prefix = this.keyPrefix.endsWith("/") ? this.keyPrefix : this.keyPrefix + "/";
+    return allKeys.map((k) => k.startsWith(prefix) ? k.slice(prefix.length) : k);
+  }
+}
+
+class MemoryCache extends Cache {
+  constructor(config = {}) {
+    super(config);
+    this.cache = {};
+    this.meta = {};
+    this.maxSize = config.maxSize || 0;
+    this.ttl = config.ttl || 0;
+  }
+  async _set(key, data) {
+    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
+      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+      if (oldestKey) {
+        delete this.cache[oldestKey];
+        delete this.meta[oldestKey];
+      }
+    }
+    this.cache[key] = data;
+    this.meta[key] = { ts: Date.now() };
+    return data;
+  }
+  async _get(key) {
+    if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+    if (this.ttl > 0) {
+      const now = Date.now();
+      const meta = this.meta[key];
+      if (meta && now - meta.ts > this.ttl * 1e3) {
+        delete this.cache[key];
+        delete this.meta[key];
+        return null;
+      }
+    }
+    return this.cache[key];
+  }
+  async _del(key) {
+    delete this.cache[key];
+    delete this.meta[key];
+    return true;
+  }
+  async _clear(prefix) {
+    if (!prefix) {
+      this.cache = {};
+      this.meta = {};
+      return true;
+    }
+    for (const key of Object.keys(this.cache)) {
+      if (key.startsWith(prefix)) {
+        delete this.cache[key];
+        delete this.meta[key];
+      }
+    }
+    return true;
+  }
+  async size() {
+    return Object.keys(this.cache).length;
+  }
+  async keys() {
+    return Object.keys(this.cache);
+  }
+}
+
+class CachePlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.driver = options.driver;
+    this.config = {
+      includePartitions: options.includePartitions !== false,
+      ...options
+    };
+  }
+  async setup(database) {
+    await super.setup(database);
+  }
+  async onSetup() {
+    if (this.config.driver) {
+      this.driver = this.config.driver;
+    } else if (this.config.driverType === "memory") {
+      this.driver = new MemoryCache(this.config.memoryOptions || {});
+    } else {
+      this.driver = new S3Cache({ client: this.database.client, ...this.config.s3Options || {} });
+    }
+    this.installDatabaseProxy();
+    this.installResourceHooks();
+  }
+  async onStart() {
+  }
+  async onStop() {
+  }
+  installDatabaseProxy() {
+    if (this.database._cacheProxyInstalled) {
+      return;
+    }
+    const installResourceHooks = this.installResourceHooks.bind(this);
+    this.database._originalCreateResourceForCache = this.database.createResource;
+    this.database.createResource = async function(...args) {
+      const resource = await this._originalCreateResourceForCache(...args);
+      installResourceHooks(resource);
+      return resource;
+    };
+    this.database._cacheProxyInstalled = true;
+  }
+  installResourceHooks() {
+    for (const resource of Object.values(this.database.resources)) {
+      this.installResourceHooksForResource(resource);
+    }
+  }
+  installResourceHooksForResource(resource) {
+    if (!this.driver) return;
+    Object.defineProperty(resource, "cache", {
+      value: this.driver,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
+    resource.cacheKeyFor = async (options = {}) => {
+      const { action, params = {}, partition, partitionValues } = options;
+      return this.generateCacheKey(resource, action, params, partition, partitionValues);
+    };
+    const cacheMethods = [
+      "count",
+      "listIds",
+      "getMany",
+      "getAll",
+      "page",
+      "list",
+      "get"
+    ];
+    for (const method of cacheMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        let key;
+        if (method === "getMany") {
+          key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
+        } else if (method === "page") {
+          const { offset, size, partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, params: { offset, size }, partition, partitionValues });
+        } else if (method === "list" || method === "listIds" || method === "count") {
+          const { partition, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+        } else if (method === "getAll") {
+          key = await resource.cacheKeyFor({ action: method });
+        } else if (method === "get") {
+          key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
+        }
+        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
+        if (ok && cached !== null && cached !== void 0) return cached;
+        if (!ok && err.name !== "NoSuchKey") throw err;
+        const result = await next();
+        await resource.cache.set(key, result);
+        return result;
+      });
+    }
+    const writeMethods = ["insert", "update", "delete", "deleteMany"];
+    for (const method of writeMethods) {
+      resource.useMiddleware(method, async (ctx, next) => {
+        const result = await next();
+        if (method === "insert") {
+          await this.clearCacheForResource(resource, ctx.args[0]);
+        } else if (method === "update") {
+          await this.clearCacheForResource(resource, { id: ctx.args[0], ...ctx.args[1] });
+        } else if (method === "delete") {
+          let data = { id: ctx.args[0] };
+          if (typeof resource.get === "function") {
+            const [ok, err, full] = await tryFn(() => resource.get(ctx.args[0]));
+            if (ok && full) data = full;
+          }
+          await this.clearCacheForResource(resource, data);
+        } else if (method === "deleteMany") {
+          await this.clearCacheForResource(resource);
+        }
+        return result;
+      });
+    }
+  }
+  async clearCacheForResource(resource, data) {
+    if (!resource.cache) return;
+    const keyPrefix = `resource=${resource.name}`;
+    await resource.cache.clear(keyPrefix);
+    if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
+      if (!data) {
+        for (const partitionName of Object.keys(resource.config.partitions)) {
+          const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+          await resource.cache.clear(partitionKeyPrefix);
+        }
+      } else {
+        const partitionValues = this.getPartitionValues(data, resource);
+        for (const [partitionName, values] of Object.entries(partitionValues)) {
+          if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
+            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+            await resource.cache.clear(partitionKeyPrefix);
+          }
+        }
+      }
+    }
+  }
+  async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
+    const keyParts = [
+      `resource=${resource.name}`,
+      `action=${action}`
+    ];
+    if (partition && partitionValues && Object.keys(partitionValues).length > 0) {
+      keyParts.push(`partition:${partition}`);
+      for (const [field, value] of Object.entries(partitionValues)) {
+        if (value !== null && value !== void 0) {
+          keyParts.push(`${field}:${value}`);
+        }
+      }
+    }
+    if (Object.keys(params).length > 0) {
+      const paramsHash = await this.hashParams(params);
+      keyParts.push(paramsHash);
+    }
+    return join(...keyParts) + ".json.gz";
+  }
+  async hashParams(params) {
+    const sortedParams = Object.keys(params).sort().map((key) => `${key}:${params[key]}`).join("|") || "empty";
+    return await sha256(sortedParams);
+  }
+  // Utility methods
+  async getCacheStats() {
+    if (!this.driver) return null;
+    return {
+      size: await this.driver.size(),
+      keys: await this.driver.keys(),
+      driver: this.driver.constructor.name
+    };
+  }
+  async clearAllCache() {
+    if (!this.driver) return;
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.cache) {
+        const keyPrefix = `resource=${resource.name}`;
+        await resource.cache.clear(keyPrefix);
+      }
+    }
+  }
+  async warmCache(resourceName, options = {}) {
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    const { includePartitions = true } = options;
+    await resource.getAll();
+    if (includePartitions && resource.config.partitions) {
+      for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
+        if (partitionDef.fields) {
+          const allRecords = await resource.getAll();
+          const recordsArray = Array.isArray(allRecords) ? allRecords : [];
+          const partitionValues = /* @__PURE__ */ new Set();
+          for (const record of recordsArray.slice(0, 10)) {
+            const values = this.getPartitionValues(record, resource);
+            if (values[partitionName]) {
+              partitionValues.add(JSON.stringify(values[partitionName]));
+            }
+          }
+          for (const partitionValueStr of partitionValues) {
+            const partitionValues2 = JSON.parse(partitionValueStr);
+            await resource.list({ partition: partitionName, partitionValues: partitionValues2 });
+          }
+        }
+      }
+    }
+  }
+}
+
+const CostsPlugin = {
+  async setup(db) {
+    if (!db || !db.client) {
+      return;
+    }
+    this.client = db.client;
+    this.map = {
+      PutObjectCommand: "put",
+      GetObjectCommand: "get",
+      HeadObjectCommand: "head",
+      DeleteObjectCommand: "delete",
+      DeleteObjectsCommand: "delete",
+      ListObjectsV2Command: "list"
+    };
+    this.costs = {
+      total: 0,
+      prices: {
+        put: 5e-3 / 1e3,
+        copy: 5e-3 / 1e3,
+        list: 5e-3 / 1e3,
+        post: 5e-3 / 1e3,
+        get: 4e-4 / 1e3,
+        select: 4e-4 / 1e3,
+        delete: 4e-4 / 1e3,
+        head: 4e-4 / 1e3
+      },
+      requests: {
+        total: 0,
+        put: 0,
+        post: 0,
+        copy: 0,
+        list: 0,
+        get: 0,
+        select: 0,
+        delete: 0,
+        head: 0
+      },
+      events: {
+        total: 0,
+        PutObjectCommand: 0,
+        GetObjectCommand: 0,
+        HeadObjectCommand: 0,
+        DeleteObjectCommand: 0,
+        DeleteObjectsCommand: 0,
+        ListObjectsV2Command: 0
+      }
+    };
+    this.client.costs = JSON.parse(JSON.stringify(this.costs));
+  },
+  async start() {
+    if (this.client) {
+      this.client.on("command.response", (name) => this.addRequest(name, this.map[name]));
+      this.client.on("command.error", (name) => this.addRequest(name, this.map[name]));
+    }
+  },
+  addRequest(name, method) {
+    if (!method) return;
+    this.costs.events[name]++;
+    this.costs.events.total++;
+    this.costs.requests.total++;
+    this.costs.requests[method]++;
+    this.costs.total += this.costs.prices[method];
+    if (this.client && this.client.costs) {
+      this.client.costs.events[name]++;
+      this.client.costs.events.total++;
+      this.client.costs.requests.total++;
+      this.client.costs.requests[method]++;
+      this.client.costs.total += this.client.costs.prices[method];
+    }
+  }
+};
+
+class FullTextPlugin extends Plugin {
+  constructor(options = {}) {
+    super();
+    this.indexResource = null;
+    this.config = {
+      minWordLength: options.minWordLength || 3,
+      maxResults: options.maxResults || 100,
+      ...options
+    };
+    this.indexes = /* @__PURE__ */ new Map();
+  }
+  async setup(database) {
+    this.database = database;
+    const [ok, err, indexResource] = await tryFn(() => database.createResource({
+      name: "fulltext_indexes",
+      attributes: {
+        id: "string|required",
+        resourceName: "string|required",
+        fieldName: "string|required",
+        word: "string|required",
+        recordIds: "json|required",
+        // Array of record IDs containing this word
+        count: "number|required",
+        lastUpdated: "string|required"
+      }
+    }));
+    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
+    await this.loadIndexes();
+    this.installIndexingHooks();
+  }
+  async start() {
+  }
+  async stop() {
+    await this.saveIndexes();
+  }
+  async loadIndexes() {
+    if (!this.indexResource) return;
+    const [ok, err, allIndexes] = await tryFn(() => this.indexResource.getAll());
+    if (ok) {
+      for (const indexRecord of allIndexes) {
+        const key = `${indexRecord.resourceName}:${indexRecord.fieldName}:${indexRecord.word}`;
+        this.indexes.set(key, {
+          recordIds: indexRecord.recordIds || [],
+          count: indexRecord.count || 0
+        });
+      }
+    }
+  }
+  async saveIndexes() {
+    if (!this.indexResource) return;
+    const [ok, err] = await tryFn(async () => {
+      const existingIndexes = await this.indexResource.getAll();
+      for (const index of existingIndexes) {
+        await this.indexResource.delete(index.id);
+      }
+      for (const [key, data] of this.indexes.entries()) {
+        const [resourceName, fieldName, word] = key.split(":");
+        await this.indexResource.insert({
+          id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          resourceName,
+          fieldName,
+          word,
+          recordIds: data.recordIds,
+          count: data.count,
+          lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
+        });
+      }
+    });
+  }
+  installIndexingHooks() {
+    if (!this.database.plugins) {
+      this.database.plugins = {};
+    }
+    this.database.plugins.fulltext = this;
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.name === "fulltext_indexes") continue;
+      this.installResourceHooks(resource);
+    }
+    if (!this.database._fulltextProxyInstalled) {
+      this.database._previousCreateResourceForFullText = this.database.createResource;
+      this.database.createResource = async function(...args) {
+        const resource = await this._previousCreateResourceForFullText(...args);
+        if (this.plugins?.fulltext && resource.name !== "fulltext_indexes") {
+          this.plugins.fulltext.installResourceHooks(resource);
+        }
+        return resource;
+      };
+      this.database._fulltextProxyInstalled = true;
+    }
+    for (const resource of Object.values(this.database.resources)) {
+      if (resource.name !== "fulltext_indexes") {
+        this.installResourceHooks(resource);
+      }
+    }
+  }
+  installResourceHooks(resource) {
+    resource._insert = resource.insert;
+    resource._update = resource.update;
+    resource._delete = resource.delete;
+    resource._deleteMany = resource.deleteMany;
+    this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
+      const [data] = args;
+      this.indexRecord(resource.name, result.id, data).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
+      const [id, data] = args;
+      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      this.indexRecord(resource.name, id, result).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
+      const [id] = args;
+      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      return result;
+    });
+    this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
+      const [ids] = args;
+      for (const id of ids) {
+        this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      }
+      return result;
+    });
+  }
+  async indexRecord(resourceName, recordId, data) {
+    const indexedFields = this.getIndexedFields(resourceName);
+    if (!indexedFields || indexedFields.length === 0) {
+      return;
+    }
+    for (const fieldName of indexedFields) {
+      const fieldValue = this.getFieldValue(data, fieldName);
+      if (!fieldValue) {
+        continue;
+      }
+      const words = this.tokenize(fieldValue);
+      for (const word of words) {
+        if (word.length < this.config.minWordLength) {
+          continue;
+        }
+        const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
+        const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
+        if (!existing.recordIds.includes(recordId)) {
+          existing.recordIds.push(recordId);
+          existing.count = existing.recordIds.length;
+        }
+        this.indexes.set(key, existing);
+      }
+    }
+  }
+  async removeRecordFromIndex(resourceName, recordId) {
+    for (const [key, data] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        const index = data.recordIds.indexOf(recordId);
+        if (index > -1) {
+          data.recordIds.splice(index, 1);
+          data.count = data.recordIds.length;
+          if (data.recordIds.length === 0) {
+            this.indexes.delete(key);
+          } else {
+            this.indexes.set(key, data);
+          }
+        }
+      }
+    }
+  }
+  getFieldValue(data, fieldPath) {
+    if (!fieldPath.includes(".")) {
+      return data && data[fieldPath] !== void 0 ? data[fieldPath] : null;
+    }
+    const keys = fieldPath.split(".");
+    let value = data;
+    for (const key of keys) {
+      if (value && typeof value === "object" && key in value) {
+        value = value[key];
+      } else {
+        return null;
+      }
+    }
+    return value;
+  }
+  tokenize(text) {
+    if (!text) return [];
+    const str = String(text).toLowerCase();
+    return str.replace(/[^\w\s\u00C0-\u017F]/g, " ").split(/\s+/).filter((word) => word.length > 0);
+  }
+  getIndexedFields(resourceName) {
+    if (this.config.fields) {
+      return this.config.fields;
+    }
+    const fieldMappings = {
+      users: ["name", "email"],
+      products: ["name", "description"],
+      articles: ["title", "content"]
+      // Add more mappings as needed
+    };
+    return fieldMappings[resourceName] || [];
+  }
+  // Main search method
+  async search(resourceName, query, options = {}) {
+    const {
+      fields = null,
+      // Specific fields to search in
+      limit = this.config.maxResults,
+      offset = 0,
+      exactMatch = false
+    } = options;
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+    const searchWords = this.tokenize(query);
+    const results = /* @__PURE__ */ new Map();
+    const searchFields = fields || this.getIndexedFields(resourceName);
+    if (searchFields.length === 0) {
+      return [];
+    }
+    for (const word of searchWords) {
+      if (word.length < this.config.minWordLength) continue;
+      for (const fieldName of searchFields) {
+        if (exactMatch) {
+          const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
+          const indexData = this.indexes.get(key);
+          if (indexData) {
+            for (const recordId of indexData.recordIds) {
+              const currentScore = results.get(recordId) || 0;
+              results.set(recordId, currentScore + 1);
+            }
+          }
+        } else {
+          for (const [key, indexData] of this.indexes.entries()) {
+            if (key.startsWith(`${resourceName}:${fieldName}:${word.toLowerCase()}`)) {
+              for (const recordId of indexData.recordIds) {
+                const currentScore = results.get(recordId) || 0;
+                results.set(recordId, currentScore + 1);
+              }
+            }
+          }
+        }
+      }
+    }
+    const sortedResults = Array.from(results.entries()).map(([recordId, score]) => ({ recordId, score })).sort((a, b) => b.score - a.score).slice(offset, offset + limit);
+    return sortedResults;
+  }
+  // Search and return full records
+  async searchRecords(resourceName, query, options = {}) {
+    const searchResults = await this.search(resourceName, query, options);
+    if (searchResults.length === 0) {
+      return [];
+    }
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    const recordIds = searchResults.map((result2) => result2.recordId);
+    const records = await resource.getMany(recordIds);
+    const result = records.filter((record) => record && typeof record === "object").map((record) => {
+      const searchResult = searchResults.find((sr) => sr.recordId === record.id);
+      return {
+        ...record,
+        _searchScore: searchResult ? searchResult.score : 0
+      };
+    }).sort((a, b) => b._searchScore - a._searchScore);
+    return result;
+  }
+  // Utility methods
+  async rebuildIndex(resourceName) {
+    const resource = this.database.resources[resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${resourceName}' not found`);
+    }
+    for (const [key] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        this.indexes.delete(key);
+      }
+    }
+    const allRecords = await resource.getAll();
+    const batchSize = 100;
+    for (let i = 0; i < allRecords.length; i += batchSize) {
+      const batch = allRecords.slice(i, i + batchSize);
+      for (const record of batch) {
+        const [ok, err] = await tryFn(() => this.indexRecord(resourceName, record.id, record));
+      }
+    }
+    await this.saveIndexes();
+  }
+  async getIndexStats() {
+    const stats = {
+      totalIndexes: this.indexes.size,
+      resources: {},
+      totalWords: 0
+    };
+    for (const [key, data] of this.indexes.entries()) {
+      const [resourceName, fieldName] = key.split(":");
+      if (!stats.resources[resourceName]) {
+        stats.resources[resourceName] = {
+          fields: {},
+          totalRecords: /* @__PURE__ */ new Set(),
+          totalWords: 0
+        };
+      }
+      if (!stats.resources[resourceName].fields[fieldName]) {
+        stats.resources[resourceName].fields[fieldName] = {
+          words: 0,
+          totalOccurrences: 0
+        };
+      }
+      stats.resources[resourceName].fields[fieldName].words++;
+      stats.resources[resourceName].fields[fieldName].totalOccurrences += data.count;
+      stats.resources[resourceName].totalWords++;
+      for (const recordId of data.recordIds) {
+        stats.resources[resourceName].totalRecords.add(recordId);
+      }
+      stats.totalWords++;
+    }
+    for (const resourceName in stats.resources) {
+      stats.resources[resourceName].totalRecords = stats.resources[resourceName].totalRecords.size;
+    }
+    return stats;
+  }
+  async rebuildAllIndexes({ timeout } = {}) {
+    if (timeout) {
+      return Promise.race([
+        this._rebuildAllIndexesInternal(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
+      ]);
+    }
+    return this._rebuildAllIndexesInternal();
+  }
+  async _rebuildAllIndexesInternal() {
+    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
+    for (const resourceName of resourceNames) {
+      const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
+    }
+  }
+  async clearIndex(resourceName) {
+    for (const [key] of this.indexes.entries()) {
+      if (key.startsWith(`${resourceName}:`)) {
+        this.indexes.delete(key);
+      }
+    }
+    await this.saveIndexes();
+  }
+  async clearAllIndexes() {
+    this.indexes.clear();
+    await this.saveIndexes();
+  }
+}
+
+class MetricsPlugin extends Plugin {
+  constructor(options = {}) {
+    super();
+    this.config = {
+      collectPerformance: options.collectPerformance !== false,
+      collectErrors: options.collectErrors !== false,
+      collectUsage: options.collectUsage !== false,
+      retentionDays: options.retentionDays || 30,
+      flushInterval: options.flushInterval || 6e4,
+      // 1 minute
+      ...options
+    };
+    this.metrics = {
+      operations: {
+        insert: { count: 0, totalTime: 0, errors: 0 },
+        update: { count: 0, totalTime: 0, errors: 0 },
+        delete: { count: 0, totalTime: 0, errors: 0 },
+        get: { count: 0, totalTime: 0, errors: 0 },
+        list: { count: 0, totalTime: 0, errors: 0 },
+        count: { count: 0, totalTime: 0, errors: 0 }
+      },
+      resources: {},
+      errors: [],
+      performance: [],
+      startTime: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.flushTimer = null;
+  }
+  async setup(database) {
+    this.database = database;
+    if (process.env.NODE_ENV === "test") return;
+    const [ok, err] = await tryFn(async () => {
+      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
+        name: "metrics",
+        attributes: {
+          id: "string|required",
+          type: "string|required",
+          // 'operation', 'error', 'performance'
+          resourceName: "string",
+          operation: "string",
+          count: "number|required",
+          totalTime: "number|required",
+          errors: "number|required",
+          avgTime: "number|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      }));
+      this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
+      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
+        name: "error_logs",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          error: "string|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      }));
+      this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
+      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
+        name: "performance_logs",
+        attributes: {
+          id: "string|required",
+          resourceName: "string|required",
+          operation: "string|required",
+          duration: "number|required",
+          timestamp: "string|required",
+          metadata: "json"
+        }
+      }));
+      this.performanceResource = ok3 ? performanceResource : database.resources.performance_logs;
+    });
+    if (!ok) {
+      this.metricsResource = database.resources.metrics;
+      this.errorsResource = database.resources.error_logs;
+      this.performanceResource = database.resources.performance_logs;
+    }
+    this.installMetricsHooks();
+    if (process.env.NODE_ENV !== "test") {
+      this.startFlushTimer();
+    }
+  }
+  async start() {
+  }
+  async stop() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    if (process.env.NODE_ENV !== "test") {
+      await this.flushMetrics();
+    }
+  }
+  installMetricsHooks() {
+    for (const resource of Object.values(this.database.resources)) {
+      if (["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+        continue;
+      }
+      this.installResourceHooks(resource);
+    }
+    this.database._createResource = this.database.createResource;
+    this.database.createResource = async function(...args) {
+      const resource = await this._createResource(...args);
+      if (this.plugins?.metrics && !["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+        this.plugins.metrics.installResourceHooks(resource);
+      }
+      return resource;
+    };
+  }
+  installResourceHooks(resource) {
+    resource._insert = resource.insert;
+    resource._update = resource.update;
+    resource._delete = resource.delete;
+    resource._deleteMany = resource.deleteMany;
+    resource._get = resource.get;
+    resource._getMany = resource.getMany;
+    resource._getAll = resource.getAll;
+    resource._list = resource.list;
+    resource._listIds = resource.listIds;
+    resource._count = resource.count;
+    resource._page = resource.page;
+    resource.insert = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._insert(...args));
+      this.recordOperation(resource.name, "insert", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "insert", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.update = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._update(...args));
+      this.recordOperation(resource.name, "update", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "update", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.delete = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._delete(...args));
+      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "delete", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.deleteMany = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._deleteMany(...args));
+      this.recordOperation(resource.name, "delete", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "delete", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.get = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._get(...args));
+      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "get", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.getMany = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._getMany(...args));
+      this.recordOperation(resource.name, "get", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "get", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.getAll = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._getAll(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.list = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._list(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.listIds = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._listIds(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.count = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._count(...args));
+      this.recordOperation(resource.name, "count", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "count", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+    resource.page = async function(...args) {
+      const startTime = Date.now();
+      const [ok, err, result] = await tryFn(() => resource._page(...args));
+      this.recordOperation(resource.name, "list", Date.now() - startTime, !ok);
+      if (!ok) this.recordError(resource.name, "list", err);
+      if (!ok) throw err;
+      return result;
+    }.bind(this);
+  }
+  recordOperation(resourceName, operation, duration, isError) {
+    if (this.metrics.operations[operation]) {
+      this.metrics.operations[operation].count++;
+      this.metrics.operations[operation].totalTime += duration;
+      if (isError) {
+        this.metrics.operations[operation].errors++;
+      }
+    }
+    if (!this.metrics.resources[resourceName]) {
+      this.metrics.resources[resourceName] = {
+        insert: { count: 0, totalTime: 0, errors: 0 },
+        update: { count: 0, totalTime: 0, errors: 0 },
+        delete: { count: 0, totalTime: 0, errors: 0 },
+        get: { count: 0, totalTime: 0, errors: 0 },
+        list: { count: 0, totalTime: 0, errors: 0 },
+        count: { count: 0, totalTime: 0, errors: 0 }
+      };
+    }
+    if (this.metrics.resources[resourceName][operation]) {
+      this.metrics.resources[resourceName][operation].count++;
+      this.metrics.resources[resourceName][operation].totalTime += duration;
+      if (isError) {
+        this.metrics.resources[resourceName][operation].errors++;
+      }
+    }
+    if (this.config.collectPerformance) {
+      this.metrics.performance.push({
+        resourceName,
+        operation,
+        duration,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+  }
+  recordError(resourceName, operation, error) {
+    if (!this.config.collectErrors) return;
+    this.metrics.errors.push({
+      resourceName,
+      operation,
+      error: error.message,
+      stack: error.stack,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+  startFlushTimer() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+    }
+    if (this.config.flushInterval > 0) {
+      this.flushTimer = setInterval(() => {
+        this.flushMetrics().catch(console.error);
+      }, this.config.flushInterval);
+    }
+  }
+  async flushMetrics() {
+    if (!this.metricsResource) return;
+    const [ok, err] = await tryFn(async () => {
+      const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
+      const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
+      const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
+      const resourceMetadata = process.env.NODE_ENV === "test" ? {} : { resource: "true" };
+      for (const [operation, data] of Object.entries(this.metrics.operations)) {
+        if (data.count > 0) {
+          await this.metricsResource.insert({
+            id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            type: "operation",
+            resourceName: "global",
+            operation,
+            count: data.count,
+            totalTime: data.totalTime,
+            errors: data.errors,
+            avgTime: data.count > 0 ? data.totalTime / data.count : 0,
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            metadata
+          });
+        }
+      }
+      for (const [resourceName, operations] of Object.entries(this.metrics.resources)) {
+        for (const [operation, data] of Object.entries(operations)) {
+          if (data.count > 0) {
+            await this.metricsResource.insert({
+              id: `metrics-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              type: "operation",
+              resourceName,
+              operation,
+              count: data.count,
+              totalTime: data.totalTime,
+              errors: data.errors,
+              avgTime: data.count > 0 ? data.totalTime / data.count : 0,
+              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              metadata: resourceMetadata
+            });
+          }
+        }
+      }
+      if (this.config.collectPerformance && this.metrics.performance.length > 0) {
+        for (const perf of this.metrics.performance) {
+          await this.performanceResource.insert({
+            id: `perf-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName: perf.resourceName,
+            operation: perf.operation,
+            duration: perf.duration,
+            timestamp: perf.timestamp,
+            metadata: perfMetadata
+          });
+        }
+      }
+      if (this.config.collectErrors && this.metrics.errors.length > 0) {
+        for (const error of this.metrics.errors) {
+          await this.errorsResource.insert({
+            id: `error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName: error.resourceName,
+            operation: error.operation,
+            error: error.error,
+            stack: error.stack,
+            timestamp: error.timestamp,
+            metadata: errorMetadata
+          });
+        }
+      }
+      this.resetMetrics();
+    });
+    if (!ok) {
+      console.error("Failed to flush metrics:", err);
+    }
+  }
+  resetMetrics() {
+    for (const operation of Object.keys(this.metrics.operations)) {
+      this.metrics.operations[operation] = { count: 0, totalTime: 0, errors: 0 };
+    }
+    for (const resourceName of Object.keys(this.metrics.resources)) {
+      for (const operation of Object.keys(this.metrics.resources[resourceName])) {
+        this.metrics.resources[resourceName][operation] = { count: 0, totalTime: 0, errors: 0 };
+      }
+    }
+    this.metrics.performance = [];
+    this.metrics.errors = [];
+  }
+  // Utility methods
+  async getMetrics(options = {}) {
+    const {
+      type = "operation",
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    if (!this.metricsResource) return [];
+    const allMetrics = await this.metricsResource.getAll();
+    let filtered = allMetrics.filter((metric) => {
+      if (type && metric.type !== type) return false;
+      if (resourceName && metric.resourceName !== resourceName) return false;
+      if (operation && metric.operation !== operation) return false;
+      if (startDate && new Date(metric.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(metric.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getErrorLogs(options = {}) {
+    if (!this.errorsResource) return [];
+    const {
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    const allErrors = await this.errorsResource.getAll();
+    let filtered = allErrors.filter((error) => {
+      if (resourceName && error.resourceName !== resourceName) return false;
+      if (operation && error.operation !== operation) return false;
+      if (startDate && new Date(error.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(error.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getPerformanceLogs(options = {}) {
+    if (!this.performanceResource) return [];
+    const {
+      resourceName,
+      operation,
+      startDate,
+      endDate,
+      limit = 100,
+      offset = 0
+    } = options;
+    const allPerformance = await this.performanceResource.getAll();
+    let filtered = allPerformance.filter((perf) => {
+      if (resourceName && perf.resourceName !== resourceName) return false;
+      if (operation && perf.operation !== operation) return false;
+      if (startDate && new Date(perf.timestamp) < new Date(startDate)) return false;
+      if (endDate && new Date(perf.timestamp) > new Date(endDate)) return false;
+      return true;
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    return filtered.slice(offset, offset + limit);
+  }
+  async getStats() {
+    const now = /* @__PURE__ */ new Date();
+    const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1e3);
+    const [metrics, errors, performance] = await Promise.all([
+      this.getMetrics({ startDate: startDate.toISOString() }),
+      this.getErrorLogs({ startDate: startDate.toISOString() }),
+      this.getPerformanceLogs({ startDate: startDate.toISOString() })
+    ]);
+    const stats = {
+      period: "24h",
+      totalOperations: 0,
+      totalErrors: errors.length,
+      avgResponseTime: 0,
+      operationsByType: {},
+      resources: {},
+      uptime: {
+        startTime: this.metrics.startTime,
+        duration: now.getTime() - new Date(this.metrics.startTime).getTime()
+      }
+    };
+    for (const metric of metrics) {
+      if (metric.type === "operation") {
+        stats.totalOperations += metric.count;
+        if (!stats.operationsByType[metric.operation]) {
+          stats.operationsByType[metric.operation] = {
+            count: 0,
+            errors: 0,
+            avgTime: 0
+          };
+        }
+        stats.operationsByType[metric.operation].count += metric.count;
+        stats.operationsByType[metric.operation].errors += metric.errors;
+        const current = stats.operationsByType[metric.operation];
+        const totalCount2 = current.count;
+        const newAvg = (current.avgTime * (totalCount2 - metric.count) + metric.totalTime) / totalCount2;
+        current.avgTime = newAvg;
+      }
+    }
+    const totalTime = metrics.reduce((sum, m) => sum + m.totalTime, 0);
+    const totalCount = metrics.reduce((sum, m) => sum + m.count, 0);
+    stats.avgResponseTime = totalCount > 0 ? totalTime / totalCount : 0;
+    return stats;
+  }
+  async cleanupOldData() {
+    const cutoffDate = /* @__PURE__ */ new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
+    if (this.metricsResource) {
+      const oldMetrics = await this.getMetrics({ endDate: cutoffDate.toISOString() });
+      for (const metric of oldMetrics) {
+        await this.metricsResource.delete(metric.id);
+      }
+    }
+    if (this.errorsResource) {
+      const oldErrors = await this.getErrorLogs({ endDate: cutoffDate.toISOString() });
+      for (const error of oldErrors) {
+        await this.errorsResource.delete(error.id);
+      }
+    }
+    if (this.performanceResource) {
+      const oldPerformance = await this.getPerformanceLogs({ endDate: cutoffDate.toISOString() });
+      for (const perf of oldPerformance) {
+        await this.performanceResource.delete(perf.id);
+      }
+    }
+  }
+}
+
+class BaseReplicator extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.config = config;
+    this.name = this.constructor.name;
+    this.enabled = config.enabled !== false;
+  }
+  /**
+   * Initialize the replicator
+   * @param {Object} database - The s3db database instance
+   * @returns {Promise<void>}
+   */
+  async initialize(database) {
+    this.database = database;
+    this.emit("initialized", { replicator: this.name });
+  }
+  /**
+   * Replicate data to the target
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {string} operation - Operation type (insert, update, delete)
+   * @param {Object} data - The data to replicate
+   * @param {string} id - Record ID
+   * @returns {Promise<Object>} replicator result
+   */
+  async replicate(resourceName, operation, data, id) {
+    throw new Error(`replicate() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Replicate multiple records in batch
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {Array} records - Array of records to replicate
+   * @returns {Promise<Object>} Batch replicator result
+   */
+  async replicateBatch(resourceName, records) {
+    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Test the connection to the target
+   * @returns {Promise<boolean>} True if connection is successful
+   */
+  async testConnection() {
+    throw new Error(`testConnection() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Get replicator status and statistics
+   * @returns {Promise<Object>} Status information
+   */
+  async getStatus() {
+    return {
+      name: this.name,
+      // Removed: enabled: this.enabled,
+      config: this.config,
+      connected: false
+    };
+  }
+  /**
+   * Cleanup resources
+   * @returns {Promise<void>}
+   */
+  async cleanup() {
+    this.emit("cleanup", { replicator: this.name });
+  }
+  /**
+   * Validate replicator configuration
+   * @returns {Object} Validation result
+   */
+  validateConfig() {
+    return { isValid: true, errors: [] };
+  }
+}
+
+class BigqueryReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.projectId = config.projectId;
+    this.datasetId = config.datasetId;
+    this.bigqueryClient = null;
+    this.credentials = config.credentials;
+    this.location = config.location || "US";
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.projectId) errors.push("projectId is required");
+    if (!this.datasetId) errors.push("datasetId is required");
+    if (Object.keys(this.resources).length === 0) errors.push("At least one resource must be configured");
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
+    if (!ok) {
+      this.emit("initialization_error", { replicator: this.name, error: err.message });
+      throw err;
+    }
+    const { BigQuery } = sdk;
+    this.bigqueryClient = new BigQuery({
+      projectId: this.projectId,
+      credentials: this.credentials,
+      location: this.location
+    });
+    this.emit("initialized", {
+      replicator: this.name,
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: Object.keys(this.resources)
+    });
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    const [ok, err, result] = await tryFn(async () => {
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      for (const tableId of tables) {
+        const [okTable, errTable] = await tryFn(async () => {
+          const table = dataset.table(tableId);
+          let job;
+          if (operation === "insert") {
+            const row = { ...data };
+            job = await table.insert([row]);
+          } else if (operation === "update") {
+            const keys = Object.keys(data).filter((k) => k !== "id");
+            const setClause = keys.map((k) => `${k}=@${k}`).join(", ");
+            const params = { id };
+            keys.forEach((k) => {
+              params[k] = data[k];
+            });
+            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableId}\` SET ${setClause} WHERE id=@id`;
+            const [updateJob] = await this.bigqueryClient.createQueryJob({
+              query,
+              params
+            });
+            await updateJob.getQueryResults();
+            job = [updateJob];
+          } else if (operation === "delete") {
+            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableId}\` WHERE id=@id`;
+            const [deleteJob] = await this.bigqueryClient.createQueryJob({
+              query,
+              params: { id }
+            });
+            await deleteJob.getQueryResults();
+            job = [deleteJob];
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table: tableId,
+            success: true,
+            jobId: job[0]?.id
+          });
+        });
+        if (!okTable) {
+          errors.push({
+            table: tableId,
+            error: errTable.message
+          });
+        }
+      }
+      if (this.logTable) {
+        const [okLog, errLog] = await tryFn(async () => {
+          const logTable = dataset.table(this.logTable);
+          await logTable.insert([{
+            resource_name: resourceName,
+            operation,
+            record_id: id,
+            data: JSON.stringify(data),
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            source: "s3db-replicator"
+          }]);
+        });
+        if (!okLog) {
+        }
+      }
+      const success = errors.length === 0;
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        tables,
+        results,
+        errors,
+        success
+      });
+      return {
+        success,
+        results,
+        errors,
+        tables
+      };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.bigqueryClient) await this.initialize();
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      await dataset.getMetadata();
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
+  }
+  async cleanup() {
+  }
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: this.resources,
+      logTable: this.logTable
+    };
+  }
+}
+
+class PostgresReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.connectionString = config.connectionString;
+    this.host = config.host;
+    this.port = config.port || 5432;
+    this.database = config.database;
+    this.user = config.user;
+    this.password = config.password;
+    this.client = null;
+    this.ssl = config.ssl;
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.connectionString && (!this.host || !this.database)) {
+      errors.push("Either connectionString or host+database must be provided");
+    }
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const [ok, err, sdk] = await tryFn(() => import('pg'));
+    if (!ok) {
+      this.emit("initialization_error", {
+        replicator: this.name,
+        error: err.message
+      });
+      throw err;
+    }
+    const { Client } = sdk;
+    const config = this.connectionString ? {
+      connectionString: this.connectionString,
+      ssl: this.ssl
+    } : {
+      host: this.host,
+      port: this.port,
+      database: this.database,
+      user: this.user,
+      password: this.password,
+      ssl: this.ssl
+    };
+    this.client = new Client(config);
+    await this.client.connect();
+    if (this.logTable) {
+      await this.createLogTableIfNotExists();
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      database: this.database || "postgres",
+      resources: Object.keys(this.resources)
+    });
+  }
+  async createLogTableIfNotExists() {
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS ${this.logTable} (
+        id SERIAL PRIMARY KEY,
+        resource_name VARCHAR(255) NOT NULL,
+        operation VARCHAR(50) NOT NULL,
+        record_id VARCHAR(255) NOT NULL,
+        data JSONB,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        source VARCHAR(100) DEFAULT 's3db-replicator',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_operation ON ${this.logTable}(operation);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_record_id ON ${this.logTable}(record_id);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
+    `;
+    await this.client.query(createTableQuery);
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    const [ok, err, result] = await tryFn(async () => {
+      for (const table of tables) {
+        const [okTable, errTable] = await tryFn(async () => {
+          let result2;
+          if (operation === "insert") {
+            const keys = Object.keys(data);
+            const values = keys.map((k) => data[k]);
+            const columns = keys.map((k) => `"${k}"`).join(", ");
+            const params = keys.map((_, i) => `$${i + 1}`).join(", ");
+            const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
+            result2 = await this.client.query(sql, values);
+          } else if (operation === "update") {
+            const keys = Object.keys(data).filter((k) => k !== "id");
+            const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
+            const values = keys.map((k) => data[k]);
+            values.push(id);
+            const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
+            result2 = await this.client.query(sql, values);
+          } else if (operation === "delete") {
+            const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
+            result2 = await this.client.query(sql, [id]);
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table,
+            success: true,
+            rows: result2.rows,
+            rowCount: result2.rowCount
+          });
+        });
+        if (!okTable) {
+          errors.push({
+            table,
+            error: errTable.message
+          });
+        }
+      }
+      if (this.logTable) {
+        const [okLog, errLog] = await tryFn(async () => {
+          await this.client.query(
+            `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
+          );
+        });
+        if (!okLog) {
+        }
+      }
+      const success = errors.length === 0;
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        tables,
+        results,
+        errors,
+        success
+      });
+      return {
+        success,
+        results,
+        errors,
+        tables
+      };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, res] = await tryFn(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.client) await this.initialize();
+      await this.client.query("SELECT 1");
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
+  }
+  async cleanup() {
+    if (this.client) await this.client.end();
+  }
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      database: this.database || "postgres",
+      resources: this.resources,
+      logTable: this.logTable
+    };
+  }
+}
+
+const S3_DEFAULT_REGION = "us-east-1";
+const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
+class ConnectionString {
+  constructor(connectionString) {
+    let uri;
+    const [ok, err, parsed] = tryFn(() => new URL(connectionString));
+    if (!ok) {
+      throw new ConnectionStringError("Invalid connection string: " + connectionString, { original: err, input: connectionString });
+    }
+    uri = parsed;
+    this.region = S3_DEFAULT_REGION;
+    if (uri.protocol === "s3:") this.defineFromS3(uri);
+    else this.defineFromCustomUri(uri);
+    for (const [k, v] of uri.searchParams.entries()) {
+      this[k] = v;
+    }
+  }
+  defineFromS3(uri) {
+    const [okBucket, errBucket, bucket] = tryFnSync(() => decodeURIComponent(uri.hostname));
+    if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: uri.hostname });
+    this.bucket = bucket || "s3db";
+    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+    this.accessKeyId = user;
+    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+    this.secretAccessKey = pass;
+    this.endpoint = S3_DEFAULT_ENDPOINT;
+    if (["/", "", null].includes(uri.pathname)) {
+      this.keyPrefix = "";
+    } else {
+      let [, ...subpath] = uri.pathname.split("/");
+      this.keyPrefix = [...subpath || []].join("/");
+    }
+  }
+  defineFromCustomUri(uri) {
+    this.forcePathStyle = true;
+    this.endpoint = uri.origin;
+    const [okUser, errUser, user] = tryFnSync(() => decodeURIComponent(uri.username));
+    if (!okUser) throw new ConnectionStringError("Invalid accessKeyId in connection string", { original: errUser, input: uri.username });
+    this.accessKeyId = user;
+    const [okPass, errPass, pass] = tryFnSync(() => decodeURIComponent(uri.password));
+    if (!okPass) throw new ConnectionStringError("Invalid secretAccessKey in connection string", { original: errPass, input: uri.password });
+    this.secretAccessKey = pass;
+    if (["/", "", null].includes(uri.pathname)) {
+      this.bucket = "s3db";
+      this.keyPrefix = "";
+    } else {
+      let [, bucket, ...subpath] = uri.pathname.split("/");
+      if (!bucket) {
+        this.bucket = "s3db";
+      } else {
+        const [okBucket, errBucket, bucketDecoded] = tryFnSync(() => decodeURIComponent(bucket));
+        if (!okBucket) throw new ConnectionStringError("Invalid bucket in connection string", { original: errBucket, input: bucket });
+        this.bucket = bucketDecoded;
+      }
+      this.keyPrefix = [...subpath || []].join("/");
+    }
+  }
+}
+
+class Client extends EventEmitter {
+  constructor({
+    verbose = false,
+    id = null,
+    AwsS3Client,
+    connectionString,
+    parallelism = 10
+  }) {
+    super();
+    this.verbose = verbose;
+    this.id = id ?? idGenerator();
+    this.parallelism = parallelism;
+    this.config = new ConnectionString(connectionString);
+    this.client = AwsS3Client || this.createClient();
+  }
+  createClient() {
+    let options = {
+      region: this.config.region,
+      endpoint: this.config.endpoint
+    };
+    if (this.config.forcePathStyle) options.forcePathStyle = true;
+    if (this.config.accessKeyId) {
+      options.credentials = {
+        accessKeyId: this.config.accessKeyId,
+        secretAccessKey: this.config.secretAccessKey
+      };
+    }
+    const client = new S3Client(options);
+    client.middlewareStack.add(
+      (next, context) => async (args) => {
+        if (context.commandName === "DeleteObjectsCommand") {
+          const body = args.request.body;
+          if (body && typeof body === "string") {
+            const contentMd5 = await md5(body);
+            args.request.headers["Content-MD5"] = contentMd5;
+          }
+        }
+        return next(args);
+      },
+      {
+        step: "build",
+        name: "addContentMd5ForDeleteObjects",
+        priority: "high"
+      }
+    );
+    return client;
+  }
+  async sendCommand(command) {
+    this.emit("command.request", command.constructor.name, command.input);
+    const [ok, err, response] = await tryFn(() => this.client.send(command));
+    if (!ok) {
+      const bucket = this.config.bucket;
+      const key = command.input && command.input.Key;
+      throw mapAwsError(err, {
+        bucket,
+        key,
+        commandName: command.constructor.name,
+        commandInput: command.input
+      });
+    }
+    this.emit("command.response", command.constructor.name, response, command.input);
+    return response;
+  }
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    keyPrefix ? path.join(keyPrefix, key) : key;
+    const stringMetadata = {};
+    if (metadata) {
+      for (const [k, v] of Object.entries(metadata)) {
+        const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
+        stringMetadata[validKey] = String(v);
+      }
+    }
+    const options = {
+      Bucket: this.config.bucket,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key,
+      Metadata: stringMetadata,
+      Body: body || Buffer.alloc(0)
+    };
+    if (contentType !== void 0) options.ContentType = contentType;
+    if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
+    if (contentLength !== void 0) options.ContentLength = contentLength;
+    let response, error;
+    try {
+      response = await this.sendCommand(new PutObjectCommand(options));
+      return response;
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key,
+        commandName: "PutObjectCommand",
+        commandInput: options
+      });
+    } finally {
+      this.emit("putObject", error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+    }
+  }
+  async getObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    const options = {
+      Bucket: this.config.bucket,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
+    };
+    let response, error;
+    try {
+      response = await this.sendCommand(new GetObjectCommand(options));
+      return response;
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key,
+        commandName: "GetObjectCommand",
+        commandInput: options
+      });
+    } finally {
+      this.emit("getObject", error || response, { key });
+    }
+  }
+  async headObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    const options = {
+      Bucket: this.config.bucket,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
+    };
+    let response, error;
+    try {
+      response = await this.sendCommand(new HeadObjectCommand(options));
+      return response;
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key,
+        commandName: "HeadObjectCommand",
+        commandInput: options
+      });
+    } finally {
+      this.emit("headObject", error || response, { key });
+    }
+  }
+  async copyObject({ from, to }) {
+    const options = {
+      Bucket: this.config.bucket,
+      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
+      CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from)
+    };
+    let response, error;
+    try {
+      response = await this.sendCommand(new CopyObjectCommand(options));
+      return response;
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key: to,
+        commandName: "CopyObjectCommand",
+        commandInput: options
+      });
+    } finally {
+      this.emit("copyObject", error || response, { from, to });
+    }
+  }
+  async exists(key) {
+    const [ok, err] = await tryFn(() => this.headObject(key));
+    if (ok) return true;
+    if (err.name === "NoSuchKey" || err.name === "NotFound") return false;
+    throw err;
+  }
+  async deleteObject(key) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    keyPrefix ? path.join(keyPrefix, key) : key;
+    const options = {
+      Bucket: this.config.bucket,
+      Key: keyPrefix ? path.join(keyPrefix, key) : key
+    };
+    let response, error;
+    try {
+      response = await this.sendCommand(new DeleteObjectCommand(options));
+      return response;
+    } catch (err) {
+      error = err;
+      throw mapAwsError(err, {
+        bucket: this.config.bucket,
+        key,
+        commandName: "DeleteObjectCommand",
+        commandInput: options
+      });
+    } finally {
+      this.emit("deleteObject", error || response, { key });
+    }
+  }
+  async deleteObjects(keys) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    const packages = chunk(keys, 1e3);
+    const { results, errors } = await PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
+      for (const key of keys2) {
+        keyPrefix ? path.join(keyPrefix, key) : key;
+        this.config.bucket;
+        await this.exists(key);
+      }
+      const options = {
+        Bucket: this.config.bucket,
+        Delete: {
+          Objects: keys2.map((key) => ({
+            Key: keyPrefix ? path.join(keyPrefix, key) : key
+          }))
+        }
+      };
+      let response;
+      const [ok, err, res] = await tryFn(() => this.sendCommand(new DeleteObjectsCommand(options)));
+      if (!ok) throw err;
+      response = res;
+      if (response && response.Errors && response.Errors.length > 0) ;
+      if (response && response.Deleted && response.Deleted.length !== keys2.length) ;
+      return response;
+    });
+    const report = {
+      deleted: results,
+      notFound: errors
+    };
+    this.emit("deleteObjects", report, keys);
+    return report;
+  }
+  /**
+   * Delete all objects under a specific prefix using efficient pagination
+   * @param {Object} options - Delete options
+   * @param {string} options.prefix - S3 prefix to delete
+   * @returns {Promise<number>} Number of objects deleted
+   */
+  async deleteAll({ prefix } = {}) {
+    const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
+    let continuationToken;
+    let totalDeleted = 0;
+    do {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: this.config.bucket,
+        Prefix: keyPrefix ? path.join(keyPrefix, prefix || "") : prefix || "",
+        ContinuationToken: continuationToken
+      });
+      const listResponse = await this.client.send(listCommand);
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        const deleteCommand = new DeleteObjectsCommand({
+          Bucket: this.config.bucket,
+          Delete: {
+            Objects: listResponse.Contents.map((obj) => ({ Key: obj.Key }))
+          }
+        });
+        const deleteResponse = await this.client.send(deleteCommand);
+        const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
+        totalDeleted += deletedCount;
+        this.emit("deleteAll", {
+          prefix,
+          batch: deletedCount,
+          total: totalDeleted
+        });
+      }
+      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : void 0;
+    } while (continuationToken);
+    this.emit("deleteAllComplete", {
+      prefix,
+      totalDeleted
+    });
+    return totalDeleted;
+  }
+  async moveObject({ from, to }) {
+    const [ok, err] = await tryFn(async () => {
+      await this.copyObject({ from, to });
+      await this.deleteObject(from);
+    });
+    if (!ok) {
+      throw new UnknownError("Unknown error in moveObject", { bucket: this.config.bucket, from, to, original: err });
+    }
+    return true;
+  }
+  async listObjects({
+    prefix,
+    maxKeys = 1e3,
+    continuationToken
+  } = {}) {
+    const options = {
+      Bucket: this.config.bucket,
+      MaxKeys: maxKeys,
+      ContinuationToken: continuationToken,
+      Prefix: this.config.keyPrefix ? path.join(this.config.keyPrefix, prefix || "") : prefix || ""
+    };
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
+    if (!ok) {
+      throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
+    }
+    this.emit("listObjects", response, options);
+    return response;
+  }
+  async count({ prefix } = {}) {
+    let count = 0;
+    let truncated = true;
+    let continuationToken;
+    while (truncated) {
+      const options = {
+        prefix,
+        continuationToken
+      };
+      const response = await this.listObjects(options);
+      count += response.KeyCount || 0;
+      truncated = response.IsTruncated || false;
+      continuationToken = response.NextContinuationToken;
+    }
+    this.emit("count", count, { prefix });
+    return count;
+  }
+  async getAllKeys({ prefix } = {}) {
+    let keys = [];
+    let truncated = true;
+    let continuationToken;
+    while (truncated) {
+      const options = {
+        prefix,
+        continuationToken
+      };
+      const response = await this.listObjects(options);
+      if (response.Contents) {
+        keys = keys.concat(response.Contents.map((x) => x.Key));
+      }
+      truncated = response.IsTruncated || false;
+      continuationToken = response.NextContinuationToken;
+    }
+    if (this.config.keyPrefix) {
+      keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
+    }
+    this.emit("getAllKeys", keys, { prefix });
+    return keys;
+  }
+  async getContinuationTokenAfterOffset(params = {}) {
+    const {
+      prefix,
+      offset = 1e3
+    } = params;
+    if (offset === 0) return null;
+    let truncated = true;
+    let continuationToken;
+    let skipped = 0;
+    while (truncated) {
+      let maxKeys = offset < 1e3 ? offset : offset - skipped > 1e3 ? 1e3 : offset - skipped;
+      const options = {
+        prefix,
+        maxKeys,
+        continuationToken
+      };
+      const res = await this.listObjects(options);
+      if (res.Contents) {
+        skipped += res.Contents.length;
+      }
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+      if (skipped >= offset) {
+        break;
+      }
+    }
+    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+    return continuationToken || null;
+  }
+  async getKeysPage(params = {}) {
+    const {
+      prefix,
+      offset = 0,
+      amount = 100
+    } = params;
+    let keys = [];
+    let truncated = true;
+    let continuationToken;
+    if (offset > 0) {
+      continuationToken = await this.getContinuationTokenAfterOffset({
+        prefix,
+        offset
+      });
+      if (!continuationToken) {
+        this.emit("getKeysPage", [], params);
+        return [];
+      }
+    }
+    while (truncated) {
+      const options = {
+        prefix,
+        continuationToken
+      };
+      const res = await this.listObjects(options);
+      if (res.Contents) {
+        keys = keys.concat(res.Contents.map((x) => x.Key));
+      }
+      truncated = res.IsTruncated || false;
+      continuationToken = res.NextContinuationToken;
+      if (keys.length >= amount) {
+        keys = keys.slice(0, amount);
+        break;
+      }
+    }
+    if (this.config.keyPrefix) {
+      keys = keys.map((x) => x.replace(this.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x);
+    }
+    this.emit("getKeysPage", keys, params);
+    return keys;
+  }
+  async moveAllObjects({ prefixFrom, prefixTo }) {
+    const keys = await this.getAllKeys({ prefix: prefixFrom });
+    const { results, errors } = await PromisePool.for(keys).withConcurrency(this.parallelism).process(async (key) => {
+      const to = key.replace(prefixFrom, prefixTo);
+      const [ok, err] = await tryFn(async () => {
+        await this.moveObject({
+          from: key,
+          to
+        });
+      });
+      if (!ok) {
+        throw new UnknownError("Unknown error in moveAllObjects", { bucket: this.config.bucket, from: key, to, original: err });
+      }
+      return to;
+    });
+    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+    if (errors.length > 0) {
+      throw new Error("Some objects could not be moved");
+    }
+    return results;
+  }
+}
+
+async function secretHandler(actual, errors, schema) {
+  if (!this.passphrase) {
+    errors.push(new ValidationError("Missing configuration for secrets encryption.", {
+      actual,
+      type: "encryptionKeyMissing",
+      suggestion: "Provide a passphrase for secret encryption."
+    }));
+    return actual;
+  }
+  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase));
+  if (ok) return res;
+  errors.push(new ValidationError("Problem encrypting secret.", {
+    actual,
+    type: "encryptionProblem",
+    error: err,
+    suggestion: "Check the passphrase and input value."
+  }));
+  return actual;
+}
+async function jsonHandler(actual, errors, schema) {
+  if (isString$1(actual)) return actual;
+  const [ok, err, json] = tryFnSync(() => JSON.stringify(actual));
+  if (!ok) throw new ValidationError("Failed to stringify JSON", { original: err, input: actual });
+  return json;
+}
+class Validator extends FastestValidator {
+  constructor({ options, passphrase, autoEncrypt = true } = {}) {
+    super(merge({}, {
+      useNewCustomCheckerFunction: true,
+      messages: {
+        encryptionKeyMissing: "Missing configuration for secrets encryption.",
+        encryptionProblem: "Problem encrypting secret. Actual: {actual}. Error: {error}"
+      },
+      defaults: {
+        string: {
+          trim: true
+        },
+        object: {
+          strict: "remove"
+        },
+        number: {
+          convert: true
+        }
+      }
+    }, options));
+    this.passphrase = passphrase;
+    this.autoEncrypt = autoEncrypt;
+    this.alias("secret", {
+      type: "string",
+      custom: this.autoEncrypt ? secretHandler : void 0,
+      messages: {
+        string: "The '{field}' field must be a string.",
+        stringMin: "This secret '{field}' field length must be at least {expected} long."
+      }
+    });
+    this.alias("secretAny", {
+      type: "any",
+      custom: this.autoEncrypt ? secretHandler : void 0
+    });
+    this.alias("secretNumber", {
+      type: "number",
+      custom: this.autoEncrypt ? secretHandler : void 0
+    });
+    this.alias("json", {
+      type: "any",
+      custom: this.autoEncrypt ? jsonHandler : void 0
+    });
+  }
+}
+const ValidatorManager = new Proxy(Validator, {
+  instance: null,
+  construct(target, args) {
+    if (!this.instance) this.instance = new target(...args);
+    return this.instance;
+  }
+});
+
+function generateBase62Mapping(keys) {
+  const mapping = {};
+  const reversedMapping = {};
+  keys.forEach((key, index) => {
+    const base62Key = encode(index);
+    mapping[key] = base62Key;
+    reversedMapping[base62Key] = key;
+  });
+  return { mapping, reversedMapping };
+}
+const SchemaActions = {
+  trim: (value) => value == null ? value : value.trim(),
+  encrypt: async (value, { passphrase }) => {
+    if (value === null || value === void 0) return value;
+    const [ok, err, res] = await tryFn(() => encrypt(value, passphrase));
+    return ok ? res : value;
+  },
+  decrypt: async (value, { passphrase }) => {
+    if (value === null || value === void 0) return value;
+    const [ok, err, raw] = await tryFn(() => decrypt(value, passphrase));
+    if (!ok) return value;
+    if (raw === "null") return null;
+    if (raw === "undefined") return void 0;
+    return raw;
+  },
+  toString: (value) => value == null ? value : String(value),
+  fromArray: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const escapedItems = value.map((item) => {
+      if (typeof item === "string") {
+        return item.replace(/\\/g, "\\\\").replace(new RegExp(`\\${separator}`, "g"), `\\${separator}`);
+      }
+      return String(item);
+    });
+    return escapedItems.join(separator);
+  },
+  toArray: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value;
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const items = [];
+    let current = "";
+    let i = 0;
+    const str = String(value);
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items;
+  },
+  toJSON: (value) => {
+    if (value === null) return null;
+    if (value === void 0) return void 0;
+    if (typeof value === "string") {
+      const [ok2, err2, parsed] = tryFnSync(() => JSON.parse(value));
+      if (ok2 && typeof parsed === "object") return value;
+      return value;
+    }
+    const [ok, err, json] = tryFnSync(() => JSON.stringify(value));
+    return ok ? json : value;
+  },
+  fromJSON: (value) => {
+    if (value === null) return null;
+    if (value === void 0) return void 0;
+    if (typeof value !== "string") return value;
+    if (value === "") return "";
+    const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+    return ok ? parsed : value;
+  },
+  toNumber: (value) => isString$1(value) ? value.includes(".") ? parseFloat(value) : parseInt(value) : value,
+  toBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value),
+  fromBool: (value) => [true, 1, "true", "1", "yes", "y"].includes(value) ? "1" : "0",
+  fromBase62: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const n = decode(value);
+      return isNaN(n) ? void 0 : n;
+    }
+    return void 0;
+  },
+  toBase62: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") {
+      return encode(value);
+    }
+    if (typeof value === "string") {
+      const n = Number(value);
+      return isNaN(n) ? value : encode(n);
+    }
+    return value;
+  },
+  fromBase62Decimal: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const n = decodeDecimal(value);
+      return isNaN(n) ? void 0 : n;
+    }
+    return void 0;
+  },
+  toBase62Decimal: (value) => {
+    if (value === null || value === void 0 || value === "") return value;
+    if (typeof value === "number") {
+      return encodeDecimal(value);
+    }
+    if (typeof value === "string") {
+      const n = Number(value);
+      return isNaN(n) ? value : encodeDecimal(n);
+    }
+    return value;
+  },
+  fromArrayOfNumbers: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const base62Items = value.map((item) => {
+      if (typeof item === "number" && !isNaN(item)) {
+        return encode(item);
+      }
+      const n = Number(item);
+      return isNaN(n) ? "" : encode(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfNumbers: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map((v) => typeof v === "number" ? v : decode(v));
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = "";
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map((v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v !== "") {
+        const n = decode(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
+  fromArrayOfDecimals: (value, { separator }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const base62Items = value.map((item) => {
+      if (typeof item === "number" && !isNaN(item)) {
+        return encodeDecimal(item);
+      }
+      const n = Number(item);
+      return isNaN(n) ? "" : encodeDecimal(n);
+    });
+    return base62Items.join(separator);
+  },
+  toArrayOfDecimals: (value, { separator }) => {
+    if (Array.isArray(value)) {
+      return value.map((v) => typeof v === "number" ? v : decodeDecimal(v));
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = "";
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map((v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v !== "") {
+        const n = decodeDecimal(v);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  }
+};
+class Schema {
+  constructor(args) {
+    const {
+      map,
+      name,
+      attributes,
+      passphrase,
+      version = 1,
+      options = {}
+    } = args;
+    this.name = name;
+    this.version = version;
+    this.attributes = attributes || {};
+    this.passphrase = passphrase ?? "secret";
+    this.options = merge({}, this.defaultOptions(), options);
+    this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
+    const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
+    this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+      { $$async: true },
+      processedAttributes
+    ));
+    if (this.options.generateAutoHooks) this.generateAutoHooks();
+    if (!isEmpty(map)) {
+      this.map = map;
+      this.reversedMap = invert(map);
+    } else {
+      const flatAttrs = flatten(this.attributes, { safe: true });
+      const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
+      const objectKeys = this.extractObjectKeys(this.attributes);
+      const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
+      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
+      this.map = mapping;
+      this.reversedMap = reversedMapping;
+    }
+  }
+  defaultOptions() {
+    return {
+      autoEncrypt: true,
+      autoDecrypt: true,
+      arraySeparator: "|",
+      generateAutoHooks: true,
+      hooks: {
+        beforeMap: {},
+        afterMap: {},
+        beforeUnmap: {},
+        afterUnmap: {}
+      }
+    };
+  }
+  addHook(hook, attribute, action) {
+    if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
+    this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action]);
+  }
+  extractObjectKeys(obj, prefix = "") {
+    const objectKeys = [];
+    for (const [key, value] of Object.entries(obj)) {
+      if (key.startsWith("$$")) continue;
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        objectKeys.push(fullKey);
+        if (value.$$type === "object") {
+          objectKeys.push(...this.extractObjectKeys(value, fullKey));
+        }
+      }
+    }
+    return objectKeys;
+  }
+  generateAutoHooks() {
+    const schema = flatten(cloneDeep(this.attributes), { safe: true });
+    for (const [name, definition] of Object.entries(schema)) {
+      if (definition.includes("array")) {
+        if (definition.includes("items:string")) {
+          this.addHook("beforeMap", name, "fromArray");
+          this.addHook("afterUnmap", name, "toArray");
+        } else if (definition.includes("items:number")) {
+          const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+          if (isIntegerArray) {
+            this.addHook("beforeMap", name, "fromArrayOfNumbers");
+            this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else {
+            this.addHook("beforeMap", name, "fromArrayOfDecimals");
+            this.addHook("afterUnmap", name, "toArrayOfDecimals");
+          }
+        }
+        continue;
+      }
+      if (definition.includes("secret")) {
+        if (this.options.autoEncrypt) {
+          this.addHook("beforeMap", name, "encrypt");
+        }
+        if (this.options.autoDecrypt) {
+          this.addHook("afterUnmap", name, "decrypt");
+        }
+        continue;
+      }
+      if (definition.includes("number")) {
+        const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+        if (isInteger) {
+          this.addHook("beforeMap", name, "toBase62");
+          this.addHook("afterUnmap", name, "fromBase62");
+        } else {
+          this.addHook("beforeMap", name, "toBase62Decimal");
+          this.addHook("afterUnmap", name, "fromBase62Decimal");
+        }
+        continue;
+      }
+      if (definition.includes("boolean")) {
+        this.addHook("beforeMap", name, "fromBool");
+        this.addHook("afterUnmap", name, "toBool");
+        continue;
+      }
+      if (definition.includes("json")) {
+        this.addHook("beforeMap", name, "toJSON");
+        this.addHook("afterUnmap", name, "fromJSON");
+        continue;
+      }
+      if (definition === "object" || definition.includes("object")) {
+        this.addHook("beforeMap", name, "toJSON");
+        this.addHook("afterUnmap", name, "fromJSON");
+        continue;
+      }
+    }
+  }
+  static import(data) {
+    let {
+      map,
+      name,
+      options,
+      version,
+      attributes
+    } = isString$1(data) ? JSON.parse(data) : data;
+    const [ok, err, attrs] = tryFnSync(() => Schema._importAttributes(attributes));
+    if (!ok) throw new SchemaError("Failed to import schema attributes", { original: err, input: attributes });
+    attributes = attrs;
+    const schema = new Schema({
+      map,
+      name,
+      options,
+      version,
+      attributes
+    });
+    return schema;
+  }
+  /**
+   * Recursively import attributes, parsing only stringified objects (legacy)
+   */
+  static _importAttributes(attrs) {
+    if (typeof attrs === "string") {
+      const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
+      if (ok && typeof parsed === "object" && parsed !== null) {
+        const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
+        if (!okNested) throw new SchemaError("Failed to parse nested schema attribute", { original: errNested, input: attrs });
+        return nested;
+      }
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      const [okArr, errArr, arr] = tryFnSync(() => attrs.map((a) => Schema._importAttributes(a)));
+      if (!okArr) throw new SchemaError("Failed to import array schema attributes", { original: errArr, input: attrs });
+      return arr;
+    }
+    if (typeof attrs === "object" && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        const [okObj, errObj, val] = tryFnSync(() => Schema._importAttributes(v));
+        if (!okObj) throw new SchemaError("Failed to import object schema attribute", { original: errObj, key: k, input: v });
+        out[k] = val;
+      }
+      return out;
+    }
+    return attrs;
+  }
+  export() {
+    const data = {
+      version: this.version,
+      name: this.name,
+      options: this.options,
+      attributes: this._exportAttributes(this.attributes),
+      map: this.map
+    };
+    return data;
+  }
+  /**
+   * Recursively export attributes, keeping objects as objects and only serializing leaves as string
+   */
+  _exportAttributes(attrs) {
+    if (typeof attrs === "string") {
+      return attrs;
+    }
+    if (Array.isArray(attrs)) {
+      return attrs.map((a) => this._exportAttributes(a));
+    }
+    if (typeof attrs === "object" && attrs !== null) {
+      const out = {};
+      for (const [k, v] of Object.entries(attrs)) {
+        out[k] = this._exportAttributes(v);
+      }
+      return out;
+    }
+    return attrs;
+  }
+  async applyHooksActions(resourceItem, hook) {
+    const cloned = cloneDeep(resourceItem);
+    for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
+      for (const action of actions) {
+        const value = get(cloned, attribute);
+        if (value !== void 0 && typeof SchemaActions[action] === "function") {
+          set(cloned, attribute, await SchemaActions[action](value, {
+            passphrase: this.passphrase,
+            separator: this.options.arraySeparator
+          }));
+        }
+      }
+    }
+    return cloned;
+  }
+  async validate(resourceItem, { mutateOriginal = false } = {}) {
+    let data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);
+    const result = await this.validator(data);
+    return result;
+  }
+  async mapper(resourceItem) {
+    let obj = cloneDeep(resourceItem);
+    obj = await this.applyHooksActions(obj, "beforeMap");
+    const flattenedObj = flatten(obj, { safe: true });
+    const rest = { "_v": this.version + "" };
+    for (const [key, value] of Object.entries(flattenedObj)) {
+      const mappedKey = this.map[key] || key;
+      const attrDef = this.getAttributeDefinition(key);
+      if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
+        rest[mappedKey] = encode(value);
+      } else if (typeof value === "string") {
+        if (value === "[object Object]") {
+          rest[mappedKey] = "{}";
+        } else if (value.startsWith("{") || value.startsWith("[")) {
+          rest[mappedKey] = value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (Array.isArray(value) || typeof value === "object" && value !== null) {
+        rest[mappedKey] = JSON.stringify(value);
+      } else {
+        rest[mappedKey] = value;
+      }
+    }
+    await this.applyHooksActions(rest, "afterMap");
+    return rest;
+  }
+  async unmapper(mappedResourceItem, mapOverride) {
+    let obj = cloneDeep(mappedResourceItem);
+    delete obj._v;
+    obj = await this.applyHooksActions(obj, "beforeUnmap");
+    const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
+    const rest = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+      let parsedValue = value;
+      const attrDef = this.getAttributeDefinition(originalKey);
+      if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
+        if (typeof parsedValue === "string" && parsedValue !== "") {
+          parsedValue = decode(parsedValue);
+        } else if (typeof parsedValue === "number") ; else {
+          parsedValue = void 0;
+        }
+      } else if (typeof value === "string") {
+        if (value === "[object Object]") {
+          parsedValue = {};
+        } else if (value.startsWith("{") || value.startsWith("[")) {
+          const [ok, err, parsed] = tryFnSync(() => JSON.parse(value));
+          if (ok) parsedValue = parsed;
+        }
+      }
+      if (this.attributes) {
+        if (typeof attrDef === "string" && attrDef.includes("array")) {
+          if (Array.isArray(parsedValue)) ; else if (typeof parsedValue === "string" && parsedValue.trim().startsWith("[")) {
+            const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
+            if (okArr && Array.isArray(arr)) {
+              parsedValue = arr;
+            }
+          } else {
+            parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
+          }
+        }
+      }
+      if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
+        for (const action of this.options.hooks.afterUnmap[originalKey]) {
+          if (typeof SchemaActions[action] === "function") {
+            parsedValue = await SchemaActions[action](parsedValue, {
+              passphrase: this.passphrase,
+              separator: this.options.arraySeparator
+            });
+          }
+        }
+      }
+      rest[originalKey] = parsedValue;
+    }
+    await this.applyHooksActions(rest, "afterUnmap");
+    const result = unflatten(rest);
+    for (const [key, value] of Object.entries(mappedResourceItem)) {
+      if (key.startsWith("$")) {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+  // Helper to get attribute definition by dot notation key
+  getAttributeDefinition(key) {
+    const parts = key.split(".");
+    let def = this.attributes;
+    for (const part of parts) {
+      if (!def) return void 0;
+      def = def[part];
+    }
+    return def;
+  }
+  /**
+   * Preprocess attributes to convert nested objects into validator-compatible format
+   * @param {Object} attributes - Original attributes
+   * @returns {Object} Processed attributes for validator
+   */
+  preprocessAttributesForValidation(attributes) {
+    const processed = {};
+    for (const [key, value] of Object.entries(attributes)) {
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const isExplicitRequired = value.$$type && value.$$type.includes("required");
+        const isExplicitOptional = value.$$type && value.$$type.includes("optional");
+        const objectConfig = {
+          type: "object",
+          properties: this.preprocessAttributesForValidation(value),
+          strict: false
+        };
+        if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
+          objectConfig.optional = true;
+        }
+        processed[key] = objectConfig;
+      } else {
+        processed[key] = value;
+      }
+    }
+    return processed;
+  }
 }
 
 class Resource extends EventEmitter {
