@@ -1,11 +1,12 @@
 import { customAlphabet, urlAlphabet } from 'nanoid';
-import { PromisePool } from '@supercharge/promise-pool';
-import { ReadableStream } from 'node:stream/web';
+import { streamToString as streamToString$1 } from '#src/stream/index.js';
 import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get as get$1, set, isObject as isObject$1, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
 import { createHash } from 'crypto';
+import { PromisePool } from '@supercharge/promise-pool';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { flatten, unflatten } from 'flat';
 import FastestValidator from 'fastest-validator';
+import { ReadableStream } from 'node:stream/web';
 
 function calculateUTF8Bytes(str) {
   if (typeof str !== "string") {
@@ -13397,194 +13398,6 @@ class Cache extends EventEmitter {
   }
 }
 
-class ResourceIdsReader extends EventEmitter {
-  constructor({ resource }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.stream = new ReadableStream({
-      highWaterMark: this.client.parallelism * 3,
-      start: this._start.bind(this),
-      pull: this._pull.bind(this),
-      cancel: this._cancel.bind(this)
-    });
-  }
-  build() {
-    return this.stream.getReader();
-  }
-  async _start(controller) {
-    this.controller = controller;
-    this.continuationToken = null;
-    this.closeNextIteration = false;
-  }
-  async _pull(controller) {
-    if (this.closeNextIteration) {
-      controller.close();
-      return;
-    }
-    const response = await this.client.listObjects({
-      prefix: `resource=${this.resource.name}`,
-      continuationToken: this.continuationToken
-    });
-    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
-    this.continuationToken = response.NextContinuationToken;
-    this.enqueue(keys);
-    if (!response.IsTruncated) this.closeNextIteration = true;
-  }
-  enqueue(ids) {
-    ids.forEach((key) => {
-      this.controller.enqueue(key);
-      this.emit("id", key);
-    });
-  }
-  _cancel(reason) {
-  }
-}
-
-class ResourceIdsPageReader extends ResourceIdsReader {
-  enqueue(ids) {
-    this.controller.enqueue(ids);
-    this.emit("page", ids);
-  }
-}
-
-class ResourceReader extends EventEmitter {
-  constructor({ resource, batchSize = 10, concurrency = 5 }) {
-    super();
-    if (!resource) {
-      throw new Error("Resource is required for ResourceReader");
-    }
-    this.resource = resource;
-    this.client = resource.client;
-    this.batchSize = batchSize;
-    this.concurrency = concurrency;
-    this.input = new ResourceIdsPageReader({ resource: this.resource });
-    this.transform = new Transform({
-      objectMode: true,
-      transform: this._transform.bind(this)
-    });
-    this.input.on("data", (chunk) => {
-      this.transform.write(chunk);
-    });
-    this.input.on("end", () => {
-      this.transform.end();
-    });
-    this.input.on("error", (error) => {
-      this.emit("error", error);
-    });
-    this.transform.on("data", (data) => {
-      this.emit("data", data);
-    });
-    this.transform.on("end", () => {
-      this.emit("end");
-    });
-    this.transform.on("error", (error) => {
-      this.emit("error", error);
-    });
-  }
-  build() {
-    return this;
-  }
-  async _transform(chunk, encoding, callback) {
-    const [ok, err] = await tryFn(async () => {
-      await PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
-        this.emit("error", error, content);
-      }).process(async (id) => {
-        const data = await this.resource.get(id);
-        this.push(data);
-        return data;
-      });
-    });
-    callback(err);
-  }
-  resume() {
-    this.input.resume();
-  }
-}
-
-class ResourceWriter extends EventEmitter {
-  constructor({ resource, batchSize = 10, concurrency = 5 }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.batchSize = batchSize;
-    this.concurrency = concurrency;
-    this.buffer = [];
-    this.writing = false;
-    this.writable = new Writable({
-      objectMode: true,
-      write: this._write.bind(this)
-    });
-    this.writable.on("finish", () => {
-      this.emit("finish");
-    });
-    this.writable.on("error", (error) => {
-      this.emit("error", error);
-    });
-  }
-  build() {
-    return this;
-  }
-  write(chunk) {
-    this.buffer.push(chunk);
-    this._maybeWrite().catch((error) => {
-      this.emit("error", error);
-    });
-    return true;
-  }
-  end() {
-    this.ended = true;
-    this._maybeWrite().catch((error) => {
-      this.emit("error", error);
-    });
-  }
-  async _maybeWrite() {
-    if (this.writing) return;
-    if (this.buffer.length === 0 && !this.ended) return;
-    this.writing = true;
-    while (this.buffer.length > 0) {
-      const batch = this.buffer.splice(0, this.batchSize);
-      const [ok, err] = await tryFn(async () => {
-        await PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
-          this.emit("error", error, content);
-        }).process(async (item) => {
-          const [ok2, err2, result] = await tryFn(async () => {
-            const res = await this.resource.insert(item);
-            return res;
-          });
-          if (!ok2) {
-            this.emit("error", err2, item);
-            return null;
-          }
-          return result;
-        });
-      });
-      if (!ok) {
-        this.emit("error", err);
-      }
-    }
-    this.writing = false;
-    if (this.ended) {
-      this.writable.emit("finish");
-    }
-  }
-  async _write(chunk, encoding, callback) {
-    callback();
-  }
-}
-
-function streamToString(stream) {
-  return new Promise((resolve, reject) => {
-    if (!stream) {
-      return reject(new Error("streamToString: stream is undefined"));
-    }
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-  });
-}
-
 class S3Cache extends Cache {
   constructor({
     client,
@@ -13621,7 +13434,7 @@ class S3Cache extends Cache {
   async _get(key) {
     const [ok, err, result] = await tryFn(async () => {
       const { Body } = await this.client.getObject(join(this.keyPrefix, key));
-      let content = await streamToString(Body);
+      let content = await streamToString$1(Body);
       content = Buffer.from(content, "base64");
       content = zlib.unzipSync(content).toString();
       return JSON.parse(content);
@@ -28961,6 +28774,194 @@ class Schema {
     }
     return processed;
   }
+}
+
+class ResourceIdsReader extends EventEmitter {
+  constructor({ resource }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.stream = new ReadableStream({
+      highWaterMark: this.client.parallelism * 3,
+      start: this._start.bind(this),
+      pull: this._pull.bind(this),
+      cancel: this._cancel.bind(this)
+    });
+  }
+  build() {
+    return this.stream.getReader();
+  }
+  async _start(controller) {
+    this.controller = controller;
+    this.continuationToken = null;
+    this.closeNextIteration = false;
+  }
+  async _pull(controller) {
+    if (this.closeNextIteration) {
+      controller.close();
+      return;
+    }
+    const response = await this.client.listObjects({
+      prefix: `resource=${this.resource.name}`,
+      continuationToken: this.continuationToken
+    });
+    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
+    this.continuationToken = response.NextContinuationToken;
+    this.enqueue(keys);
+    if (!response.IsTruncated) this.closeNextIteration = true;
+  }
+  enqueue(ids) {
+    ids.forEach((key) => {
+      this.controller.enqueue(key);
+      this.emit("id", key);
+    });
+  }
+  _cancel(reason) {
+  }
+}
+
+class ResourceIdsPageReader extends ResourceIdsReader {
+  enqueue(ids) {
+    this.controller.enqueue(ids);
+    this.emit("page", ids);
+  }
+}
+
+class ResourceReader extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    if (!resource) {
+      throw new Error("Resource is required for ResourceReader");
+    }
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.input = new ResourceIdsPageReader({ resource: this.resource });
+    this.transform = new Transform({
+      objectMode: true,
+      transform: this._transform.bind(this)
+    });
+    this.input.on("data", (chunk) => {
+      this.transform.write(chunk);
+    });
+    this.input.on("end", () => {
+      this.transform.end();
+    });
+    this.input.on("error", (error) => {
+      this.emit("error", error);
+    });
+    this.transform.on("data", (data) => {
+      this.emit("data", data);
+    });
+    this.transform.on("end", () => {
+      this.emit("end");
+    });
+    this.transform.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  async _transform(chunk, encoding, callback) {
+    const [ok, err] = await tryFn(async () => {
+      await PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
+        this.emit("error", error, content);
+      }).process(async (id) => {
+        const data = await this.resource.get(id);
+        this.push(data);
+        return data;
+      });
+    });
+    callback(err);
+  }
+  resume() {
+    this.input.resume();
+  }
+}
+
+class ResourceWriter extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.buffer = [];
+    this.writing = false;
+    this.writable = new Writable({
+      objectMode: true,
+      write: this._write.bind(this)
+    });
+    this.writable.on("finish", () => {
+      this.emit("finish");
+    });
+    this.writable.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  write(chunk) {
+    this.buffer.push(chunk);
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
+    return true;
+  }
+  end() {
+    this.ended = true;
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
+  }
+  async _maybeWrite() {
+    if (this.writing) return;
+    if (this.buffer.length === 0 && !this.ended) return;
+    this.writing = true;
+    while (this.buffer.length > 0) {
+      const batch = this.buffer.splice(0, this.batchSize);
+      const [ok, err] = await tryFn(async () => {
+        await PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
+          this.emit("error", error, content);
+        }).process(async (item) => {
+          const [ok2, err2, result] = await tryFn(async () => {
+            const res = await this.resource.insert(item);
+            return res;
+          });
+          if (!ok2) {
+            this.emit("error", err2, item);
+            return null;
+          }
+          return result;
+        });
+      });
+      if (!ok) {
+        this.emit("error", err);
+      }
+    }
+    this.writing = false;
+    if (this.ended) {
+      this.writable.emit("finish");
+    }
+  }
+  async _write(chunk, encoding, callback) {
+    callback();
+  }
+}
+
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    if (!stream) {
+      return reject(new Error("streamToString: stream is undefined"));
+    }
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+  });
 }
 
 class Resource extends EventEmitter {
