@@ -1,4 +1,4 @@
-var S3DB = (function (exports, nanoid, zlib, promisePool, web, amqp, lodashEs, crypto, jsonStableStringify, clientS3, flat, FastestValidator) {
+var S3DB = (function (exports, nanoid, zlib, promisePool, web, lodashEs, crypto, jsonStableStringify, clientS3, flat, FastestValidator) {
   'use strict';
 
   function calculateUTF8Bytes(str) {
@@ -13835,4 +13835,4 @@ ${JSON.stringify(validation, null, 2)}`,
 
   return exports;
 
-})({}, nanoid, zlib, promisePool, web, null, lodashEs, crypto, jsonStableStringify, clientS3, flat, FastestValidator);
+})({}, nanoid, zlib, promisePool, web, lodashEs, crypto, jsonStableStringify, clientS3, flat, FastestValidator);
