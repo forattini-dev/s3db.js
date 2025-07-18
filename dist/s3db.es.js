@@ -2,7 +2,6 @@ import { customAlphabet, urlAlphabet } from 'nanoid';
 import zlib from 'zlib';
 import { PromisePool } from '@supercharge/promise-pool';
 import { ReadableStream } from 'node:stream/web';
-import 'amqplib';
 import { chunk, merge, isString as isString$1, isEmpty, invert, uniq, cloneDeep, get, set, isObject as isObject$1, isFunction as isFunction$1, isPlainObject } from 'lodash-es';
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
