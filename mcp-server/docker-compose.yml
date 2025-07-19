@@ -26,8 +26,11 @@ services:
       # Plugin configuration
       - S3DB_COSTS_ENABLED=${S3DB_COSTS_ENABLED:-true}
       - S3DB_CACHE_ENABLED=${S3DB_CACHE_ENABLED:-true}
+      - S3DB_CACHE_DRIVER=${S3DB_CACHE_DRIVER:-memory}
       - S3DB_CACHE_MAX_SIZE=${S3DB_CACHE_MAX_SIZE:-1000}
       - S3DB_CACHE_TTL=${S3DB_CACHE_TTL:-300000}
+      - S3DB_CACHE_DIRECTORY=${S3DB_CACHE_DIRECTORY:-./cache}
+      - S3DB_CACHE_PREFIX=${S3DB_CACHE_PREFIX:-s3db}
       
       # AWS credentials (optional if using IAM roles)
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
@@ -45,6 +48,10 @@ services:
       - type: bind
         source: ./config
         target: /app/config
+      # Mount cache directory for filesystem cache persistence
+      - type: bind
+        source: ./cache-data
+        target: /app/cache
         bind:
           create_host_path: true
     networks:

@@ -143,9 +143,12 @@ Create a `.env` file or set these environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `S3DB_COSTS_ENABLED` | `true` | Enable automatic S3 costs tracking |
-| `S3DB_CACHE_ENABLED` | `true` | Enable memory cache for performance |
-| `S3DB_CACHE_MAX_SIZE` | `1000` | Maximum items in memory cache |
+| `S3DB_CACHE_ENABLED` | `true` | Enable cache for performance |
+| `S3DB_CACHE_DRIVER` | `memory` | Cache driver: `memory` or `filesystem` |
+| `S3DB_CACHE_MAX_SIZE` | `1000` | Maximum items in memory cache (memory driver only) |
 | `S3DB_CACHE_TTL` | `300000` | Cache TTL in milliseconds (5 minutes) |
+| `S3DB_CACHE_DIRECTORY` | `./cache` | Directory for filesystem cache (filesystem driver only) |
+| `S3DB_CACHE_PREFIX` | `s3db` | Prefix for cache files (filesystem driver only) |
 
 #### **AWS Configuration**
 | Variable | Default | Description |
@@ -202,7 +205,7 @@ S3DB_CONNECTION_STRING="s3://..." s3db-mcp --transport=sse
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheMaxSize?`, `cacheTtl?` |
+| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheDriver?`, `cacheMaxSize?`, `cacheTtl?`, `cacheDirectory?`, `cachePrefix?` |
 | `dbDisconnect` | Disconnect from database | - |
 | `dbStatus` | Get connection status | - |
 | `dbCreateResource` | Create resource/collection | `name`, `attributes`, `behavior?`, `timestamps?`, `partitions?`, `paranoid?` |
@@ -246,10 +249,13 @@ await agent.callTool('dbConnect', {
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket/databases/blog',
   verbose: false,
   parallelism: 10,
-  enableCache: true,    // Memory cache enabled by default
-  enableCosts: true,    // Costs tracking enabled by default
-  cacheMaxSize: 1000,   // Cache up to 1000 items
-  cacheTtl: 300000      // 5 minute cache TTL
+  enableCache: true,        // Cache enabled by default
+  enableCosts: true,        // Costs tracking enabled by default
+  cacheDriver: 'memory',    // 'memory' or 'filesystem'
+  cacheMaxSize: 1000,       // Cache up to 1000 items (memory only)
+  cacheTtl: 300000,         // 5 minute cache TTL
+  cacheDirectory: './cache', // Directory for filesystem cache
+  cachePrefix: 's3db'       // Prefix for cache files
 });
 
 // 2. Create a resource with schema validation
@@ -903,12 +909,24 @@ curl http://localhost:8001/health
 
 The S3DB MCP Server includes **automatic performance optimizations**:
 
-### **🏎️ Memory Cache (Enabled by Default)**
+### **🏎️ Configurable Cache (Enabled by Default)**
+- **Two cache drivers**: Memory (fast, temporary) and Filesystem (persistent)
 - **Automatic caching** of read operations (get, list, count, exists)
 - **Partition-aware** caching for optimized queries
 - **Configurable TTL** and size limits
 - **Cache invalidation** on write operations
 - **Performance monitoring** via `dbGetStats`
+
+#### **Memory Cache**
+- ⚡ **Fastest performance** for frequently accessed data
+- 🔄 **Lost on restart** - ideal for temporary caching
+- 📊 **Size-limited** by number of items
+
+#### **Filesystem Cache**  
+- 💾 **Persistent across restarts** - cache survives server restarts
+- 🗜️ **Automatic compression** to save disk space
+- 🧹 **Automatic cleanup** of expired files
+- 📁 **Configurable directory** and file naming
 
 ### **💰 Costs Tracking (Enabled by Default)**
 - **Real-time S3 costs** calculation
@@ -918,18 +936,30 @@ The S3DB MCP Server includes **automatic performance optimizations**:
 
 ### **Configuration Options**
 ```javascript
-// Connect with custom cache/costs settings
+// Connect with memory cache (fast, temporary)
 await agent.callTool('dbConnect', {
   connectionString: 's3://...',
-  enableCache: true,      // Default: true
-  enableCosts: true,      // Default: true  
-  cacheMaxSize: 2000,     // Default: 1000
-  cacheTtl: 600000        // Default: 300000 (5 min)
+  enableCache: true,        // Default: true
+  enableCosts: true,        // Default: true  
+  cacheDriver: 'memory',    // Fast but lost on restart
+  cacheMaxSize: 2000,       // Default: 1000
+  cacheTtl: 600000          // Default: 300000 (5 min)
+});
+
+// Connect with filesystem cache (persistent)
+await agent.callTool('dbConnect', {
+  connectionString: 's3://...',
+  enableCache: true,
+  cacheDriver: 'filesystem', // Survives restarts
+  cacheDirectory: './data/cache',
+  cachePrefix: 'myapp',
+  cacheTtl: 1800000          // 30 minutes
 });
 
 // Monitor performance
 const stats = await agent.callTool('dbGetStats');
 console.log('Cache size:', stats.stats.cache.size);
+console.log('Cache driver:', stats.stats.cache.driver);
 console.log('S3 costs:', stats.stats.costs.estimatedCostUSD);
 
 // Clear cache when needed
@@ -938,23 +968,76 @@ await agent.callTool('dbClearCache', { resourceName: 'users' });
 
 ### **Environment Variables**
 ```bash
-S3DB_CACHE_ENABLED=true        # Enable/disable cache
-S3DB_CACHE_MAX_SIZE=1000       # Cache capacity
-S3DB_CACHE_TTL=300000          # 5 minute TTL
-S3DB_COSTS_ENABLED=true        # Enable/disable costs tracking
+S3DB_CACHE_ENABLED=true           # Enable/disable cache
+S3DB_CACHE_DRIVER=memory          # Cache driver: 'memory' or 'filesystem'
+S3DB_CACHE_MAX_SIZE=1000          # Cache capacity (memory driver)
+S3DB_CACHE_TTL=300000             # 5 minute TTL
+S3DB_CACHE_DIRECTORY=./cache      # Filesystem cache directory
+S3DB_CACHE_PREFIX=s3db            # Filesystem cache file prefix
+S3DB_COSTS_ENABLED=true           # Enable/disable costs tracking
+```
+
+---
+
+## 🚀 **Cache Strategy Guide**
+
+Choose the right cache driver for your use case:
+
+### **When to Use Memory Cache**
+- ⚡ **Development & Testing** - fastest performance, no setup required
+- 🔄 **Short-lived processes** - containers that restart frequently  
+- 📊 **High-frequency reads** - when you need maximum speed
+- 💰 **Cost optimization** - minimize S3 requests for hot data
+- ⚠️ **Limitation**: Cache is lost on restart
+
+### **When to Use Filesystem Cache**
+- 💾 **Production environments** - cache survives server restarts
+- 🔄 **Long-running processes** - persistent data across deployments
+- 📦 **Containerized deployments** - mount cache volume for persistence
+- 🔧 **Development consistency** - maintain cache between code changes
+- 🗂️ **Large datasets** - no memory size limitations
+
+### **Configuration Examples**
+
+```javascript
+// High-performance temporary cache
+await agent.callTool('dbConnect', {
+  cacheDriver: 'memory',
+  cacheMaxSize: 5000,
+  cacheTtl: 600000  // 10 minutes
+});
+
+// Production persistent cache
+await agent.callTool('dbConnect', {
+  cacheDriver: 'filesystem',
+  cacheDirectory: './data/cache',
+  cachePrefix: 'prod',
+  cacheTtl: 3600000  // 1 hour
+});
+```
+
+### **Docker Volume Setup**
+```yaml
+# docker-compose.yml
+volumes:
+  - ./cache-data:/app/cache  # Persistent filesystem cache
+environment:
+  - S3DB_CACHE_DRIVER=filesystem
+  - S3DB_CACHE_DIRECTORY=/app/cache
 ```
 
 ---
 
 ## 📊 Performance Tips
 
-1. **Leverage built-in cache** - read operations are automatically cached
-2. **Use partitions** for large datasets to improve cache efficiency
-3. **Monitor costs** with `dbGetStats` to optimize S3 usage
-4. **Batch operations** when possible to reduce S3 requests
-5. **Proper pagination** - don't load everything at once
-6. **Connection reuse** - keep connections alive
-7. **Appropriate parallelism** - tune `S3DB_PARALLELISM`
+1. **Choose appropriate cache** - memory for speed, filesystem for persistence
+2. **Leverage built-in cache** - read operations are automatically cached
+3. **Use partitions** for large datasets to improve cache efficiency
+4. **Monitor costs** with `dbGetStats` to optimize S3 usage
+5. **Batch operations** when possible to reduce S3 requests
+6. **Proper pagination** - don't load everything at once
+7. **Connection reuse** - keep connections alive
+8. **Appropriate parallelism** - tune `S3DB_PARALLELISM`
 
 ---
 

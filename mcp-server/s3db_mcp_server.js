@@ -4,7 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+import { S3db, CachePlugin, CostsPlugin, FilesystemCache } from 's3db.js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -48,7 +48,7 @@ class S3dbMCPServer {
         tools: [
           {
             name: 'dbConnect',
-            description: 'Connect to an S3DB database with automatic costs tracking and memory cache',
+            description: 'Connect to an S3DB database with automatic costs tracking and configurable cache (memory or filesystem)',
             inputSchema: {
               type: 'object',
               properties: {
@@ -78,7 +78,7 @@ class S3dbMCPServer {
                 },
                 enableCache: {
                   type: 'boolean',
-                  description: 'Enable memory cache for improved performance',
+                  description: 'Enable cache for improved performance',
                   default: true
                 },
                 enableCosts: {
@@ -86,15 +86,31 @@ class S3dbMCPServer {
                   description: 'Enable costs tracking for S3 operations',
                   default: true
                 },
+                cacheDriver: {
+                  type: 'string',
+                  description: 'Cache driver type: "memory" or "filesystem"',
+                  enum: ['memory', 'filesystem'],
+                  default: 'memory'
+                },
                 cacheMaxSize: {
                   type: 'number',
-                  description: 'Maximum number of items in memory cache',
+                  description: 'Maximum number of items in memory cache (memory driver only)',
                   default: 1000
                 },
                 cacheTtl: {
                   type: 'number',
                   description: 'Cache time-to-live in milliseconds',
                   default: 300000
+                },
+                cacheDirectory: {
+                  type: 'string',
+                  description: 'Directory path for filesystem cache (filesystem driver only)',
+                  default: './cache'
+                },
+                cachePrefix: {
+                  type: 'string',
+                  description: 'Prefix for cache files (filesystem driver only)',
+                  default: 'cache'
                 }
               },
               required: ['connectionString']
@@ -668,8 +684,11 @@ class S3dbMCPServer {
       versioningEnabled = false,
       enableCache = true,
       enableCosts = true,
+      cacheDriver = 'memory', // 'memory', 'filesystem', or 'custom'
       cacheMaxSize = 1000,
-      cacheTtl = 300000 // 5 minutes
+      cacheTtl = 300000, // 5 minutes
+      cacheDirectory = './cache', // For filesystem cache
+      cachePrefix = 'cache'
     } = args;
 
     if (database && database.isConnected()) {
@@ -685,21 +704,42 @@ class S3dbMCPServer {
       plugins.push(CostsPlugin);
     }
 
-    // Add CachePlugin with memory cache (enabled by default, configurable)
+    // Add CachePlugin (enabled by default, configurable)
     const cacheEnabled = enableCache !== false && process.env.S3DB_CACHE_ENABLED !== 'false';
     if (cacheEnabled) {
       const cacheMaxSizeEnv = process.env.S3DB_CACHE_MAX_SIZE ? parseInt(process.env.S3DB_CACHE_MAX_SIZE) : cacheMaxSize;
       const cacheTtlEnv = process.env.S3DB_CACHE_TTL ? parseInt(process.env.S3DB_CACHE_TTL) : cacheTtl;
+      const cacheDriverEnv = process.env.S3DB_CACHE_DRIVER || cacheDriver;
+      const cacheDirectoryEnv = process.env.S3DB_CACHE_DIRECTORY || cacheDirectory;
+      const cachePrefixEnv = process.env.S3DB_CACHE_PREFIX || cachePrefix;
       
-      plugins.push(new CachePlugin({
-        driverType: 'memory',
-        memoryOptions: {
+      let cacheConfig = {
+        includePartitions: true
+      };
+      
+      if (cacheDriverEnv === 'filesystem') {
+        // Filesystem cache configuration
+        cacheConfig.driver = new FilesystemCache({
+          directory: cacheDirectoryEnv,
+          prefix: cachePrefixEnv,
+          ttl: cacheTtlEnv,
+          enableCompression: true,
+          enableStats: verbose,
+          enableCleanup: true,
+          cleanupInterval: 300000, // 5 minutes
+          createDirectory: true
+        });
+      } else {
+        // Memory cache configuration (default)
+        cacheConfig.driverType = 'memory';
+        cacheConfig.memoryOptions = {
           maxSize: cacheMaxSizeEnv,
           ttl: cacheTtlEnv,
           enableStats: verbose
-        },
-        includePartitions: true
-      }));
+        };
+      }
+      
+      plugins.push(new CachePlugin(cacheConfig));
     }
 
     database = new S3db({
@@ -724,8 +764,9 @@ class S3dbMCPServer {
         plugins: {
           costs: costsEnabled,
           cache: cacheEnabled,
-          cacheDriver: cacheEnabled ? 'memory' : null,
-          cacheMaxSize: cacheEnabled ? cacheMaxSizeEnv : null,
+          cacheDriver: cacheEnabled ? cacheDriverEnv : null,
+          cacheDirectory: cacheEnabled && cacheDriverEnv === 'filesystem' ? cacheDirectoryEnv : null,
+          cacheMaxSize: cacheEnabled && cacheDriverEnv === 'memory' ? cacheMaxSizeEnv : null,
           cacheTtl: cacheEnabled ? cacheTtlEnv : null
         }
       }

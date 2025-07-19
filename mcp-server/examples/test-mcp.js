@@ -149,9 +149,9 @@ class MockMCPClient {
           },
           cache: {
             enabled: true,
-            driver: 'MemoryCache',
+            driver: 'FilesystemCache',
             size: 23,
-            maxSize: 1000,
+            directory: './test-cache',
             ttl: 300000,
             keyCount: 23,
             sampleKeys: ['resource=users/action=list.json.gz', 'resource=posts/action=count.json.gz']
@@ -194,7 +194,9 @@ async function runTests() {
       parallelism: 10,
       enableCache: true,
       enableCosts: true,
-      cacheMaxSize: 1000,
+      cacheDriver: 'filesystem', // Test filesystem cache
+      cacheDirectory: './test-cache',
+      cachePrefix: 'test',
       cacheTtl: 300000
     });
     
