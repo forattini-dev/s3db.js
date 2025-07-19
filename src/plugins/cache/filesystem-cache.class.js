@@ -79,18 +79,11 @@
  * - Metadata includes creation time, compression info, and custom properties
  */
 import fs from 'fs';
+import { readFile, writeFile, unlink, readdir, stat, mkdir } from 'fs/promises';
 import path from 'path';
-import zlib from 'zlib';
-import { promisify } from 'util';
+import zlib from 'node:zlib';
 import { Cache } from './cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
-
-const readFile = promisify(fs.readFile);
-const writeFile = promisify(fs.writeFile);
-const unlink = promisify(fs.unlink);
-const readdir = promisify(fs.readdir);
-const stat = promisify(fs.stat);
-const mkdir = promisify(fs.mkdir);
 
 export class FilesystemCache extends Cache {
   constructor({

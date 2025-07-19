@@ -3,9 +3,10 @@
 Object.defineProperty(exports, '__esModule', { value: true });
 
 var nanoid = require('nanoid');
-var zlib = require('zlib');
+var zlib = require('node:zlib');
 var promisePool = require('@supercharge/promise-pool');
 var web = require('node:stream/web');
+var promises = require('fs/promises');
 var lodashEs = require('lodash-es');
 var crypto = require('crypto');
 var jsonStableStringify = require('json-stable-stringify');
@@ -1345,7 +1346,8 @@ class AuditPlugin extends plugin_class_default {
           version: "2.0"
         })
       };
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {
+      });
     });
     resource.on("update", async (data) => {
       const recordId = data.id;
@@ -1371,7 +1373,8 @@ class AuditPlugin extends plugin_class_default {
           version: "2.0"
         })
       };
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {
+      });
     });
     resource.on("delete", async (data) => {
       const recordId = data.id;
@@ -1397,7 +1400,8 @@ class AuditPlugin extends plugin_class_default {
           version: "2.0"
         })
       };
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {
+      });
     });
     resource.useMiddleware("deleteMany", async (ctx, next) => {
       const ids = ctx.args[0];
@@ -1430,7 +1434,8 @@ class AuditPlugin extends plugin_class_default {
               batchOperation: true
             })
           };
-          this.logAudit(auditRecord).catch(console.error);
+          this.logAudit(auditRecord).catch(() => {
+          });
         }
       }
       return result;
@@ -6812,12 +6817,786 @@ class MemoryCache extends Cache {
 }
 var memory_cache_class_default = MemoryCache;
 
+var fs = {};
+
+class FilesystemCache extends Cache {
+  constructor({
+    directory,
+    prefix = "cache",
+    ttl = 36e5,
+    enableCompression = true,
+    compressionThreshold = 1024,
+    createDirectory = true,
+    fileExtension = ".cache",
+    enableMetadata = true,
+    maxFileSize = 10485760,
+    // 10MB
+    enableStats = false,
+    enableCleanup = true,
+    cleanupInterval = 3e5,
+    // 5 minutes
+    encoding = "utf8",
+    fileMode = 420,
+    enableBackup = false,
+    backupSuffix = ".bak",
+    enableLocking = false,
+    lockTimeout = 5e3,
+    enableJournal = false,
+    journalFile = "cache.journal",
+    ...config
+  }) {
+    super(config);
+    if (!directory) {
+      throw new Error("FilesystemCache: directory parameter is required");
+    }
+    this.directory = path.resolve(directory);
+    this.prefix = prefix;
+    this.ttl = ttl;
+    this.enableCompression = enableCompression;
+    this.compressionThreshold = compressionThreshold;
+    this.createDirectory = createDirectory;
+    this.fileExtension = fileExtension;
+    this.enableMetadata = enableMetadata;
+    this.maxFileSize = maxFileSize;
+    this.enableStats = enableStats;
+    this.enableCleanup = enableCleanup;
+    this.cleanupInterval = cleanupInterval;
+    this.encoding = encoding;
+    this.fileMode = fileMode;
+    this.enableBackup = enableBackup;
+    this.backupSuffix = backupSuffix;
+    this.enableLocking = enableLocking;
+    this.lockTimeout = lockTimeout;
+    this.enableJournal = enableJournal;
+    this.journalFile = path.join(this.directory, journalFile);
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      sets: 0,
+      deletes: 0,
+      clears: 0,
+      errors: 0
+    };
+    this.locks = /* @__PURE__ */ new Map();
+    this.cleanupTimer = null;
+    this._init();
+  }
+  async _init() {
+    if (this.createDirectory) {
+      await this._ensureDirectory(this.directory);
+    }
+    if (this.enableCleanup && this.cleanupInterval > 0) {
+      this.cleanupTimer = setInterval(() => {
+        this._cleanup().catch((err) => {
+          console.warn("FilesystemCache cleanup error:", err.message);
+        });
+      }, this.cleanupInterval);
+    }
+  }
+  async _ensureDirectory(dir) {
+    const [ok, err] = await try_fn_default(async () => {
+      await promises.mkdir(dir, { recursive: true });
+    });
+    if (!ok && err.code !== "EEXIST") {
+      throw new Error(`Failed to create cache directory: ${err.message}`);
+    }
+  }
+  _getFilePath(key) {
+    const sanitizedKey = key.replace(/[<>:"/\\|?*]/g, "_");
+    const filename = `${this.prefix}_${sanitizedKey}${this.fileExtension}`;
+    return path.join(this.directory, filename);
+  }
+  _getMetadataPath(filePath) {
+    return filePath + ".meta";
+  }
+  async _set(key, data) {
+    const filePath = this._getFilePath(key);
+    try {
+      let serialized = JSON.stringify(data);
+      const originalSize = Buffer.byteLength(serialized, this.encoding);
+      if (originalSize > this.maxFileSize) {
+        throw new Error(`Cache data exceeds maximum file size: ${originalSize} > ${this.maxFileSize}`);
+      }
+      let compressed = false;
+      let finalData = serialized;
+      if (this.enableCompression && originalSize >= this.compressionThreshold) {
+        const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, this.encoding));
+        finalData = compressedBuffer.toString("base64");
+        compressed = true;
+      }
+      if (this.enableBackup && await this._fileExists(filePath)) {
+        const backupPath = filePath + this.backupSuffix;
+        await this._copyFile(filePath, backupPath);
+      }
+      if (this.enableLocking) {
+        await this._acquireLock(filePath);
+      }
+      try {
+        await promises.writeFile(filePath, finalData, {
+          encoding: compressed ? "utf8" : this.encoding,
+          mode: this.fileMode
+        });
+        if (this.enableMetadata) {
+          const metadata = {
+            key,
+            timestamp: Date.now(),
+            ttl: this.ttl,
+            compressed,
+            originalSize,
+            compressedSize: compressed ? Buffer.byteLength(finalData, "utf8") : originalSize,
+            compressionRatio: compressed ? (Buffer.byteLength(finalData, "utf8") / originalSize).toFixed(2) : 1
+          };
+          await promises.writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
+            encoding: this.encoding,
+            mode: this.fileMode
+          });
+        }
+        if (this.enableStats) {
+          this.stats.sets++;
+        }
+        if (this.enableJournal) {
+          await this._journalOperation("set", key, { size: originalSize, compressed });
+        }
+      } finally {
+        if (this.enableLocking) {
+          this._releaseLock(filePath);
+        }
+      }
+      return data;
+    } catch (error) {
+      if (this.enableStats) {
+        this.stats.errors++;
+      }
+      throw new Error(`Failed to set cache key '${key}': ${error.message}`);
+    }
+  }
+  async _get(key) {
+    const filePath = this._getFilePath(key);
+    try {
+      if (!await this._fileExists(filePath)) {
+        if (this.enableStats) {
+          this.stats.misses++;
+        }
+        return null;
+      }
+      let isExpired = false;
+      if (this.enableMetadata) {
+        const metadataPath = this._getMetadataPath(filePath);
+        if (await this._fileExists(metadataPath)) {
+          const [ok, err, metadata] = await try_fn_default(async () => {
+            const metaContent = await promises.readFile(metadataPath, this.encoding);
+            return JSON.parse(metaContent);
+          });
+          if (ok && metadata.ttl > 0) {
+            const age = Date.now() - metadata.timestamp;
+            isExpired = age > metadata.ttl;
+          }
+        }
+      } else if (this.ttl > 0) {
+        const stats = await promises.stat(filePath);
+        const age = Date.now() - stats.mtime.getTime();
+        isExpired = age > this.ttl;
+      }
+      if (isExpired) {
+        await this._del(key);
+        if (this.enableStats) {
+          this.stats.misses++;
+        }
+        return null;
+      }
+      if (this.enableLocking) {
+        await this._acquireLock(filePath);
+      }
+      try {
+        const content = await promises.readFile(filePath, this.encoding);
+        let isCompressed = false;
+        if (this.enableMetadata) {
+          const metadataPath = this._getMetadataPath(filePath);
+          if (await this._fileExists(metadataPath)) {
+            const [ok, err, metadata] = await try_fn_default(async () => {
+              const metaContent = await promises.readFile(metadataPath, this.encoding);
+              return JSON.parse(metaContent);
+            });
+            if (ok) {
+              isCompressed = metadata.compressed;
+            }
+          }
+        }
+        let finalContent = content;
+        if (isCompressed || this.enableCompression && content.match(/^[A-Za-z0-9+/=]+$/)) {
+          try {
+            const compressedBuffer = Buffer.from(content, "base64");
+            finalContent = zlib.gunzipSync(compressedBuffer).toString(this.encoding);
+          } catch (decompressError) {
+            finalContent = content;
+          }
+        }
+        const data = JSON.parse(finalContent);
+        if (this.enableStats) {
+          this.stats.hits++;
+        }
+        return data;
+      } finally {
+        if (this.enableLocking) {
+          this._releaseLock(filePath);
+        }
+      }
+    } catch (error) {
+      if (this.enableStats) {
+        this.stats.errors++;
+      }
+      await this._del(key);
+      return null;
+    }
+  }
+  async _del(key) {
+    const filePath = this._getFilePath(key);
+    try {
+      if (await this._fileExists(filePath)) {
+        await promises.unlink(filePath);
+      }
+      if (this.enableMetadata) {
+        const metadataPath = this._getMetadataPath(filePath);
+        if (await this._fileExists(metadataPath)) {
+          await promises.unlink(metadataPath);
+        }
+      }
+      if (this.enableBackup) {
+        const backupPath = filePath + this.backupSuffix;
+        if (await this._fileExists(backupPath)) {
+          await promises.unlink(backupPath);
+        }
+      }
+      if (this.enableStats) {
+        this.stats.deletes++;
+      }
+      if (this.enableJournal) {
+        await this._journalOperation("delete", key);
+      }
+      return true;
+    } catch (error) {
+      if (this.enableStats) {
+        this.stats.errors++;
+      }
+      throw new Error(`Failed to delete cache key '${key}': ${error.message}`);
+    }
+  }
+  async _clear(prefix) {
+    try {
+      const files = await promises.readdir(this.directory);
+      const cacheFiles = files.filter((file) => {
+        if (!file.startsWith(this.prefix)) return false;
+        if (!file.endsWith(this.fileExtension)) return false;
+        if (prefix) {
+          const keyPart = file.slice(this.prefix.length + 1, -this.fileExtension.length);
+          return keyPart.startsWith(prefix);
+        }
+        return true;
+      });
+      for (const file of cacheFiles) {
+        const filePath = path.join(this.directory, file);
+        if (await this._fileExists(filePath)) {
+          await promises.unlink(filePath);
+        }
+        if (this.enableMetadata) {
+          const metadataPath = this._getMetadataPath(filePath);
+          if (await this._fileExists(metadataPath)) {
+            await promises.unlink(metadataPath);
+          }
+        }
+        if (this.enableBackup) {
+          const backupPath = filePath + this.backupSuffix;
+          if (await this._fileExists(backupPath)) {
+            await promises.unlink(backupPath);
+          }
+        }
+      }
+      if (this.enableStats) {
+        this.stats.clears++;
+      }
+      if (this.enableJournal) {
+        await this._journalOperation("clear", prefix || "all", { count: cacheFiles.length });
+      }
+      return true;
+    } catch (error) {
+      if (this.enableStats) {
+        this.stats.errors++;
+      }
+      throw new Error(`Failed to clear cache: ${error.message}`);
+    }
+  }
+  async size() {
+    const keys = await this.keys();
+    return keys.length;
+  }
+  async keys() {
+    try {
+      const files = await promises.readdir(this.directory);
+      const cacheFiles = files.filter(
+        (file) => file.startsWith(this.prefix) && file.endsWith(this.fileExtension)
+      );
+      const keys = cacheFiles.map((file) => {
+        const keyPart = file.slice(this.prefix.length + 1, -this.fileExtension.length);
+        return keyPart;
+      });
+      return keys;
+    } catch (error) {
+      console.warn("FilesystemCache: Failed to list keys:", error.message);
+      return [];
+    }
+  }
+  // Helper methods
+  async _fileExists(filePath) {
+    const [ok] = await try_fn_default(async () => {
+      await promises.stat(filePath);
+    });
+    return ok;
+  }
+  async _copyFile(src, dest) {
+    const [ok, err] = await try_fn_default(async () => {
+      const content = await promises.readFile(src);
+      await promises.writeFile(dest, content);
+    });
+    if (!ok) {
+      console.warn("FilesystemCache: Failed to create backup:", err.message);
+    }
+  }
+  async _cleanup() {
+    if (!this.ttl || this.ttl <= 0) return;
+    try {
+      const files = await promises.readdir(this.directory);
+      const now = Date.now();
+      for (const file of files) {
+        if (!file.startsWith(this.prefix) || !file.endsWith(this.fileExtension)) {
+          continue;
+        }
+        const filePath = path.join(this.directory, file);
+        let shouldDelete = false;
+        if (this.enableMetadata) {
+          const metadataPath = this._getMetadataPath(filePath);
+          if (await this._fileExists(metadataPath)) {
+            const [ok, err, metadata] = await try_fn_default(async () => {
+              const metaContent = await promises.readFile(metadataPath, this.encoding);
+              return JSON.parse(metaContent);
+            });
+            if (ok && metadata.ttl > 0) {
+              const age = now - metadata.timestamp;
+              shouldDelete = age > metadata.ttl;
+            }
+          }
+        } else {
+          const [ok, err, stats] = await try_fn_default(async () => {
+            return await promises.stat(filePath);
+          });
+          if (ok) {
+            const age = now - stats.mtime.getTime();
+            shouldDelete = age > this.ttl;
+          }
+        }
+        if (shouldDelete) {
+          const keyPart = file.slice(this.prefix.length + 1, -this.fileExtension.length);
+          await this._del(keyPart);
+        }
+      }
+    } catch (error) {
+      console.warn("FilesystemCache cleanup error:", error.message);
+    }
+  }
+  async _acquireLock(filePath) {
+    if (!this.enableLocking) return;
+    const lockKey = filePath;
+    const startTime = Date.now();
+    while (this.locks.has(lockKey)) {
+      if (Date.now() - startTime > this.lockTimeout) {
+        throw new Error(`Lock timeout for file: ${filePath}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    this.locks.set(lockKey, Date.now());
+  }
+  _releaseLock(filePath) {
+    if (!this.enableLocking) return;
+    this.locks.delete(filePath);
+  }
+  async _journalOperation(operation, key, metadata = {}) {
+    if (!this.enableJournal) return;
+    const entry = {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      operation,
+      key,
+      metadata
+    };
+    const [ok, err] = await try_fn_default(async () => {
+      const line = JSON.stringify(entry) + "\n";
+      await fs.promises.appendFile(this.journalFile, line, this.encoding);
+    });
+    if (!ok) {
+      console.warn("FilesystemCache journal error:", err.message);
+    }
+  }
+  // Cleanup on process exit
+  destroy() {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+  // Get cache statistics
+  getStats() {
+    return {
+      ...this.stats,
+      directory: this.directory,
+      ttl: this.ttl,
+      compression: this.enableCompression,
+      metadata: this.enableMetadata,
+      cleanup: this.enableCleanup,
+      locking: this.enableLocking,
+      journal: this.enableJournal
+    };
+  }
+}
+
+class PartitionAwareFilesystemCache extends FilesystemCache {
+  constructor({
+    partitionStrategy = "hierarchical",
+    // 'hierarchical', 'flat', 'temporal'
+    trackUsage = true,
+    preloadRelated = false,
+    preloadThreshold = 10,
+    maxCacheSize = null,
+    usageStatsFile = "partition-usage.json",
+    ...config
+  }) {
+    super(config);
+    this.partitionStrategy = partitionStrategy;
+    this.trackUsage = trackUsage;
+    this.preloadRelated = preloadRelated;
+    this.preloadThreshold = preloadThreshold;
+    this.maxCacheSize = maxCacheSize;
+    this.usageStatsFile = path.join(this.directory, usageStatsFile);
+    this.partitionUsage = /* @__PURE__ */ new Map();
+    this.loadUsageStats();
+  }
+  /**
+   * Generate partition-aware cache key
+   */
+  _getPartitionCacheKey(resource, action, partition, partitionValues = {}, params = {}) {
+    const keyParts = [`resource=${resource}`, `action=${action}`];
+    if (partition && Object.keys(partitionValues).length > 0) {
+      keyParts.push(`partition=${partition}`);
+      const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
+      for (const [field, value] of sortedFields) {
+        if (value !== null && value !== void 0) {
+          keyParts.push(`${field}=${value}`);
+        }
+      }
+    }
+    if (Object.keys(params).length > 0) {
+      const paramsStr = Object.entries(params).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("|");
+      keyParts.push(`params=${Buffer.from(paramsStr).toString("base64")}`);
+    }
+    return keyParts.join("/") + this.fileExtension;
+  }
+  /**
+   * Get directory path for partition cache
+   */
+  _getPartitionDirectory(resource, partition, partitionValues = {}) {
+    const basePath = path.join(this.directory, `resource=${resource}`);
+    if (!partition) {
+      return basePath;
+    }
+    if (this.partitionStrategy === "flat") {
+      return path.join(basePath, "partitions");
+    }
+    if (this.partitionStrategy === "temporal" && this._isTemporalPartition(partition, partitionValues)) {
+      return this._getTemporalDirectory(basePath, partition, partitionValues);
+    }
+    const pathParts = [basePath, `partition=${partition}`];
+    const sortedFields = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b));
+    for (const [field, value] of sortedFields) {
+      if (value !== null && value !== void 0) {
+        pathParts.push(`${field}=${this._sanitizePathValue(value)}`);
+      }
+    }
+    return path.join(...pathParts);
+  }
+  /**
+   * Enhanced set method with partition awareness
+   */
+  async _set(key, data, options = {}) {
+    const { resource, action, partition, partitionValues, params } = options;
+    if (resource && partition) {
+      const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
+      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
+      await this._ensureDirectory(partitionDir);
+      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
+      if (this.trackUsage) {
+        await this._trackPartitionUsage(resource, partition, partitionValues);
+      }
+      const partitionData = {
+        data,
+        metadata: {
+          resource,
+          partition,
+          partitionValues,
+          timestamp: Date.now(),
+          ttl: this.ttl
+        }
+      };
+      return this._writeFileWithMetadata(filePath, partitionData);
+    }
+    return super._set(key, data);
+  }
+  /**
+   * Enhanced get method with partition awareness
+   */
+  async _get(key, options = {}) {
+    const { resource, action, partition, partitionValues, params } = options;
+    if (resource && partition) {
+      const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
+      const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
+      const filePath = path.join(partitionDir, this._sanitizeFileName(partitionKey));
+      if (!await this._fileExists(filePath)) {
+        if (this.preloadRelated) {
+          await this._preloadRelatedPartitions(resource, partition, partitionValues);
+        }
+        return null;
+      }
+      const result = await this._readFileWithMetadata(filePath);
+      if (result && this.trackUsage) {
+        await this._trackPartitionUsage(resource, partition, partitionValues);
+      }
+      return result?.data || null;
+    }
+    return super._get(key);
+  }
+  /**
+   * Clear cache for specific partition
+   */
+  async clearPartition(resource, partition, partitionValues = {}) {
+    const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
+    const [ok, err] = await try_fn_default(async () => {
+      if (await this._fileExists(partitionDir)) {
+        await promises.rm(partitionDir, { recursive: true });
+      }
+    });
+    if (!ok) {
+      console.warn(`Failed to clear partition cache: ${err.message}`);
+    }
+    const usageKey = this._getUsageKey(resource, partition, partitionValues);
+    this.partitionUsage.delete(usageKey);
+    await this._saveUsageStats();
+    return ok;
+  }
+  /**
+   * Clear all partitions for a resource
+   */
+  async clearResourcePartitions(resource) {
+    const resourceDir = path.join(this.directory, `resource=${resource}`);
+    const [ok, err] = await try_fn_default(async () => {
+      if (await this._fileExists(resourceDir)) {
+        await promises.rm(resourceDir, { recursive: true });
+      }
+    });
+    for (const [key] of this.partitionUsage.entries()) {
+      if (key.startsWith(`${resource}/`)) {
+        this.partitionUsage.delete(key);
+      }
+    }
+    await this._saveUsageStats();
+    return ok;
+  }
+  /**
+   * Get partition cache statistics
+   */
+  async getPartitionStats(resource, partition = null) {
+    const stats = {
+      totalFiles: 0,
+      totalSize: 0,
+      partitions: {},
+      usage: {}
+    };
+    const resourceDir = path.join(this.directory, `resource=${resource}`);
+    if (!await this._fileExists(resourceDir)) {
+      return stats;
+    }
+    await this._calculateDirectoryStats(resourceDir, stats);
+    for (const [key, usage] of this.partitionUsage.entries()) {
+      if (key.startsWith(`${resource}/`)) {
+        const partitionName = key.split("/")[1];
+        if (!partition || partitionName === partition) {
+          stats.usage[partitionName] = usage;
+        }
+      }
+    }
+    return stats;
+  }
+  /**
+   * Get cache recommendations based on usage patterns
+   */
+  async getCacheRecommendations(resource) {
+    const recommendations = [];
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1e3;
+    for (const [key, usage] of this.partitionUsage.entries()) {
+      if (key.startsWith(`${resource}/`)) {
+        const [, partition] = key.split("/");
+        const daysSinceLastAccess = (now - usage.lastAccess) / dayMs;
+        const accessesPerDay = usage.count / Math.max(1, daysSinceLastAccess);
+        let recommendation = "keep";
+        let priority = usage.count;
+        if (daysSinceLastAccess > 30) {
+          recommendation = "archive";
+          priority = 0;
+        } else if (accessesPerDay < 0.1) {
+          recommendation = "reduce_ttl";
+          priority = 1;
+        } else if (accessesPerDay > 10) {
+          recommendation = "preload";
+          priority = 100;
+        }
+        recommendations.push({
+          partition,
+          recommendation,
+          priority,
+          usage: accessesPerDay,
+          lastAccess: new Date(usage.lastAccess).toISOString()
+        });
+      }
+    }
+    return recommendations.sort((a, b) => b.priority - a.priority);
+  }
+  /**
+   * Preload frequently accessed partitions
+   */
+  async warmPartitionCache(resource, options = {}) {
+    const { partitions = [], maxFiles = 1e3 } = options;
+    let warmedCount = 0;
+    for (const partition of partitions) {
+      const usageKey = `${resource}/${partition}`;
+      const usage = this.partitionUsage.get(usageKey);
+      if (usage && usage.count >= this.preloadThreshold) {
+        console.log(`\u{1F525} Warming cache for ${resource}/${partition} (${usage.count} accesses)`);
+        warmedCount++;
+      }
+      if (warmedCount >= maxFiles) break;
+    }
+    return warmedCount;
+  }
+  // Private helper methods
+  async _trackPartitionUsage(resource, partition, partitionValues) {
+    const usageKey = this._getUsageKey(resource, partition, partitionValues);
+    const current = this.partitionUsage.get(usageKey) || {
+      count: 0,
+      firstAccess: Date.now(),
+      lastAccess: Date.now()
+    };
+    current.count++;
+    current.lastAccess = Date.now();
+    this.partitionUsage.set(usageKey, current);
+    if (current.count % 10 === 0) {
+      await this._saveUsageStats();
+    }
+  }
+  _getUsageKey(resource, partition, partitionValues) {
+    const valuePart = Object.entries(partitionValues).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("|");
+    return `${resource}/${partition}/${valuePart}`;
+  }
+  async _preloadRelatedPartitions(resource, partition, partitionValues) {
+    console.log(`\u{1F3AF} Preloading related partitions for ${resource}/${partition}`);
+    if (partitionValues.timestamp || partitionValues.date) ;
+  }
+  _isTemporalPartition(partition, partitionValues) {
+    const temporalFields = ["date", "timestamp", "createdAt", "updatedAt"];
+    return Object.keys(partitionValues).some(
+      (field) => temporalFields.some((tf) => field.toLowerCase().includes(tf))
+    );
+  }
+  _getTemporalDirectory(basePath, partition, partitionValues) {
+    const dateValue = Object.values(partitionValues)[0];
+    if (typeof dateValue === "string" && dateValue.match(/^\d{4}-\d{2}-\d{2}/)) {
+      const [year, month, day] = dateValue.split("-");
+      return path.join(basePath, "temporal", year, month, day);
+    }
+    return path.join(basePath, `partition=${partition}`);
+  }
+  _sanitizePathValue(value) {
+    return String(value).replace(/[<>:"/\\|?*]/g, "_");
+  }
+  _sanitizeFileName(filename) {
+    return filename.replace(/[<>:"/\\|?*]/g, "_");
+  }
+  async _calculateDirectoryStats(dir, stats) {
+    const [ok, err, files] = await try_fn_default(() => promises.readdir(dir));
+    if (!ok) return;
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const [statOk, statErr, fileStat] = await try_fn_default(() => promises.stat(filePath));
+      if (statOk) {
+        if (fileStat.isDirectory()) {
+          await this._calculateDirectoryStats(filePath, stats);
+        } else {
+          stats.totalFiles++;
+          stats.totalSize += fileStat.size;
+        }
+      }
+    }
+  }
+  async loadUsageStats() {
+    const [ok, err, content] = await try_fn_default(async () => {
+      const data = await promises.readFile(this.usageStatsFile, "utf8");
+      return JSON.parse(data);
+    });
+    if (ok && content) {
+      this.partitionUsage = new Map(Object.entries(content));
+    }
+  }
+  async _saveUsageStats() {
+    const statsObject = Object.fromEntries(this.partitionUsage);
+    await try_fn_default(async () => {
+      await promises.writeFile(
+        this.usageStatsFile,
+        JSON.stringify(statsObject, null, 2),
+        "utf8"
+      );
+    });
+  }
+  async _writeFileWithMetadata(filePath, data) {
+    const content = JSON.stringify(data);
+    const [ok, err] = await try_fn_default(async () => {
+      await promises.writeFile(filePath, content, {
+        encoding: this.encoding,
+        mode: this.fileMode
+      });
+    });
+    if (!ok) {
+      throw new Error(`Failed to write cache file: ${err.message}`);
+    }
+    return true;
+  }
+  async _readFileWithMetadata(filePath) {
+    const [ok, err, content] = await try_fn_default(async () => {
+      return await promises.readFile(filePath, this.encoding);
+    });
+    if (!ok || !content) return null;
+    try {
+      return JSON.parse(content);
+    } catch (error) {
+      return { data: content };
+    }
+  }
+}
+
 class CachePlugin extends plugin_class_default {
   constructor(options = {}) {
     super(options);
     this.driver = options.driver;
     this.config = {
       includePartitions: options.includePartitions !== false,
+      partitionStrategy: options.partitionStrategy || "hierarchical",
+      partitionAware: options.partitionAware !== false,
+      trackUsage: options.trackUsage !== false,
+      preloadRelated: options.preloadRelated !== false,
       ...options
     };
   }
@@ -6829,6 +7608,17 @@ class CachePlugin extends plugin_class_default {
       this.driver = this.config.driver;
     } else if (this.config.driverType === "memory") {
       this.driver = new memory_cache_class_default(this.config.memoryOptions || {});
+    } else if (this.config.driverType === "filesystem") {
+      if (this.config.partitionAware) {
+        this.driver = new PartitionAwareFilesystemCache({
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
+          ...this.config.filesystemOptions
+        });
+      } else {
+        this.driver = new FilesystemCache(this.config.filesystemOptions || {});
+      }
     } else {
       this.driver = new s3_cache_class_default({ client: this.database.client, ...this.config.s3Options || {} });
     }
@@ -6869,6 +7659,20 @@ class CachePlugin extends plugin_class_default {
       const { action, params = {}, partition, partitionValues } = options;
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
+    if (this.driver instanceof PartitionAwareFilesystemCache) {
+      resource.clearPartitionCache = async (partition, partitionValues = {}) => {
+        return await this.driver.clearPartition(resource.name, partition, partitionValues);
+      };
+      resource.getPartitionCacheStats = async (partition = null) => {
+        return await this.driver.getPartitionStats(resource.name, partition);
+      };
+      resource.getCacheRecommendations = async () => {
+        return await this.driver.getCacheRecommendations(resource.name);
+      };
+      resource.warmPartitionCache = async (partitions = [], options = {}) => {
+        return await this.driver.warmPartitionCache(resource.name, { partitions, ...options });
+      };
+    }
     const cacheMethods = [
       "count",
       "listIds",
@@ -6894,12 +7698,37 @@ class CachePlugin extends plugin_class_default {
         } else if (method === "get") {
           key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
-        const [ok, err, cached] = await try_fn_default(() => resource.cache.get(key));
-        if (ok && cached !== null && cached !== void 0) return cached;
-        if (!ok && err.name !== "NoSuchKey") throw err;
-        const result = await next();
-        await resource.cache.set(key, result);
-        return result;
+        if (this.driver instanceof PartitionAwareFilesystemCache) {
+          let partition, partitionValues;
+          if (method === "list" || method === "listIds" || method === "count" || method === "page") {
+            const args = ctx.args[0] || {};
+            partition = args.partition;
+            partitionValues = args.partitionValues;
+          }
+          const [ok, err, result] = await try_fn_default(() => resource.cache._get(key, {
+            resource: resource.name,
+            action: method,
+            partition,
+            partitionValues
+          }));
+          if (ok && result !== null && result !== void 0) return result;
+          if (!ok && err.name !== "NoSuchKey") throw err;
+          const freshResult = await next();
+          await resource.cache._set(key, freshResult, {
+            resource: resource.name,
+            action: method,
+            partition,
+            partitionValues
+          });
+          return freshResult;
+        } else {
+          const [ok, err, result] = await try_fn_default(() => resource.cache.get(key));
+          if (ok && result !== null && result !== void 0) return result;
+          if (!ok && err.name !== "NoSuchKey") throw err;
+          const freshResult = await next();
+          await resource.cache.set(key, freshResult);
+          return freshResult;
+        }
       });
     }
     const writeMethods = ["insert", "update", "delete", "deleteMany"];
@@ -6992,6 +7821,10 @@ class CachePlugin extends plugin_class_default {
       throw new Error(`Resource '${resourceName}' not found`);
     }
     const { includePartitions = true } = options;
+    if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
+      const partitionNames = resource.config.partitions ? Object.keys(resource.config.partitions) : [];
+      return await resource.warmPartitionCache(partitionNames, options);
+    }
     await resource.getAll();
     if (includePartitions && resource.config.partitions) {
       for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
@@ -7012,6 +7845,57 @@ class CachePlugin extends plugin_class_default {
         }
       }
     }
+  }
+  // Partition-specific methods
+  async getPartitionCacheStats(resourceName, partition = null) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error("Partition cache statistics are only available with PartitionAwareFilesystemCache");
+    }
+    return await this.driver.getPartitionStats(resourceName, partition);
+  }
+  async getCacheRecommendations(resourceName) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error("Cache recommendations are only available with PartitionAwareFilesystemCache");
+    }
+    return await this.driver.getCacheRecommendations(resourceName);
+  }
+  async clearPartitionCache(resourceName, partition, partitionValues = {}) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error("Partition cache clearing is only available with PartitionAwareFilesystemCache");
+    }
+    return await this.driver.clearPartition(resourceName, partition, partitionValues);
+  }
+  async analyzeCacheUsage() {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      return { message: "Cache usage analysis is only available with PartitionAwareFilesystemCache" };
+    }
+    const analysis = {
+      totalResources: Object.keys(this.database.resources).length,
+      resourceStats: {},
+      recommendations: {},
+      summary: {
+        mostUsedPartitions: [],
+        leastUsedPartitions: [],
+        suggestedOptimizations: []
+      }
+    };
+    for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+      try {
+        analysis.resourceStats[resourceName] = await this.driver.getPartitionStats(resourceName);
+        analysis.recommendations[resourceName] = await this.driver.getCacheRecommendations(resourceName);
+      } catch (error) {
+        analysis.resourceStats[resourceName] = { error: error.message };
+      }
+    }
+    const allRecommendations = Object.values(analysis.recommendations).flat();
+    analysis.summary.mostUsedPartitions = allRecommendations.filter((r) => r.recommendation === "preload").sort((a, b) => b.priority - a.priority).slice(0, 5);
+    analysis.summary.leastUsedPartitions = allRecommendations.filter((r) => r.recommendation === "archive").slice(0, 5);
+    analysis.summary.suggestedOptimizations = [
+      `Consider preloading ${analysis.summary.mostUsedPartitions.length} high-usage partitions`,
+      `Archive ${analysis.summary.leastUsedPartitions.length} unused partitions`,
+      `Monitor cache hit rates for partition efficiency`
+    ];
+    return analysis;
   }
 }
 
@@ -7189,24 +8073,29 @@ class FullTextPlugin extends plugin_class_default {
     resource._deleteMany = resource.deleteMany;
     this.wrapResourceMethod(resource, "insert", async (result, args, methodName) => {
       const [data] = args;
-      this.indexRecord(resource.name, result.id, data).catch(console.error);
+      this.indexRecord(resource.name, result.id, data).catch(() => {
+      });
       return result;
     });
     this.wrapResourceMethod(resource, "update", async (result, args, methodName) => {
       const [id, data] = args;
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
-      this.indexRecord(resource.name, id, result).catch(console.error);
+      this.removeRecordFromIndex(resource.name, id).catch(() => {
+      });
+      this.indexRecord(resource.name, id, result).catch(() => {
+      });
       return result;
     });
     this.wrapResourceMethod(resource, "delete", async (result, args, methodName) => {
       const [id] = args;
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      this.removeRecordFromIndex(resource.name, id).catch(() => {
+      });
       return result;
     });
     this.wrapResourceMethod(resource, "deleteMany", async (result, args, methodName) => {
       const [ids] = args;
       for (const id of ids) {
-        this.removeRecordFromIndex(resource.name, id).catch(console.error);
+        this.removeRecordFromIndex(resource.name, id).catch(() => {
+        });
       }
       return result;
     });
@@ -7696,7 +8585,8 @@ class MetricsPlugin extends plugin_class_default {
     }
     if (this.config.flushInterval > 0) {
       this.flushTimer = setInterval(() => {
-        this.flushMetrics().catch(console.error);
+        this.flushMetrics().catch(() => {
+        });
       }, this.config.flushInterval);
     }
   }
@@ -7768,9 +8658,6 @@ class MetricsPlugin extends plugin_class_default {
       }
       this.resetMetrics();
     });
-    if (!ok) {
-      console.error("Failed to flush metrics:", err);
-    }
   }
   resetMetrics() {
     for (const operation of Object.keys(this.metrics.operations)) {
@@ -7916,6 +8803,614 @@ class MetricsPlugin extends plugin_class_default {
     }
   }
 }
+
+class BaseReplicator extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.config = config;
+    this.name = this.constructor.name;
+    this.enabled = config.enabled !== false;
+  }
+  /**
+   * Initialize the replicator
+   * @param {Object} database - The s3db database instance
+   * @returns {Promise<void>}
+   */
+  async initialize(database) {
+    this.database = database;
+    this.emit("initialized", { replicator: this.name });
+  }
+  /**
+   * Replicate data to the target
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {string} operation - Operation type (insert, update, delete)
+   * @param {Object} data - The data to replicate
+   * @param {string} id - Record ID
+   * @returns {Promise<Object>} replicator result
+   */
+  async replicate(resourceName, operation, data, id) {
+    throw new Error(`replicate() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Replicate multiple records in batch
+   * @param {string} resourceName - Name of the resource being replicated
+   * @param {Array} records - Array of records to replicate
+   * @returns {Promise<Object>} Batch replicator result
+   */
+  async replicateBatch(resourceName, records) {
+    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Test the connection to the target
+   * @returns {Promise<boolean>} True if connection is successful
+   */
+  async testConnection() {
+    throw new Error(`testConnection() method must be implemented by ${this.name}`);
+  }
+  /**
+   * Get replicator status and statistics
+   * @returns {Promise<Object>} Status information
+   */
+  async getStatus() {
+    return {
+      name: this.name,
+      // Removed: enabled: this.enabled,
+      config: this.config,
+      connected: false
+    };
+  }
+  /**
+   * Cleanup resources
+   * @returns {Promise<void>}
+   */
+  async cleanup() {
+    this.emit("cleanup", { replicator: this.name });
+  }
+  /**
+   * Validate replicator configuration
+   * @returns {Object} Validation result
+   */
+  validateConfig() {
+    return { isValid: true, errors: [] };
+  }
+}
+var base_replicator_class_default = BaseReplicator;
+
+class BigqueryReplicator extends base_replicator_class_default {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.projectId = config.projectId;
+    this.datasetId = config.datasetId;
+    this.bigqueryClient = null;
+    this.credentials = config.credentials;
+    this.location = config.location || "US";
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"],
+          transform: null
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"], transform: null };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"],
+            transform: item.transform || null
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"],
+          transform: config.transform || null
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.projectId) errors.push("projectId is required");
+    if (!this.datasetId) errors.push("datasetId is required");
+    if (Object.keys(this.resources).length === 0) errors.push("At least one resource must be configured");
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+        if (tableConfig.transform && typeof tableConfig.transform !== "function") {
+          errors.push(`Transform must be a function for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const [ok, err, sdk] = await try_fn_default(() => import('@google-cloud/bigquery'));
+    if (!ok) {
+      this.emit("initialization_error", { replicator: this.name, error: err.message });
+      throw err;
+    }
+    const { BigQuery } = sdk;
+    this.bigqueryClient = new BigQuery({
+      projectId: this.projectId,
+      credentials: this.credentials,
+      location: this.location
+    });
+    this.emit("initialized", {
+      replicator: this.name,
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: Object.keys(this.resources)
+    });
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => ({
+      table: tableConfig.table,
+      transform: tableConfig.transform
+    }));
+  }
+  applyTransform(data, transformFn) {
+    if (!transformFn) return data;
+    let transformedData = JSON.parse(JSON.stringify(data));
+    if (transformedData._length) delete transformedData._length;
+    return transformFn(transformedData);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tableConfigs = this.getTablesForResource(resourceName, operation);
+    if (tableConfigs.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    const [ok, err, result] = await try_fn_default(async () => {
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      for (const tableConfig of tableConfigs) {
+        const [okTable, errTable] = await try_fn_default(async () => {
+          const table = dataset.table(tableConfig.table);
+          let job;
+          if (operation === "insert") {
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            job = await table.insert([transformedData]);
+          } else if (operation === "update") {
+            const transformedData = this.applyTransform(data, tableConfig.transform);
+            const keys = Object.keys(transformedData).filter((k) => k !== "id");
+            const setClause = keys.map((k) => `${k} = @${k}`).join(", ");
+            const params = { id, ...transformedData };
+            const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` SET ${setClause} WHERE id = @id`;
+            const maxRetries = 2;
+            let lastError = null;
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                const [updateJob] = await this.bigqueryClient.createQueryJob({
+                  query,
+                  params,
+                  location: this.location
+                });
+                await updateJob.getQueryResults();
+                job = [updateJob];
+                break;
+              } catch (error) {
+                lastError = error;
+                if (error?.message?.includes("streaming buffer") && attempt < maxRetries) {
+                  const delaySeconds = 30;
+                  await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1e3));
+                  continue;
+                }
+                throw error;
+              }
+            }
+            if (!job) throw lastError;
+          } else if (operation === "delete") {
+            const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
+            const [deleteJob] = await this.bigqueryClient.createQueryJob({
+              query,
+              params: { id },
+              location: this.location
+            });
+            await deleteJob.getQueryResults();
+            job = [deleteJob];
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table: tableConfig.table,
+            success: true,
+            jobId: job[0]?.id
+          });
+        });
+        if (!okTable) {
+          errors.push({
+            table: tableConfig.table,
+            error: errTable.message
+          });
+        }
+      }
+      if (this.logTable) {
+        const [okLog, errLog] = await try_fn_default(async () => {
+          const logTable = dataset.table(this.logTable);
+          await logTable.insert([{
+            resource_name: resourceName,
+            operation,
+            record_id: id,
+            data: JSON.stringify(data),
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            source: "s3db-replicator"
+          }]);
+        });
+        if (!okLog) {
+        }
+      }
+      const success = errors.length === 0;
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        tables: tableConfigs.map((t) => t.table),
+        results,
+        errors,
+        success
+      });
+      return {
+        success,
+        results,
+        errors,
+        tables: tableConfigs.map((t) => t.table)
+      };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, res] = await try_fn_default(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await try_fn_default(async () => {
+      if (!this.bigqueryClient) await this.initialize();
+      const dataset = this.bigqueryClient.dataset(this.datasetId);
+      await dataset.getMetadata();
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
+  }
+  async cleanup() {
+  }
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      projectId: this.projectId,
+      datasetId: this.datasetId,
+      resources: this.resources,
+      logTable: this.logTable
+    };
+  }
+}
+var bigquery_replicator_class_default = BigqueryReplicator;
+
+class PostgresReplicator extends base_replicator_class_default {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.connectionString = config.connectionString;
+    this.host = config.host;
+    this.port = config.port || 5432;
+    this.database = config.database;
+    this.user = config.user;
+    this.password = config.password;
+    this.client = null;
+    this.ssl = config.ssl;
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.connectionString && (!this.host || !this.database)) {
+      errors.push("Either connectionString or host+database must be provided");
+    }
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+        const validActions = ["insert", "update", "delete"];
+        const invalidActions = tableConfig.actions.filter((action) => !validActions.includes(action));
+        if (invalidActions.length > 0) {
+          errors.push(`Invalid actions for resource '${resourceName}': ${invalidActions.join(", ")}. Valid actions: ${validActions.join(", ")}`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const [ok, err, sdk] = await try_fn_default(() => import('pg'));
+    if (!ok) {
+      this.emit("initialization_error", {
+        replicator: this.name,
+        error: err.message
+      });
+      throw err;
+    }
+    const { Client } = sdk;
+    const config = this.connectionString ? {
+      connectionString: this.connectionString,
+      ssl: this.ssl
+    } : {
+      host: this.host,
+      port: this.port,
+      database: this.database,
+      user: this.user,
+      password: this.password,
+      ssl: this.ssl
+    };
+    this.client = new Client(config);
+    await this.client.connect();
+    if (this.logTable) {
+      await this.createLogTableIfNotExists();
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      database: this.database || "postgres",
+      resources: Object.keys(this.resources)
+    });
+  }
+  async createLogTableIfNotExists() {
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS ${this.logTable} (
+        id SERIAL PRIMARY KEY,
+        resource_name VARCHAR(255) NOT NULL,
+        operation VARCHAR(50) NOT NULL,
+        record_id VARCHAR(255) NOT NULL,
+        data JSONB,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        source VARCHAR(100) DEFAULT 's3db-replicator',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_resource_name ON ${this.logTable}(resource_name);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_operation ON ${this.logTable}(operation);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_record_id ON ${this.logTable}(record_id);
+      CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
+    `;
+    await this.client.query(createTableQuery);
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    const [ok, err, result] = await try_fn_default(async () => {
+      for (const table of tables) {
+        const [okTable, errTable] = await try_fn_default(async () => {
+          let result2;
+          if (operation === "insert") {
+            const keys = Object.keys(data);
+            const values = keys.map((k) => data[k]);
+            const columns = keys.map((k) => `"${k}"`).join(", ");
+            const params = keys.map((_, i) => `$${i + 1}`).join(", ");
+            const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
+            result2 = await this.client.query(sql, values);
+          } else if (operation === "update") {
+            const keys = Object.keys(data).filter((k) => k !== "id");
+            const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
+            const values = keys.map((k) => data[k]);
+            values.push(id);
+            const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
+            result2 = await this.client.query(sql, values);
+          } else if (operation === "delete") {
+            const sql = `DELETE FROM ${table} WHERE id=$1 RETURNING *`;
+            result2 = await this.client.query(sql, [id]);
+          } else {
+            throw new Error(`Unsupported operation: ${operation}`);
+          }
+          results.push({
+            table,
+            success: true,
+            rows: result2.rows,
+            rowCount: result2.rowCount
+          });
+        });
+        if (!okTable) {
+          errors.push({
+            table,
+            error: errTable.message
+          });
+        }
+      }
+      if (this.logTable) {
+        const [okLog, errLog] = await try_fn_default(async () => {
+          await this.client.query(
+            `INSERT INTO ${this.logTable} (resource_name, operation, record_id, data, timestamp, source) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [resourceName, operation, id, JSON.stringify(data), (/* @__PURE__ */ new Date()).toISOString(), "s3db-replicator"]
+          );
+        });
+        if (!okLog) {
+        }
+      }
+      const success = errors.length === 0;
+      this.emit("replicated", {
+        replicator: this.name,
+        resourceName,
+        operation,
+        id,
+        tables,
+        results,
+        errors,
+        success
+      });
+      return {
+        success,
+        results,
+        errors,
+        tables
+      };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, res] = await try_fn_default(() => this.replicate(
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
+        record.beforeData
+      ));
+      if (ok) results.push(res);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await try_fn_default(async () => {
+      if (!this.client) await this.initialize();
+      await this.client.query("SELECT 1");
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", { replicator: this.name, error: err.message });
+    return false;
+  }
+  async cleanup() {
+    if (this.client) await this.client.end();
+  }
+  getStatus() {
+    return {
+      ...super.getStatus(),
+      database: this.database || "postgres",
+      resources: this.resources,
+      logTable: this.logTable
+    };
+  }
+}
+var postgres_replicator_class_default = PostgresReplicator;
 
 const S3_DEFAULT_REGION = "us-east-1";
 const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
@@ -9999,7 +11494,7 @@ class Resource extends EventEmitter {
       if (okParse) contentType = "application/json";
     }
     if (this.behavior === "body-only" && (!body || body === "")) {
-      throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
+      throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
     }
     const [okPut, errPut, putResult] = await try_fn_default(() => this.client.putObject({
       key,
@@ -11346,8 +12841,8 @@ class Resource extends EventEmitter {
     return mappedData;
   }
   /**
-   * Compose the full object (metadata + body) as retornado por .get(),
-   * usando os dados em memória após insert/update, de acordo com o behavior
+   * Compose the full object (metadata + body) as returned by .get(),
+   * using in-memory data after insert/update, according to behavior
    */
   async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
     const behaviorFlags = {};
@@ -11502,7 +12997,7 @@ class Resource extends EventEmitter {
     if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: "useMiddleware", method });
     this._middlewares.get(method).push(fn);
   }
-  // Utilitário para aplicar valores default do schema
+  // Utility to apply schema default values
   applyDefaults(data) {
     const out = { ...data };
     for (const [key, def] of Object.entries(this.attributes)) {
@@ -11634,7 +13129,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.2.1" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.3.4" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -11707,7 +13202,7 @@ class Database extends EventEmitter {
           name,
           client: this.client,
           database: this,
-          // garantir referência
+          // ensure reference
           version: currentVersion,
           attributes: versionData.attributes,
           behavior: versionData.behavior || "user-managed",
@@ -12109,6 +13604,570 @@ class Database extends EventEmitter {
 class S3db extends Database {
 }
 
+function normalizeResourceName$1(name) {
+  return typeof name === "string" ? name.trim().toLowerCase() : name;
+}
+class S3dbReplicator extends base_replicator_class_default {
+  constructor(config = {}, resources = [], client = null) {
+    super(config);
+    this.instanceId = Math.random().toString(36).slice(2, 10);
+    this.client = client;
+    this.connectionString = config.connectionString;
+    let normalizedResources = resources;
+    if (!resources) normalizedResources = {};
+    else if (Array.isArray(resources)) {
+      normalizedResources = {};
+      for (const res of resources) {
+        if (typeof res === "string") normalizedResources[normalizeResourceName$1(res)] = res;
+      }
+    } else if (typeof resources === "string") {
+      normalizedResources[normalizeResourceName$1(resources)] = resources;
+    }
+    this.resourcesMap = this._normalizeResources(normalizedResources);
+  }
+  _normalizeResources(resources) {
+    if (!resources) return {};
+    if (Array.isArray(resources)) {
+      const map = {};
+      for (const res of resources) {
+        if (typeof res === "string") map[normalizeResourceName$1(res)] = res;
+        else if (Array.isArray(res) && typeof res[0] === "string") map[normalizeResourceName$1(res[0])] = res;
+        else if (typeof res === "object" && res.resource) {
+          map[normalizeResourceName$1(res.resource)] = { ...res };
+        }
+      }
+      return map;
+    }
+    if (typeof resources === "object") {
+      const map = {};
+      for (const [src, dest] of Object.entries(resources)) {
+        const normSrc = normalizeResourceName$1(src);
+        if (typeof dest === "string") map[normSrc] = dest;
+        else if (Array.isArray(dest)) {
+          map[normSrc] = dest.map((item) => {
+            if (typeof item === "string") return item;
+            if (typeof item === "function") return item;
+            if (typeof item === "object" && item.resource) {
+              return { ...item };
+            }
+            return item;
+          });
+        } else if (typeof dest === "function") map[normSrc] = dest;
+        else if (typeof dest === "object" && dest.resource) {
+          map[normSrc] = { ...dest };
+        }
+      }
+      return map;
+    }
+    if (typeof resources === "function") {
+      return resources;
+    }
+    if (typeof resources === "string") {
+      const map = { [normalizeResourceName$1(resources)]: resources };
+      return map;
+    }
+    return {};
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.client && !this.connectionString) {
+      errors.push("You must provide a client or a connectionString");
+    }
+    if (!this.resourcesMap || typeof this.resourcesMap === "object" && Object.keys(this.resourcesMap).length === 0) {
+      errors.push("You must provide a resources map or array");
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    try {
+      await super.initialize(database);
+      if (this.client) {
+        this.targetDatabase = this.client;
+      } else if (this.connectionString) {
+        const targetConfig = {
+          connectionString: this.connectionString,
+          region: this.region,
+          keyPrefix: this.keyPrefix,
+          verbose: this.config.verbose || false
+        };
+        this.targetDatabase = new S3db(targetConfig);
+        await this.targetDatabase.connect();
+      } else {
+        throw new Error("S3dbReplicator: No client or connectionString provided");
+      }
+      this.emit("connected", {
+        replicator: this.name,
+        target: this.connectionString || "client-provided"
+      });
+    } catch (err) {
+      throw err;
+    }
+  }
+  // Support both object and parameter signatures for flexibility
+  async replicate(resourceOrObj, operation, data, recordId, beforeData) {
+    let resource, op, payload, id;
+    if (typeof resourceOrObj === "object" && resourceOrObj.resource) {
+      resource = resourceOrObj.resource;
+      op = resourceOrObj.operation;
+      payload = resourceOrObj.data;
+      id = resourceOrObj.id;
+    } else {
+      resource = resourceOrObj;
+      op = operation;
+      payload = data;
+      id = recordId;
+    }
+    const normResource = normalizeResourceName$1(resource);
+    const destResource = this._resolveDestResource(normResource, payload);
+    const destResourceObj = this._getDestResourceObj(destResource);
+    const transformedData = this._applyTransformer(normResource, payload);
+    let result;
+    if (op === "insert") {
+      result = await destResourceObj.insert(transformedData);
+    } else if (op === "update") {
+      result = await destResourceObj.update(id, transformedData);
+    } else if (op === "delete") {
+      result = await destResourceObj.delete(id);
+    } else {
+      throw new Error(`Invalid operation: ${op}. Supported operations are: insert, update, delete`);
+    }
+    return result;
+  }
+  _applyTransformer(resource, data) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    let result;
+    if (!entry) return data;
+    if (Array.isArray(entry) && typeof entry[1] === "function") {
+      result = entry[1](data);
+    } else if (typeof entry === "function") {
+      result = entry(data);
+    } else if (typeof entry === "object") {
+      if (typeof entry.transform === "function") result = entry.transform(data);
+      else if (typeof entry.transformer === "function") result = entry.transformer(data);
+    } else {
+      result = data;
+    }
+    if (result && data && data.id && !result.id) result.id = data.id;
+    if (!result && data) result = data;
+    return result;
+  }
+  _resolveDestResource(resource, data) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return resource;
+    if (Array.isArray(entry)) {
+      if (typeof entry[0] === "string") return entry[0];
+      if (typeof entry[0] === "object" && entry[0].resource) return entry[0].resource;
+      if (typeof entry[0] === "function") return resource;
+    }
+    if (typeof entry === "string") return entry;
+    if (resource && !targetResourceName) targetResourceName = resource;
+    if (typeof entry === "object" && entry.resource) return entry.resource;
+    return resource;
+  }
+  _getDestResourceObj(resource) {
+    if (!this.client || !this.client.resources) return null;
+    const available = Object.keys(this.client.resources);
+    const norm = normalizeResourceName$1(resource);
+    const found = available.find((r) => normalizeResourceName$1(r) === norm);
+    if (!found) {
+      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(", ")}`);
+    }
+    return this.client.resources[found];
+  }
+  async replicateBatch(resourceName, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, result] = await try_fn_default(() => this.replicate({
+        resource: resourceName,
+        operation: record.operation,
+        id: record.id,
+        data: record.data,
+        beforeData: record.beforeData
+      }));
+      if (ok) results.push(result);
+      else errors.push({ id: record.id, error: err.message });
+    }
+    this.emit("batch_replicated", {
+      replicator: this.name,
+      resourceName,
+      total: records.length,
+      successful: results.length,
+      errors: errors.length
+    });
+    return {
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await try_fn_default(async () => {
+      if (!this.targetDatabase) {
+        await this.initialize(this.database);
+      }
+      await this.targetDatabase.listResources();
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.targetDatabase,
+      targetDatabase: this.connectionString || "client-provided",
+      resources: Object.keys(this.resourcesMap || {}),
+      totalreplicators: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replicator_error")
+    };
+  }
+  async cleanup() {
+    if (this.targetDatabase) {
+      this.targetDatabase.removeAllListeners();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resource, action) {
+    const normResource = normalizeResourceName$1(resource);
+    const entry = this.resourcesMap[normResource];
+    if (!entry) return false;
+    if (!action) return true;
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (typeof item === "object" && item.resource) {
+          if (item.actions && Array.isArray(item.actions)) {
+            if (item.actions.includes(action)) return true;
+          } else {
+            return true;
+          }
+        } else if (typeof item === "string" || typeof item === "function") {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (typeof entry === "object" && entry.resource) {
+      if (entry.actions && Array.isArray(entry.actions)) {
+        return entry.actions.includes(action);
+      }
+      return true;
+    }
+    if (typeof entry === "string" || typeof entry === "function") {
+      return true;
+    }
+    return false;
+  }
+}
+var s3db_replicator_class_default = S3dbReplicator;
+
+class SqsReplicator extends base_replicator_class_default {
+  constructor(config = {}, resources = [], client = null) {
+    super(config);
+    this.client = client;
+    this.queueUrl = config.queueUrl;
+    this.queues = config.queues || {};
+    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
+    this.region = config.region || "us-east-1";
+    this.sqsClient = client || null;
+    this.messageGroupId = config.messageGroupId;
+    this.deduplicationId = config.deduplicationId;
+    if (Array.isArray(resources)) {
+      this.resources = {};
+      for (const resource of resources) {
+        if (typeof resource === "string") {
+          this.resources[resource] = true;
+        } else if (typeof resource === "object" && resource.name) {
+          this.resources[resource.name] = resource;
+        }
+      }
+    } else if (typeof resources === "object") {
+      this.resources = resources;
+      for (const [resourceName, resourceConfig] of Object.entries(resources)) {
+        if (resourceConfig && resourceConfig.queueUrl) {
+          this.queues[resourceName] = resourceConfig.queueUrl;
+        }
+      }
+    } else {
+      this.resources = {};
+    }
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.queueUrl && Object.keys(this.queues).length === 0 && !this.defaultQueue && !this.resourceQueueMap) {
+      errors.push("Either queueUrl, queues object, defaultQueue, or resourceQueueMap must be provided");
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  getQueueUrlsForResource(resource) {
+    if (this.resourceQueueMap && this.resourceQueueMap[resource]) {
+      return this.resourceQueueMap[resource];
+    }
+    if (this.queues[resource]) {
+      return [this.queues[resource]];
+    }
+    if (this.queueUrl) {
+      return [this.queueUrl];
+    }
+    if (this.defaultQueue) {
+      return [this.defaultQueue];
+    }
+    throw new Error(`No queue URL found for resource '${resource}'`);
+  }
+  _applyTransformer(resource, data) {
+    const entry = this.resources[resource];
+    let result = data;
+    if (!entry) return data;
+    if (typeof entry.transform === "function") {
+      result = entry.transform(data);
+    } else if (typeof entry.transformer === "function") {
+      result = entry.transformer(data);
+    }
+    return result || data;
+  }
+  /**
+   * Create standardized message structure
+   */
+  createMessage(resource, operation, data, id, beforeData = null) {
+    const baseMessage = {
+      resource,
+      // padronizado para 'resource'
+      action: operation,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "s3db-replicator"
+    };
+    switch (operation) {
+      case "insert":
+        return {
+          ...baseMessage,
+          data
+        };
+      case "update":
+        return {
+          ...baseMessage,
+          before: beforeData,
+          data
+        };
+      case "delete":
+        return {
+          ...baseMessage,
+          data
+        };
+      default:
+        return {
+          ...baseMessage,
+          data
+        };
+    }
+  }
+  async initialize(database, client) {
+    await super.initialize(database);
+    if (!this.sqsClient) {
+      const [ok, err, sdk] = await try_fn_default(() => import('@aws-sdk/client-sqs'));
+      if (!ok) {
+        this.emit("initialization_error", {
+          replicator: this.name,
+          error: err.message
+        });
+        throw err;
+      }
+      const { SQSClient } = sdk;
+      this.sqsClient = client || new SQSClient({
+        region: this.region,
+        credentials: this.config.credentials
+      });
+      this.emit("initialized", {
+        replicator: this.name,
+        queueUrl: this.queueUrl,
+        queues: this.queues,
+        defaultQueue: this.defaultQueue
+      });
+    }
+  }
+  async replicate(resource, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await try_fn_default(async () => {
+      const { SendMessageCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrls = this.getQueueUrlsForResource(resource);
+      const transformedData = this._applyTransformer(resource, data);
+      const message = this.createMessage(resource, operation, transformedData, id, beforeData);
+      const results = [];
+      for (const queueUrl of queueUrls) {
+        const command = new SendMessageCommand({
+          QueueUrl: queueUrl,
+          MessageBody: JSON.stringify(message),
+          MessageGroupId: this.messageGroupId,
+          MessageDeduplicationId: this.deduplicationId ? `${resource}:${operation}:${id}` : void 0
+        });
+        const result2 = await this.sqsClient.send(command);
+        results.push({ queueUrl, messageId: result2.MessageId });
+        this.emit("replicated", {
+          replicator: this.name,
+          resource,
+          operation,
+          id,
+          queueUrl,
+          messageId: result2.MessageId,
+          success: true
+        });
+      }
+      return { success: true, results };
+    });
+    if (ok) return result;
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resource,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resource, records) {
+    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await try_fn_default(async () => {
+      const { SendMessageBatchCommand } = await import('@aws-sdk/client-sqs');
+      const queueUrls = this.getQueueUrlsForResource(resource);
+      const batchSize = 10;
+      const batches = [];
+      for (let i = 0; i < records.length; i += batchSize) {
+        batches.push(records.slice(i, i + batchSize));
+      }
+      const results = [];
+      const errors = [];
+      for (const batch of batches) {
+        const [okBatch, errBatch] = await try_fn_default(async () => {
+          const entries = batch.map((record, index) => ({
+            Id: `${record.id}-${index}`,
+            MessageBody: JSON.stringify(this.createMessage(
+              resource,
+              record.operation,
+              record.data,
+              record.id,
+              record.beforeData
+            )),
+            MessageGroupId: this.messageGroupId,
+            MessageDeduplicationId: this.deduplicationId ? `${resource}:${record.operation}:${record.id}` : void 0
+          }));
+          const command = new SendMessageBatchCommand({
+            QueueUrl: queueUrls[0],
+            // Assuming all queueUrls in a batch are the same for batching
+            Entries: entries
+          });
+          const result2 = await this.sqsClient.send(command);
+          results.push(result2);
+        });
+        if (!okBatch) {
+          errors.push({ batch: batch.length, error: errBatch.message });
+          if (errBatch.message && (errBatch.message.includes("Batch error") || errBatch.message.includes("Connection") || errBatch.message.includes("Network"))) {
+            throw errBatch;
+          }
+        }
+      }
+      this.emit("batch_replicated", {
+        replicator: this.name,
+        resource,
+        queueUrl: queueUrls[0],
+        // Assuming all queueUrls in a batch are the same for batching
+        total: records.length,
+        successful: results.length,
+        errors: errors.length
+      });
+      return {
+        success: errors.length === 0,
+        results,
+        errors,
+        total: records.length,
+        queueUrl: queueUrls[0]
+        // Assuming all queueUrls in a batch are the same for batching
+      };
+    });
+    if (ok) return result;
+    const errorMessage = err?.message || err || "Unknown error";
+    this.emit("batch_replicator_error", {
+      replicator: this.name,
+      resource,
+      error: errorMessage
+    });
+    return { success: false, error: errorMessage };
+  }
+  async testConnection() {
+    const [ok, err] = await try_fn_default(async () => {
+      if (!this.sqsClient) {
+        await this.initialize(this.database);
+      }
+      const { GetQueueAttributesCommand } = await import('@aws-sdk/client-sqs');
+      const command = new GetQueueAttributesCommand({
+        QueueUrl: this.queueUrl,
+        AttributeNames: ["QueueArn"]
+      });
+      await this.sqsClient.send(command);
+      return true;
+    });
+    if (ok) return true;
+    this.emit("connection_error", {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.sqsClient,
+      queueUrl: this.queueUrl,
+      region: this.region,
+      resources: Object.keys(this.resources || {}),
+      totalreplicators: this.listenerCount("replicated"),
+      totalErrors: this.listenerCount("replicator_error")
+    };
+  }
+  async cleanup() {
+    if (this.sqsClient) {
+      this.sqsClient.destroy();
+    }
+    await super.cleanup();
+  }
+  shouldReplicateResource(resource) {
+    const result = this.resourceQueueMap && Object.keys(this.resourceQueueMap).includes(resource) || this.queues && Object.keys(this.queues).includes(resource) || !!(this.defaultQueue || this.queueUrl) || this.resources && Object.keys(this.resources).includes(resource) || false;
+    return result;
+  }
+}
+var sqs_replicator_class_default = SqsReplicator;
+
+const REPLICATOR_DRIVERS = {
+  s3db: s3db_replicator_class_default,
+  sqs: sqs_replicator_class_default,
+  bigquery: bigquery_replicator_class_default,
+  postgres: postgres_replicator_class_default
+};
+function createReplicator(driver, config = {}, resources = [], client = null) {
+  const ReplicatorClass = REPLICATOR_DRIVERS[driver];
+  if (!ReplicatorClass) {
+    throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
+  }
+  return new ReplicatorClass(config, resources, client);
+}
+
 function normalizeResourceName(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : name;
 }
@@ -12156,7 +14215,7 @@ class ReplicatorPlugin extends plugin_class_default {
     return filtered;
   }
   installEventListeners(resource, database, plugin) {
-    if (!resource || this.eventListenersInstalled.has(resource.name)) {
+    if (!resource || this.eventListenersInstalled.has(resource.name) || resource.name === this.config.replicatorLogResource) {
       return;
     }
     resource.on("insert", async (data) => {
@@ -12233,10 +14292,15 @@ class ReplicatorPlugin extends plugin_class_default {
       this.installEventListeners(resource, database, this);
     }
   }
+  createReplicator(driver, config, resources, client) {
+    return createReplicator(driver, config, resources, client);
+  }
   async initializeReplicators(database) {
     for (const replicatorConfig of this.config.replicators) {
-      const { driver, config, resources } = replicatorConfig;
-      const replicator = this.createReplicator(driver, config, resources);
+      const { driver, config = {}, resources, client, ...otherConfig } = replicatorConfig;
+      const replicatorResources = resources || config.resources || {};
+      const mergedConfig = { ...config, ...otherConfig };
+      const replicator = this.createReplicator(driver, mergedConfig, replicatorResources, client);
       if (replicator) {
         await replicator.initialize(database);
         this.replicators.push(replicator);
@@ -12246,6 +14310,66 @@ class ReplicatorPlugin extends plugin_class_default {
   async start() {
   }
   async stop() {
+  }
+  filterInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const filtered = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (!key.startsWith("_") && !key.startsWith("$")) {
+        filtered[key] = value;
+      }
+    }
+    return filtered;
+  }
+  async uploadMetadataFile(database) {
+    if (typeof database.uploadMetadataFile === "function") {
+      await database.uploadMetadataFile();
+    }
+  }
+  async getCompleteData(resource, data) {
+    try {
+      const [ok, err, record] = await try_fn_default(() => resource.get(data.id));
+      if (ok && record) {
+        return record;
+      }
+    } catch (error) {
+    }
+    return data;
+  }
+  async retryWithBackoff(operation, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        const delay = Math.pow(2, attempt - 1) * 1e3;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
+  }
+  async logError(replicator, resourceName, operation, recordId, data, error) {
+    try {
+      const logResourceName = this.config.replicatorLogResource;
+      if (this.database && this.database.resources && this.database.resources[logResourceName]) {
+        const logResource = this.database.resources[logResourceName];
+        await logResource.insert({
+          replicator: replicator.name || replicator.id,
+          resourceName,
+          operation,
+          recordId,
+          data: JSON.stringify(data),
+          error: error.message,
+          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          status: "error"
+        });
+      }
+    } catch (logError) {
+    }
   }
   async processReplicatorEvent(operation, resourceName, recordId, data, beforeData = null) {
     if (!this.config.enabled) return;
@@ -12377,7 +14501,7 @@ class ReplicatorPlugin extends plugin_class_default {
   async getreplicatorStats() {
     const replicatorStats = await Promise.all(
       this.replicators.map(async (replicator) => {
-        const status = await replicator.instance.getStatus();
+        const status = await replicator.getStatus();
         return {
           id: replicator.id,
           driver: replicator.driver,
@@ -12451,12 +14575,12 @@ class ReplicatorPlugin extends plugin_class_default {
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
       if (normalizeResourceName(resourceName) === normalizeResourceName("replicator_logs")) continue;
-      if (replicator.instance.shouldReplicateResource(resourceName)) {
+      if (replicator.shouldReplicateResource(resourceName)) {
         this.emit("replicator.sync.resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
         const allRecords = await resource.getAll();
         for (const record of allRecords) {
-          await replicator.instance.replicate(resourceName, "insert", record, record.id);
+          await replicator.replicate(resourceName, "insert", record, record.id);
         }
       }
     }
