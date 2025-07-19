@@ -104,7 +104,7 @@
  * - Metadata is useful for cache management and monitoring
  * - TTL is enforced by checking object creation time
  */
-import zlib from "zlib";
+import zlib from "node:zlib";
 import { join } from "path";
 
 import { Cache } from "./cache.class.js"

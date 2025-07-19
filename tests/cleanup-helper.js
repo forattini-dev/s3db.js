@@ -1,4 +1,4 @@
-import { rmdir } from 'fs/promises';
+import { rm as rmdir } from 'fs/promises';
 
 export class TestCleanupHelper {
   constructor() {
