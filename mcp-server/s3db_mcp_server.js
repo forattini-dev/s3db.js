@@ -868,12 +868,16 @@ class S3dbMCPServer {
     const result = await resource.insert(data);
     
     // Extract partition information for cache invalidation
-    const partitionInfo = this._extractPartitionInfo(resource, data);
+    const partitionInfo = this._extractPartitionInfo(resource, result);
+    
+    // Generate cache invalidation patterns
+    const cacheInvalidationPatterns = this._generateCacheInvalidationPatterns(resource, result, 'insert');
     
     return {
       success: true,
       data: result,
-      ...(partitionInfo && { partitionInfo })
+      ...(partitionInfo && { partitionInfo }),
+      cacheInvalidationPatterns
     };
   }
 
@@ -1026,6 +1030,14 @@ class S3dbMCPServer {
     
     const result = await resource.list(options);
     
+    // Generate cache key hint for intelligent caching
+    const cacheKeyHint = this._generateCacheKeyHint(resourceName, 'list', { 
+      limit, 
+      offset, 
+      partition, 
+      partitionValues 
+    });
+    
     return {
       success: true,
       data: result,
@@ -1034,7 +1046,10 @@ class S3dbMCPServer {
         limit,
         offset,
         hasMore: result.length === limit
-      }
+      },
+      cacheKeyHint,
+      ...(partition && { partition }),
+      ...(partitionValues && { partitionValues })
     };
   }
 
@@ -1071,10 +1086,19 @@ class S3dbMCPServer {
     
     const count = await resource.count(options);
     
+    // Generate cache key hint for intelligent caching
+    const cacheKeyHint = this._generateCacheKeyHint(resourceName, 'count', { 
+      partition, 
+      partitionValues 
+    });
+    
     return {
       success: true,
       count,
-      resource: resourceName
+      resource: resourceName,
+      cacheKeyHint,
+      ...(partition && { partition }),
+      ...(partitionValues && { partitionValues })
     };
   }
 
@@ -1250,6 +1274,81 @@ class S3dbMCPServer {
     }
 
     return Object.keys(partitionInfo).length > 0 ? partitionInfo : null;
+  }
+
+  // Helper method to generate intelligent cache keys including partition information
+  _generateCacheKeyHint(resourceName, action, params = {}) {
+    const keyParts = [`resource=${resourceName}`, `action=${action}`];
+    
+    // Add partition information if present
+    if (params.partition && params.partitionValues) {
+      keyParts.push(`partition=${params.partition}`);
+      
+      // Sort partition values for consistent cache keys
+      const sortedValues = Object.entries(params.partitionValues)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&');
+        
+      if (sortedValues) {
+        keyParts.push(`values=${sortedValues}`);
+      }
+    }
+    
+    // Add other parameters (excluding partition info to avoid duplication)
+    const otherParams = { ...params };
+    delete otherParams.partition;
+    delete otherParams.partitionValues;
+    
+    if (Object.keys(otherParams).length > 0) {
+      const sortedParams = Object.entries(otherParams)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('&');
+        
+      if (sortedParams) {
+        keyParts.push(`params=${sortedParams}`);
+      }
+    }
+    
+    return keyParts.join('/') + '.json.gz';
+  }
+
+  // Helper method to generate cache invalidation patterns based on data changes
+  _generateCacheInvalidationPatterns(resource, data, action = 'write') {
+    const patterns = [];
+    const resourceName = resource.name;
+    
+    // Always invalidate general resource cache
+    patterns.push(`resource=${resourceName}/action=list`);
+    patterns.push(`resource=${resourceName}/action=count`);
+    patterns.push(`resource=${resourceName}/action=getAll`);
+    
+    // Extract partition info and invalidate partition-specific cache
+    const partitionInfo = this._extractPartitionInfo(resource, data);
+    if (partitionInfo) {
+      for (const [partitionName, partitionValues] of Object.entries(partitionInfo)) {
+        const sortedValues = Object.entries(partitionValues)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => `${key}=${value}`)
+          .join('&');
+          
+        if (sortedValues) {
+          // Invalidate specific partition caches
+          patterns.push(`resource=${resourceName}/action=list/partition=${partitionName}/values=${sortedValues}`);
+          patterns.push(`resource=${resourceName}/action=count/partition=${partitionName}/values=${sortedValues}`);
+          patterns.push(`resource=${resourceName}/action=listIds/partition=${partitionName}/values=${sortedValues}`);
+        }
+      }
+    }
+    
+    // For specific document operations, invalidate document cache
+    if (data.id) {
+      patterns.push(`resource=${resourceName}/action=get/params=id=${data.id}`);
+      patterns.push(`resource=${resourceName}/action=exists/params=id=${data.id}`);
+    }
+    
+    return patterns;
   }
 }
 
