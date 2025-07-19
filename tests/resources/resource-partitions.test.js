@@ -47,8 +47,8 @@ describe('Resource Partitions - Real Integration Tests', () => {
     // Test partition key generation
     const testData = {
       id: 'user1',
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       region: 'BR',
       department: 'engineering'
     };
@@ -443,14 +443,14 @@ describe('Resource Partitions - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    // Testa consistência dos dados por partição
+    // Test data consistency per partition
     const category1Items = await resource.listIds({
       partition: 'byCategory',
       partitionValues: { category: 'category-1' }
     });
     expect(category1Items).toHaveLength(10); // 30 itens / 3 categorias
 
-    // Testa múltiplas partições
+    // Test multiple partitions
     const allCategories = await Promise.all(
       Array.from({ length: 3 }, (_, i) =>
         resource.listIds({

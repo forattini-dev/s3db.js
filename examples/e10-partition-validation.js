@@ -72,8 +72,8 @@ import s3db from '../src/index.js';
     // Insert some test data
     console.log('📝 Inserting test data...');
     const testUsers = [
-      { id: 'user1', name: 'João Silva', region: 'US-WEST', department: 'engineering', status: 'active' },
-      { id: 'user2', name: 'Maria Santos', region: 'EU-NORTH', department: 'marketing', status: 'active' },
+      { id: 'user1', name: 'John Silva', region: 'US-WEST', department: 'engineering', status: 'active' },
+      { id: 'user2', name: 'Mary Santos', region: 'EU-NORTH', department: 'marketing', status: 'active' },
       { id: 'user3', name: 'Carlos Lima', region: 'AS-EAST', department: 'engineering', status: 'inactive' }
     ];
 

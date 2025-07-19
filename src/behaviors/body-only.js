@@ -60,7 +60,7 @@ export async function handleInsert({ resource, data, mappedData }) {
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
   
-  // Use o objeto original para o body
+  // Use the original object for the body
   const body = JSON.stringify(mappedData);
   
   return { mappedData: metadataOnly, body };
@@ -77,7 +77,7 @@ export async function handleUpdate({ resource, id, data, mappedData }) {
   };
   metadataOnly._map = JSON.stringify(resource.schema.map);
   
-  // Use o objeto original para o body
+  // Use the original object for the body
   const body = JSON.stringify(mappedData);
   
   return { mappedData: metadataOnly, body };

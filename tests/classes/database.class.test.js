@@ -137,7 +137,7 @@ describe('Database Class - Complete Journey', () => {
 
     // 12. Test deleteMany
     const remainingIds = await usersResource.listIds();
-    // Deleção individual para evitar erro de Content-Md5
+    // Individual deletion to avoid Content-Md5 error
     for (const id of remainingIds) {
       await usersResource.delete(id);
     }
@@ -794,7 +794,7 @@ describe('Database.generateDefinitionHash is stable and deterministic', () => {
   };
   expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
 
-  // Mudando um atributo, o hash deve mudar
+      // Changing an attribute, the hash should change
   const def3 = {
     attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
     options: { timestamps: true }
@@ -1027,7 +1027,7 @@ describe('Database Definition Hash Stability', () => {
   });
 
   test('should maintain same version and hash for deeply nested attributes with different order', async () => {
-    // Definição 1: ordem "normal"
+    // Definition 1: "normal" order
     const attributes1 = {
       name: 'string|required|max:100',
       email: 'email|required|unique',
@@ -1050,7 +1050,7 @@ describe('Database Definition Hash Stability', () => {
       }
     };
 
-    // Definição 2: muda ordem dos campos de primeiro nível e dos objetos aninhados
+    // Definition 2: change order of first-level fields and nested objects
     const attributes2 = {
       personal: {
         birthDate: 'date|optional',
@@ -1073,7 +1073,7 @@ describe('Database Definition Hash Stability', () => {
       name: 'string|required|max:100'
     };
 
-    // Definição 3: mais uma permutação
+    // Definition 3: one more permutation
     const attributes3 = {
       utm: {
         medium: 'string|required|max:50',
@@ -1096,7 +1096,7 @@ describe('Database Definition Hash Stability', () => {
       email: 'email|required|unique'
     };
 
-    // Cria resource com a primeira definição
+    // Create resource with the first definition
     const resource1 = await database.createResource({
       name: 'deep-nested-hash-test',
       attributes: attributes1,
@@ -1105,7 +1105,7 @@ describe('Database Definition Hash Stability', () => {
     const initialVersion = resource1.version;
     const initialHash = resource1.getDefinitionHash();
 
-    // Cria resource com a segunda definição (ordem diferente)
+    // Create resource with the second definition (different order)
     const resource2 = await database.createResource({
       name: 'deep-nested-hash-test',
       attributes: attributes2,
@@ -1114,7 +1114,7 @@ describe('Database Definition Hash Stability', () => {
     const secondVersion = resource2.version;
     const secondHash = resource2.getDefinitionHash();
 
-    // Cria resource com a terceira definição (outra ordem)
+    // Create resource with the third definition (another order)
     const resource3 = await database.createResource({
       name: 'deep-nested-hash-test',
       attributes: attributes3,
@@ -1123,7 +1123,7 @@ describe('Database Definition Hash Stability', () => {
     const thirdVersion = resource3.version;
     const thirdHash = resource3.getDefinitionHash();
 
-    // Todos devem ser o mesmo resource e mesma versão/hash
+    // All should be the same resource and same version/hash
     expect(resource2).toBe(resource1);
     expect(resource3).toBe(resource1);
     expect(secondVersion).toBe(initialVersion);

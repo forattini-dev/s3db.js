@@ -125,15 +125,15 @@ async function main() {
   // Example 1: Insert operation
   const user = await usersResource.insert({
     id: 'user-001',
-    name: 'João Silva',
-    email: 'joao@example.com',
+          name: 'John Silva',
+          email: 'john@example.com',
     age: 30,
     status: 'active'
   });
 
   // Example 2: Update operation
   const updatedUser = await usersResource.update('user-001', {
-    name: 'João Silva Santos',
+          name: 'John Silva Santos',
     age: 31,
     status: 'verified'
   });
@@ -160,10 +160,11 @@ async function main() {
   await usersResource.delete('user-001');
 
   // Example 6: Batch operations
-  const batchUsers = await usersResource.insertMany([
-    { id: 'user-002', name: 'Maria Santos', email: 'maria@example.com', age: 25 },
-    { id: 'user-003', name: 'Pedro Costa', email: 'pedro@example.com', age: 35 }
-  ]);
+  const moreUsers = [
+    { id: 'user-002', name: 'Mary Santos', email: 'mary@example.com', age: 25 },
+    { id: 'user-003', name: 'Peter Costa', email: 'peter@example.com', age: 35 }
+  ];
+  const batchUsers = await usersResource.insertMany(moreUsers);
 
   // Example 7: DeleteMany operation
   await usersResource.deleteMany(['user-002', 'user-003']);

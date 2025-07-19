@@ -2,7 +2,7 @@ import Database from '../src/database.class.js';
 import Client from '../src/client.class.js';
 import QueueConsumerPlugin from '../src/plugins/queue-consumer.plugin.js';
 
-// Exemplo didático: simula consumo de fila SQS
+// Educational example: simulates SQS queue consumption
 async function main() {
   // Inicializa database
   const client = new Client({
@@ -50,7 +50,7 @@ async function main() {
   // await plugin.setup(database);
   // await plugin.start();
 
-  // Simula recebimento de mensagem (em produção, viria do SQS)
+      // Simulate message reception (in production, would come from SQS)
   // Aqui chamamos o handler diretamente para demonstrar
   await plugin._handleMessage({
     $body: { resource: 'users', action: 'insert', data: { id: 'u1', name: 'Alice', email: 'alice@example.com' } },

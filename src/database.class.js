@@ -114,7 +114,7 @@ export class Database extends EventEmitter {
         this.resources[name] = new Resource({
           name,
           client: this.client,
-          database: this, // garantir referência
+          database: this, // ensure reference
           version: currentVersion,
           attributes: versionData.attributes,
           behavior: versionData.behavior || 'user-managed',

@@ -82,7 +82,7 @@ const sqsReplicator = createReplicator('sqs', {
 const pgReplicator = createReplicator('postgres', {
   connectionString: 'postgresql://user:pass@localhost:5432/mydb',
   logTable: 'replicator_log',
-  // ...outros parâmetros específicos do Postgres
+        // ...other Postgres-specific parameters
 });
 // await pgReplicator.initialize(database);
 // await pgReplicator.replicate('users', 'insert', { id: 'u1', name: 'A' }, 'u1');

@@ -484,7 +484,7 @@ export class Schema {
    */
   static _importAttributes(attrs) {
     if (typeof attrs === 'string') {
-      // Tenta detectar se é um objeto serializado como string JSON
+      // Try to detect if it's an object serialized as JSON string
       const [ok, err, parsed] = tryFnSync(() => JSON.parse(attrs));
       if (ok && typeof parsed === 'object' && parsed !== null) {
         const [okNested, errNested, nested] = tryFnSync(() => Schema._importAttributes(parsed));
@@ -687,9 +687,9 @@ export class Schema {
           properties: this.preprocessAttributesForValidation(value),
           strict: false
         };
-        // Se for explicitamente required, não marca como opcional
+        // If explicitly required, don't mark as optional
         if (isExplicitRequired) {
-          // nada
+          // nothing
         } else if (isExplicitOptional || this.allNestedObjectsOptional) {
           objectConfig.optional = true;
         }

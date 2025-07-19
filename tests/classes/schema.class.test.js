@@ -1027,7 +1027,7 @@ describe('Schema Class - Complete Journey', () => {
     const mappedPasswordKey = schema.map['password'] || 'password';
     expect(mapped[mappedPasswordKey]).toBeDefined();
     expect(mapped[mappedPasswordKey]).not.toBe('secret123');
-    // O unmapped deve restaurar os valores originais
+    // The unmapped should restore original values
     const unmapped = await schema.unmapper(mapped);
     expect(unmapped.name).toBe('John Doe');
     expect(unmapped.password).toBe('secret123');
@@ -1053,7 +1053,7 @@ describe('Schema Class - Complete Journey', () => {
   test('applyHooksActions with unknown action', async () => {
     schema.options.hooks.beforeMap['foo'] = ['unknownAction'];
     const resource = { foo: 'bar' };
-    // Deve ignorar erro silenciosamente
+    // Should ignore error silently
     await expect(schema.applyHooksActions(resource, 'beforeMap')).resolves.not.toThrow();
   });
 
@@ -1165,12 +1165,12 @@ describe('Schema Class - Complete Journey', () => {
       costCenter: 'string',
       team: 'string',
       webpush: {
-        // Sem $$type, mas deve ser opcional devido à opção global
+        // Without $$type, but should be optional due to global option
         enabled: 'boolean|optional|default:false',
         endpoint: 'string|optional',
       },
       requiredObject: {
-        $$type: 'object|required', // Explicitamente obrigatório
+        $$type: 'object|required', // Explicitly required
         field: 'string'
       },
       optionalObject: {
@@ -1299,16 +1299,16 @@ describe('Schema Class - Complete Journey', () => {
       passphrase: 'secret'
     });
 
-    // Teste 1: Dados válidos sem o campo webpush (deve passar)
+    // Test 1: Valid data without webpush field (should pass)
     const validDataWithoutWebpush = {
       costCenter: '860290021',
       team: 'dp-martech-growth'
     };
 
     const result1 = await schema.validate(validDataWithoutWebpush);
-    expect(result1).toBe(true); // Deve ser válido
+    expect(result1).toBe(true); // Should be valid
 
-    // Teste 2: Dados válidos com o campo webpush (deve passar)
+    // Test 2: Valid data with webpush field (should pass)
     const validDataWithWebpush = {
       costCenter: '860290021',
       team: 'dp-martech-growth',
@@ -1319,16 +1319,16 @@ describe('Schema Class - Complete Journey', () => {
     };
 
     const result2 = await schema.validate(validDataWithWebpush);
-    expect(result2).toBe(true); // Deve ser válido
+    expect(result2).toBe(true); // Should be valid
 
-    // Teste 3: Dados inválidos (campo obrigatório ausente)
+    // Test 3: Invalid data (required field missing)
     const invalidData = {
       team: 'dp-martech-growth'
-      // costCenter ausente (obrigatório)
+      // costCenter missing (required)
     };
 
     const result3 = await schema.validate(invalidData);
-    expect(Array.isArray(result3)).toBe(true); // Deve retornar array de erros
+    expect(Array.isArray(result3)).toBe(true); // Should return array of errors
     expect(result3.length).toBeGreaterThan(0);
   });
 
@@ -1452,7 +1452,7 @@ describe('Schema Utility Functions', () => {
   });
 
   test('extractObjectKeys covers nested and $$type', () => {
-    // Testar método isoladamente sem inicializar Validator
+    // Test method in isolation without initializing Validator
     const schema = Object.create(Schema.prototype);
     const attributes = {
       foo: { bar: { baz: { qux: 'string' } } },
@@ -1460,7 +1460,7 @@ describe('Schema Utility Functions', () => {
     };
     const keys = schema.extractObjectKeys(attributes);
     expect(keys).toContain('foo');
-    expect(keys).not.toContain('simple'); // simple é string, não objeto
+    expect(keys).not.toContain('simple'); // simple is string, not object
     expect(keys).not.toContain('foo.bar');
     expect(keys).not.toContain('foo.bar.baz');
     expect(keys).not.toContain('$$meta');
@@ -1478,7 +1478,7 @@ describe('Schema - Explicit Internal Coverage', () => {
   });
 
   test('Schema._exportAttributes handles nested objects/arrays/strings', () => {
-    // Todos os atributos precisam de tipo explícito
+    // All attributes need explicit type
     const schema = new Schema({ name: 't', attributes: { foo: 'string', bar: { baz: 'number' }, arr: { $$type: 'array', items: 'string' }, str: 'string' } });
     expect(schema._exportAttributes(schema.attributes)).toEqual({ foo: 'string', bar: { baz: 'number' }, arr: { $$type: 'array', items: 'string' }, str: 'string' });
   });
@@ -1536,7 +1536,7 @@ describe('Schema - Explicit Internal Coverage', () => {
   test('unmapper handles invalid JSON and [object Object] strings', async () => {
     const schema = new Schema({ name: 't', attributes: { foo: 'string', bar: 'json' } });
     const mapped = { [schema.map.foo]: '[object Object]', [schema.map.bar]: '{invalidJson}', _v: '1' };
-    // O parse de JSON inválido deve retornar o valor original
+    // Parsing invalid JSON should return the original value
     const unmapped = await schema.unmapper(mapped);
     expect(unmapped.foo).toEqual({});
     expect(unmapped.bar).toBe('{invalidJson}');
@@ -1776,9 +1776,9 @@ describe('Schema - Utility Functions and Edge Branches', () => {
     // array
     const arr = Schema._importAttributes([JSON.stringify({ a: 1 })]);
     expect(arr).toEqual([{ a: 1 }]);
-    // string não JSON
+    // non-JSON string
     expect(Schema._importAttributes('notjson')).toBe('notjson');
-    // objeto
+    // object
     expect(Schema._importAttributes({ foo: 'bar' })).toEqual({ foo: 'bar' });
   });
 });

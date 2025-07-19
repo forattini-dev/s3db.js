@@ -4,6 +4,8 @@ import { sha256 } from "../concerns/crypto.js";
 import Plugin from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
+import { FilesystemCache } from "./cache/filesystem-cache.class.js";
+import { PartitionAwareFilesystemCache } from "./cache/partition-aware-filesystem-cache.class.js";
 import tryFn from "../concerns/try-fn.js";
 
 export class CachePlugin extends Plugin {
@@ -12,6 +14,10 @@ export class CachePlugin extends Plugin {
     this.driver = options.driver;
     this.config = {
       includePartitions: options.includePartitions !== false,
+      partitionStrategy: options.partitionStrategy || 'hierarchical',
+      partitionAware: options.partitionAware !== false,
+      trackUsage: options.trackUsage !== false,
+      preloadRelated: options.preloadRelated !== false,
       ...options
     };
   }
@@ -27,6 +33,18 @@ export class CachePlugin extends Plugin {
       this.driver = this.config.driver;
     } else if (this.config.driverType === 'memory') {
       this.driver = new MemoryCache(this.config.memoryOptions || {});
+    } else if (this.config.driverType === 'filesystem') {
+      // Use partition-aware filesystem cache if enabled
+      if (this.config.partitionAware) {
+        this.driver = new PartitionAwareFilesystemCache({
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
+          ...this.config.filesystemOptions
+        });
+      } else {
+        this.driver = new FilesystemCache(this.config.filesystemOptions || {});
+      }
     } else {
       // Default to S3Cache, sempre passa o client do database
       this.driver = new S3Cache({ client: this.database.client, ...(this.config.s3Options || {}) });
@@ -89,6 +107,25 @@ export class CachePlugin extends Plugin {
       return this.generateCacheKey(resource, action, params, partition, partitionValues);
     };
 
+    // Add partition-aware methods if using PartitionAwareFilesystemCache
+    if (this.driver instanceof PartitionAwareFilesystemCache) {
+      resource.clearPartitionCache = async (partition, partitionValues = {}) => {
+        return await this.driver.clearPartition(resource.name, partition, partitionValues);
+      };
+      
+      resource.getPartitionCacheStats = async (partition = null) => {
+        return await this.driver.getPartitionStats(resource.name, partition);
+      };
+      
+      resource.getCacheRecommendations = async () => {
+        return await this.driver.getCacheRecommendations(resource.name);
+      };
+      
+      resource.warmPartitionCache = async (partitions = [], options = {}) => {
+        return await this.driver.warmPartitionCache(resource.name, { partitions, ...options });
+      };
+    }
+
     // List of methods to cache
     const cacheMethods = [
       'count', 'listIds', 'getMany', 'getAll', 'page', 'list', 'get'
@@ -110,14 +147,50 @@ export class CachePlugin extends Plugin {
         } else if (method === 'get') {
           key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
-        // Try cache
-        const [ok, err, cached] = await tryFn(() => resource.cache.get(key));
-        if (ok && cached !== null && cached !== undefined) return cached;
-        if (!ok && err.name !== 'NoSuchKey') throw err;
-        // Not cached, call next
-        const result = await next();
-        await resource.cache.set(key, result);
-        return result;
+        // Try cache with partition awareness
+        let cached;
+        if (this.driver instanceof PartitionAwareFilesystemCache) {
+          // Extract partition info for partition-aware cache
+          let partition, partitionValues;
+          if (method === 'list' || method === 'listIds' || method === 'count' || method === 'page') {
+            const args = ctx.args[0] || {};
+            partition = args.partition;
+            partitionValues = args.partitionValues;
+          }
+          
+          const [ok, err, result] = await tryFn(() => resource.cache._get(key, {
+            resource: resource.name,
+            action: method,
+            partition,
+            partitionValues
+          }));
+          
+          if (ok && result !== null && result !== undefined) return result;
+          if (!ok && err.name !== 'NoSuchKey') throw err;
+          
+          // Not cached, call next
+          const freshResult = await next();
+          
+          // Store with partition context
+          await resource.cache._set(key, freshResult, {
+            resource: resource.name,
+            action: method,
+            partition,
+            partitionValues
+          });
+          
+          return freshResult;
+        } else {
+          // Standard cache behavior
+          const [ok, err, result] = await tryFn(() => resource.cache.get(key));
+          if (ok && result !== null && result !== undefined) return result;
+          if (!ok && err.name !== 'NoSuchKey') throw err;
+          
+          // Not cached, call next
+          const freshResult = await next();
+          await resource.cache.set(key, freshResult);
+          return freshResult;
+        }
       });
     }
 
@@ -240,7 +313,13 @@ export class CachePlugin extends Plugin {
 
     const { includePartitions = true } = options;
 
-    // Warm main cache using the wrapped method (which will call the original)
+    // Use partition-aware warming if available
+    if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
+      const partitionNames = resource.config.partitions ? Object.keys(resource.config.partitions) : [];
+      return await resource.warmPartitionCache(partitionNames, options);
+    }
+
+    // Fallback to standard warming
     await resource.getAll();
 
     // Warm partition caches if enabled
@@ -269,6 +348,77 @@ export class CachePlugin extends Plugin {
         }
       }
     }
+  }
+
+  // Partition-specific methods
+  async getPartitionCacheStats(resourceName, partition = null) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error('Partition cache statistics are only available with PartitionAwareFilesystemCache');
+    }
+    
+    return await this.driver.getPartitionStats(resourceName, partition);
+  }
+
+  async getCacheRecommendations(resourceName) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error('Cache recommendations are only available with PartitionAwareFilesystemCache');
+    }
+    
+    return await this.driver.getCacheRecommendations(resourceName);
+  }
+
+  async clearPartitionCache(resourceName, partition, partitionValues = {}) {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      throw new Error('Partition cache clearing is only available with PartitionAwareFilesystemCache');
+    }
+    
+    return await this.driver.clearPartition(resourceName, partition, partitionValues);
+  }
+
+  async analyzeCacheUsage() {
+    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
+      return { message: 'Cache usage analysis is only available with PartitionAwareFilesystemCache' };
+    }
+
+    const analysis = {
+      totalResources: Object.keys(this.database.resources).length,
+      resourceStats: {},
+      recommendations: {},
+      summary: {
+        mostUsedPartitions: [],
+        leastUsedPartitions: [],
+        suggestedOptimizations: []
+      }
+    };
+
+    // Analyze each resource
+    for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+      try {
+        analysis.resourceStats[resourceName] = await this.driver.getPartitionStats(resourceName);
+        analysis.recommendations[resourceName] = await this.driver.getCacheRecommendations(resourceName);
+      } catch (error) {
+        analysis.resourceStats[resourceName] = { error: error.message };
+      }
+    }
+
+    // Generate summary
+    const allRecommendations = Object.values(analysis.recommendations).flat();
+    analysis.summary.mostUsedPartitions = allRecommendations
+      .filter(r => r.recommendation === 'preload')
+      .sort((a, b) => b.priority - a.priority)
+      .slice(0, 5);
+
+    analysis.summary.leastUsedPartitions = allRecommendations
+      .filter(r => r.recommendation === 'archive')
+      .slice(0, 5);
+
+    analysis.summary.suggestedOptimizations = [
+      `Consider preloading ${analysis.summary.mostUsedPartitions.length} high-usage partitions`,
+      `Archive ${analysis.summary.leastUsedPartitions.length} unused partitions`,
+      `Monitor cache hit rates for partition efficiency`
+    ];
+
+    return analysis;
   }
 }
 
