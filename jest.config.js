@@ -1,45 +1,36 @@
 export default {
-  verbose: false,
   testEnvironment: 'node',
-  injectGlobals: true,
-  maxWorkers: 1, // Run tests serially to avoid resource contention with MinIO
-  testTimeout: 30000, // 30 second default timeout
-  silent: true, // Suppress console output during tests for better performance
-
-  setupFiles: [
-    '<rootDir>/tests/jest.setup.js'
+  transform: {},
+  testMatch: [
+    '**/tests/**/*.test.js',
+    '**/?(*.)+(spec|test).js'
   ],
-
-  transform: {
-    '^.+\\.js?$': 'babel-jest',
-  },
-
-  moduleNameMapper: {
-    '^#src/(.*)$': '<rootDir>/src/$1',
-    '^#tests/(.*)$': '<rootDir>/tests/$1',
-  },
-
-  globals: {
-    'ts-jest': {
-      useESM: true,
-    },
-  },
-
+  collectCoverage: true,
   collectCoverageFrom: [
     'src/**/*.js',
-    '!src/**/*.test.js',
-    '!src/**/*.spec.js',
+    '!src/**/index.js',
+    '!**/*.test.js',
+    '!**/*.spec.js',
+    '!**/node_modules/**',
+    '!**/coverage/**',
+    '!**/examples/**'
   ],
-
-  coveragePathIgnorePatterns: [
-    '/node_modules/',
-    '/tests/',
-    '/examples/',
+  coverageDirectory: 'coverage',
+  coverageReporters: [
+    'text',
+    'text-summary',
+    'html',
+    'lcov'
   ],
-
-  // Ignore slow tests in normal coverage runs
-  testPathIgnorePatterns: [
-    '/node_modules/',
-    '/tests/typescript/',
-  ],
+  coverageThreshold: {
+    'src/plugins/cache/filesystem-cache.class.js': {
+      branches: 90,
+      functions: 90,
+      lines: 90,
+      statements: 90
+    }
+  },
+  testTimeout: 30000,
+  verbose: true,
+  setupFilesAfterEnv: ['<rootDir>/tests/jest.setup.js']
 };
