@@ -230,6 +230,14 @@ class S3dbMCPServer {
                 id: {
                   type: 'string',
                   description: 'Document ID'
+                },
+                partition: {
+                  type: 'string',
+                  description: 'Partition name for optimized retrieval'
+                },
+                partitionValues: {
+                  type: 'object',
+                  description: 'Partition values for targeted access'
                 }
               },
               required: ['resourceName', 'id']
@@ -344,6 +352,14 @@ class S3dbMCPServer {
                 id: {
                   type: 'string',
                   description: 'Document ID'
+                },
+                partition: {
+                  type: 'string',
+                  description: 'Partition name for optimized check'
+                },
+                partitionValues: {
+                  type: 'object',
+                  description: 'Partition values for targeted check'
                 }
               },
               required: ['resourceName', 'id']
@@ -851,9 +867,13 @@ class S3dbMCPServer {
     const resource = this.getResource(resourceName);
     const result = await resource.insert(data);
     
+    // Extract partition information for cache invalidation
+    const partitionInfo = this._extractPartitionInfo(resource, data);
+    
     return {
       success: true,
-      data: result
+      data: result,
+      ...(partitionInfo && { partitionInfo })
     };
   }
 
@@ -873,14 +893,26 @@ class S3dbMCPServer {
 
   async handleResourceGet(args) {
     this.ensureConnected();
-    const { resourceName, id } = args;
+    const { resourceName, id, partition, partitionValues } = args;
     
     const resource = this.getResource(resourceName);
-    const result = await resource.get(id);
+    
+    // Use partition information for optimized retrieval if provided
+    let options = {};
+    if (partition && partitionValues) {
+      options.partition = partition;
+      options.partitionValues = partitionValues;
+    }
+    
+    const result = await resource.get(id, options);
+    
+    // Extract partition information from result
+    const partitionInfo = this._extractPartitionInfo(resource, result);
     
     return {
       success: true,
-      data: result
+      data: result,
+      ...(partitionInfo && { partitionInfo })
     };
   }
 
@@ -905,9 +937,13 @@ class S3dbMCPServer {
     const resource = this.getResource(resourceName);
     const result = await resource.update(id, data);
     
+    // Extract partition information for cache invalidation
+    const partitionInfo = this._extractPartitionInfo(resource, result);
+    
     return {
       success: true,
-      data: result
+      data: result,
+      ...(partitionInfo && { partitionInfo })
     };
   }
 
@@ -953,16 +989,26 @@ class S3dbMCPServer {
 
   async handleResourceExists(args) {
     this.ensureConnected();
-    const { resourceName, id } = args;
+    const { resourceName, id, partition, partitionValues } = args;
     
     const resource = this.getResource(resourceName);
-    const exists = await resource.exists(id);
+    
+    // Use partition information for optimized existence check if provided
+    let options = {};
+    if (partition && partitionValues) {
+      options.partition = partition;
+      options.partitionValues = partitionValues;
+    }
+    
+    const exists = await resource.exists(id, options);
     
     return {
       success: true,
       exists,
       id,
-      resource: resourceName
+      resource: resourceName,
+      ...(partition && { partition }),
+      ...(partitionValues && { partitionValues })
     };
   }
 
@@ -1174,6 +1220,36 @@ class S3dbMCPServer {
     }
     
     return database.resources[resourceName];
+  }
+
+  // Helper method to extract partition information from data for cache optimization
+  _extractPartitionInfo(resource, data) {
+    if (!resource || !data || !resource.config?.partitions) {
+      return null;
+    }
+
+    const partitionInfo = {};
+    const partitions = resource.config.partitions;
+
+    for (const [partitionName, partitionConfig] of Object.entries(partitions)) {
+      if (partitionConfig.fields) {
+        const partitionValues = {};
+        let hasValues = false;
+
+        for (const fieldName of Object.keys(partitionConfig.fields)) {
+          if (data[fieldName] !== undefined && data[fieldName] !== null) {
+            partitionValues[fieldName] = data[fieldName];
+            hasValues = true;
+          }
+        }
+
+        if (hasValues) {
+          partitionInfo[partitionName] = partitionValues;
+        }
+      }
+    }
+
+    return Object.keys(partitionInfo).length > 0 ? partitionInfo : null;
   }
 }
 
