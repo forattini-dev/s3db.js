@@ -6,7 +6,7 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
   test('accepts minimal valid config with s3db driver and connectionString', () => {
     const plugin = new ReplicatorPlugin({
       replicators: [
-        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' } }
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
       ]
     });
     expect(plugin.config.replicators).toHaveLength(1);
@@ -17,7 +17,7 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
     const plugin = new ReplicatorPlugin({
       verbose: true,
       replicators: [
-        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' } }
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
       ]
     });
     expect(plugin.config.verbose).toBe(true);
@@ -27,7 +27,7 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
     const plugin = new ReplicatorPlugin({
       persistReplicatorLog: true,
       replicators: [
-        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' } }
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
       ]
     });
     expect(plugin.config.persistReplicatorLog).toBe(true);
@@ -37,7 +37,7 @@ describe('ReplicatorPlugin - config parsing and validation', () => {
     const plugin = new ReplicatorPlugin({
       replicatorLogResource: 'custom_logs',
       replicators: [
-        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' } }
+        { driver: 's3db', config: { connectionString: 's3://user:pass@bucket/path' }, resources: { users: 'users' } }
       ]
     });
     expect(plugin.config.replicatorLogResource).toBe('custom_logs');
@@ -84,7 +84,8 @@ describe('ReplicatorPlugin - config syntaxes', () => {
         {
           driver: 'sqs',
           queueUrlDefault: 'my-queue',
-          config: { credentials: 'test' }
+          config: { credentials: 'test' },
+          resources: { users: 'users' }
         }
       ]
     });
@@ -124,8 +125,8 @@ describe('ReplicatorPlugin - config syntaxes', () => {
   test('accepts multiple replicators', () => {
     const plugin = new ReplicatorPlugin({
       replicators: [
-        { driver: 's3db', config: { connectionString: 's3://a' } },
-        { driver: 'sqs', queueUrlDefault: 'q', config: { credentials: 'x' } }
+        { driver: 's3db', config: { connectionString: 's3://a' }, resources: { users: 'users' } },
+        { driver: 'sqs', queueUrlDefault: 'q', config: { credentials: 'x' }, resources: { orders: 'orders' } }
       ]
     });
     expect(plugin.config.replicators.length).toBe(2);
@@ -159,8 +160,9 @@ describe('ReplicatorPlugin - listener installation', () => {
       database: {}
     };
     const plugin = new ReplicatorPlugin({
+      replicatorLogResource: 'replicator_logs',
       replicators: [
-        { driver: 's3db', resources: ['users'] }
+        { driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }
       ]
     });
     plugin.database = resource.database;
@@ -192,7 +194,7 @@ describe('ReplicatorPlugin - listener installation', () => {
 describe('ReplicatorPlugin - data handling', () => {
   test('filters internal fields from data', () => {
     const plugin = new ReplicatorPlugin({
-      replicators: [{ driver: 's3db' }]
+      replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
     });
     
     const data = {

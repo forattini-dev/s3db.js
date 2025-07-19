@@ -60,7 +60,7 @@ describe('S3dbReplicator - s3db to s3db replication', () => {
         attributes: { id: 'string', name: 'string' }
       });
     }
-    // Construct and setup plugin here
+    // Construct and setup plugin here - exemplo simples
     plugin = new ReplicatorPlugin({
       verbose: false,
       persistReplicatorLog: false,
@@ -69,7 +69,10 @@ describe('S3dbReplicator - s3db to s3db replication', () => {
           driver: 's3db',
           client: dbB,
           resources: {
-            users: { resource: 'users', actions: ['insert', 'update', 'delete'] }
+            users: {
+              resource: 'users',
+              actions: ['insert', 'update', 'delete']
+            }
           }
         }
       ]
@@ -706,8 +709,16 @@ describe('S3dbReplicator - multi-resource replication', () => {
           driver: 's3db',
           client: dbB,
           resources: {
-            users: { resource: 'users', actions: ['insert', 'update', 'delete'] },
-            products: { resource: 'products', actions: ['insert', 'update', 'delete'] }
+            users: {
+              resource: 'users',
+              actions: ['insert', 'update', 'delete'],
+              transformer: (data) => ({ ...data, replicatedAt: new Date().toISOString() })
+            },
+            products: {
+              resource: 'products',
+              actions: ['insert', 'update'],
+              transformer: (data) => ({ ...data, price: parseFloat(data.price), category: 'replicated' })
+            }
           }
         }
       ]
@@ -735,8 +746,11 @@ describe('S3dbReplicator - multi-resource replication', () => {
     await productsA.delete('p1');
     // Wait a bit longer for delete replication to complete
     await new Promise(resolve => setTimeout(resolve, 1000));
+    // Users should be deleted (has delete action)
     await expect(usersB.get('u1')).rejects.toThrow();
-    await expect(productsB.get('p1')).rejects.toThrow();
+    // Products should NOT be deleted (no delete action configured)
+    const productStillExists = await productsB.get('p1');
+    expect(productStillExists).toBeDefined();
     // Ensure no cross-contamination
     await usersA.insert({ id: 'u2', name: 'Bob' });
     await productsA.insert({ id: 'p2', title: 'Gadget', price: 5 });
@@ -1362,7 +1376,15 @@ describe('S3DB Replicator - Batch Operations Tests', () => {
           driver: 's3db',
           client: dbB,
           resources: {
-            users: { resource: 'users', actions: ['insert', 'update', 'delete'] }
+            users: {
+              resource: 'users',
+              actions: ['insert', 'update', 'delete'],
+              transformer: (data) => ({ 
+                ...data, 
+                processedAt: new Date().toISOString(),
+                source: 'batch-replication'
+              })
+            }
           }
         }
       ]
@@ -1381,7 +1403,7 @@ describe('S3DB Replicator - Batch Operations Tests', () => {
   });
 
   test('replicateBatch should skip when resource not included', async () => {
-    const s3dbReplicator = plugin.replicators[0].instance;
+    const s3dbReplicator = plugin.replicators[0];
     const records = [
       { id: 'test1', operation: 'insert', data: { id: 'test1', name: 'Test 1' } }
     ];
@@ -1391,7 +1413,7 @@ describe('S3DB Replicator - Batch Operations Tests', () => {
   });
 
   test('replicateBatch should process multiple records successfully', async () => {
-    const s3dbReplicator = plugin.replicators[0].instance;
+    const s3dbReplicator = plugin.replicators[0];
     const records = [
       { id: 'batch1', operation: 'insert', data: { id: 'batch1', name: 'Batch User 1' } },
       { id: 'batch2', operation: 'insert', data: { id: 'batch2', name: 'Batch User 2' } }
@@ -1414,7 +1436,7 @@ describe('S3DB Replicator - Batch Operations Tests', () => {
   });
 
   test('replicateBatch should handle errors gracefully', async () => {
-    const s3dbReplicator = plugin.replicators[0].instance;
+    const s3dbReplicator = plugin.replicators[0];
     const records = [
       { id: 'good', operation: 'insert', data: { id: 'good', name: 'Good User' } },
       { id: 'bad', operation: 'invalid_op', data: { id: 'bad', name: 'Bad User' } }

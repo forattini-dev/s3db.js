@@ -110,7 +110,7 @@ export class AuditPlugin extends Plugin {
       };
 
       // Log audit asynchronously to avoid blocking
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {});
     });
 
     // Update event
@@ -143,7 +143,7 @@ export class AuditPlugin extends Plugin {
       };
 
       // Log audit asynchronously
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {});
     });
 
     // Delete event
@@ -176,7 +176,7 @@ export class AuditPlugin extends Plugin {
       };
 
       // Log audit asynchronously
-      this.logAudit(auditRecord).catch(console.error);
+      this.logAudit(auditRecord).catch(() => {});
     });
 
     // Remover monkey patch de deleteMany
@@ -214,7 +214,7 @@ export class AuditPlugin extends Plugin {
               batchOperation: true
             })
           };
-          this.logAudit(auditRecord).catch(console.error);
+          this.logAudit(auditRecord).catch(() => {});
         }
       }
       return result;
