@@ -1,4 +1,4 @@
-import { mkdir, rmdir } from 'fs/promises';
+import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
 import { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.class.js';
 

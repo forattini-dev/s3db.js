@@ -24,16 +24,9 @@
  */
 import path from 'path';
 import fs from 'fs';
-import { promisify } from 'util';
+import { mkdir, rm as rmdir, readdir, stat, writeFile, readFile } from 'fs/promises';
 import { FilesystemCache } from './filesystem-cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
-
-const mkdir = promisify(fs.mkdir);
-const rmdir = promisify(fs.rmdir);
-const readdir = promisify(fs.readdir);
-const stat = promisify(fs.stat);
-const writeFile = promisify(fs.writeFile);
-const readFile = promisify(fs.readFile);
 
 export class PartitionAwareFilesystemCache extends FilesystemCache {
   constructor({
