@@ -132,23 +132,23 @@ export class FullTextPlugin extends Plugin {
     this.wrapResourceMethod(resource, 'insert', async (result, args, methodName) => {
       const [data] = args;
       // Index the new record
-      this.indexRecord(resource.name, result.id, data).catch(console.error);
+      this.indexRecord(resource.name, result.id, data).catch(() => {});
       return result;
     });
 
     this.wrapResourceMethod(resource, 'update', async (result, args, methodName) => {
       const [id, data] = args;
       // Remove old index entries
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      this.removeRecordFromIndex(resource.name, id).catch(() => {});
       // Index the updated record
-      this.indexRecord(resource.name, id, result).catch(console.error);
+      this.indexRecord(resource.name, id, result).catch(() => {});
       return result;
     });
 
     this.wrapResourceMethod(resource, 'delete', async (result, args, methodName) => {
       const [id] = args;
       // Remove from index
-      this.removeRecordFromIndex(resource.name, id).catch(console.error);
+      this.removeRecordFromIndex(resource.name, id).catch(() => {});
       return result;
     });
 
@@ -156,7 +156,7 @@ export class FullTextPlugin extends Plugin {
       const [ids] = args;
       // Remove from index
       for (const id of ids) {
-        this.removeRecordFromIndex(resource.name, id).catch(console.error);
+        this.removeRecordFromIndex(resource.name, id).catch(() => {});
       }
       return result;
     });

@@ -135,24 +135,40 @@ class S3dbReplicator extends BaseReplicator {
     }
   }
 
-  // Change signature to accept id
-  async replicate({ resource, operation, data, id: explicitId }) {
+  // Support both object and parameter signatures for flexibility
+  async replicate(resourceOrObj, operation, data, recordId, beforeData) {
+    let resource, op, payload, id;
+    
+    // Handle object signature: { resource, operation, data, id }
+    if (typeof resourceOrObj === 'object' && resourceOrObj.resource) {
+      resource = resourceOrObj.resource;
+      op = resourceOrObj.operation;
+      payload = resourceOrObj.data;
+      id = resourceOrObj.id;
+    } else {
+      // Handle parameter signature: (resource, operation, data, recordId, beforeData)
+      resource = resourceOrObj;
+      op = operation;
+      payload = data;
+      id = recordId;
+    }
+    
     const normResource = normalizeResourceName(resource);
-    const destResource = this._resolveDestResource(normResource, data);
+    const destResource = this._resolveDestResource(normResource, payload);
     const destResourceObj = this._getDestResourceObj(destResource);
     
     // Apply transformer before replicating
-    const transformedData = this._applyTransformer(normResource, data);
+    const transformedData = this._applyTransformer(normResource, payload);
     
     let result;
-    if (operation === 'insert') {
+    if (op === 'insert') {
       result = await destResourceObj.insert(transformedData);
-    } else if (operation === 'update') {
-      result = await destResourceObj.update(explicitId, transformedData);
-    } else if (operation === 'delete') {
-      result = await destResourceObj.delete(explicitId);
+    } else if (op === 'update') {
+      result = await destResourceObj.update(id, transformedData);
+    } else if (op === 'delete') {
+      result = await destResourceObj.delete(id);
     } else {
-      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
+      throw new Error(`Invalid operation: ${op}. Supported operations are: insert, update, delete`);
     }
     
     return result;
@@ -193,12 +209,12 @@ class S3dbReplicator extends BaseReplicator {
     }
     // String mapping
     if (typeof entry === 'string') return entry;
-    // Função mapping
+    // Função mapping - quando só há transformer, usa o resource original
     if (typeof entry === 'function') return resource;
     // Objeto: { resource, transform }
     if (typeof entry === 'object' && entry.resource) return entry.resource;
     return resource;
-    }
+  }
 
   _getDestResourceObj(resource) {
     if (!this.client || !this.client.resources) return null;
