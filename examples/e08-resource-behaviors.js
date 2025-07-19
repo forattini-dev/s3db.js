@@ -7,8 +7,8 @@ async function demonstrateBehaviors() {
   // Initialize database
   const db = await setupDatabase());// Sample large data that exceeds 2KB
   const largeData = {
-    name: 'João Silva',
-    email: 'joao@example.com',
+    name: 'John Silva',
+    email: 'john@example.com',
     bio: 'X'.repeat(1000), // 1KB of 'A's
     description: 'B'.repeat(1000), // 1KB of 'B's  
     notes: 'C'.repeat(500), // 500 bytes of 'C's
@@ -159,8 +159,8 @@ async function demonstrateBehaviors() {
   console.log('   All behaviors work normally with small data\n');
 
   const smallData = {
-    name: 'Maria Santos',
-    email: 'maria@example.com',
+          name: 'Mary Santos',
+          email: 'mary@example.com',
     bio: 'Software developer',
     tags: ['developer', 'javascript']
   };

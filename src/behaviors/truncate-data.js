@@ -168,11 +168,11 @@ function truncateValue(value, maxBytes) {
   if (typeof value === 'string') {
     return truncateString(value, maxBytes);
   } else if (typeof value === 'object' && value !== null) {
-    // Truncar objeto como JSON string truncada
+          // Truncate object as truncated JSON string
     const jsonStr = JSON.stringify(value);
     return truncateString(jsonStr, maxBytes);
   } else {
-    // Para números, booleanos, etc., converte para string e trunca
+    // For numbers, booleans, etc., convert to string and truncate
     const stringValue = String(value);
     return truncateString(stringValue, maxBytes);
   }

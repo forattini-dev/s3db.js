@@ -183,7 +183,7 @@ export class AuditPlugin extends Plugin {
     // Adicionar middleware para deleteMany
     resource.useMiddleware('deleteMany', async (ctx, next) => {
       const ids = ctx.args[0];
-      // Captura os dados antes da deleção
+      // Capture data before deletion
       const oldDataMap = {};
       if (this.config.includeData) {
         for (const id of ids) {

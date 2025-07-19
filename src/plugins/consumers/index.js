@@ -10,9 +10,9 @@ export const CONSUMER_DRIVERS = {
 };
 
 /**
- * Cria uma instância de consumer baseado no driver
- * @param {string} driver - Tipo do driver (sqs, rabbitmq, kafka...)
- * @param {Object} config - Configuração do consumer
+ * Creates a consumer instance based on the driver
+ * @param {string} driver - Driver type (sqs, rabbitmq, kafka...)
+ * @param {Object} config - Consumer configuration
  * @returns {SqsConsumer|RabbitMqConsumer|KafkaConsumer}
  */
 export function createConsumer(driver, config) {

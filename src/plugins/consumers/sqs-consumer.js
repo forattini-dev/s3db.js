@@ -1,5 +1,5 @@
 import tryFn from "../../concerns/try-fn.js";
-// Remover o import estático do SDK
+// Remove static SDK import
 // import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 
 export class SqsConsumer {
@@ -13,7 +13,7 @@ export class SqsConsumer {
     this.region = region;
     this.credentials = credentials;
     this.endpoint = endpoint;
-    this.sqs = null; // será inicializado dinamicamente
+    this.sqs = null; // will be initialized dynamically
     this._stopped = false;
     this._timer = null;
     this._pollPromise = null;

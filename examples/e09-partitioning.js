@@ -57,8 +57,8 @@ import s3db from '../src/index.js';
     const testUsers = [
       {
         id: 'user1',
-        name: 'João Silva',
-        email: 'joao@company.com',
+        name: 'John Silva',
+        email: 'john@company.com',
         region: 'US-WEST',
         department: 'engineering',
         status: 'active',
@@ -66,8 +66,8 @@ import s3db from '../src/index.js';
       },
       {
         id: 'user2', 
-        name: 'Maria Santos',
-        email: 'maria@company.com',
+        name: 'Mary Santos',
+        email: 'mary@company.com',
         region: 'US-EAST',
         department: 'engineering',
         status: 'active',

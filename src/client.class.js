@@ -268,7 +268,7 @@ export class Client extends EventEmitter {
             // console.error('[Client][ERROR] DeleteObjectsCommand errors:', response.Errors);
           }
           if (response && response.Deleted && response.Deleted.length !== keys.length) {
-            // console.error('[Client][ERROR] Nem todos os objetos foram deletados:', response.Deleted, 'esperado:', keys);
+            // console.error('[Client][ERROR] Not all objects were deleted:', response.Deleted, 'expected:', keys);
         }
         return response;
       });

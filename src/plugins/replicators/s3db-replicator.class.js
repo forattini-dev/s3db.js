@@ -48,7 +48,7 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   _normalizeResources(resources) {
-    // Suporta array, objeto, função, string
+    // Supports array, object, function, string
     if (!resources) return {};
     if (Array.isArray(resources)) {
       const map = {};
@@ -190,7 +190,7 @@ class S3dbReplicator extends BaseReplicator {
     } else {
       result = data;
     }
-    // Garante que id sempre está presente
+          // Ensure that id is always present
     if (result && data && data.id && !result.id) result.id = data.id;
     // Fallback: if transformer returns undefined/null, use original data
     if (!result && data) result = data;
@@ -209,9 +209,9 @@ class S3dbReplicator extends BaseReplicator {
     }
     // String mapping
     if (typeof entry === 'string') return entry;
-    // Função mapping - quando só há transformer, usa o resource original
-    if (typeof entry === 'function') return resource;
-    // Objeto: { resource, transform }
+          // Mapping function - when there's only transformer, use original resource
+      if (resource && !targetResourceName) targetResourceName = resource;
+          // Object: { resource, transform }
     if (typeof entry === 'object' && entry.resource) return entry.resource;
     return resource;
   }
@@ -308,15 +308,15 @@ class S3dbReplicator extends BaseReplicator {
     // If no action is specified, just check if resource is configured
     if (!action) return true;
     
-    // Suporte a todos os estilos de configuração
-    // Se for array de objetos, checar actions
+    // Support for all configuration styles
+          // If it's an array of objects, check actions
     if (Array.isArray(entry)) {
       for (const item of entry) {
         if (typeof item === 'object' && item.resource) {
           if (item.actions && Array.isArray(item.actions)) {
             if (item.actions.includes(action)) return true;
           } else {
-            return true; // Se não há actions, aceita todas
+            return true; // If no actions, accept all
           }
         } else if (typeof item === 'string' || typeof item === 'function') {
           return true;

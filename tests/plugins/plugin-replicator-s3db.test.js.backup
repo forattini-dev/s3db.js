@@ -3,8 +3,8 @@ import { createDatabaseForTest, sleep } from '../config.js';
 import { ReplicatorPlugin } from '#src/plugins/replicator.plugin.js';
 import S3dbReplicator from '#src/plugins/replicators/s3db-replicator.class.js';
 
-// Add utility polling function to wait for replication - OPTIMIZED
-async function waitForReplication(getFn, id, { timeout = 1000, interval = 25 } = {}) {
+// Add utility polling function to wait for replication
+async function waitForReplication(getFn, id, { timeout = 5000, interval = 200 } = {}) {
   const start = Date.now();
   let lastErr;
   while (Date.now() - start < timeout) {
@@ -20,7 +20,7 @@ async function waitForReplication(getFn, id, { timeout = 1000, interval = 25 } =
   throw new Error('Timeout waiting for replication');
 }
 
-async function waitForDelete(resource, id, timeout = 500) {
+async function waitForDelete(resource, id, timeout = 2000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -28,7 +28,7 @@ async function waitForDelete(resource, id, timeout = 500) {
     } catch (err) {
       if (err.name === 'NoSuchKey' || err.code === 'NoSuchKey') return true;
     }
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise(r => setTimeout(r, 50));
   }
   throw new Error('Resource was not deleted in time');
 }

@@ -74,10 +74,10 @@ describe('Resource Journey - Real Integration Tests', () => {
     // 6. Test data validation
     const validData = {
       id: 'user1',
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       age: 30,
-      bio: 'Desenvolvedor Full Stack',
+      bio: 'Full Stack Developer',
       tags: ['javascript', 'node.js', 'react'],
       region: 'BR',
       ageGroup: 'adult'
@@ -90,7 +90,7 @@ describe('Resource Journey - Real Integration Tests', () => {
     // 7. Test invalid data validation
     const invalidData = {
       id: 'user2',
-      name: 'João Silva',
+      name: 'John Silva',
       // Missing required email
       age: 'not a number', // Wrong type
       region: 'BR',
@@ -128,8 +128,8 @@ describe('Resource Journey - Real Integration Tests', () => {
     // 11. Test real insert with all features
     const insertedUser = await resource.insert(validData);
     expect(insertedUser.id).toBe('user1');
-    expect(insertedUser.name).toBe('João Silva');
-    expect(insertedUser.email).toBe('joao@example.com');
+          expect(insertedUser.name).toBe('John Silva');
+      expect(insertedUser.email).toBe('john@example.com');
     expect(insertedUser.tags).toEqual(['javascript', 'node.js', 'react']);
     expect(insertedUser.createdAt).toBeDefined();
     expect(insertedUser.updatedAt).toBeDefined();
