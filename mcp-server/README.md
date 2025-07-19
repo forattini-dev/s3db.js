@@ -139,6 +139,14 @@ Create a `.env` file or set these environment variables:
 | `S3DB_PASSPHRASE` | `secret` | Encryption passphrase |
 | `S3DB_VERSIONING_ENABLED` | `false` | Enable resource versioning |
 
+#### **Plugin Configuration**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `S3DB_COSTS_ENABLED` | `true` | Enable automatic S3 costs tracking |
+| `S3DB_CACHE_ENABLED` | `true` | Enable memory cache for performance |
+| `S3DB_CACHE_MAX_SIZE` | `1000` | Maximum items in memory cache |
+| `S3DB_CACHE_TTL` | `300000` | Cache TTL in milliseconds (5 minutes) |
+
 #### **AWS Configuration**
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -194,11 +202,13 @@ S3DB_CONNECTION_STRING="s3://..." s3db-mcp --transport=sse
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `dbConnect` | Connect to S3DB database | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?` |
+| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `verbose?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheMaxSize?`, `cacheTtl?` |
 | `dbDisconnect` | Disconnect from database | - |
 | `dbStatus` | Get connection status | - |
 | `dbCreateResource` | Create resource/collection | `name`, `attributes`, `behavior?`, `timestamps?`, `partitions?`, `paranoid?` |
 | `dbListResources` | List all resources | - |
+| `dbGetStats` | Get database statistics (costs, cache, resources) | - |
+| `dbClearCache` | Clear cache data | `resourceName?` (optional - clears all if not provided) |
 
 ### Document Operations
 
@@ -231,11 +241,15 @@ S3DB_CONNECTION_STRING="s3://..." s3db-mcp --transport=sse
 ### Basic CRUD Operations
 
 ```javascript
-// 1. Connect to database
+// 1. Connect to database with automatic cache and costs tracking
 await agent.callTool('dbConnect', {
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@bucket/databases/blog',
   verbose: false,
-  parallelism: 10
+  parallelism: 10,
+  enableCache: true,    // Memory cache enabled by default
+  enableCosts: true,    // Costs tracking enabled by default
+  cacheMaxSize: 1000,   // Cache up to 1000 items
+  cacheTtl: 300000      // 5 minute cache TTL
 });
 
 // 2. Create a resource with schema validation
@@ -298,7 +312,59 @@ const posts = await agent.callTool('resourceList', {
 const exists = await agent.callTool('resourceExists', {
   resourceName: 'posts',
   id: post.data.id
+ });
+
+// 7. Check performance statistics
+const stats = await agent.callTool('dbGetStats');
+console.log('Cache hits:', stats.stats.cache.size);
+console.log('S3 costs:', stats.stats.costs.estimatedCostUSD);
+console.log('Total requests:', stats.stats.costs.totalRequests);
+
+// 8. Clear cache if needed
+await agent.callTool('dbClearCache', {
+  resourceName: 'posts'  // Clear cache for specific resource
 });
+```
+
+### Performance & Costs Monitoring
+
+```javascript
+// Monitor database performance and costs
+const stats = await agent.callTool('dbGetStats');
+
+console.log('Database Stats:', {
+  resources: stats.stats.database.resources,
+  totalCosts: `$${stats.stats.costs.estimatedCostUSD.toFixed(6)}`,
+  cacheHitRate: `${stats.stats.cache.keyCount}/${stats.stats.cache.maxSize}`,
+  s3Operations: stats.stats.costs.requestsByType
+});
+
+// Cache performance
+if (stats.stats.cache.enabled) {
+  console.log('Cache Performance:', {
+    driver: stats.stats.cache.driver,
+    itemsCached: stats.stats.cache.size,
+    maxCapacity: stats.stats.cache.maxSize,
+    ttl: `${stats.stats.cache.ttl / 1000}s`,
+    sampleKeys: stats.stats.cache.sampleKeys
+  });
+}
+
+// S3 costs breakdown
+if (stats.stats.costs) {
+  console.log('S3 Costs Breakdown:', {
+    totalRequests: stats.stats.costs.totalRequests,
+    getRequests: stats.stats.costs.requestsByType.get,
+    putRequests: stats.stats.costs.requestsByType.put,
+    listRequests: stats.stats.costs.requestsByType.list,
+    estimatedCost: `$${stats.stats.costs.estimatedCostUSD.toFixed(6)}`
+  });
+}
+
+// Clear cache for performance reset
+await agent.callTool('dbClearCache');  // Clear all cache
+// or
+await agent.callTool('dbClearCache', { resourceName: 'posts' });  // Clear specific resource
 ```
 
 ### Batch Operations
@@ -663,7 +729,7 @@ Add to your MCP settings:
 ### AI Agent Usage Rules
 
 **Before any task:**
-1. Always use `dbConnect` first to establish connection
+1. Always use `dbConnect` first to establish connection (cache and costs tracking are enabled by default)
 2. Use `dbStatus` to verify connection and see resources
 3. Use `dbListResources` to see available collections
 
@@ -678,6 +744,12 @@ Add to your MCP settings:
 - Use nested objects for complex data structures
 - Enable timestamps for audit trails
 - Consider partitioning strategy upfront
+
+**Performance monitoring:**
+- Use `dbGetStats` to monitor S3 costs and cache performance
+- Cache is automatically enabled for read operations (get, list, count)
+- Use `dbClearCache` to reset cache when needed
+- Monitor costs to optimize S3 usage patterns
 
 **Error handling:**
 - Check connection status before operations
@@ -827,14 +899,62 @@ curl http://localhost:8001/health
 
 ---
 
+## 🔌 Built-in Performance Features
+
+The S3DB MCP Server includes **automatic performance optimizations**:
+
+### **🏎️ Memory Cache (Enabled by Default)**
+- **Automatic caching** of read operations (get, list, count, exists)
+- **Partition-aware** caching for optimized queries
+- **Configurable TTL** and size limits
+- **Cache invalidation** on write operations
+- **Performance monitoring** via `dbGetStats`
+
+### **💰 Costs Tracking (Enabled by Default)**
+- **Real-time S3 costs** calculation
+- **Request counting** by operation type
+- **Cost estimation** in USD
+- **Performance analytics** for optimization
+
+### **Configuration Options**
+```javascript
+// Connect with custom cache/costs settings
+await agent.callTool('dbConnect', {
+  connectionString: 's3://...',
+  enableCache: true,      // Default: true
+  enableCosts: true,      // Default: true  
+  cacheMaxSize: 2000,     // Default: 1000
+  cacheTtl: 600000        // Default: 300000 (5 min)
+});
+
+// Monitor performance
+const stats = await agent.callTool('dbGetStats');
+console.log('Cache size:', stats.stats.cache.size);
+console.log('S3 costs:', stats.stats.costs.estimatedCostUSD);
+
+// Clear cache when needed
+await agent.callTool('dbClearCache', { resourceName: 'users' });
+```
+
+### **Environment Variables**
+```bash
+S3DB_CACHE_ENABLED=true        # Enable/disable cache
+S3DB_CACHE_MAX_SIZE=1000       # Cache capacity
+S3DB_CACHE_TTL=300000          # 5 minute TTL
+S3DB_COSTS_ENABLED=true        # Enable/disable costs tracking
+```
+
+---
+
 ## 📊 Performance Tips
 
-1. **Use partitions** for large datasets
-2. **Batch operations** when possible
-3. **Proper pagination** - don't load everything at once
-4. **Connection reuse** - keep connections alive
-5. **Appropriate parallelism** - tune `S3DB_PARALLELISM`
-6. **Monitor costs** - track S3 requests and data transfer
+1. **Leverage built-in cache** - read operations are automatically cached
+2. **Use partitions** for large datasets to improve cache efficiency
+3. **Monitor costs** with `dbGetStats` to optimize S3 usage
+4. **Batch operations** when possible to reduce S3 requests
+5. **Proper pagination** - don't load everything at once
+6. **Connection reuse** - keep connections alive
+7. **Appropriate parallelism** - tune `S3DB_PARALLELISM`
 
 ---
 

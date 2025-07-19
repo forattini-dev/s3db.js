@@ -4,7 +4,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { S3db } from 's3db.js';
+import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -48,7 +48,7 @@ class S3dbMCPServer {
         tools: [
           {
             name: 'dbConnect',
-            description: 'Connect to an S3DB database',
+            description: 'Connect to an S3DB database with automatic costs tracking and memory cache',
             inputSchema: {
               type: 'object',
               properties: {
@@ -75,6 +75,26 @@ class S3dbMCPServer {
                   type: 'boolean',
                   description: 'Enable resource versioning',
                   default: false
+                },
+                enableCache: {
+                  type: 'boolean',
+                  description: 'Enable memory cache for improved performance',
+                  default: true
+                },
+                enableCosts: {
+                  type: 'boolean',
+                  description: 'Enable costs tracking for S3 operations',
+                  default: true
+                },
+                cacheMaxSize: {
+                  type: 'number',
+                  description: 'Maximum number of items in memory cache',
+                  default: 1000
+                },
+                cacheTtl: {
+                  type: 'number',
+                  description: 'Cache time-to-live in milliseconds',
+                  default: 300000
                 }
               },
               required: ['connectionString']
@@ -422,6 +442,29 @@ class S3dbMCPServer {
               },
               required: ['resourceName', 'confirm']
             }
+          },
+          {
+            name: 'dbGetStats',
+            description: 'Get database statistics including costs and cache performance',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          },
+          {
+            name: 'dbClearCache',
+            description: 'Clear all cached data or cache for specific resource',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                resourceName: {
+                  type: 'string',
+                  description: 'Name of specific resource to clear cache (optional - if not provided, clears all cache)'
+                }
+              },
+              required: []
+            }
           }
         ]
       };
@@ -509,6 +552,14 @@ class S3dbMCPServer {
 
           case 'resourceDeleteAll':
             result = await this.handleResourceDeleteAll(args);
+            break;
+
+          case 'dbGetStats':
+            result = await this.handleDbGetStats(args);
+            break;
+
+          case 'dbClearCache':
+            result = await this.handleDbClearCache(args);
             break;
 
           default:
@@ -609,10 +660,46 @@ class S3dbMCPServer {
 
   // Database connection handlers
   async handleDbConnect(args) {
-    const { connectionString, verbose = false, parallelism = 10, passphrase = 'secret', versioningEnabled = false } = args;
+    const { 
+      connectionString, 
+      verbose = false, 
+      parallelism = 10, 
+      passphrase = 'secret', 
+      versioningEnabled = false,
+      enableCache = true,
+      enableCosts = true,
+      cacheMaxSize = 1000,
+      cacheTtl = 300000 // 5 minutes
+    } = args;
 
     if (database && database.isConnected()) {
       return { success: false, message: 'Database is already connected' };
+    }
+
+    // Setup plugins array
+    const plugins = [];
+
+    // Always add CostsPlugin (unless explicitly disabled)
+    const costsEnabled = enableCosts !== false && process.env.S3DB_COSTS_ENABLED !== 'false';
+    if (costsEnabled) {
+      plugins.push(CostsPlugin);
+    }
+
+    // Add CachePlugin with memory cache (enabled by default, configurable)
+    const cacheEnabled = enableCache !== false && process.env.S3DB_CACHE_ENABLED !== 'false';
+    if (cacheEnabled) {
+      const cacheMaxSizeEnv = process.env.S3DB_CACHE_MAX_SIZE ? parseInt(process.env.S3DB_CACHE_MAX_SIZE) : cacheMaxSize;
+      const cacheTtlEnv = process.env.S3DB_CACHE_TTL ? parseInt(process.env.S3DB_CACHE_TTL) : cacheTtl;
+      
+      plugins.push(new CachePlugin({
+        driverType: 'memory',
+        memoryOptions: {
+          maxSize: cacheMaxSizeEnv,
+          ttl: cacheTtlEnv,
+          enableStats: verbose
+        },
+        includePartitions: true
+      }));
     }
 
     database = new S3db({
@@ -620,7 +707,8 @@ class S3dbMCPServer {
       verbose,
       parallelism,
       passphrase,
-      versioningEnabled
+      versioningEnabled,
+      plugins
     });
 
     await database.connect();
@@ -632,7 +720,14 @@ class S3dbMCPServer {
         connected: database.isConnected(),
         bucket: database.bucket,
         keyPrefix: database.keyPrefix,
-        version: database.s3dbVersion
+        version: database.s3dbVersion,
+        plugins: {
+          costs: costsEnabled,
+          cache: cacheEnabled,
+          cacheDriver: cacheEnabled ? 'memory' : null,
+          cacheMaxSize: cacheEnabled ? cacheMaxSizeEnv : null,
+          cacheTtl: cacheEnabled ? cacheTtlEnv : null
+        }
       }
     };
   }
@@ -926,6 +1021,101 @@ class S3dbMCPServer {
       success: true,
       message: `All documents deleted from ${resourceName}`
     };
+  }
+
+  async handleDbGetStats(args) {
+    this.ensureConnected();
+    
+    const stats = {
+      database: {
+        connected: database.isConnected(),
+        bucket: database.bucket,
+        keyPrefix: database.keyPrefix,
+        version: database.s3dbVersion,
+        resourceCount: Object.keys(database.resources || {}).length,
+        resources: Object.keys(database.resources || {})
+      },
+      costs: null,
+      cache: null
+    };
+
+    // Get costs from client if available
+    if (database.client && database.client.costs) {
+      stats.costs = {
+        total: database.client.costs.total,
+        totalRequests: database.client.costs.requests.total,
+        requestsByType: { ...database.client.costs.requests },
+        eventsByType: { ...database.client.costs.events },
+        estimatedCostUSD: database.client.costs.total
+      };
+    }
+
+    // Get cache stats from plugins if available
+    try {
+      const cachePlugin = database.pluginList?.find(p => p.constructor.name === 'CachePlugin');
+      if (cachePlugin && cachePlugin.driver) {
+        const cacheSize = await cachePlugin.driver.size();
+        const cacheKeys = await cachePlugin.driver.keys();
+        
+        stats.cache = {
+          enabled: true,
+          driver: cachePlugin.driver.constructor.name,
+          size: cacheSize,
+          maxSize: cachePlugin.driver.maxSize || 'unlimited',
+          ttl: cachePlugin.driver.ttl || 'no expiration',
+          keyCount: cacheKeys.length,
+          sampleKeys: cacheKeys.slice(0, 5) // First 5 keys as sample
+        };
+      } else {
+        stats.cache = { enabled: false };
+      }
+    } catch (error) {
+      stats.cache = { enabled: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      stats
+    };
+  }
+
+  async handleDbClearCache(args) {
+    this.ensureConnected();
+    const { resourceName } = args;
+    
+    try {
+      const cachePlugin = database.pluginList?.find(p => p.constructor.name === 'CachePlugin');
+      if (!cachePlugin || !cachePlugin.driver) {
+        return {
+          success: false,
+          message: 'Cache is not enabled or available'
+        };
+      }
+
+      if (resourceName) {
+        // Clear cache for specific resource
+        const resource = this.getResource(resourceName);
+        await cachePlugin.clearCacheForResource(resource);
+        
+        return {
+          success: true,
+          message: `Cache cleared for resource: ${resourceName}`
+        };
+      } else {
+        // Clear all cache
+        await cachePlugin.driver.clear();
+        
+        return {
+          success: true,
+          message: 'All cache cleared'
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to clear cache: ${error.message}`
+      };
+    }
   }
 
   // Helper methods

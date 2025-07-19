@@ -23,6 +23,12 @@ services:
       - S3DB_PASSPHRASE=${S3DB_PASSPHRASE:-secret}
       - S3DB_VERSIONING_ENABLED=${S3DB_VERSIONING_ENABLED:-false}
       
+      # Plugin configuration
+      - S3DB_COSTS_ENABLED=${S3DB_COSTS_ENABLED:-true}
+      - S3DB_CACHE_ENABLED=${S3DB_CACHE_ENABLED:-true}
+      - S3DB_CACHE_MAX_SIZE=${S3DB_CACHE_MAX_SIZE:-1000}
+      - S3DB_CACHE_TTL=${S3DB_CACHE_TTL:-300000}
+      
       # AWS credentials (optional if using IAM roles)
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}

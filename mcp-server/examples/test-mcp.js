@@ -24,7 +24,7 @@ class MockMCPClient {
     // In a real implementation, this would connect to the MCP server
     // and fetch the available tools
     this.tools = [
-      'dbConnect', 'dbDisconnect', 'dbStatus', 'dbCreateResource', 'dbListResources',
+      'dbConnect', 'dbDisconnect', 'dbStatus', 'dbCreateResource', 'dbListResources', 'dbGetStats', 'dbClearCache',
       'resourceInsert', 'resourceGet', 'resourceUpdate', 'resourceDelete', 'resourceList'
     ];
     
@@ -127,6 +127,43 @@ class MockMCPClient {
         success: true,
         count: 42,
         resource: args.resourceName
+      },
+      
+      dbGetStats: {
+        success: true,
+        stats: {
+          database: {
+            connected: true,
+            bucket: 'test-bucket',
+            keyPrefix: 'databases/test',
+            version: '7.2.1',
+            resourceCount: 2,
+            resources: ['users', 'posts']
+          },
+          costs: {
+            total: 0.000042,
+            totalRequests: 156,
+            requestsByType: { get: 89, put: 45, list: 12, delete: 10 },
+            eventsByType: { GetObjectCommand: 89, PutObjectCommand: 45 },
+            estimatedCostUSD: 0.000042
+          },
+          cache: {
+            enabled: true,
+            driver: 'MemoryCache',
+            size: 23,
+            maxSize: 1000,
+            ttl: 300000,
+            keyCount: 23,
+            sampleKeys: ['resource=users/action=list.json.gz', 'resource=posts/action=count.json.gz']
+          }
+        }
+      },
+      
+      dbClearCache: {
+        success: true,
+        message: args.resourceName 
+          ? `Cache cleared for resource: ${args.resourceName}`
+          : 'All cache cleared'
       }
     };
     
@@ -154,7 +191,11 @@ async function runTests() {
     await client.callTool('dbConnect', {
       connectionString: 's3://test-key:test-secret@test-bucket/databases/demo',
       verbose: false,
-      parallelism: 10
+      parallelism: 10,
+      enableCache: true,
+      enableCosts: true,
+      cacheMaxSize: 1000,
+      cacheTtl: 300000
     });
     
     // Test 2: Check database status
@@ -223,18 +264,30 @@ async function runTests() {
       offset: 0
     });
     
-    // Test 8: Count documents
-    console.log('\n📋 Test 8: Count Documents');
-    console.log('---------------------------');
-    await client.callTool('resourceCount', {
-      resourceName: 'users'
-    });
-    
-    console.log('\n✅ All tests completed successfully!');
-    console.log('\n💡 To run against a real S3DB MCP server:');
-    console.log('   1. Start the server: npm start');
-    console.log('   2. Configure your .env file');
-    console.log('   3. Use a real MCP client to connect');
+         // Test 8: Count documents
+     console.log('\n📋 Test 8: Count Documents');
+     console.log('---------------------------');
+     await client.callTool('resourceCount', {
+       resourceName: 'users'
+     });
+     
+     // Test 9: Get database statistics
+     console.log('\n📋 Test 9: Database Statistics');
+     console.log('-------------------------------');
+     await client.callTool('dbGetStats');
+     
+     // Test 10: Clear cache
+     console.log('\n📋 Test 10: Clear Cache');
+     console.log('------------------------');
+     await client.callTool('dbClearCache', {
+       resourceName: 'users'
+     });
+     
+     console.log('\n✅ All tests completed successfully!');
+     console.log('\n💡 To run against a real S3DB MCP server:');
+     console.log('   1. Start the server: npm start');
+     console.log('   2. Configure your .env file');
+     console.log('   3. Use a real MCP client to connect');
     
   } catch (error) {
     console.error('\n❌ Test failed:', error.message);
