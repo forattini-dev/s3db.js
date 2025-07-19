@@ -151,9 +151,9 @@ describe('Full-Text Plugin', () => {
       await fullTextPlugin.setup(database);
       const userData = {
         id: 'user-1',
-        name: 'João Silva',
-        email: 'joao@example.com',
-        description: 'Desenvolvedor de software experiente',
+        name: 'John Silva',
+        email: 'john@example.com',
+        description: 'Experienced software developer',
         department: 'TI'
       };
 
@@ -168,9 +168,9 @@ describe('Full-Text Plugin', () => {
       await fullTextPlugin.setup(database);
       const userData = {
         id: 'user-2',
-        name: 'Maria Santos',
-        email: 'maria@example.com',
-        description: 'Analista de negócios',
+        name: 'Mary Santos',
+        email: 'mary@example.com',
+        description: 'Business analyst',
         department: 'RH'
       };
 
@@ -178,9 +178,9 @@ describe('Full-Text Plugin', () => {
 
       // Update the user
       await users.update('user-2', {
-        name: 'Maria Santos Silva',
-        email: 'maria@example.com',
-        description: 'Analista de negócios sênior',
+        name: 'Mary Santos Silva',
+                  email: 'mary@example.com',
+        description: 'Senior business analyst',
         department: 'RH'
       });
 
@@ -192,8 +192,8 @@ describe('Full-Text Plugin', () => {
       await fullTextPlugin.setup(database);
       const userData = {
         id: 'user-3',
-        name: 'Pedro Costa',
-        email: 'pedro@example.com',
+        name: 'Peter Costa',
+                  email: 'peter@example.com',
         description: 'Gerente de projeto',
         department: 'TI'
       };
@@ -212,9 +212,9 @@ describe('Full-Text Plugin', () => {
     test('should handle bulk operations', async () => {
       await fullTextPlugin.setup(database);
       const userData = [
-        { id: 'user-bulk-1', name: 'Alice Johnson', email: 'alice@example.com', description: 'Designer gráfico', department: 'IT' },
-        { id: 'user-bulk-2', name: 'Bob Wilson', email: 'bob@example.com', description: 'Desenvolvedor frontend', department: 'IT' },
-        { id: 'user-bulk-3', name: 'Carol Brown', email: 'carol@example.com', description: 'Analista de dados', department: 'IT' }
+        { id: 'user-bulk-1', name: 'Alice Johnson', email: 'alice@example.com', description: 'Graphic designer', department: 'IT' },
+        { id: 'user-bulk-2', name: 'Bob Wilson', email: 'bob@example.com', description: 'Frontend developer', department: 'IT' },
+        { id: 'user-bulk-3', name: 'Carol Brown', email: 'carol@example.com', description: 'Data analyst', department: 'IT' }
       ];
 
       await users.insertMany(userData);
@@ -244,15 +244,15 @@ describe('Full-Text Plugin', () => {
       await fullTextPlugin.setup(database);
       const userData = {
         id: 'user-accents',
-        name: 'José María González',
+        name: 'Jose Maria Gonzalez',
         email: 'jose@example.com',
-        description: 'Desenvolvedor com experiência em C++ e Python',
+        description: 'Developer with experience in C++ and Python',
         department: 'TI'
       };
 
       await users.insert(userData);
 
-      const results = await fullTextPlugin.searchRecords('users', 'José María');
+      const results = await fullTextPlugin.searchRecords('users', 'Jose Maria');
       expect(results.length).toBeGreaterThan(0);
       expect(results[0]._searchScore).toBeGreaterThan(0);
     });
@@ -289,10 +289,10 @@ describe('Full-Text Plugin', () => {
       });
       // Create test data
       const testUsers = [
-        { id: 'user-search-1', name: 'João Silva', email: 'joao@example.com', description: 'Desenvolvedor Java experiente', department: 'TI' },
-        { id: 'user-search-2', name: 'Maria Santos', email: 'maria@example.com', description: 'Analista de negócios sênior', department: 'RH' },
-        { id: 'user-search-3', name: 'Pedro Costa', email: 'pedro@example.com', description: 'Gerente de projeto de software', department: 'TI' },
-        { id: 'user-search-4', name: 'Ana Oliveira', email: 'ana@example.com', description: 'Designer de interface de usuário', department: 'Design' }
+        { id: 'user-search-1', name: 'John Silva', email: 'john@example.com', description: 'Experienced Java developer', department: 'TI' },
+        { id: 'user-search-2', name: 'Mary Santos', email: 'mary@example.com', description: 'Senior business analyst', department: 'RH' },
+        { id: 'user-search-3', name: 'Peter Costa', email: 'peter@example.com', description: 'Software project manager', department: 'TI' },
+        { id: 'user-search-4', name: 'Anna Oliveira', email: 'anna@example.com', description: 'User interface designer', department: 'Design' }
       ];
 
       for (const user of testUsers) {
@@ -300,9 +300,9 @@ describe('Full-Text Plugin', () => {
       }
 
       const testProducts = [
-        { id: 'prod-1', name: 'Laptop Dell Inspiron', description: 'Notebook para desenvolvimento', content: 'Processador Intel i7, 16GB RAM', category: 'Eletrônicos' },
-        { id: 'prod-2', name: 'Mouse Logitech', description: 'Mouse sem fio para jogos', content: 'Sensor óptico de alta precisão', category: 'Acessórios' },
-        { id: 'prod-3', name: 'Teclado Mecânico', description: 'Teclado para programadores', content: 'Switches Cherry MX Blue', category: 'Acessórios' }
+        { id: 'prod-1', name: 'Laptop Dell Inspiron', description: 'Development notebook', content: 'Intel i7 processor, 16GB RAM', category: 'Electronics' },
+        { id: 'prod-2', name: 'Mouse Logitech', description: 'Wireless gaming mouse', content: 'High precision optical sensor', category: 'Accessories' },
+        { id: 'prod-3', name: 'Mechanical Keyboard', description: 'Keyboard for programmers', content: 'Cherry MX Blue switches', category: 'Accessories' }
       ];
 
       for (const product of testProducts) {
@@ -311,16 +311,16 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should perform basic text search', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'João Silva');
+      const results = await fullTextPlugin.searchRecords('users', 'John Silva');
 
       expect(results.length).toBeGreaterThan(0);
       // Handle potential encoding issues by checking if the name contains the search term
-      expect((results[0]?.name || '').toLowerCase()).toContain('joã£o');
+      expect((results[0]?.name || '').toLowerCase()).toContain('john');
       expect(results[0]._searchScore).toBeGreaterThan(0);
     });
 
     test('should perform search across multiple fields', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'desenvolvedor');
+      const results = await fullTextPlugin.searchRecords('users', 'developer');
 
       expect(results.length).toBeGreaterThan(0);
       results.forEach(result => {
@@ -347,7 +347,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should return results with search scores', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'desenvolvedor');
+      const results = await fullTextPlugin.searchRecords('users', 'developer');
 
       results.forEach(result => {
         expect(result._searchScore).toBeDefined();
@@ -357,24 +357,24 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should handle case-insensitive search', async () => {
-      const results1 = await fullTextPlugin.searchRecords('users', 'joão');
-      const results2 = await fullTextPlugin.searchRecords('users', 'JOÃO');
+      const results1 = await fullTextPlugin.searchRecords('users', 'john');
+      const results2 = await fullTextPlugin.searchRecords('users', 'JOHN');
 
       expect(results1.length).toBe(results2.length);
     });
 
     test('should handle partial word matches', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'desenvol');
+      const results = await fullTextPlugin.searchRecords('users', 'develop');
 
       expect(results.length).toBeGreaterThan(0);
       results.forEach(result => {
-        expect((result?.name || '').toLowerCase().includes('desenvol') || 
-               (result?.description || '').toLowerCase().includes('desenvol')).toBe(true);
+        expect((result?.name || '').toLowerCase().includes('develop') || 
+               (result?.description || '').toLowerCase().includes('develop')).toBe(true);
       });
     });
 
     test('should handle multiple word search', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'João desenvolvedor');
+      const results = await fullTextPlugin.searchRecords('users', 'John developer');
 
       expect(results.length).toBeGreaterThan(0);
     });
@@ -425,8 +425,8 @@ describe('Full-Text Plugin', () => {
         }
       });
       const testUsers = [
-        { id: 'user-options-1', name: 'João Silva', email: 'joao@example.com', description: 'Desenvolvedor Java', department: 'TI' },
-        { id: 'user-options-2', name: 'Maria Santos', email: 'maria@example.com', description: 'Analista de negócios', department: 'RH' }
+        { id: 'user-options-1', name: 'John Silva', email: 'john@example.com', description: 'Java developer', department: 'TI' },
+        { id: 'user-options-2', name: 'Mary Santos', email: 'mary@example.com', description: 'Business analyst', department: 'RH' }
       ];
 
       for (const user of testUsers) {
@@ -435,17 +435,17 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should search in specific fields', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'João', {
+      const results = await fullTextPlugin.searchRecords('users', 'John', {
         fields: ['name']
       });
 
       expect(results.length).toBeGreaterThan(0);
       // Handle potential encoding issues by checking if the name contains the search term
-      expect((results[0]?.name || '').toLowerCase()).toContain('joã£o');
+      expect((results[0]?.name || '').toLowerCase()).toContain('john');
     });
 
     test('should limit results', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'desenvolvedor', {
+      const results = await fullTextPlugin.searchRecords('users', 'developer', {
         limit: 1
       });
 
@@ -453,20 +453,20 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should perform exact match search', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'João Silva', {
+      const results = await fullTextPlugin.searchRecords('users', 'John Silva', {
         exactMatch: true
       });
 
       expect(results.length).toBeGreaterThan(0);
       results.forEach(result => {
         // Handle potential encoding issues by checking if the name contains the search terms
-        expect((result?.name || '').toLowerCase()).toContain('joã£o');
+        expect((result?.name || '').toLowerCase()).toContain('john');
         expect((result?.name || '').toLowerCase()).toContain('silva');
       });
     });
 
     test('should combine multiple options', async () => {
-      const results = await fullTextPlugin.searchRecords('users', 'desenvolvedor', {
+      const results = await fullTextPlugin.searchRecords('users', 'developer', {
         fields: ['description'],
         limit: 1,
         exactMatch: false
@@ -474,7 +474,7 @@ describe('Full-Text Plugin', () => {
 
       expect(results.length).toBeLessThanOrEqual(1);
       results.forEach(result => {
-        expect((result?.description || '').toLowerCase()).toContain('desenvolvedor');
+        expect((result?.description || '').toLowerCase()).toContain('developer');
       });
     });
   });
@@ -558,7 +558,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should respect custom timeout', async () => {
-      // Mock para simular operação demorada
+      // Mock to simulate slow operation
       const original = fullTextPlugin._rebuildAllIndexesInternal;
       fullTextPlugin._rebuildAllIndexesInternal = () => new Promise(resolve => setTimeout(resolve, 1000));
       await expect(fullTextPlugin.rebuildAllIndexes({ timeout: 100 })).rejects.toThrow('Timeout');
@@ -659,15 +659,15 @@ describe('Full-Text Plugin', () => {
     test('should handle Portuguese language', async () => {
       const userData = {
         id: 'user-portuguese',
-        name: 'João Silva',
-        email: 'joao@example.com',
-        description: 'Desenvolvedor de software com experiência em Java e Python',
+        name: 'John Silva',
+        email: 'john@example.com',
+        description: 'Software developer with experience in Java and Python',
         department: 'TI'
       };
 
       await users.insert(userData);
 
-      const results = await fullTextPlugin.searchRecords('users', 'desenvolvedor');
+      const results = await fullTextPlugin.searchRecords('users', 'developer');
       expect(results.length).toBeGreaterThan(0);
     });
 

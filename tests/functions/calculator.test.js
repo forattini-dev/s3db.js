@@ -232,14 +232,14 @@ describe('Calculator Tests', () => {
         '_v': '1',
         'user_profile': JSON.stringify({
           personal_info: {
-            name: 'João Silva Santos',
-            email: 'joao.silva@example.com',
+            name: 'John Silva Santos',
+            email: 'john.silva@example.com',
             phone: '+55 11 99999-9999',
             birth_date: '1990-05-15',
             nationality: 'Brasileiro',
             address: {
               street: 'Rua das Flores, 123',
-              city: 'São Paulo',
+              city: 'Sao Paulo',
               state: 'SP',
               zip_code: '01234-567',
               country: 'Brasil'
@@ -595,7 +595,7 @@ describe('Calculator Tests', () => {
 
     test('should cover calculateUTF8Bytes with non-string input', () => {
       // Testar via calculateAttributeSizes que internamente chama calculateUTF8Bytes
-      // com valores não-string (objetos, arrays, etc.)
+      // with non-string values (objects, arrays, etc.)
       const result = calculateAttributeSizes({ 
         obj: { foo: 'bar' },
         arr: [1, 2, 3],
@@ -609,7 +609,7 @@ describe('Calculator Tests', () => {
     });
 
     test('should cover transformValue final return', () => {
-      // Testar tipos que caem no último return de transformValue
+      // Test types that fall into the last return of transformValue
       const result = calculateAttributeSizes({
         bigint: 12345678901234567890n,
         func: function(){},
@@ -621,14 +621,14 @@ describe('Calculator Tests', () => {
     });
 
     test('should cover calculateUTF8Bytes with non-string input directly', () => {
-      // Testar diretamente a função com input não-string
+      // Test function directly with non-string input
       const result = calculateUTF8Bytes('Hello World'); // Ensure it's a string
       expect(typeof result).toBe('number');
       expect(result).toBeGreaterThan(0);
     });
 
     test('should cover transformValue final return directly', () => {
-      // Testar diretamente o último return de transformValue
+      // Test directly the last return of transformValue
       const bigintResult = transformValue(12345678901234567890n);
       expect(typeof bigintResult).toBe('string');
       
@@ -638,7 +638,7 @@ describe('Calculator Tests', () => {
       const symbolResult = transformValue(Symbol('abc'));
       expect(typeof symbolResult).toBe('string');
       
-      // Testar com tipos que realmente caem no último return
+      // Test with types that actually fall into the last return
       const dateResult = transformValue(new Date());
       expect(typeof dateResult).toBe('string');
       
@@ -648,7 +648,7 @@ describe('Calculator Tests', () => {
       const regexResult = transformValue(/regex/);
       expect(typeof regexResult).toBe('string');
       
-      // Testar com undefined em contexto que não seja tratado como undefined
+      // Test with undefined in context that is not treated as undefined
       const undefinedResult = transformValue(undefined);
       expect(typeof undefinedResult).toBe('string');
       expect(undefinedResult).toBe('');

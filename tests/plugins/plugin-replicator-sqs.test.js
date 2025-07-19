@@ -34,7 +34,7 @@ describe('SqsReplicator - s3db to sqs replication', () => {
     const user = { id: '1', name: 'Bob' };
     await users.insert(user);
     console.log('Inserted user:', user);
-    await sleep(1500);
+    await sleep(300);
     const messages = (await sqsClient.quickGet(queueUrl, 1)).Messages || [];
     console.log('SQS messages:', messages);
     const found = messages.find(m => JSON.parse(m.Body).data.id === '1');
@@ -134,7 +134,7 @@ describe('SqsReplicator - b3: one resource, transform adds replication date', ()
     const user = { id: 'x1', name: 'Zoe' };
     await users.insert(user);
     console.log('Inserted user:', user);
-    await sleep(1500);
+    await sleep(300);
     const messages = (await sqsClient.quickGet(queueUrl, 1)).Messages || [];
     console.log('SQS messages:', messages);
     const found = messages.find(m => JSON.parse(m.Body).data.id === 'x1');

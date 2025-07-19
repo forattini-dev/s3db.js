@@ -44,7 +44,7 @@ async function main() {
       description: 'setsetsetsetsetset',
       shortDescription: 'setsetsetsetsetset',
       imageAlt: 'Logo da Stone',
-      siteName: 'Stone: solução completa de vendas feita',
+      siteName: 'Stone: complete sales solution made',
       type: 'website',
       locale: 'pt_BR',
       imageWidth: 128,

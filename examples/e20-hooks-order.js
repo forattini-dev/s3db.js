@@ -143,7 +143,7 @@ async function testHooks() {
   executionOrder.length = 0;
   oldOrder.length = 0;
   await resource.insert(testData);
-  console.log('\nOrdem de execução dos hooks beforeInsert:', [...oldOrder, ...executionOrder]);
+      console.log('\nbeforeInsert hooks execution order:', [...oldOrder, ...executionOrder]);
 
   await db2.disconnect?.();
   console.log('\n🧹 Cleanup completed');

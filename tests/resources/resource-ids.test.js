@@ -295,7 +295,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       const results = await resource.insertMany(users);
       
       expect(results).toHaveLength(3);
-      // Verificar que todos os IDs foram gerados corretamente, mas não depender da ordem
+      // Verify that all IDs were generated correctly, but don't depend on order
       const ids = results.map(r => r.id);
       expect(ids).toContain('bulk-id-1');
       expect(ids).toContain('bulk-id-2');

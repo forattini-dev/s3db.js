@@ -197,7 +197,7 @@ export const ErrorMap = {
   'InvalidResourceItem': InvalidResourceItem,
 };
 
-// Utilitário para mapear erro AWS para erro customizado
+// Utility to map AWS error to custom error
 export function mapAwsError(err, context = {}) {
   const code = err.code || err.Code || err.name;
   const metadata = err.$metadata ? { ...err.$metadata } : undefined;

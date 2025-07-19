@@ -71,7 +71,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     if (database && typeof database.disconnect === 'function') await database.disconnect();
   }, 10000);
 
-  async function waitForUser(id, timeout = 4000) {
+  async function waitForUser(id, timeout = 1000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {
@@ -83,7 +83,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     throw new Error(`User ${id} not found after ${timeout}ms`);
   }
 
-  async function waitForUserUpdate(id, expectedName, timeout = 4000) {
+  async function waitForUserUpdate(id, expectedName, timeout = 1000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {
@@ -95,7 +95,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     throw new Error(`User ${id} with name '${expectedName}' not found after ${timeout}ms`);
   }
 
-  async function waitForUserDeletion(id, timeout = 6000) {
+  async function waitForUserDeletion(id, timeout = 1500) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {
@@ -379,7 +379,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
     for (const msg of msgs) {
       await sqsClient.quickSend(queueUrl, msg);
     }
-    // Espera até todos serem processados
+    // Wait until all are processed
     let count = 0, tries = 0;
     while (tries++ < 30) { // Increased from 10 to 30 attempts
       count = await users.count();
@@ -462,7 +462,7 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
         }, $attributes: {}, $raw: {}
       });
     }
-    // Espera até todos serem processados
+    // Wait until all are processed
     let countUsers = 0, countOrders = 0, tries = 0;
     while (tries++ < 30) { // Increased from 10 to 30 attempts
       countUsers = await users.count();
@@ -539,7 +539,7 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
       await usersSource.insert(data);
       await replicator.replicate('users', 'insert', data, data.id);
     }
-    // Espera até todos serem processados no destino
+    // Wait until all are processed in the destination
     let countSource = 0, countTarget = 0, tries = 0;
     while (tries++ < 10) {
       countSource = await usersSource.count();

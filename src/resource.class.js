@@ -171,7 +171,7 @@ export class Resource extends EventEmitter {
             if (typeof fn === 'function') {
               this.hooks[event].push(fn.bind(this));
             }
-            // Se não for função, ignore silenciosamente
+            // If not a function, ignore silently
           }
         }
       }
@@ -704,7 +704,7 @@ export class Resource extends EventEmitter {
     // LOG: body e contentType antes do putObject
     // Only throw if behavior is 'body-only' and body is empty
     if (this.behavior === 'body-only' && (!body || body === "")) {
-      throw new Error(`[Resource.insert] Tentativa de gravar objeto sem body! Dados: id=${finalId}, resource=${this.name}`);
+      throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
     }
     // For other behaviors, allow empty body (all data in metadata)
     // Before putObject in insert
@@ -753,7 +753,7 @@ export class Resource extends EventEmitter {
 
     // Execute afterInsert hooks
     const finalResult = await this.executeHooks('afterInsert', insertedData);
-    // Emit event com dados antes dos hooks afterInsert
+    // Emit event with data before afterInsert hooks
     this.emit("insert", {
       ...insertedData,
       $before: { ...completeData },
@@ -774,7 +774,7 @@ export class Resource extends EventEmitter {
     if (isEmpty(id)) throw new Error('id cannot be empty');
     
     const key = this.getResourceKey(id);
-    // LOG: início do get
+    // LOG: start of get
     // eslint-disable-next-line no-console
     const [ok, err, request] = await tryFn(() => this.client.getObject(key));
     // LOG: resultado do headObject
@@ -788,7 +788,7 @@ export class Resource extends EventEmitter {
         id
       });
     }
-    // Se o objeto existe mas não tem conteúdo, lançar erro NoSuchKey
+    // If object exists but has no content, throw NoSuchKey error
     if (request.ContentLength === 0) {
       const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
       noContentErr.name = 'NoSuchKey';
@@ -1346,7 +1346,7 @@ export class Resource extends EventEmitter {
         prefix = `resource=${this.name}/partition=${partition}`;
       }
     } else {
-      // List from main resource (sem versão no path)
+      // List from main resource (without version in path)
       prefix = `resource=${this.name}/data`;
     }
     // Use getKeysPage for real pagination support
@@ -1892,7 +1892,7 @@ export class Resource extends EventEmitter {
     for (const [partitionName, partition] of Object.entries(partitions)) {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
-        // Salvar apenas a versão como metadado, nunca atributos do objeto
+        // Save only version as metadata, never object attributes
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -2082,7 +2082,7 @@ export class Resource extends EventEmitter {
       // Create new partition reference if new key exists
       if (newPartitionKey) {
         const [ok, err] = await tryFn(async () => {
-          // Salvar apenas a versão como metadado
+          // Save only version as metadata
           const partitionMetadata = {
             _v: String(this.version)
           };
@@ -2101,7 +2101,7 @@ export class Resource extends EventEmitter {
     } else if (newPartitionKey) {
       // If partition keys are the same, just update the existing reference
       const [ok, err] = await tryFn(async () => {
-        // Salvar apenas a versão como metadado
+        // Save only version as metadata
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -2138,7 +2138,7 @@ export class Resource extends EventEmitter {
       }
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
-        // Salvar apenas a versão como metadado
+        // Save only version as metadata
         const partitionMetadata = {
           _v: String(this.version)
         };
@@ -2306,8 +2306,8 @@ export class Resource extends EventEmitter {
   }
 
   /**
-   * Compose the full object (metadata + body) as retornado por .get(),
-   * usando os dados em memória após insert/update, de acordo com o behavior
+   * Compose the full object (metadata + body) as returned by .get(),
+   * using in-memory data after insert/update, according to behavior
    */
   async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
     // Preserve behavior flags before unmapping
@@ -2464,7 +2464,7 @@ export class Resource extends EventEmitter {
     this._middlewares.get(method).push(fn);
   }
 
-  // Utilitário para aplicar valores default do schema
+  // Utility to apply schema default values
   applyDefaults(data) {
     const out = { ...data };
     for (const [key, def] of Object.entries(this.attributes)) {
@@ -2473,7 +2473,7 @@ export class Resource extends EventEmitter {
           const match = def.match(/default:([^|]+)/);
           if (match) {
             let val = match[1];
-            // Conversão para boolean/number se necessário
+            // Convert to boolean/number if necessary
             if (def.includes('boolean')) val = val === 'true';
             else if (def.includes('number')) val = Number(val);
             out[key] = val;
