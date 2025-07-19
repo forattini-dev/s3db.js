@@ -29,7 +29,6 @@ import BaseReplicator from './base-replicator.class.js';
 class SqsReplicator extends BaseReplicator {
   constructor(config = {}, resources = [], client = null) {
     super(config);
-    this.resources = resources;
     this.client = client;
     this.queueUrl = config.queueUrl;
     this.queues = config.queues || {};
@@ -39,13 +38,26 @@ class SqsReplicator extends BaseReplicator {
     this.messageGroupId = config.messageGroupId;
     this.deduplicationId = config.deduplicationId;
     
-    // Build queues from resources configuration
-    if (resources && typeof resources === 'object') {
+    // Normalize resources to object format
+    if (Array.isArray(resources)) {
+      this.resources = {};
+      for (const resource of resources) {
+        if (typeof resource === 'string') {
+          this.resources[resource] = true;
+        } else if (typeof resource === 'object' && resource.name) {
+          this.resources[resource.name] = resource;
+        }
+      }
+    } else if (typeof resources === 'object') {
+      this.resources = resources;
+      // Build queues from resources configuration
       for (const [resourceName, resourceConfig] of Object.entries(resources)) {
-        if (resourceConfig.queueUrl) {
+        if (resourceConfig && resourceConfig.queueUrl) {
           this.queues[resourceName] = resourceConfig.queueUrl;
         }
       }
+    } else {
+      this.resources = {};
     }
   }
 
@@ -297,7 +309,7 @@ class SqsReplicator extends BaseReplicator {
       connected: !!this.sqsClient,
       queueUrl: this.queueUrl,
       region: this.region,
-      resources: this.resources,
+      resources: Object.keys(this.resources || {}),
       totalreplicators: this.listenerCount('replicated'),
       totalErrors: this.listenerCount('replicator_error')
     };

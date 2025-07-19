@@ -173,7 +173,8 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   installEventListeners(resource, database, plugin) {
-    if (!resource || this.eventListenersInstalled.has(resource.name)) {
+    if (!resource || this.eventListenersInstalled.has(resource.name) || 
+        resource.name === this.config.replicatorLogResource) {
       return;
     }
 
@@ -265,15 +266,22 @@ export class ReplicatorPlugin extends Plugin {
     }
   }
 
-  createReplicator(driver, config, resources) {
-    return createReplicator(driver, config, resources);
+  createReplicator(driver, config, resources, client) {
+    return createReplicator(driver, config, resources, client);
   }
 
   async initializeReplicators(database) {
     for (const replicatorConfig of this.config.replicators) {
-      const { driver, config, resources } = replicatorConfig;
+      const { driver, config = {}, resources, client, ...otherConfig } = replicatorConfig;
       
-      const replicator = this.createReplicator(driver, config, resources);
+      // Extract resources from replicatorConfig or config
+      const replicatorResources = resources || config.resources || {};
+      
+      // Merge config with other top-level config options (like queueUrlDefault)
+      const mergedConfig = { ...config, ...otherConfig };
+      
+      // Pass config, resources, and client in correct order
+      const replicator = this.createReplicator(driver, mergedConfig, replicatorResources, client);
       if (replicator) {
         await replicator.initialize(database);
         this.replicators.push(replicator);
@@ -290,6 +298,75 @@ export class ReplicatorPlugin extends Plugin {
     // this.isProcessing = false; // Removed as per edit hint
     // Process remaining queue items
     // await this.processQueue(); // Removed as per edit hint
+  }
+
+  filterInternalFields(data) {
+    if (!data || typeof data !== 'object') return data;
+    const filtered = {};
+    for (const [key, value] of Object.entries(data)) {
+      // Filter out internal fields that start with _ or $
+      if (!key.startsWith('_') && !key.startsWith('$')) {
+        filtered[key] = value;
+      }
+    }
+    return filtered;
+  }
+
+  async uploadMetadataFile(database) {
+    if (typeof database.uploadMetadataFile === 'function') {
+      await database.uploadMetadataFile();
+    }
+  }
+
+  async getCompleteData(resource, data) {
+    try {
+      const [ok, err, record] = await tryFn(() => resource.get(data.id));
+      if (ok && record) {
+        return record;
+      }
+    } catch (error) {
+      // Fallback to provided data
+    }
+    return data;
+  }
+
+  async retryWithBackoff(operation, maxRetries = 3) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Simple backoff: wait 1s, 2s, 4s...
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    throw lastError;
+  }
+
+  async logError(replicator, resourceName, operation, recordId, data, error) {
+    try {
+      const logResourceName = this.config.replicatorLogResource;
+      if (this.database && this.database.resources && this.database.resources[logResourceName]) {
+        const logResource = this.database.resources[logResourceName];
+        await logResource.insert({
+          replicator: replicator.name || replicator.id,
+          resourceName,
+          operation,
+          recordId,
+          data: JSON.stringify(data),
+          error: error.message,
+          timestamp: new Date().toISOString(),
+          status: 'error'
+        });
+      }
+    } catch (logError) {
+      // Silent log errors
+    }
   }
 
   async processReplicatorEvent(operation, resourceName, recordId, data, beforeData = null) {
@@ -448,7 +525,7 @@ export class ReplicatorPlugin extends Plugin {
   async getreplicatorStats() {
     const replicatorStats = await Promise.all(
       this.replicators.map(async (replicator) => {
-        const status = await replicator.instance.getStatus();
+        const status = await replicator.getStatus();
         return {
           id: replicator.id,
           driver: replicator.driver,
@@ -544,14 +621,14 @@ export class ReplicatorPlugin extends Plugin {
     for (const resourceName in this.database.resources) {
       if (normalizeResourceName(resourceName) === normalizeResourceName('replicator_logs')) continue;
 
-      if (replicator.instance.shouldReplicateResource(resourceName)) {
+      if (replicator.shouldReplicateResource(resourceName)) {
         this.emit('replicator.sync.resource', { resourceName, replicatorId });
         
         const resource = this.database.resources[resourceName];
       const allRecords = await resource.getAll();
       
       for (const record of allRecords) {
-          await replicator.instance.replicate(resourceName, 'insert', record, record.id);
+          await replicator.replicate(resourceName, 'insert', record, record.id);
         }
       }
     }

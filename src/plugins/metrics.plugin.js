@@ -319,7 +319,7 @@ export class MetricsPlugin extends Plugin {
     // Only start timer if flushInterval is greater than 0
     if (this.config.flushInterval > 0) {
       this.flushTimer = setInterval(() => {
-        this.flushMetrics().catch(console.error);
+        this.flushMetrics().catch(() => {});
       }, this.config.flushInterval);
     }
   }
@@ -405,7 +405,7 @@ export class MetricsPlugin extends Plugin {
       this.resetMetrics();
     });
     if (!ok) {
-      console.error('Failed to flush metrics:', err);
+      // Silent error handling
     }
   }
 
