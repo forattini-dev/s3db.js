@@ -481,7 +481,7 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   async logreplicator(item) {
-    // Use sempre a referência salva
+            // Always use the saved reference
     const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
     if (!logRes) {
       if (this.database) {
@@ -491,7 +491,7 @@ export class ReplicatorPlugin extends Plugin {
       this.emit('replicator.log.failed', { error: 'replicator log resource not found', item });
       return;
     }
-    // Corrigir campos obrigatórios do log resource
+            // Fix required fields of log resource
     const logItem = {
       id: item.id || `repl-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       resource: item.resource || item.resourceName || '',

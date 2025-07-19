@@ -1,7 +1,7 @@
 import { createConsumer } from './consumers/index.js';
 import tryFn from "../concerns/try-fn.js";
 
-// Exemplo de configuração para SQS:
+// Example configuration for SQS:
 // const plugin = new QueueConsumerPlugin({
 //   driver: 'sqs',
 //   queues: { users: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue' },
@@ -11,7 +11,7 @@ import tryFn from "../concerns/try-fn.js";
 //   maxMessages: 10,
 // });
 //
-// Exemplo de configuração para RabbitMQ:
+// Example configuration for RabbitMQ:
 // const plugin = new QueueConsumerPlugin({
 //   driver: 'rabbitmq',
 //   queues: { users: 'users-queue' },
@@ -23,7 +23,7 @@ import tryFn from "../concerns/try-fn.js";
 export default class QueueConsumerPlugin {
   constructor(options = {}) {
     this.options = options;
-    // Novo padrão: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
+    // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
     this.consumers = [];
   }

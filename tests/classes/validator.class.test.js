@@ -697,7 +697,7 @@ describe('Validator Class - Legacy Tests (Enhanced)', () => {
     const schema = { secret: { type: 'secret' } };
     const check = validator.compile(schema);
     const res = await check({ secret: 'mysecret' });
-    expect(res).not.toHaveProperty('secret'); // deve ser encriptado
+    expect(res).not.toHaveProperty('secret'); // should be encrypted
   });
 
   test('should error if passphrase missing', async () => {

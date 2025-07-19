@@ -119,8 +119,8 @@ describe('Resource Versions - Real Integration Tests', () => {
     // Insert profile with complex data
     const profile = await resource.insert({
       id: 'profile1',
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       settings: {
         theme: 'dark',
         notifications: true,
@@ -141,8 +141,8 @@ describe('Resource Versions - Real Integration Tests', () => {
 
     // Update with new settings
     const updatedProfile = await resource.update('profile1', {
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       settings: {
         theme: 'light',
         notifications: false,
@@ -340,8 +340,8 @@ describe('Resource Versions - Real Integration Tests', () => {
     // Insert valid user
     const user = await resource.insert({
       id: 'user1',
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       age: 30,
       role: 'user'
     });
@@ -351,8 +351,8 @@ describe('Resource Versions - Real Integration Tests', () => {
 
     // Update with valid data
     const updatedUser = await resource.update('user1', {
-      name: 'João Silva',
-      email: 'joao@example.com',
+      name: 'John Silva',
+      email: 'john@example.com',
       age: 31,
       role: 'moderator'
     });
@@ -486,8 +486,8 @@ describe('Resource Versions - Real Integration Tests', () => {
   // Skipped by default: only for manual benchmarking
   // eslint-disable-next-line jest/no-disabled-tests
   test.skip('Version Performance with Multiple Updates (manual/benchmark only)', async () => {
-    // Este teste é apenas para benchmarking manual/local.
-    // Em ambientes de CI ou máquinas lentas, pode exceder o timeout do Jest.
+            // This test is only for manual/local benchmarking.
+        // In CI environments or slow machines, it may exceed Jest timeout.
     const resource = await database.createResource({
       name: 'performance',
       attributes: {
@@ -560,7 +560,7 @@ describe('Resource Versions - Real Integration Tests', () => {
 
     const results = await Promise.all(updatePromises);
 
-    // Aguarda operações internas finalizarem
+    // Wait for internal operations to finish
     await new Promise(r => setTimeout(r, 100));
 
     // Verify final state (should be the last update)

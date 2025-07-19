@@ -53,18 +53,18 @@ describe('Resource Hooks - Real Integration Tests', () => {
     });
 
     // Test hook execution with real insert
-    const testData = { id: 'user1', name: 'João Silva', email: 'joao@example.com' };
+    const testData = { id: 'user1', name: 'John Silva', email: 'john@example.com' };
     
     const result = await resource.insert(testData);
     expect(result.id).toBe('user1');
-    expect(result.name).toBe('João Silva');
+    expect(result.name).toBe('John Silva');
     expect(hookCalls).toHaveLength(2);
     expect(hookCalls[0].event).toBe('beforeInsert');
     expect(hookCalls[1].event).toBe('afterInsert');
     expect(hookCalls[1].data.id).toBe('user1');
 
     // Test update hooks
-    const updateData = { name: 'João Silva Updated' };
+    const updateData = { name: 'John Silva Updated' };
     await resource.update('user1', { ...updateData, email: 'user1@example.com' });
     
     expect(hookCalls).toHaveLength(4);
@@ -342,11 +342,11 @@ describe('Resource Hooks - Real Integration Tests', () => {
     });
 
     // Test valid data with real insert
-    const validData = { id: 'user1', name: '  João Silva  ', email: 'joao@example.com', age: 30 };
+    const validData = { id: 'user1', name: '  John Silva  ', email: 'john@example.com', age: 30 };
     const validResult = await resource.insert(validData);
     
-    expect(validResult.name).toBe('João Silva'); // Trimmed
-    expect(validResult.email).toBe('joao@example.com');
+          expect(validResult.name).toBe('John Silva'); // Trimmed
+      expect(validResult.email).toBe('john@example.com');
     expect(validResult.age).toBe(30);
 
     // Test invalid email
@@ -454,7 +454,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
     expect(emittedEvents[3].$after.title).toBe('Updated Test Event');
     
     expect(emittedEvents[4].event).toBe('delete');
-    // Verificar id no objeto emitido
+    // Verify id in emitted object
     expect(emittedEvents[4].id).toBe('event1');
   });
 
@@ -553,9 +553,9 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const testData = {
       id: 'complex1',
       user: {
-        firstName: 'João',
-        lastName: 'Silva',
-        email: 'JOAO@EXAMPLE.COM'
+                  firstName: 'John',
+          lastName: 'Silva',
+          email: 'JOHN@EXAMPLE.COM'
       },
       settings: {
         theme: 'dark'
@@ -568,8 +568,8 @@ describe('Resource Hooks - Real Integration Tests', () => {
     const result = await resource.insert(testData);
 
     // Verify transformations
-    expect(result.user.fullName).toBe('João Silva');
-    expect(result.user.email).toBe('joao@example.com');
+          expect(result.user.fullName).toBe('John Silva');
+      expect(result.user.email).toBe('john@example.com');
     expect(result.settings.theme).toBe('dark');
     expect(result.settings.notifications).toBe(false);
     expect(result.metadata.createdAt).toBeDefined();

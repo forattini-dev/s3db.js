@@ -75,21 +75,21 @@ describe('ConnectionString Class - Complete Journey', () => {
 
 describe('ConnectionString DigitalOcean Spaces', () => {
   test('should parse DigitalOcean Spaces connection string and set correct endpoint/region/forcePathStyle', () => {
-    // Simula uma connection string típica para DigitalOcean Spaces
+    // Simulate a typical connection string for DigitalOcean Spaces
     const region = 'nyc3';
     const bucket = 'my-space';
     const accessKey = 'SPACES_KEY';
     const secretKey = 'SPACES_SECRET';
     const endpoint = `https://${region}.digitaloceanspaces.com`;
-    // Formato padrão: https://ACCESS:SECRET@nyc3.digitaloceanspaces.com/my-space
+    // Standard format: https://ACCESS:SECRET@nyc3.digitaloceanspaces.com/my-space
     const connStr = `https://${accessKey}:${secretKey}@${region}.digitaloceanspaces.com/${bucket}`;
     const conn = new ConnectionString(connStr);
     expect(conn.endpoint).toBe(`https://${region}.digitaloceanspaces.com`);
-    expect(conn.region).toBe('us-east-1'); // region padrão para compatibilidade
+    expect(conn.region).toBe('us-east-1'); // default region for compatibility
     expect(conn.bucket).toBe('my-space');
     expect(conn.accessKeyId).toBe(accessKey);
     expect(conn.secretAccessKey).toBe(secretKey);
-    // forcePathStyle é true para MinIO-like (incluindo DigitalOcean Spaces)
+    // forcePathStyle is true for MinIO-like (including DigitalOcean Spaces)
     expect(conn.forcePathStyle).toBe(true);
   });
 });
