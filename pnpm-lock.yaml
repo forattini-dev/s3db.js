@@ -44,9 +44,6 @@ importers:
       uuid:
         specifier: ^9.0.0
         version: 9.0.1
-      zlib:
-        specifier: ^1.0.5
-        version: 1.0.5
     devDependencies:
       '@rollup/plugin-commonjs':
         specifier: ^28.0.6
@@ -2648,10 +2645,6 @@ packages:
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
-
-  zlib@1.0.5:
-    resolution: {integrity: sha512-40fpE2II+Cd3k8HWTWONfeKE2jL+P42iWJ1zzps5W51qcTsOUKM5Q5m2PFb0CLxlmFAaUuUdJGc3OfZy947v0w==}
-    engines: {node: '>=0.2.0'}
 
 snapshots:
 
@@ -5934,5 +5927,3 @@ snapshots:
       yargs-parser: 21.1.1
 
   yocto-queue@0.1.0: {}
-
-  zlib@1.0.5: {}
