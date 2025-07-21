@@ -74,15 +74,17 @@ export class Database extends EventEmitter {
     // Add process exit listener for cleanup
     if (!this._exitListenerRegistered) {
       this._exitListenerRegistered = true;
-      process.on('exit', async () => {
-        if (this.isConnected()) {
-          try {
-            await this.disconnect();
-          } catch (err) {
-            // Silently ignore errors on exit
+      if (typeof process !== 'undefined') {
+        process.on('exit', async () => {
+          if (this.isConnected()) {
+            try {
+              await this.disconnect();
+            } catch (err) {
+              // Silently ignore errors on exit
+            }
           }
-        }
-      });
+        });
+      }
     }
   }
   
