@@ -1,4 +1,4 @@
-var S3DB = (function (exports, nanoid, zlib, promisePool, web, promises, lodashEs, crypto, jsonStableStringify, clientS3, flat, FastestValidator) {
+var S3DB = (function (exports, nanoid, zlib, promisePool, web, promises, crypto, lodashEs, jsonStableStringify, clientS3, flat, FastestValidator) {
   'use strict';
 
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -8340,7 +8340,7 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async setup(database) {
       this.database = database;
-      if (process.env.NODE_ENV === "test") return;
+      if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
       const [ok, err] = await try_fn_default(async () => {
         const [ok1, err1, metricsResource] = await try_fn_default(() => database.createResource({
           name: "metrics",
@@ -8390,7 +8390,7 @@ ${JSON.stringify(validation, null, 2)}`,
         this.performanceResource = database.resources.performance_logs;
       }
       this.installMetricsHooks();
-      if (process.env.NODE_ENV !== "test") {
+      if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
         this.startFlushTimer();
       }
     }
@@ -8401,7 +8401,7 @@ ${JSON.stringify(validation, null, 2)}`,
         clearInterval(this.flushTimer);
         this.flushTimer = null;
       }
-      if (process.env.NODE_ENV !== "test") {
+      if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
         await this.flushMetrics();
       }
     }
@@ -8580,10 +8580,18 @@ ${JSON.stringify(validation, null, 2)}`,
     async flushMetrics() {
       if (!this.metricsResource) return;
       const [ok, err] = await try_fn_default(async () => {
-        const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
-        const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
-        const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
-        const resourceMetadata = process.env.NODE_ENV === "test" ? {} : { resource: "true" };
+        let metadata, perfMetadata, errorMetadata, resourceMetadata;
+        if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
+          metadata = {};
+          perfMetadata = {};
+          errorMetadata = {};
+          resourceMetadata = {};
+        } else {
+          metadata = { global: "true" };
+          perfMetadata = { perf: "true" };
+          errorMetadata = { error: "true" };
+          resourceMetadata = { resource: "true" };
+        }
         for (const [operation, data] of Object.entries(this.metrics.operations)) {
           if (data.count > 0) {
             await this.metricsResource.insert({
@@ -13159,14 +13167,16 @@ ${JSON.stringify(validation, null, 2)}`,
       this.keyPrefix = this.client.keyPrefix;
       if (!this._exitListenerRegistered) {
         this._exitListenerRegistered = true;
-        process.on("exit", async () => {
-          if (this.isConnected()) {
-            try {
-              await this.disconnect();
-            } catch (err) {
+        if (typeof process !== "undefined") {
+          process.on("exit", async () => {
+            if (this.isConnected()) {
+              try {
+                await this.disconnect();
+              } catch (err) {
+              }
             }
-          }
-        });
+          });
+        }
       }
     }
     async connect() {
@@ -13749,7 +13759,7 @@ ${JSON.stringify(validation, null, 2)}`,
         if (typeof entry[0] === "function") return resource;
       }
       if (typeof entry === "string") return entry;
-      if (resource && !targetResourceName) targetResourceName = resource;
+      if (typeof entry === "function") return resource;
       if (typeof entry === "object" && entry.resource) return entry.resource;
       return resource;
     }
@@ -14298,30 +14308,10 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async stop() {
     }
-    filterInternalFields(data) {
-      if (!data || typeof data !== "object") return data;
-      const filtered = {};
-      for (const [key, value] of Object.entries(data)) {
-        if (!key.startsWith("_") && !key.startsWith("$")) {
-          filtered[key] = value;
-        }
-      }
-      return filtered;
-    }
     async uploadMetadataFile(database) {
       if (typeof database.uploadMetadataFile === "function") {
         await database.uploadMetadataFile();
       }
-    }
-    async getCompleteData(resource, data) {
-      try {
-        const [ok, err, record] = await try_fn_default(() => resource.get(data.id));
-        if (ok && record) {
-          return record;
-        }
-      } catch (error) {
-      }
-      return data;
     }
     async retryWithBackoff(operation, maxRetries = 3) {
       let lastError;
@@ -14666,4 +14656,4 @@ ${JSON.stringify(validation, null, 2)}`,
 
   return exports;
 
-})({}, nanoid, zlib, PromisePool, streams, promises, _, crypto, stringify, AWS, flat, FastestValidator);
+})({}, nanoid, zlib, PromisePool, streams, promises, crypto, _, stringify, AWS, flat, FastestValidator);
