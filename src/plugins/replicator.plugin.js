@@ -1,5 +1,3 @@
-import { isPlainObject } from 'lodash-es';
-
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
@@ -300,34 +298,10 @@ export class ReplicatorPlugin extends Plugin {
     // await this.processQueue(); // Removed as per edit hint
   }
 
-  filterInternalFields(data) {
-    if (!data || typeof data !== 'object') return data;
-    const filtered = {};
-    for (const [key, value] of Object.entries(data)) {
-      // Filter out internal fields that start with _ or $
-      if (!key.startsWith('_') && !key.startsWith('$')) {
-        filtered[key] = value;
-      }
-    }
-    return filtered;
-  }
-
   async uploadMetadataFile(database) {
     if (typeof database.uploadMetadataFile === 'function') {
       await database.uploadMetadataFile();
     }
-  }
-
-  async getCompleteData(resource, data) {
-    try {
-      const [ok, err, record] = await tryFn(() => resource.get(data.id));
-      if (ok && record) {
-        return record;
-      }
-    } catch (error) {
-      // Fallback to provided data
-    }
-    return data;
   }
 
   async retryWithBackoff(operation, maxRetries = 3) {

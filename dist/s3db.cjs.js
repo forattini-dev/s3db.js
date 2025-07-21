@@ -7,8 +7,8 @@ var zlib = require('node:zlib');
 var promisePool = require('@supercharge/promise-pool');
 var web = require('node:stream/web');
 var promises = require('fs/promises');
-var lodashEs = require('lodash-es');
 var crypto = require('crypto');
+var lodashEs = require('lodash-es');
 var jsonStableStringify = require('json-stable-stringify');
 var clientS3 = require('@aws-sdk/client-s3');
 var flat = require('flat');
@@ -8353,7 +8353,7 @@ class MetricsPlugin extends plugin_class_default {
   }
   async setup(database) {
     this.database = database;
-    if (process.env.NODE_ENV === "test") return;
+    if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
     const [ok, err] = await try_fn_default(async () => {
       const [ok1, err1, metricsResource] = await try_fn_default(() => database.createResource({
         name: "metrics",
@@ -8403,7 +8403,7 @@ class MetricsPlugin extends plugin_class_default {
       this.performanceResource = database.resources.performance_logs;
     }
     this.installMetricsHooks();
-    if (process.env.NODE_ENV !== "test") {
+    if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
       this.startFlushTimer();
     }
   }
@@ -8414,7 +8414,7 @@ class MetricsPlugin extends plugin_class_default {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    if (process.env.NODE_ENV !== "test") {
+    if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
       await this.flushMetrics();
     }
   }
@@ -8593,10 +8593,18 @@ class MetricsPlugin extends plugin_class_default {
   async flushMetrics() {
     if (!this.metricsResource) return;
     const [ok, err] = await try_fn_default(async () => {
-      const metadata = process.env.NODE_ENV === "test" ? {} : { global: "true" };
-      const perfMetadata = process.env.NODE_ENV === "test" ? {} : { perf: "true" };
-      const errorMetadata = process.env.NODE_ENV === "test" ? {} : { error: "true" };
-      const resourceMetadata = process.env.NODE_ENV === "test" ? {} : { resource: "true" };
+      let metadata, perfMetadata, errorMetadata, resourceMetadata;
+      if (typeof process !== "undefined" && process.env.NODE_ENV === "test") {
+        metadata = {};
+        perfMetadata = {};
+        errorMetadata = {};
+        resourceMetadata = {};
+      } else {
+        metadata = { global: "true" };
+        perfMetadata = { perf: "true" };
+        errorMetadata = { error: "true" };
+        resourceMetadata = { resource: "true" };
+      }
       for (const [operation, data] of Object.entries(this.metrics.operations)) {
         if (data.count > 0) {
           await this.metricsResource.insert({
@@ -13172,14 +13180,16 @@ class Database extends EventEmitter {
     this.keyPrefix = this.client.keyPrefix;
     if (!this._exitListenerRegistered) {
       this._exitListenerRegistered = true;
-      process.on("exit", async () => {
-        if (this.isConnected()) {
-          try {
-            await this.disconnect();
-          } catch (err) {
+      if (typeof process !== "undefined") {
+        process.on("exit", async () => {
+          if (this.isConnected()) {
+            try {
+              await this.disconnect();
+            } catch (err) {
+            }
           }
-        }
-      });
+        });
+      }
     }
   }
   async connect() {
@@ -13762,7 +13772,7 @@ class S3dbReplicator extends base_replicator_class_default {
       if (typeof entry[0] === "function") return resource;
     }
     if (typeof entry === "string") return entry;
-    if (resource && !targetResourceName) targetResourceName = resource;
+    if (typeof entry === "function") return resource;
     if (typeof entry === "object" && entry.resource) return entry.resource;
     return resource;
   }
@@ -14311,30 +14321,10 @@ class ReplicatorPlugin extends plugin_class_default {
   }
   async stop() {
   }
-  filterInternalFields(data) {
-    if (!data || typeof data !== "object") return data;
-    const filtered = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (!key.startsWith("_") && !key.startsWith("$")) {
-        filtered[key] = value;
-      }
-    }
-    return filtered;
-  }
   async uploadMetadataFile(database) {
     if (typeof database.uploadMetadataFile === "function") {
       await database.uploadMetadataFile();
     }
-  }
-  async getCompleteData(resource, data) {
-    try {
-      const [ok, err, record] = await try_fn_default(() => resource.get(data.id));
-      if (ok && record) {
-        return record;
-      }
-    } catch (error) {
-    }
-    return data;
   }
   async retryWithBackoff(operation, maxRetries = 3) {
     let lastError;
