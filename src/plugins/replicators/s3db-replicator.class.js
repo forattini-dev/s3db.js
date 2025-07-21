@@ -209,9 +209,9 @@ class S3dbReplicator extends BaseReplicator {
     }
     // String mapping
     if (typeof entry === 'string') return entry;
-          // Mapping function - when there's only transformer, use original resource
-      if (resource && !targetResourceName) targetResourceName = resource;
-          // Object: { resource, transform }
+    // Mapping function - when there's only transformer, use original resource
+    if (typeof entry === 'function') return resource;
+    // Object: { resource, transform }
     if (typeof entry === 'object' && entry.resource) return entry.resource;
     return resource;
   }

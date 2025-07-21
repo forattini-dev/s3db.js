@@ -33,7 +33,7 @@ export class MetricsPlugin extends Plugin {
 
   async setup(database) {
     this.database = database;
-    if (process.env.NODE_ENV === 'test') return;
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return;
 
     const [ok, err] = await tryFn(async () => {
       const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
@@ -90,7 +90,7 @@ export class MetricsPlugin extends Plugin {
     this.installMetricsHooks();
     
     // Disable flush timer during tests to avoid side effects
-    if (process.env.NODE_ENV !== 'test') {
+    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
       this.startFlushTimer();
     }
   }
@@ -107,7 +107,7 @@ export class MetricsPlugin extends Plugin {
     }
     
     // Don't flush metrics during tests
-    if (process.env.NODE_ENV !== 'test') {
+    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
       await this.flushMetrics();
     }
   }
@@ -328,11 +328,21 @@ export class MetricsPlugin extends Plugin {
     if (!this.metricsResource) return;
 
     const [ok, err] = await tryFn(async () => {
-      // Use empty metadata during tests to avoid header issues
-      const metadata = process.env.NODE_ENV === 'test' ? {} : { global: 'true' };
-      const perfMetadata = process.env.NODE_ENV === 'test' ? {} : { perf: 'true' };
-      const errorMetadata = process.env.NODE_ENV === 'test' ? {} : { error: 'true' };
-      const resourceMetadata = process.env.NODE_ENV === 'test' ? {} : { resource: 'true' };
+      let metadata, perfMetadata, errorMetadata, resourceMetadata;
+      
+      if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+        // Use empty metadata during tests to avoid header issues
+        metadata = {};
+        perfMetadata = {};
+        errorMetadata = {};
+        resourceMetadata = {};
+      } else {
+        // Use empty metadata during tests to avoid header issues
+        metadata = { global: 'true' };
+        perfMetadata = { perf: 'true' };
+        errorMetadata = { error: 'true' };
+        resourceMetadata = { resource: 'true' };
+      }
 
       // Flush operation metrics
       for (const [operation, data] of Object.entries(this.metrics.operations)) {
