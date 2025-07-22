@@ -113,6 +113,9 @@ class PostgresReplicator extends BaseReplicator {
     await super.initialize(database);
     const [ok, err, sdk] = await tryFn(() => import('pg'));
     if (!ok) {
+      if (this.config.verbose) {
+        console.warn(`[PostgresReplicator] Failed to import pg SDK: ${err.message}`);
+      }
       this.emit('initialization_error', {
         replicator: this.name,
         error: err.message
@@ -276,6 +279,9 @@ class PostgresReplicator extends BaseReplicator {
       };
     });
     if (ok) return result;
+    if (this.config.verbose) {
+      console.warn(`[PostgresReplicator] Replication failed for ${resourceName}: ${err.message}`);
+    }
     this.emit('replicator_error', {
       replicator: this.name,
       resourceName,
@@ -298,8 +304,14 @@ class PostgresReplicator extends BaseReplicator {
         record.id, 
         record.beforeData
       ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
+      if (ok) {
+        results.push(res);
+      } else {
+        if (this.config.verbose) {
+          console.warn(`[PostgresReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+        }
+        errors.push({ id: record.id, error: err.message });
+      }
     }
     
     return { 
@@ -316,6 +328,9 @@ class PostgresReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
+    if (this.config.verbose) {
+      console.warn(`[PostgresReplicator] Connection test failed: ${err.message}`);
+    }
     this.emit('connection_error', { replicator: this.name, error: err.message });
     return false;
   }

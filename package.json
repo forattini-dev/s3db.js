@@ -10,6 +10,9 @@
   "jsdelivr": "dist/s3db.iife.min.js",
   "author": "@stone/martech",
   "license": "UNLICENSED",
+  "bin": {
+    "s3db-mcp": "./mcp/server.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/forattini-dev/s3db.js.git"
@@ -26,6 +29,9 @@
   "type": "module",
   "sideEffects": false,
   "imports": {
+    "#mcp/*": "./mcp/*",
+    "#dist/*": "./dist/*",
+    "#examples/*": "./examples/*",
     "#src/*": "./src/*",
     "#tests/*": "./tests/*"
   },

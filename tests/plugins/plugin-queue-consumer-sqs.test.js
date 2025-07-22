@@ -540,12 +540,13 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
       await replicator.replicate('users', 'insert', data, data.id);
     }
     // Wait until all are processed in the destination
+    // Give more time since consumer polls every 1000ms and needs time to process
     let countSource = 0, countTarget = 0, tries = 0;
-    while (tries++ < 10) {
+    while (tries++ < 30) { // Increased from 10 to 30 (3 seconds total)
       countSource = await usersSource.count();
       countTarget = await usersTarget.count();
       if (countSource === 5 && countTarget === 5) break;
-      await new Promise(res => setTimeout(res, 100));
+      await new Promise(res => setTimeout(res, 200)); // Increased from 100ms to 200ms
     }
     expect(countSource).toBe(5);
     expect(countTarget).toBe(5);

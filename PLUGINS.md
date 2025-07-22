@@ -1561,7 +1561,16 @@ setTimeout(() => {
 
 ## 🔄 Replicator Plugin
 
-Powerful data replication system that synchronizes your s3db data to multiple targets including other S3DB instances, SQS queues, BigQuery, and PostgreSQL databases.
+**Enterprise-grade data replication system** that synchronizes your s3db data in real-time to multiple targets including other S3DB instances, SQS queues, BigQuery, PostgreSQL databases, and more. Features robust error handling, advanced transformation capabilities, and comprehensive monitoring.
+
+### 🎯 Key Features
+
+- **Real-time Replication**: Automatic data synchronization on insert, update, and delete operations
+- **Multi-Target Support**: Replicate to S3DB, BigQuery, PostgreSQL, SQS, and custom targets
+- **Advanced Transformations**: Transform data with custom functions before replication
+- **Error Resilience**: Automatic retries, detailed error reporting, and dead letter queue support
+- **Performance Monitoring**: Built-in metrics, performance tracking, and health monitoring
+- **Flexible Configuration**: Support for multiple resource mapping syntaxes and selective replication
 
 ### ⚡ Quick Start
 
@@ -1571,6 +1580,7 @@ import { S3db, ReplicatorPlugin } from 's3db.js';
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new ReplicatorPlugin({
+    verbose: true, // Enable detailed logging for debugging
     replicators: [
       {
         driver: 's3db',
@@ -1585,7 +1595,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-// Data is automatically replicated
+// Data is automatically replicated with detailed error reporting
 const users = s3db.resource('users');
 await users.insert({ name: 'John', email: 'john@example.com' });
 // This insert is automatically replicated to the backup database
@@ -1595,21 +1605,56 @@ await users.insert({ name: 'John', email: 'john@example.com' });
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable replication |
-| `replicators` | array | `[]` | Array of replicator configurations |
-| `persistReplicatorLog` | boolean | `false` | Store replication logs in database |
-| `replicatorLogResource` | string | `'replicator_logs'` | Name of log resource |
-| `batchSize` | number | `10` | Batch size for bulk operations |
-| `retryAttempts` | number | `3` | Retry failed replications |
-| `retryDelay` | number | `1000` | Delay between retries (ms) |
-| `syncInterval` | number | `0` | Auto-sync interval (0 = disabled) |
+| `enabled` | boolean | `true` | Enable/disable replication globally |
+| `replicators` | array | `[]` | Array of replicator configurations (required) |
+| `verbose` | boolean | `false` | Enable detailed console logging for debugging |
+| `persistReplicatorLog` | boolean | `false` | Store replication logs in database resource |
+| `replicatorLogResource` | string | `'replicator_log'` | Name of log resource for persistence |
+| `logErrors` | boolean | `true` | Log errors to replication log resource |
+| `batchSize` | number | `100` | Batch size for bulk replication operations |
+| `maxRetries` | number | `3` | Maximum retry attempts for failed replications |
+| `timeout` | number | `30000` | Timeout for replication operations (ms) |
 
-### Replicator Drivers
+### 🗂️ Event System & Debugging
 
-#### S3DB Replicator
+The Replicator Plugin emits comprehensive events for monitoring and debugging:
 
-Replicate to another S3DB instance with flexible resource mapping and transformation capabilities:
+```javascript
+const replicatorPlugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
 
+// Success events
+replicatorPlugin.on('replicated', (data) => {
+  console.log(`✅ Replicated: ${data.operation} on ${data.resourceName} to ${data.replicator}`);
+});
+
+// Error events
+replicatorPlugin.on('replicator_error', (data) => {
+  console.error(`❌ Replication failed: ${data.error} (${data.resourceName})`);
+});
+
+// Log resource errors
+replicatorPlugin.on('replicator_log_error', (data) => {
+  console.warn(`⚠️ Failed to log replication: ${data.logError}`);
+});
+
+// Setup errors
+replicatorPlugin.on('replicator_log_resource_creation_error', (data) => {
+  console.error(`🚨 Log resource creation failed: ${data.error}`);
+});
+
+// Cleanup errors
+replicatorPlugin.on('replicator_cleanup_error', (data) => {
+  console.warn(`🧹 Cleanup failed for ${data.replicator}: ${data.error}`);
+});
+```
+
+### 🔧 Replicator Drivers
+
+#### 🗃️ S3DB Replicator
+
+Replicate to another S3DB instance with **advanced resource mapping and transformation capabilities**. Supports multiple configuration syntaxes for maximum flexibility.
+
+**Basic Configuration:**
 ```javascript
 {
   driver: 's3db',
@@ -1623,43 +1668,34 @@ Replicate to another S3DB instance with flexible resource mapping and transforma
     // Map source → destination resource name
     products: 'backup_products',
     
-    // Advanced mapping with transformer
+    // Advanced mapping with transform function
     orders: {
       resource: 'order_backup',
-      transformer: (data) => ({
+      transform: (data) => ({
         ...data,
         backup_timestamp: new Date().toISOString(),
-        original_source: 'production'
-      })
-    },
-    
-    // Multi-destination replication
-    analytics: [
-      'analytics_backup',
-      { 
-        resource: 'analytics_processed', 
-        transformer: (data) => ({
-          ...data,
-          processed_date: data.createdAt?.split('T')[0],
-          data_source: 'analytics'
-        })
-      }
-    ]
+        original_source: 'production',
+        migrated_at: new Date().toISOString()
+      }),
+      actions: ['insert', 'update', 'delete']
+    }
   }
 }
 ```
 
-**Resource Configuration Syntaxes:**
+### 📋 Resource Configuration Syntaxes
 
-The S3DB replicator supports highly flexible resource mapping configurations:
+The S3DB replicator supports **multiple configuration syntaxes** for maximum flexibility. You can mix and match these formats as needed:
 
-**1. Array of resource names** (replicate to same name):
+#### 1. Array of Resource Names
+**Use case**: Simple backup/clone scenarios
 ```javascript
 resources: ['users', 'products', 'orders']
 // Replicates each resource to itself in the destination database
 ```
 
-**2. Object mapping** (source → destination):
+#### 2. Simple Object Mapping
+**Use case**: Rename resources during replication
 ```javascript
 resources: { 
   users: 'people',           // users → people
@@ -1668,229 +1704,1321 @@ resources: {
 }
 ```
 
-**3. Array with transformer** (resource + transformation):
-```javascript
-resources: { 
-  users: ['people', (data) => ({ ...data, fullName: `${data.firstName} ${data.lastName}` })]
-  // Replicates 'users' to 'people' with transformation
-}
-```
-
-**4. Object with resource and transformer**:
+#### 3. Object with Transform Function
+**Use case**: Data transformation during replication ⭐ **RECOMMENDED**
 ```javascript
 resources: { 
   users: { 
-    resource: 'people', 
-    transformer: (data) => ({ 
+    resource: 'people',     // Destination resource name
+    transform: (data) => ({  // Data transformation function
       ...data, 
       fullName: `${data.firstName} ${data.lastName}`,
-      migrated_at: new Date().toISOString()
-    })
+      migrated_at: new Date().toISOString(),
+      source_system: 'production'
+    }),
+    actions: ['insert', 'update', 'delete']  // Optional: which operations to replicate
   }
 }
 ```
 
-**5. Multi-destination arrays**:
-```javascript
-resources: { 
-  users: [
-    'people',                    // Simple copy
-    { 
-      resource: 'user_analytics', 
-      transformer: (data) => ({
-        id: data.id,
-        signup_date: data.createdAt,
-        user_type: data.role || 'standard'
-      })
-    }
-  ]
-}
-```
-
-**6. Function-only transformation** (transform to same resource):
+#### 4. Function-Only Transformation
+**Use case**: Transform data without changing resource name
 ```javascript
 resources: { 
   users: (data) => ({ 
     ...data, 
     processed: true,
-    backup_date: new Date().toISOString()
+    backup_date: new Date().toISOString(),
+    hash: crypto.createHash('md5').update(JSON.stringify(data)).digest('hex')
   })
 }
 ```
 
-**Mixed Configuration Example:**
+#### 5. Multi-Destination Replication
+**Use case**: Send data to multiple targets with different transformations
 ```javascript
-resources: {
+resources: { 
   users: [
-    'people',                                    // Simple copy
+    'people',                    // Simple copy to 'people'
     { 
-      resource: 'user_profiles', 
-      transformer: (data) => ({ 
-        ...data, 
-        profile_complete: !!(data.name && data.email)
+      resource: 'user_analytics', 
+      transform: (data) => ({    // Transformed copy to 'user_analytics'
+        id: data.id,
+        signup_date: data.createdAt,
+        user_type: data.role || 'standard',
+        last_activity: new Date().toISOString()
+      })
+    },
+    {
+      resource: 'audit_trail',
+      transform: (data) => ({    // Audit copy to 'audit_trail'
+        user_id: data.id,
+        action: 'user_replicated',
+        timestamp: new Date().toISOString(),
+        data_hash: crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex')
       })
     }
-  ],
-  orders: 'order_backup',                        // Rename only
-  products: { resource: 'product_catalog' },     // Object form
-  analytics: (data) => ({ ...data, processed: true })  // Transform only
+  ]
 }
 ```
 
-**Configuration Options:**
-- `connectionString`: S3DB connection string for destination database (required)
-- `client`: Pre-configured S3DB client instance (alternative to connectionString)
-- `resources`: Resource mapping configuration (see syntaxes above)
+#### 6. Advanced Mixed Configuration
+**Use case**: Complex enterprise scenarios
+```javascript
+resources: {
+  // Simple mappings
+  sessions: 'user_sessions',
+  
+  // Transform without renaming
+  products: (data) => ({ 
+    ...data, 
+    search_keywords: data.name?.toLowerCase().split(' ') || [],
+    price_category: data.price > 100 ? 'premium' : 'standard'
+  }),
+  
+  // Complex multi-destination with conditions
+  orders: [
+    'order_backup',              // Simple backup
+    { 
+      resource: 'order_analytics',
+      transform: (data) => ({
+        order_id: data.id,
+        customer_id: data.userId,
+        amount: data.amount,
+        order_date: data.createdAt?.split('T')[0],
+        status: data.status || 'pending',
+        item_count: data.items?.length || 0,
+        is_large_order: data.amount > 1000
+      }),
+      actions: ['insert', 'update']  // Only replicate inserts and updates, not deletes
+    },
+    {
+      resource: 'financial_records',
+      transform: (data) => ({
+        transaction_id: data.id,
+        amount: data.amount,
+        currency: data.currency || 'USD',
+        type: 'order_payment',
+        timestamp: new Date().toISOString(),
+        metadata: {
+          customer_id: data.userId,
+          order_items: data.items?.length || 0
+        }
+      }),
+      actions: ['insert']  // Only replicate new orders for financial records
+    }
+  ],
+  
+  // Conditional replication
+  users: {
+    resource: 'customer_profiles',
+    transform: (data) => {
+      // Only replicate active users
+      if (data.status !== 'active') return null;
+      
+      return {
+        ...data,
+        fullName: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        account_age_days: data.createdAt ? 
+          Math.floor((Date.now() - new Date(data.createdAt)) / (1000 * 60 * 60 * 24)) : 0,
+        preferences: data.preferences || {},
+        last_updated: new Date().toISOString()
+      };
+    },
+    actions: ['insert', 'update']
+  }
+}
+```
 
-**Transformer Features:**
-- **Data Transformation**: Apply custom logic before replication
-- **Field Mapping**: Rename, combine, or derive new fields  
-- **Data Enrichment**: Add metadata, timestamps, or computed values
-- **Conditional Logic**: Apply transformations based on data content
-- **Multi-destination**: Send different transformed versions to multiple targets
+### 🔧 S3DB Replicator Configuration Options
 
-#### SQS Replicator
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `connectionString` | string | Yes* | S3DB connection string for destination database |
+| `client` | S3db | Yes* | Pre-configured S3DB client instance |
+| `resources` | object/array | Yes | Resource mapping configuration (see syntaxes above) |
+| `timeout` | number | No | Operation timeout in milliseconds (default: 30000) |
+| `retryAttempts` | number | No | Number of retry attempts for failed operations (default: 3) |
 
-Send changes to AWS SQS queues:
+*Either `connectionString` or `client` must be provided.
 
+### 🎯 Transform Function Features
+
+Transform functions provide powerful data manipulation capabilities:
+
+#### Data Transformation Examples:
+```javascript
+// 1. Field mapping and enrichment
+transform: (data) => ({
+  id: data.id,
+  customer_name: `${data.firstName} ${data.lastName}`,
+  email_domain: data.email?.split('@')[1] || 'unknown',
+  created_timestamp: Date.now(),
+  source: 'production-db'
+})
+
+// 2. Conditional logic
+transform: (data) => {
+  if (data.type === 'premium') {
+    return { ...data, priority: 'high', sla: '4hours' };
+  }
+  return { ...data, priority: 'normal', sla: '24hours' };
+}
+
+// 3. Data validation and filtering
+transform: (data) => {
+  // Skip replication for invalid data
+  if (!data.email || !data.name) return null;
+  
+  return {
+    ...data,
+    email: data.email.toLowerCase(),
+    name: data.name.trim(),
+    validated: true
+  };
+}
+
+// 4. Computed fields
+transform: (data) => ({
+  ...data,
+  age: data.birthDate ? 
+    Math.floor((Date.now() - new Date(data.birthDate)) / (1000 * 60 * 60 * 24 * 365)) : null,
+  account_value: (data.orders || []).reduce((sum, order) => sum + order.amount, 0),
+  last_activity: new Date().toISOString()
+})
+
+// 5. Data aggregation
+transform: (data) => ({
+  user_id: data.id,
+  total_orders: data.orderHistory?.length || 0,
+  total_spent: data.orderHistory?.reduce((sum, order) => sum + order.amount, 0) || 0,
+  favorite_category: data.orderHistory?.map(o => o.category)
+    .sort((a,b) => a.localeCompare(b))
+    .reduce((prev, curr, i, arr) => 
+      arr.filter(v => v === prev).length >= arr.filter(v => v === curr).length ? prev : curr
+    ) || null,
+  analysis_date: new Date().toISOString()
+})
+```
+
+**Transform Function Best Practices:**
+- **Return `null`** to skip replication for specific records
+- **Preserve the `id` field** unless specifically mapping to a different field
+- **Handle edge cases** like missing fields or null values
+- **Use immutable operations** to avoid modifying the original data
+- **Keep transforms lightweight** to maintain replication performance
+- **Add metadata fields** like timestamps for tracking purposes
+
+#### 📬 SQS Replicator
+
+**Real-time event streaming** to AWS SQS queues for microservices integration and event-driven architectures.
+
+**⚠️ Required Dependency:**
+```bash
+pnpm add @aws-sdk/client-sqs
+```
+
+**Basic Configuration:**
 ```javascript
 {
   driver: 'sqs',
-  resources: ['orders'],
+  resources: ['orders', 'users'],
   config: {
-    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
     region: 'us-east-1',
-    messageGroupId: 's3db-replicator',
+    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/events.fifo',
+    messageGroupId: 's3db-events',
     deduplicationId: true
   }
 }
 ```
 
-#### BigQuery Replicator
+**Advanced Configuration with Resource-Specific Queues:**
+```javascript
+{
+  driver: 'sqs',
+  config: {
+    region: 'us-east-1',
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    },
+    
+    // Resource-specific queue URLs
+    queues: {
+      orders: 'https://sqs.us-east-1.amazonaws.com/123456789012/order-events.fifo',
+      users: 'https://sqs.us-east-1.amazonaws.com/123456789012/user-events.fifo',
+      payments: 'https://sqs.us-east-1.amazonaws.com/123456789012/payment-events.fifo'
+    },
+    
+    // Default queue for resources not specifically mapped
+    defaultQueueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/general-events.fifo',
+    
+    // FIFO queue settings
+    messageGroupId: 's3db-replicator',
+    deduplicationId: true,
+    
+    // Message attributes (applied to all messages)
+    messageAttributes: {
+      source: { StringValue: 'production-db', DataType: 'String' },
+      version: { StringValue: '1.0', DataType: 'String' },
+      environment: { StringValue: process.env.NODE_ENV || 'development', DataType: 'String' }
+    }
+  },
+  resources: {
+    // Simple resource mapping
+    orders: true,
+    users: true,
+    
+    // Resource with transformation
+    payments: {
+      transform: (data) => ({
+        payment_id: data.id,
+        amount: data.amount,
+        currency: data.currency || 'USD',
+        customer_id: data.userId,
+        payment_method: data.method,
+        status: data.status,
+        timestamp: new Date().toISOString(),
+        
+        // Add computed fields
+        amount_usd: data.currency === 'USD' ? data.amount : data.amount * (data.exchange_rate || 1),
+        is_large_payment: data.amount > 1000,
+        risk_score: data.amount > 5000 ? 'high' : data.amount > 1000 ? 'medium' : 'low'
+      })
+    }
+  }
+}
+```
 
-Replicate to Google BigQuery with advanced data transformation capabilities:
+**SQS Message Format:**
+```javascript
+{
+  // Message Body (JSON string)
+  MessageBody: JSON.stringify({
+    resource: 'orders',           // Source resource name
+    operation: 'insert',          // Operation: insert, update, delete
+    id: 'order-123',             // Record ID
+    data: {                      // Transformed data payload
+      id: 'order-123',
+      userId: 'user-456',
+      amount: 99.99,
+      status: 'pending',
+      timestamp: '2024-01-15T10:30:00.000Z'
+    },
+    beforeData: null,            // Previous data for updates
+    metadata: {
+      source: 'production-db',
+      replicator: 'sqs-replicator',
+      timestamp: '2024-01-15T10:30:00.000Z'
+    }
+  }),
+  
+  // Message Attributes
+  MessageAttributes: {
+    source: { StringValue: 'production-db', DataType: 'String' },
+    resource: { StringValue: 'orders', DataType: 'String' },
+    operation: { StringValue: 'insert', DataType: 'String' }
+  },
+  
+  // FIFO Queue Settings
+  MessageGroupId: 's3db-events',
+  MessageDeduplicationId: 'orders:insert:order-123'
+}
+```
 
+**Configuration Options:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `region` | string | Yes | AWS region for SQS service |
+| `queueUrl` | string | Yes* | Single queue URL for all resources |
+| `queues` | object | Yes* | Resource-specific queue mapping |
+| `defaultQueueUrl` | string | No | Fallback queue for unmapped resources |
+| `credentials` | object | No | AWS credentials (uses default chain if omitted) |
+| `messageGroupId` | string | No | Message group ID for FIFO queues |
+| `deduplicationId` | boolean | No | Enable message deduplication for FIFO queues |
+| `messageAttributes` | object | No | Custom message attributes applied to all messages |
+
+*Either `queueUrl` or `queues` must be provided.
+
+#### 📊 BigQuery Replicator
+
+**Data warehouse integration** for Google BigQuery with advanced transformation capabilities, multi-table support, and automatic retry logic for streaming buffer limitations.
+
+**⚠️ Required Dependency:**
+```bash
+pnpm add @google-cloud/bigquery
+```
+
+**Basic Configuration:**
 ```javascript
 {
   driver: 'bigquery',
   config: {
+    projectId: 'my-analytics-project',
+    datasetId: 'production_data',
     location: 'US',
-    projectId: 'my-gcp-project',
-    datasetId: 'analytics', 
-    credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString()),
-    logTable: 'replication_log'  // Optional: table for operation logging
+    credentials: {
+      client_email: 'service-account@project.iam.gserviceaccount.com',
+      private_key: process.env.BIGQUERY_PRIVATE_KEY,
+      project_id: 'my-analytics-project'
+    }
   },
   resources: {
     // Simple table mapping
-    clicks: 'mrt-shortner__clicks',
-    fingerprints: 'mrt-shortner__fingerprints',
-    scans: 'mrt-shortner__scans',
-    sessions: 'mrt-shortner__sessions',
-    shares: 'mrt-shortner__shares', 
-    urls: 'mrt-shortner__urls',
-    views: 'mrt-shortner__views',
+    users: 'users_table',
+    orders: 'orders_table',
+    products: 'products_table'
+  }
+}
+```
+
+**Advanced Multi-Table Configuration:**
+```javascript
+{
+  driver: 'bigquery',
+  config: {
+    projectId: 'my-analytics-project',
+    datasetId: 'analytics_warehouse',
+    location: 'US',
+    logTable: 'replication_audit_log',  // Optional: audit all operations
+    credentials: JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS, 'base64').toString())
+  },
+  resources: {
+    // Simple string mapping
+    sessions: 'user_sessions',
+    clicks: 'click_events',
     
-    // Advanced configuration with transform functions
+    // Single table with actions and transforms
     users: {
-      table: 'mrt-shortner__users',
+      table: 'dim_users',
       actions: ['insert', 'update'],
-      transform: (data) => {
-        return {
-          ...data,
-          ip: data.ip || 'unknown',
-          userIp: data.userIp || 'unknown',
-        }
-      }
+      transform: (data) => ({
+        ...data,
+        // Data cleaning and enrichment
+        email: data.email?.toLowerCase(),
+        full_name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        registration_date: data.createdAt?.split('T')[0],
+        account_age_days: data.createdAt ? 
+          Math.floor((Date.now() - new Date(data.createdAt)) / (1000 * 60 * 60 * 24)) : 0,
+        
+        // Computed fields for analytics
+        user_tier: data.totalSpent > 1000 ? 'premium' : 
+                   data.totalSpent > 100 ? 'standard' : 'basic',
+        is_active: data.lastLoginAt && 
+          (Date.now() - new Date(data.lastLoginAt)) < (30 * 24 * 60 * 60 * 1000),
+        
+        // BigQuery-specific fields
+        processed_at: new Date().toISOString(),
+        data_source: 'production_s3db'
+      })
     },
     
-    // Multiple destinations for a single resource
+    // Multiple destinations for comprehensive analytics
     orders: [
-      { actions: ['insert'], table: 'fact_orders' },
-      { 
-        actions: ['insert'], 
-        table: 'daily_revenue',
+      // Fact table for detailed order data
+      {
+        table: 'fact_orders',
+        actions: ['insert', 'update'],
+        transform: (data) => ({
+          order_id: data.id,
+          customer_id: data.userId,
+          order_date: data.createdAt?.split('T')[0],
+          order_timestamp: data.createdAt,
+          amount: parseFloat(data.amount) || 0,
+          currency: data.currency || 'USD',
+          status: data.status,
+          item_count: data.items?.length || 0,
+          
+          // Derived analytics fields
+          is_weekend_order: new Date(data.createdAt).getDay() % 6 === 0,
+          order_hour: new Date(data.createdAt).getHours(),
+          is_large_order: data.amount > 500,
+          
+          // Metadata
+          ingested_at: new Date().toISOString(),
+          source_system: 'production'
+        })
+      },
+      
+      // Daily aggregation table
+      {
+        table: 'daily_revenue_summary',
+        actions: ['insert'],  // Only for new orders
         transform: (data) => ({
           date: data.createdAt?.split('T')[0],
-          revenue: data.amount,
+          revenue: parseFloat(data.amount) || 0,
+          currency: data.currency || 'USD',
+          order_count: 1,
           customer_id: data.userId,
-          order_count: 1
+          
+          // Additional dimensions
+          order_source: data.source || 'web',
+          payment_method: data.paymentMethod,
+          is_first_order: data.isFirstOrder || false,
+          
+          created_at: new Date().toISOString()
+        })
+      },
+      
+      // Customer analytics (updates only)
+      {
+        table: 'customer_order_analytics',
+        actions: ['insert', 'update'],
+        transform: (data) => ({
+          customer_id: data.userId,
+          latest_order_id: data.id,
+          latest_order_date: data.createdAt?.split('T')[0],
+          latest_order_amount: parseFloat(data.amount) || 0,
+          
+          // Will need to be aggregated in BigQuery
+          lifetime_value_increment: parseFloat(data.amount) || 0,
+          
+          updated_at: new Date().toISOString()
         })
       }
-    ]
+    ],
+    
+    // Event tracking with conditional replication
+    events: {
+      table: 'user_events',
+      actions: ['insert'],
+      transform: (data) => {
+        // Only replicate certain event types
+        const allowedEventTypes = ['page_view', 'button_click', 'form_submit', 'purchase'];
+        if (!allowedEventTypes.includes(data.event_type)) {
+          return null; // Skip replication
+        }
+        
+        return {
+          event_id: data.id,
+          user_id: data.userId,
+          event_type: data.event_type,
+          event_timestamp: data.timestamp,
+          event_date: data.timestamp?.split('T')[0],
+          
+          // Parse and clean event properties
+          properties: JSON.stringify(data.properties || {}),
+          page_url: data.properties?.page_url,
+          referrer: data.properties?.referrer,
+          
+          // Session information
+          session_id: data.sessionId,
+          
+          // Technical metadata
+          user_agent: data.userAgent,
+          ip_address: data.ipAddress ? 'masked' : null, // Privacy compliance
+          
+          // Processing metadata
+          processed_at: new Date().toISOString(),
+          schema_version: '1.0'
+        };
+      }
+    }
   }
 }
 ```
 
 **Transform Function Features:**
-- **Data Transformation**: Apply custom logic before sending to BigQuery
-- **Field Mapping**: Rename, combine, or derive new fields
-- **Data Enrichment**: Add computed fields, defaults, or metadata
-- **Format Conversion**: Convert data types or formats for BigQuery compatibility
-- **Multiple Destinations**: Send transformed data to different tables
+
+1. **Data Cleaning & Validation:**
+```javascript
+transform: (data) => {
+  // Skip invalid records
+  if (!data.email || !data.id) return null;
+  
+  return {
+    ...data,
+    email: data.email.toLowerCase().trim(),
+    phone: data.phone?.replace(/\D/g, '') || null, // Remove non-digits
+    validated_at: new Date().toISOString()
+  };
+}
+```
+
+2. **Type Conversion for BigQuery:**
+```javascript
+transform: (data) => ({
+  ...data,
+  amount: parseFloat(data.amount) || 0,
+  quantity: parseInt(data.quantity) || 0,
+  is_active: Boolean(data.isActive),
+  tags: Array.isArray(data.tags) ? data.tags : [],
+  metadata: JSON.stringify(data.metadata || {})
+})
+```
+
+3. **Computed Analytics Fields:**
+```javascript
+transform: (data) => ({
+  ...data,
+  // Date dimensions
+  order_date: data.createdAt?.split('T')[0],
+  order_year: new Date(data.createdAt).getFullYear(),
+  order_month: new Date(data.createdAt).getMonth() + 1,
+  order_quarter: Math.ceil((new Date(data.createdAt).getMonth() + 1) / 3),
+  
+  // Business logic
+  customer_segment: data.totalSpent > 1000 ? 'VIP' : 
+                   data.totalSpent > 500 ? 'Premium' : 'Standard',
+  
+  // Geospatial (if you have coordinates)
+  location_string: data.lat && data.lng ? `${data.lat},${data.lng}` : null
+})
+```
 
 **Configuration Options:**
-- `projectId`: Google Cloud project ID (required)
-- `datasetId`: BigQuery dataset ID (required) 
-- `credentials`: Service account credentials object (optional, uses default if omitted)
-- `location`: BigQuery dataset location/region (default: 'US')
-- `logTable`: Table name for operation logging (optional)
 
-**Resource Configuration:**
-- **String**: Simple table mapping (e.g., `'table_name'`)
-- **Object**: Advanced configuration with actions and transforms
-- **Array**: Multiple destination tables with different configurations
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `projectId` | string | Yes | Google Cloud project ID |
+| `datasetId` | string | Yes | BigQuery dataset ID |
+| `credentials` | object | No | Service account credentials (uses ADC if omitted) |
+| `location` | string | No | Dataset location/region (default: 'US') |
+| `logTable` | string | No | Table name for operation audit logging |
 
-**Automatic Features:**
-- **Retry Logic**: Handles BigQuery streaming buffer limitations with 30-second retry delays
-- **Error Handling**: Graceful handling of schema mismatches and quota limits
-- **Operation Logging**: Optional audit trail of all replication operations
-- **Schema Compatibility**: Automatic handling of missing fields
+**Resource Configuration Formats:**
 
-#### PostgreSQL Replicator
-
-Replicate to PostgreSQL database:
-
+1. **String**: Simple table mapping
 ```javascript
-{
-  driver: 'postgres',
-  resources: {
-    users: [{ actions: ['insert', 'update', 'delete'], table: 'users_table' }]
-  },
-  config: {
-    connectionString: 'postgresql://user:pass@localhost:5432/analytics'
+resources: { users: 'users_table' }
+```
+
+2. **Object**: Single table with actions and transform
+```javascript
+resources: {
+  users: {
+    table: 'users_table',
+    actions: ['insert', 'update'],
+    transform: (data) => ({ ...data, processed: true })
   }
 }
 ```
 
-### Resource Configuration Formats
-
-Multiple formats supported for resource mapping:
-
+3. **Array**: Multiple destination tables
 ```javascript
-// 1. Simple array (replicate to same name)
-resources: ['users', 'products']
-
-// 2. Object mapping (source → destination)
-resources: { users: 'people', products: 'items' }
-
-// 3. Advanced mapping with transformers
 resources: {
-  users: [
-    {
-      resource: 'people',
-      transformer: (data) => ({ ...data, fullName: `${data.first} ${data.last}` })
-    }
-  ]
-}
-
-// 4. Action-specific configuration (BigQuery/PostgreSQL)
-resources: {
-  users: [
-    { actions: ['insert', 'update'], table: 'users_table' },
-    { actions: ['insert'], table: 'users_analytics' }
+  orders: [
+    { table: 'fact_orders', actions: ['insert'] },
+    { table: 'daily_revenue', actions: ['insert'], transform: aggregationFn }
   ]
 }
 ```
+
+**Automatic Features:**
+
+- **🔄 Retry Logic**: Handles BigQuery streaming buffer limitations with 30-second delays
+- **🛡️ Error Handling**: Graceful handling of schema mismatches and quota limits  
+- **📋 Operation Logging**: Optional audit trail in specified log table
+- **🔧 Schema Compatibility**: Automatic handling of missing fields and type coercion
+- **⚡ Streaming Inserts**: Uses BigQuery streaming API for real-time data ingestion
+- **🎯 Selective Replication**: Transform functions can return `null` to skip records
+
+#### 🐘 PostgreSQL Replicator
+
+**Operational database integration** for PostgreSQL with support for complex SQL operations, connection pooling, and custom transformations.
+
+**⚠️ Required Dependency:**
+```bash
+pnpm add pg
+```
+
+**Basic Configuration:**
+```javascript
+{
+  driver: 'postgres',
+  config: {
+    connectionString: 'postgresql://user:pass@localhost:5432/analytics',
+    ssl: { rejectUnauthorized: false },
+    pool: {
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000
+    }
+  },
+  resources: {
+    users: [{ 
+      table: 'users_table',
+      actions: ['insert', 'update', 'delete']
+    }]
+  }
+}
+```
+
+**Advanced Configuration with Custom SQL:**
+```javascript
+{
+  driver: 'postgres',
+  config: {
+    connectionString: 'postgresql://analytics:password@localhost:5432/operations',
+    ssl: { rejectUnauthorized: false },
+    logTable: 'replication_audit',
+    pool: {
+      max: 20,
+      min: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+      acquireTimeoutMillis: 60000
+    }
+  },
+  resources: {
+    // Multi-table replication with different strategies
+    users: [
+      {
+        table: 'operational_users',
+        actions: ['insert', 'update', 'delete'],
+        transform: (data, operation) => {
+          if (operation === 'delete') {
+            return { 
+              id: data.id, 
+              deleted_at: new Date(),
+              deletion_reason: 'user_requested'
+            };
+          }
+          
+          return {
+            ...data,
+            sync_timestamp: new Date(),
+            source_system: 's3db',
+            data_version: '1.0',
+            
+            // Computed fields
+            full_name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+            email_domain: data.email?.split('@')[1] || 'unknown',
+            account_age_days: data.createdAt ? 
+              Math.floor((Date.now() - new Date(data.createdAt)) / (1000 * 60 * 60 * 24)) : 0
+          };
+        }
+      },
+      
+      // Separate audit trail table
+      {
+        table: 'user_audit_trail',
+        actions: ['insert', 'update', 'delete'],
+        transform: (data, operation) => ({
+          user_id: data.id,
+          operation_type: operation,
+          operation_timestamp: new Date(),
+          data_snapshot: JSON.stringify(data),
+          source_database: 's3db',
+          replication_id: crypto.randomUUID()
+        })
+      }
+    ],
+    
+    // Orders with complex business logic
+    orders: [
+      {
+        table: 'order_events',
+        actions: ['insert'],
+        transform: (data) => ({
+          event_id: crypto.randomUUID(),
+          order_id: data.id,
+          customer_id: data.userId,
+          event_type: 'order_created',
+          event_timestamp: new Date(),
+          order_amount: parseFloat(data.amount) || 0,
+          order_status: data.status || 'pending',
+          
+          // Business metrics
+          is_large_order: data.amount > 500,
+          order_priority: data.amount > 1000 ? 'high' : 
+                         data.amount > 100 ? 'medium' : 'low',
+          estimated_fulfillment: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), // 2 days
+          
+          // Metadata
+          created_at: new Date(),
+          source_system: 'production_s3db'
+        })
+      },
+      
+      {
+        table: 'order_updates',
+        actions: ['update'],
+        transform: (data, operation, beforeData) => ({
+          update_id: crypto.randomUUID(),
+          order_id: data.id,
+          updated_at: new Date(),
+          
+          // Track what changed
+          changed_fields: Object.keys(data).filter(key => 
+            beforeData && data[key] !== beforeData[key]
+          ),
+          previous_status: beforeData?.status,
+          new_status: data.status,
+          
+          // Change metadata
+          status_progression: `${beforeData?.status || 'unknown'} -> ${data.status}`,
+          update_source: 'automated_replication'
+        })
+      }
+    ],
+    
+    // Conditional replication based on data
+    sensitive_data: {
+      table: 'masked_sensitive_data',
+      actions: ['insert', 'update'],
+      transform: (data) => {
+        // Skip replication for certain sensitive records
+        if (data.privacy_level === 'restricted') {
+          return null;
+        }
+        
+        return {
+          id: data.id,
+          // Mask sensitive fields
+          email: data.email ? `${data.email.split('@')[0].slice(0, 3)}***@${data.email.split('@')[1]}` : null,
+          phone: data.phone ? `***-***-${data.phone.slice(-4)}` : null,
+          name: data.name ? `${data.name.charAt(0)}${'*'.repeat(data.name.length - 1)}` : null,
+          
+          // Keep non-sensitive data
+          created_at: data.createdAt,
+          status: data.status,
+          category: data.category,
+          
+          // Add masking metadata
+          masked_at: new Date(),
+          masking_version: '1.0'
+        };
+      }
+    }
+  }
+}
+```
+
+**Configuration Options:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `connectionString` | string | Yes | PostgreSQL connection string |
+| `ssl` | object | No | SSL configuration options |
+| `pool` | object | No | Connection pool configuration |
+| `logTable` | string | No | Table name for operation audit logging |
+
+**Pool Configuration Options:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max` | number | `10` | Maximum number of connections in pool |
+| `min` | number | `0` | Minimum number of connections in pool |
+| `idleTimeoutMillis` | number | `10000` | How long a client is allowed to remain idle |
+| `connectionTimeoutMillis` | number | `0` | Return an error after timeout |
+| `acquireTimeoutMillis` | number | `0` | Return an error if no connection available |
+
+**Resource Configuration:**
+
+Resources must be configured as arrays of table configurations:
+
+```javascript
+resources: {
+  resourceName: [
+    {
+      table: 'destination_table',
+      actions: ['insert', 'update', 'delete'],
+      transform: (data, operation, beforeData) => ({
+        // Return transformed data or null to skip
+      })
+    }
+  ]
+}
+```
+
+**Automatic Features:**
+
+- **🔄 Connection Pooling**: Efficient database connection management
+- **📋 Audit Logging**: Optional audit trail in specified log table
+- **🛡️ Error Handling**: Graceful handling of connection failures and SQL errors
+- **⚡ Bulk Operations**: Optimized for high-throughput replication
+- **🎯 Flexible Actions**: Support for insert, update, delete operations
+- **🔧 Custom SQL**: Transform functions receive operation context for complex logic
+
+### 🔍 Monitoring & Health Checks
+
+Monitor replication health and performance with built-in tools:
+
+```javascript
+// Get replication status for all replicators
+const replicationStatus = await replicatorPlugin.getReplicationStats();
+
+console.log('Replication Health:', {
+  totalReplicators: replicationStatus.replicators.length,
+  activeReplicators: replicationStatus.replicators.filter(r => r.status.enabled).length,
+  lastSync: replicationStatus.lastSync,
+  errorRate: replicationStatus.stats.errorRate
+});
+
+// Check individual replicator health
+for (const replicator of replicationStatus.replicators) {
+  console.log(`${replicator.driver} replicator:`, {
+    enabled: replicator.status.enabled,
+    connected: replicator.status.connected,
+    lastActivity: replicator.status.lastActivity,
+    totalOperations: replicator.status.totalOperations,
+    errorCount: replicator.status.errorCount
+  });
+}
+
+// Get detailed replication logs
+const replicationLogs = await replicatorPlugin.getReplicationLogs({
+  resourceName: 'users',     // Filter by resource
+  status: 'failed',          // Show only failed replications
+  limit: 50,                 // Limit results
+  offset: 0                  // Pagination
+});
+
+console.log('Recent failures:', replicationLogs.map(log => ({
+  timestamp: log.timestamp,
+  resource: log.resourceName,
+  operation: log.operation,
+  error: log.error,
+  replicator: log.replicator
+})));
+
+// Retry failed replications
+const retryResult = await replicatorPlugin.retryFailedReplications();
+console.log(`Retried ${retryResult.retried} failed replications`);
+```
+
+### 🚨 Troubleshooting Guide
+
+#### Common Issues and Solutions
+
+**1. Replication Not Happening**
+```javascript
+// Check if replicator is enabled
+const plugin = s3db.plugins.find(p => p.constructor.name === 'ReplicatorPlugin');
+console.log('Plugin enabled:', plugin.config.enabled);
+
+// Check resource configuration
+console.log('Resources configured:', Object.keys(plugin.config.replicators[0].resources));
+
+// Listen for debug events
+plugin.on('replicator_error', (error) => {
+  console.error('Replication error:', error);
+});
+```
+
+**2. Transform Function Errors**
+```javascript
+// Add error handling in transform functions
+transform: (data) => {
+  try {
+    return {
+      ...data,
+      fullName: `${data.firstName} ${data.lastName}`,
+      processedAt: new Date().toISOString()
+    };
+  } catch (error) {
+    console.error('Transform error:', error, 'Data:', data);
+    return data; // Fallback to original data
+  }
+}
+```
+
+**3. Connection Issues**
+```javascript
+// Test replicator connections
+const testResults = await Promise.allSettled(
+  replicatorPlugin.replicators.map(async (replicator) => {
+    try {
+      const result = await replicator.testConnection();
+      return { replicator: replicator.id, success: result, error: null };
+    } catch (error) {
+      return { replicator: replicator.id, success: false, error: error.message };
+    }
+  })
+);
+
+testResults.forEach(result => {
+  if (result.status === 'fulfilled') {
+    console.log(`${result.value.replicator}: ${result.value.success ? '✅' : '❌'} ${result.value.error || ''}`);
+  }
+});
+```
+
+**4. Performance Issues**
+```javascript
+// Monitor replication performance
+const performanceMonitor = setInterval(async () => {
+  const stats = await replicatorPlugin.getReplicationStats();
+  
+  console.log('Performance Metrics:', {
+    operationsPerSecond: stats.operationsPerSecond,
+    averageLatency: stats.averageLatency,
+    queueSize: stats.queueSize,
+    memoryUsage: process.memoryUsage()
+  });
+  
+  // Alert on performance degradation
+  if (stats.averageLatency > 5000) { // 5 seconds
+    console.warn('⚠️ High replication latency detected:', stats.averageLatency + 'ms');
+  }
+}, 30000); // Check every 30 seconds
+```
+
+### 🎯 Advanced Use Cases
+
+#### Multi-Environment Replication Pipeline
+
+```javascript
+const replicatorPlugin = new ReplicatorPlugin({
+  verbose: true,
+  persistReplicatorLog: true,
+  replicators: [
+    // Production backup
+    {
+      driver: 's3db',
+      config: { connectionString: process.env.BACKUP_DB_URL },
+      resources: ['users', 'orders', 'products']
+    },
+    
+    // Staging environment sync
+    {
+      driver: 's3db',
+      config: { connectionString: process.env.STAGING_DB_URL },
+      resources: {
+        users: {
+          resource: 'users',
+          transform: (data) => ({
+            ...data,
+            // Remove PII for staging
+            email: data.email?.replace(/(.{2})(.*)(@.*)/, '$1***$3'),
+            phone: '***-***-' + (data.phone?.slice(-4) || '0000')
+          })
+        }
+      }
+    },
+    
+    // Analytics warehouse
+    {
+      driver: 'bigquery',
+      config: {
+        projectId: 'analytics-project',
+        datasetId: 'production_data'
+      },
+      resources: {
+        orders: [
+          { table: 'fact_orders', actions: ['insert'] },
+          { table: 'daily_revenue', actions: ['insert'], transform: aggregateDaily }
+        ]
+      }
+    },
+    
+    // Real-time events
+    {
+      driver: 'sqs',
+      config: {
+        region: 'us-east-1',
+        queues: {
+          users: process.env.USER_EVENTS_QUEUE,
+          orders: process.env.ORDER_EVENTS_QUEUE
+        }
+      },
+      resources: ['users', 'orders']
+    }
+  ]
+});
+```
+
+#### Conditional Replication Based on Business Rules
+
+```javascript
+const businessRulesReplicator = new ReplicatorPlugin({
+  replicators: [
+    {
+      driver: 's3db',
+      config: { connectionString: process.env.COMPLIANCE_DB_URL },
+      resources: {
+        users: {
+          resource: 'compliant_users',
+          transform: (data) => {
+            // Only replicate users from certain regions
+            const allowedRegions = ['US', 'EU', 'CA'];
+            if (!allowedRegions.includes(data.region)) {
+              return null; // Skip replication
+            }
+            
+            // Apply data retention rules
+            const accountAge = Date.now() - new Date(data.createdAt);
+            const maxAge = 7 * 365 * 24 * 60 * 60 * 1000; // 7 years
+            
+            if (accountAge > maxAge && data.status === 'inactive') {
+              return null; // Skip old inactive accounts
+            }
+            
+            return {
+              ...data,
+              complianceVersion: '2.0',
+              lastAudit: new Date().toISOString(),
+              retentionCategory: accountAge > maxAge * 0.8 ? 'pending_review' : 'active'
+            };
+          }
+        },
+        
+        orders: {
+          resource: 'audit_orders',
+          transform: (data) => {
+            // Only replicate high-value orders for compliance
+            if (data.amount < 10000) return null;
+            
+            return {
+              order_id: data.id,
+              customer_id: data.userId,
+              amount: data.amount,
+              currency: data.currency,
+              order_date: data.createdAt,
+              compliance_flag: 'high_value',
+              audit_required: true,
+              retention_years: 10
+            };
+          }
+        }
+      }
+    }
+  ]
+});
+```
+
+#### Event-Driven Architecture Integration
+
+```javascript
+// Custom event handlers for complex workflows
+replicatorPlugin.on('replicated', async (event) => {
+  const { resourceName, operation, recordId, replicator } = event;
+  
+  // Trigger downstream processes
+  if (resourceName === 'orders' && operation === 'insert') {
+    // Trigger inventory update
+    await inventoryService.updateStock(event.data);
+    
+    // Send confirmation email
+    await emailService.sendOrderConfirmation(event.data);
+    
+    // Update analytics dashboard
+    await analyticsService.recordSale(event.data);
+  }
+  
+  if (resourceName === 'users' && operation === 'update') {
+    // Check for important profile changes
+    const criticalFields = ['email', 'phone', 'address'];
+    const changedFields = Object.keys(event.data);
+    
+    if (criticalFields.some(field => changedFields.includes(field))) {
+      await auditService.logCriticalChange({
+        userId: recordId,
+        changedFields: changedFields.filter(f => criticalFields.includes(f)),
+        timestamp: new Date()
+      });
+    }
+  }
+});
+
+// Handle replication failures with custom logic
+replicatorPlugin.on('replicator_error', async (error) => {
+  const { resourceName, operation, recordId, replicator, error: errorMessage } = error;
+  
+  // Log to external monitoring system
+  await monitoringService.logError({
+    service: 'replication',
+    error: errorMessage,
+    context: { resourceName, operation, recordId, replicator }
+  });
+  
+  // Send alerts for critical resources
+  const criticalResources = ['users', 'orders', 'payments'];
+  if (criticalResources.includes(resourceName)) {
+    await alertingService.sendAlert({
+      severity: 'high',
+      message: `Critical replication failure: ${resourceName}`,
+      details: error
+    });
+  }
+  
+  // Implement circuit breaker pattern
+  const errorCount = await redis.incr(`replication_errors:${replicator}`);
+  await redis.expire(`replication_errors:${replicator}`, 3600); // 1 hour window
+  
+  if (errorCount > 10) {
+    console.warn(`⚠️ Circuit breaker: Disabling ${replicator} due to high error rate`);
+    // Temporarily disable problematic replicator
+    const problematicReplicator = replicatorPlugin.replicators.find(r => r.id === replicator);
+    if (problematicReplicator) {
+      problematicReplicator.enabled = false;
+    }
+  }
+});
+```
+
+### 🎛️ Performance Tuning
+
+#### Optimize Replication Performance
+
+```javascript
+// Configure for high-throughput scenarios
+const highPerformanceReplicator = new ReplicatorPlugin({
+  batchSize: 500,           // Larger batches for better throughput
+  maxRetries: 5,            // More retries for reliability
+  timeout: 60000,           // Longer timeout for large operations
+  
+  replicators: [
+    {
+      driver: 'bigquery',
+      config: {
+        projectId: 'analytics',
+        datasetId: 'high_volume_data',
+        // Use streaming inserts for real-time data
+        streamingInserts: true,
+        insertAllTimeout: 30000
+      },
+      resources: {
+        events: {
+          table: 'raw_events',
+          actions: ['insert'],
+          // Optimize transform for performance
+          transform: (data) => {
+            // Pre-compute expensive operations
+            const eventDate = data.timestamp?.split('T')[0];
+            
+            return {
+              event_id: data.id,
+              user_id: data.userId,
+              event_type: data.type,
+              event_date: eventDate,
+              properties: JSON.stringify(data.properties || {}),
+              
+              // Batch-friendly fields
+              partition_date: eventDate,
+              ingestion_timestamp: Math.floor(Date.now() / 1000) // Unix timestamp
+            };
+          }
+        }
+      }
+    },
+    
+    {
+      driver: 'postgres',
+      config: {
+        connectionString: process.env.POSTGRES_URL,
+        pool: {
+          max: 50,              // Larger connection pool
+          min: 10,
+          idleTimeoutMillis: 60000,
+          acquireTimeoutMillis: 10000
+        }
+      },
+      resources: {
+        users: [{
+          table: 'users_cache',
+          actions: ['insert', 'update'],
+          // Use upsert pattern for better performance
+          upsertMode: true,
+          transform: (data) => ({
+            id: data.id,
+            email: data.email,
+            name: data.name,
+            updated_at: new Date(),
+            
+            // Optimized for query performance
+            search_vector: `${data.name} ${data.email}`.toLowerCase()
+          })
+        }]
+      }
+    }
+  ]
+});
+```
+
+### 🔐 Security Best Practices
+
+#### Secure Replication Configuration
+
+```javascript
+const secureReplicator = new ReplicatorPlugin({
+  replicators: [
+    {
+      driver: 'bigquery',
+      config: {
+        projectId: 'secure-analytics',
+        datasetId: 'encrypted_data',
+        // Use service account with minimal permissions
+        credentials: {
+          type: 'service_account',
+          project_id: 'secure-analytics',
+          private_key: process.env.BIGQUERY_PRIVATE_KEY,
+          client_email: 'replication-service@secure-analytics.iam.gserviceaccount.com'
+        }
+      },
+      resources: {
+        users: {
+          table: 'encrypted_users',
+          actions: ['insert', 'update'],
+          transform: (data) => ({
+            // Hash sensitive identifiers
+            user_hash: crypto.createHash('sha256').update(data.id + process.env.SALT).digest('hex'),
+            
+            // Encrypt PII fields
+            encrypted_email: encrypt(data.email),
+            encrypted_phone: data.phone ? encrypt(data.phone) : null,
+            
+            // Keep non-sensitive analytics data
+            registration_date: data.createdAt?.split('T')[0],
+            account_type: data.accountType,
+            region: data.region,
+            
+            // Add encryption metadata
+            encryption_version: '1.0',
+            processed_at: new Date().toISOString()
+          })
+        }
+      }
+    }
+  ]
+});
+
+// Encryption utility functions
+function encrypt(text) {
+  if (!text) return null;
+  const cipher = crypto.createCipher('aes-256-cbc', process.env.ENCRYPTION_KEY);
+  let encrypted = cipher.update(text, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return encrypted;
+}
+
+function decrypt(encryptedText) {
+  if (!encryptedText) return null;
+  const decipher = crypto.createDecipher('aes-256-cbc', process.env.ENCRYPTION_KEY);
+  let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+```
+
+### ✅ Best Practices Summary
+
+1. **Configuration Management**
+   - Use environment variables for connection strings and credentials
+   - Implement proper error handling in transform functions
+   - Test replicator connections during application startup
+
+2. **Performance Optimization**
+   - Use appropriate batch sizes for your data volume
+   - Configure connection pools for database replicators
+   - Monitor replication lag and throughput
+
+3. **Security & Compliance**
+   - Encrypt sensitive data before replication
+   - Implement data masking for non-production environments
+   - Use minimal privilege service accounts
+
+4. **Monitoring & Alerting**
+   - Set up alerts for replication failures
+   - Monitor replication lag and error rates
+   - Implement health checks for all replicators
+
+5. **Error Handling**
+   - Implement circuit breakers for unreliable targets
+   - Use dead letter queues for failed messages
+   - Log detailed error information for debugging
 
 ### 🔧 Easy Example
 
