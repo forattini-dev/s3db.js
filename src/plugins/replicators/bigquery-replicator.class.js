@@ -219,8 +219,8 @@ class BigqueryReplicator extends BaseReplicator {
               const { errors, response } = error;
               if (this.config.verbose) {
                 console.error('[BigqueryReplicator] BigQuery insert error details:');
-                if (errors) console.error('Errors:', JSON.stringify(errors, null, 2));
-                if (response) console.error('Response:', JSON.stringify(response, null, 2));
+                if (errors) console.error(JSON.stringify(errors, null, 2));
+                if (response) console.error(JSON.stringify(response, null, 2));
               }
               throw error;
             }
