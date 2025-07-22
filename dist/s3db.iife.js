@@ -7070,6 +7070,12 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async _clear(prefix) {
       try {
+        if (!await this._fileExists(this.directory)) {
+          if (this.enableStats) {
+            this.stats.clears++;
+          }
+          return true;
+        }
         const files = await promises.readdir(this.directory);
         const cacheFiles = files.filter((file) => {
           if (!file.startsWith(this.prefix)) return false;
@@ -8941,6 +8947,9 @@ ${JSON.stringify(validation, null, 2)}`,
       await super.initialize(database);
       const [ok, err, sdk] = await try_fn_default(() => import('@google-cloud/bigquery'));
       if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[BigqueryReplicator] Failed to import BigQuery SDK: ${err.message}`);
+        }
         this.emit("initialization_error", { replicator: this.name, error: err.message });
         throw err;
       }
@@ -9010,19 +9019,28 @@ ${JSON.stringify(validation, null, 2)}`,
               const maxRetries = 2;
               let lastError = null;
               for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
+                const [ok2, error] = await try_fn_default(async () => {
                   const [updateJob] = await this.bigqueryClient.createQueryJob({
                     query,
                     params,
                     location: this.location
                   });
                   await updateJob.getQueryResults();
-                  job = [updateJob];
+                  return [updateJob];
+                });
+                if (ok2) {
+                  job = ok2;
                   break;
-                } catch (error) {
+                } else {
                   lastError = error;
+                  if (this.config.verbose) {
+                    console.warn(`[BigqueryReplicator] Update attempt ${attempt} failed: ${error.message}`);
+                  }
                   if (error?.message?.includes("streaming buffer") && attempt < maxRetries) {
                     const delaySeconds = 30;
+                    if (this.config.verbose) {
+                      console.warn(`[BigqueryReplicator] Retrying in ${delaySeconds} seconds due to streaming buffer issue`);
+                    }
                     await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1e3));
                     continue;
                   }
@@ -9089,6 +9107,9 @@ ${JSON.stringify(validation, null, 2)}`,
         };
       });
       if (ok) return result;
+      if (this.config.verbose) {
+        console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
+      }
       this.emit("replicator_error", {
         replicator: this.name,
         resourceName,
@@ -9109,8 +9130,14 @@ ${JSON.stringify(validation, null, 2)}`,
           record.id,
           record.beforeData
         ));
-        if (ok) results.push(res);
-        else errors.push({ id: record.id, error: err.message });
+        if (ok) {
+          results.push(res);
+        } else {
+          if (this.config.verbose) {
+            console.warn(`[BigqueryReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+          }
+          errors.push({ id: record.id, error: err.message });
+        }
       }
       return {
         success: errors.length === 0,
@@ -9126,6 +9153,9 @@ ${JSON.stringify(validation, null, 2)}`,
         return true;
       });
       if (ok) return true;
+      if (this.config.verbose) {
+        console.warn(`[BigqueryReplicator] Connection test failed: ${err.message}`);
+      }
       this.emit("connection_error", { replicator: this.name, error: err.message });
       return false;
     }
@@ -9213,6 +9243,9 @@ ${JSON.stringify(validation, null, 2)}`,
       await super.initialize(database);
       const [ok, err, sdk] = await try_fn_default(() => import('pg'));
       if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[PostgresReplicator] Failed to import pg SDK: ${err.message}`);
+        }
         this.emit("initialization_error", {
           replicator: this.name,
           error: err.message
@@ -9354,6 +9387,9 @@ ${JSON.stringify(validation, null, 2)}`,
         };
       });
       if (ok) return result;
+      if (this.config.verbose) {
+        console.warn(`[PostgresReplicator] Replication failed for ${resourceName}: ${err.message}`);
+      }
       this.emit("replicator_error", {
         replicator: this.name,
         resourceName,
@@ -9374,8 +9410,14 @@ ${JSON.stringify(validation, null, 2)}`,
           record.id,
           record.beforeData
         ));
-        if (ok) results.push(res);
-        else errors.push({ id: record.id, error: err.message });
+        if (ok) {
+          results.push(res);
+        } else {
+          if (this.config.verbose) {
+            console.warn(`[PostgresReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+          }
+          errors.push({ id: record.id, error: err.message });
+        }
       }
       return {
         success: errors.length === 0,
@@ -9390,6 +9432,9 @@ ${JSON.stringify(validation, null, 2)}`,
         return true;
       });
       if (ok) return true;
+      if (this.config.verbose) {
+        console.warn(`[PostgresReplicator] Connection test failed: ${err.message}`);
+      }
       this.emit("connection_error", { replicator: this.name, error: err.message });
       return false;
     }
@@ -13124,7 +13169,7 @@ ${JSON.stringify(validation, null, 2)}`,
       super();
       this.version = "1";
       this.s3dbVersion = (() => {
-        const [ok, err, version] = try_fn_default(() => true ? "7.3.4" : "latest");
+        const [ok, err, version] = try_fn_default(() => true ? "7.3.6" : "latest");
         return ok ? version : "latest";
       })();
       this.resources = {};
@@ -13628,9 +13673,8 @@ ${JSON.stringify(validation, null, 2)}`,
         const map = {};
         for (const res of resources) {
           if (typeof res === "string") map[normalizeResourceName$1(res)] = res;
-          else if (Array.isArray(res) && typeof res[0] === "string") map[normalizeResourceName$1(res[0])] = res;
           else if (typeof res === "object" && res.resource) {
-            map[normalizeResourceName$1(res.resource)] = { ...res };
+            map[normalizeResourceName$1(res.resource)] = res;
           }
         }
         return map;
@@ -13643,25 +13687,20 @@ ${JSON.stringify(validation, null, 2)}`,
           else if (Array.isArray(dest)) {
             map[normSrc] = dest.map((item) => {
               if (typeof item === "string") return item;
-              if (typeof item === "function") return item;
               if (typeof item === "object" && item.resource) {
-                return { ...item };
+                return item;
               }
               return item;
             });
           } else if (typeof dest === "function") map[normSrc] = dest;
           else if (typeof dest === "object" && dest.resource) {
-            map[normSrc] = { ...dest };
+            map[normSrc] = dest;
           }
         }
         return map;
       }
       if (typeof resources === "function") {
         return resources;
-      }
-      if (typeof resources === "string") {
-        const map = { [normalizeResourceName$1(resources)]: resources };
-        return map;
       }
       return {};
     }
@@ -13676,8 +13715,8 @@ ${JSON.stringify(validation, null, 2)}`,
       return { isValid: errors.length === 0, errors };
     }
     async initialize(database) {
-      try {
-        await super.initialize(database);
+      await super.initialize(database);
+      const [ok, err] = await try_fn_default(async () => {
         if (this.client) {
           this.targetDatabase = this.client;
         } else if (this.connectionString) {
@@ -13696,7 +13735,11 @@ ${JSON.stringify(validation, null, 2)}`,
           replicator: this.name,
           target: this.connectionString || "client-provided"
         });
-      } catch (err) {
+      });
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[S3dbReplicator] Initialization failed: ${err.message}`);
+        }
         throw err;
       }
     }
@@ -13715,18 +13758,77 @@ ${JSON.stringify(validation, null, 2)}`,
         id = recordId;
       }
       const normResource = normalizeResourceName$1(resource);
-      const destResource = this._resolveDestResource(normResource, payload);
-      const destResourceObj = this._getDestResourceObj(destResource);
-      const transformedData = this._applyTransformer(normResource, payload);
-      let result;
-      if (op === "insert") {
-        result = await destResourceObj.insert(transformedData);
-      } else if (op === "update") {
-        result = await destResourceObj.update(id, transformedData);
-      } else if (op === "delete") {
-        result = await destResourceObj.delete(id);
+      const entry = this.resourcesMap[normResource];
+      if (!entry) {
+        throw new Error(`[S3dbReplicator] Resource not configured: ${resource}`);
+      }
+      if (Array.isArray(entry)) {
+        const results = [];
+        for (const destConfig of entry) {
+          const [ok, error, result] = await try_fn_default(async () => {
+            return await this._replicateToSingleDestination(destConfig, normResource, op, payload, id);
+          });
+          if (!ok) {
+            if (this.config && this.config.verbose) {
+              console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(destConfig)}: ${error.message}`);
+            }
+            throw error;
+          }
+          results.push(result);
+        }
+        return results;
       } else {
-        throw new Error(`Invalid operation: ${op}. Supported operations are: insert, update, delete`);
+        const [ok, error, result] = await try_fn_default(async () => {
+          return await this._replicateToSingleDestination(entry, normResource, op, payload, id);
+        });
+        if (!ok) {
+          if (this.config && this.config.verbose) {
+            console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(entry)}: ${error.message}`);
+          }
+          throw error;
+        }
+        return result;
+      }
+    }
+    async _replicateToSingleDestination(destConfig, sourceResource, operation, data, recordId) {
+      let destResourceName;
+      if (typeof destConfig === "string") {
+        destResourceName = destConfig;
+      } else if (typeof destConfig === "object" && destConfig.resource) {
+        destResourceName = destConfig.resource;
+      } else {
+        destResourceName = sourceResource;
+      }
+      if (typeof destConfig === "object" && destConfig.actions && Array.isArray(destConfig.actions)) {
+        if (!destConfig.actions.includes(operation)) {
+          return { skipped: true, reason: "action_not_supported", action: operation, destination: destResourceName };
+        }
+      }
+      const destResourceObj = this._getDestResourceObj(destResourceName);
+      let transformedData;
+      if (typeof destConfig === "object" && destConfig.transform && typeof destConfig.transform === "function") {
+        transformedData = destConfig.transform(data);
+        if (transformedData && data && data.id && !transformedData.id) {
+          transformedData.id = data.id;
+        }
+      } else if (typeof destConfig === "object" && destConfig.transformer && typeof destConfig.transformer === "function") {
+        transformedData = destConfig.transformer(data);
+        if (transformedData && data && data.id && !transformedData.id) {
+          transformedData.id = data.id;
+        }
+      } else {
+        transformedData = data;
+      }
+      if (!transformedData && data) transformedData = data;
+      let result;
+      if (operation === "insert") {
+        result = await destResourceObj.insert(transformedData);
+      } else if (operation === "update") {
+        result = await destResourceObj.update(recordId, transformedData);
+      } else if (operation === "delete") {
+        result = await destResourceObj.delete(recordId);
+      } else {
+        throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
       }
       return result;
     }
@@ -13735,13 +13837,25 @@ ${JSON.stringify(validation, null, 2)}`,
       const entry = this.resourcesMap[normResource];
       let result;
       if (!entry) return data;
-      if (Array.isArray(entry) && typeof entry[1] === "function") {
-        result = entry[1](data);
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          if (typeof item === "object" && item.transform && typeof item.transform === "function") {
+            result = item.transform(data);
+            break;
+          } else if (typeof item === "object" && item.transformer && typeof item.transformer === "function") {
+            result = item.transformer(data);
+            break;
+          }
+        }
+        if (!result) result = data;
+      } else if (typeof entry === "object") {
+        if (typeof entry.transform === "function") {
+          result = entry.transform(data);
+        } else if (typeof entry.transformer === "function") {
+          result = entry.transformer(data);
+        }
       } else if (typeof entry === "function") {
         result = entry(data);
-      } else if (typeof entry === "object") {
-        if (typeof entry.transform === "function") result = entry.transform(data);
-        else if (typeof entry.transformer === "function") result = entry.transformer(data);
       } else {
         result = data;
       }
@@ -13754,9 +13868,11 @@ ${JSON.stringify(validation, null, 2)}`,
       const entry = this.resourcesMap[normResource];
       if (!entry) return resource;
       if (Array.isArray(entry)) {
-        if (typeof entry[0] === "string") return entry[0];
-        if (typeof entry[0] === "object" && entry[0].resource) return entry[0].resource;
-        if (typeof entry[0] === "function") return resource;
+        for (const item of entry) {
+          if (typeof item === "string") return item;
+          if (typeof item === "object" && item.resource) return item.resource;
+        }
+        return resource;
       }
       if (typeof entry === "string") return entry;
       if (typeof entry === "function") return resource;
@@ -13764,8 +13880,7 @@ ${JSON.stringify(validation, null, 2)}`,
       return resource;
     }
     _getDestResourceObj(resource) {
-      if (!this.client || !this.client.resources) return null;
-      const available = Object.keys(this.client.resources);
+      const available = Object.keys(this.client.resources || {});
       const norm = normalizeResourceName$1(resource);
       const found = available.find((r) => normalizeResourceName$1(r) === norm);
       if (!found) {
@@ -13787,8 +13902,14 @@ ${JSON.stringify(validation, null, 2)}`,
           data: record.data,
           beforeData: record.beforeData
         }));
-        if (ok) results.push(result);
-        else errors.push({ id: record.id, error: err.message });
+        if (ok) {
+          results.push(result);
+        } else {
+          if (this.config.verbose) {
+            console.warn(`[S3dbReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+          }
+          errors.push({ id: record.id, error: err.message });
+        }
       }
       this.emit("batch_replicated", {
         replicator: this.name,
@@ -13806,18 +13927,20 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async testConnection() {
       const [ok, err] = await try_fn_default(async () => {
-        if (!this.targetDatabase) {
-          await this.initialize(this.database);
+        if (!this.targetDatabase) throw new Error("No target database configured");
+        if (typeof this.targetDatabase.connect === "function") {
+          await this.targetDatabase.connect();
         }
-        await this.targetDatabase.listResources();
         return true;
       });
-      if (ok) return true;
-      this.emit("connection_error", {
-        replicator: this.name,
-        error: err.message
-      });
-      return false;
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[S3dbReplicator] Connection test failed: ${err.message}`);
+        }
+        this.emit("connection_error", { replicator: this.name, error: err.message });
+        return false;
+      }
+      return true;
     }
     async getStatus() {
       const baseStatus = await super.getStatus();
@@ -13849,7 +13972,7 @@ ${JSON.stringify(validation, null, 2)}`,
             } else {
               return true;
             }
-          } else if (typeof item === "string" || typeof item === "function") {
+          } else if (typeof item === "string") {
             return true;
           }
         }
@@ -13976,6 +14099,9 @@ ${JSON.stringify(validation, null, 2)}`,
       if (!this.sqsClient) {
         const [ok, err, sdk] = await try_fn_default(() => import('@aws-sdk/client-sqs'));
         if (!ok) {
+          if (this.config.verbose) {
+            console.warn(`[SqsReplicator] Failed to import SQS SDK: ${err.message}`);
+          }
           this.emit("initialization_error", {
             replicator: this.name,
             error: err.message
@@ -14027,6 +14153,9 @@ ${JSON.stringify(validation, null, 2)}`,
         return { success: true, results };
       });
       if (ok) return result;
+      if (this.config.verbose) {
+        console.warn(`[SqsReplicator] Replication failed for ${resource}: ${err.message}`);
+      }
       this.emit("replicator_error", {
         replicator: this.name,
         resource,
@@ -14099,6 +14228,9 @@ ${JSON.stringify(validation, null, 2)}`,
       });
       if (ok) return result;
       const errorMessage = err?.message || err || "Unknown error";
+      if (this.config.verbose) {
+        console.warn(`[SqsReplicator] Batch replication failed for ${resource}: ${errorMessage}`);
+      }
       this.emit("batch_replicator_error", {
         replicator: this.name,
         resource,
@@ -14120,6 +14252,9 @@ ${JSON.stringify(validation, null, 2)}`,
         return true;
       });
       if (ok) return true;
+      if (this.config.verbose) {
+        console.warn(`[SqsReplicator] Connection test failed: ${err.message}`);
+      }
       this.emit("connection_error", {
         replicator: this.name,
         error: err.message
@@ -14216,25 +14351,37 @@ ${JSON.stringify(validation, null, 2)}`,
         return;
       }
       resource.on("insert", async (data) => {
-        try {
+        const [ok, error] = await try_fn_default(async () => {
           const completeData = { ...data, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
           await plugin.processReplicatorEvent("insert", resource.name, completeData.id, completeData);
-        } catch (error) {
+        });
+        if (!ok) {
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Insert event failed for resource ${resource.name}: ${error.message}`);
+          }
           this.emit("error", { operation: "insert", error: error.message, resource: resource.name });
         }
       });
       resource.on("update", async (data, beforeData) => {
-        try {
+        const [ok, error] = await try_fn_default(async () => {
           const completeData = { ...data, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
           await plugin.processReplicatorEvent("update", resource.name, completeData.id, completeData, beforeData);
-        } catch (error) {
+        });
+        if (!ok) {
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Update event failed for resource ${resource.name}: ${error.message}`);
+          }
           this.emit("error", { operation: "update", error: error.message, resource: resource.name });
         }
       });
       resource.on("delete", async (data) => {
-        try {
+        const [ok, error] = await try_fn_default(async () => {
           await plugin.processReplicatorEvent("delete", resource.name, data.id, data);
-        } catch (error) {
+        });
+        if (!ok) {
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Delete event failed for resource ${resource.name}: ${error.message}`);
+          }
           this.emit("error", { operation: "delete", error: error.message, resource: resource.name });
         }
       });
@@ -14250,13 +14397,17 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async setup(database) {
       this.database = database;
-      try {
+      const [initOk, initError] = await try_fn_default(async () => {
         await this.initializeReplicators(database);
-      } catch (error) {
-        this.emit("error", { operation: "setup", error: error.message });
-        throw error;
+      });
+      if (!initOk) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Replicator initialization failed: ${initError.message}`);
+        }
+        this.emit("error", { operation: "setup", error: initError.message });
+        throw initError;
       }
-      try {
+      const [logOk, logError] = await try_fn_default(async () => {
         if (this.config.replicatorLogResource) {
           const logRes = await database.createResource({
             name: this.config.replicatorLogResource,
@@ -14273,7 +14424,15 @@ ${JSON.stringify(validation, null, 2)}`,
             }
           });
         }
-      } catch (error) {
+      });
+      if (!logOk) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Failed to create log resource ${this.config.replicatorLogResource}: ${logError.message}`);
+        }
+        this.emit("replicator_log_resource_creation_error", {
+          resourceName: this.config.replicatorLogResource,
+          error: logError.message
+        });
       }
       await this.uploadMetadataFile(database);
       const originalCreateResource = database.createResource.bind(database);
@@ -14316,21 +14475,28 @@ ${JSON.stringify(validation, null, 2)}`,
     async retryWithBackoff(operation, maxRetries = 3) {
       let lastError;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          return await operation();
-        } catch (error) {
+        const [ok, error] = await try_fn_default(operation);
+        if (ok) {
+          return ok;
+        } else {
           lastError = error;
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Retry attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+          }
           if (attempt === maxRetries) {
             throw error;
           }
           const delay = Math.pow(2, attempt - 1) * 1e3;
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Waiting ${delay}ms before retry...`);
+          }
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
       throw lastError;
     }
     async logError(replicator, resourceName, operation, recordId, data, error) {
-      try {
+      const [ok, logError] = await try_fn_default(async () => {
         const logResourceName = this.config.replicatorLogResource;
         if (this.database && this.database.resources && this.database.resources[logResourceName]) {
           const logResource = this.database.resources[logResourceName];
@@ -14345,7 +14511,19 @@ ${JSON.stringify(validation, null, 2)}`,
             status: "error"
           });
         }
-      } catch (logError) {
+      });
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Failed to log error for ${resourceName}: ${logError.message}`);
+        }
+        this.emit("replicator_log_error", {
+          replicator: replicator.name || replicator.id,
+          resourceName,
+          operation,
+          recordId,
+          originalError: error.message,
+          logError: logError.message
+        });
       }
     }
     async processReplicatorEvent(operation, resourceName, recordId, data, beforeData = null) {
@@ -14358,8 +14536,8 @@ ${JSON.stringify(validation, null, 2)}`,
         return;
       }
       const promises = applicableReplicators.map(async (replicator) => {
-        try {
-          const result = await this.retryWithBackoff(
+        const [ok, error, result] = await try_fn_default(async () => {
+          const result2 = await this.retryWithBackoff(
             () => replicator.replicate(resourceName, operation, data, recordId, beforeData),
             this.config.maxRetries
           );
@@ -14368,11 +14546,17 @@ ${JSON.stringify(validation, null, 2)}`,
             resourceName,
             operation,
             recordId,
-            result,
+            result: result2,
             success: true
           });
+          return result2;
+        });
+        if (ok) {
           return result;
-        } catch (error) {
+        } else {
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Replication failed for ${replicator.name || replicator.id} on ${resourceName}: ${error.message}`);
+          }
           this.emit("replicator_error", {
             replicator: replicator.name || replicator.id,
             resourceName,
@@ -14397,11 +14581,14 @@ ${JSON.stringify(validation, null, 2)}`,
         return;
       }
       const promises = applicableReplicators.map(async (replicator) => {
-        try {
+        const [wrapperOk, wrapperError] = await try_fn_default(async () => {
           const [ok, err, result] = await try_fn_default(
             () => replicator.replicate(item.resourceName, item.operation, item.data, item.recordId, item.beforeData)
           );
           if (!ok) {
+            if (this.config.verbose) {
+              console.warn(`[ReplicatorPlugin] Replicator item processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${err.message}`);
+            }
             this.emit("replicator_error", {
               replicator: replicator.name || replicator.id,
               resourceName: item.resourceName,
@@ -14423,18 +14610,24 @@ ${JSON.stringify(validation, null, 2)}`,
             success: true
           });
           return { success: true, result };
-        } catch (error) {
+        });
+        if (wrapperOk) {
+          return wrapperOk;
+        } else {
+          if (this.config.verbose) {
+            console.warn(`[ReplicatorPlugin] Wrapper processing failed for ${replicator.name || replicator.id} on ${item.resourceName}: ${wrapperError.message}`);
+          }
           this.emit("replicator_error", {
             replicator: replicator.name || replicator.id,
             resourceName: item.resourceName,
             operation: item.operation,
             recordId: item.recordId,
-            error: error.message
+            error: wrapperError.message
           });
           if (this.config.logErrors && this.database) {
-            await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, error);
+            await this.logError(replicator, item.resourceName, item.operation, item.recordId, item.data, wrapperError);
           }
-          return { success: false, error: error.message };
+          return { success: false, error: wrapperError.message };
         }
       });
       return Promise.allSettled(promises);
@@ -14456,9 +14649,13 @@ ${JSON.stringify(validation, null, 2)}`,
         timestamp: typeof item.timestamp === "number" ? item.timestamp : Date.now(),
         createdAt: item.createdAt || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
       };
-      try {
+      const [ok, err] = await try_fn_default(async () => {
         await logRes.insert(logItem);
-      } catch (err) {
+      });
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Failed to log replicator item: ${err.message}`);
+        }
         this.emit("replicator.log.failed", { error: err, item });
       }
     }
@@ -14564,14 +14761,23 @@ ${JSON.stringify(validation, null, 2)}`,
       this.emit("replicator.sync.completed", { replicatorId, stats: this.stats });
     }
     async cleanup() {
-      try {
+      const [ok, error] = await try_fn_default(async () => {
         if (this.replicators && this.replicators.length > 0) {
           const cleanupPromises = this.replicators.map(async (replicator) => {
-            try {
+            const [replicatorOk, replicatorError] = await try_fn_default(async () => {
               if (replicator && typeof replicator.cleanup === "function") {
                 await replicator.cleanup();
               }
-            } catch (error) {
+            });
+            if (!replicatorOk) {
+              if (this.config.verbose) {
+                console.warn(`[ReplicatorPlugin] Failed to cleanup replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
+              }
+              this.emit("replicator_cleanup_error", {
+                replicator: replicator.name || replicator.id || "unknown",
+                driver: replicator.driver || "unknown",
+                error: replicatorError.message
+              });
             }
           });
           await Promise.allSettled(cleanupPromises);
@@ -14580,7 +14786,14 @@ ${JSON.stringify(validation, null, 2)}`,
         this.database = null;
         this.eventListenersInstalled.clear();
         this.removeAllListeners();
-      } catch (error) {
+      });
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[ReplicatorPlugin] Failed to cleanup plugin: ${error.message}`);
+        }
+        this.emit("replicator_plugin_cleanup_error", {
+          error: error.message
+        });
       }
     }
   }
