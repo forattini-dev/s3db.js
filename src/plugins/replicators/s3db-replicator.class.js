@@ -249,42 +249,60 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   _applyTransformer(resource, data) {
+    // First, clean internal fields that shouldn't go to target S3DB
+    let cleanData = this._cleanInternalFields(data);
+    
     const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     let result;
-    if (!entry) return data;
+    if (!entry) return cleanData;
     
     // Array of multiple destinations - use first transform found
     if (Array.isArray(entry)) {
       for (const item of entry) {
         if (typeof item === 'object' && item.transform && typeof item.transform === 'function') {
-          result = item.transform(data);
+          result = item.transform(cleanData);
           break;
         } else if (typeof item === 'object' && item.transformer && typeof item.transformer === 'function') {
-          result = item.transformer(data);
+          result = item.transformer(cleanData);
           break;
         }
       }
-      if (!result) result = data;
+      if (!result) result = cleanData;
     } else if (typeof entry === 'object') {
       // Prefer transform, fallback to transformer for backwards compatibility
       if (typeof entry.transform === 'function') {
-        result = entry.transform(data);
+        result = entry.transform(cleanData);
       } else if (typeof entry.transformer === 'function') {
-        result = entry.transformer(data);
+        result = entry.transformer(cleanData);
       }
     } else if (typeof entry === 'function') {
       // Function directly as transformer
-      result = entry(data);
+      result = entry(cleanData);
     } else {
-      result = data;
+      result = cleanData;
     }
     
     // Ensure that id is always present
-    if (result && data && data.id && !result.id) result.id = data.id;
-    // Fallback: if transformer returns undefined/null, use original data
-    if (!result && data) result = data;
+    if (result && cleanData && cleanData.id && !result.id) result.id = cleanData.id;
+    // Fallback: if transformer returns undefined/null, use original clean data
+    if (!result && cleanData) result = cleanData;
     return result;
+  }
+
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== 'object') return data;
+    
+    const cleanData = { ...data };
+    
+    // Remove internal fields that start with $ or _
+    Object.keys(cleanData).forEach(key => {
+      if (key.startsWith('$') || key.startsWith('_')) {
+        delete cleanData[key];
+      }
+    });
+    
+    return cleanData;
   }
 
   _resolveDestResource(resource, data) {
