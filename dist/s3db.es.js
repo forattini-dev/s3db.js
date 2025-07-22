@@ -9034,8 +9034,8 @@ class BigqueryReplicator extends base_replicator_class_default {
               const { errors: errors2, response } = error;
               if (this.config.verbose) {
                 console.error("[BigqueryReplicator] BigQuery insert error details:");
-                if (errors2) console.error("Errors:", JSON.stringify(errors2, null, 2));
-                if (response) console.error("Response:", JSON.stringify(response, null, 2));
+                if (errors2) console.error(JSON.stringify(errors2, null, 2));
+                if (response) console.error(JSON.stringify(response, null, 2));
               }
               throw error;
             }
@@ -13236,7 +13236,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.3.8" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.3.10" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
