@@ -9102,6 +9102,9 @@ class BigqueryReplicator extends base_replicator_class_default {
         }
       }
       const success = errors.length === 0;
+      if (errors.length > 0) {
+        console.warn(`[BigqueryReplicator] Replication completed with errors for ${resourceName}:`, errors);
+      }
       this.emit("replicated", {
         replicator: this.name,
         resourceName,
@@ -9151,6 +9154,9 @@ class BigqueryReplicator extends base_replicator_class_default {
         }
         errors.push({ id: record.id, error: err.message });
       }
+    }
+    if (errors.length > 0) {
+      console.warn(`[BigqueryReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
     }
     return {
       success: errors.length === 0,
@@ -9382,6 +9388,9 @@ class PostgresReplicator extends base_replicator_class_default {
         }
       }
       const success = errors.length === 0;
+      if (errors.length > 0) {
+        console.warn(`[PostgresReplicator] Replication completed with errors for ${resourceName}:`, errors);
+      }
       this.emit("replicated", {
         replicator: this.name,
         resourceName,
@@ -9431,6 +9440,9 @@ class PostgresReplicator extends base_replicator_class_default {
         }
         errors.push({ id: record.id, error: err.message });
       }
+    }
+    if (errors.length > 0) {
+      console.warn(`[PostgresReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
     }
     return {
       success: errors.length === 0,
@@ -13182,7 +13194,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.3.6" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.3.7" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -13924,6 +13936,9 @@ class S3dbReplicator extends base_replicator_class_default {
         errors.push({ id: record.id, error: err.message });
       }
     }
+    if (errors.length > 0) {
+      console.warn(`[S3dbReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
+    }
     this.emit("batch_replicated", {
       replicator: this.name,
       resourceName,
@@ -14220,6 +14235,9 @@ class SqsReplicator extends base_replicator_class_default {
             throw errBatch;
           }
         }
+      }
+      if (errors.length > 0) {
+        console.warn(`[SqsReplicator] Batch replication completed with ${errors.length} error(s) for ${resource}:`, errors);
       }
       this.emit("batch_replicated", {
         replicator: this.name,
