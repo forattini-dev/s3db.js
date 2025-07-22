@@ -11070,6 +11070,7 @@ class Resource extends EventEmitter {
    * @param {Function} [config.idGenerator] - Custom ID generator function
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
    * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
+   * @param {Object} [config.events={}] - Event listeners to automatically add
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -11091,6 +11092,14 @@ class Resource extends EventEmitter {
    *     beforeInsert: [async (data) => {
       *       return data;
    *     }]
+   *   },
+   *   events: {
+   *     insert: (ev) => console.log('Inserted:', ev.id),
+   *     update: [
+   *       (ev) => console.warn('Update detected'),
+   *       (ev) => console.log('Updated:', ev.id)
+   *     ],
+   *     delete: (ev) => console.log('Deleted:', ev.id)
    *   }
    * });
    * 
@@ -11143,7 +11152,8 @@ class Resource extends EventEmitter {
       hooks = {},
       idGenerator: customIdGenerator,
       idSize = 22,
-      versioningEnabled = false
+      versioningEnabled = false,
+      events = {}
     } = config;
     this.name = name;
     this.client = client;
@@ -11182,6 +11192,19 @@ class Resource extends EventEmitter {
               this.hooks[event].push(fn.bind(this));
             }
           }
+        }
+      }
+    }
+    if (events && Object.keys(events).length > 0) {
+      for (const [eventName, listeners] of Object.entries(events)) {
+        if (Array.isArray(listeners)) {
+          for (const listener of listeners) {
+            if (typeof listener === "function") {
+              this.on(eventName, listener);
+            }
+          }
+        } else if (typeof listeners === "function") {
+          this.on(eventName, listeners);
         }
       }
     }
@@ -13224,6 +13247,24 @@ function validateResourceConfig(config) {
       }
     }
   }
+  if (config.events !== void 0) {
+    if (typeof config.events !== "object" || Array.isArray(config.events)) {
+      errors.push("Resource 'events' must be an object");
+    } else {
+      for (const [eventName, listeners] of Object.entries(config.events)) {
+        if (Array.isArray(listeners)) {
+          for (let i = 0; i < listeners.length; i++) {
+            const listener = listeners[i];
+            if (typeof listener !== "function") {
+              errors.push(`Resource 'events.${eventName}[${i}]' must be a function`);
+            }
+          }
+        } else if (typeof listeners !== "function") {
+          errors.push(`Resource 'events.${eventName}' must be a function or array of functions`);
+        }
+      }
+    }
+  }
   return {
     isValid: errors.length === 0,
     errors
@@ -13607,7 +13648,8 @@ class Database extends EventEmitter {
       versioningEnabled: this.versioningEnabled,
       map: config.map,
       idGenerator: config.idGenerator,
-      idSize: config.idSize
+      idSize: config.idSize,
+      events: config.events || {}
     });
     resource.database = this;
     this.resources[name] = resource;

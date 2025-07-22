@@ -47,6 +47,7 @@ declare module 's3db.js' {
     idSize?: number;
     versioningEnabled?: boolean;
     map?: any;
+    events?: EventListenerConfig;
   }
 
   /** Partition configuration */
@@ -63,6 +64,11 @@ declare module 's3db.js' {
     afterUpdate?: Function[];
     beforeDelete?: Function[];
     afterDelete?: Function[];
+  }
+
+  /** Event listener configuration */
+  export interface EventListenerConfig {
+    [eventName: string]: Function | Function[];
   }
 
   /** Query options */
