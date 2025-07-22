@@ -95,7 +95,7 @@ class SqsReplicator extends BaseReplicator {
     
     if (!entry) return data;
     
-    // Check for transform function in resource config
+    // Support both transform and transformer (backwards compatibility)
     if (typeof entry.transform === 'function') {
       result = entry.transform(data);
     } else if (typeof entry.transformer === 'function') {
@@ -146,6 +146,9 @@ class SqsReplicator extends BaseReplicator {
     if (!this.sqsClient) {
       const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
       if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[SqsReplicator] Failed to import SQS SDK: ${err.message}`);
+        }
         this.emit('initialization_error', {
           replicator: this.name,
           error: err.message
@@ -199,6 +202,9 @@ class SqsReplicator extends BaseReplicator {
       return { success: true, results };
     });
     if (ok) return result;
+    if (this.config.verbose) {
+      console.warn(`[SqsReplicator] Replication failed for ${resource}: ${err.message}`);
+    }
     this.emit('replicator_error', {
       replicator: this.name,
       resource,
@@ -272,6 +278,9 @@ class SqsReplicator extends BaseReplicator {
     });
     if (ok) return result;
     const errorMessage = err?.message || err || 'Unknown error';
+    if (this.config.verbose) {
+      console.warn(`[SqsReplicator] Batch replication failed for ${resource}: ${errorMessage}`);
+    }
     this.emit('batch_replicator_error', {
       replicator: this.name,
       resource,
@@ -295,6 +304,9 @@ class SqsReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
+    if (this.config.verbose) {
+      console.warn(`[SqsReplicator] Connection test failed: ${err.message}`);
+    }
     this.emit('connection_error', {
       replicator: this.name,
       error: err.message
