@@ -48,18 +48,16 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   _normalizeResources(resources) {
-    // Supports array, object, function, string
+    // Supports object, function, string, and arrays of destination configurations
     if (!resources) return {};
     if (Array.isArray(resources)) {
       const map = {};
       for (const res of resources) {
         if (typeof res === 'string') map[normalizeResourceName(res)] = res;
-        else if (Array.isArray(res) && typeof res[0] === 'string') map[normalizeResourceName(res[0])] = res;
         else if (typeof res === 'object' && res.resource) {
-          // Array of objects with resource/action/transformer
-          map[normalizeResourceName(res.resource)] = { ...res };
+          // Objects with resource/transform/actions - keep as is
+          map[normalizeResourceName(res.resource)] = res;
         }
-        // Do NOT set actions: ['insert'] or any default actions here
       }
       return map;
     }
@@ -69,30 +67,25 @@ class S3dbReplicator extends BaseReplicator {
         const normSrc = normalizeResourceName(src);
         if (typeof dest === 'string') map[normSrc] = dest;
         else if (Array.isArray(dest)) {
-          // Array of destinations/objects/transformers
+          // Array of multiple destinations - support multi-destination replication
           map[normSrc] = dest.map(item => {
             if (typeof item === 'string') return item;
-            if (typeof item === 'function') return item;
             if (typeof item === 'object' && item.resource) {
-              // Copy all fields (resource, transformer, actions, etc.)
-              return { ...item };
+              // Keep object items as is
+              return item;
             }
             return item;
           });
         } else if (typeof dest === 'function') map[normSrc] = dest;
         else if (typeof dest === 'object' && dest.resource) {
-          // Copy all fields (resource, transformer, actions, etc.)
-          map[normSrc] = { ...dest };
+          // Support { resource, transform/transformer } format - keep as is
+          map[normSrc] = dest;
         }
       }
       return map;
     }
     if (typeof resources === 'function') {
       return resources;
-    }
-    if (typeof resources === 'string') {
-      const map = { [normalizeResourceName(resources)]: resources };
-      return map;
     }
     return {};
   }
@@ -110,27 +103,34 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   async initialize(database) {
-    try {
     await super.initialize(database);
+    
+    const [ok, err] = await tryFn(async () => {
       if (this.client) {
         this.targetDatabase = this.client;
       } else if (this.connectionString) {
-    const targetConfig = {
-      connectionString: this.connectionString,
-      region: this.region,
-      keyPrefix: this.keyPrefix,
-      verbose: this.config.verbose || false
-    };
-    this.targetDatabase = new S3db(targetConfig);
-    await this.targetDatabase.connect();
+        const targetConfig = {
+          connectionString: this.connectionString,
+          region: this.region,
+          keyPrefix: this.keyPrefix,
+          verbose: this.config.verbose || false
+        };
+        this.targetDatabase = new S3db(targetConfig);
+        await this.targetDatabase.connect();
       } else {
         throw new Error('S3dbReplicator: No client or connectionString provided');
       }
-    this.emit('connected', { 
-      replicator: this.name, 
-      target: this.connectionString || 'client-provided'
+      
+      this.emit('connected', { 
+        replicator: this.name, 
+        target: this.connectionString || 'client-provided'
+      });
     });
-    } catch (err) {
+    
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn(`[S3dbReplicator] Initialization failed: ${err.message}`);
+      }
       throw err;
     }
   }
@@ -154,21 +154,95 @@ class S3dbReplicator extends BaseReplicator {
     }
     
     const normResource = normalizeResourceName(resource);
-    const destResource = this._resolveDestResource(normResource, payload);
-    const destResourceObj = this._getDestResourceObj(destResource);
+    const entry = this.resourcesMap[normResource];
     
-    // Apply transformer before replicating
-    const transformedData = this._applyTransformer(normResource, payload);
-    
-    let result;
-    if (op === 'insert') {
-      result = await destResourceObj.insert(transformedData);
-    } else if (op === 'update') {
-      result = await destResourceObj.update(id, transformedData);
-    } else if (op === 'delete') {
-      result = await destResourceObj.delete(id);
+    if (!entry) {
+      throw new Error(`[S3dbReplicator] Resource not configured: ${resource}`);
+    }
+
+    // Handle multi-destination arrays
+    if (Array.isArray(entry)) {
+      const results = [];
+      for (const destConfig of entry) {
+        const [ok, error, result] = await tryFn(async () => {
+          return await this._replicateToSingleDestination(destConfig, normResource, op, payload, id);
+        });
+        
+        if (!ok) {
+          if (this.config && this.config.verbose) {
+            console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(destConfig)}: ${error.message}`);
+          }
+          throw error;
+        }
+        results.push(result);
+      }
+      return results;
     } else {
-      throw new Error(`Invalid operation: ${op}. Supported operations are: insert, update, delete`);
+      // Single destination
+      const [ok, error, result] = await tryFn(async () => {
+        return await this._replicateToSingleDestination(entry, normResource, op, payload, id);
+      });
+      
+      if (!ok) {
+        if (this.config && this.config.verbose) {
+          console.warn(`[S3dbReplicator] Failed to replicate to destination ${JSON.stringify(entry)}: ${error.message}`);
+        }
+        throw error;
+      }
+      return result;
+    }
+  }
+
+  async _replicateToSingleDestination(destConfig, sourceResource, operation, data, recordId) {
+    // Determine destination resource name
+    let destResourceName;
+    if (typeof destConfig === 'string') {
+      destResourceName = destConfig;
+    } else if (typeof destConfig === 'object' && destConfig.resource) {
+      destResourceName = destConfig.resource;
+    } else {
+      destResourceName = sourceResource;
+    }
+
+    // Check if this destination supports the operation
+    if (typeof destConfig === 'object' && destConfig.actions && Array.isArray(destConfig.actions)) {
+      if (!destConfig.actions.includes(operation)) {
+        return { skipped: true, reason: 'action_not_supported', action: operation, destination: destResourceName };
+      }
+    }
+
+    const destResourceObj = this._getDestResourceObj(destResourceName);
+    
+    // Apply appropriate transformer for this destination
+    let transformedData;
+    if (typeof destConfig === 'object' && destConfig.transform && typeof destConfig.transform === 'function') {
+      transformedData = destConfig.transform(data);
+      // Ensure ID is preserved
+      if (transformedData && data && data.id && !transformedData.id) {
+        transformedData.id = data.id;
+      }
+    } else if (typeof destConfig === 'object' && destConfig.transformer && typeof destConfig.transformer === 'function') {
+      transformedData = destConfig.transformer(data);
+      // Ensure ID is preserved
+      if (transformedData && data && data.id && !transformedData.id) {
+        transformedData.id = data.id;
+      }
+    } else {
+      transformedData = data;
+    }
+
+    // Fallback: if transformer returns undefined/null, use original data
+    if (!transformedData && data) transformedData = data;
+
+    let result;
+    if (operation === 'insert') {
+      result = await destResourceObj.insert(transformedData);
+    } else if (operation === 'update') {
+      result = await destResourceObj.update(recordId, transformedData);
+    } else if (operation === 'delete') {
+      result = await destResourceObj.delete(recordId);
+    } else {
+      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
     }
     
     return result;
@@ -179,18 +253,34 @@ class S3dbReplicator extends BaseReplicator {
     const entry = this.resourcesMap[normResource];
     let result;
     if (!entry) return data;
-    // Array: [resource, transformer]
-    if (Array.isArray(entry) && typeof entry[1] === 'function') {
-      result = entry[1](data);
-    } else if (typeof entry === 'function') {
-      result = entry(data);
+    
+    // Array of multiple destinations - use first transform found
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (typeof item === 'object' && item.transform && typeof item.transform === 'function') {
+          result = item.transform(data);
+          break;
+        } else if (typeof item === 'object' && item.transformer && typeof item.transformer === 'function') {
+          result = item.transformer(data);
+          break;
+        }
+      }
+      if (!result) result = data;
     } else if (typeof entry === 'object') {
-      if (typeof entry.transform === 'function') result = entry.transform(data);
-      else if (typeof entry.transformer === 'function') result = entry.transformer(data);
+      // Prefer transform, fallback to transformer for backwards compatibility
+      if (typeof entry.transform === 'function') {
+        result = entry.transform(data);
+      } else if (typeof entry.transformer === 'function') {
+        result = entry.transformer(data);
+      }
+    } else if (typeof entry === 'function') {
+      // Function directly as transformer
+      result = entry(data);
     } else {
       result = data;
     }
-          // Ensure that id is always present
+    
+    // Ensure that id is always present
     if (result && data && data.id && !result.id) result.id = data.id;
     // Fallback: if transformer returns undefined/null, use original data
     if (!result && data) result = data;
@@ -201,11 +291,14 @@ class S3dbReplicator extends BaseReplicator {
     const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) return resource;
-    // Array: [resource, transformer]
+    
+    // Array of multiple destinations - use first resource found
     if (Array.isArray(entry)) {
-      if (typeof entry[0] === 'string') return entry[0];
-      if (typeof entry[0] === 'object' && entry[0].resource) return entry[0].resource;
-      if (typeof entry[0] === 'function') return resource; // fallback
+      for (const item of entry) {
+        if (typeof item === 'string') return item;
+        if (typeof item === 'object' && item.resource) return item.resource;
+      }
+      return resource; // fallback
     }
     // String mapping
     if (typeof entry === 'string') return entry;
@@ -217,8 +310,7 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   _getDestResourceObj(resource) {
-    if (!this.client || !this.client.resources) return null;
-    const available = Object.keys(this.client.resources);
+    const available = Object.keys(this.client.resources || {});
     const norm = normalizeResourceName(resource);
     const found = available.find(r => normalizeResourceName(r) === norm);
     if (!found) {
@@ -243,8 +335,14 @@ class S3dbReplicator extends BaseReplicator {
         data: record.data, 
         beforeData: record.beforeData
       }));
-      if (ok) results.push(result);
-      else errors.push({ id: record.id, error: err.message });
+      if (ok) {
+        results.push(result);
+      } else {
+        if (this.config.verbose) {
+          console.warn(`[S3dbReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+        }
+        errors.push({ id: record.id, error: err.message });
+      }
     }
 
     this.emit('batch_replicated', {
@@ -265,19 +363,25 @@ class S3dbReplicator extends BaseReplicator {
 
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
-      if (!this.targetDatabase) {
-        await this.initialize(this.database);
-      }
+      if (!this.targetDatabase) throw new Error('No target database configured');
+      
       // Try to list resources to test connection
-      await this.targetDatabase.listResources();
+      if (typeof this.targetDatabase.connect === 'function') {
+        await this.targetDatabase.connect();
+      }
+      
       return true;
     });
-    if (ok) return true;
-    this.emit('connection_error', {
-      replicator: this.name,
-      error: err.message
-    });
-    return false;
+    
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn(`[S3dbReplicator] Connection test failed: ${err.message}`);
+      }
+      this.emit('connection_error', { replicator: this.name, error: err.message });
+      return false;
+    }
+    
+    return true;
   }
 
   async getStatus() {
@@ -308,22 +412,22 @@ class S3dbReplicator extends BaseReplicator {
     // If no action is specified, just check if resource is configured
     if (!action) return true;
     
-    // Support for all configuration styles
-          // If it's an array of objects, check actions
+    // Array of multiple destinations - check if any supports the action
     if (Array.isArray(entry)) {
       for (const item of entry) {
         if (typeof item === 'object' && item.resource) {
           if (item.actions && Array.isArray(item.actions)) {
             if (item.actions.includes(action)) return true;
           } else {
-            return true; // If no actions, accept all
+            return true; // If no actions specified, accept all
           }
-        } else if (typeof item === 'string' || typeof item === 'function') {
-          return true;
+        } else if (typeof item === 'string') {
+          return true; // String destinations accept all actions
         }
       }
       return false;
     }
+    
     if (typeof entry === 'object' && entry.resource) {
       if (entry.actions && Array.isArray(entry.actions)) {
         return entry.actions.includes(action);

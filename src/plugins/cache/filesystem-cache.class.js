@@ -428,6 +428,15 @@ export class FilesystemCache extends Cache {
 
   async _clear(prefix) {
     try {
+      // Check if directory exists before trying to read it
+      if (!await this._fileExists(this.directory)) {
+        // Directory doesn't exist, nothing to clear
+        if (this.enableStats) {
+          this.stats.clears++;
+        }
+        return true;
+      }
+      
       const files = await readdir(this.directory);
       const cacheFiles = files.filter(file => {
         if (!file.startsWith(this.prefix)) return false;
