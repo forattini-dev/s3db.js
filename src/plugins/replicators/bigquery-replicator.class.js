@@ -115,6 +115,9 @@ class BigqueryReplicator extends BaseReplicator {
     await super.initialize(database);
     const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
     if (!ok) {
+      if (this.config.verbose) {
+        console.warn(`[BigqueryReplicator] Failed to import BigQuery SDK: ${err.message}`);
+      }
       this.emit('initialization_error', { replicator: this.name, error: err.message });
       throw err;
     }
@@ -206,21 +209,32 @@ class BigqueryReplicator extends BaseReplicator {
             let lastError = null;
             
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              try {
+              const [ok, error] = await tryFn(async () => {
                 const [updateJob] = await this.bigqueryClient.createQueryJob({
                   query,
                   params,
                   location: this.location
                 });
                 await updateJob.getQueryResults();
-                job = [updateJob];
+                return [updateJob];
+              });
+              
+              if (ok) {
+                job = ok;
                 break;
-              } catch (error) {
+              } else {
                 lastError = error;
+                
+                if (this.config.verbose) {
+                  console.warn(`[BigqueryReplicator] Update attempt ${attempt} failed: ${error.message}`);
+                }
                 
                 // If it's streaming buffer error and not the last attempt
                 if (error?.message?.includes('streaming buffer') && attempt < maxRetries) {
                   const delaySeconds = 30;
+                  if (this.config.verbose) {
+                    console.warn(`[BigqueryReplicator] Retrying in ${delaySeconds} seconds due to streaming buffer issue`);
+                  }
                   await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
                   continue;
                 }
@@ -298,6 +312,9 @@ class BigqueryReplicator extends BaseReplicator {
     
     if (ok) return result;
     
+    if (this.config.verbose) {
+      console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
+    }
     this.emit('replicator_error', {
       replicator: this.name,
       resourceName,
@@ -321,8 +338,14 @@ class BigqueryReplicator extends BaseReplicator {
         record.id, 
         record.beforeData
       ));
-      if (ok) results.push(res);
-      else errors.push({ id: record.id, error: err.message });
+      if (ok) {
+        results.push(res);
+      } else {
+        if (this.config.verbose) {
+          console.warn(`[BigqueryReplicator] Batch replication failed for record ${record.id}: ${err.message}`);
+        }
+        errors.push({ id: record.id, error: err.message });
+      }
     }
     
     return { 
@@ -340,6 +363,9 @@ class BigqueryReplicator extends BaseReplicator {
       return true;
     });
     if (ok) return true;
+    if (this.config.verbose) {
+      console.warn(`[BigqueryReplicator] Connection test failed: ${err.message}`);
+    }
     this.emit('connection_error', { replicator: this.name, error: err.message });
     return false;
   }
