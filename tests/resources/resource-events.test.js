@@ -537,4 +537,349 @@ describe('Resource Events - Always Emit Complete Content', () => {
       expect(eventData.arrayField).toEqual(['1', '2', '3']); // Numbers converted to strings
     });
   });
+
+  describe('Events Configuration - Auto-registered Listeners', () => {
+    test('should register single event listener from config', async () => {
+      const insertListener = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'single_event_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          insert: insertListener
+        }
+      });
+
+      const testData = {
+        id: 'test-single-event',
+        name: 'Test User'
+      };
+
+      await resource.insert(testData);
+
+      // Should have called the configured listener
+      expect(insertListener).toHaveBeenCalledTimes(1);
+      expect(insertListener).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'test-single-event',
+        name: 'Test User'
+      }));
+    });
+
+    test('should register multiple event listeners from config', async () => {
+      const listener1 = jest.fn();
+      const listener2 = jest.fn();
+      const listener3 = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'multiple_events_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          update: [listener1, listener2, listener3]
+        }
+      });
+
+      const testData = {
+        id: 'test-multiple-events',
+        name: 'Test User'
+      };
+
+      await resource.insert(testData);
+      await resource.update('test-multiple-events', { name: 'Updated User' });
+
+      // All three listeners should have been called
+      expect(listener1).toHaveBeenCalledTimes(1);
+      expect(listener2).toHaveBeenCalledTimes(1);
+      expect(listener3).toHaveBeenCalledTimes(1);
+
+      // All should receive the same event data
+      const expectedEventData = expect.objectContaining({
+        id: 'test-multiple-events',
+        name: 'Updated User'
+      });
+      expect(listener1).toHaveBeenCalledWith(expectedEventData);
+      expect(listener2).toHaveBeenCalledWith(expectedEventData);
+      expect(listener3).toHaveBeenCalledWith(expectedEventData);
+    });
+
+    test('should register listeners for different event types', async () => {
+      const insertListener = jest.fn();
+      const updateListener = jest.fn();
+      const deleteListener = jest.fn();
+      const listListener = jest.fn();
+      const countListener = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'different_events_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          insert: insertListener,
+          update: updateListener,
+          delete: deleteListener,
+          list: listListener,
+          count: countListener
+        }
+      });
+
+      const testData = {
+        id: 'test-different-events',
+        name: 'Test User'
+      };
+
+      // Test insert event
+      await resource.insert(testData);
+      expect(insertListener).toHaveBeenCalledTimes(1);
+
+      // Test update event
+      await resource.update('test-different-events', { name: 'Updated User' });
+      expect(updateListener).toHaveBeenCalledTimes(1);
+
+             // Test list event
+       await resource.list();
+       expect(listListener).toHaveBeenCalled();
+
+      // Test count event
+      await resource.count();
+      expect(countListener).toHaveBeenCalledTimes(1);
+
+      // Test delete event
+      await resource.delete('test-different-events');
+      expect(deleteListener).toHaveBeenCalledTimes(1);
+    });
+
+    test('should receive correct event data with $before and $after for updates', async () => {
+      const updateListener = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'before_after_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required',
+          email: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          update: updateListener
+        }
+      });
+
+      const originalData = {
+        id: 'test-before-after',
+        name: 'Original Name',
+        email: 'original@example.com'
+      };
+
+      await resource.insert(originalData);
+
+      const updateData = {
+        name: 'Updated Name',
+        email: 'updated@example.com'
+      };
+
+      await resource.update('test-before-after', updateData);
+
+      expect(updateListener).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'test-before-after',
+        name: 'Updated Name',
+        email: 'updated@example.com',
+        $before: expect.objectContaining({
+          name: 'Original Name',
+          email: 'original@example.com'
+        }),
+        $after: expect.objectContaining({
+          name: 'Updated Name',
+          email: 'updated@example.com'
+        })
+      }));
+    });
+
+    test('should work with bulk operations', async () => {
+      const insertManyListener = jest.fn();
+      const deleteManyListener = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'bulk_operations_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          insertMany: insertManyListener,
+          deleteMany: deleteManyListener
+        }
+      });
+
+             const bulkData = [
+         { id: 'bulk-user-1', name: 'User 1' },
+         { id: 'bulk-user-2', name: 'User 2' },
+         { id: 'bulk-user-3', name: 'User 3' }
+       ];
+
+      // Test insertMany event
+      await resource.insertMany(bulkData);
+      expect(insertManyListener).toHaveBeenCalledWith(3);
+
+      // Test deleteMany event
+      const allIds = await resource.listIds();
+      await resource.deleteMany(allIds);
+      expect(deleteManyListener).toHaveBeenCalledWith(3);
+    });
+
+    test('should work with different behaviors', async () => {
+      const insertListener = jest.fn();
+      
+      // Test with body-overflow behavior
+      const resource = await database.createResource({
+        name: 'behavior_overflow_test',
+        attributes: {
+          id: 'string|required',
+          title: 'string|required',
+          content: 'string'
+        },
+        behavior: 'body-overflow',
+        events: {
+          insert: insertListener
+        }
+      });
+
+      const testData = {
+        id: 'test-behavior',
+        title: 'Test Title',
+        content: 'x'.repeat(3000) // Large content that will overflow
+      };
+
+      await resource.insert(testData);
+
+      expect(insertListener).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'test-behavior',
+        title: 'Test Title',
+        content: 'x'.repeat(3000)
+      }));
+    });
+
+         test('should call all listeners even if some fail', async () => {
+       const workingListener1 = jest.fn();
+       const workingListener2 = jest.fn();
+       
+       const resource = await database.createResource({
+         name: 'error_handling_test',
+         attributes: {
+           id: 'string|required',
+           name: 'string|required'
+         },
+         behavior: 'user-managed',
+         events: {
+           insert: [workingListener1, workingListener2]
+         }
+       });
+
+       const testData = {
+         id: 'test-error-handling',
+         name: 'Test User'
+       };
+
+       // Insert should work normally
+       const result = await resource.insert(testData);
+       expect(result).toMatchObject(testData);
+
+       // Both listeners should have been called
+       expect(workingListener1).toHaveBeenCalledTimes(1);
+       expect(workingListener2).toHaveBeenCalledTimes(1);
+     });
+
+    test('should preserve listener context and binding', async () => {
+      let capturedThis;
+      const contextListener = function(event) {
+        capturedThis = this;
+      };
+      
+      const resource = await database.createResource({
+        name: 'context_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          insert: contextListener
+        }
+      });
+
+      await resource.insert({
+        id: 'test-context',
+        name: 'Test User'
+      });
+
+      // The listener should be bound to the resource
+      expect(capturedThis).toBeDefined();
+      expect(capturedThis.constructor.name).toBe('Resource');
+    });
+
+    test('should validate events configuration', async () => {
+      // Should throw error for invalid events config
+      await expect(database.createResource({
+        name: 'invalid_events_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        events: {
+          insert: 'not a function' // Invalid: should be function
+        }
+      })).rejects.toThrow();
+
+      // Should throw error for invalid array of listeners
+      await expect(database.createResource({
+        name: 'invalid_array_events_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        events: {
+          update: ['not a function', 'also not a function'] // Invalid: should be functions
+        }
+      })).rejects.toThrow();
+    });
+
+    test('should not interfere with manually added listeners', async () => {
+      const configListener = jest.fn();
+      const manualListener = jest.fn();
+      
+      const resource = await database.createResource({
+        name: 'manual_listeners_test',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        },
+        behavior: 'user-managed',
+        events: {
+          insert: configListener
+        }
+      });
+
+      // Add manual listener after resource creation
+      resource.on('insert', manualListener);
+
+      await resource.insert({
+        id: 'test-manual',
+        name: 'Test User'
+      });
+
+      // Both listeners should have been called
+      expect(configListener).toHaveBeenCalledTimes(1);
+      expect(manualListener).toHaveBeenCalledTimes(1);
+    });
+  });
 }); 

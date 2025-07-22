@@ -471,7 +471,8 @@ export class Database extends EventEmitter {
       versioningEnabled: this.versioningEnabled,
       map: config.map,
       idGenerator: config.idGenerator,
-      idSize: config.idSize
+      idSize: config.idSize,
+      events: config.events || {}
     });
     resource.database = this;
     this.resources[name] = resource;

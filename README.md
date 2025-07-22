@@ -109,6 +109,7 @@
 - [🗂️ Advanced Partitioning](#️-advanced-partitioning)
 - [🎣 Advanced Hooks System](#-advanced-hooks-system)
 - [🧩 Resource Middlewares](#-resource-middlewares)
+- [🎧 Event Listeners Configuration](#-event-listeners-configuration)
 - [📖 API Reference](#-api-reference)
 
 ---
@@ -1398,6 +1399,169 @@ await users.insert({ name: 'john', email: 'john@example.com' });
 
 #### **Best Practices**
 - Hooks are lightweight and ideal for observing or reacting to events.
+
+---
+
+### 🎧 Event Listeners Configuration
+
+s3db.js resources extend Node.js EventEmitter, providing a powerful event system for real-time monitoring and notifications. You can configure event listeners in **two ways**: programmatically using `.on()` or declaratively in the resource configuration.
+
+#### **Programmatic Event Listeners**
+Traditional EventEmitter pattern using `.on()`, `.once()`, or `.off()`:
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "string|required"
+  }
+});
+
+// Single event listener
+users.on('insert', (event) => {
+  console.log('User created:', event.name);
+});
+
+// Multiple listeners for the same event
+users.on('update', (event) => {
+  console.log('Update detected:', event.id);
+});
+
+users.on('update', (event) => {
+  if (event.$before.email !== event.$after.email) {
+    console.log('Email changed!');
+  }
+});
+```
+
+#### **Declarative Event Listeners**
+Configure event listeners directly in the resource configuration for cleaner, more maintainable code:
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: {
+    name: "string|required",
+    email: "string|required"
+  },
+  events: {
+    // Single event listener
+    insert: (event) => {
+      console.log('📝 User created:', {
+        id: event.id,
+        name: event.name,
+        timestamp: new Date().toISOString()
+      });
+    },
+
+    // Multiple event listeners (array)
+    update: [
+      (event) => {
+        console.log('⚠️ Update detected for user:', event.id);
+      },
+      (event) => {
+        const changes = [];
+        if (event.$before.name !== event.$after.name) {
+          changes.push(`name: ${event.$before.name} → ${event.$after.name}`);
+        }
+        if (event.$before.email !== event.$after.email) {
+          changes.push(`email: ${event.$before.email} → ${event.$after.email}`);
+        }
+        if (changes.length > 0) {
+          console.log('📝 Changes:', changes.join(', '));
+        }
+      }
+    ],
+
+    // Bulk operation listeners
+    deleteMany: (count) => {
+      console.log(`🗑️ Bulk delete: ${count} users deleted`);
+    },
+
+    // Performance and monitoring
+    list: (result) => {
+      console.log(`📋 Listed ${result.count} users, ${result.errors} errors`);
+    }
+  }
+});
+```
+
+#### **Available Events**
+
+| Event | Description | Data Passed |
+|-------|-------------|-------------|
+| `insert` | Single record inserted | Complete object with all fields |
+| `update` | Single record updated | Object with `$before` and `$after` states |
+| `delete` | Single record deleted | Object data before deletion |
+| `insertMany` | Bulk insert completed | Number of records inserted |
+| `deleteMany` | Bulk delete completed | Number of records deleted |
+| `list` | List operation completed | Result object with count and errors |
+| `count` | Count operation completed | Total count number |
+| `get` | Single record retrieved | Complete object data |
+| `getMany` | Multiple records retrieved | Count of records |
+
+#### **Event Data Structure**
+
+**Insert/Get Events:**
+```javascript
+{
+  id: 'user-123',
+  name: 'John Doe',
+  email: 'john@example.com',
+  createdAt: '2023-12-01T10:00:00.000Z',
+  // ... all other fields
+}
+```
+
+**Update Events:**
+```javascript
+{
+  id: 'user-123',
+  name: 'John Updated',
+  email: 'john.new@example.com',
+  $before: {
+    name: 'John Doe',
+    email: 'john@example.com',
+    // ... previous state
+  },
+  $after: {
+    name: 'John Updated',
+    email: 'john.new@example.com',
+    // ... current state
+  }
+}
+```
+
+#### **Combining Both Approaches**
+You can use both declarative and programmatic event listeners together:
+
+```javascript
+const users = await s3db.createResource({
+  name: "users",
+  attributes: { name: "string|required" },
+  events: {
+    insert: (event) => console.log('Config listener:', event.name)
+  }
+});
+
+// Add additional programmatic listeners
+users.on('insert', (event) => {
+  console.log('Programmatic listener:', event.name);
+});
+
+await users.insert({ name: 'John' });
+// Output:
+// Config listener: John
+// Programmatic listener: John
+```
+
+#### **Best Practices for Event Listeners**
+- **Declarative for core functionality**: Use the `events` config for essential listeners
+- **Programmatic for conditional/dynamic**: Use `.on()` for listeners that might change at runtime
+- **Error handling**: Listeners should handle their own errors to avoid breaking operations
+- **Performance**: Keep listeners lightweight; use async operations sparingly
+- **Debugging**: Event listeners are excellent for debugging and monitoring
 - Middlewares are powerful and ideal for controlling or transforming operations.
 - You can safely combine both for maximum flexibility.
 
