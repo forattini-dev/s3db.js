@@ -261,6 +261,12 @@ class PostgresReplicator extends BaseReplicator {
         }
       }
       const success = errors.length === 0;
+      
+      // Log errors if any occurred
+      if (errors.length > 0) {
+        console.warn(`[PostgresReplicator] Replication completed with errors for ${resourceName}:`, errors);
+      }
+      
       this.emit('replicated', {
         replicator: this.name,
         resourceName,
@@ -312,6 +318,11 @@ class PostgresReplicator extends BaseReplicator {
         }
         errors.push({ id: record.id, error: err.message });
       }
+    }
+    
+    // Log errors if any occurred during batch processing
+    if (errors.length > 0) {
+      console.warn(`[PostgresReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
     }
     
     return { 

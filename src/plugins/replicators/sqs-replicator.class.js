@@ -260,6 +260,11 @@ class SqsReplicator extends BaseReplicator {
           }
         }
       }
+      // Log errors if any occurred during batch processing
+      if (errors.length > 0) {
+        console.warn(`[SqsReplicator] Batch replication completed with ${errors.length} error(s) for ${resource}:`, errors);
+      }
+      
       this.emit('batch_replicated', {
         replicator: this.name,
         resource,
