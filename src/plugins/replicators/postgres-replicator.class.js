@@ -211,18 +211,22 @@ class PostgresReplicator extends BaseReplicator {
           let result;
           
           if (operation === 'insert') {
+            // Clean internal fields before processing
+            const cleanData = this._cleanInternalFields(data);
             // INSERT INTO table (col1, col2, ...) VALUES (...)
-            const keys = Object.keys(data);
-            const values = keys.map(k => data[k]);
+            const keys = Object.keys(cleanData);
+            const values = keys.map(k => cleanData[k]);
             const columns = keys.map(k => `"${k}"`).join(', ');
             const params = keys.map((_, i) => `$${i + 1}`).join(', ');
             const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
             result = await this.client.query(sql, values);
           } else if (operation === 'update') {
+            // Clean internal fields before processing
+            const cleanData = this._cleanInternalFields(data);
             // UPDATE table SET col1=$1, col2=$2 ... WHERE id=$N
-            const keys = Object.keys(data).filter(k => k !== 'id');
+            const keys = Object.keys(cleanData).filter(k => k !== 'id');
             const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(', ');
-            const values = keys.map(k => data[k]);
+            const values = keys.map(k => cleanData[k]);
             values.push(id);
             const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
             result = await this.client.query(sql, values);
@@ -344,6 +348,21 @@ class PostgresReplicator extends BaseReplicator {
     }
     this.emit('connection_error', { replicator: this.name, error: err.message });
     return false;
+  }
+
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== 'object') return data;
+    
+    const cleanData = { ...data };
+    
+    // Remove internal fields that start with $ or _
+    Object.keys(cleanData).forEach(key => {
+      if (key.startsWith('$') || key.startsWith('_')) {
+        delete cleanData[key];
+      }
+    });
+    
+    return cleanData;
   }
 
   async cleanup() {

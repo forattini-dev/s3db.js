@@ -8996,10 +8996,20 @@ class BigqueryReplicator extends base_replicator_class_default {
     }));
   }
   applyTransform(data, transformFn) {
-    if (!transformFn) return data;
-    let transformedData = JSON.parse(JSON.stringify(data));
-    if (transformedData._length) delete transformedData._length;
+    let cleanData = this._cleanInternalFields(data);
+    if (!transformFn) return cleanData;
+    let transformedData = JSON.parse(JSON.stringify(cleanData));
     return transformFn(transformedData);
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
   }
   async replicate(resourceName, operation, data, id, beforeData = null) {
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
@@ -9022,7 +9032,17 @@ class BigqueryReplicator extends base_replicator_class_default {
           let job;
           if (operation === "insert") {
             const transformedData = this.applyTransform(data, tableConfig.transform);
-            job = await table.insert([transformedData]);
+            try {
+              job = await table.insert([transformedData]);
+            } catch (error) {
+              const { errors: errors2, response } = error;
+              if (this.config.verbose) {
+                console.error("[BigqueryReplicator] BigQuery insert error details:");
+                if (errors2) console.error("Errors:", JSON.stringify(errors2, null, 2));
+                if (response) console.error("Response:", JSON.stringify(response, null, 2));
+              }
+              throw error;
+            }
           } else if (operation === "update") {
             const transformedData = this.applyTransform(data, tableConfig.transform);
             const keys = Object.keys(transformedData).filter((k) => k !== "id");
@@ -9048,6 +9068,10 @@ class BigqueryReplicator extends base_replicator_class_default {
                 lastError = error;
                 if (this.config.verbose) {
                   console.warn(`[BigqueryReplicator] Update attempt ${attempt} failed: ${error.message}`);
+                  if (error.errors) {
+                    console.error("[BigqueryReplicator] BigQuery update error details:");
+                    console.error("Errors:", JSON.stringify(error.errors, null, 2));
+                  }
                 }
                 if (error?.message?.includes("streaming buffer") && attempt < maxRetries) {
                   const delaySeconds = 30;
@@ -9063,13 +9087,23 @@ class BigqueryReplicator extends base_replicator_class_default {
             if (!job) throw lastError;
           } else if (operation === "delete") {
             const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
-            const [deleteJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params: { id },
-              location: this.location
-            });
-            await deleteJob.getQueryResults();
-            job = [deleteJob];
+            try {
+              const [deleteJob] = await this.bigqueryClient.createQueryJob({
+                query,
+                params: { id },
+                location: this.location
+              });
+              await deleteJob.getQueryResults();
+              job = [deleteJob];
+            } catch (error) {
+              if (this.config.verbose) {
+                console.error("[BigqueryReplicator] BigQuery delete error details:");
+                console.error("Query:", query);
+                if (error.errors) console.error("Errors:", JSON.stringify(error.errors, null, 2));
+                if (error.response) console.error("Response:", JSON.stringify(error.response, null, 2));
+              }
+              throw error;
+            }
           } else {
             throw new Error(`Unsupported operation: ${operation}`);
           }
@@ -9344,16 +9378,18 @@ class PostgresReplicator extends base_replicator_class_default {
         const [okTable, errTable] = await try_fn_default(async () => {
           let result2;
           if (operation === "insert") {
-            const keys = Object.keys(data);
-            const values = keys.map((k) => data[k]);
+            const cleanData = this._cleanInternalFields(data);
+            const keys = Object.keys(cleanData);
+            const values = keys.map((k) => cleanData[k]);
             const columns = keys.map((k) => `"${k}"`).join(", ");
             const params = keys.map((_, i) => `$${i + 1}`).join(", ");
             const sql = `INSERT INTO ${table} (${columns}) VALUES (${params}) ON CONFLICT (id) DO NOTHING RETURNING *`;
             result2 = await this.client.query(sql, values);
           } else if (operation === "update") {
-            const keys = Object.keys(data).filter((k) => k !== "id");
+            const cleanData = this._cleanInternalFields(data);
+            const keys = Object.keys(cleanData).filter((k) => k !== "id");
             const setClause = keys.map((k, i) => `"${k}"=$${i + 1}`).join(", ");
-            const values = keys.map((k) => data[k]);
+            const values = keys.map((k) => cleanData[k]);
             values.push(id);
             const sql = `UPDATE ${table} SET ${setClause} WHERE id=$${keys.length + 1} RETURNING *`;
             result2 = await this.client.query(sql, values);
@@ -9462,6 +9498,16 @@ class PostgresReplicator extends base_replicator_class_default {
     }
     this.emit("connection_error", { replicator: this.name, error: err.message });
     return false;
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
   }
   async cleanup() {
     if (this.client) await this.client.end();
@@ -13194,7 +13240,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.3.7" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.3.8" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -13858,35 +13904,46 @@ class S3dbReplicator extends base_replicator_class_default {
     return result;
   }
   _applyTransformer(resource, data) {
+    let cleanData = this._cleanInternalFields(data);
     const normResource = normalizeResourceName$1(resource);
     const entry = this.resourcesMap[normResource];
     let result;
-    if (!entry) return data;
+    if (!entry) return cleanData;
     if (Array.isArray(entry)) {
       for (const item of entry) {
         if (typeof item === "object" && item.transform && typeof item.transform === "function") {
-          result = item.transform(data);
+          result = item.transform(cleanData);
           break;
         } else if (typeof item === "object" && item.transformer && typeof item.transformer === "function") {
-          result = item.transformer(data);
+          result = item.transformer(cleanData);
           break;
         }
       }
-      if (!result) result = data;
+      if (!result) result = cleanData;
     } else if (typeof entry === "object") {
       if (typeof entry.transform === "function") {
-        result = entry.transform(data);
+        result = entry.transform(cleanData);
       } else if (typeof entry.transformer === "function") {
-        result = entry.transformer(data);
+        result = entry.transformer(cleanData);
       }
     } else if (typeof entry === "function") {
-      result = entry(data);
+      result = entry(cleanData);
     } else {
-      result = data;
+      result = cleanData;
     }
-    if (result && data && data.id && !result.id) result.id = data.id;
-    if (!result && data) result = data;
+    if (result && cleanData && cleanData.id && !result.id) result.id = cleanData.id;
+    if (!result && cleanData) result = cleanData;
     return result;
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
   }
   _resolveDestResource(resource, data) {
     const normResource = normalizeResourceName$1(resource);
@@ -14077,15 +14134,26 @@ class SqsReplicator extends base_replicator_class_default {
     throw new Error(`No queue URL found for resource '${resource}'`);
   }
   _applyTransformer(resource, data) {
+    let cleanData = this._cleanInternalFields(data);
     const entry = this.resources[resource];
-    let result = data;
-    if (!entry) return data;
+    let result = cleanData;
+    if (!entry) return cleanData;
     if (typeof entry.transform === "function") {
-      result = entry.transform(data);
+      result = entry.transform(cleanData);
     } else if (typeof entry.transformer === "function") {
-      result = entry.transformer(data);
+      result = entry.transformer(cleanData);
     }
-    return result || data;
+    return result || cleanData;
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
   }
   /**
    * Create standardized message structure

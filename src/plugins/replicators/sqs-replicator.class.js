@@ -90,19 +90,37 @@ class SqsReplicator extends BaseReplicator {
   }
 
   _applyTransformer(resource, data) {
-    const entry = this.resources[resource];
-    let result = data;
+    // First, clean internal fields that shouldn't go to SQS
+    let cleanData = this._cleanInternalFields(data);
     
-    if (!entry) return data;
+    const entry = this.resources[resource];
+    let result = cleanData;
+    
+    if (!entry) return cleanData;
     
     // Support both transform and transformer (backwards compatibility)
     if (typeof entry.transform === 'function') {
-      result = entry.transform(data);
+      result = entry.transform(cleanData);
     } else if (typeof entry.transformer === 'function') {
-      result = entry.transformer(data);
+      result = entry.transformer(cleanData);
     }
     
-    return result || data;
+    return result || cleanData;
+  }
+
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== 'object') return data;
+    
+    const cleanData = { ...data };
+    
+    // Remove internal fields that start with $ or _
+    Object.keys(cleanData).forEach(key => {
+      if (key.startsWith('$') || key.startsWith('_')) {
+        delete cleanData[key];
+      }
+    });
+    
+    return cleanData;
   }
 
   /**

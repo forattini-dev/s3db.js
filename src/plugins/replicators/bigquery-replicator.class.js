@@ -41,14 +41,14 @@ class BigqueryReplicator extends BaseReplicator {
     this.credentials = config.credentials;
     this.location = config.location || 'US';
     this.logTable = config.logTable;
-    
+
     // Parse resources configuration
     this.resources = this.parseResourcesConfig(resources);
   }
 
   parseResourcesConfig(resources) {
     const parsed = {};
-    
+
     for (const [resourceName, config] of Object.entries(resources)) {
       if (typeof config === 'string') {
         // Short form: just table name
@@ -78,7 +78,7 @@ class BigqueryReplicator extends BaseReplicator {
         }];
       }
     }
-    
+
     return parsed;
   }
 
@@ -87,7 +87,7 @@ class BigqueryReplicator extends BaseReplicator {
     if (!this.projectId) errors.push('projectId is required');
     if (!this.datasetId) errors.push('datasetId is required');
     if (Object.keys(this.resources).length === 0) errors.push('At least one resource must be configured');
-    
+
     // Validate resource configurations
     for (const [resourceName, tables] of Object.entries(this.resources)) {
       for (const tableConfig of tables) {
@@ -107,7 +107,7 @@ class BigqueryReplicator extends BaseReplicator {
         }
       }
     }
-    
+
     return { isValid: errors.length === 0, errors };
   }
 
@@ -141,15 +141,15 @@ class BigqueryReplicator extends BaseReplicator {
 
   shouldReplicateAction(resourceName, operation) {
     if (!this.resources[resourceName]) return false;
-    
-    return this.resources[resourceName].some(tableConfig => 
+
+    return this.resources[resourceName].some(tableConfig =>
       tableConfig.actions.includes(operation)
     );
   }
 
   getTablesForResource(resourceName, operation) {
     if (!this.resources[resourceName]) return [];
-    
+
     return this.resources[resourceName]
       .filter(tableConfig => tableConfig.actions.includes(operation))
       .map(tableConfig => ({
@@ -159,16 +159,32 @@ class BigqueryReplicator extends BaseReplicator {
   }
 
   applyTransform(data, transformFn) {
-    if (!transformFn) return data;
-    
-    let transformedData = JSON.parse(JSON.stringify(data));
-    if (transformedData._length) delete transformedData._length;
-    
+    // First, clean internal fields that shouldn't go to BigQuery
+    let cleanData = this._cleanInternalFields(data);
+
+    if (!transformFn) return cleanData;
+
+    let transformedData = JSON.parse(JSON.stringify(cleanData));
     return transformFn(transformedData);
   }
 
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== 'object') return data;
+
+    const cleanData = { ...data };
+
+    // Remove internal fields that start with $ or _
+    Object.keys(cleanData).forEach(key => {
+      if (key.startsWith('$') || key.startsWith('_')) {
+        delete cleanData[key];
+      }
+    });
+
+    return cleanData;
+  }
+
   async replicate(resourceName, operation, data, id, beforeData = null) {
-    
+
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
@@ -187,27 +203,38 @@ class BigqueryReplicator extends BaseReplicator {
 
     const [ok, err, result] = await tryFn(async () => {
       const dataset = this.bigqueryClient.dataset(this.datasetId);
-      
+
       // Replicate to all applicable tables
       for (const tableConfig of tableConfigs) {
         const [okTable, errTable] = await tryFn(async () => {
           const table = dataset.table(tableConfig.table);
           let job;
-          
+
           if (operation === 'insert') {
             const transformedData = this.applyTransform(data, tableConfig.transform);
-            job = await table.insert([transformedData]);
+            try {
+              job = await table.insert([transformedData]);
+            } catch (error) {
+              // Extract detailed BigQuery error information
+              const { errors, response } = error;
+              if (this.config.verbose) {
+                console.error('[BigqueryReplicator] BigQuery insert error details:');
+                if (errors) console.error('Errors:', JSON.stringify(errors, null, 2));
+                if (response) console.error('Response:', JSON.stringify(response, null, 2));
+              }
+              throw error;
+            }
           } else if (operation === 'update') {
             const transformedData = this.applyTransform(data, tableConfig.transform);
             const keys = Object.keys(transformedData).filter(k => k !== 'id');
             const setClause = keys.map(k => `${k} = @${k}`).join(', ');
             const params = { id, ...transformedData };
             const query = `UPDATE \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` SET ${setClause} WHERE id = @id`;
-            
+
             // Retry logic for streaming buffer issues
             const maxRetries = 2;
             let lastError = null;
-            
+
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
               const [ok, error] = await tryFn(async () => {
                 const [updateJob] = await this.bigqueryClient.createQueryJob({
@@ -218,17 +245,22 @@ class BigqueryReplicator extends BaseReplicator {
                 await updateJob.getQueryResults();
                 return [updateJob];
               });
-              
+
               if (ok) {
                 job = ok;
                 break;
               } else {
                 lastError = error;
-                
+
+                // Enhanced error logging for BigQuery update operations
                 if (this.config.verbose) {
                   console.warn(`[BigqueryReplicator] Update attempt ${attempt} failed: ${error.message}`);
+                  if (error.errors) {
+                    console.error('[BigqueryReplicator] BigQuery update error details:');
+                    console.error('Errors:', JSON.stringify(error.errors, null, 2));
+                  }
                 }
-                
+
                 // If it's streaming buffer error and not the last attempt
                 if (error?.message?.includes('streaming buffer') && attempt < maxRetries) {
                   const delaySeconds = 30;
@@ -238,32 +270,43 @@ class BigqueryReplicator extends BaseReplicator {
                   await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
                   continue;
                 }
-                
+
                 throw error;
               }
             }
-            
+
             if (!job) throw lastError;
           } else if (operation === 'delete') {
             const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
-            const [deleteJob] = await this.bigqueryClient.createQueryJob({
-              query,
-              params: { id },
-              location: this.location
-            });
-            await deleteJob.getQueryResults();
-            job = [deleteJob];
+            try {
+              const [deleteJob] = await this.bigqueryClient.createQueryJob({
+                query,
+                params: { id },
+                location: this.location
+              });
+              await deleteJob.getQueryResults();
+              job = [deleteJob];
+            } catch (error) {
+              // Enhanced error logging for BigQuery delete operations
+              if (this.config.verbose) {
+                console.error('[BigqueryReplicator] BigQuery delete error details:');
+                console.error('Query:', query);
+                if (error.errors) console.error('Errors:', JSON.stringify(error.errors, null, 2));
+                if (error.response) console.error('Response:', JSON.stringify(error.response, null, 2));
+              }
+              throw error;
+            }
           } else {
             throw new Error(`Unsupported operation: ${operation}`);
           }
-          
+
           results.push({
             table: tableConfig.table,
             success: true,
             jobId: job[0]?.id
           });
         });
-        
+
         if (!okTable) {
           errors.push({
             table: tableConfig.table,
@@ -271,7 +314,7 @@ class BigqueryReplicator extends BaseReplicator {
           });
         }
       }
-      
+
       // Log operation if logTable is configured
       if (this.logTable) {
         const [okLog, errLog] = await tryFn(async () => {
@@ -289,14 +332,14 @@ class BigqueryReplicator extends BaseReplicator {
           // Don't fail the main operation if logging fails
         }
       }
-      
+
       const success = errors.length === 0;
-      
+
       // Log errors if any occurred
       if (errors.length > 0) {
         console.warn(`[BigqueryReplicator] Replication completed with errors for ${resourceName}:`, errors);
       }
-      
+
       this.emit('replicated', {
         replicator: this.name,
         resourceName,
@@ -307,17 +350,17 @@ class BigqueryReplicator extends BaseReplicator {
         errors,
         success
       });
-      
-      return { 
-        success, 
-        results, 
+
+      return {
+        success,
+        results,
         errors,
         tables: tableConfigs.map(t => t.table)
       };
     });
-    
+
     if (ok) return result;
-    
+
     if (this.config.verbose) {
       console.warn(`[BigqueryReplicator] Replication failed for ${resourceName}: ${err.message}`);
     }
@@ -328,20 +371,20 @@ class BigqueryReplicator extends BaseReplicator {
       id,
       error: err.message
     });
-    
+
     return { success: false, error: err.message };
   }
 
   async replicateBatch(resourceName, records) {
     const results = [];
     const errors = [];
-    
+
     for (const record of records) {
       const [ok, err, res] = await tryFn(() => this.replicate(
-        resourceName, 
-        record.operation, 
-        record.data, 
-        record.id, 
+        resourceName,
+        record.operation,
+        record.data,
+        record.id,
         record.beforeData
       ));
       if (ok) {
@@ -353,16 +396,16 @@ class BigqueryReplicator extends BaseReplicator {
         errors.push({ id: record.id, error: err.message });
       }
     }
-    
+
     // Log errors if any occurred during batch processing
     if (errors.length > 0) {
       console.warn(`[BigqueryReplicator] Batch replication completed with ${errors.length} error(s) for ${resourceName}:`, errors);
     }
-    
-    return { 
-      success: errors.length === 0, 
-      results, 
-      errors 
+
+    return {
+      success: errors.length === 0,
+      results,
+      errors
     };
   }
 
