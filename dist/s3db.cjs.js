@@ -9654,7 +9654,13 @@ class Client extends EventEmitter {
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
         const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
-        stringMetadata[validKey] = String(v);
+        const stringValue = String(v);
+        const hasSpecialChars = /[^\x00-\x7F]/.test(stringValue);
+        if (hasSpecialChars) {
+          stringMetadata[validKey] = Buffer.from(stringValue, "utf8").toString("base64");
+        } else {
+          stringMetadata[validKey] = stringValue;
+        }
       }
     }
     const options = {
@@ -9691,6 +9697,28 @@ class Client extends EventEmitter {
     let response, error;
     try {
       response = await this.sendCommand(new clientS3.GetObjectCommand(options));
+      if (response.Metadata) {
+        const decodedMetadata = {};
+        for (const [key2, value] of Object.entries(response.Metadata)) {
+          if (typeof value === "string") {
+            try {
+              const decoded = Buffer.from(value, "base64").toString("utf8");
+              const hasSpecialChars = /[^\x00-\x7F]/.test(decoded);
+              const isValidBase64 = Buffer.from(decoded, "utf8").toString("base64") === value;
+              if (isValidBase64 && hasSpecialChars && decoded !== value) {
+                decodedMetadata[key2] = decoded;
+              } else {
+                decodedMetadata[key2] = value;
+              }
+            } catch (decodeError) {
+              decodedMetadata[key2] = value;
+            }
+          } else {
+            decodedMetadata[key2] = value;
+          }
+        }
+        response.Metadata = decodedMetadata;
+      }
       return response;
     } catch (err) {
       error = err;
@@ -13281,7 +13309,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.3.10" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.4.1" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
