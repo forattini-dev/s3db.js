@@ -103,7 +103,17 @@ export class Client extends EventEmitter {
       for (const [k, v] of Object.entries(metadata)) {
         // Ensure key is a valid string and value is a string
         const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
-        stringMetadata[validKey] = String(v);
+        const stringValue = String(v);
+        
+        // Check if value contains non-ASCII characters that might be corrupted by HTTP headers
+        const hasSpecialChars = /[^\x00-\x7F]/.test(stringValue);
+        
+        if (hasSpecialChars) {
+          // Encode as base64 without prefix - we'll detect it intelligently on read
+          stringMetadata[validKey] = Buffer.from(stringValue, 'utf8').toString('base64');
+        } else {
+          stringMetadata[validKey] = stringValue;
+        }
       }
     }
     
@@ -141,9 +151,39 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
+ 
     let response, error;
     try {
       response = await this.sendCommand(new GetObjectCommand(options));
+      
+      // Smart decode: try to detect base64-encoded UTF-8 values without prefix
+      if (response.Metadata) {
+        const decodedMetadata = {};
+        for (const [key, value] of Object.entries(response.Metadata)) {
+          if (typeof value === 'string') {
+            // Try to decode as base64 and check if it's valid UTF-8 with special chars
+            try {
+              const decoded = Buffer.from(value, 'base64').toString('utf8');
+              // Check if decoded string is different from original and contains non-ASCII chars
+              const hasSpecialChars = /[^\x00-\x7F]/.test(decoded);
+              const isValidBase64 = Buffer.from(decoded, 'utf8').toString('base64') === value;
+              
+              if (isValidBase64 && hasSpecialChars && decoded !== value) {
+                decodedMetadata[key] = decoded;
+              } else {
+                decodedMetadata[key] = value;
+              }
+            } catch (decodeError) {
+              // If decode fails, use original value
+              decodedMetadata[key] = value;
+            }
+          } else {
+            decodedMetadata[key] = value;
+          }
+        }
+        response.Metadata = decodedMetadata;
+      }
+      
       return response;
     } catch (err) {
       error = err;
