@@ -113,6 +113,23 @@ export class Database extends EventEmitter {
       
       if (versionData) {
         // Extract configuration from version data at root level
+        // Restore ID generator configuration
+        let restoredIdGenerator, restoredIdSize;
+        if (versionData.idGenerator !== undefined) {
+          if (versionData.idGenerator === 'custom_function') {
+            // Custom function was used but can't be restored - use default
+            restoredIdGenerator = undefined;
+            restoredIdSize = versionData.idSize || 22;
+          } else if (typeof versionData.idGenerator === 'number') {
+            // Size-based generator
+            restoredIdGenerator = versionData.idGenerator;
+            restoredIdSize = versionData.idSize || versionData.idGenerator;
+          }
+        } else {
+          // Legacy resource without saved ID config
+          restoredIdSize = versionData.idSize || 22;
+        }
+
         this.resources[name] = new Resource({
           name,
           client: this.client,
@@ -131,7 +148,9 @@ export class Database extends EventEmitter {
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
           hooks: versionData.hooks || {},
           versioningEnabled: this.versioningEnabled,
-          map: versionData.map
+          map: versionData.map,
+          idGenerator: restoredIdGenerator,
+          idSize: restoredIdSize
         });
       }
     }
@@ -334,6 +353,8 @@ export class Database extends EventEmitter {
             autoDecrypt: resource.config.autoDecrypt,
             cache: resource.config.cache,
             hooks: resource.config.hooks,
+            idSize: resource.idSize,
+            idGenerator: resource.idGeneratorType,
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
           }
         }
