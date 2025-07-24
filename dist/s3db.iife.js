@@ -11183,6 +11183,14 @@ ${JSON.stringify(validation, null, 2)}`,
       this.passphrase = passphrase ?? "secret";
       this.versioningEnabled = versioningEnabled;
       this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
+      if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
+        this.idSize = customIdGenerator;
+      } else if (typeof idSize === "number" && idSize > 0) {
+        this.idSize = idSize;
+      } else {
+        this.idSize = 22;
+      }
+      this.idGeneratorType = this.getIdGeneratorType(customIdGenerator, this.idSize);
       this.config = {
         cache,
         hooks,
@@ -11238,7 +11246,7 @@ ${JSON.stringify(validation, null, 2)}`,
      */
     configureIdGenerator(customIdGenerator, idSize) {
       if (typeof customIdGenerator === "function") {
-        return customIdGenerator;
+        return () => String(customIdGenerator());
       }
       if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
         return nanoid.customAlphabet(nanoid.urlAlphabet, customIdGenerator);
@@ -11247,6 +11255,19 @@ ${JSON.stringify(validation, null, 2)}`,
         return nanoid.customAlphabet(nanoid.urlAlphabet, idSize);
       }
       return idGenerator;
+    }
+    /**
+     * Get a serializable representation of the ID generator type
+     * @param {Function|number} customIdGenerator - Custom ID generator function or size
+     * @param {number} idSize - Size for auto-generated IDs
+     * @returns {string|number} Serializable ID generator type
+     * @private
+     */
+    getIdGeneratorType(customIdGenerator, idSize) {
+      if (typeof customIdGenerator === "function") {
+        return "custom_function";
+      }
+      return idSize;
     }
     /**
      * Get resource options (for backward compatibility with tests)
@@ -13367,6 +13388,18 @@ ${JSON.stringify(validation, null, 2)}`,
         const currentVersion = resourceMetadata.currentVersion || "v0";
         const versionData = resourceMetadata.versions?.[currentVersion];
         if (versionData) {
+          let restoredIdGenerator, restoredIdSize;
+          if (versionData.idGenerator !== void 0) {
+            if (versionData.idGenerator === "custom_function") {
+              restoredIdGenerator = void 0;
+              restoredIdSize = versionData.idSize || 22;
+            } else if (typeof versionData.idGenerator === "number") {
+              restoredIdGenerator = versionData.idGenerator;
+              restoredIdSize = versionData.idSize || versionData.idGenerator;
+            }
+          } else {
+            restoredIdSize = versionData.idSize || 22;
+          }
           this.resources[name] = new resource_class_default({
             name,
             client: this.client,
@@ -13386,7 +13419,9 @@ ${JSON.stringify(validation, null, 2)}`,
             autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
             hooks: versionData.hooks || {},
             versioningEnabled: this.versioningEnabled,
-            map: versionData.map
+            map: versionData.map,
+            idGenerator: restoredIdGenerator,
+            idSize: restoredIdSize
           });
         }
       }
@@ -13547,6 +13582,8 @@ ${JSON.stringify(validation, null, 2)}`,
               autoDecrypt: resource.config.autoDecrypt,
               cache: resource.config.cache,
               hooks: resource.config.hooks,
+              idSize: resource.idSize,
+              idGenerator: resource.idGeneratorType,
               createdAt: isNewVersion ? (/* @__PURE__ */ new Date()).toISOString() : existingVersionData?.createdAt
             }
           }
