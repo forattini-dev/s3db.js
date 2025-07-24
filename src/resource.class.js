@@ -142,6 +142,19 @@ export class Resource extends EventEmitter {
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
+    
+    // Store ID configuration for persistence
+    // If customIdGenerator is a number, use it as idSize
+    // Otherwise, use the provided idSize or default to 22
+    if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
+      this.idSize = customIdGenerator;
+    } else if (typeof idSize === 'number' && idSize > 0) {
+      this.idSize = idSize;
+    } else {
+      this.idSize = 22;
+    }
+    
+    this.idGeneratorType = this.getIdGeneratorType(customIdGenerator, this.idSize);
 
     // Store configuration - all at root level
     this.config = {
@@ -220,9 +233,9 @@ export class Resource extends EventEmitter {
    * @private
    */
   configureIdGenerator(customIdGenerator, idSize) {
-    // If a custom function is provided, use it
+    // If a custom function is provided, wrap it to ensure string output
     if (typeof customIdGenerator === 'function') {
-      return customIdGenerator;
+      return () => String(customIdGenerator());
     }
     // If customIdGenerator is a number (size), create a generator with that size
     if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
@@ -234,6 +247,22 @@ export class Resource extends EventEmitter {
     }
     // Default to the standard idGenerator (22 chars)
     return defaultIdGenerator;
+  }
+
+  /**
+   * Get a serializable representation of the ID generator type
+   * @param {Function|number} customIdGenerator - Custom ID generator function or size
+   * @param {number} idSize - Size for auto-generated IDs
+   * @returns {string|number} Serializable ID generator type
+   * @private
+   */
+  getIdGeneratorType(customIdGenerator, idSize) {
+    // If a custom function is provided
+    if (typeof customIdGenerator === 'function') {
+      return 'custom_function';
+    }
+    // For number generators or default size, return the actual idSize
+    return idSize;
   }
 
   /**
