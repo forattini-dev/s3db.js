@@ -83,7 +83,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     throw new Error(`User ${id} not found after ${timeout}ms`);
   }
 
-  async function waitForUserUpdate(id, expectedName, timeout = 1000) {
+  async function waitForUserUpdate(id, expectedName, timeout = 3000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {

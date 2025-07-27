@@ -28,12 +28,12 @@ export class CachePlugin extends Plugin {
 
   async onSetup() {
     // Initialize cache driver
-    if (this.config.driver) {
-      // Use custom driver if provided
+    if (this.config.driver && typeof this.config.driver === 'object') {
+      // Use custom driver instance if provided
       this.driver = this.config.driver;
-    } else if (this.config.driverType === 'memory') {
+    } else if (this.config.driver === 'memory') {
       this.driver = new MemoryCache(this.config.memoryOptions || {});
-    } else if (this.config.driverType === 'filesystem') {
+    } else if (this.config.driver === 'filesystem') {
       // Use partition-aware filesystem cache if enabled
       if (this.config.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({

@@ -24,7 +24,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
   describe('Plugin Setup and Driver Instantiation', () => {
     test('should setup cache plugin with memory driver', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         ttl: 60000,
         maxSize: 100
       });
@@ -37,7 +37,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should setup cache plugin with filesystem driver', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'filesystem',
+        driver: 'filesystem',
         filesystemOptions: {
           directory: '/tmp/test-cache'
         }
@@ -50,7 +50,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should setup cache plugin with partition-aware filesystem driver', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'filesystem',
+        driver: 'filesystem',
         partitionAware: true,
         filesystemOptions: {
           directory: '/tmp/test-cache-partition'
@@ -64,7 +64,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should setup cache plugin with S3 driver', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 's3',
+        driver: 's3',
         client: database.client
       });
       await cachePlugin.setup(database);
@@ -75,7 +75,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should default to S3Cache for invalid driver type', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'invalid-driver'
+        driver: 'invalid-driver'
       });
       await cachePlugin.setup(database);
 
@@ -98,7 +98,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
   describe('Configuration Validation', () => {
     test('should validate required filesystem options', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'filesystem'
+        driver: 'filesystem'
         // Missing filesystemOptions.directory
       });
 
@@ -107,7 +107,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should use database client for S3 cache by default', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 's3'
+        driver: 's3'
         // No explicit client - should use database.client
       });
       await cachePlugin.setup(database);
@@ -118,7 +118,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should use default TTL when not specified', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'memory'
+        driver: 'memory'
         // No TTL specified
       });
       await cachePlugin.setup(database);
@@ -128,7 +128,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should validate partition-aware options', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'filesystem',
+        driver: 'filesystem',
         partitionAware: true,
         partitionStrategy: 'invalid-strategy',
         filesystemOptions: {
@@ -148,7 +148,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     beforeEach(async () => {
       cachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         ttl: 60000
       });
       await cachePlugin.setup(database);
@@ -192,7 +192,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should setup partition-aware driver correctly', async () => {
       const partitionCachePlugin = new CachePlugin({
-        driverType: 'filesystem',
+        driver: 'filesystem',
         partitionAware: true,
         filesystemOptions: {
           directory: '/tmp/test-partition-cache'
@@ -232,7 +232,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     beforeEach(async () => {
       cachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         ttl: 60000
       });
       await cachePlugin.setup(database);
@@ -276,7 +276,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should analyze cache usage when partition-aware', async () => {
       const partitionCachePlugin = new CachePlugin({
-        driverType: 'filesystem',
+        driver: 'filesystem',
         partitionAware: true,
         trackUsage: true,
         filesystemOptions: {
@@ -296,7 +296,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
   describe('Error Handling', () => {
     test('should handle cache driver errors gracefully', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'memory'
+        driver: 'memory'
       });
       await cachePlugin.setup(database);
 
@@ -328,7 +328,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should handle missing database gracefully', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'memory'
+        driver: 'memory'
       });
 
       await expect(cachePlugin.setup(null)).rejects.toThrow();
@@ -336,7 +336,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     test('should handle plugin setup multiple times', async () => {
       const cachePlugin = new CachePlugin({
-        driverType: 'memory'
+        driver: 'memory'
       });
 
       await cachePlugin.setup(database);
@@ -352,7 +352,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
     beforeEach(async () => {
       cachePlugin = new CachePlugin({
-        driverType: 'memory'
+        driver: 'memory'
       });
       await cachePlugin.setup(database);
 
@@ -431,7 +431,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
       for (const driver of drivers) {
         const cachePlugin = new CachePlugin({
-          driverType: driver.type,
+          driver: driver.type,
           ...driver.options
         });
         await cachePlugin.setup(database);

@@ -14,7 +14,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
 
     // Configure memory cache
     cachePlugin = new CachePlugin({
-      driverType: 'memory',
+      driver: 'memory',
       memoryOptions: {
         ttl: 60000,
         maxSize: 100
@@ -61,7 +61,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
 
     test('should handle default configuration', async () => {
       const defaultCachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         memoryOptions: {
           ttl: 300000
         }
@@ -74,7 +74,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
 
     test('should handle custom maxSize configuration', async () => {
       const customCachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         memoryOptions: {
           maxSize: 50
         }
@@ -369,7 +369,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
     test('should handle memory limit constraints', async () => {
       // Create cache with very small limit
       const smallCachePlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         memoryOptions: {
           maxSize: 2
         }
@@ -403,7 +403,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
     test('should handle TTL expiration', async () => {
       // Create cache with very short TTL
       const shortTtlPlugin = new CachePlugin({
-        driverType: 'memory',
+        driver: 'memory',
         memoryOptions: {
           ttl: 0.05 // 50ms in seconds
         }

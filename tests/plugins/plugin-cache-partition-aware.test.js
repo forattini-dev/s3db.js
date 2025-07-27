@@ -36,7 +36,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
 
     // Configure partition-aware filesystem cache
     cachePlugin = new CachePlugin({
-      driverType: 'filesystem',
+      driver: 'filesystem',
       partitionAware: true,
       partitionStrategy: 'hierarchical',
       trackUsage: true,
