@@ -14,7 +14,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
 
     // Configure S3 cache
     cachePlugin = new CachePlugin({
-      driverType: 's3',
+      driver: 's3',
       client: db.client
     });
     await cachePlugin.setup(db);
@@ -52,7 +52,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
 
     test('should handle custom configuration', async () => {
       const customCachePlugin = new CachePlugin({
-        driverType: 's3',
+        driver: 's3',
         client: db.client,
         s3Options: {
           bucket: 'custom-cache-bucket',
@@ -67,7 +67,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
 
     test('should use database client by default', async () => {
       const defaultCachePlugin = new CachePlugin({
-        driverType: 's3'
+        driver: 's3'
         // No explicit client - should use database.client
       });
       await defaultCachePlugin.setup(db);

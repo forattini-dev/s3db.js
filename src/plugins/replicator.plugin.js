@@ -164,6 +164,13 @@ export class ReplicatorPlugin extends Plugin {
     return filtered;
   }
 
+  async getCompleteData(resource, data) {
+    // Always get the complete record from the resource to ensure we have all data
+    // This handles all behaviors: body-overflow, truncate-data, body-only, etc.
+    const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
+    return ok ? completeRecord : data;
+  }
+
   installEventListeners(resource, database, plugin) {
     if (!resource || this.eventListenersInstalled.has(resource.name) || 
         resource.name === this.config.replicatorLogResource) {
@@ -186,8 +193,10 @@ export class ReplicatorPlugin extends Plugin {
 
     resource.on('update', async (data, beforeData) => {
       const [ok, error] = await tryFn(async () => {
-        const completeData = { ...data, updatedAt: new Date().toISOString() };
-        await plugin.processReplicatorEvent('update', resource.name, completeData.id, completeData, beforeData);
+        // For updates, we need to get the complete updated record, not just the changed fields
+        const completeData = await plugin.getCompleteData(resource, data);
+        const dataWithTimestamp = { ...completeData, updatedAt: new Date().toISOString() };
+        await plugin.processReplicatorEvent('update', resource.name, completeData.id, dataWithTimestamp, beforeData);
       });
       
       if (!ok) {
@@ -214,17 +223,6 @@ export class ReplicatorPlugin extends Plugin {
     this.eventListenersInstalled.add(resource.name);
   }
 
-  /**
-   * Get complete data by always fetching the full record from the resource
-   * This ensures we always have the complete data regardless of behavior or data size
-   */
-  async getCompleteData(resource, data) {
-    // Always get the complete record from the resource to ensure we have all data
-    // This handles all behaviors: body-overflow, truncate-data, body-only, etc.
-    const [ok, err, completeRecord] = await tryFn(() => resource.get(data.id));
-    return ok ? completeRecord : data;
-  }
-
   async setup(database) {
     this.database = database;
 
@@ -241,7 +239,7 @@ export class ReplicatorPlugin extends Plugin {
     }
 
     const [logOk, logError] = await tryFn(async () => {
-      if (this.config.replicatorLogResource) {
+      if (this.config.persistReplicatorLog) {
         const logRes = await database.createResource({
           name: this.config.replicatorLogResource,
           behavior: 'body-overflow',
@@ -271,6 +269,13 @@ export class ReplicatorPlugin extends Plugin {
 
     await this.uploadMetadataFile(database);
 
+    // Install event listeners for existing resources
+    for (const resourceName in database.resources) {
+      const resource = database.resources[resourceName];
+      this.installEventListeners(resource, database, this);
+    }
+
+    // Override createResource to install listeners for new resources
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
       const resource = await originalCreateResource(config);
@@ -279,11 +284,6 @@ export class ReplicatorPlugin extends Plugin {
       }
       return resource;
     };
-
-    for (const resourceName in database.resources) {
-      const resource = database.resources[resourceName];
-      this.installEventListeners(resource, database, this);
-    }
   }
 
   createReplicator(driver, config, resources, client) {
