@@ -747,7 +747,7 @@ class S3dbMCPServer {
         });
       } else {
         // Memory cache configuration (default)
-        cacheConfig.driverType = 'memory';
+        cacheConfig.driver = 'memory';
         cacheConfig.memoryOptions = {
           maxSize: cacheMaxSizeEnv,
           ttl: cacheTtlEnv,

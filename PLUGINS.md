@@ -81,7 +81,7 @@ await users.list();  // Cached result
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `driverType` | string | `'s3'` | Cache driver: `'memory'` or `'s3'` |
+| `driver` | string | `'s3'` | Cache driver: `'memory'` or `'s3'` |
 | `ttl` | number | `300000` | Time-to-live in milliseconds (5 minutes) |
 | `maxSize` | number | `1000` | Maximum number of items in cache (memory driver) |
 | `includePartitions` | boolean | `true` | Include partition values in cache keys |
@@ -113,7 +113,7 @@ import { S3db, CachePlugin } from 's3db.js';
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new CachePlugin({
-    driverType: 'memory',
+    driver: 'memory',
     ttl: 600000, // 10 minutes
     maxSize: 500
   })]
@@ -3887,7 +3887,7 @@ const s3db = new S3db({
   plugins: [
     // Performance optimization
     new CachePlugin({ 
-      driverType: 'memory',
+      driver: 'memory',
       ttl: 600000 
     }),
     
