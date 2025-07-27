@@ -7606,11 +7606,11 @@ class CachePlugin extends plugin_class_default {
     await super.setup(database);
   }
   async onSetup() {
-    if (this.config.driver) {
+    if (this.config.driver && typeof this.config.driver === "object") {
       this.driver = this.config.driver;
-    } else if (this.config.driverType === "memory") {
+    } else if (this.config.driver === "memory") {
       this.driver = new memory_cache_class_default(this.config.memoryOptions || {});
-    } else if (this.config.driverType === "filesystem") {
+    } else if (this.config.driver === "filesystem") {
       if (this.config.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
           partitionStrategy: this.config.partitionStrategy,
@@ -13326,7 +13326,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.4.1" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "7.4.2" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -14548,6 +14548,10 @@ class ReplicatorPlugin extends plugin_class_default {
     }
     return filtered;
   }
+  async getCompleteData(resource, data) {
+    const [ok, err, completeRecord] = await try_fn_default(() => resource.get(data.id));
+    return ok ? completeRecord : data;
+  }
   installEventListeners(resource, database, plugin) {
     if (!resource || this.eventListenersInstalled.has(resource.name) || resource.name === this.config.replicatorLogResource) {
       return;
@@ -14566,8 +14570,9 @@ class ReplicatorPlugin extends plugin_class_default {
     });
     resource.on("update", async (data, beforeData) => {
       const [ok, error] = await try_fn_default(async () => {
-        const completeData = { ...data, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-        await plugin.processReplicatorEvent("update", resource.name, completeData.id, completeData, beforeData);
+        const completeData = await plugin.getCompleteData(resource, data);
+        const dataWithTimestamp = { ...completeData, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        await plugin.processReplicatorEvent("update", resource.name, completeData.id, dataWithTimestamp, beforeData);
       });
       if (!ok) {
         if (this.config.verbose) {
@@ -14589,14 +14594,6 @@ class ReplicatorPlugin extends plugin_class_default {
     });
     this.eventListenersInstalled.add(resource.name);
   }
-  /**
-   * Get complete data by always fetching the full record from the resource
-   * This ensures we always have the complete data regardless of behavior or data size
-   */
-  async getCompleteData(resource, data) {
-    const [ok, err, completeRecord] = await try_fn_default(() => resource.get(data.id));
-    return ok ? completeRecord : data;
-  }
   async setup(database) {
     this.database = database;
     const [initOk, initError] = await try_fn_default(async () => {
@@ -14610,7 +14607,7 @@ class ReplicatorPlugin extends plugin_class_default {
       throw initError;
     }
     const [logOk, logError] = await try_fn_default(async () => {
-      if (this.config.replicatorLogResource) {
+      if (this.config.persistReplicatorLog) {
         const logRes = await database.createResource({
           name: this.config.replicatorLogResource,
           behavior: "body-overflow",
@@ -14637,6 +14634,10 @@ class ReplicatorPlugin extends plugin_class_default {
       });
     }
     await this.uploadMetadataFile(database);
+    for (const resourceName in database.resources) {
+      const resource = database.resources[resourceName];
+      this.installEventListeners(resource, database, this);
+    }
     const originalCreateResource = database.createResource.bind(database);
     database.createResource = async (config) => {
       const resource = await originalCreateResource(config);
@@ -14645,10 +14646,6 @@ class ReplicatorPlugin extends plugin_class_default {
       }
       return resource;
     };
-    for (const resourceName in database.resources) {
-      const resource = database.resources[resourceName];
-      this.installEventListeners(resource, database, this);
-    }
   }
   createReplicator(driver, config, resources, client) {
     return createReplicator(driver, config, resources, client);
