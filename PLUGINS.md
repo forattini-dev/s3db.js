@@ -81,41 +81,91 @@ await users.list();  // Cached result
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `driver` | string | `'s3'` | Cache driver: `'memory'` or `'s3'` |
-| `ttl` | number | `300000` | Time-to-live in milliseconds (5 minutes) |
-| `maxSize` | number | `1000` | Maximum number of items in cache (memory driver) |
+| `driver` | string | `'s3'` | Cache driver: `'memory'`, `'s3'`, or `'filesystem'` |
+| `ttl` | number | `300000` | Time-to-live in milliseconds (5 minutes) - global setting |
+| `maxSize` | number | `1000` | Maximum number of items in cache - global setting |
+| `config` | object | `{}` | Driver-specific configuration options (can override global settings) |
 | `includePartitions` | boolean | `true` | Include partition values in cache keys |
 | `driver` | object | `null` | Custom cache driver instance |
-| `memoryOptions` | object | `{}` | Options for memory cache driver |
-| `s3Options` | object | `{}` | Options for S3 cache driver |
 
-### Memory Driver Options (`memoryOptions`)
+**Configuration Priority:** Driver-specific `config` options override global plugin settings. For example, if you set `ttl: 600000` at the plugin level and `ttl: 1800000` in the driver config, the driver will use 1800000 (30 minutes) while the global setting serves as the default for any drivers that don't specify their own TTL.
+
+### Driver Configuration Options
+
+The `config` object contains driver-specific options. Note that `ttl` and `maxSize` can be configured at the plugin level (applies to all operations) or in the driver config (driver-specific override).
+
+#### Memory Driver (`driver: 'memory'`)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `maxSize` | number | `1000` | Maximum items in memory |
-| `ttl` | number | `300000` | Default TTL in milliseconds |
+| `ttl` | number | inherited | TTL override for memory cache (inherits from plugin level) |
+| `maxSize` | number | inherited | Max items override for memory cache (inherits from plugin level) |
 | `checkPeriod` | number | `600000` | Cleanup interval in milliseconds |
+| `algorithm` | string | `'lru'` | Eviction algorithm: `'lru'`, `'fifo'`, `'lfu'` |
 
-### S3 Driver Options (`s3Options`)
+#### S3 Driver (`driver: 's3'`)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `ttl` | number | inherited | TTL override for S3 cache (inherits from plugin level) |
+| `maxSize` | number | inherited | Max items override for S3 cache (inherits from plugin level) |
 | `bucket` | string | Same as database | S3 bucket for cache storage |
 | `prefix` | string | `'cache/'` | S3 key prefix for cache objects |
 | `client` | object | Database client | Custom S3 client instance |
+| `compression` | boolean | `false` | Enable compression for cached values |
+
+#### Filesystem Driver (`driver: 'filesystem'`)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `directory` | string | required | Directory path to store cache files |
+| `ttl` | number | inherited | TTL override for filesystem cache (inherits from plugin level) |
+| `maxSize` | number | inherited | Max items override for filesystem cache (inherits from plugin level) |
+| `prefix` | string | `'cache'` | Prefix for cache filenames |
+| `enableCompression` | boolean | `true` | Whether to compress cache values using gzip |
+| `compressionThreshold` | number | `1024` | Minimum size in bytes to trigger compression |
+| `createDirectory` | boolean | `true` | Whether to create the directory if it doesn't exist |
+| `fileExtension` | string | `'.cache'` | File extension for cache files |
+| `enableMetadata` | boolean | `true` | Whether to store metadata alongside cache data |
+| `maxFileSize` | number | `10485760` | Maximum file size in bytes (10MB) |
+| `enableStats` | boolean | `false` | Whether to track cache statistics |
+| `enableCleanup` | boolean | `true` | Whether to automatically clean up expired files |
+| `cleanupInterval` | number | `300000` | Interval in milliseconds to run cleanup (5 minutes) |
+| `encoding` | string | `'utf8'` | File encoding to use |
+| `fileMode` | number | `0o644` | File permissions in octal notation |
 
 ### 🔧 Easy Example
 
 ```javascript
 import { S3db, CachePlugin } from 's3db.js';
 
+// Memory cache example with global settings
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new CachePlugin({
     driver: 'memory',
-    ttl: 600000, // 10 minutes
-    maxSize: 500
+    ttl: 600000, // 10 minutes - applies to all cache operations
+    maxSize: 500, // 500 items max - applies to all cache operations
+    config: {
+      checkPeriod: 120000, // 2 minutes cleanup
+      algorithm: 'lru'
+    }
+  })]
+});
+
+// Filesystem cache example with driver-specific override
+const s3dbWithFileCache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: 'filesystem',
+    ttl: 900000, // 15 minutes - global default
+    maxSize: 2000, // 2000 items max - global default
+    config: {
+      directory: './cache',
+      ttl: 1800000, // 30 minutes - overrides global for filesystem only
+      enableCompression: true,
+      enableCleanup: true
+    }
   })]
 });
 
@@ -143,7 +193,7 @@ const result3 = await products.count(); // Fresh data
 ### 🚀 Advanced Configuration Example
 
 ```javascript
-import { S3db, CachePlugin, MemoryCache, S3Cache } from 's3db.js';
+import { S3db, CachePlugin, MemoryCache, S3Cache, FilesystemCache } from 's3db.js';
 
 // Custom cache driver with advanced configuration
 const customCache = new MemoryCache({
@@ -153,36 +203,78 @@ const customCache = new MemoryCache({
   algorithm: 'lru' // Least Recently Used
 });
 
-const s3db = new S3db({
+// Advanced cache configuration with global settings
+const s3dbWithAdvancedCache = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new CachePlugin({
-    driver: customCache,
+    driver: 'filesystem',
+    
+    // Global cache settings (apply to all operations)
+    ttl: 3600000, // 1 hour default
+    maxSize: 5000, // 5000 items max
     includePartitions: true,
     
-    // S3 cache fallback for persistence
-    s3Options: {
-      bucket: 'my-cache-bucket',
-      prefix: 'app-cache/',
-      ttl: 3600000, // 1 hour S3 cache
-      compression: true,
-      encryption: true
-    },
-    
-    // Memory cache for speed
-    memoryOptions: {
-      maxSize: 5000,
-      ttl: 600000, // 10 minutes memory cache
-      checkPeriod: 120000, // 2 minutes cleanup
-      evictionPolicy: 'lru',
-      stats: true // Enable cache statistics
+    // Driver-specific configuration
+    config: {
+      directory: './data/cache',
+      prefix: 'app-cache',
+      ttl: 7200000, // 2 hours - overrides global TTL for filesystem
+      maxSize: 10000, // 10000 items - overrides global maxSize for filesystem
+      enableCompression: true,
+      compressionThreshold: 512, // Compress files > 512 bytes
+      enableCleanup: true,
+      cleanupInterval: 600000, // 10 minutes
+      enableMetadata: true,
+      maxFileSize: 5242880, // 5MB per file
+      enableStats: true,
+      fileMode: 0o644,
+      encoding: 'utf8'
     }
   })]
 });
 
-await s3db.connect();
+// Multiple cache configuration examples
+const s3dbWithS3Cache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: 's3',
+    ttl: 3600000, // 1 hour - global TTL
+    maxSize: 1000, // 1000 items max - global limit
+    includePartitions: true,
+    config: {
+      bucket: 'my-cache-bucket',
+      prefix: 'app-cache/',
+      compression: true
+    }
+  })]
+});
+
+const s3dbWithMemoryCache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: 'memory',
+    ttl: 600000, // 10 minutes - global TTL
+    maxSize: 5000, // 5000 items max - global limit
+    includePartitions: true,
+    config: {
+      checkPeriod: 120000, // 2 minutes cleanup
+      algorithm: 'lru'
+    }
+  })]
+});
+
+const s3dbWithCustomCache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: customCache, // Custom driver instance
+    includePartitions: true
+  })]
+});
+
+await s3dbWithAdvancedCache.connect();
 
 // Access cache methods on resources
-const users = s3db.resource('users');
+const users = s3dbWithAdvancedCache.resource('users');
 
 // Generate custom cache keys
 const cacheKey = await users.cacheKeyFor({
@@ -3888,7 +3980,8 @@ const s3db = new S3db({
     // Performance optimization
     new CachePlugin({ 
       driver: 'memory',
-      ttl: 600000 
+      ttl: 600000, // 10 minutes
+      maxSize: 1000
     }),
     
     // Cost tracking
