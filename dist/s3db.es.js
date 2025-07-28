@@ -9661,7 +9661,7 @@ class Client extends EventEmitter {
   }) {
     super();
     this.verbose = verbose;
-    this.id = id ?? idGenerator();
+    this.id = id ?? idGenerator(77);
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.httpClientOptions = {
@@ -11248,10 +11248,18 @@ class Resource extends EventEmitter {
    */
   constructor(config = {}) {
     super();
-    this._instanceId = Math.random().toString(36).slice(2, 8);
+    this._instanceId = idGenerator(7);
     const validation = validateResourceConfig(config);
     if (!validation.isValid) {
-      throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: "constructor", suggestion: "Check resource config and attributes." });
+      const errorDetails = validation.errors.map((err) => `  \u2022 ${err}`).join("\n");
+      throw new ResourceError(
+        `Invalid Resource ${config.name || "[unnamed]"} configuration:
+${errorDetails}`,
+        {
+          resourceName: config.name,
+          validation: validation.errors
+        }
+      );
     }
     const {
       name,
@@ -13422,6 +13430,7 @@ var resource_class_default = Resource;
 class Database extends EventEmitter {
   constructor(options) {
     super();
+    this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
       const [ok, err, version] = try_fn_default(() => true ? "8.0.2" : "latest");
