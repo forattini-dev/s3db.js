@@ -9621,14 +9621,16 @@ class Client extends EventEmitter {
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.httpClientOptions = {
-      keepAlive: false,
-      // Disabled for maximum creation speed
-      maxSockets: 10,
-      // Minimal sockets
-      maxFreeSockets: 2,
-      // Minimal pool
-      timeout: 15e3,
-      // Short timeout
+      keepAlive: true,
+      // Enabled for better performance
+      keepAliveMsecs: 1e3,
+      // 1 second keep-alive
+      maxSockets: 50,
+      // Balanced for most applications
+      maxFreeSockets: 10,
+      // Good connection reuse
+      timeout: 6e4,
+      // 60 second timeout
       ...httpClientOptions
     };
     this.client = AwsS3Client || this.createClient();
@@ -13378,7 +13380,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "7.5.0" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "8.0.0" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};

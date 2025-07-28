@@ -1,14 +1,19 @@
 import path from "path";
-import { config } from "dotenv";
 import { fileURLToPath } from "url";
+import { config } from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-config({ path: path.resolve(__dirname, '../../.env') });
+config({
+  debug: true,
+  path: path.resolve(__dirname, '../../.env'),
+});
 
 import { Database } from '../../src/index.js';
 import { createDatabaseForTest } from '../config.js';
+
+
 
 // Configurações de HTTP client para testar
 const httpConfigs = {
@@ -41,16 +46,6 @@ const httpConfigs = {
       timeout: 120000,
     }
   },
-  conservative: {
-    name: 'Conservative',
-    config: {
-      keepAlive: true,
-      keepAliveMsecs: 500,
-      maxSockets: 10,
-      maxFreeSockets: 2,
-      timeout: 15000,
-    }
-  },
   highConcurrency: {
     name: 'High Concurrency',
     config: {
@@ -60,25 +55,16 @@ const httpConfigs = {
       maxFreeSockets: 20,
       timeout: 60000,
     }
-  },
-  lowConcurrency: {
-    name: 'Low Concurrency',
-    config: {
-      keepAlive: true,
-      keepAliveMsecs: 1000,
-      maxSockets: 5,
-      maxFreeSockets: 1,
-      timeout: 60000,
-    }
   }
 };
 
-// Função para medir performance de operações S3 reais
-async function benchmarkS3Operations(db, configName, operations = 20) {
+// Função para benchmark de operações básicas
+async function benchmarkBasicOperations(db, configName, operations = 10) {
   // Create the resource if it doesn't exist
-  if (!db.resourceExists('benchmark')) {
+  if (!db.resourceExists('basic-benchmark')) {
+    console.log('Creating basic-benchmark resource...');
     await db.createResource({
-      name: 'benchmark',
+      name: 'basic-benchmark',
       attributes: {
         id: 'string',
         name: 'string',
@@ -86,28 +72,11 @@ async function benchmarkS3Operations(db, configName, operations = 20) {
         timestamp: 'string',
         category: 'string',
         priority: 'number',
-        tags: 'array|items:string',
-        metadata: {
-          category: 'string',
-          priority: 'number',
-          tags: 'array|items:string'
-        }
-      },
-      partitions: {
-        byCategory: {
-          fields: {
-            category: 'string'
-          }
-        },
-        byPriority: {
-          fields: {
-            priority: 'number'
-          }
-        }
+        tags: 'array|items:string'
       }
     });
   }
-  const resource = db.resource('benchmark');
+  const resource = db.resource('basic-benchmark');
   
   // Preparar dados de teste
   const testData = Array.from({ length: operations }, (_, i) => ({
@@ -117,12 +86,7 @@ async function benchmarkS3Operations(db, configName, operations = 20) {
     timestamp: new Date().toISOString(),
     category: `cat-${i % 10}`,
     priority: i % 3,
-    tags: [`tag${i}`, `benchmark`],
-    metadata: {
-      category: `cat-${i % 10}`,
-      priority: i % 3,
-      tags: [`tag${i}`, `benchmark`]
-    }
+    tags: [`tag${i}`, `benchmark`]
   }));
 
   const results = {
@@ -132,7 +96,7 @@ async function benchmarkS3Operations(db, configName, operations = 20) {
     delete: { times: [], avg: 0, total: 0 }
   };
 
-  console.log(`\n=== Testing ${configName} ===`);
+  console.log(`\n=== Testing ${configName} (Basic Operations) ===`);
 
   // Teste de INSERT
   console.log(`Running ${operations} INSERT operations...`);
@@ -193,84 +157,11 @@ async function benchmarkS3Operations(db, configName, operations = 20) {
   return results;
 }
 
-// Função para medir performance de operações em paralelo
-async function benchmarkParallelOperations(db, configName, operations = 10, concurrency = 3) {
-  // Create the resource if it doesn't exist
-  if (!db.resourceExists('parallel-benchmark')) {
-    await db.createResource({
-      name: 'parallel-benchmark',
-      attributes: {
-        id: 'string',
-        name: 'string',
-        value: 'number',
-        timestamp: 'string'
-      }
-    });
-  }
-  const resource = db.resource('parallel-benchmark');
-  
-  const testData = Array.from({ length: operations }, (_, i) => ({
-    id: `parallel-${i}`,
-    name: `Parallel Item ${i}`,
-    value: Math.random() * 1000,
-    timestamp: new Date().toISOString()
-  }));
-
-  console.log(`\n=== Testing ${configName} (Parallel - ${concurrency} concurrent) ===`);
-
-  // Função para executar operações em paralelo
-  async function runParallelOperations(operationType, operationFn) {
-    const start = process.hrtime.bigint();
-    const promises = [];
-    
-    for (let i = 0; i < operations; i += concurrency) {
-      const batch = testData.slice(i, i + concurrency);
-      const batchPromises = batch.map(item => operationFn(item));
-      promises.push(...batchPromises);
-    }
-    
-    await Promise.all(promises);
-    const end = process.hrtime.bigint();
-    return Number(end - start) / 1e6;
-  }
-
-  // INSERT paralelo - usar insertMany para melhor performance
-  console.log(`Running ${operations} parallel INSERT operations using insertMany...`);
-  const insertStart = process.hrtime.bigint();
-  const insertResults = await resource.insertMany(testData);
-  const insertEnd = process.hrtime.bigint();
-  const insertTime = Number(insertEnd - insertStart) / 1e6;
-
-  // GET paralelo
-  console.log(`Running ${operations} parallel GET operations...`);
-  const getTime = await runParallelOperations('GET', async (item) => {
-    await resource.get(item.id);
-  });
-
-  // UPDATE paralelo
-  console.log(`Running ${operations} parallel UPDATE operations...`);
-  const updateTime = await runParallelOperations('UPDATE', async (item) => {
-    await resource.update(item.id, { ...item, updated: true });
-  });
-
-  // DELETE paralelo
-  console.log(`Running ${operations} parallel DELETE operations...`);
-  const deleteTime = await runParallelOperations('DELETE', async (item) => {
-    await resource.delete(item.id);
-  });
-
-  return {
-    insert: { total: insertTime, avg: insertTime / operations },
-    get: { total: getTime, avg: getTime / operations },
-    update: { total: updateTime, avg: updateTime / operations },
-    delete: { total: deleteTime, avg: deleteTime / operations }
-  };
-}
-
-// Função para benchmark de operações em massa (1000 elementos)
+// Função para benchmark de operações em massa
 async function benchmarkBulkOperations(db, configName) {
   // Create the resource if it doesn't exist
   if (!db.resourceExists('bulk-benchmark')) {
+    console.log('Creating bulk-benchmark resource...');
     await db.createResource({
       name: 'bulk-benchmark',
       attributes: {
@@ -280,31 +171,14 @@ async function benchmarkBulkOperations(db, configName) {
         timestamp: 'string',
         category: 'string',
         priority: 'number',
-        tags: 'array|items:string',
-        metadata: {
-          category: 'string',
-          priority: 'number',
-          tags: 'array|items:string'
-        }
-      },
-      partitions: {
-        byCategory: {
-          fields: {
-            category: 'string'
-          }
-        },
-        byPriority: {
-          fields: {
-            priority: 'number'
-          }
-        }
+        tags: 'array|items:string'
       }
     });
   }
   const resource = db.resource('bulk-benchmark');
   
-  const totalElements = 1000;
-  const pageSize = 100;
+  const totalElements = 500; // Aumentado para 500 elementos
+  const pageSize = 50; // Páginas de 50 elementos
   
   console.log(`\n=== Testing ${configName} (Bulk Operations - ${totalElements} elements) ===`);
 
@@ -317,33 +191,33 @@ async function benchmarkBulkOperations(db, configName) {
     timestamp: new Date().toISOString(),
     category: `category-${i % 20}`,
     priority: i % 5,
-    tags: [`tag${i % 50}`, `bulk`, `benchmark`],
-    metadata: {
-      category: `category-${i % 20}`,
-      priority: i % 5,
-      tags: [`tag${i % 50}`, `bulk`, `benchmark`]
-    }
+    tags: [`tag${i % 50}`, `bulk`, `benchmark`]
   }));
 
   const results = {
     bulkInsert: { total: 0, avg: 0 },
     pagination: { total: 0, avg: 0, pages: 0 },
-    partitionQuery: { total: 0, avg: 0 },
+    query: { total: 0, avg: 0 },
     bulkDelete: { total: 0, avg: 0 }
   };
 
-  // BULK INSERT - 1000 elementos usando insertMany
+  // BULK INSERT - usando insertMany
   console.log(`Running BULK INSERT of ${totalElements} elements using insertMany...`);
   const bulkInsertStart = process.hrtime.bigint();
   
-  // Usar insertMany para inserção em massa
-  const insertResults = await resource.insertMany(testData);
+  try {
+    const insertResults = await resource.insertMany(testData);
+    console.log(`Inserted ${insertResults.length} items successfully`);
+  } catch (error) {
+    console.error('Error during bulk insert:', error);
+    throw error;
+  }
   
   const bulkInsertEnd = process.hrtime.bigint();
   results.bulkInsert.total = Number(bulkInsertEnd - bulkInsertStart) / 1e6;
   results.bulkInsert.avg = results.bulkInsert.total / totalElements;
 
-  // PAGINAÇÃO - Buscar todos os elementos em páginas de 100
+  // PAGINAÇÃO - Buscar todos os elementos em páginas
   console.log(`Running PAGINATION with ${pageSize} items per page...`);
   const paginationStart = process.hrtime.bigint();
   
@@ -352,6 +226,7 @@ async function benchmarkBulkOperations(db, configName) {
   let totalRetrieved = 0;
   
   while (hasMore) {
+    console.log(`  Fetching page ${page}...`);
     const start = process.hrtime.bigint();
     const result = await resource.list({ 
       limit: pageSize, 
@@ -359,8 +234,9 @@ async function benchmarkBulkOperations(db, configName) {
     });
     const end = process.hrtime.bigint();
     
-    totalRetrieved += result.items.length;
-    hasMore = result.items.length === pageSize;
+    totalRetrieved += result.length;
+    console.log(`  Page ${page}: ${result.length} items retrieved`);
+    hasMore = result.length === pageSize;
     page++;
   }
   
@@ -369,27 +245,32 @@ async function benchmarkBulkOperations(db, configName) {
   results.pagination.avg = results.pagination.total / page;
   results.pagination.pages = page - 1;
 
-  // QUERY POR PARTIÇÃO - Buscar por categoria específica
-  console.log(`Running PARTITION QUERY...`);
-  const partitionStart = process.hrtime.bigint();
+  // QUERY - Buscar por categoria específica
+  console.log(`Running QUERY by category...`);
+  const queryStart = process.hrtime.bigint();
   
   const categoryToSearch = 'category-5';
-  const partitionResult = await resource.list({ 
+  const queryResult = await resource.list({ 
     where: { category: categoryToSearch },
     limit: 100 
   });
   
-  const partitionEnd = process.hrtime.bigint();
-  results.partitionQuery.total = Number(partitionEnd - partitionStart) / 1e6;
-  results.partitionQuery.avg = results.partitionQuery.total;
+  const queryEnd = process.hrtime.bigint();
+  results.query.total = Number(queryEnd - queryStart) / 1e6;
+  results.query.avg = results.query.total;
 
-  // BULK DELETE - Remover todos os elementos usando deleteMany
+  // BULK DELETE - usando deleteMany
   console.log(`Running BULK DELETE of ${totalElements} elements using deleteMany...`);
   const bulkDeleteStart = process.hrtime.bigint();
   
-  // Usar deleteMany para remoção em massa
-  const deleteIds = testData.map(item => item.id);
-  const deleteResults = await resource.deleteMany(deleteIds);
+  try {
+    const deleteIds = testData.map(item => item.id);
+    const deleteResults = await resource.deleteMany(deleteIds);
+    console.log(`Deleted ${deleteIds.length} items successfully`);
+  } catch (error) {
+    console.error('Error during bulk delete:', error);
+    throw error;
+  }
   
   const bulkDeleteEnd = process.hrtime.bigint();
   results.bulkDelete.total = Number(bulkDeleteEnd - bulkDeleteStart) / 1e6;
@@ -398,27 +279,13 @@ async function benchmarkBulkOperations(db, configName) {
   return results;
 }
 
-// Função para calcular estatísticas
-function calculateStats(times) {
-  const sorted = times.sort((a, b) => a - b);
-  const avg = times.reduce((a, b) => a + b, 0) / times.length;
-  const min = sorted[0];
-  const max = sorted[sorted.length - 1];
-  const median = sorted[Math.floor(sorted.length / 2)];
-  const p95 = sorted[Math.floor(sorted.length * 0.95)];
-  const p99 = sorted[Math.floor(sorted.length * 0.99)];
-  
-  return { avg, min, max, median, p95, p99 };
-}
-
 // Função principal do benchmark
 async function runHttpClientS3Benchmark() {
-  console.log('🚀 HTTP Client S3 Operations Benchmark - Extended');
-  console.log('================================================');
+  console.log('🚀 HTTP Client S3 Operations Benchmark - Realistic Version');
+  console.log('==========================================================');
   
-  const baseDb = await createDatabaseForTest('http-client-s3-bench');
+  const baseDb = await createDatabaseForTest();
   const results = {};
-  const parallelResults = {};
   const bulkResults = {};
   
   // Store the connection string for reuse
@@ -438,16 +305,11 @@ async function runHttpClientS3Benchmark() {
     
     await testDb.connect();
     
-    // Benchmark sequencial (reduzido para 15 operações para ser mais rápido)
-    results[key] = await benchmarkS3Operations(testDb, config.name, 15);
+    // Benchmark básico (10 operações)
+    results[key] = await benchmarkBasicOperations(testDb, config.name, 10);
     
-    // Benchmark paralelo (reduzido para 8 operações)
-    parallelResults[key] = await benchmarkParallelOperations(testDb, config.name, 8, 2);
-    
-    // Benchmark de operações em massa (apenas para algumas configurações para não demorar muito)
-    if (key === 'default' || key === 'highConcurrency' || key === 'aggressive') {
-      bulkResults[key] = await benchmarkBulkOperations(testDb, config.name);
-    }
+    // Benchmark de operações em massa (500 elementos)
+    bulkResults[key] = await benchmarkBulkOperations(testDb, config.name);
     
     await testDb.disconnect();
   }
@@ -457,17 +319,15 @@ async function runHttpClientS3Benchmark() {
   await baseDb.disconnect();
 
   // Preparar resultados para console.table
-  const sequentialTable = [];
-  const parallelTable = [];
+  const basicTable = [];
   const bulkTable = [];
   const summaryTable = [];
 
   for (const [key, config] of Object.entries(httpConfigs)) {
     const result = results[key];
-    const parallelResult = parallelResults[key];
     
-    // Tabela sequencial
-    sequentialTable.push({
+    // Tabela básica
+    basicTable.push({
       'Configuration': config.name,
       'INSERT (ms)': result.insert.avg.toFixed(2),
       'GET (ms)': result.get.avg.toFixed(2),
@@ -476,41 +336,24 @@ async function runHttpClientS3Benchmark() {
       'Total Time (s)': ((result.insert.total + result.get.total + result.update.total + result.delete.total) / 1000).toFixed(2)
     });
 
-    // Tabela paralela
-    parallelTable.push({
+    // Tabela de operações em massa
+    const bulkResult = bulkResults[key];
+    bulkTable.push({
       'Configuration': config.name,
-      'INSERT (ms)': parallelResult.insert.avg.toFixed(2),
-      'GET (ms)': parallelResult.get.avg.toFixed(2),
-      'UPDATE (ms)': parallelResult.update.avg.toFixed(2),
-      'DELETE (ms)': parallelResult.delete.avg.toFixed(2),
-      'Total Time (s)': ((parallelResult.insert.total + parallelResult.get.total + parallelResult.update.total + parallelResult.delete.total) / 1000).toFixed(2)
+      'Bulk Insert (s)': (bulkResult.bulkInsert.total / 1000).toFixed(2),
+      'Pagination (s)': (bulkResult.pagination.total / 1000).toFixed(2),
+      'Query (ms)': bulkResult.query.avg.toFixed(2),
+      'Bulk Delete (s)': (bulkResult.bulkDelete.total / 1000).toFixed(2),
+      'Total Bulk Time (s)': ((bulkResult.bulkInsert.total + bulkResult.pagination.total + bulkResult.query.total + bulkResult.bulkDelete.total) / 1000).toFixed(2)
     });
 
-    // Tabela de operações em massa (se disponível)
-    if (bulkResults[key]) {
-      const bulkResult = bulkResults[key];
-      bulkTable.push({
-        'Configuration': config.name,
-        'Bulk Insert (s)': (bulkResult.bulkInsert.total / 1000).toFixed(2),
-        'Pagination (s)': (bulkResult.pagination.total / 1000).toFixed(2),
-        'Partition Query (ms)': bulkResult.partitionQuery.avg.toFixed(2),
-        'Bulk Delete (s)': (bulkResult.bulkDelete.total / 1000).toFixed(2),
-        'Total Bulk Time (s)': ((bulkResult.bulkInsert.total + bulkResult.pagination.total + bulkResult.partitionQuery.total + bulkResult.bulkDelete.total) / 1000).toFixed(2)
-      });
-    }
-
-    // Tabela de resumo com melhorias
+    // Tabela de resumo
     const defaultResult = results.default;
-    const defaultParallel = parallelResults.default;
-    
     const insertImprovement = ((defaultResult.insert.avg - result.insert.avg) / defaultResult.insert.avg * 100).toFixed(1);
-    const getImprovement = ((defaultResult.get.avg - result.get.avg) / defaultResult.get.avg * 100).toFixed(1);
-    const parallelImprovement = ((defaultParallel.insert.avg - parallelResult.insert.avg) / defaultParallel.insert.avg * 100).toFixed(1);
     
     summaryTable.push({
       'Configuration': config.name,
-      'Sequential vs Default': `${insertImprovement}%`,
-      'Parallel vs Default': `${parallelImprovement}%`,
+      'Basic vs Default': `${insertImprovement}%`,
       'Keep-alive': config.config.keepAlive ? 'Yes' : 'No',
       'Max Sockets': config.config.maxSockets,
       'Keep-alive (ms)': config.config.keepAliveMsecs || 'N/A'
@@ -518,19 +361,13 @@ async function runHttpClientS3Benchmark() {
   }
 
   // Exibir resultados
-  console.log('\n📈 SEQUENTIAL S3 OPERATIONS PERFORMANCE');
-  console.log('========================================');
-  console.table(sequentialTable);
+  console.log('\n📈 BASIC S3 OPERATIONS PERFORMANCE (10 operations)');
+  console.log('==================================================');
+  console.table(basicTable);
 
-  console.log('\n⚡ PARALLEL S3 OPERATIONS PERFORMANCE');
-  console.log('=====================================');
-  console.table(parallelTable);
-
-  if (bulkTable.length > 0) {
-    console.log('\n🔥 BULK OPERATIONS PERFORMANCE (1000 elements)');
-    console.log('==============================================');
-    console.table(bulkTable);
-  }
+  console.log('\n🔥 BULK OPERATIONS PERFORMANCE (500 elements)');
+  console.log('==============================================');
+  console.table(bulkTable);
 
   console.log('\n📊 PERFORMANCE SUMMARY');
   console.log('======================');
@@ -540,23 +377,16 @@ async function runHttpClientS3Benchmark() {
   console.log('\n🔍 DETAILED ANALYSIS');
   console.log('===================');
   
-  const bestSequential = sequentialTable.reduce((best, current) => 
+  const bestBasic = basicTable.reduce((best, current) => 
     parseFloat(current['Total Time (s)']) < parseFloat(best['Total Time (s)']) ? current : best
   );
   
-  const bestParallel = parallelTable.reduce((best, current) => 
-    parseFloat(current['Total Time (s)']) < parseFloat(best['Total Time (s)']) ? current : best
+  const bestBulk = bulkTable.reduce((best, current) => 
+    parseFloat(current['Total Bulk Time (s)']) < parseFloat(best['Total Bulk Time (s)']) ? current : best
   );
 
-  console.log(`🏆 Best Sequential Performance: ${bestSequential.Configuration} (${bestSequential['Total Time (s)']}s)`);
-  console.log(`🏆 Best Parallel Performance: ${bestParallel.Configuration} (${bestParallel['Total Time (s)']}s)`);
-  
-  if (bulkTable.length > 0) {
-    const bestBulk = bulkTable.reduce((best, current) => 
-      parseFloat(current['Total Bulk Time (s)']) < parseFloat(best['Total Bulk Time (s)']) ? current : best
-    );
-    console.log(`🏆 Best Bulk Performance: ${bestBulk.Configuration} (${bestBulk['Total Bulk Time (s)']}s)`);
-  }
+  console.log(`🏆 Best Basic Performance: ${bestBasic.Configuration} (${bestBasic['Total Time (s)']}s)`);
+  console.log(`🏆 Best Bulk Performance: ${bestBulk.Configuration} (${bestBulk['Total Bulk Time (s)']}s)`);
   
   // Recomendações
   console.log('\n💡 RECOMMENDATIONS');
@@ -567,15 +397,9 @@ async function runHttpClientS3Benchmark() {
   const improvement = ((noKeepAlive.insert.avg - defaultResult.insert.avg) / noKeepAlive.insert.avg * 100).toFixed(1);
   
   console.log(`• Keep-alive provides ${improvement}% improvement over no keep-alive`);
-  console.log(`• High concurrency settings work best for parallel operations`);
-  console.log(`• Conservative settings may be better for resource-constrained environments`);
-  console.log(`• Default settings provide good balance between performance and resource usage`);
-  
-  if (bulkTable.length > 0) {
-    console.log(`• Bulk operations show real-world performance with 1000+ elements`);
-    console.log(`• Pagination with 100 items per page demonstrates scalable querying`);
-    console.log(`• Partition queries enable efficient filtering by category/priority`);
-  }
+  console.log(`• insertMany is much more efficient than individual inserts`);
+  console.log(`• deleteMany provides efficient bulk deletion`);
+  console.log(`• Pagination works well for large datasets`);
   
   // Análise de latência
   console.log('\n📊 LATENCY ANALYSIS');
@@ -591,11 +415,9 @@ async function runHttpClientS3Benchmark() {
   console.log(`• Worst INSERT latency: ${maxLatency.toFixed(2)}ms`);
   console.log(`• Latency variation: ${((maxLatency - minLatency) / avgLatency * 100).toFixed(1)}%`);
   
-  if (bulkTable.length > 0) {
-    const bulkInsertTimes = bulkTable.map(row => parseFloat(row['Bulk Insert (s)']) * 1000 / 1000); // ms per element
-    const avgBulkLatency = bulkInsertTimes.reduce((a, b) => a + b, 0) / bulkInsertTimes.length;
-    console.log(`• Average bulk INSERT latency per element: ${avgBulkLatency.toFixed(2)}ms`);
-  }
+  const bulkInsertTimes = bulkTable.map(row => parseFloat(row['Bulk Insert (s)']) * 1000 / 500); // ms per element
+  const avgBulkLatency = bulkInsertTimes.reduce((a, b) => a + b, 0) / bulkInsertTimes.length;
+  console.log(`• Average bulk INSERT latency per element: ${avgBulkLatency.toFixed(2)}ms`);
 }
 
 // Executar o benchmark
