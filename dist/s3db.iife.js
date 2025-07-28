@@ -1,4 +1,4 @@
-var S3DB = (function (exports, nanoid, zlib, promisePool, web, promises, crypto, lodashEs, jsonStableStringify, clientS3, flat, FastestValidator) {
+var S3DB = (function (exports, nanoid, zlib, promisePool, web, promises, crypto, lodashEs, jsonStableStringify, nodeHttpHandler, clientS3, flat, FastestValidator) {
   'use strict';
 
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -1258,7 +1258,6 @@ ${JSON.stringify(validation, null, 2)}`,
         includeData: options.includeData !== false,
         includePartitions: options.includePartitions !== false,
         maxDataSize: options.maxDataSize || 1e4,
-        // 10KB limit
         ...options
       };
     }
@@ -1279,327 +1278,193 @@ ${JSON.stringify(validation, null, 2)}`,
           metadata: "string|optional"
         },
         behavior: "body-overflow"
-        // keyPrefix removido
       }));
       this.auditResource = ok ? auditResource : this.database.resources.audits || null;
       if (!ok && !this.auditResource) return;
-      this.installDatabaseProxy();
-      this.installEventListeners();
+      this.database.addHook("afterCreateResource", (context) => {
+        if (context.resource.name !== "audits") {
+          this.setupResourceAuditing(context.resource);
+        }
+      });
+      for (const resource of Object.values(this.database.resources)) {
+        if (resource.name !== "audits") {
+          this.setupResourceAuditing(resource);
+        }
+      }
     }
     async onStart() {
     }
     async onStop() {
     }
-    installDatabaseProxy() {
-      if (this.database._auditProxyInstalled) {
-        return;
-      }
-      const installEventListenersForResource = this.installEventListenersForResource.bind(this);
-      this.database._originalCreateResource = this.database.createResource;
-      this.database.createResource = async function(...args) {
-        const resource = await this._originalCreateResource(...args);
-        if (resource.name !== "audits") {
-          installEventListenersForResource(resource);
-        }
-        return resource;
-      };
-      this.database._auditProxyInstalled = true;
-    }
-    installEventListeners() {
-      for (const resource of Object.values(this.database.resources)) {
-        if (resource.name === "audits") {
-          continue;
-        }
-        this.installEventListenersForResource(resource);
-      }
-    }
-    installEventListenersForResource(resource) {
+    setupResourceAuditing(resource) {
       resource.on("insert", async (data) => {
-        const recordId = data.id || "auto-generated";
-        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+        await this.logAudit({
           resourceName: resource.name,
           operation: "insert",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+          recordId: data.id || "auto-generated",
           oldData: null,
-          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(() => {
+          newData: this.config.includeData ? JSON.stringify(this.truncateData(data)) : null,
+          partition: this.config.includePartitions && this.getPartitionValues(data, resource) ? this.getPrimaryPartition(this.getPartitionValues(data, resource)) : null,
+          partitionValues: this.config.includePartitions && this.getPartitionValues(data, resource) ? JSON.stringify(this.getPartitionValues(data, resource)) : null
         });
       });
       resource.on("update", async (data) => {
-        const recordId = data.id;
         let oldData = data.$before;
         if (this.config.includeData && !oldData) {
-          const [ok, err, fetched] = await try_fn_default(() => resource.get(recordId));
+          const [ok, err, fetched] = await try_fn_default(() => resource.get(data.id));
           if (ok) oldData = fetched;
         }
-        const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+        await this.logAudit({
           resourceName: resource.name,
           operation: "update",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
-          newData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(data)),
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(() => {
+          recordId: data.id,
+          oldData: oldData && this.config.includeData ? JSON.stringify(this.truncateData(oldData)) : null,
+          newData: this.config.includeData ? JSON.stringify(this.truncateData(data)) : null,
+          partition: this.config.includePartitions && this.getPartitionValues(data, resource) ? this.getPrimaryPartition(this.getPartitionValues(data, resource)) : null,
+          partitionValues: this.config.includePartitions && this.getPartitionValues(data, resource) ? JSON.stringify(this.getPartitionValues(data, resource)) : null
         });
       });
       resource.on("delete", async (data) => {
-        const recordId = data.id;
         let oldData = data;
         if (this.config.includeData && !oldData) {
-          const [ok, err, fetched] = await try_fn_default(() => resource.get(recordId));
+          const [ok, err, fetched] = await try_fn_default(() => resource.get(data.id));
           if (ok) oldData = fetched;
         }
-        const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
-        const auditRecord = {
-          id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+        await this.logAudit({
           resourceName: resource.name,
           operation: "delete",
-          recordId,
-          userId: this.getCurrentUserId?.() || "system",
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          oldData: oldData && this.config.includeData === false ? null : oldData ? JSON.stringify(this.truncateData(oldData)) : null,
+          recordId: data.id,
+          oldData: oldData && this.config.includeData ? JSON.stringify(this.truncateData(oldData)) : null,
           newData: null,
-          partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-          partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-          metadata: JSON.stringify({
-            source: "audit-plugin",
-            version: "2.0"
-          })
-        };
-        this.logAudit(auditRecord).catch(() => {
+          partition: oldData && this.config.includePartitions && this.getPartitionValues(oldData, resource) ? this.getPrimaryPartition(this.getPartitionValues(oldData, resource)) : null,
+          partitionValues: oldData && this.config.includePartitions && this.getPartitionValues(oldData, resource) ? JSON.stringify(this.getPartitionValues(oldData, resource)) : null
         });
       });
-      resource.useMiddleware("deleteMany", async (ctx, next) => {
-        const ids = ctx.args[0];
-        const oldDataMap = {};
-        if (this.config.includeData) {
-          for (const id of ids) {
-            const [ok, err, data] = await try_fn_default(() => resource.get(id));
-            oldDataMap[id] = ok ? data : null;
-          }
-        }
-        const result = await next();
-        if (result && result.length > 0 && this.config.includeData) {
-          for (const id of ids) {
-            const oldData = oldDataMap[id];
-            const partitionValues = oldData ? this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null : null;
-            const auditRecord = {
-              id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-              resourceName: resource.name,
-              operation: "delete",
-              recordId: id,
-              userId: this.getCurrentUserId?.() || "system",
-              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-              oldData: this.config.includeData === false ? null : JSON.stringify(this.truncateData(oldData)),
-              newData: null,
-              partition: this.config.includePartitions ? this.getPrimaryPartition(partitionValues) : null,
-              partitionValues: this.config.includePartitions ? partitionValues ? Object.keys(partitionValues).length > 0 ? JSON.stringify(partitionValues) : null : null : null,
-              metadata: JSON.stringify({
-                source: "audit-plugin",
-                version: "2.0",
-                batchOperation: true
-              })
-            };
-            this.logAudit(auditRecord).catch(() => {
-            });
-          }
-        }
-        return result;
-      });
+    }
+    // Backward compatibility for tests
+    installEventListenersForResource(resource) {
+      return this.setupResourceAuditing(resource);
+    }
+    async logAudit(auditData) {
+      if (!this.auditResource) {
+        return;
+      }
+      const auditRecord = {
+        id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+        userId: this.getCurrentUserId?.() || "system",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        metadata: JSON.stringify({ source: "audit-plugin", version: "2.0" }),
+        resourceName: auditData.resourceName,
+        operation: auditData.operation,
+        recordId: auditData.recordId
+      };
+      if (auditData.oldData !== null) {
+        auditRecord.oldData = auditData.oldData;
+      }
+      if (auditData.newData !== null) {
+        auditRecord.newData = auditData.newData;
+      }
+      if (auditData.partition !== null) {
+        auditRecord.partition = auditData.partition;
+      }
+      if (auditData.partitionValues !== null) {
+        auditRecord.partitionValues = auditData.partitionValues;
+      }
+      try {
+        await this.auditResource.insert(auditRecord);
+      } catch (error) {
+        console.warn("Audit logging failed:", error.message);
+      }
     }
     getPartitionValues(data, resource) {
-      if (!data) return null;
-      const partitions = resource.config?.partitions || {};
+      if (!this.config.includePartitions || !resource.partitions) return null;
       const partitionValues = {};
-      for (const [partitionName, partitionDef] of Object.entries(partitions)) {
-        if (partitionDef.fields) {
-          const partitionData = {};
-          for (const [fieldName, fieldRule] of Object.entries(partitionDef.fields)) {
-            const fieldValue = this.getNestedFieldValue(data, fieldName);
-            if (fieldValue !== void 0 && fieldValue !== null) {
-              partitionData[fieldName] = fieldValue;
-            }
-          }
-          if (Object.keys(partitionData).length > 0) {
-            partitionValues[partitionName] = partitionData;
-          }
+      for (const [partitionName, partitionConfig] of Object.entries(resource.partitions)) {
+        const values = {};
+        for (const field of Object.keys(partitionConfig.fields)) {
+          values[field] = this.getNestedFieldValue(data, field);
+        }
+        if (Object.values(values).some((v) => v !== void 0 && v !== null)) {
+          partitionValues[partitionName] = values;
         }
       }
-      return partitionValues;
+      return Object.keys(partitionValues).length > 0 ? partitionValues : null;
     }
     getNestedFieldValue(data, fieldPath) {
-      if (!fieldPath.includes(".")) {
-        return data[fieldPath];
-      }
-      const keys = fieldPath.split(".");
-      let currentLevel = data;
-      for (const key of keys) {
-        if (!currentLevel || typeof currentLevel !== "object" || !(key in currentLevel)) {
+      const parts = fieldPath.split(".");
+      let value = data;
+      for (const part of parts) {
+        if (value && typeof value === "object" && part in value) {
+          value = value[part];
+        } else {
           return void 0;
         }
-        currentLevel = currentLevel[key];
       }
-      return currentLevel;
+      return value;
     }
     getPrimaryPartition(partitionValues) {
       if (!partitionValues) return null;
       const partitionNames = Object.keys(partitionValues);
       return partitionNames.length > 0 ? partitionNames[0] : null;
     }
-    async logAudit(auditRecord) {
-      if (!auditRecord.id) {
-        auditRecord.id = `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      }
-      const result = await this.auditResource.insert(auditRecord);
-      return result;
-    }
     truncateData(data) {
-      if (!data) return data;
-      const filteredData = {};
-      for (const [key, value] of Object.entries(data)) {
-        if (!key.startsWith("_") && key !== "$overflow") {
-          filteredData[key] = value;
-        }
-      }
-      const dataStr = JSON.stringify(filteredData);
+      if (!this.config.includeData) return null;
+      const dataStr = JSON.stringify(data);
       if (dataStr.length <= this.config.maxDataSize) {
-        return filteredData;
-      }
-      let truncatedData = { ...filteredData };
-      let currentSize = JSON.stringify(truncatedData).length;
-      const metadataOverhead = JSON.stringify({
-        _truncated: true,
-        _originalSize: dataStr.length,
-        _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }).length;
-      const targetSize = this.config.maxDataSize - metadataOverhead;
-      for (const [key, value] of Object.entries(truncatedData)) {
-        if (typeof value === "string" && currentSize > targetSize) {
-          const excess = currentSize - targetSize;
-          const newLength = Math.max(0, value.length - excess - 3);
-          if (newLength < value.length) {
-            truncatedData[key] = value.substring(0, newLength) + "...";
-            currentSize = JSON.stringify(truncatedData).length;
-          }
-        }
+        return data;
       }
       return {
-        ...truncatedData,
+        ...data,
         _truncated: true,
         _originalSize: dataStr.length,
         _truncatedAt: (/* @__PURE__ */ new Date()).toISOString()
       };
     }
-    // Utility methods for querying audit logs
     async getAuditLogs(options = {}) {
       if (!this.auditResource) return [];
-      const [ok, err, result] = await try_fn_default(async () => {
-        const {
-          resourceName,
-          operation,
-          recordId,
-          userId,
-          partition,
-          startDate,
-          endDate,
-          limit = 100,
-          offset = 0
-        } = options;
-        const allAudits = await this.auditResource.getAll();
-        let filtered = allAudits.filter((audit) => {
-          if (resourceName && audit.resourceName !== resourceName) return false;
-          if (operation && audit.operation !== operation) return false;
-          if (recordId && audit.recordId !== recordId) return false;
-          if (userId && audit.userId !== userId) return false;
-          if (partition && audit.partition !== partition) return false;
-          if (startDate && new Date(audit.timestamp) < new Date(startDate)) return false;
-          if (endDate && new Date(audit.timestamp) > new Date(endDate)) return false;
-          return true;
-        });
-        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        const deserialized = filtered.slice(offset, offset + limit).map((audit) => {
-          const [okOld, , oldData] = typeof audit.oldData === "string" ? tryFnSync(() => JSON.parse(audit.oldData)) : [true, null, audit.oldData];
-          const [okNew, , newData] = typeof audit.newData === "string" ? tryFnSync(() => JSON.parse(audit.newData)) : [true, null, audit.newData];
-          const [okPart, , partitionValues] = audit.partitionValues && typeof audit.partitionValues === "string" ? tryFnSync(() => JSON.parse(audit.partitionValues)) : [true, null, audit.partitionValues];
-          const [okMeta, , metadata] = audit.metadata && typeof audit.metadata === "string" ? tryFnSync(() => JSON.parse(audit.metadata)) : [true, null, audit.metadata];
-          return {
-            ...audit,
-            oldData: audit.oldData === null || audit.oldData === void 0 || audit.oldData === "null" ? null : okOld ? oldData : null,
-            newData: audit.newData === null || audit.newData === void 0 || audit.newData === "null" ? null : okNew ? newData : null,
-            partitionValues: okPart ? partitionValues : audit.partitionValues,
-            metadata: okMeta ? metadata : audit.metadata
-          };
-        });
-        return deserialized;
-      });
-      return ok ? result : [];
+      const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100 } = options;
+      let query = {};
+      if (resourceName) query.resourceName = resourceName;
+      if (operation) query.operation = operation;
+      if (recordId) query.recordId = recordId;
+      if (partition) query.partition = partition;
+      if (startDate || endDate) {
+        query.timestamp = {};
+        if (startDate) query.timestamp.$gte = startDate;
+        if (endDate) query.timestamp.$lte = endDate;
+      }
+      const result = await this.auditResource.page({ query, limit });
+      return result.items || [];
     }
     async getRecordHistory(resourceName, recordId) {
-      return this.getAuditLogs({
-        resourceName,
-        recordId,
-        limit: 1e3
-      });
+      return await this.getAuditLogs({ resourceName, recordId });
     }
     async getPartitionHistory(resourceName, partitionName, partitionValues) {
-      return this.getAuditLogs({
+      return await this.getAuditLogs({
         resourceName,
         partition: partitionName,
-        limit: 1e3
+        partitionValues: JSON.stringify(partitionValues)
       });
     }
     async getAuditStats(options = {}) {
-      const {
-        resourceName,
-        startDate,
-        endDate
-      } = options;
-      const allAudits = await this.getAuditLogs({
-        resourceName,
-        startDate,
-        endDate,
-        limit: 1e4
-      });
+      const logs = await this.getAuditLogs(options);
       const stats = {
-        total: allAudits.length,
+        total: logs.length,
         byOperation: {},
         byResource: {},
         byPartition: {},
         byUser: {},
         timeline: {}
       };
-      for (const audit of allAudits) {
-        stats.byOperation[audit.operation] = (stats.byOperation[audit.operation] || 0) + 1;
-        stats.byResource[audit.resourceName] = (stats.byResource[audit.resourceName] || 0) + 1;
-        if (audit.partition) {
-          stats.byPartition[audit.partition] = (stats.byPartition[audit.partition] || 0) + 1;
+      for (const log of logs) {
+        stats.byOperation[log.operation] = (stats.byOperation[log.operation] || 0) + 1;
+        stats.byResource[log.resourceName] = (stats.byResource[log.resourceName] || 0) + 1;
+        if (log.partition) {
+          stats.byPartition[log.partition] = (stats.byPartition[log.partition] || 0) + 1;
         }
-        stats.byUser[audit.userId] = (stats.byUser[audit.userId] || 0) + 1;
-        if (audit.timestamp) {
-          const day = audit.timestamp.split("T")[0];
-          stats.timeline[day] = (stats.timeline[day] || 0) + 1;
-        }
+        stats.byUser[log.userId] = (stats.byUser[log.userId] || 0) + 1;
+        const date = log.timestamp.split("T")[0];
+        stats.timeline[date] = (stats.timeline[date] || 0) + 1;
       }
       return stats;
     }
@@ -7088,19 +6953,37 @@ ${JSON.stringify(validation, null, 2)}`,
         });
         for (const file of cacheFiles) {
           const filePath = path.join(this.directory, file);
-          if (await this._fileExists(filePath)) {
-            await promises.unlink(filePath);
+          try {
+            if (await this._fileExists(filePath)) {
+              await promises.unlink(filePath);
+            }
+          } catch (error) {
+            if (error.code !== "ENOENT") {
+              throw error;
+            }
           }
           if (this.enableMetadata) {
-            const metadataPath = this._getMetadataPath(filePath);
-            if (await this._fileExists(metadataPath)) {
-              await promises.unlink(metadataPath);
+            try {
+              const metadataPath = this._getMetadataPath(filePath);
+              if (await this._fileExists(metadataPath)) {
+                await promises.unlink(metadataPath);
+              }
+            } catch (error) {
+              if (error.code !== "ENOENT") {
+                throw error;
+              }
             }
           }
           if (this.enableBackup) {
-            const backupPath = filePath + this.backupSuffix;
-            if (await this._fileExists(backupPath)) {
-              await promises.unlink(backupPath);
+            try {
+              const backupPath = filePath + this.backupSuffix;
+              if (await this._fileExists(backupPath)) {
+                await promises.unlink(backupPath);
+              }
+            } catch (error) {
+              if (error.code !== "ENOENT") {
+                throw error;
+              }
             }
           }
         }
@@ -7112,6 +6995,12 @@ ${JSON.stringify(validation, null, 2)}`,
         }
         return true;
       } catch (error) {
+        if (error.code === "ENOENT") {
+          if (this.enableStats) {
+            this.stats.clears++;
+          }
+          return true;
+        }
         if (this.enableStats) {
           this.stats.errors++;
         }
@@ -7615,26 +7504,22 @@ ${JSON.stringify(validation, null, 2)}`,
       } else {
         this.driver = new s3_cache_class_default({ client: this.database.client, ...this.config.s3Options || {} });
       }
-      this.installDatabaseProxy();
+      this.installDatabaseHooks();
       this.installResourceHooks();
+    }
+    /**
+     * Install database hooks to handle resource creation/updates
+     */
+    installDatabaseHooks() {
+      this.database.addHook("afterCreateResource", async ({ resource }) => {
+        this.installResourceHooksForResource(resource);
+      });
     }
     async onStart() {
     }
     async onStop() {
     }
-    installDatabaseProxy() {
-      if (this.database._cacheProxyInstalled) {
-        return;
-      }
-      const installResourceHooks = this.installResourceHooks.bind(this);
-      this.database._originalCreateResourceForCache = this.database.createResource;
-      this.database.createResource = async function(...args) {
-        const resource = await this._originalCreateResourceForCache(...args);
-        installResourceHooks(resource);
-        return resource;
-      };
-      this.database._cacheProxyInstalled = true;
-    }
+    // Remove the old installDatabaseProxy method
     installResourceHooks() {
       for (const resource of Object.values(this.database.resources)) {
         this.installResourceHooksForResource(resource);
@@ -7673,7 +7558,12 @@ ${JSON.stringify(validation, null, 2)}`,
         "getAll",
         "page",
         "list",
-        "get"
+        "get",
+        "exists",
+        "content",
+        "hasContent",
+        "query",
+        "getFromPartition"
       ];
       for (const method of cacheMethods) {
         resource.useMiddleware(method, async (ctx, next) => {
@@ -7686,9 +7576,26 @@ ${JSON.stringify(validation, null, 2)}`,
           } else if (method === "list" || method === "listIds" || method === "count") {
             const { partition, partitionValues } = ctx.args[0] || {};
             key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+          } else if (method === "query") {
+            const filter = ctx.args[0] || {};
+            const options = ctx.args[1] || {};
+            key = await resource.cacheKeyFor({
+              action: method,
+              params: { filter, options: { limit: options.limit, offset: options.offset } },
+              partition: options.partition,
+              partitionValues: options.partitionValues
+            });
+          } else if (method === "getFromPartition") {
+            const { id, partitionName, partitionValues } = ctx.args[0] || {};
+            key = await resource.cacheKeyFor({
+              action: method,
+              params: { id, partitionName },
+              partition: partitionName,
+              partitionValues
+            });
           } else if (method === "getAll") {
             key = await resource.cacheKeyFor({ action: method });
-          } else if (method === "get") {
+          } else if (["get", "exists", "content", "hasContent"].includes(method)) {
             key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
           }
           if (this.driver instanceof PartitionAwareFilesystemCache) {
@@ -7697,6 +7604,14 @@ ${JSON.stringify(validation, null, 2)}`,
               const args = ctx.args[0] || {};
               partition = args.partition;
               partitionValues = args.partitionValues;
+            } else if (method === "query") {
+              const options = ctx.args[1] || {};
+              partition = options.partition;
+              partitionValues = options.partitionValues;
+            } else if (method === "getFromPartition") {
+              const { partitionName, partitionValues: pValues } = ctx.args[0] || {};
+              partition = partitionName;
+              partitionValues = pValues;
             }
             const [ok, err, result] = await try_fn_default(() => resource.cache._get(key, {
               resource: resource.name,
@@ -7724,7 +7639,7 @@ ${JSON.stringify(validation, null, 2)}`,
           }
         });
       }
-      const writeMethods = ["insert", "update", "delete", "deleteMany"];
+      const writeMethods = ["insert", "update", "delete", "deleteMany", "setContent", "deleteContent", "replace"];
       for (const method of writeMethods) {
         resource.useMiddleware(method, async (ctx, next) => {
           const result = await next();
@@ -7739,6 +7654,12 @@ ${JSON.stringify(validation, null, 2)}`,
               if (ok && full) data = full;
             }
             await this.clearCacheForResource(resource, data);
+          } else if (method === "setContent" || method === "deleteContent") {
+            const id = ctx.args[0]?.id || ctx.args[0];
+            await this.clearCacheForResource(resource, { id });
+          } else if (method === "replace") {
+            const id = ctx.args[0];
+            await this.clearCacheForResource(resource, { id, ...ctx.args[1] });
           } else if (method === "deleteMany") {
             await this.clearCacheForResource(resource);
           }
@@ -7749,20 +7670,37 @@ ${JSON.stringify(validation, null, 2)}`,
     async clearCacheForResource(resource, data) {
       if (!resource.cache) return;
       const keyPrefix = `resource=${resource.name}`;
-      await resource.cache.clear(keyPrefix);
-      if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
-        if (!data) {
-          for (const partitionName of Object.keys(resource.config.partitions)) {
-            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-            await resource.cache.clear(partitionKeyPrefix);
+      if (data && data.id) {
+        const itemSpecificMethods = ["get", "exists", "content", "hasContent"];
+        for (const method of itemSpecificMethods) {
+          try {
+            const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
+            await resource.cache.clear(specificKey.replace(".json.gz", ""));
+          } catch (error) {
           }
-        } else {
+        }
+        if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
           const partitionValues = this.getPartitionValues(data, resource);
           for (const [partitionName, values] of Object.entries(partitionValues)) {
             if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
-              const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-              await resource.cache.clear(partitionKeyPrefix);
+              try {
+                const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+                await resource.cache.clear(partitionKeyPrefix);
+              } catch (error) {
+              }
             }
+          }
+        }
+      }
+      try {
+        await resource.cache.clear(keyPrefix);
+      } catch (error) {
+        const aggregateMethods = ["count", "list", "listIds", "getAll", "page", "query"];
+        for (const method of aggregateMethods) {
+          try {
+            await resource.cache.clear(`${keyPrefix}/action=${method}`);
+            await resource.cache.clear(`resource=${resource.name}/action=${method}`);
+          } catch (methodError) {
           }
         }
       }
@@ -7787,7 +7725,7 @@ ${JSON.stringify(validation, null, 2)}`,
       return join(...keyParts) + ".json.gz";
     }
     async hashParams(params) {
-      const sortedParams = Object.keys(params).sort().map((key) => `${key}:${params[key]}`).join("|") || "empty";
+      const sortedParams = Object.keys(params).sort().map((key) => `${key}:${JSON.stringify(params[key])}`).join("|") || "empty";
       return await sha256(sortedParams);
     }
     // Utility methods
@@ -7992,12 +7930,14 @@ ${JSON.stringify(validation, null, 2)}`,
       }));
       this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
       await this.loadIndexes();
+      this.installDatabaseHooks();
       this.installIndexingHooks();
     }
     async start() {
     }
     async stop() {
       await this.saveIndexes();
+      this.removeDatabaseHooks();
     }
     async loadIndexes() {
       if (!this.indexResource) return;
@@ -8032,6 +7972,16 @@ ${JSON.stringify(validation, null, 2)}`,
           });
         }
       });
+    }
+    installDatabaseHooks() {
+      this.database.addHook("afterCreateResource", (resource) => {
+        if (resource.name !== "fulltext_indexes") {
+          this.installResourceHooks(resource);
+        }
+      });
+    }
+    removeDatabaseHooks() {
+      this.database.removeHook("afterCreateResource", this.installResourceHooks.bind(this));
     }
     installIndexingHooks() {
       if (!this.database.plugins) {
@@ -8395,6 +8345,7 @@ ${JSON.stringify(validation, null, 2)}`,
         this.errorsResource = database.resources.error_logs;
         this.performanceResource = database.resources.performance_logs;
       }
+      this.installDatabaseHooks();
       this.installMetricsHooks();
       if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
         this.startFlushTimer();
@@ -8407,9 +8358,17 @@ ${JSON.stringify(validation, null, 2)}`,
         clearInterval(this.flushTimer);
         this.flushTimer = null;
       }
-      if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
-        await this.flushMetrics();
-      }
+      this.removeDatabaseHooks();
+    }
+    installDatabaseHooks() {
+      this.database.addHook("afterCreateResource", (resource) => {
+        if (resource.name !== "metrics" && resource.name !== "error_logs" && resource.name !== "performance_logs") {
+          this.installResourceHooks(resource);
+        }
+      });
+    }
+    removeDatabaseHooks() {
+      this.database.removeHook("afterCreateResource", this.installResourceHooks.bind(this));
     }
     installMetricsHooks() {
       for (const resource of Object.values(this.database.resources)) {
@@ -9510,6 +9469,72 @@ ${JSON.stringify(validation, null, 2)}`,
   }
   var postgres_replicator_class_default = PostgresReplicator;
 
+  /*
+  this and http-lib folder
+
+  The MIT License
+
+  Copyright (c) 2015 John Hiesey
+
+  Permission is hereby granted, free of charge,
+  to any person obtaining a copy of this software and
+  associated documentation files (the "Software"), to
+  deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify,
+  merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom
+  the Software is furnished to do so,
+  subject to the following conditions:
+
+  The above copyright notice and this permission notice
+  shall be included in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+  */
+
+  function Agent$1() {}
+  Agent$1.defaultMaxSockets = 4;
+
+  /*
+  this and http-lib folder
+
+  The MIT License
+
+  Copyright (c) 2015 John Hiesey
+
+  Permission is hereby granted, free of charge,
+  to any person obtaining a copy of this software and
+  associated documentation files (the "Software"), to
+  deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify,
+  merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom
+  the Software is furnished to do so,
+  subject to the following conditions:
+
+  The above copyright notice and this permission notice
+  shall be included in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+  */
+
+  function Agent() {}
+  Agent.defaultMaxSockets = 4;
+
   const S3_DEFAULT_REGION = "us-east-1";
   const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
   class ConnectionString {
@@ -9577,19 +9602,38 @@ ${JSON.stringify(validation, null, 2)}`,
       id = null,
       AwsS3Client,
       connectionString,
-      parallelism = 10
+      parallelism = 10,
+      httpClientOptions = {}
     }) {
       super();
       this.verbose = verbose;
       this.id = id ?? idGenerator();
       this.parallelism = parallelism;
       this.config = new ConnectionString(connectionString);
+      this.httpClientOptions = {
+        keepAlive: false,
+        // Disabled for maximum creation speed
+        maxSockets: 10,
+        // Minimal sockets
+        maxFreeSockets: 2,
+        // Minimal pool
+        timeout: 15e3,
+        // Short timeout
+        ...httpClientOptions
+      };
       this.client = AwsS3Client || this.createClient();
     }
     createClient() {
+      const httpAgent = new Agent$1(this.httpClientOptions);
+      const httpsAgent = new Agent(this.httpClientOptions);
+      const httpHandler = new nodeHttpHandler.NodeHttpHandler({
+        httpAgent,
+        httpsAgent
+      });
       let options = {
         region: this.config.region,
-        endpoint: this.config.endpoint
+        endpoint: this.config.endpoint,
+        requestHandler: httpHandler
       };
       if (this.config.forcePathStyle) options.forcePathStyle = true;
       if (this.config.accessKeyId) {
@@ -13138,7 +13182,14 @@ ${JSON.stringify(validation, null, 2)}`,
         "delete",
         "deleteMany",
         "exists",
-        "getMany"
+        "getMany",
+        "content",
+        "hasContent",
+        "query",
+        "getFromPartition",
+        "setContent",
+        "deleteContent",
+        "replace"
       ];
       for (const method of this._middlewareMethods) {
         this._middlewares.set(method, []);
@@ -13330,6 +13381,7 @@ ${JSON.stringify(validation, null, 2)}`,
       this.cache = options.cache;
       this.passphrase = options.passphrase || "secret";
       this.versioningEnabled = options.versioningEnabled || false;
+      this._initHooks();
       let connectionString = options.connectionString;
       if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
         const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
@@ -13806,6 +13858,131 @@ ${JSON.stringify(validation, null, 2)}`,
         this.emit("disconnected", /* @__PURE__ */ new Date());
       } catch (err) {
       }
+    }
+    /**
+     * Initialize hooks system for database operations
+     * @private
+     */
+    _initHooks() {
+      this._hooks = /* @__PURE__ */ new Map();
+      this._hookEvents = [
+        "beforeConnect",
+        "afterConnect",
+        "beforeCreateResource",
+        "afterCreateResource",
+        "beforeUploadMetadata",
+        "afterUploadMetadata",
+        "beforeDisconnect",
+        "afterDisconnect",
+        "resourceCreated",
+        "resourceUpdated"
+      ];
+      for (const event of this._hookEvents) {
+        this._hooks.set(event, []);
+      }
+      this._wrapHookableMethods();
+    }
+    /**
+     * Wrap methods that can have hooks
+     * @private
+     */
+    _wrapHookableMethods() {
+      if (this._hooksInstalled) return;
+      this._originalConnect = this.connect.bind(this);
+      this._originalCreateResource = this.createResource.bind(this);
+      this._originalUploadMetadataFile = this.uploadMetadataFile.bind(this);
+      this._originalDisconnect = this.disconnect.bind(this);
+      this.connect = async (...args) => {
+        await this._executeHooks("beforeConnect", { args });
+        const result = await this._originalConnect(...args);
+        await this._executeHooks("afterConnect", { result, args });
+        return result;
+      };
+      this.createResource = async (config) => {
+        await this._executeHooks("beforeCreateResource", { config });
+        const resource = await this._originalCreateResource(config);
+        await this._executeHooks("afterCreateResource", { resource, config });
+        return resource;
+      };
+      this.uploadMetadataFile = async (...args) => {
+        await this._executeHooks("beforeUploadMetadata", { args });
+        const result = await this._originalUploadMetadataFile(...args);
+        await this._executeHooks("afterUploadMetadata", { result, args });
+        return result;
+      };
+      this.disconnect = async (...args) => {
+        await this._executeHooks("beforeDisconnect", { args });
+        const result = await this._originalDisconnect(...args);
+        await this._executeHooks("afterDisconnect", { result, args });
+        return result;
+      };
+      this._hooksInstalled = true;
+    }
+    /**
+     * Add a hook for a specific database event
+     * @param {string} event - Hook event name
+     * @param {Function} fn - Hook function
+     * @example
+     * database.addHook('afterCreateResource', async ({ resource }) => {
+     *   console.log('Resource created:', resource.name);
+     * });
+     */
+    addHook(event, fn) {
+      if (!this._hooks) this._initHooks();
+      if (!this._hooks.has(event)) {
+        throw new Error(`Unknown hook event: ${event}. Available events: ${this._hookEvents.join(", ")}`);
+      }
+      if (typeof fn !== "function") {
+        throw new Error("Hook function must be a function");
+      }
+      this._hooks.get(event).push(fn);
+    }
+    /**
+     * Execute hooks for a specific event
+     * @param {string} event - Hook event name
+     * @param {Object} context - Context data to pass to hooks
+     * @private
+     */
+    async _executeHooks(event, context = {}) {
+      if (!this._hooks || !this._hooks.has(event)) return;
+      const hooks = this._hooks.get(event);
+      for (const hook of hooks) {
+        try {
+          await hook({ database: this, ...context });
+        } catch (error) {
+          this.emit("hookError", { event, error, context });
+        }
+      }
+    }
+    /**
+     * Remove a hook for a specific event
+     * @param {string} event - Hook event name
+     * @param {Function} fn - Hook function to remove
+     */
+    removeHook(event, fn) {
+      if (!this._hooks || !this._hooks.has(event)) return;
+      const hooks = this._hooks.get(event);
+      const index = hooks.indexOf(fn);
+      if (index > -1) {
+        hooks.splice(index, 1);
+      }
+    }
+    /**
+     * Get all hooks for a specific event
+     * @param {string} event - Hook event name
+     * @returns {Function[]} Array of hook functions
+     */
+    getHooks(event) {
+      if (!this._hooks || !this._hooks.has(event)) return [];
+      return [...this._hooks.get(event)];
+    }
+    /**
+     * Clear all hooks for a specific event
+     * @param {string} event - Hook event name
+     */
+    clearHooks(event) {
+      if (!this._hooks || !this._hooks.has(event)) return;
+      this._hooks.get(event).length = 0;
     }
   }
   class S3db extends Database {
@@ -14587,56 +14764,52 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     async setup(database) {
       this.database = database;
-      const [initOk, initError] = await try_fn_default(async () => {
-        await this.initializeReplicators(database);
-      });
-      if (!initOk) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Replicator initialization failed: ${initError.message}`);
+      if (this.config.persistReplicatorLog) {
+        const [ok, err, logResource] = await try_fn_default(() => database.createResource({
+          name: this.config.replicatorLogResource || "replicator_logs",
+          attributes: {
+            id: "string|required",
+            resource: "string|required",
+            action: "string|required",
+            data: "json",
+            timestamp: "number|required",
+            createdAt: "string|required"
+          },
+          behavior: "truncate-data"
+        }));
+        if (ok) {
+          this.replicatorLogResource = logResource;
+        } else {
+          this.replicatorLogResource = database.resources[this.config.replicatorLogResource || "replicator_logs"];
         }
-        this.emit("error", { operation: "setup", error: initError.message });
-        throw initError;
       }
-      const [logOk, logError] = await try_fn_default(async () => {
-        if (this.config.persistReplicatorLog) {
-          const logRes = await database.createResource({
-            name: this.config.replicatorLogResource,
-            behavior: "body-overflow",
-            attributes: {
-              operation: "string",
-              resourceName: "string",
-              recordId: "string",
-              data: "string",
-              error: "string|optional",
-              replicator: "string",
-              timestamp: "string",
-              status: "string"
-            }
-          });
-        }
-      });
-      if (!logOk) {
-        if (this.config.verbose) {
-          console.warn(`[ReplicatorPlugin] Failed to create log resource ${this.config.replicatorLogResource}: ${logError.message}`);
-        }
-        this.emit("replicator_log_resource_creation_error", {
-          resourceName: this.config.replicatorLogResource,
-          error: logError.message
-        });
-      }
-      await this.uploadMetadataFile(database);
-      for (const resourceName in database.resources) {
-        const resource = database.resources[resourceName];
-        this.installEventListeners(resource, database, this);
-      }
-      const originalCreateResource = database.createResource.bind(database);
-      database.createResource = async (config) => {
-        const resource = await originalCreateResource(config);
-        if (resource) {
+      await this.initializeReplicators(database);
+      this.installDatabaseHooks();
+      for (const resource of Object.values(database.resources)) {
+        if (resource.name !== (this.config.replicatorLogResource || "replicator_logs")) {
           this.installEventListeners(resource, database, this);
         }
-        return resource;
-      };
+      }
+    }
+    async start() {
+    }
+    async stop() {
+      for (const replicator of this.replicators || []) {
+        if (replicator && typeof replicator.cleanup === "function") {
+          await replicator.cleanup();
+        }
+      }
+      this.removeDatabaseHooks();
+    }
+    installDatabaseHooks() {
+      this.database.addHook("afterCreateResource", (resource) => {
+        if (resource.name !== (this.config.replicatorLogResource || "replicator_logs")) {
+          this.installEventListeners(resource, this.database, this);
+        }
+      });
+    }
+    removeDatabaseHooks() {
+      this.database.removeHook("afterCreateResource", this.installEventListeners.bind(this));
     }
     createReplicator(driver, config, resources, client) {
       return createReplicator(driver, config, resources, client);
@@ -14652,10 +14825,6 @@ ${JSON.stringify(validation, null, 2)}`,
           this.replicators.push(replicator);
         }
       }
-    }
-    async start() {
-    }
-    async stop() {
     }
     async uploadMetadataFile(database) {
       if (typeof database.uploadMetadataFile === "function") {
@@ -15059,4 +15228,4 @@ ${JSON.stringify(validation, null, 2)}`,
 
   return exports;
 
-})({}, nanoid, zlib, PromisePool, streams, promises, crypto, _, stringify, AWS, flat, FastestValidator);
+})({}, nanoid, zlib, PromisePool, streams, promises, crypto, _, stringify, nodeHttpHandler, AWS, flat, FastestValidator);

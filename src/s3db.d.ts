@@ -6,6 +6,15 @@ declare module 's3db.js' {
   // CORE TYPES
   // ============================================================================
 
+  /** HTTP Client configuration for keep-alive and connection pooling */
+  export interface HttpClientOptions {
+    keepAlive?: boolean;
+    keepAliveMsecs?: number;
+    maxSockets?: number;
+    maxFreeSockets?: number;
+    timeout?: number;
+  }
+
   /** Main Database configuration */
   export interface DatabaseConfig {
     connectionString?: string;
@@ -23,6 +32,7 @@ declare module 's3db.js' {
     cache?: CacheConfig | boolean;
     plugins?: (PluginInterface | PluginFunction)[];
     client?: Client;
+    httpClientOptions?: HttpClientOptions;
   }
 
   /** Resource configuration */
