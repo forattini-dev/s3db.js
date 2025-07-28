@@ -34,7 +34,7 @@ export class Client extends EventEmitter {
   }) {
     super();
     this.verbose = verbose;
-    this.id = id ?? idGenerator();
+    this.id = id ?? idGenerator(77);
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.httpClientOptions = {
