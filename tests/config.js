@@ -1,6 +1,7 @@
 /* istanbul ignore file */
 import { join } from 'path';
 import { nanoid } from 'nanoid';
+import { isString } from 'lodash-es';
 
 import {
   SQSClient, 
@@ -10,7 +11,6 @@ import {
 
 import Client from '../src/client.class.js';
 import Database from '../src/database.class.js';
-import { isString } from 'lodash-es';
 
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
