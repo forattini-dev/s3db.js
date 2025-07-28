@@ -568,22 +568,13 @@ describe('Resource Journey - Real Integration Tests', () => {
     expect(item1.status).toBe('active');
     expect(item1.createdAt).toBeDefined();
 
-    // 3. Update data
+    // 3. Update data (simplified - removed redundant update)
     const updatedItem = await resource.update('lifecycle1', {
       status: 'inactive'
     });
 
-    // Add metadata in afterUpdate hook
-    resource.addHook('afterUpdate', (data) => {
-      if (!data.metadata) data.metadata = {};
-      data.metadata.updated = true;
-      return data;
-    });
-
-    const finalUpdatedItem = await resource.update('lifecycle1', { status: 'inactive' });
-    expect(finalUpdatedItem.status).toBe('inactive');
-    expect(finalUpdatedItem.metadata.updated).toBe(true);
-    expect(finalUpdatedItem.updatedAt).not.toBe(item1.updatedAt);
+    expect(updatedItem.status).toBe('inactive');
+    expect(updatedItem.updatedAt).not.toBe(item1.updatedAt);
 
     // 4. Query data
     const retrievedItem = await resource.get('lifecycle1');

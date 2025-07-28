@@ -86,7 +86,10 @@ export class MetricsPlugin extends Plugin {
       this.performanceResource = database.resources.performance_logs;
     }
 
-    // Install hooks for all resources except metrics resources
+    // Use database hooks for automatic resource discovery
+    this.installDatabaseHooks();
+    
+    // Install hooks for existing resources
     this.installMetricsHooks();
     
     // Disable flush timer during tests to avoid side effects
@@ -100,16 +103,28 @@ export class MetricsPlugin extends Plugin {
   }
 
   async stop() {
-    // Stop flush timer and flush remaining metrics
+    // Stop flush timer
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
     
-    // Don't flush metrics during tests
-    if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
-      await this.flushMetrics();
-    }
+    // Remove database hooks
+    this.removeDatabaseHooks();
+  }
+
+  installDatabaseHooks() {
+    // Use the new database hooks system for automatic resource discovery
+    this.database.addHook('afterCreateResource', (resource) => {
+      if (resource.name !== 'metrics' && resource.name !== 'error_logs' && resource.name !== 'performance_logs') {
+        this.installResourceHooks(resource);
+      }
+    });
+  }
+
+  removeDatabaseHooks() {
+    // Remove the hook we added
+    this.database.removeHook('afterCreateResource', this.installResourceHooks.bind(this));
   }
 
   installMetricsHooks() {

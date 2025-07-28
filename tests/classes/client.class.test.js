@@ -546,6 +546,8 @@ describe('Client Error Propagation - bucket field', () => {
   });
 
   test('listObjects error includes bucket (invalid bucket)', async () => {
+    // Mock the sendCommand to avoid real network calls
+    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.listObjects({ prefix: 'x' });
     } catch (err) {
@@ -556,6 +558,8 @@ describe('Client Error Propagation - bucket field', () => {
   });
 
   test('putObject error includes bucket (invalid bucket)', async () => {
+    // Mock the sendCommand to avoid real network calls
+    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.putObject({ key: 'x', body: 'abc' });
     } catch (err) {
@@ -566,6 +570,8 @@ describe('Client Error Propagation - bucket field', () => {
   });
 
   test('copyObject error includes bucket (invalid bucket)', async () => {
+    // Mock the sendCommand to avoid real network calls
+    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.copyObject({ from: 'a', to: 'b' });
     } catch (err) {
@@ -576,6 +582,8 @@ describe('Client Error Propagation - bucket field', () => {
   });
 
   test('moveObject error includes bucket (invalid bucket)', async () => {
+    // Mock the sendCommand to avoid real network calls
+    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.moveObject({ from: 'a', to: 'b' });
     } catch (err) {
