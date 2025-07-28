@@ -6627,8 +6627,8 @@ class MemoryCache extends Cache {
     super(config);
     this.cache = {};
     this.meta = {};
-    this.maxSize = config.maxSize || 0;
-    this.ttl = config.ttl || 0;
+    this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
+    this.ttl = config.ttl !== void 0 ? config.ttl : 3e5;
   }
   async _set(key, data) {
     if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
@@ -7486,37 +7486,81 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
 class CachePlugin extends plugin_class_default {
   constructor(options = {}) {
     super(options);
-    this.driver = options.driver;
-    this.config = {
-      includePartitions: options.includePartitions !== false,
-      partitionStrategy: options.partitionStrategy || "hierarchical",
-      partitionAware: options.partitionAware !== false,
-      trackUsage: options.trackUsage !== false,
-      preloadRelated: options.preloadRelated !== false,
-      ...options
+    this.driverName = options.driver || "s3";
+    this.ttl = options.ttl;
+    this.maxSize = options.maxSize;
+    this.config = options.config || {};
+    this.includePartitions = options.includePartitions !== false;
+    this.partitionStrategy = options.partitionStrategy || "hierarchical";
+    this.partitionAware = options.partitionAware !== false;
+    this.trackUsage = options.trackUsage !== false;
+    this.preloadRelated = options.preloadRelated !== false;
+    this.legacyConfig = {
+      memoryOptions: options.memoryOptions,
+      filesystemOptions: options.filesystemOptions,
+      s3Options: options.s3Options,
+      driver: options.driver
     };
   }
   async setup(database) {
     await super.setup(database);
   }
   async onSetup() {
-    if (this.config.driver && typeof this.config.driver === "object") {
-      this.driver = this.config.driver;
-    } else if (this.config.driver === "memory") {
-      this.driver = new memory_cache_class_default(this.config.memoryOptions || {});
-    } else if (this.config.driver === "filesystem") {
-      if (this.config.partitionAware) {
+    if (this.driverName && typeof this.driverName === "object") {
+      this.driver = this.driverName;
+    } else if (this.driverName === "memory") {
+      const driverConfig = {
+        ...this.legacyConfig.memoryOptions,
+        // Legacy support (lowest priority)
+        ...this.config
+        // New config format (medium priority)
+      };
+      if (this.ttl !== void 0) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== void 0) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      this.driver = new memory_cache_class_default(driverConfig);
+    } else if (this.driverName === "filesystem") {
+      const driverConfig = {
+        ...this.legacyConfig.filesystemOptions,
+        // Legacy support (lowest priority)
+        ...this.config
+        // New config format (medium priority)
+      };
+      if (this.ttl !== void 0) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== void 0) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      if (this.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.config.partitionStrategy,
-          trackUsage: this.config.trackUsage,
-          preloadRelated: this.config.preloadRelated,
-          ...this.config.filesystemOptions
+          partitionStrategy: this.partitionStrategy,
+          trackUsage: this.trackUsage,
+          preloadRelated: this.preloadRelated,
+          ...driverConfig
         });
       } else {
-        this.driver = new FilesystemCache(this.config.filesystemOptions || {});
+        this.driver = new FilesystemCache(driverConfig);
       }
     } else {
-      this.driver = new s3_cache_class_default({ client: this.database.client, ...this.config.s3Options || {} });
+      const driverConfig = {
+        client: this.database.client,
+        // Required for S3Cache
+        ...this.legacyConfig.s3Options,
+        // Legacy support (lowest priority)
+        ...this.config
+        // New config format (medium priority)
+      };
+      if (this.ttl !== void 0) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== void 0) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      this.driver = new s3_cache_class_default(driverConfig);
     }
     this.installDatabaseHooks();
     this.installResourceHooks();
@@ -13384,7 +13428,7 @@ class Database extends EventEmitter {
     super();
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "8.0.0" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "8.0.2" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
