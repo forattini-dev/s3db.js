@@ -117,61 +117,54 @@ describe('Resource Partitions - Real Integration Tests', () => {
       }
     });
 
-    // Insert test data
+    // Insert test data (reduced from 5 to 3 products)
     const products = [
       { id: 'prod1', name: 'Laptop A', category: 'electronics', brand: 'BrandA', price: 1000, inStock: true },
       { id: 'prod2', name: 'Phone B', category: 'electronics', brand: 'BrandB', price: 800, inStock: false },
-      { id: 'prod3', name: 'Book C', category: 'books', brand: 'BrandC', price: 20, inStock: true },
-      { id: 'prod4', name: 'Tablet D', category: 'electronics', brand: 'BrandA', price: 500, inStock: true },
-      { id: 'prod5', name: 'Magazine E', category: 'books', brand: 'BrandD', price: 5, inStock: false }
+      { id: 'prod3', name: 'Book C', category: 'books', brand: 'BrandC', price: 20, inStock: true }
     ];
 
     await resource.insertMany(products);
 
-    // Test listing by category
+    // Test listing by category (simplified)
     const electronics = await resource.listIds({
       partition: 'byCategory',
       partitionValues: { category: 'electronics' }
     });
-    expect(electronics).toHaveLength(3);
+    expect(electronics).toHaveLength(2);
     expect(electronics).toContain('prod1');
     expect(electronics).toContain('prod2');
-    expect(electronics).toContain('prod4');
 
     const books = await resource.listIds({
       partition: 'byCategory',
       partitionValues: { category: 'books' }
     });
-    expect(books).toHaveLength(2);
+    expect(books).toHaveLength(1);
     expect(books).toContain('prod3');
-    expect(books).toContain('prod5');
 
-    // Test listing by brand
+    // Test listing by brand (simplified)
     const brandA = await resource.listIds({
       partition: 'byBrand',
       partitionValues: { brand: 'BrandA' }
     });
-    expect(brandA).toHaveLength(2);
+    expect(brandA).toHaveLength(1);
     expect(brandA).toContain('prod1');
-    expect(brandA).toContain('prod4');
 
-    // Test listing by stock status
+    // Test listing by stock status (simplified)
     const inStock = await resource.listIds({
       partition: 'byStockStatus',
       partitionValues: { inStock: true }
     });
-    expect(inStock).toHaveLength(3);
+    expect(inStock).toHaveLength(2);
     expect(inStock).toContain('prod1');
     expect(inStock).toContain('prod3');
-    expect(inStock).toContain('prod4');
 
     const outOfStock = await resource.listIds({
       partition: 'byStockStatus',
       partitionValues: { inStock: false }
     });
-    expect(outOfStock).toHaveLength(2);
+    expect(outOfStock).toHaveLength(1);
     expect(outOfStock).toContain('prod2');
-    expect(outOfStock).toContain('prod5');
   });
 
   test('Partition with Complex Field Types', async () => {

@@ -5,17 +5,11 @@
 
 /// <reference path="../../src/s3db.d.ts" />
 
-import type { 
-  DatabaseConfig, 
-  ResourceConfig, 
-  BehaviorName,
-  PluginInterface,
-  ReplicatorConfig
-} from 's3db.js';
+import { Database, Resource } from 's3db.js';
 
 // Test 1: Basic Database Configuration
 function testBasicDatabaseConfiguration(): void {
-  const config: DatabaseConfig = {
+  const config: import('s3db.js').DatabaseConfig = {
     connectionString: 's3://key:secret@bucket',
     region: 'us-east-1',
     verbose: true,
@@ -23,7 +17,7 @@ function testBasicDatabaseConfiguration(): void {
   };
 
   // Test that all behavior names are valid
-  const behaviors: BehaviorName[] = [
+  const behaviors: import('s3db.js').BehaviorName[] = [
     'user-managed',
     'enforce-limits',
     'truncate-data', 
@@ -37,7 +31,7 @@ function testBasicDatabaseConfiguration(): void {
 
 // Test 2: Resource Configuration
 function testResourceConfiguration(): void {
-  const resourceConfig: ResourceConfig = {
+  const resourceConfig: import('s3db.js').ResourceConfig = {
     name: 'users',
     client: {} as any, // Mock for testing
     attributes: {
@@ -119,7 +113,7 @@ function testPluginConfigurations(): void {
 // Test 4: Replicator Configurations
 function testReplicatorConfigurations(): void {
   // S3 to S3 replication
-  const s3Replication: ReplicatorConfig = {
+  const s3Replication: import('s3db.js').ReplicatorConfig = {
     driver: 's3db',
     config: {
       connectionString: 's3://backup-key:backup-secret@backup-bucket',
@@ -132,7 +126,7 @@ function testReplicatorConfigurations(): void {
   };
 
   // SQS replication for event streaming
-  const sqsReplication: ReplicatorConfig = {
+  const sqsReplication: import('s3db.js').ReplicatorConfig = {
     driver: 'sqs',
     config: {
       region: 'us-east-1',
@@ -145,7 +139,7 @@ function testReplicatorConfigurations(): void {
   };
 
   // BigQuery replication for analytics
-  const bigqueryReplication: ReplicatorConfig = {
+  const bigqueryReplication: import('s3db.js').ReplicatorConfig = {
     driver: 'bigquery',
     config: {
       projectId: 'my-analytics-project',
@@ -192,7 +186,7 @@ function testEventHandlers(): void {
 
 // Test 6: Advanced Configuration Example
 function testAdvancedConfiguration(): void {
-  const advancedConfig: DatabaseConfig = {
+  const advancedConfig: import('s3db.js').DatabaseConfig = {
     connectionString: 's3://prod-key:prod-secret@production-bucket/app-data',
     region: 'us-west-2',
     verbose: false, // Production setting
@@ -211,7 +205,7 @@ function testAdvancedConfiguration(): void {
     plugins: [] // Would contain actual plugin instances in real code
   };
 
-  const productionResourceConfig: ResourceConfig = {
+  const productionResourceConfig: import('s3db.js').ResourceConfig = {
     name: 'orders',
     client: {} as any, // Mock for testing
     attributes: {
@@ -330,7 +324,7 @@ function testTypeAssertions(): void {
   ];
 
   // Test replicator drivers
-  type ValidDrivers = ReplicatorConfig['driver'];
+  type ValidDrivers = import('s3db.js').ReplicatorConfig['driver'];
   const validDrivers: ValidDrivers[] = ['s3db', 'sqs', 'bigquery', 'postgres'];
 
   // Test cache types

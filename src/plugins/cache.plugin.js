@@ -50,11 +50,21 @@ export class CachePlugin extends Plugin {
       this.driver = new S3Cache({ client: this.database.client, ...(this.config.s3Options || {}) });
     }
 
-    // Install database proxy for new resources
-    this.installDatabaseProxy();
+    // Use database hooks instead of method overwriting
+    this.installDatabaseHooks();
     
     // Install hooks for existing resources
     this.installResourceHooks();
+  }
+
+  /**
+   * Install database hooks to handle resource creation/updates
+   */
+  installDatabaseHooks() {
+    // Hook into resource creation to install cache middleware
+    this.database.addHook('afterCreateResource', async ({ resource }) => {
+      this.installResourceHooksForResource(resource);
+    });
   }
 
   async onStart() {
@@ -65,27 +75,7 @@ export class CachePlugin extends Plugin {
     // Cleanup if needed
   }
 
-  installDatabaseProxy() {
-    if (this.database._cacheProxyInstalled) {
-      return; // Already installed
-    }
-    
-    const installResourceHooks = this.installResourceHooks.bind(this);
-    
-    // Store original method
-    this.database._originalCreateResourceForCache = this.database.createResource;
-    
-    // Create new method that doesn't call itself
-    this.database.createResource = async function (...args) {
-      const resource = await this._originalCreateResourceForCache(...args);
-      installResourceHooks(resource);
-      return resource;
-    };
-    
-    // Mark as installed
-    this.database._cacheProxyInstalled = true;
-  }
-
+  // Remove the old installDatabaseProxy method
   installResourceHooks() {
     for (const resource of Object.values(this.database.resources)) {
       this.installResourceHooksForResource(resource);
@@ -126,10 +116,12 @@ export class CachePlugin extends Plugin {
       };
     }
 
-    // List of methods to cache
+    // Expanded list of methods to cache (including previously missing ones)
     const cacheMethods = [
-      'count', 'listIds', 'getMany', 'getAll', 'page', 'list', 'get'
+      'count', 'listIds', 'getMany', 'getAll', 'page', 'list', 'get',
+      'exists', 'content', 'hasContent', 'query', 'getFromPartition'
     ];
+    
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
         // Build cache key
@@ -142,11 +134,29 @@ export class CachePlugin extends Plugin {
         } else if (method === 'list' || method === 'listIds' || method === 'count') {
           const { partition, partitionValues } = ctx.args[0] || {};
           key = await resource.cacheKeyFor({ action: method, partition, partitionValues });
+        } else if (method === 'query') {
+          const filter = ctx.args[0] || {};
+          const options = ctx.args[1] || {};
+          key = await resource.cacheKeyFor({ 
+            action: method, 
+            params: { filter, options: { limit: options.limit, offset: options.offset } },
+            partition: options.partition,
+            partitionValues: options.partitionValues
+          });
+        } else if (method === 'getFromPartition') {
+          const { id, partitionName, partitionValues } = ctx.args[0] || {};
+          key = await resource.cacheKeyFor({ 
+            action: method, 
+            params: { id, partitionName }, 
+            partition: partitionName, 
+            partitionValues 
+          });
         } else if (method === 'getAll') {
           key = await resource.cacheKeyFor({ action: method });
-        } else if (method === 'get') {
+        } else if (['get', 'exists', 'content', 'hasContent'].includes(method)) {
           key = await resource.cacheKeyFor({ action: method, params: { id: ctx.args[0] } });
         }
+        
         // Try cache with partition awareness
         let cached;
         if (this.driver instanceof PartitionAwareFilesystemCache) {
@@ -156,6 +166,14 @@ export class CachePlugin extends Plugin {
             const args = ctx.args[0] || {};
             partition = args.partition;
             partitionValues = args.partitionValues;
+          } else if (method === 'query') {
+            const options = ctx.args[1] || {};
+            partition = options.partition;
+            partitionValues = options.partitionValues;
+          } else if (method === 'getFromPartition') {
+            const { partitionName, partitionValues: pValues } = ctx.args[0] || {};
+            partition = partitionName;
+            partitionValues = pValues;
           }
           
           const [ok, err, result] = await tryFn(() => resource.cache._get(key, {
@@ -194,8 +212,8 @@ export class CachePlugin extends Plugin {
       });
     }
 
-    // List of methods to clear cache on write
-    const writeMethods = ['insert', 'update', 'delete', 'deleteMany'];
+    // List of methods to clear cache on write (expanded to include new methods)
+    const writeMethods = ['insert', 'update', 'delete', 'deleteMany', 'setContent', 'deleteContent', 'replace'];
     for (const method of writeMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
         const result = await next();
@@ -211,6 +229,12 @@ export class CachePlugin extends Plugin {
             if (ok && full) data = full;
           }
           await this.clearCacheForResource(resource, data);
+        } else if (method === 'setContent' || method === 'deleteContent') {
+          const id = ctx.args[0]?.id || ctx.args[0];
+          await this.clearCacheForResource(resource, { id });
+        } else if (method === 'replace') {
+          const id = ctx.args[0];
+          await this.clearCacheForResource(resource, { id, ...ctx.args[1] });
         } else if (method === 'deleteMany') {
           // After all deletions, clear all aggregate and partition caches
           await this.clearCacheForResource(resource);
@@ -225,25 +249,49 @@ export class CachePlugin extends Plugin {
     
     const keyPrefix = `resource=${resource.name}`;
     
-    // Always clear main cache for this resource
-    await resource.cache.clear(keyPrefix);
-    
-    // Only clear partition cache if partitions are enabled AND resource has partitions AND includePartitions is true
-    if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
-      if (!data) {
-        // If no data, clear all partition caches
-        for (const partitionName of Object.keys(resource.config.partitions)) {
-          const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-          await resource.cache.clear(partitionKeyPrefix);
+    // For specific operations, only clear relevant cache entries
+    if (data && data.id) {
+      // Clear specific item caches for this ID
+      const itemSpecificMethods = ['get', 'exists', 'content', 'hasContent'];
+      for (const method of itemSpecificMethods) {
+        try {
+          const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
+          await resource.cache.clear(specificKey.replace('.json.gz', ''));
+        } catch (error) {
+          // Ignore cache clearing errors for individual items
         }
-      } else {
+      }
+      
+      // Clear partition-specific caches if this resource has partitions
+      if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
         const partitionValues = this.getPartitionValues(data, resource);
         for (const [partitionName, values] of Object.entries(partitionValues)) {
-          // Only clear partition cache if there are actual values
           if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
-            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-            await resource.cache.clear(partitionKeyPrefix);
+            try {
+              const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+              await resource.cache.clear(partitionKeyPrefix);
+            } catch (error) {
+              // Ignore partition cache clearing errors
+            }
           }
+        }
+      }
+    }
+    
+    // Clear aggregate caches more broadly to ensure all variants are cleared
+    try {
+      // Clear all cache entries for this resource - this ensures aggregate methods are invalidated
+      await resource.cache.clear(keyPrefix);
+    } catch (error) {
+      // If broad clearing fails, try specific method clearing
+      const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];
+      for (const method of aggregateMethods) {
+        try {
+          // Try multiple key patterns to ensure we catch all variations
+          await resource.cache.clear(`${keyPrefix}/action=${method}`);
+          await resource.cache.clear(`resource=${resource.name}/action=${method}`);
+        } catch (methodError) {
+          // Ignore individual method clearing errors
         }
       }
     }
@@ -277,7 +325,7 @@ export class CachePlugin extends Plugin {
   async hashParams(params) {
     const sortedParams = Object.keys(params)
       .sort()
-      .map(key => `${key}:${params[key]}`)
+      .map(key => `${key}:${JSON.stringify(params[key])}`) // Use JSON.stringify for complex objects
       .join('|') || 'empty';
     
     return await sha256(sortedParams);

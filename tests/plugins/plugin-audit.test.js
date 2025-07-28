@@ -71,14 +71,10 @@ describe('Audit Plugin', () => {
       },
       behavior: 'body-overflow'
     });
-    // Force installation of listeners
-    if (auditPlugin && auditPlugin.installEventListenersForResource) {
-      auditPlugin.installEventListenersForResource(testResource);
-      auditPlugin.installEventListenersForResource(users);
-    }
-    // Limpa todos os logs do resource de auditoria antes de cada teste
+    
+    // Clean up audit logs before each test
     if (auditPlugin && auditPlugin.auditResource && auditPlugin.auditResource.deleteMany) {
-      const allLogs = await auditPlugin.auditResource.getAll();
+      const allLogs = await auditPlugin.getAuditLogs({ limit: 1000 });
       if (allLogs && allLogs.length > 0) {
         await auditPlugin.auditResource.deleteMany(allLogs.map(l => l.id));
       }
@@ -496,7 +492,7 @@ describe('Audit Plugin', () => {
       // Wait for async audit logging
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      const auditLogs = await auditPlugin.auditResource.getAll();
+      const auditLogs = await auditPlugin.getAuditLogs({ limit: 100 });
       const userAudit = auditLogs.find(log => log.recordId === 'user-small');
 
       expect(userAudit).toBeDefined();

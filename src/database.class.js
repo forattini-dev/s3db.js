@@ -32,6 +32,9 @@ export class Database extends EventEmitter {
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
 
+    // Initialize hooks system
+    this._initHooks();
+
     // Handle both connection string and individual parameters
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
@@ -616,6 +619,154 @@ export class Database extends EventEmitter {
     } catch (err) {
       // Silently ignore errors on exit
     }
+  }
+
+  /**
+   * Initialize hooks system for database operations
+   * @private
+   */
+  _initHooks() {
+    // Map of hook name -> array of hook functions
+    this._hooks = new Map();
+    
+    // Define available hooks
+    this._hookEvents = [
+      'beforeConnect', 'afterConnect',
+      'beforeCreateResource', 'afterCreateResource',
+      'beforeUploadMetadata', 'afterUploadMetadata',
+      'beforeDisconnect', 'afterDisconnect',
+      'resourceCreated', 'resourceUpdated'
+    ];
+
+    // Initialize hook arrays
+    for (const event of this._hookEvents) {
+      this._hooks.set(event, []);
+    }
+
+    // Wrap hookable methods
+    this._wrapHookableMethods();
+  }
+
+  /**
+   * Wrap methods that can have hooks
+   * @private
+   */
+  _wrapHookableMethods() {
+    if (this._hooksInstalled) return; // Already wrapped
+
+    // Store original methods
+    this._originalConnect = this.connect.bind(this);
+    this._originalCreateResource = this.createResource.bind(this);
+    this._originalUploadMetadataFile = this.uploadMetadataFile.bind(this);
+    this._originalDisconnect = this.disconnect.bind(this);
+
+    // Wrap connect
+    this.connect = async (...args) => {
+      await this._executeHooks('beforeConnect', { args });
+      const result = await this._originalConnect(...args);
+      await this._executeHooks('afterConnect', { result, args });
+      return result;
+    };
+
+    // Wrap createResource
+    this.createResource = async (config) => {
+      await this._executeHooks('beforeCreateResource', { config });
+      const resource = await this._originalCreateResource(config);
+      await this._executeHooks('afterCreateResource', { resource, config });
+      return resource;
+    };
+
+    // Wrap uploadMetadataFile
+    this.uploadMetadataFile = async (...args) => {
+      await this._executeHooks('beforeUploadMetadata', { args });
+      const result = await this._originalUploadMetadataFile(...args);
+      await this._executeHooks('afterUploadMetadata', { result, args });
+      return result;
+    };
+
+    // Wrap disconnect
+    this.disconnect = async (...args) => {
+      await this._executeHooks('beforeDisconnect', { args });
+      const result = await this._originalDisconnect(...args);
+      await this._executeHooks('afterDisconnect', { result, args });
+      return result;
+    };
+
+    this._hooksInstalled = true;
+  }
+
+  /**
+   * Add a hook for a specific database event
+   * @param {string} event - Hook event name
+   * @param {Function} fn - Hook function
+   * @example
+   * database.addHook('afterCreateResource', async ({ resource }) => {
+   *   console.log('Resource created:', resource.name);
+   * });
+   */
+  addHook(event, fn) {
+    if (!this._hooks) this._initHooks();
+    if (!this._hooks.has(event)) {
+      throw new Error(`Unknown hook event: ${event}. Available events: ${this._hookEvents.join(', ')}`);
+    }
+    if (typeof fn !== 'function') {
+      throw new Error('Hook function must be a function');
+    }
+    this._hooks.get(event).push(fn);
+  }
+
+  /**
+   * Execute hooks for a specific event
+   * @param {string} event - Hook event name
+   * @param {Object} context - Context data to pass to hooks
+   * @private
+   */
+  async _executeHooks(event, context = {}) {
+    if (!this._hooks || !this._hooks.has(event)) return;
+    
+    const hooks = this._hooks.get(event);
+    for (const hook of hooks) {
+      try {
+        await hook({ database: this, ...context });
+      } catch (error) {
+        // Emit error but don't stop hook execution
+        this.emit('hookError', { event, error, context });
+      }
+    }
+  }
+
+  /**
+   * Remove a hook for a specific event
+   * @param {string} event - Hook event name
+   * @param {Function} fn - Hook function to remove
+   */
+  removeHook(event, fn) {
+    if (!this._hooks || !this._hooks.has(event)) return;
+    
+    const hooks = this._hooks.get(event);
+    const index = hooks.indexOf(fn);
+    if (index > -1) {
+      hooks.splice(index, 1);
+    }
+  }
+
+  /**
+   * Get all hooks for a specific event
+   * @param {string} event - Hook event name
+   * @returns {Function[]} Array of hook functions
+   */
+  getHooks(event) {
+    if (!this._hooks || !this._hooks.has(event)) return [];
+    return [...this._hooks.get(event)];
+  }
+
+  /**
+   * Clear all hooks for a specific event
+   * @param {string} event - Hook event name
+   */
+  clearHooks(event) {
+    if (!this._hooks || !this._hooks.has(event)) return;
+    this._hooks.get(event).length = 0;
   }
 }
 

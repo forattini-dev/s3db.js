@@ -225,65 +225,71 @@ export class ReplicatorPlugin extends Plugin {
 
   async setup(database) {
     this.database = database;
-
-    const [initOk, initError] = await tryFn(async () => {
-      await this.initializeReplicators(database);
-    });
     
-    if (!initOk) {
-      if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Replicator initialization failed: ${initError.message}`);
+    // Create replicator log resource if enabled
+    if (this.config.persistReplicatorLog) {
+      const [ok, err, logResource] = await tryFn(() => database.createResource({
+        name: this.config.replicatorLogResource || 'replicator_logs',
+        attributes: {
+          id: 'string|required',
+          resource: 'string|required',
+          action: 'string|required',
+          data: 'json',
+          timestamp: 'number|required',
+          createdAt: 'string|required'
+        },
+        behavior: 'truncate-data'
+      }));
+      
+      if (ok) {
+        this.replicatorLogResource = logResource;
+      } else {
+        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || 'replicator_logs'];
       }
-      this.emit('error', { operation: 'setup', error: initError.message });
-      throw initError;
     }
 
-    const [logOk, logError] = await tryFn(async () => {
-      if (this.config.persistReplicatorLog) {
-        const logRes = await database.createResource({
-          name: this.config.replicatorLogResource,
-          behavior: 'body-overflow',
-          attributes: {
-            operation: 'string',
-            resourceName: 'string', 
-            recordId: 'string',
-            data: 'string',
-            error: 'string|optional',
-            replicator: 'string',
-            timestamp: 'string',
-            status: 'string'
-          }
-        });
-      }
-    });
+    // Initialize replicators
+    await this.initializeReplicators(database);
     
-    if (!logOk) {
-      if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to create log resource ${this.config.replicatorLogResource}: ${logError.message}`);
-      }
-      this.emit('replicator_log_resource_creation_error', {
-        resourceName: this.config.replicatorLogResource,
-        error: logError.message
-      });
-    }
-
-    await this.uploadMetadataFile(database);
-
+    // Use database hooks for automatic resource discovery
+    this.installDatabaseHooks();
+    
     // Install event listeners for existing resources
-    for (const resourceName in database.resources) {
-      const resource = database.resources[resourceName];
-      this.installEventListeners(resource, database, this);
-    }
-
-    // Override createResource to install listeners for new resources
-    const originalCreateResource = database.createResource.bind(database);
-    database.createResource = async (config) => {
-      const resource = await originalCreateResource(config);
-      if (resource) {
+    for (const resource of Object.values(database.resources)) {
+      if (resource.name !== (this.config.replicatorLogResource || 'replicator_logs')) {
         this.installEventListeners(resource, database, this);
       }
-      return resource;
-    };
+    }
+  }
+
+  async start() {
+    // Plugin is ready
+  }
+
+  async stop() {
+    // Stop all replicators
+    for (const replicator of this.replicators || []) {
+      if (replicator && typeof replicator.cleanup === 'function') {
+        await replicator.cleanup();
+      }
+    }
+    
+    // Remove database hooks
+    this.removeDatabaseHooks();
+  }
+
+  installDatabaseHooks() {
+    // Use the new database hooks system for automatic resource discovery
+    this.database.addHook('afterCreateResource', (resource) => {
+      if (resource.name !== (this.config.replicatorLogResource || 'replicator_logs')) {
+        this.installEventListeners(resource, this.database, this);
+      }
+    });
+  }
+
+  removeDatabaseHooks() {
+    // Remove the hook we added
+    this.database.removeHook('afterCreateResource', this.installEventListeners.bind(this));
   }
 
   createReplicator(driver, config, resources, client) {
@@ -307,17 +313,6 @@ export class ReplicatorPlugin extends Plugin {
         this.replicators.push(replicator);
       }
     }
-  }
-
-  async start() {
-    // Plugin is ready
-  }
-
-  async stop() {
-    // Stop queue processing
-    // this.isProcessing = false; // Removed as per edit hint
-    // Process remaining queue items
-    // await this.processQueue(); // Removed as per edit hint
   }
 
   async uploadMetadataFile(database) {
