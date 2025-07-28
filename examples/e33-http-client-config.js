@@ -1,15 +1,16 @@
 import { Database } from '../src/index.js';
 
 // Example 1: Using optimized default HTTP client configuration
-console.log('Example 1: Default HTTP client configuration (Fast Creation)');
+console.log('Example 1: Default HTTP client configuration (Optimized Performance)');
 console.log('const client1 = new Database({');
 console.log('  connectionString: "s3://your-bucket",');
-console.log('  // Uses fast creation settings (keep-alive disabled by default):');
-console.log('  // - keepAlive: false (for maximum creation speed)');
-console.log('  // - maxSockets: 10 (minimal for fast creation)');
-console.log('  // - maxFreeSockets: 2 (minimal pool)');
-console.log('  // - timeout: 15000 (short timeout)');
-console.log('  // Note: Enable keep-alive manually for better S3 operation performance');
+console.log('  // Uses optimized performance settings by default:');
+console.log('  // - keepAlive: true (enabled for better performance)');
+console.log('  // - keepAliveMsecs: 1000 (1 second keep-alive)');
+console.log('  // - maxSockets: 50 (balanced for most applications)');
+console.log('  // - maxFreeSockets: 10 (good connection reuse)');
+console.log('  // - timeout: 60000 (60 second timeout)');
+console.log('  // These settings provide excellent performance for most use cases');
 console.log('});');
 
 // Example 2: Custom HTTP client configuration
@@ -52,9 +53,9 @@ console.log('  },');
 console.log('});');
 
 console.log('\n📊 PERFORMANCE CONSIDERATIONS:');
-console.log('• Default configuration prioritizes fast client creation');
-console.log('• Keep-alive should be enabled for better S3 operation performance');
-console.log('• Client creation speed ≠ S3 operation speed');
-console.log('• Choose based on your actual usage patterns');
+console.log('• Default configuration is optimized for S3 operation performance');
+console.log('• Keep-alive is enabled by default for better connection reuse');
+console.log('• Balanced settings work well for most applications');
+console.log('• Customize based on your specific performance requirements');
 console.log('\nNote: These are example configurations. In a real application,');
 console.log('you would need to provide a valid S3 connection string.'); 

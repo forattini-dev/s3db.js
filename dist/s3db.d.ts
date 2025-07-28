@@ -8,10 +8,15 @@ declare module 's3db.js' {
 
   /** HTTP Client configuration for keep-alive and connection pooling */
   export interface HttpClientOptions {
+    /** Enable keep-alive for better performance (default: true) */
     keepAlive?: boolean;
+    /** Keep-alive duration in milliseconds (default: 1000) */
     keepAliveMsecs?: number;
+    /** Maximum number of sockets (default: 50) */
     maxSockets?: number;
+    /** Maximum number of free sockets in pool (default: 10) */
     maxFreeSockets?: number;
+    /** Request timeout in milliseconds (default: 60000) */
     timeout?: number;
   }
 
