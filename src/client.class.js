@@ -1,10 +1,10 @@
 import path from "path";
 import EventEmitter from "events";
 import { chunk } from "lodash-es";
+import { Agent as HttpAgent } from 'http';
+import { Agent as HttpsAgent } from 'https';
 import { PromisePool } from "@supercharge/promise-pool";
-
-import { idGenerator } from "./concerns/id.js";
-import tryFn from "./concerns/try-fn.js";
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 
 import {
   S3Client,
@@ -16,10 +16,12 @@ import {
   DeleteObjectsCommand,
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
-import { md5 } from "./concerns/crypto.js";
 
-import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
+import tryFn from "./concerns/try-fn.js";
+import { md5 } from "./concerns/crypto.js";
+import { idGenerator } from "./concerns/id.js";
 import { ConnectionString } from "./connection-string.class.js";
+import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
 
 export class Client extends EventEmitter {
   constructor({
@@ -28,19 +30,38 @@ export class Client extends EventEmitter {
     AwsS3Client,
     connectionString,
     parallelism = 10,
+    httpClientOptions = {},
   }) {
     super();
     this.verbose = verbose;
     this.id = id ?? idGenerator();
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
+    this.httpClientOptions = {
+      keepAlive: false, // Disabled for maximum creation speed
+      maxSockets: 10, // Minimal sockets
+      maxFreeSockets: 2, // Minimal pool
+      timeout: 15000, // Short timeout
+      ...httpClientOptions,
+    };
     this.client = AwsS3Client || this.createClient()
   }
 
   createClient() {
+    // Create HTTP agents with keep-alive configuration
+    const httpAgent = new HttpAgent(this.httpClientOptions);
+    const httpsAgent = new HttpsAgent(this.httpClientOptions);
+
+    // Create HTTP handler with agents
+    const httpHandler = new NodeHttpHandler({
+      httpAgent,
+      httpsAgent,
+    });
+
     let options = {
       region: this.config.region,
       endpoint: this.config.endpoint,
+      requestHandler: httpHandler,
     }
 
     if (this.config.forcePathStyle) options.forcePathStyle = true
