@@ -91,8 +91,8 @@ export class MemoryCache extends Cache {
     super(config);
     this.cache = {};
     this.meta = {};
-    this.maxSize = config.maxSize || 0;
-    this.ttl = config.ttl || 0;
+    this.maxSize = config.maxSize !== undefined ? config.maxSize : 1000;
+    this.ttl = config.ttl !== undefined ? config.ttl : 300000;
   }
 
   async _set(key, data) {

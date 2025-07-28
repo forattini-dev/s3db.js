@@ -1,5 +1,6 @@
 /* istanbul ignore file */
-import { join } from 'path';
+import path, { join } from 'path';
+import fs from 'fs/promises';
 import { nanoid } from 'nanoid';
 import { isString } from 'lodash-es';
 
@@ -94,4 +95,16 @@ export async function createSqsQueueForTest(testName, options = {}) {
   await new Promise(resolve => setTimeout(resolve, 500));
   
   return queueUrl;
+}
+
+export async function createTemporaryPathForTest (prefix = 's3db-test') {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  const uniqueId = `${timestamp}-${random}`;
+  const tempPath = path.join('/tmp', `${prefix}-${uniqueId}`);
+  
+  // Criar o diretório se não existir
+  await fs.mkdir(tempPath, { recursive: true });
+  
+  return tempPath;
 }
