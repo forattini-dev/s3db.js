@@ -38,10 +38,11 @@ export class Client extends EventEmitter {
     this.parallelism = parallelism;
     this.config = new ConnectionString(connectionString);
     this.httpClientOptions = {
-      keepAlive: false, // Disabled for maximum creation speed
-      maxSockets: 10, // Minimal sockets
-      maxFreeSockets: 2, // Minimal pool
-      timeout: 15000, // Short timeout
+      keepAlive: true, // Enabled for better performance
+      keepAliveMsecs: 1000, // 1 second keep-alive
+      maxSockets: 50, // Balanced for most applications
+      maxFreeSockets: 10, // Good connection reuse
+      timeout: 60000, // 60 second timeout
       ...httpClientOptions,
     };
     this.client = AwsS3Client || this.createClient()
