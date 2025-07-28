@@ -34,6 +34,10 @@ export class FullTextPlugin extends Plugin {
     // Load existing indexes
     await this.loadIndexes();
     
+    // Use database hooks for automatic resource discovery
+    this.installDatabaseHooks();
+    
+    // Install hooks for existing resources
     this.installIndexingHooks();
   }
 
@@ -44,6 +48,9 @@ export class FullTextPlugin extends Plugin {
   async stop() {
     // Save indexes before stopping
     await this.saveIndexes();
+    
+    // Remove database hooks
+    this.removeDatabaseHooks();
   }
 
   async loadIndexes() {
@@ -84,6 +91,20 @@ export class FullTextPlugin extends Plugin {
         });
       }
     });
+  }
+
+  installDatabaseHooks() {
+    // Use the new database hooks system for automatic resource discovery
+    this.database.addHook('afterCreateResource', (resource) => {
+      if (resource.name !== 'fulltext_indexes') {
+        this.installResourceHooks(resource);
+      }
+    });
+  }
+
+  removeDatabaseHooks() {
+    // Remove the hook we added
+    this.database.removeHook('afterCreateResource', this.installResourceHooks.bind(this));
   }
 
   installIndexingHooks() {

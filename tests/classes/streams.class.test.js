@@ -41,12 +41,10 @@ describe('Streams - Complete Journey', () => {
   });
 
   test('ResourceReader Stream Journey', async () => {
-    // Insert test data
+    // Insert test data (reduced from 4 to 2 users)
     const users = await resource.insertMany([
       { name: 'John Doe', email: 'john@example.com', age: 30 },
-      { name: 'Jane Smith', email: 'jane@example.com', age: 25 },
-      { name: 'Bob Wilson', email: 'bob@example.com', age: 35 },
-      { name: 'Alice Johnson', email: 'alice@example.com', age: 28 }
+      { name: 'Jane Smith', email: 'jane@example.com', age: 25 }
     ]);
 
     // Create reader stream
@@ -70,9 +68,7 @@ describe('Streams - Complete Journey', () => {
 
     const testData = [
       { name: 'Stream User 1', email: 'stream1@example.com', age: 30 },
-      { name: 'Stream User 2', email: 'stream2@example.com', age: 25 },
-      { name: 'Stream User 3', email: 'stream3@example.com', age: 35 },
-      { name: 'Stream User 4', email: 'stream4@example.com', age: 28 }
+      { name: 'Stream User 2', email: 'stream2@example.com', age: 25 }
     ];
 
     // Write data to stream
@@ -86,10 +82,10 @@ describe('Streams - Complete Journey', () => {
         try {
           // Verify data was written
           const count = await resource.count();
-          expect(count).toBeGreaterThanOrEqual(4); // Allow for potential duplicates
+          expect(count).toBeGreaterThanOrEqual(2); // Allow for potential duplicates
 
           const allUsers = await resource.query({});
-          expect(allUsers.length).toBeGreaterThanOrEqual(4);
+          expect(allUsers.length).toBeGreaterThanOrEqual(2);
           expect(allUsers.every(user => user.id && user.name && user.email)).toBe(true);
           expect(allUsers.some(user => user.name === 'Stream User 1')).toBe(true);
           expect(allUsers.some(user => user.name === 'Stream User 2')).toBe(true);

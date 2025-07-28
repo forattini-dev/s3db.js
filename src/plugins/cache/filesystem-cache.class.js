@@ -455,24 +455,45 @@ export class FilesystemCache extends Cache {
       for (const file of cacheFiles) {
         const filePath = path.join(this.directory, file);
         
-        // Delete main file
-        if (await this._fileExists(filePath)) {
-          await unlink(filePath);
+        // Delete main file (handle ENOENT gracefully)
+        try {
+          if (await this._fileExists(filePath)) {
+            await unlink(filePath);
+          }
+        } catch (error) {
+          if (error.code !== 'ENOENT') {
+            throw error; // Re-throw non-ENOENT errors
+          }
+          // ENOENT means file is already gone, which is what we wanted
         }
         
-        // Delete metadata file
+        // Delete metadata file (handle ENOENT gracefully)
         if (this.enableMetadata) {
-          const metadataPath = this._getMetadataPath(filePath);
-          if (await this._fileExists(metadataPath)) {
-            await unlink(metadataPath);
+          try {
+            const metadataPath = this._getMetadataPath(filePath);
+            if (await this._fileExists(metadataPath)) {
+              await unlink(metadataPath);
+            }
+          } catch (error) {
+            if (error.code !== 'ENOENT') {
+              throw error; // Re-throw non-ENOENT errors
+            }
+            // ENOENT means file is already gone, which is what we wanted
           }
         }
         
-        // Delete backup file
+        // Delete backup file (handle ENOENT gracefully)
         if (this.enableBackup) {
-          const backupPath = filePath + this.backupSuffix;
-          if (await this._fileExists(backupPath)) {
-            await unlink(backupPath);
+          try {
+            const backupPath = filePath + this.backupSuffix;
+            if (await this._fileExists(backupPath)) {
+              await unlink(backupPath);
+            }
+          } catch (error) {
+            if (error.code !== 'ENOENT') {
+              throw error; // Re-throw non-ENOENT errors
+            }
+            // ENOENT means file is already gone, which is what we wanted
           }
         }
       }
@@ -490,6 +511,14 @@ export class FilesystemCache extends Cache {
       return true;
       
     } catch (error) {
+      // Handle ENOENT errors at the top level too (e.g., directory doesn't exist)
+      if (error.code === 'ENOENT') {
+        if (this.enableStats) {
+          this.stats.clears++;
+        }
+        return true; // Already cleared!
+      }
+      
       if (this.enableStats) {
         this.stats.errors++;
       }

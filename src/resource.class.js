@@ -2484,10 +2484,11 @@ export class Resource extends EventEmitter {
   _initMiddleware() {
     // Map of methodName -> array of middleware functions
     this._middlewares = new Map();
-    // Supported methods for middleware
+    // Supported methods for middleware (expanded to include newly cached methods)
     this._middlewareMethods = [
       'get', 'list', 'listIds', 'getAll', 'count', 'page',
-      'insert', 'update', 'delete', 'deleteMany', 'exists', 'getMany'
+      'insert', 'update', 'delete', 'deleteMany', 'exists', 'getMany',
+      'content', 'hasContent', 'query', 'getFromPartition', 'setContent', 'deleteContent', 'replace'
     ];
     for (const method of this._middlewareMethods) {
       this._middlewares.set(method, []);
