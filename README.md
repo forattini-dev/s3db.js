@@ -357,13 +357,7 @@ A logical container for your resources, stored in a specific S3 prefix.
 
 ```javascript
 const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  // Optional: Customize HTTP client for performance
-  httpClientOptions: {
-    keepAlive: true,
-    maxSockets: 50,
-    timeout: 60000
-  }
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
 });
 ```
 
@@ -403,24 +397,6 @@ Built-in validation using [@icebob/fastest-validator](https://github.com/icebob/
 ### 🚀 Performance Optimization
 
 s3db.js is designed for high performance with optimized defaults and configurable settings:
-
-#### HTTP Client Optimization
-
-The default HTTP client configuration is optimized for most applications:
-
-```javascript
-// Default optimized settings
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,         // Connection reuse for better performance
-    keepAliveMsecs: 1000,    // 1 second keep-alive duration
-    maxSockets: 50,          // Balanced concurrency
-    maxFreeSockets: 10,      // Good connection pool utilization
-    timeout: 60000           // 60 second timeout
-  }
-});
-```
 
 #### Bulk Operations Performance
 
