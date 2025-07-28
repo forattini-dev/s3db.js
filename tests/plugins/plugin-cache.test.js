@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 
-import { createDatabaseForTest } from '#tests/config.js';
+import { createDatabaseForTest, createTemporaryPathForTest } from '#tests/config.js';
 import { CachePlugin } from '#src/plugins/cache.plugin.js';
 import { MemoryCache } from '#src/plugins/cache/index.js';
 import { S3Cache } from '#src/plugins/cache/s3-cache.class.js';
@@ -36,10 +36,12 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
     });
 
     test('should setup cache plugin with filesystem driver', async () => {
+      const tempDir = await createTemporaryPathForTest('filesystem-plugin');
+      
       const cachePlugin = new CachePlugin({
         driver: 'filesystem',
-        filesystemOptions: {
-          directory: '/tmp/test-cache'
+        config: {
+          directory: tempDir
         }
       });
       await cachePlugin.setup(database);
@@ -49,11 +51,13 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
     });
 
     test('should setup cache plugin with partition-aware filesystem driver', async () => {
+      const tempDir = await createTemporaryPathForTest('partition-aware-filesystem');
+      
       const cachePlugin = new CachePlugin({
         driver: 'filesystem',
         partitionAware: true,
-        filesystemOptions: {
-          directory: '/tmp/test-cache-partition'
+        config: {
+          directory: tempDir
         }
       });
       await cachePlugin.setup(database);
@@ -127,12 +131,14 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
     });
 
     test('should validate partition-aware options', async () => {
+      const tempDir = await createTemporaryPathForTest('partition-validation');
+      
       const cachePlugin = new CachePlugin({
         driver: 'filesystem',
         partitionAware: true,
         partitionStrategy: 'invalid-strategy',
-        filesystemOptions: {
-          directory: '/tmp/test-cache'
+        config: {
+          directory: tempDir
         }
       });
 
@@ -191,11 +197,13 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
     });
 
     test('should setup partition-aware driver correctly', async () => {
+      const tempDir = await createTemporaryPathForTest('partition-driver');
+      
       const partitionCachePlugin = new CachePlugin({
         driver: 'filesystem',
         partitionAware: true,
-        filesystemOptions: {
-          directory: '/tmp/test-partition-cache'
+        config: {
+          directory: tempDir
         }
       });
       await partitionCachePlugin.setup(database);
@@ -275,12 +283,14 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
     });
 
     test('should analyze cache usage when partition-aware', async () => {
+      const tempDir = await createTemporaryPathForTest('cache-analysis');
+      
       const partitionCachePlugin = new CachePlugin({
         driver: 'filesystem',
         partitionAware: true,
         trackUsage: true,
-        filesystemOptions: {
-          directory: '/tmp/test-analysis-cache'
+        config: {
+          directory: tempDir
         }
       });
       await partitionCachePlugin.setup(database);
@@ -423,10 +433,12 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
 
   describe('Cross-Driver Compatibility', () => {
     test('should work consistently across different drivers', async () => {
+      const tempDir = await createTemporaryPathForTest('compat-test');
+      
       const drivers = [
         { type: 'memory', options: {} },
-        { type: 'filesystem', options: { filesystemOptions: { directory: '/tmp/compat-test' } } },
-        { type: 's3', options: { client: database.client } }
+        { type: 'filesystem', options: { config: { directory: tempDir } } },
+        { type: 's3', options: { config: { client: database.client } } }
       ];
 
       for (const driver of drivers) {

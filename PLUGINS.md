@@ -100,19 +100,16 @@ The `config` object contains driver-specific options. Note that `ttl` and `maxSi
 |-----------|------|---------|-------------|
 | `ttl` | number | inherited | TTL override for memory cache (inherits from plugin level) |
 | `maxSize` | number | inherited | Max items override for memory cache (inherits from plugin level) |
-| `checkPeriod` | number | `600000` | Cleanup interval in milliseconds |
-| `algorithm` | string | `'lru'` | Eviction algorithm: `'lru'`, `'fifo'`, `'lfu'` |
 
 #### S3 Driver (`driver: 's3'`)
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `ttl` | number | inherited | TTL override for S3 cache (inherits from plugin level) |
-| `maxSize` | number | inherited | Max items override for S3 cache (inherits from plugin level) |
-| `bucket` | string | Same as database | S3 bucket for cache storage |
-| `prefix` | string | `'cache/'` | S3 key prefix for cache objects |
+| `keyPrefix` | string | `'cache'` | S3 key prefix for cache objects |
 | `client` | object | Database client | Custom S3 client instance |
-| `compression` | boolean | `false` | Enable compression for cached values |
+
+**Note:** S3 cache automatically uses gzip compression for all cached values.
 
 #### Filesystem Driver (`driver: 'filesystem'`)
 
@@ -120,7 +117,6 @@ The `config` object contains driver-specific options. Note that `ttl` and `maxSi
 |-----------|------|---------|-------------|
 | `directory` | string | required | Directory path to store cache files |
 | `ttl` | number | inherited | TTL override for filesystem cache (inherits from plugin level) |
-| `maxSize` | number | inherited | Max items override for filesystem cache (inherits from plugin level) |
 | `prefix` | string | `'cache'` | Prefix for cache filenames |
 | `enableCompression` | boolean | `true` | Whether to compress cache values using gzip |
 | `compressionThreshold` | number | `1024` | Minimum size in bytes to trigger compression |
@@ -145,11 +141,7 @@ const s3db = new S3db({
   plugins: [new CachePlugin({
     driver: 'memory',
     ttl: 600000, // 10 minutes - applies to all cache operations
-    maxSize: 500, // 500 items max - applies to all cache operations
-    config: {
-      checkPeriod: 120000, // 2 minutes cleanup
-      algorithm: 'lru'
-    }
+    maxSize: 500 // 500 items max - applies to all cache operations
   })]
 });
 
@@ -198,9 +190,7 @@ import { S3db, CachePlugin, MemoryCache, S3Cache, FilesystemCache } from 's3db.j
 // Custom cache driver with advanced configuration
 const customCache = new MemoryCache({
   maxSize: 2000,
-  ttl: 900000, // 15 minutes
-  checkPeriod: 300000, // 5 minutes cleanup
-  algorithm: 'lru' // Least Recently Used
+  ttl: 900000 // 15 minutes
 });
 
 // Advanced cache configuration with global settings
@@ -219,7 +209,6 @@ const s3dbWithAdvancedCache = new S3db({
       directory: './data/cache',
       prefix: 'app-cache',
       ttl: 7200000, // 2 hours - overrides global TTL for filesystem
-      maxSize: 10000, // 10000 items - overrides global maxSize for filesystem
       enableCompression: true,
       compressionThreshold: 512, // Compress files > 512 bytes
       enableCleanup: true,
@@ -239,12 +228,9 @@ const s3dbWithS3Cache = new S3db({
   plugins: [new CachePlugin({
     driver: 's3',
     ttl: 3600000, // 1 hour - global TTL
-    maxSize: 1000, // 1000 items max - global limit
     includePartitions: true,
     config: {
-      bucket: 'my-cache-bucket',
-      prefix: 'app-cache/',
-      compression: true
+      keyPrefix: 'app-cache'
     }
   })]
 });
@@ -255,11 +241,7 @@ const s3dbWithMemoryCache = new S3db({
     driver: 'memory',
     ttl: 600000, // 10 minutes - global TTL
     maxSize: 5000, // 5000 items max - global limit
-    includePartitions: true,
-    config: {
-      checkPeriod: 120000, // 2 minutes cleanup
-      algorithm: 'lru'
-    }
+    includePartitions: true
   })]
 });
 
