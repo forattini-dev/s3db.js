@@ -11,14 +11,26 @@ import tryFn from "../concerns/try-fn.js";
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    this.driver = options.driver;
-    this.config = {
-      includePartitions: options.includePartitions !== false,
-      partitionStrategy: options.partitionStrategy || 'hierarchical',
-      partitionAware: options.partitionAware !== false,
-      trackUsage: options.trackUsage !== false,
-      preloadRelated: options.preloadRelated !== false,
-      ...options
+    
+    // Extract primary configuration
+    this.driverName = options.driver || 's3';
+    this.ttl = options.ttl;
+    this.maxSize = options.maxSize;
+    this.config = options.config || {};
+    
+    // Plugin-level settings
+    this.includePartitions = options.includePartitions !== false;
+    this.partitionStrategy = options.partitionStrategy || 'hierarchical';
+    this.partitionAware = options.partitionAware !== false;
+    this.trackUsage = options.trackUsage !== false;
+    this.preloadRelated = options.preloadRelated !== false;
+    
+    // Legacy support - keep the old options for backward compatibility
+    this.legacyConfig = {
+      memoryOptions: options.memoryOptions,
+      filesystemOptions: options.filesystemOptions,
+      s3Options: options.s3Options,
+      driver: options.driver
     };
   }
 
@@ -28,26 +40,68 @@ export class CachePlugin extends Plugin {
 
   async onSetup() {
     // Initialize cache driver
-    if (this.config.driver && typeof this.config.driver === 'object') {
+    if (this.driverName && typeof this.driverName === 'object') {
       // Use custom driver instance if provided
-      this.driver = this.config.driver;
-    } else if (this.config.driver === 'memory') {
-      this.driver = new MemoryCache(this.config.memoryOptions || {});
-    } else if (this.config.driver === 'filesystem') {
+      this.driver = this.driverName;
+    } else if (this.driverName === 'memory') {
+      // Build driver configuration with proper precedence
+      const driverConfig = {
+        ...this.legacyConfig.memoryOptions, // Legacy support (lowest priority)
+        ...this.config, // New config format (medium priority)
+      };
+      
+      // Add global settings if defined (highest priority)
+      if (this.ttl !== undefined) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== undefined) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      
+      this.driver = new MemoryCache(driverConfig);
+    } else if (this.driverName === 'filesystem') {
+      // Build driver configuration with proper precedence
+      const driverConfig = {
+        ...this.legacyConfig.filesystemOptions, // Legacy support (lowest priority)
+        ...this.config, // New config format (medium priority)
+      };
+      
+      // Add global settings if defined (highest priority)
+      if (this.ttl !== undefined) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== undefined) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      
       // Use partition-aware filesystem cache if enabled
-      if (this.config.partitionAware) {
+      if (this.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.config.partitionStrategy,
-          trackUsage: this.config.trackUsage,
-          preloadRelated: this.config.preloadRelated,
-          ...this.config.filesystemOptions
+          partitionStrategy: this.partitionStrategy,
+          trackUsage: this.trackUsage,
+          preloadRelated: this.preloadRelated,
+          ...driverConfig
         });
       } else {
-        this.driver = new FilesystemCache(this.config.filesystemOptions || {});
+        this.driver = new FilesystemCache(driverConfig);
       }
     } else {
-      // Default to S3Cache, sempre passa o client do database
-      this.driver = new S3Cache({ client: this.database.client, ...(this.config.s3Options || {}) });
+      // Default to S3Cache - build driver configuration with proper precedence
+      const driverConfig = {
+        client: this.database.client, // Required for S3Cache
+        ...this.legacyConfig.s3Options, // Legacy support (lowest priority)
+        ...this.config, // New config format (medium priority)
+      };
+      
+      // Add global settings if defined (highest priority)
+      if (this.ttl !== undefined) {
+        driverConfig.ttl = this.ttl;
+      }
+      if (this.maxSize !== undefined) {
+        driverConfig.maxSize = this.maxSize;
+      }
+      
+      this.driver = new S3Cache(driverConfig);
     }
 
     // Use database hooks instead of method overwriting
