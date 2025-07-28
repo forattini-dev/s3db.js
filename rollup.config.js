@@ -153,6 +153,7 @@ export default {
   external: [
     '@aws-sdk/client-s3',
     '@aws-sdk/client-sqs',
+    '@smithy/node-http-handler',
     '@google-cloud/bigquery',
     '@supercharge/promise-pool',
     'avsc',
