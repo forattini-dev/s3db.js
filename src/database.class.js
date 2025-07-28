@@ -6,13 +6,15 @@ import jsonStableStringify from "json-stable-stringify";
 import Client from "./client.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
-import { streamToString } from "./stream/index.js";
 import { ResourceNotFound } from "./errors.js";
+import { idGenerator } from "./concerns/id.js";
+import { streamToString } from "./stream/index.js";
 
 export class Database extends EventEmitter {
   constructor(options) {
     super();
 
+    this.id = idGenerator(7)
     this.version = "1";
     // Version is injected during build, fallback to "latest" for development
     this.s3dbVersion = (() => {

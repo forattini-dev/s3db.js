@@ -7,14 +7,13 @@ import { PromisePool } from "@supercharge/promise-pool";
 import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
 
 import Schema from "./schema.class.js";
-import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { streamToString } from "./stream/index.js";
-import { InvalidResourceItem, ResourceError, PartitionError } from "./errors.js";
+import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 import { idGenerator as defaultIdGenerator } from "./concerns/id.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
-import { mapAwsError } from "./errors.js";
+import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError } from "./errors.js";
 
 
 export class Resource extends EventEmitter {
@@ -99,12 +98,19 @@ export class Resource extends EventEmitter {
    */
   constructor(config = {}) {
     super();
-    this._instanceId = Math.random().toString(36).slice(2, 8);
+    this._instanceId = defaultIdGenerator(7);
 
     // Validate configuration
     const validation = validateResourceConfig(config);
     if (!validation.isValid) {
-      throw new ResourceError(`Invalid Resource ${config.name} configuration`, { resourceName: config.name, validation: validation.errors, operation: 'constructor', suggestion: 'Check resource config and attributes.' });
+      const errorDetails = validation.errors.map(err => `  • ${err}`).join('\n');
+      throw new ResourceError(
+        `Invalid Resource ${config.name || '[unnamed]'} configuration:\n${errorDetails}`, 
+        { 
+          resourceName: config.name, 
+          validation: validation.errors, 
+        }
+      );
     }
 
     // Extract configuration with defaults - all at root level
