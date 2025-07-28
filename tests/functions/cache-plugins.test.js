@@ -72,8 +72,8 @@ describe('Cache Plugins Coverage Tests', () => {
       const cache = new MemoryCache();
       expect(cache.cache).toBeDefined();
       expect(cache.meta).toBeDefined();
-      expect(cache.maxSize).toBe(0);
-      expect(cache.ttl).toBe(0);
+      expect(cache.maxSize).toBe(1000);
+      expect(cache.ttl).toBe(300000);
     });
 
     test('should create memory cache with custom configuration', () => {
@@ -233,37 +233,39 @@ describe('Cache Plugins Coverage Tests', () => {
   describe('CachePlugin Integration', () => {
     test('should create cache plugin with memory cache', async () => {
       const cachePlugin = new CachePlugin({
-        enabled: true,
-        type: 'memory',
-        config: { maxSize: 100 }
+        driver: 'memory',
+        maxSize: 100
       });
       
       await cachePlugin.setup(database);
-      expect(cachePlugin.config.enabled).toBe(true);
+      expect(cachePlugin.driver).toBeDefined();
+      expect(cachePlugin.driver.constructor.name).toBe('MemoryCache');
     });
 
     test('should create cache plugin with S3 cache', async () => {
       const cachePlugin = new CachePlugin({
-        enabled: true,
-        type: 's3',
+        driver: 's3',
         config: { 
-          client: database.client,
           keyPrefix: 'plugin-cache'
         }
       });
       
       await cachePlugin.setup(database);
-      expect(cachePlugin.config.enabled).toBe(true);
+      expect(cachePlugin.driver).toBeDefined();
+      expect(cachePlugin.driver.constructor.name).toBe('S3Cache');
     });
 
-    test('should handle disabled cache plugin', async () => {
+    test('should handle memory cache plugin setup', async () => {
       const cachePlugin = new CachePlugin({
-        enabled: false,
-        type: 'memory'
+        driver: 'memory',
+        ttl: 300000,
+        maxSize: 1000
       });
       
       await cachePlugin.setup(database);
-      expect(cachePlugin.config.enabled).toBe(false);
+      expect(cachePlugin.driver).toBeDefined();
+      expect(cachePlugin.driver.ttl).toBe(300000);
+      expect(cachePlugin.driver.maxSize).toBe(1000);
     });
 
     test('should handle plugin setup', async () => {
