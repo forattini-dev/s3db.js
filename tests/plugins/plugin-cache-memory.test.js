@@ -9,7 +9,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
   let users;
 
   beforeEach(async () => {
-    db = createDatabaseForTest('plugin-cache-memory');
+    db = createDatabaseForTest('suite=plugins/cache-memory');
     await db.connect();
 
     // Configure memory cache

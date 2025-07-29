@@ -10,7 +10,7 @@ describe('Database Class - Complete Journey', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('database');
+    database = createDatabaseForTest('suite=classes/database');
     await database.connect();
   });
 
@@ -332,7 +332,7 @@ describe('Database Plugin System', () => {
       };
     }
 
-    const db = await createDatabaseForTest('database-plugin-test', {
+    const db = await createDatabaseForTest('suite=classes/database-plugin-test', {
       plugins: [MockPlugin]
     });
     await db.connect();
@@ -352,7 +352,7 @@ describe('Database Plugin System', () => {
       afterStart: jest.fn()
     };
 
-    const db = await createDatabaseForTest('database-plugin-instance-test', {
+    const db = await createDatabaseForTest('suite=classes/database-plugin-instance-test', {
       plugins: [mockPlugin]
     });
     await db.connect();
@@ -368,7 +368,7 @@ describe('Database Plugin System', () => {
       start: startMock
     };
 
-    const db = await createDatabaseForTest('database-plugin-no-hooks-test', {
+    const db = await createDatabaseForTest('suite=classes/database-plugin-no-hooks-test', {
       plugins: [mockPlugin]
     });
     await db.connect();
@@ -377,7 +377,7 @@ describe('Database Plugin System', () => {
   });
 
   test('should handle empty plugins array', async () => {
-    const db = await createDatabaseForTest('database-plugin-empty-test', {
+    const db = await createDatabaseForTest('suite=classes/database-plugin-empty-test', {
       plugins: []
     });
 
@@ -389,7 +389,7 @@ describe('Database Resource Updates and Versioning', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('database-versioning');
+    database = await createDatabaseForTest('suite=classes/database-versioning');
   });
 
   test('should update existing resource instead of creating new one', async () => {
@@ -470,7 +470,7 @@ describe('Database Definition Changes and Versioning', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('database-def-changes');
+    database = await createDatabaseForTest('suite=classes/database-def-changes');
   });
 
   test('should detect new resources', async () => {
@@ -584,7 +584,7 @@ describe('Database Metadata and File Operations', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('database-meta');
+    database = await createDatabaseForTest('suite=classes/database-meta');
   });
 
   test('should create blank metadata structure', () => {
@@ -670,7 +670,7 @@ describe('Database Resource Methods', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('database-methods');
+    database = await createDatabaseForTest('suite=classes/database-methods');
   });
 
   test('should reject non-existent resource', async () => {
@@ -781,7 +781,7 @@ describe('Database Definition Hash Stability', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('database-hash-stability');
+    database = await createDatabaseForTest('suite=classes/database-hash-stability');
   });
 
   test('should maintain same version when resource definition is identical', async () => {

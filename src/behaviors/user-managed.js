@@ -64,6 +64,8 @@ import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
  * @property {boolean} [enabled=true] - Whether the behavior is active
  */
 export async function handleInsert({ resource, data, mappedData, originalData }) {
+
+  
   const totalSize = calculateTotalSize(mappedData);
   
   // Calculate effective limit considering system overhead
@@ -84,8 +86,12 @@ export async function handleInsert({ resource, data, mappedData, originalData })
       excess: totalSize - 2047,
       data: originalData || data
     });
+    // If data exceeds limit, store in body
+    return { mappedData: { _v: mappedData._v }, body: JSON.stringify(mappedData) };
   }
-  return { mappedData, body: JSON.stringify(data) };
+  
+  // If data fits in metadata, store only in metadata
+  return { mappedData, body: "" };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
@@ -141,7 +147,22 @@ export async function handleUpsert({ resource, id, data, mappedData, originalDat
 }
 
 export async function handleGet({ resource, metadata, body }) {
-  // No special handling needed for user-managed behavior
-  // User is responsible for handling metadata as received
+  // If body contains data, parse it and merge with metadata
+  if (body && body.trim() !== '') {
+    try {
+      const bodyData = JSON.parse(body);
+      // Merge body data with metadata, with metadata taking precedence
+      const mergedData = {
+        ...bodyData,
+        ...metadata
+      };
+      return { metadata: mergedData, body };
+    } catch (error) {
+      // If parsing fails, return original metadata and body
+      return { metadata, body };
+    }
+  }
+  
+  // If no body data, return metadata as is
   return { metadata, body };
 }

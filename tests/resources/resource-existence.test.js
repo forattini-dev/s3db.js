@@ -6,7 +6,7 @@ describe('Resource Existence Methods', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-existence');
+    database = createDatabaseForTest('suite=resources/existence');
     await database.connect();
   });
 

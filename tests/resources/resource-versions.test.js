@@ -5,7 +5,7 @@ describe('Resource Versions - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-versions');
+    database = createDatabaseForTest('suite=resources/versions');
     await database.connect();
   });
 

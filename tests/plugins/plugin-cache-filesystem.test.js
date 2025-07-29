@@ -8,14 +8,7 @@ describe('FilesystemCache - Basic Tests', () => {
   let testDir;
 
   beforeAll(async () => {
-    testDir = join(process.cwd(), 'test-cache-filesystem-simple');
-    
-    // Clean up any existing cache directory
-    try {
-      await rmdir(testDir, { recursive: true });
-    } catch (e) {
-      // Directory might not exist, ignore
-    }
+    testDir = await createTemporaryPathForTest('cache-filesystem-simple');
   });
 
   afterAll(async () => {

@@ -11,7 +11,7 @@ describe('Validator Class - Enhanced Shorthand & Custom Types', () => {
   let validator;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('validator-test');
+    database = createDatabaseForTest('suite=classes/validator');
     client = database.client;
     resource = new Resource({
       client,
@@ -640,7 +640,7 @@ describe('Validator Class - Legacy Tests (Enhanced)', () => {
   let validator;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('validator-test');
+    database = createDatabaseForTest('suite=classes/validator');
     client = database.client;
     resource = new Resource({
       client,

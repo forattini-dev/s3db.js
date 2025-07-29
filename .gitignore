@@ -4,3 +4,8 @@ coverage/
 .env
 *.log
 .coveralls.yml
+
+# Test directories
+test-cache/
+test-cache-config/
+test-partition-cache/

@@ -142,7 +142,8 @@ export async function handleInsert({ resource, data, mappedData, originalData })
     resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
   }
 
-  return { mappedData: resultFields, body: JSON.stringify(mappedData) };
+  // For truncate-data, all data should fit in metadata, so body is empty
+  return { mappedData: resultFields, body: "" };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData, originalData }) {

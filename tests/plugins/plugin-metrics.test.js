@@ -10,7 +10,7 @@ describe('Metrics Plugin', () => {
   let testResource;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('plugins-metrics');
+    database = createDatabaseForTest('suite=plugins/metrics');
     await database.connect();
     client = database.client;
 

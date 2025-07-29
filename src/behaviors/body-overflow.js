@@ -113,7 +113,6 @@ export async function handleInsert({ resource, data, mappedData, originalData })
 
   const hasOverflow = Object.keys(bodyFields).length > 0;
   let body = hasOverflow ? JSON.stringify(bodyFields) : "";
-  if (!hasOverflow) body = '{}';
 
   // FIX: Only return metadataFields as mappedData, not full mappedData
   return { mappedData: metadataFields, body };
