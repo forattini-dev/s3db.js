@@ -28,7 +28,7 @@ describe('Audit Plugin', () => {
   let testResource;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('plugins-audit');
+    database = createDatabaseForTest('suite=plugins/audit');
     await database.connect();
     client = database.client;
 

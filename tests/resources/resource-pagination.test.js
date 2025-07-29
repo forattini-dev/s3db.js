@@ -5,7 +5,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-pagination');
+    database = createDatabaseForTest('suite=resources/pagination');
     await database.connect();
   });
 

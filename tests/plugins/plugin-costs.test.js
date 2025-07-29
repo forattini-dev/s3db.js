@@ -9,7 +9,7 @@ describe('Costs Plugin', () => {
   let client;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('plugins-costs');
+    database = createDatabaseForTest('suite=plugins/costs');
     await database.connect();
     client = database.client;
   });

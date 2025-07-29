@@ -12,7 +12,7 @@ describe('Full-Text Plugin', () => {
   let products;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('plugins-fulltext');
+    database = createDatabaseForTest('suite=plugins/fulltext');
     await database.connect();
     client = database.client;
     fullTextPlugin = new FullTextPlugin({

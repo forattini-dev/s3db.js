@@ -5,7 +5,7 @@ describe('Resource Hooks - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-hooks');
+    database = createDatabaseForTest('suite=resources/hooks');
     await database.connect();
   });
 

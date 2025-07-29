@@ -11,7 +11,7 @@ describe('Cache Plugin - Global Configuration & Validation', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('plugins-cache-global');
+    database = createDatabaseForTest('suite=plugins/cache-global');
     await database.connect();
   });
 

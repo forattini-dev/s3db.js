@@ -29,7 +29,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
   beforeAll(async () => {
     queueUrl = await createSqsQueueForTest('queue-consumer');
     sqsClient = createSqsClientForTest('queue-consumer');
-    database = await createDatabaseForTest('queue-consumer');
+    database = await createDatabaseForTest('suite=plugins/queue-consumer');
     await database.connect();
     users = await database.createResource({
       name: 'users',
@@ -194,7 +194,7 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
   beforeAll(async () => {
     queueUrl = await createSqsQueueForTest('queue-consumer-real');
     sqsClient = createSqsClientForTest('queue-consumer-real');
-    database = await createDatabaseForTest('queue-consumer-real');
+    database = await createDatabaseForTest('suite=plugins/queue-consumer-real');
     users = await database.createResource({
       name: 'users',
       attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
@@ -250,7 +250,7 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
   beforeAll(async () => {
     queueUrl = await createSqsQueueForTest('queue-consumer-multi');
     sqsClient = createSqsClientForTest('queue-consumer-multi');
-    database = await createDatabaseForTest('queue-consumer-multi');
+    database = await createDatabaseForTest('suite=plugins/queue-consumer-multi');
     users = await database.createResource({
       name: 'users',
       attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
@@ -335,7 +335,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
   beforeAll(async () => {
     queueUrl = await createSqsQueueForTest('queue-consumer-batch');
     sqsClient = createSqsClientForTest('queue-consumer-batch');
-    database = await createDatabaseForTest('queue-consumer-batch');
+    database = await createDatabaseForTest('suite=plugins/queue-consumer-batch');
     await database.connect();
     users = await database.createResource({
       name: 'users',
@@ -398,7 +398,7 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
     queueUrlOrders = await createSqsQueueForTest('queue-consumer-orders');
     sqsClientUsers = createSqsClientForTest('queue-consumer-users');
     sqsClientOrders = createSqsClientForTest('queue-consumer-orders');
-    database = await createDatabaseForTest('queue-consumer-multi-resource');
+    database = await createDatabaseForTest('suite=plugins/queue-consumer-multi-resource');
     await database.connect();
     users = await database.createResource({
       name: 'users',
@@ -482,14 +482,14 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
     queueUrl = await createSqsQueueForTest('replicator-sqs');
     sqsClient = createSqsClientForTest('replicator-sqs');
     // Banco de origem
-    dbSource = await createDatabaseForTest('replicator-source');
+    dbSource = await createDatabaseForTest('suite=plugins/replicator-source');
     await dbSource.connect();
     usersSource = await dbSource.createResource({
       name: 'users',
       attributes: { id: 'string|required', name: 'string|required', email: 'string|required' }
     });
     // Banco de destino
-    dbTarget = await createDatabaseForTest('replicator-target');
+    dbTarget = await createDatabaseForTest('suite=plugins/replicator-target');
     await dbTarget.connect();
     usersTarget = await dbTarget.createResource({
       name: 'users',

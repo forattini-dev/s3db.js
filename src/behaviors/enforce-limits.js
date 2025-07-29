@@ -148,7 +148,9 @@ export async function handleInsert({ resource, data, mappedData, originalData })
   if (totalSize > effectiveLimit) {
     throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
   }
-  return { mappedData, body: JSON.stringify(mappedData) };
+  
+  // If data fits in metadata, store only in metadata
+  return { mappedData, body: "" };
 }
 
 export async function handleUpdate({ resource, id, data, mappedData, originalData }) {
