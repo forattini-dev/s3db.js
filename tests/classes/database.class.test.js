@@ -593,8 +593,12 @@ describe('Database Metadata and File Operations', () => {
     expect(metadata).toEqual({
       version: '1',
       s3dbVersion: database.s3dbVersion,
+      lastUpdated: expect.any(String),
       resources: {}
     });
+    
+    // Verify lastUpdated is a valid ISO string
+    expect(() => new Date(metadata.lastUpdated).toISOString()).not.toThrow();
   });
 
   test('should upload metadata file', async () => {

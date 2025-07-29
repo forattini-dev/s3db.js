@@ -33,6 +33,7 @@ export class Database extends EventEmitter {
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
+    this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
 
     // Initialize hooks system
     this._initHooks();
@@ -97,13 +98,53 @@ export class Database extends EventEmitter {
     await this.startPlugins();
 
     let metadata = null;
+    let needsHealing = false;
+    let healingLog = [];
 
     if (await this.client.exists(`s3db.json`)) {
-      const request = await this.client.getObject(`s3db.json`);
-      metadata = JSON.parse(await streamToString(request?.Body));
+      try {
+        const request = await this.client.getObject(`s3db.json`);
+        const rawContent = await streamToString(request?.Body);
+        
+        // Try to parse JSON
+        try {
+          metadata = JSON.parse(rawContent);
+        } catch (parseError) {
+          healingLog.push('JSON parsing failed - attempting recovery');
+          needsHealing = true;
+          
+          // Attempt to fix common JSON issues
+          metadata = await this._attemptJsonRecovery(rawContent, healingLog);
+          
+          if (!metadata) {
+            // Create backup and start fresh
+            await this._createCorruptedBackup(rawContent);
+            healingLog.push('Created backup of corrupted file - starting with blank metadata');
+            metadata = this.blankMetadataStructure();
+          }
+        }
+
+        // Validate and heal metadata structure
+        const healedMetadata = await this._validateAndHealMetadata(metadata, healingLog);
+        if (healedMetadata !== metadata) {
+          metadata = healedMetadata;
+          needsHealing = true;
+        }
+
+      } catch (error) {
+        healingLog.push(`Critical error reading s3db.json: ${error.message}`);
+        await this._createCorruptedBackup();
+        metadata = this.blankMetadataStructure();
+        needsHealing = true;
+      }
     } else {
       metadata = this.blankMetadataStructure();
       await this.uploadMetadataFile();
+    }
+
+    // Upload healed metadata if needed
+    if (needsHealing) {
+      await this._uploadHealedMetadata(metadata, healingLog);
     }
 
     this.savedMetadata = metadata;
@@ -151,7 +192,7 @@ export class Database extends EventEmitter {
           paranoid: versionData.paranoid !== undefined ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
-          hooks: versionData.hooks || {},
+          hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : (versionData.hooks || {}),
           versioningEnabled: this.versioningEnabled,
           map: versionData.map,
           idGenerator: restoredIdGenerator,
@@ -269,6 +310,78 @@ export class Database extends EventEmitter {
     return `v${maxVersion + 1}`;
   }
 
+  /**
+   * Serialize hooks to strings for JSON persistence
+   * @param {Object} hooks - Hooks object with event names as keys and function arrays as values
+   * @returns {Object} Serialized hooks object
+   * @private
+   */
+  _serializeHooks(hooks) {
+    if (!hooks || typeof hooks !== 'object') return hooks;
+    
+    const serialized = {};
+    for (const [event, hookArray] of Object.entries(hooks)) {
+      if (Array.isArray(hookArray)) {
+        serialized[event] = hookArray.map(hook => {
+          if (typeof hook === 'function') {
+            try {
+              return {
+                __s3db_serialized_function: true,
+                code: hook.toString(),
+                name: hook.name || 'anonymous'
+              };
+            } catch (err) {
+              if (this.verbose) {
+                console.warn(`Failed to serialize hook for event '${event}':`, err.message);
+              }
+              return null;
+            }
+          }
+          return hook;
+        });
+      } else {
+        serialized[event] = hookArray;
+      }
+    }
+    return serialized;
+  }
+
+  /**
+   * Deserialize hooks from strings back to functions
+   * @param {Object} serializedHooks - Serialized hooks object
+   * @returns {Object} Deserialized hooks object
+   * @private
+   */
+  _deserializeHooks(serializedHooks) {
+    if (!serializedHooks || typeof serializedHooks !== 'object') return serializedHooks;
+    
+    const deserialized = {};
+    for (const [event, hookArray] of Object.entries(serializedHooks)) {
+      if (Array.isArray(hookArray)) {
+        deserialized[event] = hookArray.map(hook => {
+          if (hook && typeof hook === 'object' && hook.__s3db_serialized_function) {
+            try {
+              // Use Function constructor instead of eval for better security
+              const fn = new Function('return ' + hook.code)();
+              if (typeof fn === 'function') {
+                return fn;
+              }
+            } catch (err) {
+              if (this.verbose) {
+                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err.message);
+              }
+            }
+            return null;
+          }
+          return hook;
+        }).filter(hook => hook !== null); // Remove failed deserializations
+      } else {
+        deserialized[event] = hookArray;
+      }
+    }
+    return deserialized;
+  }
+
   async startPlugins() {
     const db = this
 
@@ -357,7 +470,7 @@ export class Database extends EventEmitter {
             allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
             autoDecrypt: resource.config.autoDecrypt,
             cache: resource.config.cache,
-            hooks: resource.config.hooks,
+            hooks: this.persistHooks ? this._serializeHooks(resource.config.hooks) : resource.config.hooks,
             idSize: resource.idSize,
             idGenerator: resource.idGeneratorType,
             createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
@@ -386,8 +499,329 @@ export class Database extends EventEmitter {
     return {
       version: `1`,
       s3dbVersion: this.s3dbVersion,
+      lastUpdated: new Date().toISOString(),
       resources: {},
     };
+  }
+
+  /**
+   * Attempt to recover JSON from corrupted content
+   */
+  async _attemptJsonRecovery(content, healingLog) {
+    if (!content || typeof content !== 'string') {
+      healingLog.push('Content is empty or not a string');
+      return null;
+    }
+
+    // Try common JSON fixes
+    const fixes = [
+      // Remove trailing commas
+      () => content.replace(/,(\s*[}\]])/g, '$1'),
+      // Add missing quotes to keys
+      () => content.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":'),
+      // Fix incomplete objects by adding closing braces
+      () => {
+        let openBraces = 0;
+        let openBrackets = 0;
+        let inString = false;
+        let escaped = false;
+        
+        for (let i = 0; i < content.length; i++) {
+          const char = content[i];
+          
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          
+          if (char === '\\') {
+            escaped = true;
+            continue;
+          }
+          
+          if (char === '"') {
+            inString = !inString;
+            continue;
+          }
+          
+          if (!inString) {
+            if (char === '{') openBraces++;
+            else if (char === '}') openBraces--;
+            else if (char === '[') openBrackets++;
+            else if (char === ']') openBrackets--;
+          }
+        }
+        
+        let fixed = content;
+        while (openBrackets > 0) {
+          fixed += ']';
+          openBrackets--;
+        }
+        while (openBraces > 0) {
+          fixed += '}';
+          openBraces--;
+        }
+        
+        return fixed;
+      }
+    ];
+
+    for (const [index, fix] of fixes.entries()) {
+      try {
+        const fixedContent = fix();
+        const parsed = JSON.parse(fixedContent);
+        healingLog.push(`JSON recovery successful using fix #${index + 1}`);
+        return parsed;
+      } catch (error) {
+        // Try next fix
+      }
+    }
+
+    healingLog.push('All JSON recovery attempts failed');
+    return null;
+  }
+
+  /**
+   * Validate and heal metadata structure
+   */
+  async _validateAndHealMetadata(metadata, healingLog) {
+    if (!metadata || typeof metadata !== 'object') {
+      healingLog.push('Metadata is not an object - using blank structure');
+      return this.blankMetadataStructure();
+    }
+
+    let healed = { ...metadata };
+    let changed = false;
+
+    // Ensure required fields exist and have correct types
+    if (!healed.version || typeof healed.version !== 'string') {
+      if (healed.version && typeof healed.version === 'number') {
+        healed.version = String(healed.version);
+        healingLog.push('Converted version from number to string');
+        changed = true;
+      } else {
+        healed.version = '1';
+        healingLog.push('Added missing or invalid version field');
+        changed = true;
+      }
+    }
+
+    if (!healed.s3dbVersion || typeof healed.s3dbVersion !== 'string') {
+      if (healed.s3dbVersion && typeof healed.s3dbVersion !== 'string') {
+        healed.s3dbVersion = String(healed.s3dbVersion);
+        healingLog.push('Converted s3dbVersion to string');
+        changed = true;
+      } else {
+        healed.s3dbVersion = this.s3dbVersion;
+        healingLog.push('Added missing s3dbVersion field');
+        changed = true;
+      }
+    }
+
+    if (!healed.resources || typeof healed.resources !== 'object' || Array.isArray(healed.resources)) {
+      healed.resources = {};
+      healingLog.push('Fixed invalid resources field');
+      changed = true;
+    }
+
+    if (!healed.lastUpdated) {
+      healed.lastUpdated = new Date().toISOString();
+      healingLog.push('Added missing lastUpdated field');
+      changed = true;
+    }
+
+    // Validate and heal resource structures
+    const validResources = {};
+    for (const [name, resource] of Object.entries(healed.resources)) {
+      const healedResource = this._healResourceStructure(name, resource, healingLog);
+      if (healedResource) {
+        validResources[name] = healedResource;
+        if (healedResource !== resource) {
+          changed = true;
+        }
+      } else {
+        healingLog.push(`Removed invalid resource: ${name}`);
+        changed = true;
+      }
+    }
+
+    healed.resources = validResources;
+
+    return changed ? healed : metadata;
+  }
+
+  /**
+   * Heal individual resource structure
+   */
+  _healResourceStructure(name, resource, healingLog) {
+    if (!resource || typeof resource !== 'object') {
+      healingLog.push(`Resource ${name}: invalid structure`);
+      return null;
+    }
+
+    let healed = { ...resource };
+    let changed = false;
+
+    // Ensure currentVersion exists
+    if (!healed.currentVersion) {
+      healed.currentVersion = 'v0';
+      healingLog.push(`Resource ${name}: added missing currentVersion`);
+      changed = true;
+    }
+
+    // Ensure versions object exists
+    if (!healed.versions || typeof healed.versions !== 'object' || Array.isArray(healed.versions)) {
+      healed.versions = {};
+      healingLog.push(`Resource ${name}: fixed invalid versions object`);
+      changed = true;
+    }
+
+    // Ensure partitions object exists
+    if (!healed.partitions || typeof healed.partitions !== 'object' || Array.isArray(healed.partitions)) {
+      healed.partitions = {};
+      healingLog.push(`Resource ${name}: fixed invalid partitions object`);
+      changed = true;
+    }
+
+    // Check if currentVersion exists in versions
+    const currentVersion = healed.currentVersion;
+    if (!healed.versions[currentVersion]) {
+      // Try to find a valid version or fall back to v0
+      const availableVersions = Object.keys(healed.versions);
+      if (availableVersions.length > 0) {
+        healed.currentVersion = availableVersions[0];
+        healingLog.push(`Resource ${name}: changed currentVersion from ${currentVersion} to ${healed.currentVersion}`);
+        changed = true;
+      } else {
+        // No valid versions exist - resource cannot be healed
+        healingLog.push(`Resource ${name}: no valid versions found - removing resource`);
+        return null;
+      }
+    }
+
+    // Validate version data
+    const versionData = healed.versions[healed.currentVersion];
+    if (!versionData || typeof versionData !== 'object') {
+      healingLog.push(`Resource ${name}: invalid version data - removing resource`);
+      return null;
+    }
+
+    // Ensure required version fields
+    if (!versionData.attributes || typeof versionData.attributes !== 'object') {
+      healingLog.push(`Resource ${name}: missing or invalid attributes - removing resource`);
+      return null;
+    }
+
+    // Heal hooks structure
+    if (versionData.hooks) {
+      const healedHooks = this._healHooksStructure(versionData.hooks, name, healingLog);
+      if (healedHooks !== versionData.hooks) {
+        healed.versions[healed.currentVersion].hooks = healedHooks;
+        changed = true;
+      }
+    }
+
+    return changed ? healed : resource;
+  }
+
+  /**
+   * Heal hooks structure
+   */
+  _healHooksStructure(hooks, resourceName, healingLog) {
+    if (!hooks || typeof hooks !== 'object') {
+      healingLog.push(`Resource ${resourceName}: invalid hooks structure - using empty hooks`);
+      return {};
+    }
+
+    const healed = {};
+    let changed = false;
+
+    for (const [event, hookArray] of Object.entries(hooks)) {
+      if (Array.isArray(hookArray)) {
+        // Filter out null, undefined, empty strings, and invalid hooks
+        const validHooks = hookArray.filter(hook => 
+          hook !== null && 
+          hook !== undefined && 
+          hook !== ""
+        );
+        healed[event] = validHooks;
+        
+        if (validHooks.length !== hookArray.length) {
+          healingLog.push(`Resource ${resourceName}: cleaned invalid hooks for event ${event}`);
+          changed = true;
+        }
+      } else {
+        healingLog.push(`Resource ${resourceName}: hooks for event ${event} is not an array - removing`);
+        changed = true;
+      }
+    }
+
+    return changed ? healed : hooks;
+  }
+
+  /**
+   * Create backup of corrupted file
+   */
+  async _createCorruptedBackup(content = null) {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupKey = `s3db.json.corrupted.${timestamp}.backup`;
+      
+      if (!content) {
+        try {
+          const request = await this.client.getObject(`s3db.json`);
+          content = await streamToString(request?.Body);
+        } catch (error) {
+          content = 'Unable to read corrupted file content';
+        }
+      }
+
+      await this.client.putObject({
+        key: backupKey,
+        body: content,
+        contentType: 'application/json'
+      });
+
+      if (this.verbose) {
+        console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
+      }
+    } catch (error) {
+      if (this.verbose) {
+        console.warn(`S3DB: Failed to create backup: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Upload healed metadata with logging
+   */
+  async _uploadHealedMetadata(metadata, healingLog) {
+    try {
+      if (this.verbose && healingLog.length > 0) {
+        console.warn('S3DB Self-Healing Operations:');
+        healingLog.forEach(log => console.warn(`  - ${log}`));
+      }
+
+      // Update lastUpdated timestamp
+      metadata.lastUpdated = new Date().toISOString();
+
+      await this.client.putObject({
+        key: 's3db.json',
+        body: JSON.stringify(metadata, null, 2),
+        contentType: 'application/json'
+      });
+
+      this.emit('metadataHealed', { healingLog, metadata });
+
+      if (this.verbose) {
+        console.warn('S3DB: Successfully uploaded healed metadata');
+      }
+    } catch (error) {
+      if (this.verbose) {
+        console.error(`S3DB: Failed to upload healed metadata: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   /**
