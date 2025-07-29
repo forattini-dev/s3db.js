@@ -34,6 +34,7 @@ declare module 's3db.js' {
     parallelism?: number | string;
     passphrase?: string;
     versioningEnabled?: boolean;
+    persistHooks?: boolean;
     cache?: CacheConfig | boolean;
     plugins?: (PluginInterface | PluginFunction)[];
     client?: Client;

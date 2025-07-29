@@ -1,0 +1,37 @@
+{
+  "version": "1",
+  "s3dbVersion": "8.0.2",
+  "lastUpdated": "2025-07-29T13:16:10.765Z",
+  "resources": {
+    "invitations": {
+      "currentVersion": "v0",
+      "partitions": {},
+      "versions": {
+        "v0": {
+          "hash": "sha256:676af43e229aba2db07fadb6ef5ff72cc2bfa06723a3325789fa3cc9fc9fedd4",
+          "attributes": {
+            "name": "string|optional",
+            "status": "string",
+            "people": "array",
+            "contact": "json"
+          },
+          "behavior": "user-managed",
+          "timestamps": false,
+          "partitions": {},
+          "paranoid": true,
+          "allNestedObjectsOptional": true,
+          "autoDecrypt": true,
+          "cache": false,
+          "hooks": {
+            "beforeInsert": [
+              null
+            ]
+          },
+          "idSize": 5,
+          "idGenerator": 5,
+          "createdAt": "2025-07-27T20:04:08.781Z"
+        }
+      }
+    }
+  }
+}
