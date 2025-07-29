@@ -86,7 +86,10 @@ await users.list();  // Cached result
 | `maxSize` | number | `1000` | Maximum number of items in cache - global setting |
 | `config` | object | `{}` | Driver-specific configuration options (can override global settings) |
 | `includePartitions` | boolean | `true` | Include partition values in cache keys |
-| `driver` | object | `null` | Custom cache driver instance |
+| `partitionAware` | boolean | `false` | Use partition-aware filesystem cache |
+| `partitionStrategy` | string | `'hierarchical'` | Partition strategy: `'hierarchical'`, `'flat'`, `'temporal'` |
+| `trackUsage` | boolean | `true` | Track partition usage statistics |
+| `preloadRelated` | boolean | `false` | Preload related partition data |
 
 **Configuration Priority:** Driver-specific `config` options override global plugin settings. For example, if you set `ttl: 600000` at the plugin level and `ttl: 1800000` in the driver config, the driver will use 1800000 (30 minutes) while the global setting serves as the default for any drivers that don't specify their own TTL.
 
@@ -100,6 +103,17 @@ The `config` object contains driver-specific options. Note that `ttl` and `maxSi
 |-----------|------|---------|-------------|
 | `ttl` | number | inherited | TTL override for memory cache (inherits from plugin level) |
 | `maxSize` | number | inherited | Max items override for memory cache (inherits from plugin level) |
+| `enableStats` | boolean | `false` | Whether to track cache statistics (hits, misses, etc.) |
+| `evictionPolicy` | string | `'lru'` | Cache eviction policy: `'lru'` (Least Recently Used) or `'fifo'` (First In First Out) |
+| `logEvictions` | boolean | `false` | Whether to log when items are evicted from cache |
+| `cleanupInterval` | number | `60000` | Interval in milliseconds to run cleanup of expired items (1 minute default) |
+| `caseSensitive` | boolean | `true` | Whether cache keys are case sensitive |
+| `enableCompression` | boolean | `false` | Whether to compress values using gzip (requires zlib) |
+| `compressionThreshold` | number | `1024` | Minimum size in bytes to trigger compression |
+| `tags` | object | `{}` | Default tags to apply to all cached items |
+| `persistent` | boolean | `false` | Whether to persist cache to disk (experimental) |
+| `persistencePath` | string | `'./cache'` | Directory path for persistent cache storage |
+| `persistenceInterval` | number | `300000` | Interval in milliseconds to save cache to disk (5 minutes default) |
 
 #### S3 Driver (`driver: 's3'`)
 
@@ -129,6 +143,25 @@ The `config` object contains driver-specific options. Note that `ttl` and `maxSi
 | `cleanupInterval` | number | `300000` | Interval in milliseconds to run cleanup (5 minutes) |
 | `encoding` | string | `'utf8'` | File encoding to use |
 | `fileMode` | number | `0o644` | File permissions in octal notation |
+| `enableBackup` | boolean | `false` | Whether to create backup files before overwriting |
+| `backupSuffix` | string | `'.bak'` | Suffix for backup files |
+| `enableLocking` | boolean | `false` | Whether to use file locking to prevent concurrent access |
+| `lockTimeout` | number | `5000` | Lock timeout in milliseconds |
+| `enableJournal` | boolean | `false` | Whether to maintain a journal of operations |
+| `journalFile` | string | `'cache.journal'` | Journal filename |
+
+#### Partition-Aware Filesystem Driver (when `partitionAware: true`)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `partitionStrategy` | string | `'hierarchical'` | Partition strategy: `'hierarchical'`, `'flat'`, `'temporal'` |
+| `trackUsage` | boolean | `true` | Track partition usage statistics |
+| `preloadRelated` | boolean | `false` | Preload related partition data |
+| `preloadThreshold` | number | `10` | Minimum usage count to trigger preloading |
+| `maxCacheSize` | string/null | `null` | Maximum cache size (e.g., `'1GB'`, `'500MB'`) |
+| `usageStatsFile` | string | `'partition-usage.json'` | File to store usage statistics |
+
+**Note:** All Filesystem Driver parameters also apply to Partition-Aware Filesystem Driver.
 
 ### 🔧 Easy Example
 
@@ -141,7 +174,11 @@ const s3db = new S3db({
   plugins: [new CachePlugin({
     driver: 'memory',
     ttl: 600000, // 10 minutes - applies to all cache operations
-    maxSize: 500 // 500 items max - applies to all cache operations
+    maxSize: 500, // 500 items max - applies to all cache operations
+    config: {
+      enableStats: true,
+      evictionPolicy: 'lru'
+    }
   })]
 });
 
@@ -156,7 +193,20 @@ const s3dbWithFileCache = new S3db({
       directory: './cache',
       ttl: 1800000, // 30 minutes - overrides global for filesystem only
       enableCompression: true,
-      enableCleanup: true
+      enableCleanup: true,
+      enableMetadata: true
+    }
+  })]
+});
+
+// S3 cache example
+const s3dbWithS3Cache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: 's3',
+    ttl: 3600000, // 1 hour
+    config: {
+      keyPrefix: 'app-cache'
     }
   })]
 });
@@ -185,15 +235,9 @@ const result3 = await products.count(); // Fresh data
 ### 🚀 Advanced Configuration Example
 
 ```javascript
-import { S3db, CachePlugin, MemoryCache, S3Cache, FilesystemCache } from 's3db.js';
+import { S3db, CachePlugin } from 's3db.js';
 
-// Custom cache driver with advanced configuration
-const customCache = new MemoryCache({
-  maxSize: 2000,
-  ttl: 900000 // 15 minutes
-});
-
-// Advanced cache configuration with global settings
+// Advanced cache configuration with partition-aware filesystem cache
 const s3dbWithAdvancedCache = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new CachePlugin({
@@ -203,6 +247,10 @@ const s3dbWithAdvancedCache = new S3db({
     ttl: 3600000, // 1 hour default
     maxSize: 5000, // 5000 items max
     includePartitions: true,
+    partitionAware: true, // Enable partition-aware caching
+    partitionStrategy: 'hierarchical',
+    trackUsage: true,
+    preloadRelated: true,
     
     // Driver-specific configuration
     config: {
@@ -217,12 +265,34 @@ const s3dbWithAdvancedCache = new S3db({
       maxFileSize: 5242880, // 5MB per file
       enableStats: true,
       fileMode: 0o644,
-      encoding: 'utf8'
+      encoding: 'utf8',
+      enableBackup: true,
+      enableLocking: true,
+      lockTimeout: 3000
     }
   })]
 });
 
-// Multiple cache configuration examples
+// Memory cache with advanced features
+const s3dbWithMemoryCache = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [new CachePlugin({
+    driver: 'memory',
+    ttl: 600000, // 10 minutes - global TTL
+    maxSize: 5000, // 5000 items max - global limit
+    includePartitions: true,
+    config: {
+      enableStats: true,
+      evictionPolicy: 'lru',
+      logEvictions: true,
+      enableCompression: true,
+      compressionThreshold: 1024,
+      tags: { environment: 'production' }
+    }
+  })]
+});
+
+// S3 cache with custom prefix
 const s3dbWithS3Cache = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new CachePlugin({
@@ -232,24 +302,6 @@ const s3dbWithS3Cache = new S3db({
     config: {
       keyPrefix: 'app-cache'
     }
-  })]
-});
-
-const s3dbWithMemoryCache = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new CachePlugin({
-    driver: 'memory',
-    ttl: 600000, // 10 minutes - global TTL
-    maxSize: 5000, // 5000 items max - global limit
-    includePartitions: true
-  })]
-});
-
-const s3dbWithCustomCache = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new CachePlugin({
-    driver: customCache, // Custom driver instance
-    includePartitions: true
   })]
 });
 
@@ -267,16 +319,25 @@ const cacheKey = await users.cacheKeyFor({
 });
 
 // Manual cache operations
-await users.cache.set(cacheKey, data, 1800000); // 30 minutes
+await users.cache.set(cacheKey, data);
 const cached = await users.cache.get(cacheKey);
 await users.cache.delete(cacheKey);
 await users.cache.clear(); // Clear all cache
 
+// Partition-aware cache operations (if using partition-aware cache)
+if (users.cache.clearPartition) {
+  await users.cache.clearPartition('byStatus', { status: 'active' });
+  const stats = await users.cache.getPartitionStats('byStatus');
+  console.log('Partition stats:', stats);
+}
+
 // Cache statistics (if enabled)
-const stats = users.cache.stats();
-console.log('Cache hit rate:', stats.hitRate);
-console.log('Total hits:', stats.hits);
-console.log('Total misses:', stats.misses);
+if (users.cache.stats) {
+  const stats = users.cache.stats();
+  console.log('Cache hit rate:', stats.hitRate);
+  console.log('Total hits:', stats.hits);
+  console.log('Total misses:', stats.misses);
+}
 ```
 
 ---

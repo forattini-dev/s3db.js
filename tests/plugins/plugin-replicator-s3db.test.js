@@ -38,8 +38,8 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
   let dbA, dbB, plugin;
   
   beforeEach(async () => {
-    dbA = createDatabaseForTest('rep-optimized-src');
-    dbB = createDatabaseForTest('rep-optimized-dst');
+    dbA = createDatabaseForTest('suite=plugins/replicator-s3db-src');
+    dbB = createDatabaseForTest('suite=plugins/replicator-s3db-dst');
     await Promise.all([
       dbA.connect(),
       dbB.connect()

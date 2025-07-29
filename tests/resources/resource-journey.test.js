@@ -5,7 +5,7 @@ describe('Resource Journey - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-journey');
+    database = createDatabaseForTest('suite=resources/journey');
     await database.connect();
   });
 

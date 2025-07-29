@@ -9,7 +9,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
   let users;
 
   beforeEach(async () => {
-    db = createDatabaseForTest('plugin-cache-s3-simple');
+    db = createDatabaseForTest('suite=plugins/cache-s3');
     await db.connect();
 
     // Configure S3 cache

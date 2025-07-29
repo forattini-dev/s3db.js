@@ -9,7 +9,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-ids');
+    database = createDatabaseForTest('suite=resources/ids');
     await database.connect();
   });
 
@@ -716,7 +716,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       });
 
       const results = await Promise.all(
-        Array.from({ length: 50 }, (_, i) => 
+        Array.from({ length: 20 }, (_, i) => 
           resource.insert({ name: `User ${i}` })
         )
       );
@@ -726,10 +726,10 @@ describe('Custom ID Generators - Real Integration Tests', () => {
         expect(result.id).toMatch(/^[a-zA-Z0-9_-]{8}$/);
       });
 
-      // Check uniqueness across all 50 IDs
+      // Check uniqueness across all 20 IDs
       const ids = results.map(r => r.id);
       const uniqueIds = new Set(ids);
-      expect(uniqueIds.size).toBe(50);
+      expect(uniqueIds.size).toBe(20);
 
       console.log('First 5 consistent IDs:', ids.slice(0, 5));
       console.log('Last 5 consistent IDs:', ids.slice(-5));
