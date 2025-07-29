@@ -8,7 +8,7 @@ describe('SqsReplicator - Comprehensive Integration Tests', () => {
   let db, users, queueUrl, sqsClient, plugin;
   
   beforeAll(async () => {
-    db = createDatabaseForTest('rep-sqs-optimized');
+    db = createDatabaseForTest('suite=plugins/replicator-sqs');
     await db.connect();
     users = await db.createResource({
       name: 'users',

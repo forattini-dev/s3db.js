@@ -9,7 +9,7 @@ describe('Streams - Complete Journey', () => {
   let resource;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('streams');
+    database = createDatabaseForTest('suite=classes/streams');
     await database.connect();
     resource = await database.createResource({
       name: 'streams-test',
@@ -200,7 +200,7 @@ describe('ResourceReader - Coverage', () => {
   let resource;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('streams');
+    database = createDatabaseForTest('suite=classes/streams');
     await database.connect();
     resource = await database.createResource({
       name: 'streams-coverage-test',

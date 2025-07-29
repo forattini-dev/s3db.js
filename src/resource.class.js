@@ -740,7 +740,17 @@ export class Resource extends EventEmitter {
     const { id: validatedId, ...validatedAttributes } = validated;
     // Reinjetar propriedades extras do beforeInsert
     Object.assign(validatedAttributes, extraData);
-    const finalId = validatedId || id || this.idGenerator();
+    
+    // Generate ID with fallback for empty generators
+    let finalId = validatedId || id;
+    if (!finalId) {
+      finalId = this.idGenerator();
+      // Fallback to default generator if custom generator returns empty
+      if (!finalId || finalId.trim() === '') {
+        const { idGenerator } = await import('#src/concerns/id.js');
+        finalId = idGenerator();
+      }
+    }
 
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
@@ -769,8 +779,7 @@ export class Resource extends EventEmitter {
       throw new Error(`[Resource.insert] Attempt to save object without body! Data: id=${finalId}, resource=${this.name}`);
     }
     // For other behaviors, allow empty body (all data in metadata)
-    // Before putObject in insert
-    // eslint-disable-next-line no-console
+
     const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
       key,
       body,
@@ -796,31 +805,19 @@ export class Resource extends EventEmitter {
         errPut.excess = excess;
         throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'insert', id: finalId, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
       }
-      throw mapAwsError(errPut, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'insert',
-        id: finalId
-      });
+      throw errPut;
     }
 
-    // Compose the full object sem reinjetar extras
-    let insertedData = await this.composeFullObjectFromWrite({
-      id: finalId,
-      metadata: finalMetadata,
-      body,
-      behavior: this.behavior
-    });
-
+    // Get the inserted object
+    const insertedObject = await this.get(finalId);
+    
     // Execute afterInsert hooks
-    const finalResult = await this.executeHooks('afterInsert', insertedData);
-    // Emit event with data before afterInsert hooks
-    this.emit("insert", {
-      ...insertedData,
-      $before: { ...completeData },
-      $after: { ...finalResult }
-    });
+    const finalResult = await this.executeHooks('afterInsert', insertedObject);
+    
+    // Emit insert event
+    this.emit('insert', finalResult);
+    
+    // Return the final object
     return finalResult;
   }
 
@@ -830,7 +827,7 @@ export class Resource extends EventEmitter {
    * @returns {Promise<Object>} The resource object with all attributes and metadata
    * @example
    * const user = await resource.get('user-123');
-            */
+   */
   async get(id) {
     if (isObject(id)) throw new Error(`id cannot be an object`);
     if (isEmpty(id)) throw new Error('id cannot be empty');
@@ -850,18 +847,8 @@ export class Resource extends EventEmitter {
         id
       });
     }
-    // If object exists but has no content, throw NoSuchKey error
-    if (request.ContentLength === 0) {
-      const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
-      noContentErr.name = 'NoSuchKey';
-      throw mapAwsError(noContentErr, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'get',
-        id
-      });
-    }
+    // NOTE: ContentLength === 0 is valid for objects with data in metadata only
+    // (removed validation that threw NoSuchKey for empty body objects)
 
     // Get the correct schema version for unmapping (from _v metadata)
     const objectVersionRaw = request.Metadata?._v || this.version;
@@ -2440,6 +2427,19 @@ export class Resource extends EventEmitter {
       Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
       return result;
     }
+    
+    // Handle user-managed behavior when data is in body
+    if (behavior === 'user-managed' && body && body.trim() !== '') {
+      const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okBody) {
+        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+        const bodyData = okUnmap ? unmappedBody : {};
+        const merged = { ...bodyData, ...unmappedMetadata, id };
+        Object.keys(merged).forEach(k => { merged[k] = fixValue(merged[k]); });
+        return filterInternalFields(merged);
+      }
+    }
+    
     const result = { ...unmappedMetadata, id };
     Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
     const filtered = filterInternalFields(result);

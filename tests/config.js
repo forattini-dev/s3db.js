@@ -1,7 +1,6 @@
 /* istanbul ignore file */
-import path, { join } from 'path';
 import fs from 'fs/promises';
-import { nanoid } from 'nanoid';
+import path, { join } from 'path';
 import { isString } from 'lodash-es';
 
 import {
@@ -10,14 +9,15 @@ import {
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
 
-import Client from '../src/client.class.js';
-import Database from '../src/database.class.js';
+import Client from '#src/client.class.js';
+import Database from '#src/database.class.js';
+import { idGenerator } from '#src/concerns/id.js';
 
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const s3Prefix = (testName) => join('tests', 'day=' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4));
-const sqsName = (testName) => ['tests', 'day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + nanoid(4)].join('-').replace(/-/g,'_')
+const s3Prefix = (testName = idGenerator(5)) => join('day=' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + idGenerator(4));
+const sqsName = (testName = idGenerator(5)) => ['day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + idGenerator(4)].join('-').replace(/-/g,'_')
 
 export function createClientForTest(testName, options = {}) {
   if (!options.connectionString) {

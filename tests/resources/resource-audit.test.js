@@ -6,7 +6,7 @@ let database, audits;
 
 describe('Resource Audit - Minimal Insert/Get', () => {
   beforeAll(async () => {
-    database = createDatabaseForTest('resource-audit');
+    database = createDatabaseForTest('suite=resources/audit');
     audits = await database.createResource({
       name: 'audits',
       attributes: {
@@ -53,7 +53,7 @@ describe('Resource Audit - Minimal Insert/Get', () => {
 describe('Resource Middleware - Chaining and Short-circuit', () => {
   let resource, plugin;
   beforeAll(async () => {
-    database = createDatabaseForTest('resource-middleware');
+    database = createDatabaseForTest('suite=resources/middleware');
     resource = await database.createResource({
       name: 'mw-test',
       attributes: { id: 'string|required', name: 'string|required' }

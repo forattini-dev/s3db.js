@@ -118,7 +118,7 @@ export class S3Cache extends Cache {
     ttl = 0,
     prefix = undefined
   }) {
-    super({ client, keyPrefix, ttl, prefix });
+    super();
     this.client = client
     this.keyPrefix = keyPrefix;
     this.config.ttl = ttl;

@@ -6,7 +6,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('resource-partitions');
+    database = createDatabaseForTest('suite=resources/partitions');
     await database.connect();
   });
 

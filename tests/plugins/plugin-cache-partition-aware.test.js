@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
-import { createDatabaseForTest } from '../config.js';
+import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import CachePlugin from '../../src/plugins/cache.plugin.js';
 import { PartitionAwareFilesystemCache } from '../../src/plugins/cache/index.js';
 
@@ -12,14 +12,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
   let testDir;
 
   beforeAll(async () => {
-    testDir = join(process.cwd(), 'test-cache-partition-aware-simple');
-    
-    // Clean up any existing cache directory
-    try {
-      await rmdir(testDir, { recursive: true });
-    } catch (e) {
-      // Directory might not exist, ignore
-    }
+    testDir = await createTemporaryPathForTest('cache-partition-aware-simple');
   });
 
   afterAll(async () => {
@@ -31,7 +24,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
   });
 
   beforeEach(async () => {
-    db = createDatabaseForTest('plugin-cache-partition-aware-simple');
+    db = createDatabaseForTest('suite=plugins/cache-partition-aware');
     await db.connect();
 
     // Configure partition-aware filesystem cache
