@@ -1,0 +1,24 @@
+{
+  "version": "1",
+  "s3dbVersion": "8.0.2",
+  "resources": {
+    "test1": {
+      "currentVersion": "v0",
+      "partitions": {},
+      "versions": {
+        "v0": {
+          "hash": "sha256:test1",
+          "attributes": { "name": "string" },
+          "behavior": "user-managed",
+          "hooks": {
+            "beforeInsert": "not_an_array",
+            "afterInsert": [null, undefined, "", false, 0],
+            "beforeUpdate": {
+              "invalid": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+} 

@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "s3dbVersion": "8.0.2",
+  "resources": {
+    "test1": {
+      "currentVersion": "v999",
+      "partitions": {},
+      "versions": {
+        "v0": {
+          "hash": "sha256:test",
+          "attributes": { "name": "string" },
+          "behavior": "user-managed"
+        }
+      }
+    },
+    "test2": {
+      "currentVersion": "v0",
+      "partitions": {},
+      "versions": {}
+    },
+    "test3": {
+      "currentVersion": "v0"
+    },
+    "test4": {
+      "partitions": {},
+      "versions": {
+        "v0": {
+          "attributes": { "name": "string" },
+          "behavior": "user-managed"
+        }
+      }
+    }
+  }
+} 
