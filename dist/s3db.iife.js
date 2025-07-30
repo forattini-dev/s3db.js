@@ -13493,7 +13493,7 @@ ${errorDetails}`,
       this.id = idGenerator(7);
       this.version = "1";
       this.s3dbVersion = (() => {
-        const [ok, err, version] = try_fn_default(() => true ? "8.1.0" : "latest");
+        const [ok, err, version] = try_fn_default(() => true ? "8.1.1" : "latest");
         return ok ? version : "latest";
       })();
       this.resources = {};
