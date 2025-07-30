@@ -28,7 +28,7 @@ export class Database extends EventEmitter {
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || []; // Initialize plugins array
+    this.plugins = {}; // Initialize plugins registry
     this.pluginList = options.plugins || []; // Keep the list for backward compatibility
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
@@ -390,9 +390,13 @@ export class Database extends EventEmitter {
 
       const setupProms = plugins.map(async (plugin) => {
         if (plugin.beforeSetup) await plugin.beforeSetup()
-          await plugin.setup(db)
+        await plugin.setup(db)
         if (plugin.afterSetup) await plugin.afterSetup()
-        });
+        
+        // Register the plugin using the same naming convention as usePlugin()
+        const pluginName = this._getPluginName(plugin);
+        this.plugins[pluginName] = plugin;
+      });
       
       await Promise.all(setupProms);
 
@@ -411,8 +415,16 @@ export class Database extends EventEmitter {
    * @param {Plugin} plugin - Plugin instance to register
    * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
    */
+  /**
+   * Get the normalized plugin name
+   * @private
+   */
+  _getPluginName(plugin, customName = null) {
+    return customName || plugin.constructor.name.replace('Plugin', '').toLowerCase();
+  }
+
   async usePlugin(plugin, name = null) {
-    const pluginName = name || plugin.constructor.name.replace('Plugin', '').toLowerCase();
+    const pluginName = this._getPluginName(plugin, name);
     
     // Register the plugin
     this.plugins[pluginName] = plugin;
