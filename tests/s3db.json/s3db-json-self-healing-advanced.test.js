@@ -4,15 +4,12 @@ import { createDatabaseForTest } from '../config.js';
 
 describe('S3DB JSON Advanced Self-Healing Tests', () => {
   let database;
-  const testConnectionString = 'http://127.0.0.1:9000/bucket=s3db-advanced-healing-tests/region=us-east-1/accessKey=AKIAIOSFODNN7EXAMPLE/secretKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY/';
 
   beforeEach(async () => {
-    database = await createDatabaseForTest({
-      connectionString: testConnectionString,
-      options: {
-        versioningEnabled: true,
-        verbose: true
-      }
+    database = await createDatabaseForTest('suite=s3db-json/self-healing-advanced', {
+      versioningEnabled: true,
+      verbose: false,
+      persistHooks: true
     });
   });
 
@@ -444,7 +441,13 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         resources: {
           "test": {
             currentVersion: "v0",
-            partitions: {},
+            partitions: {
+              byVersion: {
+                fields: {
+                  _v: "string"
+                }
+              }
+            },
             versions: {
               "v0": {
                 hash: "sha256:test",

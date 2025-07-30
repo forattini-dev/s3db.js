@@ -28,6 +28,10 @@ export function createClientForTest(testName, options = {}) {
 };
 
 export function createDatabaseForTest(testName, options = {}) {
+  if (!isString(testName)) {
+    throw new Error('testName must be a string');
+  }
+
   const params = {
     connectionString: process.env.BUCKET_CONNECTION_STRING + `/${s3Prefix(testName)}`,
     ...options,

@@ -340,7 +340,7 @@ describe('Costs Plugin', () => {
     });
 
     test('should handle cost tracking with multiple clients', async () => {
-      const client2 = createClientForTest(`plugin-costs-client2`);
+      const client2 = createClientForTest(`suite=plugins/costs-client2`);
 
       const database2 = new Database({ client: client2 });
 

@@ -7,7 +7,7 @@ describe('Client Class - Complete Journey', () => {
   let client;
 
   beforeEach(() => {
-    client = createClientForTest('client');
+    client = createClientForTest('suite=classes/client');
   });
 
   test('Client Journey: Connect → Upload → List → Download → Copy → Move → Delete', async () => {

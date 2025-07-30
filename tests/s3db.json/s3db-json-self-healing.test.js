@@ -12,7 +12,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('s3db-json-self-healing', {
+    database = await createDatabaseForTest('suite=s3db-json/self-healing', {
       versioningEnabled: true,
       verbose: false,
       persistHooks: true

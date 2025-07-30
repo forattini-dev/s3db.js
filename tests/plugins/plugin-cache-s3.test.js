@@ -231,6 +231,46 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
       const stats = await cachePlugin.getCacheStats();
       expect(stats.size).toBeGreaterThan(0);
     });
+
+    test('should verify cache keys are actually stored in S3', async () => {
+      // Clear any existing cache
+      await cachePlugin.clearAllCache();
+
+      // Generate cache entries
+      await users.count();
+      await users.list();
+      const userIds = await users.listIds();
+      if (userIds.length > 0) {
+        await users.get(userIds[0]);
+      }
+
+      // Use S3 client directly to list keys with cache prefix
+      const cacheDriver = cachePlugin.driver;
+      const keyPrefix = cacheDriver.keyPrefix;
+      
+      // Get all keys from S3 with cache prefix
+      const s3Keys = await db.client.getAllKeys({ prefix: keyPrefix });
+      
+      // Should have cache keys in S3
+      expect(s3Keys.length).toBeGreaterThan(0);
+      expect(s3Keys.some(key => key.includes('count'))).toBe(true);
+      expect(s3Keys.some(key => key.includes('list'))).toBe(true);
+      
+      // Keys found in S3: cache/resource=users/action=count.json.gz, cache/resource=users/action=get/{id}.json.gz, etc.
+      // expect(s3Keys).toEqual(['force-display-keys']); // Used for inspection
+      
+      // Show keys in test description 
+      expect(s3Keys).toEqual(expect.arrayContaining([
+        expect.stringContaining('count'),
+        expect.stringContaining('list')
+      ]));
+      
+      // Validate that keys are properly prefixed and stored
+      s3Keys.forEach(key => {
+        expect(typeof key).toBe('string');
+        expect(key.length).toBeGreaterThan(0);
+      });
+    });
   });
 
   describe('Error Handling', () => {
