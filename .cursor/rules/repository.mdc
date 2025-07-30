@@ -6,3 +6,8 @@ alwaysApply: true
 - Every time you make a significant change, remember to update te types in `./src/s3db.d.ts`.
 - Do not edit those test files: `./tests/database.js` and `./tests/jest.setup.js`
 - We are using ESM, so its a type=module project.
+- Always use `import "dotenv/config"` to load environment variables to examples and one-shot script files.
+- Always use `import { createClientForTest, createDatabaseForTest } from "./tests/utils.js";` to create a client and database for tests.
+
+
+
