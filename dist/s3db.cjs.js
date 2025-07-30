@@ -13507,7 +13507,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "8.1.1" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "8.1.2" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -13515,7 +13515,7 @@ class Database extends EventEmitter {
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
+    this.plugins = {};
     this.pluginList = options.plugins || [];
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
@@ -13808,6 +13808,8 @@ class Database extends EventEmitter {
         if (plugin.beforeSetup) await plugin.beforeSetup();
         await plugin.setup(db);
         if (plugin.afterSetup) await plugin.afterSetup();
+        const pluginName = this._getPluginName(plugin);
+        this.plugins[pluginName] = plugin;
       });
       await Promise.all(setupProms);
       const startProms = plugins.map(async (plugin) => {
@@ -13823,8 +13825,15 @@ class Database extends EventEmitter {
    * @param {Plugin} plugin - Plugin instance to register
    * @param {string} [name] - Optional name for the plugin (defaults to plugin.constructor.name)
    */
+  /**
+   * Get the normalized plugin name
+   * @private
+   */
+  _getPluginName(plugin, customName = null) {
+    return customName || plugin.constructor.name.replace("Plugin", "").toLowerCase();
+  }
   async usePlugin(plugin, name = null) {
-    const pluginName = name || plugin.constructor.name.replace("Plugin", "").toLowerCase();
+    const pluginName = this._getPluginName(plugin, name);
     this.plugins[pluginName] = plugin;
     if (this.isConnected()) {
       await plugin.setup(this);
