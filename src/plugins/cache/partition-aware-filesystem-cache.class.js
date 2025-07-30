@@ -155,6 +155,34 @@ export class PartitionAwareFilesystemCache extends FilesystemCache {
   }
 
   /**
+   * Public set method with partition support
+   */
+  async set(resource, action, data, options = {}) {
+    if (typeof resource === 'string' && typeof action === 'string' && options.partition) {
+      // Partition-aware set
+      const key = this._getPartitionCacheKey(resource, action, options.partition, options.partitionValues, options.params);
+      return this._set(key, data, { resource, action, ...options });
+    }
+    
+    // Standard cache set (first parameter is the key)
+    return super.set(resource, action); // resource is actually the key, action is the data
+  }
+
+  /**
+   * Public get method with partition support
+   */
+  async get(resource, action, options = {}) {
+    if (typeof resource === 'string' && typeof action === 'string' && options.partition) {
+      // Partition-aware get
+      const key = this._getPartitionCacheKey(resource, action, options.partition, options.partitionValues, options.params);
+      return this._get(key, { resource, action, ...options });
+    }
+    
+    // Standard cache get (first parameter is the key)
+    return super.get(resource); // resource is actually the key
+  }
+
+  /**
    * Enhanced get method with partition awareness
    */
   async _get(key, options = {}) {
