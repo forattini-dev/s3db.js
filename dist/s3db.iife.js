@@ -605,6 +605,12 @@ ${JSON.stringify(validation, null, 2)}`,
   const passwordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
   const passwordGenerator = nanoid.customAlphabet(passwordAlphabet, 16);
 
+  var id = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    idGenerator: idGenerator,
+    passwordGenerator: passwordGenerator
+  });
+
   var domain;
 
   // This constructor is used to store event handlers. Instantiating this is
@@ -6548,7 +6554,7 @@ ${JSON.stringify(validation, null, 2)}`,
       ttl = 0,
       prefix = void 0
     }) {
-      super({ client, keyPrefix, ttl, prefix });
+      super();
       this.client = client;
       this.keyPrefix = keyPrefix;
       this.config.ttl = ttl;
@@ -10791,7 +10797,7 @@ ${JSON.stringify(validation, null, 2)}`,
     if (totalSize > effectiveLimit) {
       throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
     }
-    return { mappedData, body: JSON.stringify(mappedData) };
+    return { mappedData, body: "" };
   }
   async function handleUpdate$4({ resource, id, data, mappedData, originalData }) {
     const totalSize = calculateTotalSize(mappedData);
@@ -10854,8 +10860,9 @@ ${JSON.stringify(validation, null, 2)}`,
         excess: totalSize - 2047,
         data: originalData || data
       });
+      return { mappedData: { _v: mappedData._v }, body: JSON.stringify(mappedData) };
     }
-    return { mappedData, body: JSON.stringify(data) };
+    return { mappedData, body: "" };
   }
   async function handleUpdate$3({ resource, id, data, mappedData, originalData }) {
     const totalSize = calculateTotalSize(mappedData);
@@ -10902,6 +10909,18 @@ ${JSON.stringify(validation, null, 2)}`,
     return { mappedData, body: JSON.stringify(data) };
   }
   async function handleGet$3({ resource, metadata, body }) {
+    if (body && body.trim() !== "") {
+      try {
+        const bodyData = JSON.parse(body);
+        const mergedData = {
+          ...bodyData,
+          ...metadata
+        };
+        return { metadata: mergedData, body };
+      } catch (error) {
+        return { metadata, body };
+      }
+    }
     return { metadata, body };
   }
 
@@ -10969,7 +10988,7 @@ ${JSON.stringify(validation, null, 2)}`,
     if (truncated) {
       resultFields[TRUNCATED_FLAG] = TRUNCATED_FLAG_VALUE;
     }
-    return { mappedData: resultFields, body: JSON.stringify(mappedData) };
+    return { mappedData: resultFields, body: "" };
   }
   async function handleUpdate$2({ resource, id, data, mappedData, originalData }) {
     return handleInsert$2({ resource, data, mappedData, originalData });
@@ -11059,7 +11078,6 @@ ${JSON.stringify(validation, null, 2)}`,
     }
     const hasOverflow = Object.keys(bodyFields).length > 0;
     let body = hasOverflow ? JSON.stringify(bodyFields) : "";
-    if (!hasOverflow) body = "{}";
     return { mappedData: metadataFields, body };
   }
   async function handleUpdate$1({ resource, id, data, mappedData, originalData }) {
@@ -11711,16 +11729,16 @@ ${errorDetails}`,
      *   email: 'john@example.com'
      * });
      */
-    async insert({ id, ...attributes }) {
-      const exists = await this.exists(id);
-      if (exists) throw new Error(`Resource with id '${id}' already exists`);
-      this.getResourceKey(id || "(auto)");
+    async insert({ id: id$1, ...attributes }) {
+      const exists = await this.exists(id$1);
+      if (exists) throw new Error(`Resource with id '${id$1}' already exists`);
+      this.getResourceKey(id$1 || "(auto)");
       if (this.options.timestamps) {
         attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
         attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
       }
       const attributesWithDefaults = this.applyDefaults(attributes);
-      const completeData = { id, ...attributesWithDefaults };
+      const completeData = { id: id$1, ...attributesWithDefaults };
       const preProcessedData = await this.executeHooks("beforeInsert", completeData);
       const extraProps = Object.keys(preProcessedData).filter(
         (k) => !(k in completeData) || preProcessedData[k] !== completeData[k]
@@ -11744,7 +11762,14 @@ ${errorDetails}`,
       }
       const { id: validatedId, ...validatedAttributes } = validated;
       Object.assign(validatedAttributes, extraData);
-      const finalId = validatedId || id || this.idGenerator();
+      let finalId = validatedId || id$1;
+      if (!finalId) {
+        finalId = this.idGenerator();
+        if (!finalId || finalId.trim() === "") {
+          const { idGenerator } = await Promise.resolve().then(function () { return id; });
+          finalId = idGenerator();
+        }
+      }
       const mappedData = await this.schema.mapper(validatedAttributes);
       mappedData._v = String(this.version);
       const behaviorImpl = getBehavior(this.behavior);
@@ -11789,26 +11814,11 @@ ${errorDetails}`,
           errPut.excess = excess;
           throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "insert", id: finalId, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
         }
-        throw mapAwsError(errPut, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "insert",
-          id: finalId
-        });
+        throw errPut;
       }
-      let insertedData = await this.composeFullObjectFromWrite({
-        id: finalId,
-        metadata: finalMetadata,
-        body,
-        behavior: this.behavior
-      });
-      const finalResult = await this.executeHooks("afterInsert", insertedData);
-      this.emit("insert", {
-        ...insertedData,
-        $before: { ...completeData },
-        $after: { ...finalResult }
-      });
+      const insertedObject = await this.get(finalId);
+      const finalResult = await this.executeHooks("afterInsert", insertedObject);
+      this.emit("insert", finalResult);
       return finalResult;
     }
     /**
@@ -11817,7 +11827,7 @@ ${errorDetails}`,
      * @returns {Promise<Object>} The resource object with all attributes and metadata
      * @example
      * const user = await resource.get('user-123');
-              */
+     */
     async get(id) {
       if (lodashEs.isObject(id)) throw new Error(`id cannot be an object`);
       if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
@@ -11825,17 +11835,6 @@ ${errorDetails}`,
       const [ok, err, request] = await try_fn_default(() => this.client.getObject(key));
       if (!ok) {
         throw mapAwsError(err, {
-          bucket: this.client.config.bucket,
-          key,
-          resourceName: this.name,
-          operation: "get",
-          id
-        });
-      }
-      if (request.ContentLength === 0) {
-        const noContentErr = new Error(`No such key: ${key} [bucket:${this.client.config.bucket}]`);
-        noContentErr.name = "NoSuchKey";
-        throw mapAwsError(noContentErr, {
           bucket: this.client.config.bucket,
           key,
           resourceName: this.name,
@@ -13180,6 +13179,18 @@ ${errorDetails}`,
           result2[k] = fixValue(result2[k]);
         });
         return result2;
+      }
+      if (behavior === "user-managed" && body && body.trim() !== "") {
+        const [okBody, errBody, parsedBody] = await try_fn_default(() => Promise.resolve(JSON.parse(body)));
+        if (okBody) {
+          const [okUnmap, errUnmap, unmappedBody] = await try_fn_default(() => this.schema.unmapper(parsedBody));
+          const bodyData = okUnmap ? unmappedBody : {};
+          const merged = { ...bodyData, ...unmappedMetadata, id };
+          Object.keys(merged).forEach((k) => {
+            merged[k] = fixValue(merged[k]);
+          });
+          return filterInternalFields(merged);
+        }
       }
       const result = { ...unmappedMetadata, id };
       Object.keys(result).forEach((k) => {

@@ -61,14 +61,15 @@ export class AuditPlugin extends Plugin {
   setupResourceAuditing(resource) {
     // Insert
     resource.on('insert', async (data) => {
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       await this.logAudit({
         resourceName: resource.name,
         operation: 'insert',
         recordId: data.id || 'auto-generated',
         oldData: null,
         newData: this.config.includeData ? JSON.stringify(this.truncateData(data)) : null,
-        partition: this.config.includePartitions && this.getPartitionValues(data, resource) ? this.getPrimaryPartition(this.getPartitionValues(data, resource)) : null,
-        partitionValues: this.config.includePartitions && this.getPartitionValues(data, resource) ? JSON.stringify(this.getPartitionValues(data, resource)) : null
+        partition: partitionValues ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: partitionValues ? JSON.stringify(partitionValues) : null
       });
     });
 
@@ -80,14 +81,15 @@ export class AuditPlugin extends Plugin {
         if (ok) oldData = fetched;
       }
 
+      const partitionValues = this.config.includePartitions ? this.getPartitionValues(data, resource) : null;
       await this.logAudit({
         resourceName: resource.name,
         operation: 'update',
         recordId: data.id,
         oldData: oldData && this.config.includeData ? JSON.stringify(this.truncateData(oldData)) : null,
         newData: this.config.includeData ? JSON.stringify(this.truncateData(data)) : null,
-        partition: this.config.includePartitions && this.getPartitionValues(data, resource) ? this.getPrimaryPartition(this.getPartitionValues(data, resource)) : null,
-        partitionValues: this.config.includePartitions && this.getPartitionValues(data, resource) ? JSON.stringify(this.getPartitionValues(data, resource)) : null
+        partition: partitionValues ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: partitionValues ? JSON.stringify(partitionValues) : null
       });
     });
 
@@ -99,16 +101,59 @@ export class AuditPlugin extends Plugin {
         if (ok) oldData = fetched;
       }
 
+      const partitionValues = oldData && this.config.includePartitions ? this.getPartitionValues(oldData, resource) : null;
       await this.logAudit({
         resourceName: resource.name,
         operation: 'delete',
         recordId: data.id,
         oldData: oldData && this.config.includeData ? JSON.stringify(this.truncateData(oldData)) : null,
         newData: null,
-        partition: oldData && this.config.includePartitions && this.getPartitionValues(oldData, resource) ? this.getPrimaryPartition(this.getPartitionValues(oldData, resource)) : null,
-        partitionValues: oldData && this.config.includePartitions && this.getPartitionValues(oldData, resource) ? JSON.stringify(this.getPartitionValues(oldData, resource)) : null
+        partition: partitionValues ? this.getPrimaryPartition(partitionValues) : null,
+        partitionValues: partitionValues ? JSON.stringify(partitionValues) : null
       });
     });
+
+    // DeleteMany - We need to intercept before deletion to get the data
+    const originalDeleteMany = resource.deleteMany.bind(resource);
+    const plugin = this;
+    resource.deleteMany = async function(ids) {
+      // Fetch all objects before deletion for audit logging
+      const objectsToDelete = [];
+      if (plugin.config.includeData) {
+        for (const id of ids) {
+          const [ok, err, fetched] = await tryFn(() => resource.get(id));
+          if (ok) {
+            objectsToDelete.push(fetched);
+          } else {
+            objectsToDelete.push({ id }); // Just store the ID if we can't fetch
+          }
+        }
+      } else {
+        objectsToDelete.push(...ids.map(id => ({ id })));
+      }
+      
+      // Perform the actual deletion
+      const result = await originalDeleteMany(ids);
+      
+      // Log audit entries after successful deletion
+      for (const oldData of objectsToDelete) {
+        const partitionValues = oldData && plugin.config.includePartitions ? plugin.getPartitionValues(oldData, resource) : null;
+        await plugin.logAudit({
+          resourceName: resource.name,
+          operation: 'deleteMany',
+          recordId: oldData.id,
+          oldData: oldData && plugin.config.includeData ? JSON.stringify(plugin.truncateData(oldData)) : null,
+          newData: null,
+          partition: partitionValues ? plugin.getPrimaryPartition(partitionValues) : null,
+          partitionValues: partitionValues ? JSON.stringify(partitionValues) : null
+        });
+      }
+      
+      return result;
+    };
+    
+    // Store reference for cleanup if needed
+    resource._originalDeleteMany = originalDeleteMany;
   }
 
   // Backward compatibility for tests
@@ -154,10 +199,16 @@ export class AuditPlugin extends Plugin {
   }
 
   getPartitionValues(data, resource) {
-    if (!this.config.includePartitions || !resource.partitions) return null;
+    if (!this.config.includePartitions) return null;
+    
+    // Access partitions from resource.config.partitions, not resource.partitions
+    const partitions = resource.config?.partitions || resource.partitions;
+    if (!partitions) {
+      return null;
+    }
     
     const partitionValues = {};
-    for (const [partitionName, partitionConfig] of Object.entries(resource.partitions)) {
+    for (const [partitionName, partitionConfig] of Object.entries(partitions)) {
       const values = {};
       for (const field of Object.keys(partitionConfig.fields)) {
         values[field] = this.getNestedFieldValue(data, field);
@@ -207,7 +258,7 @@ export class AuditPlugin extends Plugin {
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
     
-    const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100 } = options;
+    const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
     
     let query = {};
     
@@ -222,7 +273,7 @@ export class AuditPlugin extends Plugin {
       if (endDate) query.timestamp.$lte = endDate;
     }
     
-    const result = await this.auditResource.page({ query, limit });
+    const result = await this.auditResource.page({ query, limit, offset });
     return result.items || [];
   }
 

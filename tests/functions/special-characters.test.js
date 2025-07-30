@@ -6,7 +6,7 @@ describe('Comprehensive Special Characters Encoding Tests', () => {
   let resource;
 
   beforeAll(async () => {
-    db = await createDatabaseForTest('comprehensive-special-chars');
+    db = await createDatabaseForTest('suite=functions/special-characters');
     resource = await db.createResource({
       name: 'test_comprehensive_special_chars',
       attributes: {

@@ -4,15 +4,12 @@ import { createDatabaseForTest } from '../config.js';
 
 describe('S3DB JSON Corruption - Now Successfully Healed', () => {
   let database;
-  const testConnectionString = 'http://127.0.0.1:9000/bucket=s3db-corruption-healed/region=us-east-1/accessKey=AKIAIOSFODNN7EXAMPLE/secretKey=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY/';
 
   beforeEach(async () => {
-    database = await createDatabaseForTest({
-      connectionString: testConnectionString,
-      options: {
-        versioningEnabled: true,
-        verbose: false
-      }
+    database = await createDatabaseForTest('suite=s3db-json/corruption-healed', {
+      versioningEnabled: true,
+      verbose: false,
+      persistHooks: true
     });
   });
 
