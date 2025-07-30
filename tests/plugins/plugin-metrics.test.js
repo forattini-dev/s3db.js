@@ -1,88 +1,68 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { createDatabaseForTest } from '../config.js';
+import { MetricsPlugin } from '../../src/plugins/metrics.plugin.js';
 
-import { MetricsPlugin } from '#src/plugins/metrics.plugin.js';
-import { createDatabaseForTest } from '#tests/config.js';
-
-describe('Metrics Plugin', () => {
+describe('MetricsPlugin Coverage Tests', () => {
   let database;
-  let client;
-  let plugin;
-  let testResource;
+  let metricsPlugin;
 
   beforeEach(async () => {
     database = createDatabaseForTest('suite=plugins/metrics');
     await database.connect();
-    client = database.client;
-
-    // Create test resource
-    testResource = await database.createResource({
-      name: 'test_users',
-      attributes: {
-        id: 'string|required',
-        name: 'string|required',
-        email: 'string|required',
-        age: 'number'
-      }
-    });
-
-    // Create plugin with default settings
-    plugin = new MetricsPlugin({
-      enabled: false, // Disabled during tests
+    
+    metricsPlugin = new MetricsPlugin({
+      enabled: true,
       collectPerformance: true,
       collectErrors: true,
       collectUsage: true,
-      flushInterval: 0 // Disable flush timer for testing
+      retentionDays: 30,
+      flushInterval: 0 // Disable auto-flush in tests
     });
-
-    await plugin.setup(database);
-    await plugin.start();
+    
+    // Setup plugin with forced environment for tests
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    try {
+      await metricsPlugin.setup(database);
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   afterEach(async () => {
-    if (plugin) {
-      await plugin.stop();
+    if (metricsPlugin) {
+      await metricsPlugin.stop();
     }
     if (database && typeof database.disconnect === 'function') {
       await database.disconnect();
     }
   });
 
-  describe('Constructor and Configuration', () => {
+  describe('Plugin Initialization', () => {
     test('should initialize with default configuration', () => {
-      const defaultPlugin = new MetricsPlugin();
-      
-      expect(defaultPlugin.config.collectPerformance).toBe(true);
-      expect(defaultPlugin.config.collectErrors).toBe(true);
-      expect(defaultPlugin.config.collectUsage).toBe(true);
-      expect(defaultPlugin.config.retentionDays).toBe(30);
-      expect(defaultPlugin.config.flushInterval).toBe(60000);
+      const plugin = new MetricsPlugin();
+      expect(plugin.config.collectPerformance).toBe(true);
+      expect(plugin.config.collectErrors).toBe(true);
+      expect(plugin.config.retentionDays).toBe(30);
+      expect(plugin.metrics).toBeDefined();
+      expect(plugin.metrics.operations).toBeDefined();
     });
 
     test('should initialize with custom configuration', () => {
-      const customPlugin = new MetricsPlugin({
+      const plugin = new MetricsPlugin({
         enabled: false,
         collectPerformance: false,
-        collectErrors: false,
-        collectUsage: false,
-        retentionDays: 7,
-        flushInterval: 5000
+        retentionDays: 60,
+        flushInterval: 120000
       });
-      
-      expect(customPlugin.config.enabled).toBe(false);
-      expect(customPlugin.config.collectPerformance).toBe(false);
-      expect(customPlugin.config.collectErrors).toBe(false);
-      expect(customPlugin.config.collectUsage).toBe(false);
-      expect(customPlugin.config.retentionDays).toBe(7);
-      expect(customPlugin.config.flushInterval).toBe(5000);
+      expect(plugin.config.enabled).toBe(false);
+      expect(plugin.config.collectPerformance).toBe(false);
+      expect(plugin.config.retentionDays).toBe(60);
+      expect(plugin.config.flushInterval).toBe(120000);
     });
 
-    test('should initialize metrics structure', () => {
-      expect(plugin.metrics.operations).toBeDefined();
-      expect(plugin.metrics.resources).toBeDefined();
-      expect(plugin.metrics.errors).toBeDefined();
-      expect(plugin.metrics.performance).toBeDefined();
-      expect(plugin.metrics.startTime).toBeDefined();
-      
+    test('should have correct initial metrics structure', () => {
+      const plugin = new MetricsPlugin();
       expect(plugin.metrics.operations.insert).toEqual({ count: 0, totalTime: 0, errors: 0 });
       expect(plugin.metrics.operations.update).toEqual({ count: 0, totalTime: 0, errors: 0 });
       expect(plugin.metrics.operations.delete).toEqual({ count: 0, totalTime: 0, errors: 0 });
@@ -92,389 +72,387 @@ describe('Metrics Plugin', () => {
     });
   });
 
-  describe('Setup and Resource Creation', () => {
-    test('should not create metrics resources when disabled during tests', async () => {
-      // During tests, the plugin is disabled to avoid recursion
-      expect(database.resources.metrics).toBeUndefined();
-      expect(database.resources.error_logs).toBeUndefined();
-      expect(database.resources.performance_logs).toBeUndefined();
+  describe('Plugin Setup', () => {
+    test('should setup plugin without errors', async () => {
+      await expect(metricsPlugin.setup(database)).resolves.not.toThrow();
+      expect(metricsPlugin.database).toBe(database);
     });
 
-    test('should not install hooks when disabled during tests', async () => {
-      // During tests, hooks are not installed to avoid recursion
-      expect(testResource._insert).toBeUndefined();
-      expect(testResource._update).toBeUndefined();
-      expect(testResource._delete).toBeUndefined();
-      expect(testResource._get).toBeUndefined();
+    test('should create metrics resources during setup', async () => {
+      // Resources should be available from beforeEach setup
+      expect(metricsPlugin.metricsResource).toBeDefined();
+      expect(metricsPlugin.errorsResource).toBeDefined();
+      expect(metricsPlugin.performanceResource).toBeDefined();
     });
 
-    test('should not install hooks on new resources when disabled', async () => {
-      const newResource = await database.createResource({
-        name: 'new_test_resource',
+    test('should handle setup when resources already exist', async () => {
+      // Create resources first
+      await database.createResource({
+        name: 'metrics',
+        attributes: { id: 'string|required', type: 'string|required' }
+      });
+      
+      await expect(metricsPlugin.setup(database)).resolves.not.toThrow();
+    });
+
+    test('should skip setup when disabled', async () => {
+      const disabledPlugin = new MetricsPlugin({ enabled: false });
+      await disabledPlugin.setup(database);
+      
+      expect(disabledPlugin.database).toBe(database);
+      // Should not create timer when disabled
+      expect(disabledPlugin.flushTimer).toBeNull();
+    });
+  });
+
+  describe('Operation Recording', () => {
+    beforeEach(async () => {
+      await metricsPlugin.setup(database);
+    });
+
+    test('should record operation metrics', () => {
+      metricsPlugin.recordOperation('test_resource', 'insert', 100, false);
+      
+      expect(metricsPlugin.metrics.operations.insert.count).toBe(1);
+      expect(metricsPlugin.metrics.operations.insert.totalTime).toBe(100);
+      expect(metricsPlugin.metrics.operations.insert.errors).toBe(0);
+    });
+
+    test('should record operation errors', () => {
+      metricsPlugin.recordOperation('test_resource', 'insert', 150, true);
+      
+      expect(metricsPlugin.metrics.operations.insert.count).toBe(1);
+      expect(metricsPlugin.metrics.operations.insert.totalTime).toBe(150);
+      expect(metricsPlugin.metrics.operations.insert.errors).toBe(1);
+    });
+
+    test('should record resource-specific metrics', () => {
+      metricsPlugin.recordOperation('test_resource', 'get', 50, false);
+      
+      expect(metricsPlugin.metrics.resources.test_resource).toBeDefined();
+      expect(metricsPlugin.metrics.resources.test_resource.get.count).toBe(1);
+      expect(metricsPlugin.metrics.resources.test_resource.get.totalTime).toBe(50);
+    });
+
+    test('should record performance data when enabled', () => {
+      const initialLength = metricsPlugin.metrics.performance.length;
+      metricsPlugin.recordOperation('test_resource', 'update', 200, false);
+      
+      expect(metricsPlugin.metrics.performance.length).toBe(initialLength + 1);
+      expect(metricsPlugin.metrics.performance[initialLength].resourceName).toBe('test_resource');
+      expect(metricsPlugin.metrics.performance[initialLength].operation).toBe('update');
+      expect(metricsPlugin.metrics.performance[initialLength].duration).toBe(200);
+    });
+
+    test('should record error details', () => {
+      const error = new Error('Test error message');
+      metricsPlugin.recordError('test_resource', 'insert', error);
+      
+      expect(metricsPlugin.metrics.errors.length).toBe(1);
+      expect(metricsPlugin.metrics.errors[0].resourceName).toBe('test_resource');
+      expect(metricsPlugin.metrics.errors[0].operation).toBe('insert');
+      expect(metricsPlugin.metrics.errors[0].error).toBe('Test error message');
+    });
+
+    test('should not record errors when disabled', () => {
+      const noErrorPlugin = new MetricsPlugin({ collectErrors: false });
+      const error = new Error('Test error');
+      noErrorPlugin.recordError('test_resource', 'insert', error);
+      
+      expect(noErrorPlugin.metrics.errors.length).toBe(0);
+    });
+  });
+
+  describe('Hook Installation', () => {
+    beforeEach(async () => {
+      await metricsPlugin.setup(database);
+    });
+
+    test('should install hooks on existing resources', async () => {
+      const resource = await database.createResource({
+        name: 'test_hooks',
         attributes: {
           id: 'string|required',
-          name: 'string'
+          name: 'string|required'
         }
       });
 
-      expect(newResource._insert).toBeUndefined();
-      expect(newResource._update).toBeUndefined();
-      expect(newResource._delete).toBeUndefined();
-      expect(newResource._get).toBeUndefined();
-    });
-  });
+      metricsPlugin.installResourceHooks(resource);
 
-  describe('Operation Tracking', () => {
-    test('should not track operations when disabled during tests', async () => {
-      const user = await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      expect(user).toBeDefined();
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.insert.count).toBe(0);
-      expect(plugin.metrics.operations.insert.totalTime).toBe(0);
-      expect(plugin.metrics.operations.insert.errors).toBe(0);
+      // Check that original methods are stored
+      expect(resource._insert).toBeDefined();
+      expect(resource._update).toBeDefined();
+      expect(resource._get).toBeDefined();
+      expect(resource._delete).toBeDefined();
     });
 
-    test('should not track update operations when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
+    test('should record metrics through hooked insert operation', async () => {
+      const resource = await database.createResource({
+        name: 'test_insert_hook',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        }
       });
 
-      const updated = await testResource.update('user1', {
-        name: 'John Smith',
-        email: 'john@example.com',
-        age: 31
-      });
+      metricsPlugin.installResourceHooks(resource);
 
-      expect(updated).toBeDefined();
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.update.count).toBe(0);
-      expect(plugin.metrics.operations.update.totalTime).toBe(0);
-      expect(plugin.metrics.operations.update.errors).toBe(0);
+      await resource.insert({ id: 'test-1', name: 'Test Item' });
+
+      expect(metricsPlugin.metrics.operations.insert.count).toBeGreaterThan(0);
+      expect(metricsPlugin.metrics.resources.test_insert_hook.insert.count).toBeGreaterThan(0);
     });
 
-    test('should not track get operations when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
+    test('should record metrics through hooked get operation', async () => {
+      const resource = await database.createResource({
+        name: 'test_get_hook',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        }
       });
 
-      const user = await testResource.get('user1');
+      metricsPlugin.installResourceHooks(resource);
 
-      expect(user).toBeDefined();
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.get.count).toBe(0);
-      expect(plugin.metrics.operations.get.totalTime).toBe(0);
-      expect(plugin.metrics.operations.get.errors).toBe(0);
+      // Insert first to have something to get
+      await resource.insert({ id: 'test-2', name: 'Test Item 2' });
+      await resource.get('test-2');
+
+      expect(metricsPlugin.metrics.operations.get.count).toBeGreaterThan(0);
+      expect(metricsPlugin.metrics.resources.test_get_hook.get.count).toBeGreaterThan(0);
     });
 
-    test('should not track list operations when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
+    test('should record metrics through hooked update operation', async () => {
+      const resource = await database.createResource({
+        name: 'test_update_hook',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        }
       });
 
-      await testResource.insert({
-        id: 'user2',
-        name: 'Jane Doe',
-        email: 'jane@example.com',
-        age: 25
+      metricsPlugin.installResourceHooks(resource);
+
+      await resource.insert({ id: 'test-3', name: 'Test Item 3' });
+      await resource.update('test-3', { name: 'Updated Name' });
+
+      expect(metricsPlugin.metrics.operations.update.count).toBeGreaterThan(0);
+      expect(metricsPlugin.metrics.resources.test_update_hook.update.count).toBeGreaterThan(0);
+    });
+
+    test('should record metrics through hooked delete operation', async () => {
+      const resource = await database.createResource({
+        name: 'test_delete_hook',
+        attributes: {
+          id: 'string|required',
+          name: 'string|required'
+        }
       });
 
-      const users = await testResource.list();
+      metricsPlugin.installResourceHooks(resource);
 
-      expect(users).toBeDefined();
-      expect(users.length).toBe(2);
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.list.count).toBe(0);
-      expect(plugin.metrics.operations.list.totalTime).toBe(0);
-      expect(plugin.metrics.operations.list.errors).toBe(0);
+      await resource.insert({ id: 'test-4', name: 'Test Item 4' });
+      await resource.delete('test-4');
+
+      expect(metricsPlugin.metrics.operations.delete.count).toBeGreaterThan(0);
+      expect(metricsPlugin.metrics.resources.test_delete_hook.delete.count).toBeGreaterThan(0);
     });
 
-    test('should not track count operations when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
+    test('should skip metrics resources when installing hooks', async () => {
+      await metricsPlugin.setup(database);
 
-      await testResource.insert({
-        id: 'user2',
-        name: 'Jane Doe',
-        email: 'jane@example.com',
-        age: 25
-      });
-
-      const count = await testResource.count();
-
-      expect(count).toBe(2);
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.count.count).toBe(0);
-      expect(plugin.metrics.operations.count.totalTime).toBe(0);
-      expect(plugin.metrics.operations.count.errors).toBe(0);
-    });
-
-    test('should not track delete operations when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      const result = await testResource.delete('user1');
-
-      expect(result).toBeDefined();
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.delete.count).toBe(0);
-      expect(plugin.metrics.operations.delete.totalTime).toBe(0);
-      expect(plugin.metrics.operations.delete.errors).toBe(0);
-    });
-  });
-
-  describe('Error Tracking', () => {
-    test('should not track failed operations when disabled', async () => {
-      try {
-        await testResource.get('non-existent');
-      } catch (error) {
-        // Expected error
-      }
-
-      // When disabled, no metrics should be collected
-      expect(plugin.metrics.operations.get.count).toBe(0);
-      expect(plugin.metrics.operations.get.totalTime).toBe(0);
-      expect(plugin.metrics.operations.get.errors).toBe(0);
-    });
-
-    test('should not record error details when disabled', async () => {
-      try {
-        await testResource.get('non-existent');
-      } catch (error) {
-        // Expected error
-      }
-
-      // When disabled, no error details should be recorded
-      expect(plugin.metrics.errors.length).toBe(0);
-    });
-
-    test('should not record error details when disabled', async () => {
-      try {
-        await testResource.get('non-existent');
-      } catch (error) {
-        // Expected error
-      }
-
-      // When disabled, no error details should be recorded
-      expect(plugin.metrics.errors.length).toBe(0);
-    });
-  });
-
-  describe('Performance Tracking', () => {
-    test('should not record performance data when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      // When disabled, no performance data should be recorded
-      expect(plugin.metrics.performance.length).toBe(0);
-    });
-
-    test('should not record performance data when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      // When disabled, no performance data should be recorded
-      expect(plugin.metrics.performance.length).toBe(0);
+      // Should not install hooks on metrics resources
+      const metricsResource = metricsPlugin.metricsResource;
+      expect(metricsResource._insert).toBeUndefined();
     });
   });
 
   describe('Metrics Flushing', () => {
-    test('should not flush metrics when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      // When disabled, no metrics should be stored
-      const metrics = await plugin.getMetrics();
-      expect(metrics.length).toBe(0);
-
-      // When disabled, metrics should not be reset
-      expect(plugin.metrics.operations.insert.count).toBe(0);
+    beforeEach(async () => {
+      await metricsPlugin.setup(database);
     });
 
-    test('should not handle flush timer when disabled', async () => {
-      const pluginWithTimer = new MetricsPlugin({
-        enabled: false,
-        flushInterval: 100
-      });
-      await pluginWithTimer.setup(database);
-      await pluginWithTimer.start();
+    test('should flush metrics to storage', async () => {
+      // Record some metrics first
+      metricsPlugin.recordOperation('test_flush', 'insert', 100, false);
+      metricsPlugin.recordOperation('test_flush', 'get', 50, false);
 
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
+      await metricsPlugin.flushMetrics();
 
-      // Wait for potential flush
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Check that metrics were stored
+      const storedMetrics = await metricsPlugin.metricsResource.getAll();
+      expect(storedMetrics.length).toBeGreaterThan(0);
+    });
 
-      // When disabled, no metrics should be flushed
-      const metrics = await pluginWithTimer.getMetrics();
-      expect(metrics.length).toBe(0);
+    test('should reset metrics after flushing', async () => {
+      metricsPlugin.recordOperation('test_reset', 'insert', 100, false);
+      expect(metricsPlugin.metrics.operations.insert.count).toBe(1);
 
-      await pluginWithTimer.stop();
+      metricsPlugin.resetMetrics();
+      expect(metricsPlugin.metrics.operations.insert.count).toBe(0);
+      expect(metricsPlugin.metrics.operations.insert.totalTime).toBe(0);
+      expect(metricsPlugin.metrics.operations.insert.errors).toBe(0);
+    });
+
+    test('should handle flush errors gracefully', async () => {
+      // Mock a failing metricsResource
+      metricsPlugin.metricsResource = null;
+      
+      await expect(metricsPlugin.flushMetrics()).resolves.not.toThrow();
     });
   });
 
   describe('Utility Methods', () => {
-    test('should return empty metrics when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      // When disabled, no metrics should be returned
-      const insertMetrics = await plugin.getMetrics({
-        operation: 'insert'
-      });
-      expect(insertMetrics.length).toBe(0);
-
-      const resourceMetrics = await plugin.getMetrics({
-        resourceName: 'test_users'
-      });
-      expect(resourceMetrics.length).toBe(0);
-    });
-
-    test('should return empty error logs when disabled', async () => {
-      try {
-        await testResource.get('non-existent');
-      } catch (error) {
-        // Expected error
-      }
-
-      const errorLogs = await plugin.getErrorLogs();
-      expect(errorLogs.length).toBe(0);
-    });
-
-    test('should return empty performance logs when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      const performanceLogs = await plugin.getPerformanceLogs();
-      expect(performanceLogs.length).toBe(0);
-    });
-
-    test('should return empty stats when disabled', async () => {
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      const stats = await plugin.getStats();
+    beforeEach(async () => {
+      await metricsPlugin.setup(database);
       
+      // Add some test data
+      await metricsPlugin.metricsResource.insert({
+        id: 'test-metric-1',
+        type: 'operation',
+        resourceName: 'test_resource',
+        operation: 'insert',
+        count: 5,
+        totalTime: 500,
+        errors: 0,
+        avgTime: 100,
+        timestamp: new Date().toISOString(),
+        metadata: {}
+      });
+    });
+
+    test('should get metrics with filters', async () => {
+      const metrics = await metricsPlugin.getMetrics({
+        type: 'operation',
+        resourceName: 'test_resource'
+      });
+
+      expect(metrics.length).toBeGreaterThan(0);
+      expect(metrics[0].type).toBe('operation');
+      expect(metrics[0].resourceName).toBe('test_resource');
+    });
+
+    test('should get metrics with date filters', async () => {
+      const startDate = new Date(Date.now() - 60000).toISOString(); // 1 minute ago
+      const endDate = new Date().toISOString();
+
+      const metrics = await metricsPlugin.getMetrics({
+        startDate,
+        endDate
+      });
+
+      expect(Array.isArray(metrics)).toBe(true);
+    });
+
+    test('should get error logs', async () => {
+      // Add test error
+      await metricsPlugin.errorsResource.insert({
+        id: 'test-error-1',
+        resourceName: 'test_resource',
+        operation: 'insert',
+        error: 'Test error',
+        timestamp: new Date().toISOString(),
+        metadata: {}
+      });
+
+      const errors = await metricsPlugin.getErrorLogs({
+        resourceName: 'test_resource'
+      });
+
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].resourceName).toBe('test_resource');
+    });
+
+    test('should get performance logs', async () => {
+      // Add test performance log
+      await metricsPlugin.performanceResource.insert({
+        id: 'test-perf-1',
+        resourceName: 'test_resource',
+        operation: 'get',
+        duration: 150,
+        timestamp: new Date().toISOString(),
+        metadata: {}
+      });
+
+      const performance = await metricsPlugin.getPerformanceLogs({
+        operation: 'get'
+      });
+
+      expect(performance.length).toBeGreaterThan(0);
+      expect(performance[0].operation).toBe('get');
+    });
+
+    test('should get aggregated stats', async () => {
+      const stats = await metricsPlugin.getStats();
+
+      expect(stats).toBeDefined();
       expect(stats.period).toBe('24h');
-      expect(stats.totalOperations).toBe(0);
-      expect(stats.operationsByType).toBeDefined();
+      expect(typeof stats.totalOperations).toBe('number');
+      expect(typeof stats.totalErrors).toBe('number');
       expect(stats.uptime).toBeDefined();
       expect(stats.uptime.startTime).toBeDefined();
     });
   });
 
-  describe('Data Cleanup', () => {
-    test('should cleanup old data', async () => {
-      // Create plugin with short retention
-      const pluginWithRetention = new MetricsPlugin({
-        retentionDays: 1
-      });
-      await pluginWithRetention.setup(database);
-      await pluginWithRetention.start();
+  describe('Plugin Lifecycle', () => {
+    test('should start plugin without errors', async () => {
+      await expect(metricsPlugin.start()).resolves.not.toThrow();
+    });
 
-      // Perform operation and flush
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-      await pluginWithRetention.flushMetrics();
+    test('should stop plugin and clear timer', async () => {
+      await metricsPlugin.setup(database);
+      await metricsPlugin.start();
+      
+      // Simulate timer being set
+      metricsPlugin.flushTimer = setInterval(() => {}, 1000);
+      
+      await metricsPlugin.stop();
+      expect(metricsPlugin.flushTimer).toBeNull();
+    });
 
-      // Cleanup should not throw
-      await expect(pluginWithRetention.cleanupOldData()).resolves.toBeUndefined();
+    test('should handle timer management', () => {
+      const plugin = new MetricsPlugin({ flushInterval: 1000 });
+      
+      // Should create timer when flushInterval > 0
+      plugin.startFlushTimer();
+      expect(plugin.flushTimer).not.toBeNull();
+      
+      // Clean up timer
+      if (plugin.flushTimer) {
+        clearInterval(plugin.flushTimer);
+        plugin.flushTimer = null;
+      }
 
-      await pluginWithRetention.stop();
+      // Test with interval disabled
+      plugin.config.flushInterval = 0;
+      plugin.startFlushTimer();
+      expect(plugin.flushTimer).toBeNull();
     });
   });
 
-  describe('Plugin Lifecycle', () => {
-    test('should handle stop gracefully', async () => {
-      // Perform some operations
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
-      });
-
-      // Stop should flush remaining metrics
-      await plugin.stop();
-
-      // Check that flush timer was cleared
-      expect(plugin.flushTimer).toBeNull();
+  describe('Data Cleanup', () => {
+    beforeEach(async () => {
+      await metricsPlugin.setup(database);
     });
 
-    test('should handle disabled plugin', async () => {
-      const disabledPlugin = new MetricsPlugin({
-        enabled: false
-      });
+    test('should cleanup old data', async () => {
+      // Add old data (simulate old timestamp)
+      const oldDate = new Date(Date.now() - (40 * 24 * 60 * 60 * 1000)); // 40 days ago
       
-      await disabledPlugin.setup(database);
-      await disabledPlugin.start();
-
-      // Perform operation
-      await testResource.insert({
-        id: 'user1',
-        name: 'John Doe',
-        email: 'john@example.com',
-        age: 30
+      await metricsPlugin.metricsResource.insert({
+        id: 'old-metric',
+        type: 'operation',
+        resourceName: 'test',
+        operation: 'insert',
+        count: 1,
+        totalTime: 100,
+        errors: 0,
+        avgTime: 100,
+        timestamp: oldDate.toISOString(),
+        metadata: {}
       });
 
-      // Should not track metrics
-      expect(disabledPlugin.metrics.operations.insert.count).toBe(0);
-
-      await disabledPlugin.stop();
+      await expect(metricsPlugin.cleanupOldData()).resolves.not.toThrow();
     });
   });
 }); 

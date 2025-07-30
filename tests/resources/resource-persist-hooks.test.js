@@ -5,7 +5,7 @@ describe("Resource Hook Persistence", () => {
   let db;
 
   beforeEach(async () => {
-    db = await createDatabaseForTest("persist-hooks", {
+    db = await createDatabaseForTest("suite=resources/persist-hooks", {
       persistHooks: true // Enable hook persistence for testing
     });
     await db.connect();
@@ -84,7 +84,7 @@ describe("Resource Hook Persistence", () => {
     await originalDb.disconnect();
 
     // Create new database instance to same location
-    const newDb = await createDatabaseForTest("persist-hooks-restore", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-restore", {
       persistHooks: true,
       connectionString: originalConnectionString
     });
@@ -108,7 +108,7 @@ describe("Resource Hook Persistence", () => {
   });
 
   test("should handle hook serialization errors gracefully", async () => {
-    const db = await createDatabaseForTest("persist-hooks-serialization", {
+    const db = await createDatabaseForTest("suite=resources/persist-hooks-serialization", {
       persistHooks: true,
       verbose: true
     });
@@ -145,7 +145,7 @@ describe("Resource Hook Persistence", () => {
   });
 
   test("should not serialize hooks when persistHooks is false", async () => {
-    const db = await createDatabaseForTest("persist-hooks-disabled", {
+    const db = await createDatabaseForTest("suite=resources/persist-hooks-disabled", {
       persistHooks: false
     });
 
@@ -173,7 +173,7 @@ describe("Resource Hook Persistence", () => {
   });
 
   test("should handle empty or invalid hooks gracefully", async () => {
-    const db = await createDatabaseForTest("persist-hooks-empty", {
+    const db = await createDatabaseForTest("suite=resources/persist-hooks-empty", {
       persistHooks: true
     });
 
@@ -207,7 +207,7 @@ describe("Resource Hook Persistence", () => {
   });
 
   test("should preserve hook function names in serialization", async () => {
-    const db = await createDatabaseForTest("persist-hooks-names", {
+    const db = await createDatabaseForTest("suite=resources/persist-hooks-names", {
       persistHooks: true
     });
 
@@ -230,7 +230,7 @@ describe("Resource Hook Persistence", () => {
     await db.disconnect();
 
     // Reconnect and verify hooks are restored
-    const newDb = await createDatabaseForTest("persist-hooks-names-restore", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-names-restore", {
       persistHooks: true,
       connectionString: originalConnectionString
     });

@@ -5,7 +5,7 @@ describe("Resource Hook Persistence - Limitations", () => {
   let db;
 
   beforeEach(async () => {
-    db = await createDatabaseForTest("persist-hooks-limitations", {
+    db = await createDatabaseForTest("suite=resources/persist-hooks-limitations", {
       persistHooks: true,
       verbose: false
     });
@@ -69,7 +69,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     await originalDb.disconnect();
 
     // Reconnect to test deserialized hooks
-    const newDb = await createDatabaseForTest("persist-hooks-limitations-restore", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-restore", {
       persistHooks: true,
       connectionString,
       verbose: false
@@ -124,7 +124,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     await originalDb.disconnect();
 
     // Reconnect to test deserialized hooks
-    const newDb = await createDatabaseForTest("persist-hooks-limitations-self-contained", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-self-contained", {
       persistHooks: true,
       connectionString,
       verbose: false
@@ -194,7 +194,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     await originalDb.disconnect();
 
     // Reconnect to test deserialized hooks
-    const newDb = await createDatabaseForTest("persist-hooks-limitations-closure", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-closure", {
       persistHooks: true,
       connectionString,
       verbose: false
@@ -254,7 +254,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     await originalDb.disconnect();
 
     // Reconnect - hook will handle the undefined variable gracefully
-    const newDb = await createDatabaseForTest("persist-hooks-limitations-demo", {
+    const newDb = await createDatabaseForTest("suite=resources/persist-hooks-limitations-demo", {
       persistHooks: true,
       connectionString,
       verbose: false
