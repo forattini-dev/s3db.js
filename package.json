@@ -11,6 +11,8 @@
   "author": "@stone/martech",
   "license": "UNLICENSED",
   "bin": {
+    "s3db.js": "./bin/cli.js",
+    "s3db": "./bin/cli.js",
     "s3db-mcp": "./mcp/server.js"
   },
   "repository": {
@@ -73,8 +75,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.850.0",
+    "@modelcontextprotocol/sdk": "^1.17.3",
     "@smithy/node-http-handler": "^4.1.0",
     "@supercharge/promise-pool": "^3.2.0",
+    "commander": "^12.1.0",
+    "dotenv": "^17.2.1",
     "fastest-validator": "^1.19.1",
     "flat": "^6.0.1",
     "json-stable-stringify": "^1.3.0",
@@ -112,7 +117,6 @@
     "@rollup/plugin-replace": "^6.0.2",
     "@rollup/plugin-terser": "^0.4.4",
     "@types/node": "24.1.0",
-    "dotenv": "^17.2.1",
     "jest": "^30.0.5",
     "rollup": "^4.46.1",
     "rollup-plugin-copy": "^3.5.0",
