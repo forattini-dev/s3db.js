@@ -256,21 +256,46 @@ export class AuditPlugin extends Plugin {
     
     const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
     
-    let query = {};
+    // If we have specific filters, we need to fetch more items to ensure proper pagination after filtering
+    const hasFilters = resourceName || operation || recordId || partition || startDate || endDate;
     
-    if (resourceName) query.resourceName = resourceName;
-    if (operation) query.operation = operation;
-    if (recordId) query.recordId = recordId;
-    if (partition) query.partition = partition;
+    let items = [];
     
-    if (startDate || endDate) {
-      query.timestamp = {};
-      if (startDate) query.timestamp.$gte = startDate;
-      if (endDate) query.timestamp.$lte = endDate;
+    if (hasFilters) {
+      // Fetch enough items to handle filtering
+      const fetchSize = Math.min(10000, Math.max(1000, (limit + offset) * 20));
+      const result = await this.auditResource.list({ limit: fetchSize });
+      items = result || [];
+      
+      // Apply filters
+      if (resourceName) {
+        items = items.filter(log => log.resourceName === resourceName);
+      }
+      if (operation) {
+        items = items.filter(log => log.operation === operation);
+      }
+      if (recordId) {
+        items = items.filter(log => log.recordId === recordId);
+      }
+      if (partition) {
+        items = items.filter(log => log.partition === partition);
+      }
+      if (startDate || endDate) {
+        items = items.filter(log => {
+          const timestamp = new Date(log.timestamp);
+          if (startDate && timestamp < new Date(startDate)) return false;
+          if (endDate && timestamp > new Date(endDate)) return false;
+          return true;
+        });
+      }
+      
+      // Apply offset and limit after filtering
+      return items.slice(offset, offset + limit);
+    } else {
+      // No filters, use direct pagination
+      const result = await this.auditResource.page({ size: limit, offset });
+      return result.items || [];
     }
-    
-    const result = await this.auditResource.page({ query, limit, offset });
-    return result.items || [];
   }
 
   async getRecordHistory(resourceName, recordId) {
