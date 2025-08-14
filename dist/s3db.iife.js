@@ -1353,17 +1353,13 @@ ${JSON.stringify(validation, null, 2)}`,
       const plugin = this;
       resource.deleteMany = async function(ids) {
         const objectsToDelete = [];
-        if (plugin.config.includeData) {
-          for (const id of ids) {
-            const [ok, err, fetched] = await try_fn_default(() => resource.get(id));
-            if (ok) {
-              objectsToDelete.push(fetched);
-            } else {
-              objectsToDelete.push({ id });
-            }
+        for (const id of ids) {
+          const [ok, err, fetched] = await try_fn_default(() => resource.get(id));
+          if (ok) {
+            objectsToDelete.push(fetched);
+          } else {
+            objectsToDelete.push({ id });
           }
-        } else {
-          objectsToDelete.push(...ids.map((id) => ({ id })));
         }
         const result = await originalDeleteMany(ids);
         for (const oldData of objectsToDelete) {
@@ -13501,7 +13497,8 @@ ${errorDetails}`,
       this.options = options;
       this.verbose = options.verbose || false;
       this.parallelism = parseInt(options.parallelism + "") || 10;
-      this.plugins = {};
+      this.plugins = options.plugins || [];
+      this.pluginRegistry = {};
       this.pluginList = options.plugins || [];
       this.cache = options.cache;
       this.passphrase = options.passphrase || "secret";
@@ -13795,7 +13792,7 @@ ${errorDetails}`,
           await plugin.setup(db);
           if (plugin.afterSetup) await plugin.afterSetup();
           const pluginName = this._getPluginName(plugin);
-          this.plugins[pluginName] = plugin;
+          this.pluginRegistry[pluginName] = plugin;
         });
         await Promise.all(setupProms);
         const startProms = plugins.map(async (plugin) => {
