@@ -119,17 +119,13 @@ export class AuditPlugin extends Plugin {
     resource.deleteMany = async function(ids) {
       // Fetch all objects before deletion for audit logging
       const objectsToDelete = [];
-      if (plugin.config.includeData) {
-        for (const id of ids) {
-          const [ok, err, fetched] = await tryFn(() => resource.get(id));
-          if (ok) {
-            objectsToDelete.push(fetched);
-          } else {
-            objectsToDelete.push({ id }); // Just store the ID if we can't fetch
-          }
+      for (const id of ids) {
+        const [ok, err, fetched] = await tryFn(() => resource.get(id));
+        if (ok) {
+          objectsToDelete.push(fetched);
+        } else {
+          objectsToDelete.push({ id }); // Just store the ID if we can't fetch
         }
-      } else {
-        objectsToDelete.push(...ids.map(id => ({ id })));
       }
       
       // Perform the actual deletion
