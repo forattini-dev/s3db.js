@@ -339,17 +339,25 @@ describe('Audit Plugin', () => {
     });
 
     test('should generate unique audit IDs', async () => {
-      const userData1 = { id: 'user-4', name: 'Alice', email: 'alice@example.com', department: 'IT', region: 'SP' };
-      const userData2 = { id: 'user-5', name: 'Charlie', email: 'charlie@example.com', department: 'HR', region: 'RJ' };
+      const userData1 = { id: 'user-unique-id-test-1', name: 'Alice', email: 'alice@example.com', department: 'IT', region: 'SP' };
+      const userData2 = { id: 'user-unique-id-test-2', name: 'Charlie', email: 'charlie@example.com', department: 'HR', region: 'RJ' };
 
       await users.insert(userData1);
       await users.insert(userData2);
+      
+      // Wait for audit logs to be written
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-      const auditLogs = await auditPlugin.getAuditLogs({
+      const allAuditLogs = await auditPlugin.getAuditLogs({
         resourceName: 'users',
         operation: 'insert',
-        limit: 2
+        limit: 1000
       });
+      
+      // Filter for our specific inserts
+      const auditLogs = allAuditLogs.filter(log => 
+        log.recordId === 'user-unique-id-test-1' || log.recordId === 'user-unique-id-test-2'
+      );
 
       expect(auditLogs).toHaveLength(2);
       expect(auditLogs[0].id).not.toBe(auditLogs[1].id);
@@ -496,7 +504,7 @@ describe('Audit Plugin', () => {
 
       const auditLogs = await auditPlugin.getAuditLogs({
         resourceName: 'users',
-        operation: 'delete',
+        operation: 'deleteMany',
         limit: 10
       });
 
