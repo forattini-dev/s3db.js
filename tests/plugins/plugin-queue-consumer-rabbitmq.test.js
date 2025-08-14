@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { RabbitMqConsumer } from '#src/plugins/consumers/rabbitmq-consumer.js';
 
 describe('RabbitMQ Consumer Tests', () => {
@@ -6,8 +6,8 @@ describe('RabbitMQ Consumer Tests', () => {
   let mockOnMessage, mockOnError;
 
   beforeEach(() => {
-    mockOnMessage = jest.fn().mockResolvedValue();
-    mockOnError = jest.fn();
+    mockOnMessage = vi.fn().mockResolvedValue();
+    mockOnError = vi.fn();
   });
 
   afterEach(async () => {

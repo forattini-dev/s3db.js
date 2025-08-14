@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { Cache, MemoryCache, S3Cache } from '../../src/plugins/cache/index.js';
@@ -584,7 +584,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
 
       // Mock a driver error - wrap in try-catch to avoid unhandled promise rejection
       const originalGet = cachePlugin.driver.get;
-      cachePlugin.driver.get = jest.fn().mockRejectedValue(new Error('Cache error'));
+      cachePlugin.driver.get = vi.fn().mockRejectedValue(new Error('Cache error'));
 
       try {
         // Operations should still work even if cache fails

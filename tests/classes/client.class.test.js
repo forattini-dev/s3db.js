@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, vi } from 'vitest';
 
 import { createClientForTest } from '#tests/config.js';
 
@@ -103,19 +103,19 @@ describe('Client Class - Coverage', () => {
 
   test('should call headObject and exists returns true/false', async () => {
     // Mock headObject to succeed
-    client.headObject = jest.fn().mockResolvedValue({});
+    client.headObject = vi.fn().mockResolvedValue({});
     let exists = await client.exists('some-key');
     expect(exists).toBe(true);
     // Mock headObject to throw NoSuchKey
-    client.headObject = jest.fn().mockRejectedValue({ name: 'NoSuchKey' });
+    client.headObject = vi.fn().mockRejectedValue({ name: 'NoSuchKey' });
     exists = await client.exists('some-key');
     expect(exists).toBe(false);
     // Mock headObject to throw NotFound
-    client.headObject = jest.fn().mockRejectedValue({ name: 'NotFound' });
+    client.headObject = vi.fn().mockRejectedValue({ name: 'NotFound' });
     exists = await client.exists('some-key');
     expect(exists).toBe(false);
     // Mock headObject to throw other error
-    client.headObject = jest.fn().mockRejectedValue({ name: 'OtherError' });
+    client.headObject = vi.fn().mockRejectedValue({ name: 'OtherError' });
     await expect(client.exists('some-key')).rejects.toBeDefined();
   });
 
@@ -142,7 +142,7 @@ describe('Client Class - Coverage', () => {
     client.on('putObject', (res, opts) => events.push('putObject'));
     client.on('getObject', (res, opts) => events.push('getObject'));
     client.on('deleteObject', (res, opts) => events.push('deleteObject'));
-    client.sendCommand = jest.fn().mockResolvedValue({});
+    client.sendCommand = vi.fn().mockResolvedValue({});
     await client.putObject({ key: 'k' });
     await client.getObject('k');
     await client.deleteObject('k');
@@ -150,55 +150,55 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle errors in putObject/getObject/deleteObject', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.putObject({ key: 'k' })).rejects.toBeDefined();
     await expect(client.getObject('k')).rejects.toBeDefined();
     await expect(client.deleteObject('k')).rejects.toBeDefined();
   });
 
   test('should call headObject and copyObject', async () => {
-    client.client.send = jest.fn().mockResolvedValue({});
+    client.client.send = vi.fn().mockResolvedValue({});
     await client.headObject('k');
     await client.copyObject({ from: 'a', to: 'b' });
   });
 
   test('should handle errors in headObject/copyObject', async () => {
-    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    client.client.send = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.headObject('k')).rejects.toBeDefined();
     await expect(client.copyObject({ from: 'a', to: 'b' })).rejects.toBeDefined();
   });
 
   test('should call deleteObjects and handle errors', async () => {
     client.parallelism = 1;
-    client.sendCommand = jest.fn().mockResolvedValue({});
+    client.sendCommand = vi.fn().mockResolvedValue({});
     await client.deleteObjects(['k1', 'k2']);
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.deleteObjects(['k1'])).resolves.toBeDefined();
   });
 
   test('should call deleteAll and handle empty', async () => {
-    client.client.send = jest.fn().mockResolvedValue({ Contents: [] });
+    client.client.send = vi.fn().mockResolvedValue({ Contents: [] });
     const deleted = await client.deleteAll({ prefix: 'p' });
     expect(deleted).toBe(0);
   });
 
   test('should call moveObject and handle errors', async () => {
-    client.copyObject = jest.fn().mockResolvedValue(true);
-    client.deleteObject = jest.fn().mockResolvedValue(true);
+    client.copyObject = vi.fn().mockResolvedValue(true);
+    client.deleteObject = vi.fn().mockResolvedValue(true);
     await expect(client.moveObject({ from: 'a', to: 'b' })).resolves.toBe(true);
-    client.copyObject = jest.fn().mockRejectedValue(new Error('fail'));
+    client.copyObject = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.moveObject({ from: 'a', to: 'b' })).rejects.toBeDefined();
   });
 
   test('should call listObjects and handle errors', async () => {
-    client.client.send = jest.fn().mockResolvedValue({});
+    client.client.send = vi.fn().mockResolvedValue({});
     await client.listObjects({ prefix: 'p' });
-    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    client.client.send = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.listObjects({ prefix: 'p' })).rejects.toBeDefined();
   });
 
   test('should call count and getAllKeys', async () => {
-    client.listObjects = jest.fn().mockResolvedValue({ KeyCount: 2, Contents: [{ Key: 'a' }, { Key: 'b' }], IsTruncated: false });
+    client.listObjects = vi.fn().mockResolvedValue({ KeyCount: 2, Contents: [{ Key: 'a' }, { Key: 'b' }], IsTruncated: false });
     const count = await client.count({ prefix: 'p' });
     expect(count).toBe(2);
     const keys = await client.getAllKeys({ prefix: 'p' });
@@ -206,7 +206,7 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should call getContinuationTokenAfterOffset', async () => {
-    client.listObjects = jest.fn().mockResolvedValue({ KeyCount: 2, Contents: [{ Key: 'a' }, { Key: 'b' }], IsTruncated: false });
+    client.listObjects = vi.fn().mockResolvedValue({ KeyCount: 2, Contents: [{ Key: 'a' }, { Key: 'b' }], IsTruncated: false });
     const token = await client.getContinuationTokenAfterOffset({ prefix: 'p', offset: 0 });
     expect(token).toBeNull();
   });
@@ -214,25 +214,25 @@ describe('Client Class - Coverage', () => {
   test('should handle sendCommand console.warn suppression and error handling', async () => {
     
     // Test console.warn suppression for 'Stream of unknown length'
-    client.client.send = jest.fn().mockResolvedValue({});
+    client.client.send = vi.fn().mockResolvedValue({});
     await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
     
     // Test error handling in console.warn replacement
     const mockError = new Error('Console error');
     
-    client.client.send = jest.fn().mockResolvedValue({});
+    client.client.send = vi.fn().mockResolvedValue({});
     await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
     
     // Test error handling in console.warn restoration
     
-    client.client.send = jest.fn().mockResolvedValue({});
+    client.client.send = vi.fn().mockResolvedValue({});
     await client.sendCommand({ constructor: { name: 'TestCommand' }, input: {} });
     
   });
 
   test('should handle deleteAll with actual content deletion', async () => {
     // Mock first call with content, second call with empty content
-    client.client.send = jest.fn()
+    client.client.send = vi.fn()
       .mockResolvedValueOnce({
         Contents: [{ Key: 'test1' }, { Key: 'test2' }],
         IsTruncated: true,
@@ -252,7 +252,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle deleteAll with multiple batches', async () => {
     // Mock multiple batches with continuation tokens
-    client.client.send = jest.fn()
+    client.client.send = vi.fn()
       .mockResolvedValueOnce({
         Contents: [{ Key: 'test1' }],
         IsTruncated: true,
@@ -275,7 +275,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getContinuationTokenAfterOffset with different offset scenarios', async () => {
     // Test offset < 1000
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: [{ Key: 'a' }, { Key: 'b' }],
       IsTruncated: false
     });
@@ -284,7 +284,7 @@ describe('Client Class - Coverage', () => {
     expect(token1).toBeDefined();
 
     // Test offset > 1000 with multiple iterations
-    client.listObjects = jest.fn()
+    client.listObjects = vi.fn()
       .mockResolvedValueOnce({
         Contents: Array.from({ length: 1000 }, (_, i) => ({ Key: `key${i}` })),
         IsTruncated: true,
@@ -301,8 +301,8 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getKeysPage with offset and amount limits', async () => {
     // Test with offset > 0
-    client.getContinuationTokenAfterOffset = jest.fn().mockResolvedValue('token1');
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.getContinuationTokenAfterOffset = vi.fn().mockResolvedValue('token1');
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: Array.from({ length: 150 }, (_, i) => ({ Key: `key${i}` })),
       IsTruncated: false
     });
@@ -313,7 +313,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getKeysPage with keyPrefix processing', async () => {
     client.config.keyPrefix = '/test/prefix/';
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: [
         { Key: '/test/prefix/file1.txt' },
         { Key: '/test/prefix/file2.txt' }
@@ -326,8 +326,8 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle moveAllObjects successfully', async () => {
-    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
-    client.moveObject = jest.fn().mockResolvedValue(true);
+    client.getAllKeys = vi.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
+    client.moveObject = vi.fn().mockResolvedValue(true);
 
     const results = await client.moveAllObjects({ 
       prefixFrom: 'old/', 
@@ -338,8 +338,8 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle moveAllObjects with errors', async () => {
-    client.getAllKeys = jest.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
-    client.moveObject = jest.fn()
+    client.getAllKeys = vi.fn().mockResolvedValue(['file1.txt', 'file2.txt']);
+    client.moveObject = vi.fn()
       .mockResolvedValueOnce(true)
       .mockRejectedValueOnce(new Error('Move failed'));
 
@@ -350,13 +350,13 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle moveObject error with undefined options', async () => {
-    client.copyObject = jest.fn().mockRejectedValue(new Error('Copy failed'));
+    client.copyObject = vi.fn().mockRejectedValue(new Error('Copy failed'));
     
     await expect(client.moveObject({ from: 'a', to: 'b' })).rejects.toBeDefined();
   });
 
   test('should handle count with truncated responses', async () => {
-    client.listObjects = jest.fn()
+    client.listObjects = vi.fn()
       .mockResolvedValueOnce({
         KeyCount: 1000,
         IsTruncated: true,
@@ -373,7 +373,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getAllKeys with truncated responses and keyPrefix', async () => {
     client.config.keyPrefix = '/test/prefix/';
-    client.listObjects = jest.fn()
+    client.listObjects = vi.fn()
       .mockResolvedValueOnce({
         Contents: [
           { Key: '/test/prefix/file1.txt' },
@@ -395,7 +395,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getAllKeys with keys starting with slash after prefix removal', async () => {
     client.config.keyPrefix = '/test/prefix';
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: [
         { Key: '/test/prefix/file1.txt' }
       ],
@@ -408,7 +408,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle listObjects with keyPrefix and empty prefix', async () => {
     client.config.keyPrefix = '/test/prefix/';
-    client.sendCommand = jest.fn().mockResolvedValue({});
+    client.sendCommand = vi.fn().mockResolvedValue({});
     
     await client.listObjects({ prefix: '' });
     
@@ -423,7 +423,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle listObjects with undefined prefix', async () => {
     client.config.keyPrefix = '/test/prefix/';
-    client.sendCommand = jest.fn().mockResolvedValue({});
+    client.sendCommand = vi.fn().mockResolvedValue({});
     
     await client.listObjects({});
     
@@ -437,7 +437,7 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle deleteAll with no contents in response', async () => {
-    client.client.send = jest.fn().mockResolvedValue({
+    client.client.send = vi.fn().mockResolvedValue({
       Contents: [],
       IsTruncated: false
     });
@@ -447,7 +447,7 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle deleteAll with undefined prefix', async () => {
-    client.client.send = jest.fn().mockResolvedValue({
+    client.client.send = vi.fn().mockResolvedValue({
       Contents: [],
       IsTruncated: false
     });
@@ -457,7 +457,7 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle getContinuationTokenAfterOffset with skipped >= offset', async () => {
-    client.listObjects = jest.fn()
+    client.listObjects = vi.fn()
       .mockResolvedValueOnce({
         Contents: Array.from({ length: 1000 }, (_, i) => ({ Key: `key${i}` })),
         IsTruncated: true,
@@ -473,7 +473,7 @@ describe('Client Class - Coverage', () => {
   });
 
   test('should handle getKeysPage with keys.length > amount', async () => {
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: Array.from({ length: 200 }, (_, i) => ({ Key: `key${i}` })),
       IsTruncated: false
     });
@@ -484,7 +484,7 @@ describe('Client Class - Coverage', () => {
 
   test('should handle getKeysPage with keyPrefix and keys starting with slash', async () => {
     client.config.keyPrefix = '/test/prefix';
-    client.listObjects = jest.fn().mockResolvedValue({
+    client.listObjects = vi.fn().mockResolvedValue({
       Contents: [
         { Key: '/test/prefix/file1.txt' }
       ],
@@ -547,7 +547,7 @@ describe('Client Error Propagation - bucket field', () => {
 
   test('listObjects error includes bucket (invalid bucket)', async () => {
     // Mock the sendCommand to avoid real network calls
-    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
+    invalidClient.sendCommand = vi.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.listObjects({ prefix: 'x' });
     } catch (err) {
@@ -559,7 +559,7 @@ describe('Client Error Propagation - bucket field', () => {
 
   test('putObject error includes bucket (invalid bucket)', async () => {
     // Mock the sendCommand to avoid real network calls
-    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
+    invalidClient.sendCommand = vi.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.putObject({ key: 'x', body: 'abc' });
     } catch (err) {
@@ -571,7 +571,7 @@ describe('Client Error Propagation - bucket field', () => {
 
   test('copyObject error includes bucket (invalid bucket)', async () => {
     // Mock the sendCommand to avoid real network calls
-    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
+    invalidClient.sendCommand = vi.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.copyObject({ from: 'a', to: 'b' });
     } catch (err) {
@@ -583,7 +583,7 @@ describe('Client Error Propagation - bucket field', () => {
 
   test('moveObject error includes bucket (invalid bucket)', async () => {
     // Mock the sendCommand to avoid real network calls
-    invalidClient.sendCommand = jest.fn().mockRejectedValue(new Error('Invalid bucket'));
+    invalidClient.sendCommand = vi.fn().mockRejectedValue(new Error('Invalid bucket'));
     try {
       await invalidClient.moveObject({ from: 'a', to: 'b' });
     } catch (err) {
@@ -601,14 +601,14 @@ describe('Client Error Simulation', () => {
   });
 
   test('putObject error includes bucket', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.putObject({ key: 'k' })).rejects.toMatchObject({
       data: expect.objectContaining({ bucket: client.config.bucket })
     });
   });
 
   test('getObject NoSuchKey error', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue({ name: 'NoSuchKey' });
+    client.sendCommand = vi.fn().mockRejectedValue({ name: 'NoSuchKey' });
     await expect(client.getObject('k')).rejects.toMatchObject({
       name: 'NoSuchKey',
       data: expect.objectContaining({ bucket: client.config.bucket })
@@ -616,7 +616,7 @@ describe('Client Error Simulation', () => {
   });
 
   test('getObject UnknownError', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.getObject('k')).rejects.toMatchObject({
       name: 'UnknownError',
       data: expect.objectContaining({ bucket: client.config.bucket })
@@ -624,7 +624,7 @@ describe('Client Error Simulation', () => {
   });
 
   test('headObject NoSuchKey error', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue({ name: 'NoSuchKey' });
+    client.sendCommand = vi.fn().mockRejectedValue({ name: 'NoSuchKey' });
     await expect(client.headObject('k')).rejects.toMatchObject({
       name: 'NoSuchKey',
       data: expect.objectContaining({ bucket: client.config.bucket })
@@ -632,7 +632,7 @@ describe('Client Error Simulation', () => {
   });
 
   test('headObject UnknownError', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.headObject('k')).rejects.toMatchObject({
       name: 'UnknownError',
       data: expect.objectContaining({ bucket: client.config.bucket })
@@ -640,14 +640,14 @@ describe('Client Error Simulation', () => {
   });
 
   test('copyObject error includes bucket', async () => {
-    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    client.client.send = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.copyObject({ from: 'a', to: 'b' })).rejects.toMatchObject({
       data: expect.objectContaining({ bucket: client.config.bucket })
     });
   });
 
   test('deleteObject error includes bucket', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.deleteObject('k')).rejects.toMatchObject({
       data: expect.objectContaining({ bucket: client.config.bucket })
     });
@@ -656,7 +656,7 @@ describe('Client Error Simulation', () => {
   test('deleteObjects error includes bucket', async () => {
     const customError = new Error('fail');
     customError.data = { bucket: client.config.bucket };
-    client.exists = jest.fn().mockRejectedValue(customError);
+    client.exists = vi.fn().mockRejectedValue(customError);
     const result = await client.deleteObjects(['k1', 'k2']);
     expect(result).toHaveProperty('notFound');
     expect(Array.isArray(result.notFound)).toBe(true);
@@ -671,49 +671,49 @@ describe('Client Error Simulation', () => {
   });
 
   test('listObjects error includes bucket', async () => {
-    client.sendCommand = jest.fn().mockRejectedValue(new Error('fail'));
+    client.sendCommand = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.listObjects({ prefix: 'x' })).rejects.toMatchObject({
       data: expect.objectContaining({ bucket: client.config.bucket })
     });
   });
 
   test('moveObject error includes bucket', async () => {
-    client.copyObject = jest.fn().mockRejectedValue(new Error('fail'));
+    client.copyObject = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.moveObject({ from: 'a', to: 'b' })).rejects.toMatchObject({
       data: expect.objectContaining({ bucket: client.config.bucket })
     });
   });
 
   test('moveAllObjects error includes bucket', async () => {
-    client.getAllKeys = jest.fn().mockResolvedValue(['a', 'b']);
-    client.moveObject = jest.fn()
+    client.getAllKeys = vi.fn().mockResolvedValue(['a', 'b']);
+    client.moveObject = vi.fn()
       .mockResolvedValueOnce(true)
       .mockRejectedValueOnce(new Error('fail'));
     await expect(client.moveAllObjects({ prefixFrom: 'a', prefixTo: 'b' })).rejects.toThrow('Some objects could not be moved');
   });
 
   test('getAllKeys propagates error', async () => {
-    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    client.listObjects = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.getAllKeys({ prefix: 'x' })).rejects.toBeDefined();
   });
 
   test('getKeysPage propagates error', async () => {
-    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    client.listObjects = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.getKeysPage({ prefix: 'x', amount: 10 })).rejects.toBeDefined();
   });
 
   test('getContinuationTokenAfterOffset propagates error', async () => {
-    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    client.listObjects = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.getContinuationTokenAfterOffset({ prefix: 'x', offset: 10 })).rejects.toBeDefined();
   });
 
   test('count propagates error', async () => {
-    client.listObjects = jest.fn().mockRejectedValue(new Error('fail'));
+    client.listObjects = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.count({ prefix: 'x' })).rejects.toBeDefined();
   });
 
   test('deleteAll propagates error', async () => {
-    client.client.send = jest.fn().mockRejectedValue(new Error('fail'));
+    client.client.send = vi.fn().mockRejectedValue(new Error('fail'));
     await expect(client.deleteAll({ prefix: 'x' })).rejects.toBeDefined();
   });
 });

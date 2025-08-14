@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import CachePlugin from '../../src/plugins/cache.plugin.js';
 import { S3Cache } from '../../src/plugins/cache/s3-cache.class.js';

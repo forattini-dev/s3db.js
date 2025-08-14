@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach } from 'vitest';
 import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';

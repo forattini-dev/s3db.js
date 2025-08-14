@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import { MetricsPlugin } from '../../src/plugins/metrics.plugin.js';
 

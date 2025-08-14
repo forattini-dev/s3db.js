@@ -1,5 +1,5 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
-jest.setTimeout(15000);
+import { describe, expect, test, beforeEach, vi } from 'vitest';
+// vi.setConfig({ testTimeout: 15000 });
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Partitions - Real Integration Tests', () => {
@@ -8,6 +8,12 @@ describe('Resource Partitions - Real Integration Tests', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('suite=resources/partitions');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   test('Basic Partition Creation and Usage', async () => {

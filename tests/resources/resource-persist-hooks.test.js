@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { createDatabaseForTest } from "../config.js";
 
 describe("Resource Hook Persistence", () => {

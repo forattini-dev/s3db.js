@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, test } from 'vitest';
 import { sha256, encrypt, decrypt } from '#src/concerns/crypto.js';
 
 // Node.js only: Buffer and process are available

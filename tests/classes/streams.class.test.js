@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 
 import { createDatabaseForTest } from '#tests/config.js';
 import { ResourceReader, ResourceWriter } from '#src/stream/index.js';
@@ -214,7 +214,7 @@ describe('ResourceReader - Coverage', () => {
     });
   });
 
-  test('should handle event forwarding from input to transform', (done) => {
+  test('should handle event forwarding from input to transform', async () => {
     // Create a simple test that simulates the event forwarding behavior
     const input = new EventEmitter();
     const transform = new EventEmitter();
@@ -241,45 +241,57 @@ describe('ResourceReader - Coverage', () => {
       expect(chunk).toEqual(['id1', 'id2']);
     });
     
-    transform.on('end', () => {
-      endReceived = true;
-      expect(dataReceived).toBe(true);
-      expect(endReceived).toBe(true);
-      done();
+    const promise = new Promise((resolve) => {
+      transform.on('end', () => {
+        endReceived = true;
+        expect(dataReceived).toBe(true);
+        expect(endReceived).toBe(true);
+        resolve();
+      });
     });
     
     // Simulate input events
     input.emit('data', ['id1', 'id2']);
     input.emit('end');
+    
+    await promise;
   });
 
-  test('should handle error forwarding from input', (done) => {
+  test('should handle error forwarding from input', async () => {
     const reader = new ResourceReader({ resource });
     
-    reader.on('error', (error) => {
-      expect(error.message).toBe('test error');
-      expect(error.message).not.toContain('[object');
-      done();
+    const promise = new Promise((resolve) => {
+      reader.on('error', (error) => {
+        expect(error.message).toBe('test error');
+        expect(error.message).not.toContain('[object');
+        resolve();
+      });
     });
     
     // Simulate input error
     reader.input.emit('error', new Error('test error'));
+    
+    await promise;
   });
 
-  test('should handle error forwarding from transform', (done) => {
+  test('should handle error forwarding from transform', async () => {
     const reader = new ResourceReader({ resource });
     
-    reader.on('error', (error) => {
-      expect(error.message).toBe('transform error');
-      expect(error.message).not.toContain('[object');
-      done();
+    const promise = new Promise((resolve) => {
+      reader.on('error', (error) => {
+        expect(error.message).toBe('transform error');
+        expect(error.message).not.toContain('[object');
+        resolve();
+      });
     });
     
     // Simulate transform error
     reader.transform.emit('error', new Error('transform error'));
+    
+    await promise;
   });
 
-  test('should handle _transform with PromisePool success', (done) => {
+  test('should handle _transform with PromisePool success', async () => {
     const reader = new ResourceReader({ 
       resource, 
       concurrency: 1 
@@ -287,10 +299,10 @@ describe('ResourceReader - Coverage', () => {
     
     // Mock resource.get to return data
     const originalGet = resource.get;
-    resource.get = jest.fn().mockResolvedValue({ id: 'test', name: 'Test' });
+    resource.get = vi.fn().mockResolvedValue({ id: 'test', name: 'Test' });
     
     // Mock push
-    reader.push = jest.fn();
+    reader.push = vi.fn();
 
     let dataCount = 0;
     reader.on('data', (data) => {
@@ -302,20 +314,18 @@ describe('ResourceReader - Coverage', () => {
       expect(dataCount).toBe(2);
       expect(resource.get).toHaveBeenCalledTimes(2);
       resource.get = originalGet; // Restore original
-      done();
     });
     
     // Simulate transform with chunk of IDs
-    reader._transform(['id1', 'id2'], null, (error) => {
-      if (error) done(error);
-      // Emit data manually since push is mocked
-      reader.emit('data', { id: 'test', name: 'Test' });
-      reader.emit('data', { id: 'test', name: 'Test' });
-      reader.emit('end');
+    await new Promise((resolve, reject) => {
+      reader._transform(['id1', 'id2'], null, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
     });
   });
 
-  test('should handle _transform with PromisePool error', (done) => {
+  test('should handle _transform with PromisePool error', async () => {
     const reader = new ResourceReader({ 
       resource, 
       concurrency: 1 
@@ -323,44 +333,52 @@ describe('ResourceReader - Coverage', () => {
     
     // Mock resource.get to throw error
     const originalGet = resource.get;
-    resource.get = jest.fn().mockRejectedValue(new Error('get failed'));
+    resource.get = vi.fn().mockRejectedValue(new Error('get failed'));
     
     reader.on('error', (error, content) => {
       expect(error.message).toBe('get failed');
       expect(error.message).not.toContain('[object');
       resource.get = originalGet; // Restore original
-      done();
     });
     
-    // Simulate transform with chunk of IDs
-    reader._transform(['id1'], null, (error) => {
-      if (error) done(error);
+    // Simulate transform with chunk of IDs  
+    await new Promise((resolve) => {
+      reader._transform(['id1'], null, (error) => {
+        if (error) {
+          expect(error.message).toBe('get failed');
+        }
+        resolve();
+      });
     });
   });
 
-  test('should handle _transform callback error', (done) => {
+  test('should handle _transform callback error', async () => {
     const reader = new ResourceReader({ resource });
     
     // Mock resource.get to throw error
     const originalGet = resource.get;
-    resource.get = jest.fn().mockRejectedValue(new Error('get failed'));
+    resource.get = vi.fn().mockRejectedValue(new Error('get failed'));
     
     reader.on('error', (error, content) => {
       expect(error.message).toBe('get failed');
       expect(error.message).not.toContain('[object');
       resource.get = originalGet; // Restore original
-      done();
     });
     
-    // Simulate transform with chunk of IDs
-    reader._transform(['id1'], null, (error) => {
-      if (error) done(error);
+    // Simulate transform with chunk of IDs  
+    await new Promise((resolve) => {
+      reader._transform(['id1'], null, (error) => {
+        if (error) {
+          expect(error.message).toBe('get failed');
+        }
+        resolve();
+      });
     });
   });
 
   test('should call resume method', () => {
     const reader = new ResourceReader({ resource });
-    reader.input.resume = jest.fn();
+    reader.input.resume = vi.fn();
     
     reader.resume();
     

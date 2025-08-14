@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach } from 'vitest';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Pagination - Real Integration Tests', () => {

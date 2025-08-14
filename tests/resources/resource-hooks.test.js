@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach } from 'vitest';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Hooks - Real Integration Tests', () => {
@@ -7,6 +7,12 @@ describe('Resource Hooks - Real Integration Tests', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('suite=resources/hooks');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   test('Basic Hook Registration and Execution', async () => {

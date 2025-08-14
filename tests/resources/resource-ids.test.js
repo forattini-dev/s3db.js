@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { describe, expect, test, beforeEach, jest, afterEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, vi, afterEach } from 'vitest';
 
 import { ResourceError } from '#src/errors.js';
 import { Resource } from '#src/resource.class.js';

@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, vi } from 'vitest';
 
 import Database from '#src/database.class.js';
 import { CostsPlugin } from '#src/plugins/costs.plugin.js';
@@ -422,6 +422,13 @@ describe('Costs Plugin', () => {
           email: 'string|required'
         }
       });
+      
+      // Clean up any existing data
+      try {
+        await users.deleteAll({ paranoid: false });
+      } catch (error) {
+        // Ignore errors if no data exists
+      }
     });
 
     test('should track costs for resource creation', async () => {

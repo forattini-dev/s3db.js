@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, vi } from 'vitest';
 
 import Database, { S3db } from '../../src/database.class.js';
 import Resource from '#src/resource.class.js';
@@ -243,7 +243,7 @@ describe('Database Constructor and Edge Cases', () => {
 
   test('should handle constructor with all options', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
-    const mockPlugin = { setup: jest.fn(), start: jest.fn() };
+    const mockPlugin = { setup: vi.fn(), start: vi.fn() };
     
     const db = new Database({
       verbose: true,
@@ -317,18 +317,18 @@ describe('Database Constructor and Edge Cases', () => {
 
 describe('Database Plugin System', () => {
   test('should start plugins with function plugins', async () => {
-    const setupMock = jest.fn();
-    const startMock = jest.fn();
+    const setupMock = vi.fn();
+    const startMock = vi.fn();
     function MockPlugin(db) {
       setupMock(db);
       startMock();
       return {
-        beforeSetup: jest.fn(),
+        beforeSetup: vi.fn(),
         setup: setupMock,
-        afterSetup: jest.fn(),
-        beforeStart: jest.fn(),
+        afterSetup: vi.fn(),
+        beforeStart: vi.fn(),
         start: startMock,
-        afterStart: jest.fn()
+        afterStart: vi.fn()
       };
     }
 
@@ -341,15 +341,15 @@ describe('Database Plugin System', () => {
   });
 
   test('should start plugins with instance plugins', async () => {
-    const setupMock = jest.fn();
-    const startMock = jest.fn();
+    const setupMock = vi.fn();
+    const startMock = vi.fn();
     const mockPlugin = {
-      beforeSetup: jest.fn(),
+      beforeSetup: vi.fn(),
       setup: setupMock,
-      afterSetup: jest.fn(),
-      beforeStart: jest.fn(),
+      afterSetup: vi.fn(),
+      beforeStart: vi.fn(),
       start: startMock,
-      afterStart: jest.fn()
+      afterStart: vi.fn()
     };
 
     const db = await createDatabaseForTest('suite=classes/database-plugin-instance-test', {
@@ -361,8 +361,8 @@ describe('Database Plugin System', () => {
   });
 
   test('should handle plugins without hooks', async () => {
-    const setupMock = jest.fn();
-    const startMock = jest.fn();
+    const setupMock = vi.fn();
+    const startMock = vi.fn();
     const mockPlugin = {
       setup: setupMock,
       start: startMock
@@ -429,7 +429,7 @@ describe('Database Resource Updates and Versioning', () => {
       }
     });
 
-    const versionSpy = jest.spyOn(resource, 'emit');
+    const versionSpy = vi.spyOn(resource, 'emit');
 
     // Update resource to trigger version change
     await database.createResource({
@@ -608,8 +608,8 @@ describe('Database Metadata and File Operations', () => {
       attributes: { name: 'string|required' }
     });
 
-    const uploadSpy = jest.spyOn(database.client, 'putObject');
-    const emitSpy = jest.spyOn(database, 'emit');
+    const uploadSpy = vi.spyOn(database.client, 'putObject');
+    const emitSpy = vi.spyOn(database, 'emit');
 
     await database.uploadMetadataFile();
 
@@ -654,7 +654,7 @@ describe('Database Metadata and File Operations', () => {
       }
     };
 
-    const uploadSpy = jest.spyOn(database.client, 'putObject');
+    const uploadSpy = vi.spyOn(database.client, 'putObject');
 
     await database.uploadMetadataFile();
 
@@ -758,23 +758,32 @@ describe('Database Configuration and Status', () => {
 });
 
 describe('Database.generateDefinitionHash is stable and deterministic', () => {
-  const db = new Database({ client: { bucket: 'test', keyPrefix: 'test/' } });
-  const def1 = {
-    attributes: { name: 'string|required', email: 'email|required' },
-    options: { timestamps: true }
-  };
-  const def2 = {
-    attributes: { name: 'string|required', email: 'email|required' },
-    options: { timestamps: true }
-  };
-  expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
+  test('should generate same hash for identical definitions', () => {
+    const db = new Database({ client: { bucket: 'test', keyPrefix: 'test/' } });
+    const def1 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    const def2 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
+  });
 
-      // Changing an attribute, the hash should change
-  const def3 = {
-    attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
-    options: { timestamps: true }
-  };
-  expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+  test('should generate different hash for different definitions', () => {
+    const db = new Database({ client: { bucket: 'test', keyPrefix: 'test/' } });
+    const def1 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    // Changing an attribute, the hash should change
+    const def3 = {
+      attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
+      options: { timestamps: true }
+    };
+    expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+  });
 });
 
 describe('Database Definition Hash Stability', () => {

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import BaseReplicator from '../../src/plugins/replicators/base-replicator.class.js';
 import S3dbReplicator from '../../src/plugins/replicators/s3db-replicator.class.js';

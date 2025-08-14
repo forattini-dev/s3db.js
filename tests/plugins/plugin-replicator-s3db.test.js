@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseForTest, sleep } from '../config.js';
 import { ReplicatorPlugin } from '#src/plugins/replicator.plugin.js';
 import S3dbReplicator from '#src/plugins/replicators/s3db-replicator.class.js';
@@ -54,6 +54,16 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
         attributes: { id: 'string', name: 'string' }
       })
     ]);
+    
+    // Clean up any existing data
+    try {
+      await Promise.all([
+        dbA.resources['users'].deleteAll({ paranoid: false }),
+        dbB.resources['users'].deleteAll({ paranoid: false })
+      ]);
+    } catch (error) {
+      // Ignore errors if no data exists
+    }
     
     plugin = new ReplicatorPlugin({
       verbose: false,

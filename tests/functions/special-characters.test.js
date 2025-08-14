@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 
 describe('Comprehensive Special Characters Encoding Tests', () => {
@@ -18,6 +18,13 @@ describe('Comprehensive Special Characters Encoding Tests', () => {
       },
       behavior: 'user-managed'
     });
+    
+    // Clean up any existing data
+    try {
+      await resource.deleteAll({ paranoid: false });
+    } catch (error) {
+      // Ignore errors if no data exists
+    }
   });
 
   afterAll(async () => {

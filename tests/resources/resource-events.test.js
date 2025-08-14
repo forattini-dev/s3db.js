@@ -1,6 +1,6 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach } from 'vitest';
 import { createDatabaseForTest } from '#tests/config.js';
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 describe('Resource Events - Always Emit Complete Content', () => {
   let database;
@@ -8,6 +8,12 @@ describe('Resource Events - Always Emit Complete Content', () => {
   beforeEach(async () => {
     database = createDatabaseForTest('suite=resources/events');
     await database.connect();
+  });
+
+  afterEach(async () => {
+    if (database && typeof database.disconnect === 'function') {
+      await database.disconnect();
+    }
   });
 
   describe('user-managed behavior', () => {
@@ -393,7 +399,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
         content: 'X'.repeat(3000) // Too large
       };
 
-      const eventEmitted = jest.fn();
+      const eventEmitted = vi.fn();
       resource.once('insert', eventEmitted);
 
       try {
@@ -540,7 +546,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
 
   describe('Events Configuration - Auto-registered Listeners', () => {
     test('should register single event listener from config', async () => {
-      const insertListener = jest.fn();
+      const insertListener = vi.fn();
       
       const resource = await database.createResource({
         name: 'single_event_test',
@@ -570,9 +576,9 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should register multiple event listeners from config', async () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
-      const listener3 = jest.fn();
+      const listener1 = vi.fn();
+      const listener2 = vi.fn();
+      const listener3 = vi.fn();
       
       const resource = await database.createResource({
         name: 'multiple_events_test',
@@ -610,11 +616,11 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should register listeners for different event types', async () => {
-      const insertListener = jest.fn();
-      const updateListener = jest.fn();
-      const deleteListener = jest.fn();
-      const listListener = jest.fn();
-      const countListener = jest.fn();
+      const insertListener = vi.fn();
+      const updateListener = vi.fn();
+      const deleteListener = vi.fn();
+      const listListener = vi.fn();
+      const countListener = vi.fn();
       
       const resource = await database.createResource({
         name: 'different_events_test',
@@ -659,7 +665,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should receive correct event data with $before and $after for updates', async () => {
-      const updateListener = jest.fn();
+      const updateListener = vi.fn();
       
       const resource = await database.createResource({
         name: 'before_after_test',
@@ -705,8 +711,8 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should work with bulk operations', async () => {
-      const insertManyListener = jest.fn();
-      const deleteManyListener = jest.fn();
+      const insertManyListener = vi.fn();
+      const deleteManyListener = vi.fn();
       
       const resource = await database.createResource({
         name: 'bulk_operations_test',
@@ -738,7 +744,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should work with different behaviors', async () => {
-      const insertListener = jest.fn();
+      const insertListener = vi.fn();
       
       // Test with body-overflow behavior
       const resource = await database.createResource({
@@ -770,8 +776,8 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
          test('should call all listeners even if some fail', async () => {
-       const workingListener1 = jest.fn();
-       const workingListener2 = jest.fn();
+       const workingListener1 = vi.fn();
+       const workingListener2 = vi.fn();
        
        const resource = await database.createResource({
          name: 'error_handling_test',
@@ -854,8 +860,8 @@ describe('Resource Events - Always Emit Complete Content', () => {
     });
 
     test('should not interfere with manually added listeners', async () => {
-      const configListener = jest.fn();
-      const manualListener = jest.fn();
+      const configListener = vi.fn();
+      const manualListener = vi.fn();
       
       const resource = await database.createResource({
         name: 'manual_listeners_test',

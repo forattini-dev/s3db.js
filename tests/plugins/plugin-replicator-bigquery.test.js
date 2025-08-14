@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import BigqueryReplicator from '#src/plugins/replicators/bigquery-replicator.class.js';
 
 describe('BigQuery Replicator Tests', () => {

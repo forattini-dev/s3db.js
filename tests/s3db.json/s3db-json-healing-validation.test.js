@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { Database } from '../../src/database.class.js';
 import { createDatabaseForTest } from '../config.js';
 import { readFileSync } from 'fs';

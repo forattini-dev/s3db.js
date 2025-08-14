@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, test } from 'vitest';
 
 describe('Index Files - Export Tests', () => {
   test('main index.js should export core classes', async () => {

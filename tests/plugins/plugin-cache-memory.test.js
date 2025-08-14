@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import CachePlugin from '../../src/plugins/cache.plugin.js';
 import { MemoryCache } from '../../src/plugins/cache/index.js';
@@ -545,7 +545,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
 
       // Mock driver error - wrap in try-catch to avoid unhandled promise rejection
       const originalGet = cachePlugin.driver.get;
-      cachePlugin.driver.get = jest.fn().mockRejectedValue(new Error('Memory cache error'));
+      cachePlugin.driver.get = vi.fn().mockRejectedValue(new Error('Memory cache error'));
 
       try {
         // Operations should still work or handle the error
@@ -563,7 +563,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
     test('should handle null/undefined cache values', async () => {
       // Mock driver to return null
       const originalGet = cachePlugin.driver.get;
-      cachePlugin.driver.get = jest.fn().mockResolvedValue(null);
+      cachePlugin.driver.get = vi.fn().mockResolvedValue(null);
 
       await users.insert({ name: 'Null Test', email: 'null@example.com', department: 'Test', region: 'US', status: 'active' });
 

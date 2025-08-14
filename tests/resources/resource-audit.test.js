@@ -1,5 +1,5 @@
 import { createDatabaseForTest } from '#tests/config.js';
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { Plugin } from '../../src/plugins/plugin.class.js';
 
 let database, audits;

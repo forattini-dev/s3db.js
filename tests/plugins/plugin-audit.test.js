@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, vi } from 'vitest';
 
 import Database from '#src/database.class.js';
 import { AuditPlugin } from '#src/plugins/audit.plugin.js';
@@ -6,15 +6,15 @@ import { createDatabaseForTest, createClientForTest } from '#tests/config.js';
 
 function createMockResource(overrides = {}) {
   return {
-    count: jest.fn().mockResolvedValue(10),
-    listIds: jest.fn().mockResolvedValue(['id1', 'id2']),
-    getMany: jest.fn().mockResolvedValue([{ id: 'id1' }]),
-    getAll: jest.fn().mockResolvedValue([{ id: 'id1' }, { id: 'id2' }]),
-    page: jest.fn().mockResolvedValue([{ id: 'id1' }]),
-    insert: jest.fn().mockResolvedValue({ id: 'new_id' }),
-    update: jest.fn().mockResolvedValue({ id: 'updated_id' }),
-    delete: jest.fn().mockResolvedValue(true),
-    deleteMany: jest.fn().mockResolvedValue(true),
+    count: vi.fn().mockResolvedValue(10),
+    listIds: vi.fn().mockResolvedValue(['id1', 'id2']),
+    getMany: vi.fn().mockResolvedValue([{ id: 'id1' }]),
+    getAll: vi.fn().mockResolvedValue([{ id: 'id1' }, { id: 'id2' }]),
+    page: vi.fn().mockResolvedValue([{ id: 'id1' }]),
+    insert: vi.fn().mockResolvedValue({ id: 'new_id' }),
+    update: vi.fn().mockResolvedValue({ id: 'updated_id' }),
+    delete: vi.fn().mockResolvedValue(true),
+    deleteMany: vi.fn().mockResolvedValue(true),
     useMiddleware: () => {},
     ...overrides
   };
@@ -71,6 +71,14 @@ describe('Audit Plugin', () => {
       },
       behavior: 'body-overflow'
     });
+    
+    // Clean up any existing data
+    try {
+      await users.deleteAll({ paranoid: false });
+      await testResource.deleteAll({ paranoid: false });
+    } catch (error) {
+      // Ignore errors if no data exists
+    }
     
     // Clean up audit logs before each test
     if (auditPlugin && auditPlugin.auditResource) {
@@ -868,7 +876,7 @@ describe('Audit Plugin', () => {
       
       // Mock database to simulate error
       const errorDatabase = {
-        createResource: jest.fn().mockRejectedValue(new Error('Resource creation failed')),
+        createResource: vi.fn().mockRejectedValue(new Error('Resource creation failed')),
         resources: {}
       };
 
@@ -879,7 +887,7 @@ describe('Audit Plugin', () => {
     test('should handle audit logging errors gracefully', async () => {
       // Mock audit resource to simulate error
       const originalInsert = auditPlugin.auditResource.insert;
-      auditPlugin.auditResource.insert = jest.fn().mockRejectedValue(new Error('Insert failed'));
+      auditPlugin.auditResource.insert = vi.fn().mockRejectedValue(new Error('Insert failed'));
 
       const userData = {
         id: 'user-error',
@@ -899,7 +907,7 @@ describe('Audit Plugin', () => {
     test('should handle query errors gracefully', async () => {
       // Mock audit resource to simulate query error
       const originalGetAll = auditPlugin.auditResource.getAll;
-      auditPlugin.auditResource.getAll = jest.fn().mockRejectedValue(new Error('Query failed'));
+      auditPlugin.auditResource.getAll = vi.fn().mockRejectedValue(new Error('Query failed'));
 
       // Should return empty array instead of throwing
       const logs = await auditPlugin.getAuditLogs({ resourceName: 'users' });
@@ -944,8 +952,8 @@ describe('Audit Plugin', () => {
     beforeEach(() => {
       // Mock the audit resource to avoid S3 errors
       mockAuditResource = {
-        insert: jest.fn().mockResolvedValue({ id: 'mock-audit-id' }),
-        getAll: jest.fn().mockResolvedValue([])
+        insert: vi.fn().mockResolvedValue({ id: 'mock-audit-id' }),
+        getAll: vi.fn().mockResolvedValue([])
       };
       mockedAuditPlugin = new AuditPlugin({ enabled: true, includeData: true, includePartitions: true });
       mockedAuditPlugin.auditResource = mockAuditResource;
@@ -983,7 +991,7 @@ describe('Audit Plugin', () => {
 
     test('should handle update operations correctly', async () => {
       const userId = 'user-update-mock';
-      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: jest.fn().mockResolvedValue([]) });
+      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: vi.fn(), emit: vi.fn(), get: vi.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: vi.fn().mockResolvedValue([]) });
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const updateData = { id: userId, name: 'John Smith', age: 31 };
       const beforeData = { id: userId, name: 'John Doe', age: 30 };
@@ -996,7 +1004,7 @@ describe('Audit Plugin', () => {
     });
     test('should handle delete operations correctly', async () => {
       const userId = 'user-delete-mock';
-      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: jest.fn().mockResolvedValue([]) });
+      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: vi.fn(), emit: vi.fn(), get: vi.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: vi.fn().mockResolvedValue([]) });
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const deleteData = { id: userId, name: 'John Doe', age: 30 };
       const deleteCall = mockResource.on.mock.calls.find(call => call[0] === 'delete');
@@ -1026,10 +1034,10 @@ describe('Audit Plugin', () => {
           byDepartment: { fields: { department: 'string' } },
           byRegion: { fields: { region: 'string' } }
         } },
-        on: jest.fn(),
-        emit: jest.fn(),
-        get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', department: 'IT', region: 'SP' }),
-        deleteMany: jest.fn().mockResolvedValue([])
+        on: vi.fn(),
+        emit: vi.fn(),
+        get: vi.fn().mockResolvedValue({ id: userId, name: 'John Doe', department: 'IT', region: 'SP' }),
+        deleteMany: vi.fn().mockResolvedValue([])
       });
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const updateData = { id: userId, name: 'John Doe', department: 'IT', region: 'SP' };
@@ -1056,7 +1064,7 @@ describe('Audit Plugin', () => {
       };
       const mockPlugin = new AuditPlugin({ enabled: true, includeData: true, includePartitions: true, maxDataSize: 100 });
       mockPlugin.auditResource = mockAuditResource;
-      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), deleteMany: jest.fn().mockResolvedValue([]) });
+      const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: vi.fn(), emit: vi.fn(), deleteMany: vi.fn().mockResolvedValue([]) });
       mockPlugin.installEventListenersForResource(mockResource);
       const insertCall = mockResource.on.mock.calls.find(call => call[0] === 'insert');
       if (insertCall) { await insertCall[1](largeData); }

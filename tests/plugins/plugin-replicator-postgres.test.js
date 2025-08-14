@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from '@jest/globals';
+import { describe, test, expect, afterEach } from 'vitest';
 import PostgresReplicator from '#src/plugins/replicators/postgres-replicator.class.js';
 
 describe('Postgres Replicator Tests', () => {

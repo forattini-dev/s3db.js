@@ -1,4 +1,4 @@
-import { describe, test, expect, jest } from '@jest/globals';
+import { describe, test, expect, vi } from 'vitest';
 
 import { ReplicatorPlugin } from '#src/plugins/replicator.plugin.js';
 
@@ -137,7 +137,7 @@ describe('ReplicatorPlugin - listener installation', () => {
   test('installs listeners for insert, update, delete', () => {
     const resource = {
       name: 'users',
-      on: jest.fn(),
+      on: vi.fn(),
       database: {}
     };
     const plugin = new ReplicatorPlugin({
@@ -156,7 +156,7 @@ describe('ReplicatorPlugin - listener installation', () => {
   test('does not install listeners for replicator log resource', () => {
     const resource = {
       name: 'replicator_logs',
-      on: jest.fn(),
+      on: vi.fn(),
       database: {}
     };
     const plugin = new ReplicatorPlugin({
@@ -174,7 +174,7 @@ describe('ReplicatorPlugin - listener installation', () => {
   test('does not install listeners multiple times on same resource', () => {
     const resource = {
       name: 'users',
-      on: jest.fn(),
+      on: vi.fn(),
       database: {}
     };
     const plugin = new ReplicatorPlugin({

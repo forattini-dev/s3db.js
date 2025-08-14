@@ -1,5 +1,5 @@
 import { cloneDeep, merge } from 'lodash-es';
-import { describe, expect, test, beforeEach } from '@jest/globals';
+import { describe, expect, test, beforeEach } from 'vitest';
 import { join } from 'path';
 
 import Client from '#src/client.class.js';

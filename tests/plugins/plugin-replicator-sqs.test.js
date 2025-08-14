@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll, jest } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createDatabaseForTest, createSqsQueueForTest, createSqsClientForTest, sleep } from '../config.js';
 import { ReplicatorPlugin } from '../../src/plugins/replicator.plugin.js';
 import SqsReplicator from '../../src/plugins/replicators/sqs-replicator.class.js';
@@ -121,7 +121,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
   beforeEach(() => {
     mockSqsClient = {
-      send: jest.fn().mockResolvedValue({ MessageId: 'test-msg-id' })
+      send: vi.fn().mockResolvedValue({ MessageId: 'test-msg-id' })
     };
   });
 
@@ -258,7 +258,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
   test('should handle replication errors gracefully', async () => {
     const errorClient = {
-      send: jest.fn().mockRejectedValue(new Error('SQS error'))
+      send: vi.fn().mockRejectedValue(new Error('SQS error'))
     };
     
     const replicator = new SqsReplicator({ queueUrl: 'test-queue', verbose: true });
@@ -267,7 +267,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     replicator.resources = { users: true };
 
     // Mock console.warn to avoid output during test
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation();
 
     const result = await replicator.replicate('users', 'insert', { id: '1' }, '1');
     
@@ -335,7 +335,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
   test('should handle batch replication with errors', async () => {
     const errorClient = {
-      send: jest.fn().mockRejectedValue(new Error('Batch error'))
+      send: vi.fn().mockRejectedValue(new Error('Batch error'))
     };
     
     const replicator = new SqsReplicator({ queueUrl: 'test-queue' });
@@ -344,7 +344,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     replicator.resources = { users: true };
 
     // Mock console.warn to avoid output during test
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation();
 
     const records = [
       { id: '1', operation: 'insert', data: { id: '1', name: 'User 1' } }
@@ -384,7 +384,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     replicator.enabled = true;
     replicator.resources = { users: true };
 
-    const emitSpy = jest.spyOn(replicator, 'emit');
+    const emitSpy = vi.spyOn(replicator, 'emit');
 
     await replicator.replicate('users', 'insert', { id: '1' }, '1');
     
@@ -398,7 +398,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
 
   test('should emit error events on failed replication', async () => {
     const errorClient = {
-      send: jest.fn().mockRejectedValue(new Error('SQS error'))
+      send: vi.fn().mockRejectedValue(new Error('SQS error'))
     };
     
     const replicator = new SqsReplicator({ queueUrl: 'test-queue' });
@@ -406,7 +406,7 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     replicator.enabled = true;
     replicator.resources = { users: true };
 
-    const emitSpy = jest.spyOn(replicator, 'emit');
+    const emitSpy = vi.spyOn(replicator, 'emit');
 
     await replicator.replicate('users', 'insert', { id: '1' }, '1');
     
