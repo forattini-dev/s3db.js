@@ -28,7 +28,8 @@ export class Database extends EventEmitter {
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = {}; // Initialize plugins registry
+    this.plugins = options.plugins || []; // Keep the original array for backward compatibility
+    this.pluginRegistry = {}; // Initialize plugins registry as separate object
     this.pluginList = options.plugins || []; // Keep the list for backward compatibility
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
@@ -395,7 +396,7 @@ export class Database extends EventEmitter {
         
         // Register the plugin using the same naming convention as usePlugin()
         const pluginName = this._getPluginName(plugin);
-        this.plugins[pluginName] = plugin;
+        this.pluginRegistry[pluginName] = plugin;
       });
       
       await Promise.all(setupProms);
