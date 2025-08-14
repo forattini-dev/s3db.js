@@ -1478,18 +1478,37 @@ class AuditPlugin extends plugin_class_default {
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
     const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
-    let query = {};
-    if (resourceName) query.resourceName = resourceName;
-    if (operation) query.operation = operation;
-    if (recordId) query.recordId = recordId;
-    if (partition) query.partition = partition;
-    if (startDate || endDate) {
-      query.timestamp = {};
-      if (startDate) query.timestamp.$gte = startDate;
-      if (endDate) query.timestamp.$lte = endDate;
+    const hasFilters = resourceName || operation || recordId || partition || startDate || endDate;
+    let items = [];
+    if (hasFilters) {
+      const fetchSize = Math.min(1e4, Math.max(1e3, (limit + offset) * 20));
+      const result = await this.auditResource.list({ limit: fetchSize });
+      items = result || [];
+      if (resourceName) {
+        items = items.filter((log) => log.resourceName === resourceName);
+      }
+      if (operation) {
+        items = items.filter((log) => log.operation === operation);
+      }
+      if (recordId) {
+        items = items.filter((log) => log.recordId === recordId);
+      }
+      if (partition) {
+        items = items.filter((log) => log.partition === partition);
+      }
+      if (startDate || endDate) {
+        items = items.filter((log) => {
+          const timestamp = new Date(log.timestamp);
+          if (startDate && timestamp < new Date(startDate)) return false;
+          if (endDate && timestamp > new Date(endDate)) return false;
+          return true;
+        });
+      }
+      return items.slice(offset, offset + limit);
+    } else {
+      const result = await this.auditResource.page({ size: limit, offset });
+      return result.items || [];
     }
-    const result = await this.auditResource.page({ query, limit, offset });
-    return result.items || [];
   }
   async getRecordHistory(resourceName, recordId) {
     return await this.getAuditLogs({ resourceName, recordId });
