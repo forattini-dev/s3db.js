@@ -14,89 +14,33 @@ export default {
   input: 'src/index.js',
 
   output: [
-    // CommonJS for Node.js
+    // CommonJS for Node.js (require)
     {
       format: 'cjs',
       file: 'dist/s3db.cjs.js',
       inlineDynamicImports: true,
-      exports: 'named',
+      exports: 'named', // Only named exports for CJS
+      sourcemap: true,
     },
+    // ES Modules for modern Node.js and bundlers (import)
     {
-      format: 'cjs',
-      file: 'dist/s3db.cjs.min.js',
-      inlineDynamicImports: true,
-      exports: 'named',
-      plugins: [terser()],
-    },
-    // ES Modules for modern bundlers and Node.js
-    {
-      format: 'es',
+      format: 'es', 
       file: 'dist/s3db.es.js',
       inlineDynamicImports: true,
       exports: 'named',
-    },
-    {
-      format: 'es',
-      file: 'dist/s3db.es.min.js',
-      inlineDynamicImports: true,
-      exports: 'named',
-      plugins: [terser()],
-    },
-    // IIFE for browser CDN usage
-    {
-      format: 'iife',
-      file: 'dist/s3db.iife.js',
-      inlineDynamicImports: true,
-      name: 'S3DB',
-      exports: 'named',
-      globals: {
-        // Nomes reais dos CDNs populares
-        'nanoid': 'nanoid',
-        'lodash-es': '_', 
-        '@aws-sdk/client-s3': 'AWS',
-        'fastest-validator': 'FastestValidator',
-        'json-stable-stringify': 'stringify',
-        'flat': 'flat',
-        '@supercharge/promise-pool': 'PromisePool',
-        // Node.js built-ins (polyfilled automaticamente)
-        'crypto': 'crypto',
-        'zlib': 'zlib',
-        'node:stream/web': 'streams'
-      },
-    },
-    {
-      format: 'iife',
-      file: 'dist/s3db.iife.min.js',
-      inlineDynamicImports: true,
-      name: 'S3DB',
-      exports: 'named',
-      globals: {
-        'nanoid': 'nanoid',
-        'lodash-es': '_',
-        '@aws-sdk/client-s3': 'AWS', 
-        'fastest-validator': 'FastestValidator',
-        'json-stable-stringify': 'stringify',
-        'flat': 'flat',
-        '@supercharge/promise-pool': 'PromisePool',
-        'crypto': 'crypto',
-        'zlib': 'zlib',
-        'node:stream/web': 'streams'
-      },
-      plugins: [terser()],
+      sourcemap: true,
     },
   ],
 
   plugins: [
     commonjs(),
     resolve({
-      preferBuiltins: false,
-      browser: true, // Prefer browser versions when available
+      preferBuiltins: true, // S3DB is Node.js focused
+      exportConditions: ['node'], // Target Node.js environment
     }),
     json(),
-    nodePolyfills({
-      include: ['crypto', 'zlib'],
-      preferBuiltins: false,
-    }),
+    // Remove node polyfills - S3DB is Node.js only
+    // nodePolyfills not needed for server-side library
     
     // Copy TypeScript definitions to dist (only once)
     {
@@ -141,8 +85,7 @@ export default {
     
     esbuild({
       sourceMap: true,
-      target: 'esnext',
-      format: 'esm',
+      target: 'node18', // Target Node.js 18+ (modern but stable)
       treeShaking: true,
       define: {
         __PACKAGE_VERSION__: `"${packageJson.version}"`
@@ -151,22 +94,29 @@ export default {
   ],
 
   external: [
+    // Core dependencies (bundled with package)
     '@aws-sdk/client-s3',
-    '@aws-sdk/client-sqs',
-    '@smithy/node-http-handler',
-    '@google-cloud/bigquery',
+    '@smithy/node-http-handler', 
     '@supercharge/promise-pool',
-    'avsc',
-    'amqplib',
-    'crypto',
     'fastest-validator',
     'json-stable-stringify',
     'flat',
     'lodash-es',
     'nanoid',
-    'node:stream/web',
-    'pg',
+    'dotenv',
+    // Peer dependencies (user installs)
+    '@aws-sdk/client-sqs',
+    '@google-cloud/bigquery',
+    'amqplib',
+    'pg', 
     'uuid',
+    // Node.js built-ins
+    'crypto',
+    'fs/promises',
+    'node:crypto',
+    'node:fs',
+    'node:stream/web',
+    'node:zlib',
     'zlib',
   ],
 };
