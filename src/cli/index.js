@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import Table from 'cli-table3';
 import inquirer from 'inquirer';
-import { S3db } from '../classes/database.class.js';
+import { S3db } from '../database.class.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
