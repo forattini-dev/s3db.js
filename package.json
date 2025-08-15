@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "9.0.1",
+  "version": "9.1.0",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
   "main": "dist/s3db.cjs.js",
   "module": "dist/s3db.es.js",
@@ -24,7 +24,7 @@
     "s3",
     "aws",
     "database",
-    "orm", 
+    "orm",
     "nosql",
     "document-store",
     "cloud-database",
@@ -50,7 +50,7 @@
   },
   "files": [
     "dist/",
-    "src/", 
+    "src/",
     "bin/cli.js",
     "mcp/server.js",
     "README.md",
