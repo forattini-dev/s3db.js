@@ -75,9 +75,9 @@ export function analyzeString(str) {
 
   // Only Latin-1 extended characters
   // These get corrupted but don't cause errors
-  // Choose based on efficiency: if Latin-1 is >20% of string, use base64
+  // Choose based on efficiency: if Latin-1 is >50% of string, use base64
   const latin1Ratio = latin1Count / str.length;
-  if (latin1Ratio > 0.2) {
+  if (latin1Ratio > 0.5) {
     return {
       type: 'base64',
       safe: false,

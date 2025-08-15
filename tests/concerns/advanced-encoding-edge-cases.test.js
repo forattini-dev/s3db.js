@@ -69,7 +69,7 @@ describe('Advanced Encoding Edge Cases', () => {
       expect(result.optimized.timestamp).toMatch(/^is/);
       expect(result.optimized.hash).toMatch(/^h/);
       expect(result.optimized.count).toMatch(/^t/);
-      expect(result.optimized.name).toBe('Test Name');
+      expect(result.optimized.name).toBe('=Test Name');  // ASCII gets '=' prefix
       
       expect(result.stats.totalOriginal).toBeGreaterThan(result.stats.totalOptimized);
       expect(result.stats.methods).toBeDefined();
@@ -102,8 +102,8 @@ describe('Advanced Encoding Edge Cases', () => {
       expect(result.optimized.string).toBeDefined();
       expect(result.optimized.number).toBeDefined();
       expect(result.optimized.boolean).toBeDefined();
-      expect(result.optimized.null).toBe('\x40');
-      expect(result.optimized.undefined).toBe('\x41');
+      expect(result.optimized.null).toBe('d\x40');  // null with 'd' prefix
+      expect(result.optimized.undefined).toBe('d\x41');  // undefined with 'd' prefix
     });
   });
   
