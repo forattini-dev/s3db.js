@@ -60,6 +60,22 @@ if (!versions[currentVersion]) {
 - `metrics`: Performance monitoring
 - `fulltext`: Text search
 
+### Advanced Metadata Encoding
+**Implementation**: `src/concerns/advanced-metadata-encoding.js`
+**Optimizations**:
+- ISO timestamps → Unix Base62 (67% savings)
+- UUIDs → Binary Base64 (33% savings)
+- Dictionary encoding for common values (95% savings)
+- Hex strings → Base64 (33% savings)
+- Large numbers → Base62 (40-46% savings)
+- UTF-8 byte calculation memory cache (2-3x faster)
+
+**Dictionary**: 34 common values mapped to single bytes
+- Statuses: `active`, `inactive`, `pending`, etc.
+- Booleans: `true`, `false`, `yes`, `no`
+- HTTP methods: `GET`, `POST`, `PUT`, `DELETE`
+- Null values: `null`, `undefined`, `none`
+
 ### Encryption
 **Algorithm**: AES-256-GCM with PBKDF2 key derivation
 **Implementation**: `src/concerns/crypto.js`
