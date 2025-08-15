@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { advancedEncode, advancedDecode } from '../src/concerns/advanced-metadata-encoding.js';
-import { metadataEncode, metadataDecode } from '../src/concerns/metadata-encoding.js';
+import { advancedEncode, advancedDecode } from './src/concerns/advanced-metadata-encoding.js';
+import { metadataEncode, metadataDecode } from './src/concerns/metadata-encoding.js';
 
 /**
  * Comprehensive benchmark of compression methods
