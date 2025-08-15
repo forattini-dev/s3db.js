@@ -1,4 +1,4 @@
-import { S3db } from "../src/index.js";
+import { S3db } from "../../src/index.js";
 import { setupDatabase, teardownDatabase } from './database.js';
 
 /**

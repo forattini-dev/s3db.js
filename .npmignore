@@ -1,16 +1,82 @@
+# 🚫 NPM IGNORE - Keep npm package lean and professional
+# =======================================================
+
+# Development and build artifacts
 .cursor/
 .github/
 .shrimp/
 coverage/
 examples/
-node_modules/
-src/
 tests/
+scripts/
+build-standalone/
+build-binaries/
+releases/
+
+# Development tools and configs
 .cursorignore
 .env
+.env.*
 .gitignore
 *.log
 docker-compose.yml
 jest.config.js
-*.md
-rollup.config.js
+rollup.*.config.*
+vitest.config.js
+vitest.setup.js
+tsconfig.json
+benchmark-compression.js
+
+# Standalone binary files (use GitHub releases instead)
+bin/s3db-cli-standalone.js
+mcp/server-standalone.js
+
+# All compiled binaries (DO NOT SHIP)
+bin/s3db-linux*
+bin/s3db-macos*
+bin/s3db-win*
+bin/*.exe
+bin/compiled/
+releases/*
+
+# Source maps and debug files
+*.map
+*.map.js
+
+# Documentation (keep only essential README.md)
+ROADMAP.md
+OPTIMIZATION_SUMMARY.md
+CLAUDE.md
+CONTRIBUTING.md
+CHANGELOG.md
+docs/
+
+# Test artifacts
+test-cache/
+test-cache-config/
+test-partition-cache/
+*.test.js
+*.spec.js
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# CI/CD files
+.coveralls.yml
+
+# ✅ WHAT GETS PUBLISHED TO NPM:
+# ├── src/           - Source code for debugging/transparency
+# ├── dist/          - Compiled JavaScript (CJS + ESM)
+# ├── bin/cli.js     - Node.js CLI script (lightweight)
+# ├── mcp/server.js  - MCP server (lightweight) 
+# ├── package.json   - Package metadata
+# ├── README.md      - Main documentation
+# └── LICENSE        - License file
+#
+# 📦 Standalone binaries available via GitHub Releases

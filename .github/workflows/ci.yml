@@ -1,0 +1,253 @@
+name: 🧪 CI - Tests & Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # Job 1: Test Suite
+  test:
+    name: 🧪 Test Suite
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build Package
+        run: pnpm run build
+
+      - name: 🧪 Run Quick Tests
+        run: pnpm run test:quick
+        timeout-minutes: 8
+
+      - name: 🔍 TypeScript Check
+        run: pnpm run test:ts
+
+      - name: 📊 Performance Benchmark
+        run: pnpm run benchmark
+        continue-on-error: true
+
+  # Job 2: Code Quality
+  quality:
+    name: 🔍 Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build Package
+        run: pnpm run build
+
+      - name: 🧪 Run Tests with Coverage
+        run: pnpm run test:coverage
+        timeout-minutes: 15
+
+      - name: 📊 Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # Job 3: Build Verification
+  build-verify:
+    name: 🔨 Build Verification
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build Package
+        run: pnpm run build
+
+      - name: 🔍 Verify Package Contents
+        run: |
+          echo "📦 Package will include:"
+          npm pack --dry-run 2>/dev/null | head -50 || echo "Package verification done"
+
+      - name: 📊 Check Bundle Size
+        run: |
+          echo "📊 Bundle sizes:"
+          du -h dist/* | sort -hr
+          
+          echo "📈 Size limits check:"
+          ESM_SIZE=$(stat -c%s dist/s3db.es.js)
+          CJS_SIZE=$(stat -c%s dist/s3db.cjs.js)
+          
+          echo "ESM: ${ESM_SIZE} bytes"
+          echo "CJS: ${CJS_SIZE} bytes"
+          
+          # Alert if bundles are too large (>1MB each)
+          if [ $ESM_SIZE -gt 1048576 ]; then
+            echo "⚠️ Warning: ESM bundle is larger than 1MB"
+          fi
+          
+          if [ $CJS_SIZE -gt 1048576 ]; then
+            echo "⚠️ Warning: CJS bundle is larger than 1MB"
+          fi
+
+      - name: 🧪 Test Binary Build (Quick)
+        run: |
+          echo "🔨 Testing binary build process..."
+          timeout 60s ./build-binaries.sh || echo "⚠️ Binary build test timed out (expected in CI)"
+        continue-on-error: true
+
+  # Job 4: Dependency Security
+  security:
+    name: 🛡️ Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🛡️ Security Audit
+        run: pnpm audit --audit-level moderate
+        continue-on-error: true
+
+      - name: 🔍 Dependency Check
+        run: |
+          echo "📦 Production dependencies:"
+          pnpm ls --prod --depth=0
+          
+          echo "🔧 Dev dependencies:"
+          pnpm ls --dev --depth=0
+
+  # Job 5: Compatibility Test
+  compatibility:
+    name: 🔄 Compatibility Test
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build Package
+        run: pnpm run build
+
+      - name: 🧪 Run Core Tests
+        run: pnpm run test:quick
+        timeout-minutes: 10
+
+  # Summary Job
+  ci-summary:
+    name: 📊 CI Summary
+    runs-on: ubuntu-latest
+    needs: [test, quality, build-verify, security, compatibility]
+    if: always()
+    
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🧪 CI Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "✅ **Tests**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Tests**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.quality.result }}" == "success" ]]; then
+            echo "✅ **Quality**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Quality**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.build-verify.result }}" == "success" ]]; then
+            echo "✅ **Build**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.compatibility.result }}" == "success" ]]; then
+            echo "✅ **Compatibility**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Compatibility**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY

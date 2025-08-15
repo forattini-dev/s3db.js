@@ -309,15 +309,6 @@ const s3db = new S3db({
 });
 ```
 
-#### Performance Impact
-
-| Configuration | Use Case | Performance | Resource Usage |
-|---------------|----------|-------------|----------------|
-| **Default** | Most applications | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
-| **High Concurrency** | APIs, web services | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| **Aggressive** | Data processing, bulk ops | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| **Conservative** | Serverless, IoT | ⭐⭐⭐ | ⭐⭐ |
-
 ### Authentication Methods
 
 <details>

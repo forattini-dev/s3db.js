@@ -259,9 +259,83 @@ reader.pipe(transformStream).pipe(writeStream);
 **Usage**: `npx s3db-mcp-server --transport=sse`
 **Port**: 8000 (default)
 
+## CLI & Standalone Binaries
+
+### s3db CLI
+**Location**: `bin/s3db-cli.js` (ES modules), `bin/s3db-cli-standalone.js` (CommonJS)
+**Commands**:
+```bash
+s3db list                            # List all resources
+s3db query <resource>                # Query records
+s3db insert <resource> -d '<json>'   # Insert data
+s3db get <resource> <id>             # Get by ID
+s3db delete <resource> <id>          # Delete record
+s3db count <resource>                # Count records
+```
+
+**Connection**: Via `--connection` or `S3DB_CONNECTION` env var
+**Features**: Colored output, progress spinners, table formatting
+
+### Building Standalone Binaries
+**Script**: `build-binaries.sh` or `pnpm run build:binaries`
+**Process**:
+1. Bundle with esbuild (includes ALL dependencies)
+2. Compile with pkg to native executables
+3. Output to `bin/standalone/`
+
+**Created Binaries**:
+- `s3db-linux-x64` (~47MB)
+- `s3db-macos-x64` (~52MB) - Needs codesigning
+- `s3db-macos-arm64` (~45MB) - Needs codesigning
+- `s3db-win-x64.exe` (~39MB)
+- `s3db-mcp-linux-x64` (~47MB)
+- `s3db-mcp-macos-x64` (~52MB)
+- `s3db-mcp-macos-arm64` (~45MB)
+- `s3db-mcp-win-x64.exe` (~39MB)
+
+**CommonJS Compatibility**: 
+- Created `server-standalone.js` for MCP to avoid `import.meta.url` issues
+- Uses `__dirname` instead of `fileURLToPath(import.meta.url)`
+- Bundles include AWS SDK, all CLI tools (chalk, ora, commander)
+
+### NPM Distribution
+**Best Practices**:
+- Don't include binaries in NPM package (too large)
+- Binaries available via GitHub releases
+- NPM package includes source + dist builds only
+
 ## Testing Infrastructure
+
+### Test Coverage
+**Target**: 90% minimum coverage for all files
+**Current**: ~89.8% overall coverage
+**Commands**:
+```bash
+pnpm test                   # All tests
+pnpm test:js               # JavaScript only
+pnpm test:ts               # TypeScript only
+pnpm test:plugins          # Plugin tests
+pnpm test:cache            # Cache tests
+pnpm test:audit            # Audit (memory intensive)
+
+# Coverage report
+pnpm test:js-coverage
+
+# Single test file
+node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/path/to/test.js
+```
+
+### Test Infrastructure
 - Jest with ESM (`--experimental-vm-modules`)
 - LocalStack for S3 simulation
-- Coverage in `coverage/`
+- Coverage reports in `coverage/`
 - TypeScript validation in `tests/typescript/`
 - Max workers: 1 (prevents race conditions)
+- Vitest support via `vitest.config.js`
+
+### Key Test Files
+- `tests/functions/advanced-metadata-encoding.test.js` - Encoding optimizations
+- `tests/concerns/calculator.test.js` - UTF-8 byte calculations
+- `tests/s3db.json/` - Self-healing JSON tests
+- `tests/plugins/` - All plugin functionality
+- `tests/resources/` - Resource CRUD operations
