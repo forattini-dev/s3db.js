@@ -1,3 +1,8 @@
+// Memory cache for UTF-8 byte calculations
+// Using Map for simple strings, with a max size to prevent memory leaks
+const utf8BytesMemory = new Map();
+const UTF8_MEMORY_MAX_SIZE = 10000; // Limit memory size
+
 /**
  * Calculates the size in bytes of a string using UTF-8 encoding
  * @param {string} str - The string to calculate size for
@@ -6,6 +11,11 @@
 export function calculateUTF8Bytes(str) {
   if (typeof str !== 'string') {
     str = String(str);
+  }
+  
+  // Check memory first
+  if (utf8BytesMemory.has(str)) {
+    return utf8BytesMemory.get(str);
   }
   
   let bytes = 0;
@@ -31,8 +41,34 @@ export function calculateUTF8Bytes(str) {
     }
   }
   
+  // Add to memory if under size limit
+  if (utf8BytesMemory.size < UTF8_MEMORY_MAX_SIZE) {
+    utf8BytesMemory.set(str, bytes);
+  } else if (utf8BytesMemory.size === UTF8_MEMORY_MAX_SIZE) {
+    // Simple LRU: clear half of memory when full
+    const entriesToDelete = Math.floor(UTF8_MEMORY_MAX_SIZE / 2);
+    let deleted = 0;
+    for (const key of utf8BytesMemory.keys()) {
+      if (deleted >= entriesToDelete) break;
+      utf8BytesMemory.delete(key);
+      deleted++;
+    }
+    utf8BytesMemory.set(str, bytes);
+  }
+  
   return bytes;
 }
+
+/**
+ * Clear the UTF-8 memory cache (useful for testing or memory management)
+ */
+export function clearUTF8Memory() {
+  utf8BytesMemory.clear();
+}
+
+// Aliases for backward compatibility
+export const clearUTF8Memo = clearUTF8Memory;
+export const clearUTF8Cache = clearUTF8Memory;
 
 /**
  * Calculates the size in bytes of attribute names (mapped to digits)
