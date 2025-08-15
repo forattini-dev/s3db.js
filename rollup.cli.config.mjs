@@ -36,15 +36,7 @@ export default {
       preferBuiltins: true,
       exportConditions: ['node']
     }),
-    commonjs(),
-    terser({
-      compress: {
-        drop_console: false, // Keep console for CLI
-        drop_debugger: true
-      },
-      mangle: {
-        keep_fnames: true // Keep function names for debugging
-      }
-    })
+    commonjs()
+    // terser disabled for CLI due to eval usage in REPL
   ]
 };
