@@ -21,7 +21,7 @@ describe('Advanced Metadata Encoding', () => {
         }
         
         const decoded = advancedDecode(result.encoded);
-        expect(decoded).toBe(status.toLowerCase());
+        expect(decoded).toBe(status);
       });
     });
 
@@ -47,7 +47,7 @@ describe('Advanced Metadata Encoding', () => {
         expect(result.method).toBe('dictionary');
         
         const decoded = advancedDecode(result.encoded);
-        expect(decoded).toBe(method.toLowerCase());
+        expect(decoded).toBe(method);  // Should preserve uppercase
       });
     });
 
@@ -60,7 +60,7 @@ describe('Advanced Metadata Encoding', () => {
         }
         
         const decoded = advancedDecode(result.encoded);
-        expect(decoded).toBe(val.toLowerCase());
+        expect(decoded).toBe(val);
       });
     });
   });
@@ -213,9 +213,16 @@ describe('Advanced Metadata Encoding', () => {
       const numbers = ['123', '1', '99'];
       numbers.forEach(num => {
         const result = advancedEncode(num);
-        // Small numbers may still get encoded with base62 if beneficial
-        if (result.method === 'none') {
-          expect(result.encoded).toBe(num);
+        // Small numbers may be in dictionary or get '=' prefix for ASCII
+        if (result.method === 'dictionary') {
+          // '1' and '0' are in dictionary
+          const decoded = advancedDecode(result.encoded);
+          expect(decoded).toBe(num);
+        } else if (result.method === 'none') {
+          // ASCII numbers get '=' prefix
+          expect(result.encoded).toBe('=' + num);
+          const decoded = advancedDecode(result.encoded);
+          expect(decoded).toBe(num);
         } else if (result.method === 'number') {
           const decoded = advancedDecode(result.encoded);
           expect(decoded).toBe(num);
@@ -249,7 +256,7 @@ describe('Advanced Metadata Encoding', () => {
       const ascii = 'Hello World 123';
       const result = advancedEncode(ascii);
       expect(result.method).toBe('none');
-      expect(result.encoded).toBe(ascii);
+      expect(result.encoded).toBe('=' + ascii);  // ASCII gets '=' prefix
     });
   });
 
@@ -264,8 +271,8 @@ describe('Advanced Metadata Encoding', () => {
     });
 
     test('should handle null and undefined', () => {
-      expect(advancedEncode(null).encoded).toBe('\x40'); // null in dictionary
-      expect(advancedEncode(undefined).encoded).toBe('\x41'); // undefined in dictionary
+      expect(advancedEncode(null).encoded).toBe('d\x40'); // null in dictionary with 'd' prefix
+      expect(advancedEncode(undefined).encoded).toBe('d\x41'); // undefined in dictionary with 'd' prefix
       
       expect(advancedDecode(null)).toBe(null);
       expect(advancedDecode(undefined)).toBe(undefined);
@@ -305,7 +312,7 @@ describe('Advanced Metadata Encoding', () => {
       expect(encoded.id).toMatch(/^u/);
       expect(encoded.status).toBe('d\x01'); // 'active' in dictionary
       expect(encoded.enabled).toBe('d\x10'); // 'true' in dictionary
-      expect(encoded.method).toBe('d\x21'); // 'POST' in dictionary
+      expect(encoded.method).toBe('d\x21U'); // 'POST' in dictionary with uppercase flag
       expect(encoded.createdAt).toMatch(/^im/);
       expect(encoded.hash).toMatch(/^h/);
       expect(encoded.count).toMatch(/^[nt]/); // Could be timestamp or number
@@ -316,7 +323,7 @@ describe('Advanced Metadata Encoding', () => {
       expect(decoded.id).toBe(metadata.id);
       expect(decoded.status).toBe('active');
       expect(decoded.enabled).toBe('true');
-      expect(decoded.method).toBe('post'); // lowercase
+      expect(decoded.method).toBe('POST'); // uppercase preserved with 'U' flag
       expect(decoded.createdAt).toBe(metadata.createdAt);
       expect(decoded.hash).toBe(metadata.hash);
       expect(decoded.count).toBe(metadata.count);
@@ -365,7 +372,7 @@ describe('Advanced Metadata Encoding', () => {
       expect(decoded.mixed[0]).toBeDefined();
       // '123' is a small number, might or might not be encoded
       expect(decoded.mixed[1]).toBeDefined();
-      expect(decoded.mixed[2]).toBe('get'); // lowercase
+      expect(decoded.mixed[2]).toBe('GET'); // uppercase preserved
     });
 
     test('should handle mixed types', () => {

@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config({ debug: false, silent: true });
 
 import { join } from 'path';
-import S3db from '../src/index.js';
+import S3db from '../../src/index.js';
 
 const createPrefix = () => join('s3db', 'examples', new Date().toISOString().substring(0, 10), 'example-' + Date.now());
 

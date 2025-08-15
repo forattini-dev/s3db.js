@@ -106,8 +106,8 @@ function isBeneficialInteger(str) {
  */
 export function advancedEncode(value) {
   // Handle null and undefined
-  if (value === null) return { encoded: DICTIONARY['null'], method: 'dictionary' };
-  if (value === undefined) return { encoded: DICTIONARY['undefined'], method: 'dictionary' };
+  if (value === null) return { encoded: 'd' + DICTIONARY['null'], method: 'dictionary' };
+  if (value === undefined) return { encoded: 'd' + DICTIONARY['undefined'], method: 'dictionary' };
   
   const str = String(value);
   
@@ -117,8 +117,10 @@ export function advancedEncode(value) {
   // Check dictionary first (most efficient)
   const lowerStr = str.toLowerCase();
   if (DICTIONARY[lowerStr]) {
+    // Preserve uppercase for HTTP methods
+    const isUpperCase = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'].includes(str);
     return { 
-      encoded: 'd' + DICTIONARY[lowerStr], 
+      encoded: 'd' + DICTIONARY[lowerStr] + (isUpperCase ? 'U' : ''), 
       method: 'dictionary',
       original: str 
     };
@@ -197,8 +199,9 @@ export function advancedEncode(value) {
       }
     }
     
-    // Pure ASCII, no encoding needed
-    return { encoded: str, method: 'none' };
+    // Pure ASCII - add a marker to avoid confusion with encoded values
+    // Use '=' as marker for unencoded ASCII (not used by other encodings)
+    return { encoded: '=' + str, method: 'none' };
   }
   
   // Has special characters - fallback to smart encoding
@@ -227,11 +230,24 @@ export function advancedDecode(value) {
   if (!value || typeof value !== 'string') return value;
   if (value.length === 0) return '';
   
+  // Check if this is actually an encoded value
+  // Encoded values have specific prefixes followed by encoded content
   const prefix = value[0];
   const content = value.slice(1);
   
+  // If no content after prefix, it's not encoded
+  if (content.length === 0 && prefix !== 'd') {
+    return value;
+  }
+  
   switch (prefix) {
     case 'd': // Dictionary
+      if (content.endsWith('U')) {
+        // Uppercase flag for HTTP methods
+        const key = content.slice(0, -1);
+        const val = REVERSE_DICTIONARY[key];
+        return val ? val.toUpperCase() : value;
+      }
       return REVERSE_DICTIONARY[content] || value;
     
     case 'i': // ISO timestamp
@@ -276,7 +292,10 @@ export function advancedDecode(value) {
     case 't': // Timestamp
     case 'n': // Number
       try {
-        return String(fromBase62(content));
+        const num = fromBase62(content);
+        // If decoding failed, return original
+        if (isNaN(num)) return value;
+        return String(num);
       } catch {
         return value;
       }
@@ -294,6 +313,9 @@ export function advancedDecode(value) {
       } catch {
         return value;
       }
+    
+    case '=': // Unencoded ASCII
+      return content;
     
     default:
       // No prefix - return as is

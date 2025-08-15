@@ -5,6 +5,10 @@ coverage/
 *.log
 .coveralls.yml
 
+# Build directories  
+build-binaries/
+releases/
+
 # Test directories
 test-cache/
 test-cache-config/
