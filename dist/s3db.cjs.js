@@ -73,9 +73,14 @@ const decodeDecimal = (s) => {
   return negative ? -num : num;
 };
 
+const utf8BytesMemory = /* @__PURE__ */ new Map();
+const UTF8_MEMORY_MAX_SIZE = 1e4;
 function calculateUTF8Bytes(str) {
   if (typeof str !== "string") {
     str = String(str);
+  }
+  if (utf8BytesMemory.has(str)) {
+    return utf8BytesMemory.get(str);
   }
   let bytes = 0;
   for (let i = 0; i < str.length; i++) {
@@ -93,8 +98,25 @@ function calculateUTF8Bytes(str) {
       }
     }
   }
+  if (utf8BytesMemory.size < UTF8_MEMORY_MAX_SIZE) {
+    utf8BytesMemory.set(str, bytes);
+  } else if (utf8BytesMemory.size === UTF8_MEMORY_MAX_SIZE) {
+    const entriesToDelete = Math.floor(UTF8_MEMORY_MAX_SIZE / 2);
+    let deleted = 0;
+    for (const key of utf8BytesMemory.keys()) {
+      if (deleted >= entriesToDelete) break;
+      utf8BytesMemory.delete(key);
+      deleted++;
+    }
+    utf8BytesMemory.set(str, bytes);
+  }
   return bytes;
 }
+function clearUTF8Memory() {
+  utf8BytesMemory.clear();
+}
+const clearUTF8Memo = clearUTF8Memory;
+const clearUTF8Cache = clearUTF8Memory;
 function calculateAttributeNamesSize(mappedObject) {
   let totalSize = 0;
   for (const key of Object.keys(mappedObject)) {
@@ -9673,6 +9695,146 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 function Agent() {}
 Agent.defaultMaxSockets = 4;
 
+function analyzeString(str) {
+  if (!str || typeof str !== "string") {
+    return { type: "none", safe: true };
+  }
+  let hasLatin1 = false;
+  let hasMultibyte = false;
+  let asciiCount = 0;
+  let latin1Count = 0;
+  let multibyteCount = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 32 && code <= 126) {
+      asciiCount++;
+    } else if (code < 32 || code === 127) {
+      hasMultibyte = true;
+      multibyteCount++;
+    } else if (code >= 128 && code <= 255) {
+      hasLatin1 = true;
+      latin1Count++;
+    } else {
+      hasMultibyte = true;
+      multibyteCount++;
+    }
+  }
+  if (!hasLatin1 && !hasMultibyte) {
+    return {
+      type: "ascii",
+      safe: true,
+      stats: { ascii: asciiCount, latin1: 0, multibyte: 0 }
+    };
+  }
+  if (hasMultibyte) {
+    const multibyteRatio = multibyteCount / str.length;
+    if (multibyteRatio > 0.3) {
+      return {
+        type: "base64",
+        safe: false,
+        reason: "high multibyte content",
+        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
+      };
+    }
+    return {
+      type: "url",
+      safe: false,
+      reason: "contains multibyte characters",
+      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
+    };
+  }
+  const latin1Ratio = latin1Count / str.length;
+  if (latin1Ratio > 0.2) {
+    return {
+      type: "base64",
+      safe: false,
+      reason: "high Latin-1 content",
+      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+    };
+  }
+  return {
+    type: "url",
+    safe: false,
+    reason: "contains Latin-1 extended characters",
+    stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+  };
+}
+function metadataEncode(value) {
+  if (value === null) {
+    return { encoded: "null", encoding: "special" };
+  }
+  if (value === void 0) {
+    return { encoded: "undefined", encoding: "special" };
+  }
+  const stringValue = String(value);
+  const analysis = analyzeString(stringValue);
+  switch (analysis.type) {
+    case "none":
+    case "ascii":
+      return {
+        encoded: stringValue,
+        encoding: "none",
+        analysis
+      };
+    case "url":
+      return {
+        encoded: "u:" + encodeURIComponent(stringValue),
+        encoding: "url",
+        analysis
+      };
+    case "base64":
+      return {
+        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
+        encoding: "base64",
+        analysis
+      };
+    default:
+      return {
+        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
+        encoding: "base64",
+        analysis
+      };
+  }
+}
+function metadataDecode(value) {
+  if (value === "null") {
+    return null;
+  }
+  if (value === "undefined") {
+    return void 0;
+  }
+  if (value === null || value === void 0 || typeof value !== "string") {
+    return value;
+  }
+  if (value.startsWith("u:")) {
+    if (value.length === 2) return value;
+    try {
+      return decodeURIComponent(value.substring(2));
+    } catch (err) {
+      return value;
+    }
+  }
+  if (value.startsWith("b:")) {
+    if (value.length === 2) return value;
+    try {
+      const decoded = Buffer.from(value.substring(2), "base64").toString("utf8");
+      return decoded;
+    } catch (err) {
+      return value;
+    }
+  }
+  if (value.length > 0 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
+    try {
+      const decoded = Buffer.from(value, "base64").toString("utf8");
+      if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
+        return decoded;
+      }
+    } catch {
+    }
+  }
+  return value;
+}
+
 const S3_DEFAULT_REGION = "us-east-1";
 const S3_DEFAULT_ENDPOINT = "https://s3.us-east-1.amazonaws.com";
 class ConnectionString {
@@ -9825,13 +9987,8 @@ class Client extends EventEmitter {
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
         const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, "_");
-        const stringValue = String(v);
-        const hasSpecialChars = /[^\x00-\x7F]/.test(stringValue);
-        if (hasSpecialChars) {
-          stringMetadata[validKey] = Buffer.from(stringValue, "utf8").toString("base64");
-        } else {
-          stringMetadata[validKey] = stringValue;
-        }
+        const { encoded } = metadataEncode(v);
+        stringMetadata[validKey] = encoded;
       }
     }
     const options = {
@@ -9871,22 +10028,7 @@ class Client extends EventEmitter {
       if (response.Metadata) {
         const decodedMetadata = {};
         for (const [key2, value] of Object.entries(response.Metadata)) {
-          if (typeof value === "string") {
-            try {
-              const decoded = Buffer.from(value, "base64").toString("utf8");
-              const hasSpecialChars = /[^\x00-\x7F]/.test(decoded);
-              const isValidBase64 = Buffer.from(decoded, "utf8").toString("base64") === value;
-              if (isValidBase64 && hasSpecialChars && decoded !== value) {
-                decodedMetadata[key2] = decoded;
-              } else {
-                decodedMetadata[key2] = value;
-              }
-            } catch (decodeError) {
-              decodedMetadata[key2] = value;
-            }
-          } else {
-            decodedMetadata[key2] = value;
-          }
+          decodedMetadata[key2] = metadataDecode(value);
         }
         response.Metadata = decodedMetadata;
       }
@@ -13522,7 +13664,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = try_fn_default(() => true ? "8.2.0" : "latest");
+      const [ok, err, version] = try_fn_default(() => true ? "9.0.1" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -15726,6 +15868,9 @@ exports.calculateEffectiveLimit = calculateEffectiveLimit;
 exports.calculateSystemOverhead = calculateSystemOverhead;
 exports.calculateTotalSize = calculateTotalSize;
 exports.calculateUTF8Bytes = calculateUTF8Bytes;
+exports.clearUTF8Cache = clearUTF8Cache;
+exports.clearUTF8Memo = clearUTF8Memo;
+exports.clearUTF8Memory = clearUTF8Memory;
 exports.decode = decode;
 exports.decodeDecimal = decodeDecimal;
 exports.decrypt = decrypt;
