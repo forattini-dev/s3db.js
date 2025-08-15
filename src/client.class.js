@@ -20,6 +20,7 @@ import {
 import tryFn from "./concerns/try-fn.js";
 import { md5 } from "./concerns/crypto.js";
 import { idGenerator } from "./concerns/id.js";
+import { metadataEncode, metadataDecode } from "./concerns/metadata-encoding.js";
 import { ConnectionString } from "./connection-string.class.js";
 import { mapAwsError, UnknownError, NoSuchKey, NotFound } from "./errors.js";
 
@@ -119,23 +120,16 @@ export class Client extends EventEmitter {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
     
-    // Ensure all metadata values are strings and keys are valid
+    // Ensure all metadata values are strings and use smart encoding
     const stringMetadata = {};
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
-        // Ensure key is a valid string and value is a string
+        // Ensure key is a valid string
         const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
-        const stringValue = String(v);
         
-        // Check if value contains non-ASCII characters that might be corrupted by HTTP headers
-        const hasSpecialChars = /[^\x00-\x7F]/.test(stringValue);
-        
-        if (hasSpecialChars) {
-          // Encode as base64 without prefix - we'll detect it intelligently on read
-          stringMetadata[validKey] = Buffer.from(stringValue, 'utf8').toString('base64');
-        } else {
-          stringMetadata[validKey] = stringValue;
-        }
+        // Smart encode the value
+        const { encoded } = metadataEncode(v);
+        stringMetadata[validKey] = encoded;
       }
     }
     
@@ -178,30 +172,11 @@ export class Client extends EventEmitter {
     try {
       response = await this.sendCommand(new GetObjectCommand(options));
       
-      // Smart decode: try to detect base64-encoded UTF-8 values without prefix
+      // Smart decode metadata values
       if (response.Metadata) {
         const decodedMetadata = {};
         for (const [key, value] of Object.entries(response.Metadata)) {
-          if (typeof value === 'string') {
-            // Try to decode as base64 and check if it's valid UTF-8 with special chars
-            try {
-              const decoded = Buffer.from(value, 'base64').toString('utf8');
-              // Check if decoded string is different from original and contains non-ASCII chars
-              const hasSpecialChars = /[^\x00-\x7F]/.test(decoded);
-              const isValidBase64 = Buffer.from(decoded, 'utf8').toString('base64') === value;
-              
-              if (isValidBase64 && hasSpecialChars && decoded !== value) {
-                decodedMetadata[key] = decoded;
-              } else {
-                decodedMetadata[key] = value;
-              }
-            } catch (decodeError) {
-              // If decode fails, use original value
-              decodedMetadata[key] = value;
-            }
-          } else {
-            decodedMetadata[key] = value;
-          }
+          decodedMetadata[key] = metadataDecode(value);
         }
         response.Metadata = decodedMetadata;
       }
