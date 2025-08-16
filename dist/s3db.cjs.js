@@ -1734,6 +1734,12 @@ class BackupPlugin extends Plugin {
       }
     }
   }
+  async _getBackupMetadata(backupId) {
+    const [ok, err, backup] = await tryFn(
+      () => this.database.resource(this.config.backupMetadataResource).get(backupId)
+    );
+    return ok ? backup : null;
+  }
   /**
    * List available backups
    */
