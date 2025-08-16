@@ -4,9 +4,12 @@ export { default as Plugin } from './plugin.class.js'
 
 // plugins:
 export * from './audit.plugin.js'
+export * from './backup.plugin.js'
 export * from './cache.plugin.js'
 export * from './costs.plugin.js'
 export * from './fulltext.plugin.js'
 export * from './metrics.plugin.js'
 export * from './queue-consumer.plugin.js'
 export * from './replicator.plugin.js'
+export * from './scheduler.plugin.js'
+export * from './state-machine.plugin.js'
