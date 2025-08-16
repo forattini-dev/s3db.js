@@ -84,6 +84,7 @@
  * - Tags are useful for cache invalidation and monitoring
  * - Case sensitivity affects key matching and storage efficiency
  */
+import zlib from 'node:zlib';
 import { Cache } from "./cache.class.js"
 
 export class MemoryCache extends Cache {
@@ -93,6 +94,18 @@ export class MemoryCache extends Cache {
     this.meta = {};
     this.maxSize = config.maxSize !== undefined ? config.maxSize : 1000;
     this.ttl = config.ttl !== undefined ? config.ttl : 300000;
+    
+    // Compression configuration
+    this.enableCompression = config.enableCompression !== undefined ? config.enableCompression : false;
+    this.compressionThreshold = config.compressionThreshold !== undefined ? config.compressionThreshold : 1024;
+    
+    // Stats for compression
+    this.compressionStats = {
+      totalCompressed: 0,
+      totalOriginalSize: 0,
+      totalCompressedSize: 0,
+      compressionRatio: 0
+    };
   }
 
   async _set(key, data) {
@@ -106,13 +119,59 @@ export class MemoryCache extends Cache {
         delete this.meta[oldestKey];
       }
     }
-    this.cache[key] = data;
-    this.meta[key] = { ts: Date.now() };
+    
+    // Prepare data for storage
+    let finalData = data;
+    let compressed = false;
+    let originalSize = 0;
+    let compressedSize = 0;
+    
+    // Apply compression if enabled
+    if (this.enableCompression) {
+      try {
+        // Serialize data to measure size
+        const serialized = JSON.stringify(data);
+        originalSize = Buffer.byteLength(serialized, 'utf8');
+        
+        // Compress only if over threshold
+        if (originalSize >= this.compressionThreshold) {
+          const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, 'utf8'));
+          finalData = {
+            __compressed: true,
+            __data: compressedBuffer.toString('base64'),
+            __originalSize: originalSize
+          };
+          compressedSize = Buffer.byteLength(finalData.__data, 'utf8');
+          compressed = true;
+          
+          // Update compression stats
+          this.compressionStats.totalCompressed++;
+          this.compressionStats.totalOriginalSize += originalSize;
+          this.compressionStats.totalCompressedSize += compressedSize;
+          this.compressionStats.compressionRatio = 
+            (this.compressionStats.totalCompressedSize / this.compressionStats.totalOriginalSize).toFixed(2);
+        }
+      } catch (error) {
+        // If compression fails, store uncompressed
+        console.warn(`[MemoryCache] Compression failed for key '${key}':`, error.message);
+      }
+    }
+    
+    this.cache[key] = finalData;
+    this.meta[key] = { 
+      ts: Date.now(),
+      compressed,
+      originalSize,
+      compressedSize: compressed ? compressedSize : originalSize
+    };
+    
     return data;
   }
 
   async _get(key) {
     if (!Object.prototype.hasOwnProperty.call(this.cache, key)) return null;
+    
+    // Check TTL expiration
     if (this.ttl > 0) {
       const now = Date.now();
       const meta = this.meta[key];
@@ -123,7 +182,27 @@ export class MemoryCache extends Cache {
         return null;
       }
     }
-    return this.cache[key];
+    
+    const rawData = this.cache[key];
+    
+    // Check if data is compressed
+    if (rawData && typeof rawData === 'object' && rawData.__compressed) {
+      try {
+        // Decompress data
+        const compressedBuffer = Buffer.from(rawData.__data, 'base64');
+        const decompressed = zlib.gunzipSync(compressedBuffer).toString('utf8');
+        return JSON.parse(decompressed);
+      } catch (error) {
+        console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
+        // If decompression fails, remove corrupted entry
+        delete this.cache[key];
+        delete this.meta[key];
+        return null;
+      }
+    }
+    
+    // Return uncompressed data
+    return rawData;
   }
 
   async _del(key) {
@@ -158,6 +237,36 @@ export class MemoryCache extends Cache {
 
   async keys() {
     return Object.keys(this.cache);
+  }
+
+  /**
+   * Get compression statistics
+   * @returns {Object} Compression stats including total compressed items, ratios, and space savings
+   */
+  getCompressionStats() {
+    if (!this.enableCompression) {
+      return { enabled: false, message: 'Compression is disabled' };
+    }
+
+    const spaceSavings = this.compressionStats.totalOriginalSize > 0 
+      ? ((this.compressionStats.totalOriginalSize - this.compressionStats.totalCompressedSize) / this.compressionStats.totalOriginalSize * 100).toFixed(2)
+      : 0;
+
+    return {
+      enabled: true,
+      totalItems: Object.keys(this.cache).length,
+      compressedItems: this.compressionStats.totalCompressed,
+      compressionThreshold: this.compressionThreshold,
+      totalOriginalSize: this.compressionStats.totalOriginalSize,
+      totalCompressedSize: this.compressionStats.totalCompressedSize,
+      averageCompressionRatio: this.compressionStats.compressionRatio,
+      spaceSavingsPercent: spaceSavings,
+      memoryUsage: {
+        uncompressed: `${(this.compressionStats.totalOriginalSize / 1024).toFixed(2)} KB`,
+        compressed: `${(this.compressionStats.totalCompressedSize / 1024).toFixed(2)} KB`,
+        saved: `${((this.compressionStats.totalOriginalSize - this.compressionStats.totalCompressedSize) / 1024).toFixed(2)} KB`
+      }
+    };
   }
 }
 
