@@ -2087,6 +2087,14 @@ class MemoryCache extends Cache {
     this.meta = {};
     this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
     this.ttl = config.ttl !== void 0 ? config.ttl : 3e5;
+    this.enableCompression = config.enableCompression !== void 0 ? config.enableCompression : false;
+    this.compressionThreshold = config.compressionThreshold !== void 0 ? config.compressionThreshold : 1024;
+    this.compressionStats = {
+      totalCompressed: 0,
+      totalOriginalSize: 0,
+      totalCompressedSize: 0,
+      compressionRatio: 0
+    };
   }
   async _set(key, data) {
     if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
@@ -2096,8 +2104,39 @@ class MemoryCache extends Cache {
         delete this.meta[oldestKey];
       }
     }
-    this.cache[key] = data;
-    this.meta[key] = { ts: Date.now() };
+    let finalData = data;
+    let compressed = false;
+    let originalSize = 0;
+    let compressedSize = 0;
+    if (this.enableCompression) {
+      try {
+        const serialized = JSON.stringify(data);
+        originalSize = Buffer.byteLength(serialized, "utf8");
+        if (originalSize >= this.compressionThreshold) {
+          const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, "utf8"));
+          finalData = {
+            __compressed: true,
+            __data: compressedBuffer.toString("base64"),
+            __originalSize: originalSize
+          };
+          compressedSize = Buffer.byteLength(finalData.__data, "utf8");
+          compressed = true;
+          this.compressionStats.totalCompressed++;
+          this.compressionStats.totalOriginalSize += originalSize;
+          this.compressionStats.totalCompressedSize += compressedSize;
+          this.compressionStats.compressionRatio = (this.compressionStats.totalCompressedSize / this.compressionStats.totalOriginalSize).toFixed(2);
+        }
+      } catch (error) {
+        console.warn(`[MemoryCache] Compression failed for key '${key}':`, error.message);
+      }
+    }
+    this.cache[key] = finalData;
+    this.meta[key] = {
+      ts: Date.now(),
+      compressed,
+      originalSize,
+      compressedSize: compressed ? compressedSize : originalSize
+    };
     return data;
   }
   async _get(key) {
@@ -2111,7 +2150,20 @@ class MemoryCache extends Cache {
         return null;
       }
     }
-    return this.cache[key];
+    const rawData = this.cache[key];
+    if (rawData && typeof rawData === "object" && rawData.__compressed) {
+      try {
+        const compressedBuffer = Buffer.from(rawData.__data, "base64");
+        const decompressed = zlib.gunzipSync(compressedBuffer).toString("utf8");
+        return JSON.parse(decompressed);
+      } catch (error) {
+        console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
+        delete this.cache[key];
+        delete this.meta[key];
+        return null;
+      }
+    }
+    return rawData;
   }
   async _del(key) {
     delete this.cache[key];
@@ -2137,6 +2189,31 @@ class MemoryCache extends Cache {
   }
   async keys() {
     return Object.keys(this.cache);
+  }
+  /**
+   * Get compression statistics
+   * @returns {Object} Compression stats including total compressed items, ratios, and space savings
+   */
+  getCompressionStats() {
+    if (!this.enableCompression) {
+      return { enabled: false, message: "Compression is disabled" };
+    }
+    const spaceSavings = this.compressionStats.totalOriginalSize > 0 ? ((this.compressionStats.totalOriginalSize - this.compressionStats.totalCompressedSize) / this.compressionStats.totalOriginalSize * 100).toFixed(2) : 0;
+    return {
+      enabled: true,
+      totalItems: Object.keys(this.cache).length,
+      compressedItems: this.compressionStats.totalCompressed,
+      compressionThreshold: this.compressionThreshold,
+      totalOriginalSize: this.compressionStats.totalOriginalSize,
+      totalCompressedSize: this.compressionStats.totalCompressedSize,
+      averageCompressionRatio: this.compressionStats.compressionRatio,
+      spaceSavingsPercent: spaceSavings,
+      memoryUsage: {
+        uncompressed: `${(this.compressionStats.totalOriginalSize / 1024).toFixed(2)} KB`,
+        compressed: `${(this.compressionStats.totalCompressedSize / 1024).toFixed(2)} KB`,
+        saved: `${((this.compressionStats.totalOriginalSize - this.compressionStats.totalCompressedSize) / 1024).toFixed(2)} KB`
+      }
+    };
   }
 }
 
