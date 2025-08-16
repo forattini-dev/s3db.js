@@ -18,6 +18,9 @@
   - [📊 Metrics Plugin](#-metrics-plugin)
   - [🔄 Replicator Plugin](#-replicator-plugin)
   - [📬 Queue Consumer Plugin](#-queue-consumer-plugin)
+  - [🤖 State Machine Plugin](#-state-machine-plugin)
+  - [💾 Backup Plugin](#-backup-plugin)
+  - [⏰ Scheduler Plugin](#-scheduler-plugin)
 - [🔧 Plugin Development](#-plugin-development)
 - [💡 Plugin Combinations](#-plugin-combinations)
 - [🎯 Best Practices](#-best-practices)
@@ -4143,6 +4146,501 @@ const s3db = new S3db({
 
 ---
 
+## 🤖 State Machine Plugin
+
+Finite state machine capabilities for managing complex workflows and business processes with well-defined states and transitions.
+
+### ⚡ Quick Start
+
+```javascript
+import { S3db, StateMachinePlugin } from 's3db.js';
+
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    new StateMachinePlugin({
+      stateMachines: {
+        order_processing: {
+          initialState: 'pending',
+          states: {
+            pending: {
+              on: { CONFIRM: 'confirmed', CANCEL: 'cancelled' }
+            },
+            confirmed: {
+              on: { PREPARE: 'preparing', CANCEL: 'cancelled' },
+              entry: 'onConfirmed'
+            },
+            preparing: {
+              on: { SHIP: 'shipped', CANCEL: 'cancelled' },
+              guards: { SHIP: 'canShip' }
+            },
+            shipped: {
+              on: { DELIVER: 'delivered', RETURN: 'returned' }
+            },
+            delivered: { type: 'final' },
+            cancelled: { type: 'final' },
+            returned: { type: 'final' }
+          }
+        }
+      },
+      actions: {
+        onConfirmed: async (context, event, machine) => {
+          console.log(`Order ${context.id} confirmed!`);
+          return { action: 'confirmed', timestamp: new Date() };
+        }
+      },
+      guards: {
+        canShip: async (context, event, machine) => {
+          const inventory = await machine.database.resource('inventory').get(context.productId);
+          return inventory && inventory.quantity >= context.quantity;
+        }
+      }
+    })
+  ]
+});
+
+await s3db.connect();
+
+// Initialize entity with state machine
+await s3db.plugins.stateMachine.initializeEntity('order_processing', 'order123');
+
+// Send events to trigger transitions
+await s3db.plugins.stateMachine.send('order_processing', 'order123', 'CONFIRM', {
+  id: 'order123',
+  productId: 'prod1',
+  quantity: 2
+});
+
+// Get current state
+const state = await s3db.plugins.stateMachine.getState('order_processing', 'order123');
+console.log('Current state:', state); // 'confirmed'
+```
+
+### ⚙️ Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `stateMachines` | object | `{}` | State machine definitions |
+| `actions` | object | `{}` | Action functions for state entry/exit |
+| `guards` | object | `{}` | Guard functions for transition validation |
+| `persistTransitions` | boolean | `true` | Store transition history in database |
+| `transitionLogResource` | string | `'transitions'` | Resource name for transition log |
+| `stateResource` | string | `'entity_states'` | Resource name for current states |
+| `verbose` | boolean | `false` | Enable detailed logging |
+
+### State Machine Definition Structure
+
+```javascript
+stateMachines: {
+  machine_name: {
+    initialState: 'start_state',
+    states: {
+      state_name: {
+        on: { EVENT_NAME: 'target_state' },     // Transitions
+        entry: 'action_name',                   // Action on state entry
+        exit: 'action_name',                    // Action on state exit
+        guards: { EVENT_NAME: 'guard_name' },   // Transition guards
+        meta: { custom: 'metadata' },          // Additional metadata
+        type: 'final'                          // Mark as final state
+      }
+    }
+  }
+}
+```
+
+### API Methods
+
+```javascript
+// Entity management
+await stateMachine.initializeEntity(machineId, entityId, context);
+const state = await stateMachine.getState(machineId, entityId);
+const result = await stateMachine.send(machineId, entityId, event, context);
+
+// State information
+const events = stateMachine.getValidEvents(machineId, entityId);
+const definition = stateMachine.getMachineDefinition(machineId);
+const machines = stateMachine.getMachines();
+
+// History and visualization
+const history = await stateMachine.getTransitionHistory(machineId, entityId);
+const dot = stateMachine.visualize(machineId); // Graphviz DOT format
+```
+
+### Events
+
+```javascript
+stateMachine.on('initialized', ({ machines }) => {
+  console.log('Initialized machines:', machines);
+});
+
+stateMachine.on('transition', ({ machineId, entityId, from, to, event, context }) => {
+  console.log(`${entityId}: ${from} → ${to} via ${event}`);
+});
+
+stateMachine.on('action_error', ({ actionName, error, machineId, entityId }) => {
+  console.error(`Action ${actionName} failed:`, error);
+});
+```
+
+---
+
+## 💾 Backup Plugin
+
+Comprehensive database backup and restore capabilities with support for multiple destinations, compression, encryption, and retention policies.
+
+### ⚡ Quick Start
+
+```javascript
+import { S3db, BackupPlugin } from 's3db.js';
+
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    new BackupPlugin({
+      destinations: [
+        {
+          type: 'filesystem',
+          path: './backups/{date}/',
+          compression: 'gzip'
+        }
+      ],
+      retention: {
+        daily: 7,
+        weekly: 4,
+        monthly: 12
+      },
+      onBackupComplete: (type, stats) => {
+        console.log(`${type} backup completed:`, {
+          size: `${Math.round(stats.size / 1024)}KB`,
+          duration: `${stats.duration}ms`
+        });
+      }
+    })
+  ]
+});
+
+await s3db.connect();
+
+// Perform backups
+const fullBackup = await s3db.plugins.backup.backup('full');
+console.log('Backup ID:', fullBackup.id);
+
+const incrementalBackup = await s3db.plugins.backup.backup('incremental');
+
+// List available backups
+const backups = await s3db.plugins.backup.listBackups();
+console.log('Available backups:', backups.length);
+
+// Restore from backup
+// await s3db.plugins.backup.restore(fullBackup.id);
+```
+
+### ⚙️ Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `destinations` | array | `[]` | Backup destinations configuration |
+| `retention` | object | `{}` | Retention policy (daily, weekly, monthly, yearly) |
+| `include` | array | `null` | Resources to include (null = all) |
+| `exclude` | array | `[]` | Resources to exclude (supports wildcards) |
+| `compression` | string | `'gzip'` | Compression: `'none'`, `'gzip'`, `'brotli'` |
+| `encryption` | object | `null` | Encryption configuration |
+| `verification` | boolean | `true` | Verify backup integrity |
+| `tempDir` | string | `'./tmp/backups'` | Temporary working directory |
+| `onBackupStart` | function | `null` | Callback when backup starts |
+| `onBackupComplete` | function | `null` | Callback when backup completes |
+| `onBackupError` | function | `null` | Callback when backup fails |
+| `verbose` | boolean | `false` | Enable detailed logging |
+
+### Destination Types
+
+#### Filesystem
+```javascript
+{
+  type: 'filesystem',
+  path: '/backups/{date}/',      // {date} expands to YYYY-MM-DD
+  compression: 'gzip'
+}
+```
+
+#### Amazon S3
+```javascript
+{
+  type: 's3',
+  bucket: 'backup-bucket',
+  path: 'db-backups/{date}/',
+  region: 'us-east-1',
+  storageClass: 'STANDARD_IA'
+}
+```
+
+### Backup Types
+
+```javascript
+// Full backup - complete snapshot
+const fullBackup = await backup.backup('full');
+
+// Incremental backup - changes since last backup
+const incrementalBackup = await backup.backup('incremental');
+
+// Differential backup - changes since last full backup
+const differentialBackup = await backup.backup('differential');
+```
+
+### Retention Policies (GFS)
+
+```javascript
+retention: {
+  daily: 7,      // Keep daily backups for 7 days
+  weekly: 4,     // Keep weekly backups for 4 weeks
+  monthly: 12,   // Keep monthly backups for 12 months
+  yearly: 3      // Keep yearly backups for 3 years
+}
+```
+
+### API Methods
+
+```javascript
+// Backup operations
+const result = await backup.backup(type, options);
+const backups = await backup.listBackups({ type: 'full', limit: 10 });
+const status = await backup.getBackupStatus(backupId);
+await backup.restore(backupId, options);
+
+// Management
+await backup.cleanup(); // Apply retention policy
+const isValid = await backup.verify(backupId);
+await backup.cancel(backupId);
+```
+
+### Events
+
+```javascript
+backup.on('backup_start', ({ id, type }) => {
+  console.log(`Backup ${id} started (${type})`);
+});
+
+backup.on('backup_complete', ({ id, type, size, duration, destinations }) => {
+  console.log(`Backup ${id} completed in ${duration}ms`);
+});
+
+backup.on('backup_error', ({ id, type, error }) => {
+  console.error(`Backup ${id} failed:`, error);
+});
+```
+
+---
+
+## ⏰ Scheduler Plugin
+
+Robust job scheduling capabilities with cron expressions, retry logic, and comprehensive monitoring for automated tasks.
+
+### ⚡ Quick Start
+
+```javascript
+import { S3db, SchedulerPlugin } from 's3db.js';
+
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    new SchedulerPlugin({
+      timezone: 'America/Sao_Paulo',
+      jobs: {
+        daily_cleanup: {
+          schedule: '0 3 * * *', // 3 AM daily
+          description: 'Clean up expired sessions',
+          action: async (database, context) => {
+            const expired = await database.resource('sessions').list({
+              where: { expiresAt: { $lt: new Date() } }
+            });
+            
+            for (const session of expired) {
+              await database.resource('sessions').delete(session.id);
+            }
+            
+            return { deleted: expired.length };
+          },
+          enabled: true,
+          retries: 2,
+          timeout: 30000
+        },
+        
+        hourly_metrics: {
+          schedule: '@hourly',
+          description: 'Collect system metrics',
+          action: async (database) => {
+            const metrics = {
+              timestamp: new Date().toISOString(),
+              memory: process.memoryUsage(),
+              uptime: process.uptime()
+            };
+            
+            await database.resource('metrics').insert({
+              id: `metrics_${Date.now()}`,
+              ...metrics
+            });
+            
+            return metrics;
+          }
+        }
+      },
+      onJobComplete: (jobName, result, duration) => {
+        console.log(`Job ${jobName} completed in ${duration}ms`);
+      }
+    })
+  ]
+});
+
+await s3db.connect();
+
+// Jobs run automatically based on schedule
+// Manual execution
+await s3db.plugins.scheduler.runJob('daily_cleanup');
+
+// Get job status
+const allJobs = s3db.plugins.scheduler.getAllJobsStatus();
+console.log('Scheduled jobs:', allJobs.length);
+```
+
+### ⚙️ Configuration Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `timezone` | string | `'UTC'` | IANA timezone identifier |
+| `jobs` | object | `{}` | Job definitions |
+| `defaultTimeout` | number | `60000` | Default job timeout (ms) |
+| `defaultRetries` | number | `1` | Default retry attempts |
+| `persistJobs` | boolean | `true` | Store job execution history |
+| `jobHistoryResource` | string | `'job_history'` | Resource for job history |
+| `onJobStart` | function | `null` | Callback when job starts |
+| `onJobComplete` | function | `null` | Callback when job completes |
+| `onJobError` | function | `null` | Callback when job fails |
+| `verbose` | boolean | `false` | Enable detailed logging |
+
+### Job Configuration
+
+```javascript
+jobs: {
+  job_name: {
+    schedule: '0 0 * * *',           // Cron expression (required)
+    description: 'Job description',   // Human-readable description
+    action: async (database, context, schedulerPlugin) => {
+      // Job implementation (required)
+      return { success: true };
+    },
+    enabled: true,                   // Enable/disable job
+    retries: 2,                     // Retry attempts on failure
+    timeout: 30000,                 // Timeout in milliseconds
+    meta: { priority: 'high' }      // Custom metadata
+  }
+}
+```
+
+### Cron Expressions
+
+#### Standard Format
+```
+* * * * *
+│ │ │ │ │
+│ │ │ │ └─── Day of week (0-7, Sunday = 0 or 7)
+│ │ │ └───── Month (1-12)
+│ │ └─────── Day of month (1-31)
+│ └───────── Hour (0-23)
+└─────────── Minute (0-59)
+```
+
+#### Examples
+```javascript
+'0 0 * * *'      // Daily at midnight
+'0 9 * * MON'    // Every Monday at 9 AM
+'*/15 * * * *'   // Every 15 minutes
+'0 2 1 * *'      // First day of month at 2 AM
+```
+
+#### Shorthand Expressions
+```javascript
+'@yearly'   // Once a year at midnight on January 1st
+'@monthly'  // Once a month at midnight on the 1st
+'@weekly'   // Once a week at midnight on Sunday
+'@daily'    // Once a day at midnight
+'@hourly'   // Once an hour at the beginning of the hour
+```
+
+### API Methods
+
+```javascript
+// Job execution
+const result = await scheduler.runJob(jobName, context);
+const stats = scheduler.getJobStatus(jobName);
+const allJobs = scheduler.getAllJobsStatus();
+
+// Job management
+scheduler.enableJob(jobName);
+scheduler.disableJob(jobName);
+scheduler.addJob(jobName, jobConfig);
+scheduler.removeJob(jobName);
+
+// History and monitoring
+const history = await scheduler.getJobHistory(jobName, { status: 'success', limit: 10 });
+const stats = scheduler.getJobStatistics(jobName);
+```
+
+### Events
+
+```javascript
+scheduler.on('job_start', ({ jobName, context }) => {
+  console.log(`Job ${jobName} started`);
+});
+
+scheduler.on('job_complete', ({ jobName, result, duration }) => {
+  console.log(`Job ${jobName} completed in ${duration}ms`);
+});
+
+scheduler.on('job_error', ({ jobName, error, retryCount }) => {
+  console.error(`Job ${jobName} failed (attempt ${retryCount}):`, error);
+});
+
+scheduler.on('job_enabled', ({ jobName }) => {
+  console.log(`Job ${jobName} enabled`);
+});
+```
+
+### Integration with Other Plugins
+
+```javascript
+// Scheduled backups
+jobs: {
+  daily_backup: {
+    schedule: '0 1 * * *',
+    action: async (database) => {
+      const backup = database.getPlugin('BackupPlugin');
+      return await backup.backup('full');
+    }
+  }
+}
+
+// Process state machine entities
+jobs: {
+  process_pending_orders: {
+    schedule: '*/10 * * * *',
+    action: async (database) => {
+      const stateMachine = database.getPlugin('StateMachinePlugin');
+      const orders = await database.resource('orders').list({
+        where: { status: 'pending' }
+      });
+      
+      for (const order of orders) {
+        await stateMachine.send('order_processing', order.id, 'AUTO_PROCESS');
+      }
+      
+      return { processed: orders.length };
+    }
+  }
+}
+```
+
+---
+
 ## 🎯 Best Practices
 
 ### Plugin Performance
@@ -4152,6 +4650,9 @@ const s3db = new S3db({
 3. **Use appropriate sampling** for metrics collection
 4. **Configure retention policies** for audit logs
 5. **Test replicator connections** before deployment
+6. **Design efficient state machines** with minimal guards and actions
+7. **Schedule backups during low-traffic periods** to minimize impact
+8. **Use appropriate job timeouts** to prevent resource exhaustion
 
 ### Plugin Security
 
@@ -4160,6 +4661,9 @@ const s3db = new S3db({
 3. **Use IAM roles** instead of access keys when possible
 4. **Encrypt replication data** in transit and at rest
 5. **Validate message sources** in queue consumers
+6. **Secure state machine actions** to prevent unauthorized transitions
+7. **Encrypt backup data** for sensitive databases
+8. **Restrict job execution permissions** to necessary resources only
 
 ### Plugin Monitoring
 
@@ -4168,6 +4672,9 @@ const s3db = new S3db({
 3. **Track error rates** across all plugins
 4. **Use structured logging** for debugging
 5. **Implement circuit breakers** for external services
+6. **Monitor state machine transition rates** and error patterns
+7. **Track backup success rates** and storage usage
+8. **Alert on job failures** and execution delays
 
 ---
 
