@@ -246,6 +246,258 @@ program
     }
   });
 
+// Create backup
+program
+  .command('backup [type]')
+  .description('Create a database backup')
+  .option('-c, --connection <string>', 'S3 connection string')
+  .option('-t, --type <type>', 'Backup type: full, incremental (default: full)', 'full')
+  .option('-r, --resources <list>', 'Comma-separated list of resources to backup (default: all)')
+  .option('--list', 'List available backups')
+  .option('--status <backupId>', 'Get status of a specific backup')
+  .action(async (type = 'full', options) => {
+    const spinner = ora('Connecting to S3DB...').start();
+    
+    try {
+      const db = new S3db({ 
+        connectionString: getConnection(options) 
+      });
+      await db.init();
+      
+      // Check if backup plugin is available
+      const backupPlugin = db.plugins?.find(p => p.constructor.name === 'BackupPlugin');
+      if (!backupPlugin) {
+        spinner.fail(chalk.red('BackupPlugin is not installed. Cannot create backups without backup plugin.'));
+        process.exit(1);
+      }
+      
+      // List backups if requested
+      if (options.list) {
+        spinner.text = 'Listing available backups...';
+        const backups = await backupPlugin.listBackups({ limit: 20 });
+        spinner.stop();
+        
+        if (backups.length === 0) {
+          console.log(chalk.yellow('No backups found'));
+          return;
+        }
+        
+        const table = new Table({
+          head: ['Backup ID', 'Type', 'Status', 'Size', 'Duration', 'Created'],
+          style: { head: ['cyan'] }
+        });
+        
+        backups.forEach(backup => {
+          const createdAt = new Date(backup.timestamp).toLocaleString();
+          const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
+          const duration = backup.duration ? `${(backup.duration / 1000).toFixed(1)}s` : 'N/A';
+          
+          table.push([
+            backup.id,
+            backup.type || 'full',
+            backup.status === 'completed' ? '✓' : backup.status,
+            size,
+            duration,
+            createdAt
+          ]);
+        });
+        
+        console.log(table.toString());
+        return;
+      }
+      
+      // Get backup status if requested
+      if (options.status) {
+        spinner.text = 'Getting backup status...';
+        const backup = await backupPlugin.getBackupStatus(options.status);
+        spinner.stop();
+        
+        if (!backup) {
+          console.log(chalk.red(`Backup '${options.status}' not found`));
+          return;
+        }
+        
+        console.log(chalk.cyan('Backup Status:'));
+        console.log(`  ID: ${backup.id}`);
+        console.log(`  Type: ${backup.type}`);
+        console.log(`  Status: ${backup.status === 'completed' ? '✓ ' + backup.status : backup.status}`);
+        console.log(`  Created: ${new Date(backup.timestamp).toLocaleString()}`);
+        console.log(`  Size: ${backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A'}`);
+        console.log(`  Duration: ${backup.duration ? `${(backup.duration / 1000).toFixed(1)}s` : 'N/A'}`);
+        console.log(`  Resources: ${Array.isArray(backup.resources) ? backup.resources.join(', ') : 'N/A'}`);
+        console.log(`  Compressed: ${backup.compressed ? '✓' : '✗'}`);
+        console.log(`  Encrypted: ${backup.encrypted ? '✓' : '✗'}`);
+        
+        if (backup.error) {
+          console.log(chalk.red(`  Error: ${backup.error}`));
+        }
+        
+        return;
+      }
+      
+      // Validate backup type
+      if (!['full', 'incremental'].includes(type)) {
+        spinner.fail(chalk.red(`Invalid backup type '${type}'. Must be 'full' or 'incremental'`));
+        process.exit(1);
+      }
+      
+      // Parse resources list
+      let resourcesToBackup = null;
+      if (options.resources) {
+        resourcesToBackup = options.resources.split(',').map(r => r.trim());
+      }
+      
+      spinner.text = `Creating ${type} backup...`;
+      
+      // Create backup
+      const startTime = Date.now();
+      const result = await backupPlugin.backup(type, {
+        resources: resourcesToBackup
+      });
+      const duration = Date.now() - startTime;
+      
+      spinner.succeed(chalk.green(`✓ ${type} backup created successfully`));
+      
+      console.log(chalk.green('\nBackup Summary:'));
+      console.log(`  Backup ID: ${result.id}`);
+      console.log(`  Type: ${result.type}`);
+      console.log(`  Size: ${result.size ? `${(result.size / 1024 / 1024).toFixed(2)} MB` : 'N/A'}`);
+      console.log(`  Duration: ${(duration / 1000).toFixed(1)}s`);
+      console.log(`  Destinations: ${result.destinations.length}`);
+      console.log(`  Checksum: ${result.checksum ? result.checksum.substring(0, 16) + '...' : 'N/A'}`);
+      
+      if (resourcesToBackup) {
+        console.log(`  Resources: ${resourcesToBackup.join(', ')}`);
+      }
+      
+    } catch (error) {
+      spinner.fail(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
+// Restore from backup
+program
+  .command('restore <backupId>')
+  .description('Restore database from a backup')
+  .option('-c, --connection <string>', 'S3 connection string')
+  .option('--overwrite', 'Overwrite existing records', false)
+  .option('-r, --resources <list>', 'Comma-separated list of resources to restore (default: all)')
+  .option('--list-backups', 'List available backups before restoring')
+  .action(async (backupId, options) => {
+    const spinner = ora('Connecting to S3DB...').start();
+    
+    try {
+      const db = new S3db({ 
+        connectionString: getConnection(options) 
+      });
+      await db.init();
+      
+      // Check if backup plugin is available
+      const backupPlugin = db.plugins?.find(p => p.constructor.name === 'BackupPlugin');
+      if (!backupPlugin) {
+        spinner.fail(chalk.red('BackupPlugin is not installed. Cannot restore without backup plugin.'));
+        process.exit(1);
+      }
+      
+      // List backups if requested
+      if (options.listBackups) {
+        spinner.text = 'Listing available backups...';
+        const backups = await backupPlugin.listBackups({ limit: 20 });
+        spinner.stop();
+        
+        if (backups.length === 0) {
+          console.log(chalk.yellow('No backups found'));
+          return;
+        }
+        
+        const table = new Table({
+          head: ['Backup ID', 'Type', 'Status', 'Size', 'Created', 'Resources'],
+          style: { head: ['cyan'] }
+        });
+        
+        backups.forEach(backup => {
+          const createdAt = new Date(backup.timestamp).toLocaleString();
+          const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
+          const resources = Array.isArray(backup.resources) ? backup.resources.join(', ') : 'N/A';
+          
+          table.push([
+            backup.id,
+            backup.type || 'full',
+            backup.status === 'completed' ? '✓' : backup.status,
+            size,
+            createdAt,
+            resources.length > 50 ? resources.substring(0, 47) + '...' : resources
+          ]);
+        });
+        
+        console.log(table.toString());
+        console.log(chalk.gray(`\nUse: s3db restore <backupId> to restore from a backup`));
+        return;
+      }
+      
+      // Parse resources list
+      let resourcesToRestore = null;
+      if (options.resources) {
+        resourcesToRestore = options.resources.split(',').map(r => r.trim());
+      }
+      
+      // Get backup info first
+      spinner.text = 'Checking backup...';
+      const backup = await backupPlugin.getBackupStatus(backupId);
+      
+      if (!backup) {
+        spinner.fail(chalk.red(`Backup '${backupId}' not found`));
+        process.exit(1);
+      }
+      
+      if (backup.status !== 'completed') {
+        spinner.fail(chalk.red(`Backup '${backupId}' is not in completed status (current: ${backup.status})`));
+        process.exit(1);
+      }
+      
+      // Show backup info
+      spinner.stop();
+      console.log(chalk.cyan('Backup Information:'));
+      console.log(`  ID: ${backup.id}`);
+      console.log(`  Type: ${backup.type}`);
+      console.log(`  Created: ${new Date(backup.timestamp).toLocaleString()}`);
+      console.log(`  Size: ${backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A'}`);
+      console.log(`  Resources: ${Array.isArray(backup.resources) ? backup.resources.join(', ') : 'N/A'}`);
+      console.log(`  Compressed: ${backup.compressed ? '✓' : '✗'}`);
+      console.log(`  Encrypted: ${backup.encrypted ? '✓' : '✗'}`);
+      
+      if (resourcesToRestore) {
+        console.log(`  Restoring only: ${resourcesToRestore.join(', ')}`);
+      }
+      
+      if (options.overwrite) {
+        console.log(chalk.yellow('  ⚠️  Overwrite mode enabled - existing records will be replaced'));
+      }
+      
+      console.log('');
+      
+      // Start restore
+      const restoreSpinner = ora('Restoring from backup...').start();
+      
+      const result = await backupPlugin.restore(backupId, {
+        overwrite: options.overwrite,
+        resources: resourcesToRestore
+      });
+      
+      restoreSpinner.succeed(chalk.green(`✓ Restore completed successfully`));
+      
+      console.log(chalk.green('\nRestore Summary:'));
+      console.log(`  Backup ID: ${result.backupId}`);
+      console.log(`  Resources restored: ${result.restored.join(', ')}`);
+      console.log(`  Total resources: ${result.restored.length}`);
+      
+    } catch (error) {
+      spinner.fail(chalk.red(error.message));
+      process.exit(1);
+    }
+  });
+
 program.parse(process.argv);
 
 // Show help if no command provided
