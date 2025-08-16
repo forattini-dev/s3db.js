@@ -1,7 +1,7 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createWriteStream, createReadStream } from 'fs';
-import { createGzip, createGunzip } from 'zlib';
+import zlib from 'node:zlib';
 import { pipeline } from 'stream/promises';
 import { mkdir, writeFile, readFile, unlink, stat, readdir } from 'fs/promises';
 import path from 'path';
@@ -57,7 +57,7 @@ import crypto from 'crypto';
  *   ],
  *   
  *   // Backup configuration
- *   compression: 'gzip',       // none, gzip, brotli
+ *   compression: 'gzip',       // none, gzip, brotli, deflate
  *   encryption: {
  *     algorithm: 'AES-256-GCM',
  *     key: process.env.BACKUP_ENCRYPTION_KEY
@@ -454,18 +454,63 @@ export class BackupPlugin extends Plugin {
   async _compressBackup(backupDir, backupId) {
     const compressedPath = `${backupDir}.tar.gz`;
     
-    // Simple gzip compression (in production, use tar + gzip)
-    const sourceFiles = await this._getDirectoryFiles(backupDir);
-    const archive = createGzip();
-    const output = createWriteStream(compressedPath);
-    
-    // For simplicity, just compress the manifest
-    const manifestPath = path.join(backupDir, 'manifest.json');
-    const input = createReadStream(manifestPath);
-    
-    await pipeline(input, archive, output);
-    
-    return compressedPath;
+    try {
+      // Read all files in backup directory
+      const files = await this._getDirectoryFiles(backupDir);
+      const backupData = {};
+      
+      // Read all files into memory for compression
+      for (const file of files) {
+        const filePath = path.join(backupDir, file);
+        const content = await readFile(filePath, 'utf8');
+        backupData[file] = content;
+      }
+      
+      // Serialize and compress using zlib (same pattern as cache plugins)
+      const serialized = JSON.stringify(backupData);
+      const originalSize = Buffer.byteLength(serialized, 'utf8');
+      
+      // Compress using specified algorithm
+      let compressedBuffer;
+      let compressionType = this.config.compression;
+      
+      switch (this.config.compression) {
+        case 'gzip':
+          compressedBuffer = zlib.gzipSync(Buffer.from(serialized, 'utf8'));
+          break;
+        case 'brotli':
+          compressedBuffer = zlib.brotliCompressSync(Buffer.from(serialized, 'utf8'));
+          break;
+        case 'deflate':
+          compressedBuffer = zlib.deflateSync(Buffer.from(serialized, 'utf8'));
+          break;
+        case 'none':
+          compressedBuffer = Buffer.from(serialized, 'utf8');
+          compressionType = 'none';
+          break;
+        default:
+          throw new Error(`Unsupported compression type: ${this.config.compression}`);
+      }
+      
+      const compressedData = this.config.compression !== 'none' 
+        ? compressedBuffer.toString('base64')
+        : serialized;
+      
+      // Write compressed data
+      await writeFile(compressedPath, compressedData, 'utf8');
+      
+      // Log compression stats
+      const compressedSize = Buffer.byteLength(compressedData, 'utf8');
+      const compressionRatio = (compressedSize / originalSize * 100).toFixed(2);
+      
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Compressed ${originalSize} bytes to ${compressedSize} bytes (${compressionRatio}% of original)`);
+      }
+      
+      return compressedPath;
+    } catch (error) {
+      throw new Error(`Failed to compress backup: ${error.message}`);
+    }
   }
 
   async _encryptBackup(filePath, backupId) {
@@ -831,7 +876,66 @@ export class BackupPlugin extends Plugin {
   }
 
   async _decompressBackup(tempDir) {
-    // Decompress backup files
+    try {
+      // Find compressed backup file
+      const files = await readdir(tempDir);
+      const compressedFile = files.find(f => f.endsWith('.tar.gz'));
+      
+      if (!compressedFile) {
+        throw new Error('No compressed backup file found');
+      }
+      
+      const compressedPath = path.join(tempDir, compressedFile);
+      
+      // Read compressed data
+      const compressedData = await readFile(compressedPath, 'utf8');
+      
+      // Read backup metadata to determine compression type
+      const backupId = path.basename(compressedFile, '.tar.gz');
+      const backup = await this._getBackupMetadata(backupId);
+      const compressionType = backup?.compression || 'gzip';
+      
+      // Decompress using appropriate algorithm
+      let decompressed;
+      
+      if (compressionType === 'none') {
+        decompressed = compressedData;
+      } else {
+        const compressedBuffer = Buffer.from(compressedData, 'base64');
+        
+        switch (compressionType) {
+          case 'gzip':
+            decompressed = zlib.gunzipSync(compressedBuffer).toString('utf8');
+            break;
+          case 'brotli':
+            decompressed = zlib.brotliDecompressSync(compressedBuffer).toString('utf8');
+            break;
+          case 'deflate':
+            decompressed = zlib.inflateSync(compressedBuffer).toString('utf8');
+            break;
+          default:
+            throw new Error(`Unsupported compression type: ${compressionType}`);
+        }
+      }
+      
+      // Parse decompressed data
+      const backupData = JSON.parse(decompressed);
+      
+      // Write individual files back to temp directory
+      for (const [filename, content] of Object.entries(backupData)) {
+        const filePath = path.join(tempDir, filename);
+        await writeFile(filePath, content, 'utf8');
+      }
+      
+      // Remove compressed file
+      await unlink(compressedPath);
+      
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Decompressed backup with ${Object.keys(backupData).length} files`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to decompress backup: ${error.message}`);
+    }
   }
 
   async _restoreResource(resourceName, resourceData, overwrite) {
