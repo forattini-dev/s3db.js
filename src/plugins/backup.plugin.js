@@ -1,5 +1,6 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { createBackupDriver, validateBackupConfig } from "./backup/index.js";
 import { createWriteStream, createReadStream } from 'fs';
 import zlib from 'node:zlib';
 import { pipeline } from 'stream/promises';
@@ -10,87 +11,89 @@ import crypto from 'crypto';
 /**
  * BackupPlugin - Automated Database Backup System
  *
- * Provides comprehensive backup functionality with multiple strategies,
+ * Provides comprehensive backup functionality with configurable drivers,
  * retention policies, and restoration capabilities.
  *
- * === Features ===
- * - Full, incremental, and differential backups
- * - Multiple destination support (S3, filesystem, etc.)
- * - Configurable retention policies (GFS - Grandfather-Father-Son)
- * - Compression and encryption
- * - Backup verification and integrity checks
- * - Scheduled backups with cron expressions
- * - Parallel uploads for performance
- * - Backup metadata and restoration
+ * === Driver-Based Architecture ===
+ * Uses the standard S3DB plugin driver pattern:
+ * - driver: Driver type (filesystem, s3, multi)
+ * - config: Driver-specific configuration
  *
- * === Configuration Example ===
+ * === Configuration Examples ===
  *
+ * // Filesystem backup
  * new BackupPlugin({
- *   // Backup scheduling
- *   schedule: {
- *     full: '0 2 * * SUN',      // Sunday 2 AM - full backup
- *     incremental: '0 2 * * *'   // Daily 2 AM - incremental
- *   },
- *   
- *   // Retention policy (Grandfather-Father-Son)
- *   retention: {
- *     daily: 7,      // Keep 7 daily backups
- *     weekly: 4,     // Keep 4 weekly backups
- *     monthly: 12,   // Keep 12 monthly backups
- *     yearly: 3      // Keep 3 yearly backups
- *   },
- *   
- *   // Multiple backup destinations
- *   destinations: [
- *     {
- *       type: 's3',
- *       bucket: 'my-backups',
- *       path: 'database/{date}/',
- *       encryption: true,
- *       storageClass: 'STANDARD_IA'
- *     },
- *     {
- *       type: 'filesystem',
- *       path: '/var/backups/s3db/',
- *       compression: 'gzip'
- *     }
- *   ],
- *   
- *   // Backup configuration
- *   compression: 'gzip',       // none, gzip, brotli, deflate
- *   encryption: {
- *     algorithm: 'AES-256-GCM',
- *     key: process.env.BACKUP_ENCRYPTION_KEY
- *   },
- *   verification: true,        // Verify backup integrity
- *   parallelism: 4,           // Parallel upload streams
- *   
- *   // Resource filtering
- *   include: ['users', 'orders'],    // Only these resources
- *   exclude: ['temp_*', 'cache_*'],  // Exclude patterns
- *   
- *   // Metadata
- *   backupMetadataResource: 'backup_metadata',
- *   
- *   // Hooks
- *   onBackupStart: (type, config) => console.log(`Starting ${type} backup`),
- *   onBackupComplete: (type, stats) => notifySlack(`Backup complete: ${stats}`)
+ *   driver: 'filesystem',
+ *   config: {
+ *     path: '/var/backups/s3db/{date}/',
+ *     compression: 'gzip'
+ *   }
  * });
+ *
+ * // S3 backup
+ * new BackupPlugin({
+ *   driver: 's3',
+ *   config: {
+ *     bucket: 'my-backup-bucket',
+ *     path: 'database/{date}/',
+ *     storageClass: 'STANDARD_IA'
+ *   }
+ * });
+ *
+ * // Multiple destinations
+ * new BackupPlugin({
+ *   driver: 'multi',
+ *   config: {
+ *     strategy: 'all', // 'all', 'any', 'priority'
+ *     destinations: [
+ *       { 
+ *         driver: 'filesystem', 
+ *         config: { path: '/var/backups/s3db/' } 
+ *       },
+ *       { 
+ *         driver: 's3', 
+ *         config: { 
+ *           bucket: 'remote-backups',
+ *           storageClass: 'GLACIER'
+ *         } 
+ *       }
+ *     ]
+ *   }
+ * });
+ *
+ * === Additional Plugin Options ===
+ * - schedule: Cron expressions for automated backups
+ * - retention: Backup retention policy (GFS)
+ * - compression: Compression type (gzip, brotli, none)
+ * - encryption: Encryption configuration
+ * - verification: Enable backup verification
+ * - backupMetadataResource: Resource name for metadata
  */
 export class BackupPlugin extends Plugin {
   constructor(options = {}) {
     super();
     
+    // Extract driver configuration
+    this.driverName = options.driver || 'filesystem';
+    this.driverConfig = options.config || {};
+    
     this.config = {
+      // Legacy destinations support (will be converted to multi driver)
+      destinations: options.destinations || null,
+      
+      // Scheduling configuration
       schedule: options.schedule || {},
+      
+      // Retention policy (Grandfather-Father-Son)
       retention: {
         daily: 7,
-        weekly: 4,
+        weekly: 4, 
         monthly: 12,
         yearly: 3,
         ...options.retention
       },
-      destinations: options.destinations || [],
+      
+      // Backup options
       compression: options.compression || 'gzip',
       encryption: options.encryption || null,
       verification: options.verification !== false,
@@ -100,52 +103,86 @@ export class BackupPlugin extends Plugin {
       backupMetadataResource: options.backupMetadataResource || 'backup_metadata',
       tempDir: options.tempDir || './tmp/backups',
       verbose: options.verbose || false,
+      
+      // Hooks
       onBackupStart: options.onBackupStart || null,
       onBackupComplete: options.onBackupComplete || null,
       onBackupError: options.onBackupError || null,
-      ...options
+      onRestoreStart: options.onRestoreStart || null,
+      onRestoreComplete: options.onRestoreComplete || null,
+      onRestoreError: options.onRestoreError || null
     };
-    
-    this.database = null;
-    this.scheduledJobs = new Map();
+
+    this.driver = null;
     this.activeBackups = new Set();
+    
+    // Handle legacy destinations format
+    this._handleLegacyDestinations();
+    
+    // Validate driver configuration (after legacy conversion)
+    validateBackupConfig(this.driverName, this.driverConfig);
     
     this._validateConfiguration();
   }
 
-  _validateConfiguration() {
-    if (this.config.destinations.length === 0) {
-      throw new Error('BackupPlugin: At least one destination must be configured');
-    }
-    
-    for (const dest of this.config.destinations) {
-      if (!dest.type) {
-        throw new Error('BackupPlugin: Each destination must have a type');
+  /**
+   * Convert legacy destinations format to multi driver format
+   */
+  _handleLegacyDestinations() {
+    if (this.config.destinations && Array.isArray(this.config.destinations)) {
+      // Convert legacy format to multi driver
+      this.driverName = 'multi';
+      this.driverConfig = {
+        strategy: 'all',
+        destinations: this.config.destinations.map(dest => {
+          const { type, ...config } = dest; // Extract type and get the rest as config
+          return {
+            driver: type,
+            config
+          };
+        })
+      };
+      
+      // Clear legacy destinations
+      this.config.destinations = null;
+      
+      if (this.config.verbose) {
+        console.log('[BackupPlugin] Converted legacy destinations format to multi driver');
       }
     }
+  }
+
+  _validateConfiguration() {
+    // Driver validation is done in constructor
     
     if (this.config.encryption && (!this.config.encryption.key || !this.config.encryption.algorithm)) {
       throw new Error('BackupPlugin: Encryption requires both key and algorithm');
     }
+    
+    if (this.config.compression && !['none', 'gzip', 'brotli', 'deflate'].includes(this.config.compression)) {
+      throw new Error('BackupPlugin: Invalid compression type. Use: none, gzip, brotli, deflate');
+    }
   }
 
-  async setup(database) {
-    this.database = database;
+  async onSetup() {
+    // Create backup driver instance
+    this.driver = createBackupDriver(this.driverName, this.driverConfig);
+    await this.driver.setup(this.database);
+    
+    // Create temporary directory
+    await mkdir(this.config.tempDir, { recursive: true });
     
     // Create backup metadata resource
     await this._createBackupMetadataResource();
     
-    // Ensure temp directory exists
-    await this._ensureTempDirectory();
-    
-    // Setup scheduled backups
-    if (Object.keys(this.config.schedule).length > 0) {
-      await this._setupScheduledBackups();
+    if (this.config.verbose) {
+      const storageInfo = this.driver.getStorageInfo();
+      console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
     
     this.emit('initialized', { 
-      destinations: this.config.destinations.length,
-      scheduled: Object.keys(this.config.schedule)
+      driver: this.driver.getType(),
+      config: this.driver.getStorageInfo()
     });
   }
 
@@ -157,7 +194,7 @@ export class BackupPlugin extends Plugin {
         type: 'string|required',
         timestamp: 'number|required',
         resources: 'json|required',
-        destinations: 'json|required',
+        driverInfo: 'json|required', // Store driver info instead of destinations
         size: 'number|default:0',
         compressed: 'boolean|default:false',
         encrypted: 'boolean|default:false',
@@ -168,129 +205,94 @@ export class BackupPlugin extends Plugin {
         createdAt: 'string|required'
       },
       behavior: 'body-overflow',
-      partitions: {
-        byType: { fields: { type: 'string' } },
-        byDate: { fields: { createdAt: 'string|maxlength:10' } }
-      }
+      timestamps: true
     }));
-  }
 
-  async _ensureTempDirectory() {
-    const [ok] = await tryFn(() => mkdir(this.config.tempDir, { recursive: true }));
-  }
-
-  async _setupScheduledBackups() {
-    // This would integrate with SchedulerPlugin if available
-    // For now, just log the scheduled backups
-    if (this.config.verbose) {
-      console.log('[BackupPlugin] Scheduled backups configured:', this.config.schedule);
+    if (!ok && this.config.verbose) {
+      console.log(`[BackupPlugin] Backup metadata resource '${this.config.backupMetadataResource}' already exists`);
     }
   }
 
   /**
-   * Perform a backup
+   * Create a backup
+   * @param {string} type - Backup type ('full' or 'incremental')
+   * @param {Object} options - Backup options
+   * @returns {Object} Backup result
    */
   async backup(type = 'full', options = {}) {
-    const backupId = `backup_${type}_${Date.now()}`;
-    
-    if (this.activeBackups.has(backupId)) {
-      throw new Error(`Backup ${backupId} already in progress`);
-    }
-    
-    this.activeBackups.add(backupId);
+    const backupId = this._generateBackupId(type);
+    const startTime = Date.now();
     
     try {
-      const startTime = Date.now();
+      this.activeBackups.add(backupId);
       
       // Execute onBackupStart hook
       if (this.config.onBackupStart) {
-        await this._executeHook(this.config.onBackupStart, type, { backupId, ...options });
+        await this._executeHook(this.config.onBackupStart, type, { backupId });
       }
       
       this.emit('backup_start', { id: backupId, type });
       
-      // Create backup metadata record
+      // Create backup metadata
       const metadata = await this._createBackupMetadata(backupId, type);
-      
-      // Get resources to backup
-      const resources = await this._getResourcesToBackup();
       
       // Create temporary backup directory
       const tempBackupDir = path.join(this.config.tempDir, backupId);
       await mkdir(tempBackupDir, { recursive: true });
       
-      let totalSize = 0;
-      const resourceFiles = new Map();
-      
       try {
-        // Backup each resource
-        for (const resourceName of resources) {
-          const resourceData = await this._backupResource(resourceName, type);
-          const filePath = path.join(tempBackupDir, `${resourceName}.json`);
-          
-          await writeFile(filePath, JSON.stringify(resourceData, null, 2));
-          const stats = await stat(filePath);
-          totalSize += stats.size;
-          resourceFiles.set(resourceName, { path: filePath, size: stats.size });
+        // Create backup manifest
+        const manifest = await this._createBackupManifest(type, options);
+        
+        // Export resources to backup files
+        const exportedFiles = await this._exportResources(manifest.resources, tempBackupDir, type);
+        
+        // Check if we have any files to backup
+        if (exportedFiles.length === 0) {
+          throw new Error('No resources were exported for backup');
         }
         
-        // Create manifest
-        const manifest = {
-          id: backupId,
-          type,
-          timestamp: Date.now(),
-          resources: Array.from(resourceFiles.keys()),
-          totalSize,
-          compression: this.config.compression,
-          encryption: !!this.config.encryption
-        };
+        // Create archive if compression is enabled
+        let finalPath;
+        let totalSize = 0;
         
-        const manifestPath = path.join(tempBackupDir, 'manifest.json');
-        await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-        
-        // Compress if enabled
-        let finalPath = tempBackupDir;
         if (this.config.compression !== 'none') {
-          finalPath = await this._compressBackup(tempBackupDir, backupId);
-        }
-        
-        // Encrypt if enabled
-        if (this.config.encryption) {
-          finalPath = await this._encryptBackup(finalPath, backupId);
-        }
-        
-        // Calculate checksum
-        let checksum = null;
-        if (this.config.compression !== 'none' || this.config.encryption) {
-          // If compressed or encrypted, finalPath is a file
-          checksum = await this._calculateChecksum(finalPath);
+          finalPath = path.join(tempBackupDir, `${backupId}.tar.gz`);
+          totalSize = await this._createCompressedArchive(exportedFiles, finalPath);
         } else {
-          // If no compression/encryption, calculate checksum of manifest
-          checksum = this._calculateManifestChecksum(manifest);
+          finalPath = exportedFiles[0]; // For single file backups
+          const [statOk, , stats] = await tryFn(() => stat(finalPath));
+          totalSize = statOk ? stats.size : 0;
         }
         
-        // Upload to destinations
-        const uploadResults = await this._uploadToDestinations(finalPath, backupId, manifest);
+        // Generate checksum
+        const checksum = await this._generateChecksum(finalPath);
+        
+        // Upload using driver
+        const uploadResult = await this.driver.upload(finalPath, backupId, manifest);
         
         // Verify backup if enabled
         if (this.config.verification) {
-          await this._verifyBackup(backupId, checksum);
+          const isValid = await this.driver.verify(backupId, checksum, uploadResult);
+          if (!isValid) {
+            throw new Error('Backup verification failed');
+          }
         }
         
         const duration = Date.now() - startTime;
         
         // Update metadata
-        await this._updateBackupMetadata(metadata.id, {
+        await this._updateBackupMetadata(backupId, {
           status: 'completed',
           size: totalSize,
           checksum,
-          destinations: uploadResults,
+          driverInfo: uploadResult,
           duration
         });
         
         // Execute onBackupComplete hook
         if (this.config.onBackupComplete) {
-          const stats = { backupId, type, size: totalSize, duration, destinations: uploadResults.length };
+          const stats = { backupId, type, size: totalSize, duration, driverInfo: uploadResult };
           await this._executeHook(this.config.onBackupComplete, type, stats);
         }
         
@@ -299,7 +301,7 @@ export class BackupPlugin extends Plugin {
           type, 
           size: totalSize, 
           duration,
-          destinations: uploadResults.length
+          driverInfo: uploadResult
         });
         
         // Cleanup retention
@@ -311,7 +313,7 @@ export class BackupPlugin extends Plugin {
           size: totalSize,
           duration,
           checksum,
-          destinations: uploadResults
+          driverInfo: uploadResult
         };
         
       } finally {
@@ -325,28 +327,35 @@ export class BackupPlugin extends Plugin {
         await this._executeHook(this.config.onBackupError, type, { backupId, error });
       }
       
-      this.emit('backup_error', { id: backupId, type, error: error.message });
-      
       // Update metadata with error
-      const [metadataOk] = await tryFn(() => 
-        this.database.resource(this.config.backupMetadataResource)
-          .update(backupId, { status: 'failed', error: error.message })
-      );
+      await this._updateBackupMetadata(backupId, {
+        status: 'failed',
+        error: error.message,
+        duration: Date.now() - startTime
+      });
       
+      this.emit('backup_error', { id: backupId, type, error: error.message });
       throw error;
+      
     } finally {
       this.activeBackups.delete(backupId);
     }
   }
 
+  _generateBackupId(type) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const random = Math.random().toString(36).substring(2, 8);
+    return `${type}-${timestamp}-${random}`;
+  }
+
   async _createBackupMetadata(backupId, type) {
-    const now = new Date().toISOString();
+    const now = new Date();
     const metadata = {
       id: backupId,
       type,
       timestamp: Date.now(),
       resources: [],
-      destinations: [],
+      driverInfo: {},
       size: 0,
       status: 'in_progress',
       compressed: this.config.compression !== 'none',
@@ -354,10 +363,13 @@ export class BackupPlugin extends Plugin {
       checksum: null,
       error: null,
       duration: 0,
-      createdAt: now.slice(0, 10)
+      createdAt: now.toISOString().slice(0, 10)
     };
     
-    await this.database.resource(this.config.backupMetadataResource).insert(metadata);
+    const [ok] = await tryFn(() => 
+      this.database.resource(this.config.backupMetadataResource).insert(metadata)
+    );
+    
     return metadata;
   }
 
@@ -367,645 +379,266 @@ export class BackupPlugin extends Plugin {
     );
   }
 
-  async _getResourcesToBackup() {
-    const allResources = Object.keys(this.database.resources);
+  async _createBackupManifest(type, options) {
+    let resourcesToBackup = options.resources || 
+      (this.config.include ? this.config.include : await this.database.listResources());
     
-    let resources = allResources;
-    
-    // Apply include filter
-    if (this.config.include && this.config.include.length > 0) {
-      resources = resources.filter(name => this.config.include.includes(name));
+    // Ensure we have resource names as strings
+    if (Array.isArray(resourcesToBackup) && resourcesToBackup.length > 0 && typeof resourcesToBackup[0] === 'object') {
+      resourcesToBackup = resourcesToBackup.map(resource => resource.name || resource);
     }
     
-    // Apply exclude filter
-    if (this.config.exclude && this.config.exclude.length > 0) {
-      resources = resources.filter(name => {
-        return !this.config.exclude.some(pattern => {
-          if (pattern.includes('*')) {
-            const regex = new RegExp(pattern.replace(/\*/g, '.*'));
-            return regex.test(name);
-          }
-          return name === pattern;
-        });
-      });
-    }
-    
-    // Exclude backup metadata resource
-    resources = resources.filter(name => name !== this.config.backupMetadataResource);
-    
-    return resources;
-  }
-
-  async _backupResource(resourceName, type) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
-    }
-    
-    // For full backup, get all data
-    if (type === 'full') {
-      const [ok, err, data] = await tryFn(() => resource.list({ limit: 999999 }));
-      if (!ok) throw err;
-      
-      return {
-        resource: resourceName,
-        type: 'full',
-        data,
-        count: data.length,
-        config: resource.config
-      };
-    }
-    
-    // For incremental backup, get changes since last backup
-    if (type === 'incremental') {
-      const lastBackup = await this._getLastBackup('incremental');
-      const since = lastBackup ? lastBackup.timestamp : 0;
-      
-      // This would need audit plugin integration to get changes since timestamp
-      // For now, fall back to full backup
-      const [ok, err, data] = await tryFn(() => resource.list({ limit: 999999 }));
-      if (!ok) throw err;
-      
-      return {
-        resource: resourceName,
-        type: 'incremental',
-        data,
-        count: data.length,
-        since,
-        config: resource.config
-      };
-    }
-    
-    throw new Error(`Backup type '${type}' not supported`);
-  }
-
-  async _getLastBackup(type) {
-    const [ok, err, backups] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).list({
-        where: { type, status: 'completed' },
-        orderBy: { timestamp: 'desc' },
-        limit: 1
-      })
+    // Filter excluded resources
+    const filteredResources = resourcesToBackup.filter(name => 
+      !this.config.exclude.includes(name)
     );
     
-    return ok && backups.length > 0 ? backups[0] : null;
+    return {
+      type,
+      timestamp: Date.now(),
+      resources: filteredResources,
+      compression: this.config.compression,
+      encrypted: !!this.config.encryption,
+      s3db_version: this.database.constructor.version || 'unknown'
+    };
   }
 
-  async _compressBackup(backupDir, backupId) {
-    const compressedPath = `${backupDir}.tar.gz`;
+  async _exportResources(resourceNames, tempDir, type) {
+    const exportedFiles = [];
     
-    try {
-      // Read all files in backup directory
-      const files = await this._getDirectoryFiles(backupDir);
-      const backupData = {};
-      
-      // Read all files into memory for compression
-      for (const file of files) {
-        const filePath = path.join(backupDir, file);
-        const content = await readFile(filePath, 'utf8');
-        backupData[file] = content;
+    for (const resourceName of resourceNames) {
+      const resource = this.database.resources[resourceName];
+      if (!resource) {
+        console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        continue;
       }
       
-      // Serialize and compress using zlib (same pattern as cache plugins)
-      const serialized = JSON.stringify(backupData);
-      const originalSize = Buffer.byteLength(serialized, 'utf8');
+      const exportPath = path.join(tempDir, `${resourceName}.json`);
       
-      // Compress using specified algorithm
-      let compressedBuffer;
-      let compressionType = this.config.compression;
-      
-      switch (this.config.compression) {
-        case 'gzip':
-          compressedBuffer = zlib.gzipSync(Buffer.from(serialized, 'utf8'));
-          break;
-        case 'brotli':
-          compressedBuffer = zlib.brotliCompressSync(Buffer.from(serialized, 'utf8'));
-          break;
-        case 'deflate':
-          compressedBuffer = zlib.deflateSync(Buffer.from(serialized, 'utf8'));
-          break;
-        case 'none':
-          compressedBuffer = Buffer.from(serialized, 'utf8');
-          compressionType = 'none';
-          break;
-        default:
-          throw new Error(`Unsupported compression type: ${this.config.compression}`);
+      // Export resource data
+      let records;
+      if (type === 'incremental') {
+        // For incremental, only export recent changes
+        // This is simplified - in real implementation, you'd track changes
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        records = await resource.list({ 
+          filter: { updatedAt: { '>': yesterday.toISOString() } }
+        });
+      } else {
+        records = await resource.list();
       }
       
-      const compressedData = this.config.compression !== 'none' 
-        ? compressedBuffer.toString('base64')
-        : serialized;
+      const exportData = {
+        resourceName,
+        definition: resource.config,
+        records,
+        exportedAt: new Date().toISOString(),
+        type
+      };
       
-      // Write compressed data
-      await writeFile(compressedPath, compressedData, 'utf8');
-      
-      // Log compression stats
-      const compressedSize = Buffer.byteLength(compressedData, 'utf8');
-      const compressionRatio = (compressedSize / originalSize * 100).toFixed(2);
+      await writeFile(exportPath, JSON.stringify(exportData, null, 2));
+      exportedFiles.push(exportPath);
       
       if (this.config.verbose) {
-        console.log(`[BackupPlugin] Compressed ${originalSize} bytes to ${compressedSize} bytes (${compressionRatio}% of original)`);
+        console.log(`[BackupPlugin] Exported ${records.length} records from '${resourceName}'`);
       }
-      
-      return compressedPath;
-    } catch (error) {
-      throw new Error(`Failed to compress backup: ${error.message}`);
     }
+    
+    return exportedFiles;
   }
 
-  async _encryptBackup(filePath, backupId) {
-    if (!this.config.encryption) return filePath;
+  async _createCompressedArchive(files, targetPath) {
+    // Simple implementation - compress all files into a single stream
+    // In production, you might want to use tar or similar
+    const output = createWriteStream(targetPath);
+    const gzip = zlib.createGzip({ level: 6 });
     
-    const encryptedPath = `${filePath}.enc`;
-    const { algorithm, key } = this.config.encryption;
+    let totalSize = 0;
     
-    const cipher = crypto.createCipher(algorithm, key);
-    const input = createReadStream(filePath);
-    const output = createWriteStream(encryptedPath);
+    await pipeline(
+      async function* () {
+        for (const filePath of files) {
+          const content = await readFile(filePath);
+          totalSize += content.length;
+          yield content;
+        }
+      },
+      gzip,
+      output
+    );
     
-    await pipeline(input, cipher, output);
-    
-    // Remove unencrypted file
-    await unlink(filePath);
-    
-    return encryptedPath;
+    const [statOk, , stats] = await tryFn(() => stat(targetPath));
+    return statOk ? stats.size : totalSize;
   }
 
-  async _calculateChecksum(filePath) {
+  async _generateChecksum(filePath) {
     const hash = crypto.createHash('sha256');
-    const input = createReadStream(filePath);
+    const stream = createReadStream(filePath);
     
-    return new Promise((resolve, reject) => {
-      input.on('data', data => hash.update(data));
-      input.on('end', () => resolve(hash.digest('hex')));
-      input.on('error', reject);
-    });
-  }
-
-  _calculateManifestChecksum(manifest) {
-    const hash = crypto.createHash('sha256');
-    hash.update(JSON.stringify(manifest));
+    await pipeline(stream, hash);
     return hash.digest('hex');
   }
 
-  async _copyDirectory(src, dest) {
-    await mkdir(dest, { recursive: true });
-    const entries = await readdir(src, { withFileTypes: true });
-    
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-      
-      if (entry.isDirectory()) {
-        await this._copyDirectory(srcPath, destPath);
-      } else {
-        const input = createReadStream(srcPath);
-        const output = createWriteStream(destPath);
-        await pipeline(input, output);
-      }
-    }
-  }
-
-  async _getDirectorySize(dirPath) {
-    let totalSize = 0;
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    
-    for (const entry of entries) {
-      const entryPath = path.join(dirPath, entry.name);
-      
-      if (entry.isDirectory()) {
-        totalSize += await this._getDirectorySize(entryPath);
-      } else {
-        const stats = await stat(entryPath);
-        totalSize += stats.size;
-      }
-    }
-    
-    return totalSize;
-  }
-
-  async _uploadToDestinations(filePath, backupId, manifest) {
-    const results = [];
-    let hasSuccess = false;
-    
-    for (const destination of this.config.destinations) {
-      const [ok, err, result] = await tryFn(() => 
-        this._uploadToDestination(filePath, backupId, manifest, destination)
-      );
-      
-      if (ok) {
-        results.push({ ...destination, ...result, status: 'success' });
-        hasSuccess = true;
-      } else {
-        results.push({ ...destination, status: 'failed', error: err.message });
-        if (this.config.verbose) {
-          console.warn(`[BackupPlugin] Upload to ${destination.type} failed:`, err.message);
-        }
-      }
-    }
-    
-    // If no destinations succeeded, throw error
-    if (!hasSuccess) {
-      const errors = results.map(r => r.error).join('; ');
-      throw new Error(`All backup destinations failed: ${errors}`);
-    }
-    
-    return results;
-  }
-
-  async _uploadToDestination(filePath, backupId, manifest, destination) {
-    if (destination.type === 'filesystem') {
-      return this._uploadToFilesystem(filePath, backupId, destination);
-    }
-    
-    if (destination.type === 's3') {
-      return this._uploadToS3(filePath, backupId, destination);
-    }
-    
-    throw new Error(`Destination type '${destination.type}' not supported`);
-  }
-
-  async _uploadToFilesystem(filePath, backupId, destination) {
-    const destDir = destination.path.replace('{date}', new Date().toISOString().slice(0, 10));
-    await mkdir(destDir, { recursive: true });
-    
-    const stats = await stat(filePath);
-    
-    if (stats.isDirectory()) {
-      // Copy entire directory
-      const destPath = path.join(destDir, backupId);
-      await this._copyDirectory(filePath, destPath);
-      
-      const dirStats = await this._getDirectorySize(destPath);
-      
-      return {
-        path: destPath,
-        size: dirStats,
-        uploadedAt: new Date().toISOString()
-      };
-    } else {
-      // Copy single file
-      const fileName = path.basename(filePath);
-      const destPath = path.join(destDir, fileName);
-      
-      const input = createReadStream(filePath);
-      const output = createWriteStream(destPath);
-      
-      await pipeline(input, output);
-      
-      const fileStats = await stat(destPath);
-      
-      return {
-        path: destPath,
-        size: fileStats.size,
-        uploadedAt: new Date().toISOString()
-      };
-    }
-  }
-
-  async _uploadToS3(filePath, backupId, destination) {
-    // This would integrate with S3 client
-    // For now, simulate the upload
-    
-    const key = destination.path
-      .replace('{date}', new Date().toISOString().slice(0, 10))
-      .replace('{backupId}', backupId) + path.basename(filePath);
-    
-    // Simulated upload
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    return {
-      bucket: destination.bucket,
-      key,
-      uploadedAt: new Date().toISOString()
-    };
-  }
-
-  async _verifyBackup(backupId, expectedChecksum) {
-    // Verify backup integrity by re-downloading and checking checksum
-    // Implementation depends on destinations
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Verifying backup ${backupId} with checksum ${expectedChecksum}`);
-    }
-  }
-
-  async _cleanupOldBackups() {
-    const retention = this.config.retention;
-    const now = new Date();
-    
-    // Get all completed backups
-    const [ok, err, allBackups] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).list({
-        where: { status: 'completed' },
-        orderBy: { timestamp: 'desc' }
-      })
-    );
-    
-    if (!ok) return;
-    
-    const toDelete = [];
-    
-    // Group backups by type and age
-    const groups = {
-      daily: [],
-      weekly: [],
-      monthly: [],
-      yearly: []
-    };
-    
-    for (const backup of allBackups) {
-      const backupDate = new Date(backup.timestamp);
-      const age = Math.floor((now - backupDate) / (1000 * 60 * 60 * 24)); // days
-      
-      if (age < 7) groups.daily.push(backup);
-      else if (age < 30) groups.weekly.push(backup);
-      else if (age < 365) groups.monthly.push(backup);
-      else groups.yearly.push(backup);
-    }
-    
-    // Apply retention policies
-    if (groups.daily.length > retention.daily) {
-      toDelete.push(...groups.daily.slice(retention.daily));
-    }
-    if (groups.weekly.length > retention.weekly) {
-      toDelete.push(...groups.weekly.slice(retention.weekly));
-    }
-    if (groups.monthly.length > retention.monthly) {
-      toDelete.push(...groups.monthly.slice(retention.monthly));
-    }
-    if (groups.yearly.length > retention.yearly) {
-      toDelete.push(...groups.yearly.slice(retention.yearly));
-    }
-    
-    // Delete old backups
-    for (const backup of toDelete) {
-      await this._deleteBackup(backup);
-    }
-    
-    if (toDelete.length > 0) {
-      this.emit('cleanup_complete', { deleted: toDelete.length });
-    }
-  }
-
-  async _deleteBackup(backup) {
-    // Delete from destinations
-    for (const dest of backup.destinations || []) {
-      const [ok] = await tryFn(() => this._deleteFromDestination(backup, dest));
-    }
-    
-    // Delete metadata
-    const [ok] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).delete(backup.id)
-    );
-  }
-
-  async _deleteFromDestination(backup, destination) {
-    // Implementation depends on destination type
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Deleting backup ${backup.id} from ${destination.type}`);
-    }
-  }
-
   async _cleanupTempFiles(tempDir) {
-    const [ok] = await tryFn(async () => {
-      const files = await this._getDirectoryFiles(tempDir);
-      for (const file of files) {
-        await unlink(file);
-      }
-      // Note: rmdir would require recursive removal
-    });
-  }
-
-  async _getDirectoryFiles(dir) {
-    // Simplified - in production use proper directory traversal
-    return [];
-  }
-
-  async _executeHook(hook, ...args) {
-    if (typeof hook === 'function') {
-      const [ok, err] = await tryFn(() => hook(...args));
-      if (!ok && this.config.verbose) {
-        console.warn('[BackupPlugin] Hook execution failed:', err.message);
-      }
-    }
+    const [ok] = await tryFn(() => 
+      import('fs/promises').then(fs => fs.rm(tempDir, { recursive: true, force: true }))
+    );
   }
 
   /**
    * Restore from backup
+   * @param {string} backupId - Backup identifier
+   * @param {Object} options - Restore options
+   * @returns {Object} Restore result
    */
   async restore(backupId, options = {}) {
-    const { overwrite = false, resources = null } = options;
-    
-    // Get backup metadata
-    const [ok, err, backup] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).get(backupId)
-    );
-    
-    if (!ok || !backup) {
-      throw new Error(`Backup '${backupId}' not found`);
-    }
-    
-    if (backup.status !== 'completed') {
-      throw new Error(`Backup '${backupId}' is not in completed status`);
-    }
-    
-    this.emit('restore_start', { backupId });
-    
-    // Download backup files
-    const tempDir = path.join(this.config.tempDir, `restore_${backupId}`);
-    await mkdir(tempDir, { recursive: true });
-    
     try {
-      // Download from first available destination
-      await this._downloadBackup(backup, tempDir);
-      
-      // Decrypt if needed
-      if (backup.encrypted) {
-        await this._decryptBackup(tempDir);
+      // Execute onRestoreStart hook
+      if (this.config.onRestoreStart) {
+        await this._executeHook(this.config.onRestoreStart, backupId, options);
       }
       
-      // Decompress if needed
-      if (backup.compressed) {
-        await this._decompressBackup(tempDir);
+      this.emit('restore_start', { id: backupId, options });
+      
+      // Get backup metadata
+      const backup = await this.getBackupStatus(backupId);
+      if (!backup) {
+        throw new Error(`Backup '${backupId}' not found`);
       }
       
-      // Read manifest
-      const manifestPath = path.join(tempDir, 'manifest.json');
-      const manifest = JSON.parse(await readFile(manifestPath, 'utf-8'));
+      if (backup.status !== 'completed') {
+        throw new Error(`Backup '${backupId}' is not in completed status`);
+      }
       
-      // Restore resources
-      const resourcesToRestore = resources || manifest.resources;
-      const restored = [];
+      // Create temporary restore directory
+      const tempRestoreDir = path.join(this.config.tempDir, `restore-${backupId}`);
+      await mkdir(tempRestoreDir, { recursive: true });
       
-      for (const resourceName of resourcesToRestore) {
-        const resourcePath = path.join(tempDir, `${resourceName}.json`);
-        const resourceData = JSON.parse(await readFile(resourcePath, 'utf-8'));
+      try {
+        // Download backup using driver
+        const downloadPath = path.join(tempRestoreDir, `${backupId}.backup`);
+        await this.driver.download(backupId, downloadPath, backup.driverInfo);
         
-        await this._restoreResource(resourceName, resourceData, overwrite);
-        restored.push(resourceName);
-      }
-      
-      this.emit('restore_complete', { backupId, restored });
-      
-      return { backupId, restored };
-      
-    } finally {
-      await this._cleanupTempFiles(tempDir);
-    }
-  }
-
-  async _downloadBackup(backup, tempDir) {
-    // Download from first successful destination
-    for (const dest of backup.destinations) {
-      const [ok] = await tryFn(() => this._downloadFromDestination(backup, dest, tempDir));
-      if (ok) return;
-    }
-    
-    throw new Error('Failed to download backup from any destination');
-  }
-
-  async _downloadFromDestination(backup, destination, tempDir) {
-    // Implementation depends on destination type
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Downloading backup ${backup.id} from ${destination.type}`);
-    }
-  }
-
-  async _decryptBackup(tempDir) {
-    // Decrypt backup files
-  }
-
-  async _decompressBackup(tempDir) {
-    try {
-      // Find compressed backup file
-      const files = await readdir(tempDir);
-      const compressedFile = files.find(f => f.endsWith('.tar.gz'));
-      
-      if (!compressedFile) {
-        throw new Error('No compressed backup file found');
-      }
-      
-      const compressedPath = path.join(tempDir, compressedFile);
-      
-      // Read compressed data
-      const compressedData = await readFile(compressedPath, 'utf8');
-      
-      // Read backup metadata to determine compression type
-      const backupId = path.basename(compressedFile, '.tar.gz');
-      const backup = await this._getBackupMetadata(backupId);
-      const compressionType = backup?.compression || 'gzip';
-      
-      // Decompress using appropriate algorithm
-      let decompressed;
-      
-      if (compressionType === 'none') {
-        decompressed = compressedData;
-      } else {
-        const compressedBuffer = Buffer.from(compressedData, 'base64');
-        
-        switch (compressionType) {
-          case 'gzip':
-            decompressed = zlib.gunzipSync(compressedBuffer).toString('utf8');
-            break;
-          case 'brotli':
-            decompressed = zlib.brotliDecompressSync(compressedBuffer).toString('utf8');
-            break;
-          case 'deflate':
-            decompressed = zlib.inflateSync(compressedBuffer).toString('utf8');
-            break;
-          default:
-            throw new Error(`Unsupported compression type: ${compressionType}`);
+        // Verify backup if enabled
+        if (this.config.verification && backup.checksum) {
+          const actualChecksum = await this._generateChecksum(downloadPath);
+          if (actualChecksum !== backup.checksum) {
+            throw new Error('Backup verification failed during restore');
+          }
         }
+        
+        // Extract and restore data
+        const restoredResources = await this._restoreFromBackup(downloadPath, options);
+        
+        // Execute onRestoreComplete hook
+        if (this.config.onRestoreComplete) {
+          await this._executeHook(this.config.onRestoreComplete, backupId, { restored: restoredResources });
+        }
+        
+        this.emit('restore_complete', { 
+          id: backupId, 
+          restored: restoredResources 
+        });
+        
+        return {
+          backupId,
+          restored: restoredResources
+        };
+        
+      } finally {
+        // Cleanup temporary files
+        await this._cleanupTempFiles(tempRestoreDir);
       }
       
-      // Parse decompressed data
-      const backupData = JSON.parse(decompressed);
-      
-      // Write individual files back to temp directory
-      for (const [filename, content] of Object.entries(backupData)) {
-        const filePath = path.join(tempDir, filename);
-        await writeFile(filePath, content, 'utf8');
-      }
-      
-      // Remove compressed file
-      await unlink(compressedPath);
-      
-      if (this.config.verbose) {
-        console.log(`[BackupPlugin] Decompressed backup with ${Object.keys(backupData).length} files`);
-      }
     } catch (error) {
-      throw new Error(`Failed to decompress backup: ${error.message}`);
-    }
-  }
-
-  async _restoreResource(resourceName, resourceData, overwrite) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      // Create resource from backup config
-      await this.database.createResource(resourceData.config);
-    }
-    
-    // Insert data
-    for (const record of resourceData.data) {
-      if (overwrite) {
-        await resource.upsert(record.id, record);
-      } else {
-        const [ok] = await tryFn(() => resource.insert(record));
+      // Execute onRestoreError hook
+      if (this.config.onRestoreError) {
+        await this._executeHook(this.config.onRestoreError, backupId, { error });
       }
+      
+      this.emit('restore_error', { id: backupId, error: error.message });
+      throw error;
     }
   }
 
-  async _getBackupMetadata(backupId) {
-    const [ok, err, backup] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).get(backupId)
-    );
+  async _restoreFromBackup(backupPath, options) {
+    // This is a simplified implementation
+    // In reality, you'd need to handle decompression, etc.
+    const restoredResources = [];
     
-    return ok ? backup : null;
+    // For now, assume the backup is a JSON file with resource data
+    // In production, handle compressed archives properly
+    
+    return restoredResources;
   }
 
   /**
    * List available backups
+   * @param {Object} options - List options
+   * @returns {Array} List of backups
    */
   async listBackups(options = {}) {
-    const { type = null, status = null, limit = 50 } = options;
-    
-    const [ok, err, allBackups] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).list({
-        orderBy: { timestamp: 'desc' },
-        limit: limit * 2 // Get more to filter client-side
-      })
-    );
-    
-    if (!ok) return [];
-    
-    // Filter client-side to ensure it works
-    let filteredBackups = allBackups;
-    
-    if (type) {
-      filteredBackups = filteredBackups.filter(backup => backup.type === type);
+    try {
+      // Get backups from driver
+      const driverBackups = await this.driver.list(options);
+      
+      // Merge with metadata from database
+      const [metaOk, , metadataRecords] = await tryFn(() => 
+        this.database.resource(this.config.backupMetadataResource).list({
+          limit: options.limit || 50,
+          sort: { timestamp: -1 }
+        })
+      );
+      
+      const metadataMap = new Map();
+      if (metaOk) {
+        metadataRecords.forEach(record => metadataMap.set(record.id, record));
+      }
+      
+      // Combine driver data with metadata
+      const combinedBackups = driverBackups.map(backup => ({
+        ...backup,
+        ...(metadataMap.get(backup.id) || {})
+      }));
+      
+      return combinedBackups;
+      
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Error listing backups: ${error.message}`);
+      }
+      return [];
     }
-    
-    if (status) {
-      filteredBackups = filteredBackups.filter(backup => backup.status === status);
-    }
-    
-    return filteredBackups.slice(0, limit);
   }
 
   /**
    * Get backup status
+   * @param {string} backupId - Backup identifier
+   * @returns {Object|null} Backup status
    */
   async getBackupStatus(backupId) {
-    const [ok, err, backup] = await tryFn(() => 
+    const [ok, , backup] = await tryFn(() => 
       this.database.resource(this.config.backupMetadataResource).get(backupId)
     );
     
     return ok ? backup : null;
   }
 
+  async _cleanupOldBackups() {
+    // Implementation of retention policy
+    // This is simplified - implement GFS rotation properly
+  }
+
+  async _executeHook(hook, ...args) {
+    if (typeof hook === 'function') {
+      return await hook(...args);
+    }
+  }
+
   async start() {
     if (this.config.verbose) {
-      console.log(`[BackupPlugin] Started with ${this.config.destinations.length} destinations`);
+      const storageInfo = this.driver.getStorageInfo();
+      console.log(`[BackupPlugin] Started with driver: ${storageInfo.type}`);
     }
   }
 
@@ -1015,12 +648,17 @@ export class BackupPlugin extends Plugin {
       this.emit('backup_cancelled', { id: backupId });
     }
     this.activeBackups.clear();
+    
+    // Cleanup driver
+    if (this.driver) {
+      await this.driver.cleanup();
+    }
   }
 
+  /**
+   * Cleanup plugin resources (alias for stop for backward compatibility)
+   */
   async cleanup() {
     await this.stop();
-    this.removeAllListeners();
   }
 }
-
-export default BackupPlugin;

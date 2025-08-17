@@ -1,11 +1,11 @@
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import EventEmitter from 'events';
+import { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile, rm } from 'fs/promises';
 import fs, { createReadStream, createWriteStream } from 'fs';
-import zlib from 'node:zlib';
 import { pipeline } from 'stream/promises';
-import { mkdir, writeFile, stat, readFile, unlink, readdir, rm } from 'fs/promises';
 import path, { join } from 'path';
 import crypto, { createHash } from 'crypto';
+import zlib from 'node:zlib';
 import { Transform, Writable } from 'stream';
 import { PromisePool } from '@supercharge/promise-pool';
 import { ReadableStream } from 'node:stream/web';
@@ -1093,11 +1093,797 @@ class AuditPlugin extends Plugin {
   }
 }
 
+class BaseBackupDriver {
+  constructor(config = {}) {
+    this.config = {
+      compression: "gzip",
+      encryption: null,
+      verbose: false,
+      ...config
+    };
+  }
+  /**
+   * Initialize the driver
+   * @param {Database} database - S3DB database instance
+   */
+  async setup(database) {
+    this.database = database;
+    await this.onSetup();
+  }
+  /**
+   * Override this method to perform driver-specific setup
+   */
+  async onSetup() {
+  }
+  /**
+   * Upload a backup file to the destination
+   * @param {string} filePath - Path to the backup file
+   * @param {string} backupId - Unique backup identifier
+   * @param {Object} manifest - Backup manifest with metadata
+   * @returns {Object} Upload result with destination info
+   */
+  async upload(filePath, backupId, manifest) {
+    throw new Error("upload() method must be implemented by subclass");
+  }
+  /**
+   * Download a backup file from the destination
+   * @param {string} backupId - Unique backup identifier
+   * @param {string} targetPath - Local path to save the backup
+   * @param {Object} metadata - Backup metadata
+   * @returns {string} Path to downloaded file
+   */
+  async download(backupId, targetPath, metadata) {
+    throw new Error("download() method must be implemented by subclass");
+  }
+  /**
+   * Delete a backup from the destination
+   * @param {string} backupId - Unique backup identifier
+   * @param {Object} metadata - Backup metadata
+   */
+  async delete(backupId, metadata) {
+    throw new Error("delete() method must be implemented by subclass");
+  }
+  /**
+   * List backups available in the destination
+   * @param {Object} options - List options (limit, prefix, etc.)
+   * @returns {Array} List of backup metadata
+   */
+  async list(options = {}) {
+    throw new Error("list() method must be implemented by subclass");
+  }
+  /**
+   * Verify backup integrity
+   * @param {string} backupId - Unique backup identifier
+   * @param {string} expectedChecksum - Expected file checksum
+   * @param {Object} metadata - Backup metadata
+   * @returns {boolean} True if backup is valid
+   */
+  async verify(backupId, expectedChecksum, metadata) {
+    throw new Error("verify() method must be implemented by subclass");
+  }
+  /**
+   * Get driver type identifier
+   * @returns {string} Driver type
+   */
+  getType() {
+    throw new Error("getType() method must be implemented by subclass");
+  }
+  /**
+   * Get driver-specific storage info
+   * @returns {Object} Storage information
+   */
+  getStorageInfo() {
+    return {
+      type: this.getType(),
+      config: this.config
+    };
+  }
+  /**
+   * Clean up resources
+   */
+  async cleanup() {
+  }
+  /**
+   * Log message if verbose mode is enabled
+   * @param {string} message - Message to log
+   */
+  log(message) {
+    if (this.config.verbose) {
+      console.log(`[${this.getType()}BackupDriver] ${message}`);
+    }
+  }
+}
+
+class FilesystemBackupDriver extends BaseBackupDriver {
+  constructor(config = {}) {
+    super({
+      path: "./backups/{date}/",
+      permissions: 420,
+      directoryPermissions: 493,
+      ...config
+    });
+  }
+  getType() {
+    return "filesystem";
+  }
+  async onSetup() {
+    if (!this.config.path) {
+      throw new Error("FilesystemBackupDriver: path configuration is required");
+    }
+    this.log(`Initialized with path: ${this.config.path}`);
+  }
+  /**
+   * Resolve path template variables
+   * @param {string} backupId - Backup identifier
+   * @param {Object} manifest - Backup manifest
+   * @returns {string} Resolved path
+   */
+  resolvePath(backupId, manifest = {}) {
+    const now = /* @__PURE__ */ new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    return this.config.path.replace("{date}", dateStr).replace("{time}", timeStr).replace("{year}", now.getFullYear().toString()).replace("{month}", (now.getMonth() + 1).toString().padStart(2, "0")).replace("{day}", now.getDate().toString().padStart(2, "0")).replace("{backupId}", backupId).replace("{type}", manifest.type || "backup");
+  }
+  async upload(filePath, backupId, manifest) {
+    const targetDir = this.resolvePath(backupId, manifest);
+    const targetPath = path.join(targetDir, `${backupId}.backup`);
+    const manifestPath = path.join(targetDir, `${backupId}.manifest.json`);
+    const [createDirOk, createDirErr] = await tryFn(
+      () => mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
+    );
+    if (!createDirOk) {
+      throw new Error(`Failed to create backup directory: ${createDirErr.message}`);
+    }
+    const [copyOk, copyErr] = await tryFn(() => copyFile(filePath, targetPath));
+    if (!copyOk) {
+      throw new Error(`Failed to copy backup file: ${copyErr.message}`);
+    }
+    const [manifestOk, manifestErr] = await tryFn(
+      () => import('fs/promises').then((fs) => fs.writeFile(
+        manifestPath,
+        JSON.stringify(manifest, null, 2),
+        { mode: this.config.permissions }
+      ))
+    );
+    if (!manifestOk) {
+      await tryFn(() => unlink(targetPath));
+      throw new Error(`Failed to write manifest: ${manifestErr.message}`);
+    }
+    const [statOk, , stats] = await tryFn(() => stat(targetPath));
+    const size = statOk ? stats.size : 0;
+    this.log(`Uploaded backup ${backupId} to ${targetPath} (${size} bytes)`);
+    return {
+      path: targetPath,
+      manifestPath,
+      size,
+      uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  async download(backupId, targetPath, metadata) {
+    const sourcePath = metadata.path || path.join(
+      this.resolvePath(backupId, metadata),
+      `${backupId}.backup`
+    );
+    const [existsOk] = await tryFn(() => access(sourcePath));
+    if (!existsOk) {
+      throw new Error(`Backup file not found: ${sourcePath}`);
+    }
+    const targetDir = path.dirname(targetPath);
+    await tryFn(() => mkdir(targetDir, { recursive: true }));
+    const [copyOk, copyErr] = await tryFn(() => copyFile(sourcePath, targetPath));
+    if (!copyOk) {
+      throw new Error(`Failed to download backup: ${copyErr.message}`);
+    }
+    this.log(`Downloaded backup ${backupId} from ${sourcePath} to ${targetPath}`);
+    return targetPath;
+  }
+  async delete(backupId, metadata) {
+    const backupPath = metadata.path || path.join(
+      this.resolvePath(backupId, metadata),
+      `${backupId}.backup`
+    );
+    const manifestPath = metadata.manifestPath || path.join(
+      this.resolvePath(backupId, metadata),
+      `${backupId}.manifest.json`
+    );
+    const [deleteBackupOk] = await tryFn(() => unlink(backupPath));
+    const [deleteManifestOk] = await tryFn(() => unlink(manifestPath));
+    if (!deleteBackupOk && !deleteManifestOk) {
+      throw new Error(`Failed to delete backup files for ${backupId}`);
+    }
+    this.log(`Deleted backup ${backupId}`);
+  }
+  async list(options = {}) {
+    const { limit = 50, prefix = "" } = options;
+    const basePath = this.resolvePath("*").replace("*", "");
+    try {
+      const results = [];
+      await this._scanDirectory(path.dirname(basePath), prefix, results, limit);
+      results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      return results.slice(0, limit);
+    } catch (error) {
+      this.log(`Error listing backups: ${error.message}`);
+      return [];
+    }
+  }
+  async _scanDirectory(dirPath, prefix, results, limit) {
+    if (results.length >= limit) return;
+    const [readDirOk, , files] = await tryFn(() => readdir(dirPath));
+    if (!readDirOk) return;
+    for (const file of files) {
+      if (results.length >= limit) break;
+      const fullPath = path.join(dirPath, file);
+      const [statOk, , stats] = await tryFn(() => stat(fullPath));
+      if (!statOk) continue;
+      if (stats.isDirectory()) {
+        await this._scanDirectory(fullPath, prefix, results, limit);
+      } else if (file.endsWith(".manifest.json")) {
+        const [readOk, , content] = await tryFn(
+          () => import('fs/promises').then((fs) => fs.readFile(fullPath, "utf8"))
+        );
+        if (readOk) {
+          try {
+            const manifest = JSON.parse(content);
+            const backupId = file.replace(".manifest.json", "");
+            if (!prefix || backupId.includes(prefix)) {
+              results.push({
+                id: backupId,
+                path: fullPath.replace(".manifest.json", ".backup"),
+                manifestPath: fullPath,
+                size: stats.size,
+                createdAt: manifest.createdAt || stats.birthtime.toISOString(),
+                ...manifest
+              });
+            }
+          } catch (parseErr) {
+            this.log(`Failed to parse manifest ${fullPath}: ${parseErr.message}`);
+          }
+        }
+      }
+    }
+  }
+  async verify(backupId, expectedChecksum, metadata) {
+    const backupPath = metadata.path || path.join(
+      this.resolvePath(backupId, metadata),
+      `${backupId}.backup`
+    );
+    const [readOk, readErr] = await tryFn(async () => {
+      const hash = crypto.createHash("sha256");
+      const stream = createReadStream(backupPath);
+      await pipeline(stream, hash);
+      const actualChecksum = hash.digest("hex");
+      return actualChecksum === expectedChecksum;
+    });
+    if (!readOk) {
+      this.log(`Verification failed for ${backupId}: ${readErr.message}`);
+      return false;
+    }
+    return readOk;
+  }
+  getStorageInfo() {
+    return {
+      ...super.getStorageInfo(),
+      path: this.config.path,
+      permissions: this.config.permissions,
+      directoryPermissions: this.config.directoryPermissions
+    };
+  }
+}
+
+class S3BackupDriver extends BaseBackupDriver {
+  constructor(config = {}) {
+    super({
+      bucket: null,
+      // Will use database bucket if not specified
+      path: "backups/{date}/",
+      storageClass: "STANDARD_IA",
+      serverSideEncryption: "AES256",
+      client: null,
+      // Will use database client if not specified
+      ...config
+    });
+  }
+  getType() {
+    return "s3";
+  }
+  async onSetup() {
+    if (!this.config.client) {
+      this.config.client = this.database.client;
+    }
+    if (!this.config.bucket) {
+      this.config.bucket = this.database.bucket;
+    }
+    if (!this.config.client) {
+      throw new Error("S3BackupDriver: client is required (either via config or database)");
+    }
+    if (!this.config.bucket) {
+      throw new Error("S3BackupDriver: bucket is required (either via config or database)");
+    }
+    this.log(`Initialized with bucket: ${this.config.bucket}, path: ${this.config.path}`);
+  }
+  /**
+   * Resolve S3 key template variables
+   * @param {string} backupId - Backup identifier
+   * @param {Object} manifest - Backup manifest
+   * @returns {string} Resolved S3 key
+   */
+  resolveKey(backupId, manifest = {}) {
+    const now = /* @__PURE__ */ new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
+    const basePath = this.config.path.replace("{date}", dateStr).replace("{time}", timeStr).replace("{year}", now.getFullYear().toString()).replace("{month}", (now.getMonth() + 1).toString().padStart(2, "0")).replace("{day}", now.getDate().toString().padStart(2, "0")).replace("{backupId}", backupId).replace("{type}", manifest.type || "backup");
+    return path.posix.join(basePath, `${backupId}.backup`);
+  }
+  resolveManifestKey(backupId, manifest = {}) {
+    return this.resolveKey(backupId, manifest).replace(".backup", ".manifest.json");
+  }
+  async upload(filePath, backupId, manifest) {
+    const backupKey = this.resolveKey(backupId, manifest);
+    const manifestKey = this.resolveManifestKey(backupId, manifest);
+    const [statOk, , stats] = await tryFn(() => stat(filePath));
+    const fileSize = statOk ? stats.size : 0;
+    const [uploadOk, uploadErr] = await tryFn(async () => {
+      const fileStream = createReadStream(filePath);
+      return await this.config.client.uploadObject({
+        bucket: this.config.bucket,
+        key: backupKey,
+        body: fileStream,
+        contentLength: fileSize,
+        metadata: {
+          "backup-id": backupId,
+          "backup-type": manifest.type || "backup",
+          "created-at": (/* @__PURE__ */ new Date()).toISOString()
+        },
+        storageClass: this.config.storageClass,
+        serverSideEncryption: this.config.serverSideEncryption
+      });
+    });
+    if (!uploadOk) {
+      throw new Error(`Failed to upload backup file: ${uploadErr.message}`);
+    }
+    const [manifestOk, manifestErr] = await tryFn(
+      () => this.config.client.uploadObject({
+        bucket: this.config.bucket,
+        key: manifestKey,
+        body: JSON.stringify(manifest, null, 2),
+        contentType: "application/json",
+        metadata: {
+          "backup-id": backupId,
+          "manifest-for": backupKey
+        },
+        storageClass: this.config.storageClass,
+        serverSideEncryption: this.config.serverSideEncryption
+      })
+    );
+    if (!manifestOk) {
+      await tryFn(() => this.config.client.deleteObject({
+        bucket: this.config.bucket,
+        key: backupKey
+      }));
+      throw new Error(`Failed to upload manifest: ${manifestErr.message}`);
+    }
+    this.log(`Uploaded backup ${backupId} to s3://${this.config.bucket}/${backupKey} (${fileSize} bytes)`);
+    return {
+      bucket: this.config.bucket,
+      key: backupKey,
+      manifestKey,
+      size: fileSize,
+      storageClass: this.config.storageClass,
+      uploadedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      etag: uploadOk?.ETag
+    };
+  }
+  async download(backupId, targetPath, metadata) {
+    const backupKey = metadata.key || this.resolveKey(backupId, metadata);
+    const [downloadOk, downloadErr] = await tryFn(
+      () => this.config.client.downloadObject({
+        bucket: this.config.bucket,
+        key: backupKey,
+        filePath: targetPath
+      })
+    );
+    if (!downloadOk) {
+      throw new Error(`Failed to download backup: ${downloadErr.message}`);
+    }
+    this.log(`Downloaded backup ${backupId} from s3://${this.config.bucket}/${backupKey} to ${targetPath}`);
+    return targetPath;
+  }
+  async delete(backupId, metadata) {
+    const backupKey = metadata.key || this.resolveKey(backupId, metadata);
+    const manifestKey = metadata.manifestKey || this.resolveManifestKey(backupId, metadata);
+    const [deleteBackupOk] = await tryFn(
+      () => this.config.client.deleteObject({
+        bucket: this.config.bucket,
+        key: backupKey
+      })
+    );
+    const [deleteManifestOk] = await tryFn(
+      () => this.config.client.deleteObject({
+        bucket: this.config.bucket,
+        key: manifestKey
+      })
+    );
+    if (!deleteBackupOk && !deleteManifestOk) {
+      throw new Error(`Failed to delete backup objects for ${backupId}`);
+    }
+    this.log(`Deleted backup ${backupId} from S3`);
+  }
+  async list(options = {}) {
+    const { limit = 50, prefix = "" } = options;
+    const searchPrefix = this.config.path.replace(/\{[^}]+\}/g, "");
+    const [listOk, listErr, response] = await tryFn(
+      () => this.config.client.listObjects({
+        bucket: this.config.bucket,
+        prefix: searchPrefix,
+        maxKeys: limit * 2
+        // Get more to account for manifest files
+      })
+    );
+    if (!listOk) {
+      this.log(`Error listing S3 objects: ${listErr.message}`);
+      return [];
+    }
+    const manifestObjects = (response.Contents || []).filter((obj) => obj.Key.endsWith(".manifest.json")).filter((obj) => !prefix || obj.Key.includes(prefix));
+    const results = [];
+    for (const obj of manifestObjects.slice(0, limit)) {
+      const [manifestOk, , manifestContent] = await tryFn(
+        () => this.config.client.getObject({
+          bucket: this.config.bucket,
+          key: obj.Key
+        })
+      );
+      if (manifestOk) {
+        try {
+          const manifest = JSON.parse(manifestContent);
+          const backupId = path.basename(obj.Key, ".manifest.json");
+          results.push({
+            id: backupId,
+            bucket: this.config.bucket,
+            key: obj.Key.replace(".manifest.json", ".backup"),
+            manifestKey: obj.Key,
+            size: obj.Size,
+            lastModified: obj.LastModified,
+            storageClass: obj.StorageClass,
+            createdAt: manifest.createdAt || obj.LastModified,
+            ...manifest
+          });
+        } catch (parseErr) {
+          this.log(`Failed to parse manifest ${obj.Key}: ${parseErr.message}`);
+        }
+      }
+    }
+    results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return results;
+  }
+  async verify(backupId, expectedChecksum, metadata) {
+    const backupKey = metadata.key || this.resolveKey(backupId, metadata);
+    const [verifyOk, verifyErr] = await tryFn(async () => {
+      const headResponse = await this.config.client.headObject({
+        bucket: this.config.bucket,
+        key: backupKey
+      });
+      const etag = headResponse.ETag?.replace(/"/g, "");
+      if (etag && !etag.includes("-")) {
+        const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
+        return etag === expectedMd5;
+      } else {
+        const [streamOk, , stream] = await tryFn(
+          () => this.config.client.getObjectStream({
+            bucket: this.config.bucket,
+            key: backupKey
+          })
+        );
+        if (!streamOk) return false;
+        const hash = crypto.createHash("sha256");
+        for await (const chunk of stream) {
+          hash.update(chunk);
+        }
+        const actualChecksum = hash.digest("hex");
+        return actualChecksum === expectedChecksum;
+      }
+    });
+    if (!verifyOk) {
+      this.log(`Verification failed for ${backupId}: ${verifyErr?.message || "checksum mismatch"}`);
+      return false;
+    }
+    return true;
+  }
+  getStorageInfo() {
+    return {
+      ...super.getStorageInfo(),
+      bucket: this.config.bucket,
+      path: this.config.path,
+      storageClass: this.config.storageClass,
+      serverSideEncryption: this.config.serverSideEncryption
+    };
+  }
+}
+
+class MultiBackupDriver extends BaseBackupDriver {
+  constructor(config = {}) {
+    super({
+      destinations: [],
+      strategy: "all",
+      // 'all', 'any', 'priority'
+      concurrency: 3,
+      requireAll: true,
+      // For backward compatibility
+      ...config
+    });
+    this.drivers = [];
+  }
+  getType() {
+    return "multi";
+  }
+  async onSetup() {
+    if (!Array.isArray(this.config.destinations) || this.config.destinations.length === 0) {
+      throw new Error("MultiBackupDriver: destinations array is required and must not be empty");
+    }
+    for (const [index, destConfig] of this.config.destinations.entries()) {
+      if (!destConfig.driver) {
+        throw new Error(`MultiBackupDriver: destination[${index}] must have a driver type`);
+      }
+      try {
+        const driver = createBackupDriver(destConfig.driver, destConfig.config || {});
+        await driver.setup(this.database);
+        this.drivers.push({
+          driver,
+          config: destConfig,
+          index
+        });
+        this.log(`Setup destination ${index}: ${destConfig.driver}`);
+      } catch (error) {
+        throw new Error(`Failed to setup destination ${index} (${destConfig.driver}): ${error.message}`);
+      }
+    }
+    if (this.config.requireAll === false) {
+      this.config.strategy = "any";
+    }
+    this.log(`Initialized with ${this.drivers.length} destinations, strategy: ${this.config.strategy}`);
+  }
+  async upload(filePath, backupId, manifest) {
+    const strategy = this.config.strategy;
+    const errors = [];
+    if (strategy === "priority") {
+      for (const { driver, config, index } of this.drivers) {
+        const [ok, err, result] = await tryFn(
+          () => driver.upload(filePath, backupId, manifest)
+        );
+        if (ok) {
+          this.log(`Priority upload successful to destination ${index}`);
+          return [{
+            ...result,
+            driver: config.driver,
+            destination: index,
+            status: "success"
+          }];
+        } else {
+          errors.push({ destination: index, error: err.message });
+          this.log(`Priority upload failed to destination ${index}: ${err.message}`);
+        }
+      }
+      throw new Error(`All priority destinations failed: ${errors.map((e) => `${e.destination}: ${e.error}`).join("; ")}`);
+    }
+    const uploadPromises = this.drivers.map(async ({ driver, config, index }) => {
+      const [ok, err, result] = await tryFn(
+        () => driver.upload(filePath, backupId, manifest)
+      );
+      if (ok) {
+        this.log(`Upload successful to destination ${index}`);
+        return {
+          ...result,
+          driver: config.driver,
+          destination: index,
+          status: "success"
+        };
+      } else {
+        this.log(`Upload failed to destination ${index}: ${err.message}`);
+        const errorResult = {
+          driver: config.driver,
+          destination: index,
+          status: "failed",
+          error: err.message
+        };
+        errors.push(errorResult);
+        return errorResult;
+      }
+    });
+    const allResults = await this._executeConcurrent(uploadPromises, this.config.concurrency);
+    const successResults = allResults.filter((r) => r.status === "success");
+    const failedResults = allResults.filter((r) => r.status === "failed");
+    if (strategy === "all" && failedResults.length > 0) {
+      throw new Error(`Some destinations failed: ${failedResults.map((r) => `${r.destination}: ${r.error}`).join("; ")}`);
+    }
+    if (strategy === "any" && successResults.length === 0) {
+      throw new Error(`All destinations failed: ${failedResults.map((r) => `${r.destination}: ${r.error}`).join("; ")}`);
+    }
+    return allResults;
+  }
+  async download(backupId, targetPath, metadata) {
+    const destinations = Array.isArray(metadata.destinations) ? metadata.destinations : [metadata];
+    for (const destMetadata of destinations) {
+      if (destMetadata.status !== "success") continue;
+      const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
+      if (!driverInstance) continue;
+      const [ok, err, result] = await tryFn(
+        () => driverInstance.driver.download(backupId, targetPath, destMetadata)
+      );
+      if (ok) {
+        this.log(`Downloaded from destination ${destMetadata.destination}`);
+        return result;
+      } else {
+        this.log(`Download failed from destination ${destMetadata.destination}: ${err.message}`);
+      }
+    }
+    throw new Error(`Failed to download backup from any destination`);
+  }
+  async delete(backupId, metadata) {
+    const destinations = Array.isArray(metadata.destinations) ? metadata.destinations : [metadata];
+    const errors = [];
+    let successCount = 0;
+    for (const destMetadata of destinations) {
+      if (destMetadata.status !== "success") continue;
+      const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
+      if (!driverInstance) continue;
+      const [ok, err] = await tryFn(
+        () => driverInstance.driver.delete(backupId, destMetadata)
+      );
+      if (ok) {
+        successCount++;
+        this.log(`Deleted from destination ${destMetadata.destination}`);
+      } else {
+        errors.push(`${destMetadata.destination}: ${err.message}`);
+        this.log(`Delete failed from destination ${destMetadata.destination}: ${err.message}`);
+      }
+    }
+    if (successCount === 0 && errors.length > 0) {
+      throw new Error(`Failed to delete from any destination: ${errors.join("; ")}`);
+    }
+    if (errors.length > 0) {
+      this.log(`Partial delete success, some errors: ${errors.join("; ")}`);
+    }
+  }
+  async list(options = {}) {
+    const allLists = await Promise.allSettled(
+      this.drivers.map(
+        ({ driver, index }) => driver.list(options).catch((err) => {
+          this.log(`List failed for destination ${index}: ${err.message}`);
+          return [];
+        })
+      )
+    );
+    const backupMap = /* @__PURE__ */ new Map();
+    allLists.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        result.value.forEach((backup) => {
+          const existing = backupMap.get(backup.id);
+          if (!existing || new Date(backup.createdAt) > new Date(existing.createdAt)) {
+            backupMap.set(backup.id, {
+              ...backup,
+              destinations: existing ? [...existing.destinations || [], { destination: index, ...backup }] : [{ destination: index, ...backup }]
+            });
+          }
+        });
+      }
+    });
+    const results = Array.from(backupMap.values()).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, options.limit || 50);
+    return results;
+  }
+  async verify(backupId, expectedChecksum, metadata) {
+    const destinations = Array.isArray(metadata.destinations) ? metadata.destinations : [metadata];
+    for (const destMetadata of destinations) {
+      if (destMetadata.status !== "success") continue;
+      const driverInstance = this.drivers.find((d) => d.index === destMetadata.destination);
+      if (!driverInstance) continue;
+      const [ok, , isValid] = await tryFn(
+        () => driverInstance.driver.verify(backupId, expectedChecksum, destMetadata)
+      );
+      if (ok && isValid) {
+        this.log(`Verification successful from destination ${destMetadata.destination}`);
+        return true;
+      }
+    }
+    return false;
+  }
+  async cleanup() {
+    await Promise.all(
+      this.drivers.map(
+        ({ driver }) => tryFn(() => driver.cleanup()).catch(() => {
+        })
+      )
+    );
+  }
+  getStorageInfo() {
+    return {
+      ...super.getStorageInfo(),
+      strategy: this.config.strategy,
+      destinations: this.drivers.map(({ driver, config, index }) => ({
+        index,
+        driver: config.driver,
+        info: driver.getStorageInfo()
+      }))
+    };
+  }
+  /**
+   * Execute promises with concurrency limit
+   * @param {Array} promises - Array of promise functions
+   * @param {number} concurrency - Max concurrent executions
+   * @returns {Array} Results in original order
+   */
+  async _executeConcurrent(promises, concurrency) {
+    const results = new Array(promises.length);
+    const executing = [];
+    for (let i = 0; i < promises.length; i++) {
+      const promise = Promise.resolve(promises[i]).then((result) => {
+        results[i] = result;
+        return result;
+      });
+      executing.push(promise);
+      if (executing.length >= concurrency) {
+        await Promise.race(executing);
+        executing.splice(executing.findIndex((p) => p === promise), 1);
+      }
+    }
+    await Promise.all(executing);
+    return results;
+  }
+}
+
+const BACKUP_DRIVERS = {
+  filesystem: FilesystemBackupDriver,
+  s3: S3BackupDriver,
+  multi: MultiBackupDriver
+};
+function createBackupDriver(driver, config = {}) {
+  const DriverClass = BACKUP_DRIVERS[driver];
+  if (!DriverClass) {
+    throw new Error(`Unknown backup driver: ${driver}. Available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`);
+  }
+  return new DriverClass(config);
+}
+function validateBackupConfig(driver, config = {}) {
+  if (!driver || typeof driver !== "string") {
+    throw new Error("Driver type must be a non-empty string");
+  }
+  if (!BACKUP_DRIVERS[driver]) {
+    throw new Error(`Unknown backup driver: ${driver}. Available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`);
+  }
+  switch (driver) {
+    case "filesystem":
+      if (!config.path) {
+        throw new Error('FilesystemBackupDriver requires "path" configuration');
+      }
+      break;
+    case "s3":
+      break;
+    case "multi":
+      if (!Array.isArray(config.destinations) || config.destinations.length === 0) {
+        throw new Error('MultiBackupDriver requires non-empty "destinations" array');
+      }
+      config.destinations.forEach((dest, index) => {
+        if (!dest.driver) {
+          throw new Error(`Destination ${index} must have a "driver" property`);
+        }
+        if (dest.driver !== "multi") {
+          validateBackupConfig(dest.driver, dest.config || {});
+        }
+      });
+      break;
+  }
+  return true;
+}
+
 class BackupPlugin extends Plugin {
   constructor(options = {}) {
     super();
+    this.driverName = options.driver || "filesystem";
+    this.driverConfig = options.config || {};
     this.config = {
+      // Legacy destinations support (will be converted to multi driver)
+      destinations: options.destinations || null,
+      // Scheduling configuration
       schedule: options.schedule || {},
+      // Retention policy (Grandfather-Father-Son)
       retention: {
         daily: 7,
         weekly: 4,
@@ -1105,7 +1891,7 @@ class BackupPlugin extends Plugin {
         yearly: 3,
         ...options.retention
       },
-      destinations: options.destinations || [],
+      // Backup options
       compression: options.compression || "gzip",
       encryption: options.encryption || null,
       verification: options.verification !== false,
@@ -1115,39 +1901,62 @@ class BackupPlugin extends Plugin {
       backupMetadataResource: options.backupMetadataResource || "backup_metadata",
       tempDir: options.tempDir || "./tmp/backups",
       verbose: options.verbose || false,
+      // Hooks
       onBackupStart: options.onBackupStart || null,
       onBackupComplete: options.onBackupComplete || null,
       onBackupError: options.onBackupError || null,
-      ...options
+      onRestoreStart: options.onRestoreStart || null,
+      onRestoreComplete: options.onRestoreComplete || null,
+      onRestoreError: options.onRestoreError || null
     };
-    this.database = null;
-    this.scheduledJobs = /* @__PURE__ */ new Map();
+    this.driver = null;
     this.activeBackups = /* @__PURE__ */ new Set();
+    this._handleLegacyDestinations();
+    validateBackupConfig(this.driverName, this.driverConfig);
     this._validateConfiguration();
   }
-  _validateConfiguration() {
-    if (this.config.destinations.length === 0) {
-      throw new Error("BackupPlugin: At least one destination must be configured");
-    }
-    for (const dest of this.config.destinations) {
-      if (!dest.type) {
-        throw new Error("BackupPlugin: Each destination must have a type");
+  /**
+   * Convert legacy destinations format to multi driver format
+   */
+  _handleLegacyDestinations() {
+    if (this.config.destinations && Array.isArray(this.config.destinations)) {
+      this.driverName = "multi";
+      this.driverConfig = {
+        strategy: "all",
+        destinations: this.config.destinations.map((dest) => {
+          const { type, ...config } = dest;
+          return {
+            driver: type,
+            config
+          };
+        })
+      };
+      this.config.destinations = null;
+      if (this.config.verbose) {
+        console.log("[BackupPlugin] Converted legacy destinations format to multi driver");
       }
     }
+  }
+  _validateConfiguration() {
     if (this.config.encryption && (!this.config.encryption.key || !this.config.encryption.algorithm)) {
       throw new Error("BackupPlugin: Encryption requires both key and algorithm");
     }
+    if (this.config.compression && !["none", "gzip", "brotli", "deflate"].includes(this.config.compression)) {
+      throw new Error("BackupPlugin: Invalid compression type. Use: none, gzip, brotli, deflate");
+    }
   }
-  async setup(database) {
-    this.database = database;
+  async onSetup() {
+    this.driver = createBackupDriver(this.driverName, this.driverConfig);
+    await this.driver.setup(this.database);
+    await mkdir(this.config.tempDir, { recursive: true });
     await this._createBackupMetadataResource();
-    await this._ensureTempDirectory();
-    if (Object.keys(this.config.schedule).length > 0) {
-      await this._setupScheduledBackups();
+    if (this.config.verbose) {
+      const storageInfo = this.driver.getStorageInfo();
+      console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
     this.emit("initialized", {
-      destinations: this.config.destinations.length,
-      scheduled: Object.keys(this.config.schedule)
+      driver: this.driver.getType(),
+      config: this.driver.getStorageInfo()
     });
   }
   async _createBackupMetadataResource() {
@@ -1158,7 +1967,8 @@ class BackupPlugin extends Plugin {
         type: "string|required",
         timestamp: "number|required",
         resources: "json|required",
-        destinations: "json|required",
+        driverInfo: "json|required",
+        // Store driver info instead of destinations
         size: "number|default:0",
         compressed: "boolean|default:false",
         encrypted: "boolean|default:false",
@@ -1169,88 +1979,64 @@ class BackupPlugin extends Plugin {
         createdAt: "string|required"
       },
       behavior: "body-overflow",
-      partitions: {
-        byType: { fields: { type: "string" } },
-        byDate: { fields: { createdAt: "string|maxlength:10" } }
-      }
+      timestamps: true
     }));
-  }
-  async _ensureTempDirectory() {
-    const [ok] = await tryFn(() => mkdir(this.config.tempDir, { recursive: true }));
-  }
-  async _setupScheduledBackups() {
-    if (this.config.verbose) {
-      console.log("[BackupPlugin] Scheduled backups configured:", this.config.schedule);
+    if (!ok && this.config.verbose) {
+      console.log(`[BackupPlugin] Backup metadata resource '${this.config.backupMetadataResource}' already exists`);
     }
   }
   /**
-   * Perform a backup
+   * Create a backup
+   * @param {string} type - Backup type ('full' or 'incremental')
+   * @param {Object} options - Backup options
+   * @returns {Object} Backup result
    */
   async backup(type = "full", options = {}) {
-    const backupId = `backup_${type}_${Date.now()}`;
-    if (this.activeBackups.has(backupId)) {
-      throw new Error(`Backup ${backupId} already in progress`);
-    }
-    this.activeBackups.add(backupId);
+    const backupId = this._generateBackupId(type);
+    const startTime = Date.now();
     try {
-      const startTime = Date.now();
+      this.activeBackups.add(backupId);
       if (this.config.onBackupStart) {
-        await this._executeHook(this.config.onBackupStart, type, { backupId, ...options });
+        await this._executeHook(this.config.onBackupStart, type, { backupId });
       }
       this.emit("backup_start", { id: backupId, type });
       const metadata = await this._createBackupMetadata(backupId, type);
-      const resources = await this._getResourcesToBackup();
       const tempBackupDir = path.join(this.config.tempDir, backupId);
       await mkdir(tempBackupDir, { recursive: true });
-      let totalSize = 0;
-      const resourceFiles = /* @__PURE__ */ new Map();
       try {
-        for (const resourceName of resources) {
-          const resourceData = await this._backupResource(resourceName, type);
-          const filePath = path.join(tempBackupDir, `${resourceName}.json`);
-          await writeFile(filePath, JSON.stringify(resourceData, null, 2));
-          const stats = await stat(filePath);
-          totalSize += stats.size;
-          resourceFiles.set(resourceName, { path: filePath, size: stats.size });
+        const manifest = await this._createBackupManifest(type, options);
+        const exportedFiles = await this._exportResources(manifest.resources, tempBackupDir, type);
+        if (exportedFiles.length === 0) {
+          throw new Error("No resources were exported for backup");
         }
-        const manifest = {
-          id: backupId,
-          type,
-          timestamp: Date.now(),
-          resources: Array.from(resourceFiles.keys()),
-          totalSize,
-          compression: this.config.compression,
-          encryption: !!this.config.encryption
-        };
-        const manifestPath = path.join(tempBackupDir, "manifest.json");
-        await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-        let finalPath = tempBackupDir;
+        let finalPath;
+        let totalSize = 0;
         if (this.config.compression !== "none") {
-          finalPath = await this._compressBackup(tempBackupDir, backupId);
-        }
-        if (this.config.encryption) {
-          finalPath = await this._encryptBackup(finalPath, backupId);
-        }
-        let checksum = null;
-        if (this.config.compression !== "none" || this.config.encryption) {
-          checksum = await this._calculateChecksum(finalPath);
+          finalPath = path.join(tempBackupDir, `${backupId}.tar.gz`);
+          totalSize = await this._createCompressedArchive(exportedFiles, finalPath);
         } else {
-          checksum = this._calculateManifestChecksum(manifest);
+          finalPath = exportedFiles[0];
+          const [statOk, , stats] = await tryFn(() => stat(finalPath));
+          totalSize = statOk ? stats.size : 0;
         }
-        const uploadResults = await this._uploadToDestinations(finalPath, backupId, manifest);
+        const checksum = await this._generateChecksum(finalPath);
+        const uploadResult = await this.driver.upload(finalPath, backupId, manifest);
         if (this.config.verification) {
-          await this._verifyBackup(backupId, checksum);
+          const isValid = await this.driver.verify(backupId, checksum, uploadResult);
+          if (!isValid) {
+            throw new Error("Backup verification failed");
+          }
         }
         const duration = Date.now() - startTime;
-        await this._updateBackupMetadata(metadata.id, {
+        await this._updateBackupMetadata(backupId, {
           status: "completed",
           size: totalSize,
           checksum,
-          destinations: uploadResults,
+          driverInfo: uploadResult,
           duration
         });
         if (this.config.onBackupComplete) {
-          const stats = { backupId, type, size: totalSize, duration, destinations: uploadResults.length };
+          const stats = { backupId, type, size: totalSize, duration, driverInfo: uploadResult };
           await this._executeHook(this.config.onBackupComplete, type, stats);
         }
         this.emit("backup_complete", {
@@ -1258,7 +2044,7 @@ class BackupPlugin extends Plugin {
           type,
           size: totalSize,
           duration,
-          destinations: uploadResults.length
+          driverInfo: uploadResult
         });
         await this._cleanupOldBackups();
         return {
@@ -1267,7 +2053,7 @@ class BackupPlugin extends Plugin {
           size: totalSize,
           duration,
           checksum,
-          destinations: uploadResults
+          driverInfo: uploadResult
         };
       } finally {
         await this._cleanupTempFiles(tempBackupDir);
@@ -1276,23 +2062,30 @@ class BackupPlugin extends Plugin {
       if (this.config.onBackupError) {
         await this._executeHook(this.config.onBackupError, type, { backupId, error });
       }
+      await this._updateBackupMetadata(backupId, {
+        status: "failed",
+        error: error.message,
+        duration: Date.now() - startTime
+      });
       this.emit("backup_error", { id: backupId, type, error: error.message });
-      const [metadataOk] = await tryFn(
-        () => this.database.resource(this.config.backupMetadataResource).update(backupId, { status: "failed", error: error.message })
-      );
       throw error;
     } finally {
       this.activeBackups.delete(backupId);
     }
   }
+  _generateBackupId(type) {
+    const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    const random = Math.random().toString(36).substring(2, 8);
+    return `${type}-${timestamp}-${random}`;
+  }
   async _createBackupMetadata(backupId, type) {
-    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const now = /* @__PURE__ */ new Date();
     const metadata = {
       id: backupId,
       type,
       timestamp: Date.now(),
       resources: [],
-      destinations: [],
+      driverInfo: {},
       size: 0,
       status: "in_progress",
       compressed: this.config.compression !== "none",
@@ -1300,9 +2093,11 @@ class BackupPlugin extends Plugin {
       checksum: null,
       error: null,
       duration: 0,
-      createdAt: now.slice(0, 10)
+      createdAt: now.toISOString().slice(0, 10)
     };
-    await this.database.resource(this.config.backupMetadataResource).insert(metadata);
+    const [ok] = await tryFn(
+      () => this.database.resource(this.config.backupMetadataResource).insert(metadata)
+    );
     return metadata;
   }
   async _updateBackupMetadata(backupId, updates) {
@@ -1310,466 +2105,194 @@ class BackupPlugin extends Plugin {
       () => this.database.resource(this.config.backupMetadataResource).update(backupId, updates)
     );
   }
-  async _getResourcesToBackup() {
-    const allResources = Object.keys(this.database.resources);
-    let resources = allResources;
-    if (this.config.include && this.config.include.length > 0) {
-      resources = resources.filter((name) => this.config.include.includes(name));
+  async _createBackupManifest(type, options) {
+    let resourcesToBackup = options.resources || (this.config.include ? this.config.include : await this.database.listResources());
+    if (Array.isArray(resourcesToBackup) && resourcesToBackup.length > 0 && typeof resourcesToBackup[0] === "object") {
+      resourcesToBackup = resourcesToBackup.map((resource) => resource.name || resource);
     }
-    if (this.config.exclude && this.config.exclude.length > 0) {
-      resources = resources.filter((name) => {
-        return !this.config.exclude.some((pattern) => {
-          if (pattern.includes("*")) {
-            const regex = new RegExp(pattern.replace(/\*/g, ".*"));
-            return regex.test(name);
-          }
-          return name === pattern;
-        });
-      });
-    }
-    resources = resources.filter((name) => name !== this.config.backupMetadataResource);
-    return resources;
-  }
-  async _backupResource(resourceName, type) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
-    }
-    if (type === "full") {
-      const [ok, err, data] = await tryFn(() => resource.list({ limit: 999999 }));
-      if (!ok) throw err;
-      return {
-        resource: resourceName,
-        type: "full",
-        data,
-        count: data.length,
-        config: resource.config
-      };
-    }
-    if (type === "incremental") {
-      const lastBackup = await this._getLastBackup("incremental");
-      const since = lastBackup ? lastBackup.timestamp : 0;
-      const [ok, err, data] = await tryFn(() => resource.list({ limit: 999999 }));
-      if (!ok) throw err;
-      return {
-        resource: resourceName,
-        type: "incremental",
-        data,
-        count: data.length,
-        since,
-        config: resource.config
-      };
-    }
-    throw new Error(`Backup type '${type}' not supported`);
-  }
-  async _getLastBackup(type) {
-    const [ok, err, backups] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).list({
-        where: { type, status: "completed" },
-        orderBy: { timestamp: "desc" },
-        limit: 1
-      })
+    const filteredResources = resourcesToBackup.filter(
+      (name) => !this.config.exclude.includes(name)
     );
-    return ok && backups.length > 0 ? backups[0] : null;
+    return {
+      type,
+      timestamp: Date.now(),
+      resources: filteredResources,
+      compression: this.config.compression,
+      encrypted: !!this.config.encryption,
+      s3db_version: this.database.constructor.version || "unknown"
+    };
   }
-  async _compressBackup(backupDir, backupId) {
-    const compressedPath = `${backupDir}.tar.gz`;
-    try {
-      const files = await this._getDirectoryFiles(backupDir);
-      const backupData = {};
-      for (const file of files) {
-        const filePath = path.join(backupDir, file);
-        const content = await readFile(filePath, "utf8");
-        backupData[file] = content;
+  async _exportResources(resourceNames, tempDir, type) {
+    const exportedFiles = [];
+    for (const resourceName of resourceNames) {
+      const resource = this.database.resources[resourceName];
+      if (!resource) {
+        console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        continue;
       }
-      const serialized = JSON.stringify(backupData);
-      const originalSize = Buffer.byteLength(serialized, "utf8");
-      let compressedBuffer;
-      let compressionType = this.config.compression;
-      switch (this.config.compression) {
-        case "gzip":
-          compressedBuffer = zlib.gzipSync(Buffer.from(serialized, "utf8"));
-          break;
-        case "brotli":
-          compressedBuffer = zlib.brotliCompressSync(Buffer.from(serialized, "utf8"));
-          break;
-        case "deflate":
-          compressedBuffer = zlib.deflateSync(Buffer.from(serialized, "utf8"));
-          break;
-        case "none":
-          compressedBuffer = Buffer.from(serialized, "utf8");
-          compressionType = "none";
-          break;
-        default:
-          throw new Error(`Unsupported compression type: ${this.config.compression}`);
+      const exportPath = path.join(tempDir, `${resourceName}.json`);
+      let records;
+      if (type === "incremental") {
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1e3);
+        records = await resource.list({
+          filter: { updatedAt: { ">": yesterday.toISOString() } }
+        });
+      } else {
+        records = await resource.list();
       }
-      const compressedData = this.config.compression !== "none" ? compressedBuffer.toString("base64") : serialized;
-      await writeFile(compressedPath, compressedData, "utf8");
-      const compressedSize = Buffer.byteLength(compressedData, "utf8");
-      const compressionRatio = (compressedSize / originalSize * 100).toFixed(2);
+      const exportData = {
+        resourceName,
+        definition: resource.config,
+        records,
+        exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        type
+      };
+      await writeFile(exportPath, JSON.stringify(exportData, null, 2));
+      exportedFiles.push(exportPath);
       if (this.config.verbose) {
-        console.log(`[BackupPlugin] Compressed ${originalSize} bytes to ${compressedSize} bytes (${compressionRatio}% of original)`);
+        console.log(`[BackupPlugin] Exported ${records.length} records from '${resourceName}'`);
       }
-      return compressedPath;
-    } catch (error) {
-      throw new Error(`Failed to compress backup: ${error.message}`);
     }
+    return exportedFiles;
   }
-  async _encryptBackup(filePath, backupId) {
-    if (!this.config.encryption) return filePath;
-    const encryptedPath = `${filePath}.enc`;
-    const { algorithm, key } = this.config.encryption;
-    const cipher = crypto.createCipher(algorithm, key);
-    const input = createReadStream(filePath);
-    const output = createWriteStream(encryptedPath);
-    await pipeline(input, cipher, output);
-    await unlink(filePath);
-    return encryptedPath;
+  async _createCompressedArchive(files, targetPath) {
+    const output = createWriteStream(targetPath);
+    const gzip = zlib.createGzip({ level: 6 });
+    let totalSize = 0;
+    await pipeline(
+      async function* () {
+        for (const filePath of files) {
+          const content = await readFile(filePath);
+          totalSize += content.length;
+          yield content;
+        }
+      },
+      gzip,
+      output
+    );
+    const [statOk, , stats] = await tryFn(() => stat(targetPath));
+    return statOk ? stats.size : totalSize;
   }
-  async _calculateChecksum(filePath) {
+  async _generateChecksum(filePath) {
     const hash = crypto.createHash("sha256");
-    const input = createReadStream(filePath);
-    return new Promise((resolve, reject) => {
-      input.on("data", (data) => hash.update(data));
-      input.on("end", () => resolve(hash.digest("hex")));
-      input.on("error", reject);
-    });
-  }
-  _calculateManifestChecksum(manifest) {
-    const hash = crypto.createHash("sha256");
-    hash.update(JSON.stringify(manifest));
+    const stream = createReadStream(filePath);
+    await pipeline(stream, hash);
     return hash.digest("hex");
   }
-  async _copyDirectory(src, dest) {
-    await mkdir(dest, { recursive: true });
-    const entries = await readdir(src, { withFileTypes: true });
-    for (const entry of entries) {
-      const srcPath = path.join(src, entry.name);
-      const destPath = path.join(dest, entry.name);
-      if (entry.isDirectory()) {
-        await this._copyDirectory(srcPath, destPath);
-      } else {
-        const input = createReadStream(srcPath);
-        const output = createWriteStream(destPath);
-        await pipeline(input, output);
-      }
-    }
-  }
-  async _getDirectorySize(dirPath) {
-    let totalSize = 0;
-    const entries = await readdir(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        totalSize += await this._getDirectorySize(entryPath);
-      } else {
-        const stats = await stat(entryPath);
-        totalSize += stats.size;
-      }
-    }
-    return totalSize;
-  }
-  async _uploadToDestinations(filePath, backupId, manifest) {
-    const results = [];
-    let hasSuccess = false;
-    for (const destination of this.config.destinations) {
-      const [ok, err, result] = await tryFn(
-        () => this._uploadToDestination(filePath, backupId, manifest, destination)
-      );
-      if (ok) {
-        results.push({ ...destination, ...result, status: "success" });
-        hasSuccess = true;
-      } else {
-        results.push({ ...destination, status: "failed", error: err.message });
-        if (this.config.verbose) {
-          console.warn(`[BackupPlugin] Upload to ${destination.type} failed:`, err.message);
-        }
-      }
-    }
-    if (!hasSuccess) {
-      const errors = results.map((r) => r.error).join("; ");
-      throw new Error(`All backup destinations failed: ${errors}`);
-    }
-    return results;
-  }
-  async _uploadToDestination(filePath, backupId, manifest, destination) {
-    if (destination.type === "filesystem") {
-      return this._uploadToFilesystem(filePath, backupId, destination);
-    }
-    if (destination.type === "s3") {
-      return this._uploadToS3(filePath, backupId, destination);
-    }
-    throw new Error(`Destination type '${destination.type}' not supported`);
-  }
-  async _uploadToFilesystem(filePath, backupId, destination) {
-    const destDir = destination.path.replace("{date}", (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    await mkdir(destDir, { recursive: true });
-    const stats = await stat(filePath);
-    if (stats.isDirectory()) {
-      const destPath = path.join(destDir, backupId);
-      await this._copyDirectory(filePath, destPath);
-      const dirStats = await this._getDirectorySize(destPath);
-      return {
-        path: destPath,
-        size: dirStats,
-        uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    } else {
-      const fileName = path.basename(filePath);
-      const destPath = path.join(destDir, fileName);
-      const input = createReadStream(filePath);
-      const output = createWriteStream(destPath);
-      await pipeline(input, output);
-      const fileStats = await stat(destPath);
-      return {
-        path: destPath,
-        size: fileStats.size,
-        uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
-      };
-    }
-  }
-  async _uploadToS3(filePath, backupId, destination) {
-    const key = destination.path.replace("{date}", (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).replace("{backupId}", backupId) + path.basename(filePath);
-    await new Promise((resolve) => setTimeout(resolve, 1e3));
-    return {
-      bucket: destination.bucket,
-      key,
-      uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  async _verifyBackup(backupId, expectedChecksum) {
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Verifying backup ${backupId} with checksum ${expectedChecksum}`);
-    }
-  }
-  async _cleanupOldBackups() {
-    const retention = this.config.retention;
-    const now = /* @__PURE__ */ new Date();
-    const [ok, err, allBackups] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).list({
-        where: { status: "completed" },
-        orderBy: { timestamp: "desc" }
-      })
-    );
-    if (!ok) return;
-    const toDelete = [];
-    const groups = {
-      daily: [],
-      weekly: [],
-      monthly: [],
-      yearly: []
-    };
-    for (const backup of allBackups) {
-      const backupDate = new Date(backup.timestamp);
-      const age = Math.floor((now - backupDate) / (1e3 * 60 * 60 * 24));
-      if (age < 7) groups.daily.push(backup);
-      else if (age < 30) groups.weekly.push(backup);
-      else if (age < 365) groups.monthly.push(backup);
-      else groups.yearly.push(backup);
-    }
-    if (groups.daily.length > retention.daily) {
-      toDelete.push(...groups.daily.slice(retention.daily));
-    }
-    if (groups.weekly.length > retention.weekly) {
-      toDelete.push(...groups.weekly.slice(retention.weekly));
-    }
-    if (groups.monthly.length > retention.monthly) {
-      toDelete.push(...groups.monthly.slice(retention.monthly));
-    }
-    if (groups.yearly.length > retention.yearly) {
-      toDelete.push(...groups.yearly.slice(retention.yearly));
-    }
-    for (const backup of toDelete) {
-      await this._deleteBackup(backup);
-    }
-    if (toDelete.length > 0) {
-      this.emit("cleanup_complete", { deleted: toDelete.length });
-    }
-  }
-  async _deleteBackup(backup) {
-    for (const dest of backup.destinations || []) {
-      const [ok2] = await tryFn(() => this._deleteFromDestination(backup, dest));
-    }
-    const [ok] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).delete(backup.id)
-    );
-  }
-  async _deleteFromDestination(backup, destination) {
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Deleting backup ${backup.id} from ${destination.type}`);
-    }
-  }
   async _cleanupTempFiles(tempDir) {
-    const [ok] = await tryFn(async () => {
-      const files = await this._getDirectoryFiles(tempDir);
-      for (const file of files) {
-        await unlink(file);
-      }
-    });
-  }
-  async _getDirectoryFiles(dir) {
-    return [];
-  }
-  async _executeHook(hook, ...args) {
-    if (typeof hook === "function") {
-      const [ok, err] = await tryFn(() => hook(...args));
-      if (!ok && this.config.verbose) {
-        console.warn("[BackupPlugin] Hook execution failed:", err.message);
-      }
-    }
+    const [ok] = await tryFn(
+      () => import('fs/promises').then((fs) => fs.rm(tempDir, { recursive: true, force: true }))
+    );
   }
   /**
    * Restore from backup
+   * @param {string} backupId - Backup identifier
+   * @param {Object} options - Restore options
+   * @returns {Object} Restore result
    */
   async restore(backupId, options = {}) {
-    const { overwrite = false, resources = null } = options;
-    const [ok, err, backup] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).get(backupId)
-    );
-    if (!ok || !backup) {
-      throw new Error(`Backup '${backupId}' not found`);
-    }
-    if (backup.status !== "completed") {
-      throw new Error(`Backup '${backupId}' is not in completed status`);
-    }
-    this.emit("restore_start", { backupId });
-    const tempDir = path.join(this.config.tempDir, `restore_${backupId}`);
-    await mkdir(tempDir, { recursive: true });
     try {
-      await this._downloadBackup(backup, tempDir);
-      if (backup.encrypted) {
-        await this._decryptBackup(tempDir);
+      if (this.config.onRestoreStart) {
+        await this._executeHook(this.config.onRestoreStart, backupId, options);
       }
-      if (backup.compressed) {
-        await this._decompressBackup(tempDir);
+      this.emit("restore_start", { id: backupId, options });
+      const backup = await this.getBackupStatus(backupId);
+      if (!backup) {
+        throw new Error(`Backup '${backupId}' not found`);
       }
-      const manifestPath = path.join(tempDir, "manifest.json");
-      const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
-      const resourcesToRestore = resources || manifest.resources;
-      const restored = [];
-      for (const resourceName of resourcesToRestore) {
-        const resourcePath = path.join(tempDir, `${resourceName}.json`);
-        const resourceData = JSON.parse(await readFile(resourcePath, "utf-8"));
-        await this._restoreResource(resourceName, resourceData, overwrite);
-        restored.push(resourceName);
+      if (backup.status !== "completed") {
+        throw new Error(`Backup '${backupId}' is not in completed status`);
       }
-      this.emit("restore_complete", { backupId, restored });
-      return { backupId, restored };
-    } finally {
-      await this._cleanupTempFiles(tempDir);
-    }
-  }
-  async _downloadBackup(backup, tempDir) {
-    for (const dest of backup.destinations) {
-      const [ok] = await tryFn(() => this._downloadFromDestination(backup, dest, tempDir));
-      if (ok) return;
-    }
-    throw new Error("Failed to download backup from any destination");
-  }
-  async _downloadFromDestination(backup, destination, tempDir) {
-    if (this.config.verbose) {
-      console.log(`[BackupPlugin] Downloading backup ${backup.id} from ${destination.type}`);
-    }
-  }
-  async _decryptBackup(tempDir) {
-  }
-  async _decompressBackup(tempDir) {
-    try {
-      const files = await readdir(tempDir);
-      const compressedFile = files.find((f) => f.endsWith(".tar.gz"));
-      if (!compressedFile) {
-        throw new Error("No compressed backup file found");
-      }
-      const compressedPath = path.join(tempDir, compressedFile);
-      const compressedData = await readFile(compressedPath, "utf8");
-      const backupId = path.basename(compressedFile, ".tar.gz");
-      const backup = await this._getBackupMetadata(backupId);
-      const compressionType = backup?.compression || "gzip";
-      let decompressed;
-      if (compressionType === "none") {
-        decompressed = compressedData;
-      } else {
-        const compressedBuffer = Buffer.from(compressedData, "base64");
-        switch (compressionType) {
-          case "gzip":
-            decompressed = zlib.gunzipSync(compressedBuffer).toString("utf8");
-            break;
-          case "brotli":
-            decompressed = zlib.brotliDecompressSync(compressedBuffer).toString("utf8");
-            break;
-          case "deflate":
-            decompressed = zlib.inflateSync(compressedBuffer).toString("utf8");
-            break;
-          default:
-            throw new Error(`Unsupported compression type: ${compressionType}`);
+      const tempRestoreDir = path.join(this.config.tempDir, `restore-${backupId}`);
+      await mkdir(tempRestoreDir, { recursive: true });
+      try {
+        const downloadPath = path.join(tempRestoreDir, `${backupId}.backup`);
+        await this.driver.download(backupId, downloadPath, backup.driverInfo);
+        if (this.config.verification && backup.checksum) {
+          const actualChecksum = await this._generateChecksum(downloadPath);
+          if (actualChecksum !== backup.checksum) {
+            throw new Error("Backup verification failed during restore");
+          }
         }
-      }
-      const backupData = JSON.parse(decompressed);
-      for (const [filename, content] of Object.entries(backupData)) {
-        const filePath = path.join(tempDir, filename);
-        await writeFile(filePath, content, "utf8");
-      }
-      await unlink(compressedPath);
-      if (this.config.verbose) {
-        console.log(`[BackupPlugin] Decompressed backup with ${Object.keys(backupData).length} files`);
+        const restoredResources = await this._restoreFromBackup(downloadPath, options);
+        if (this.config.onRestoreComplete) {
+          await this._executeHook(this.config.onRestoreComplete, backupId, { restored: restoredResources });
+        }
+        this.emit("restore_complete", {
+          id: backupId,
+          restored: restoredResources
+        });
+        return {
+          backupId,
+          restored: restoredResources
+        };
+      } finally {
+        await this._cleanupTempFiles(tempRestoreDir);
       }
     } catch (error) {
-      throw new Error(`Failed to decompress backup: ${error.message}`);
-    }
-  }
-  async _restoreResource(resourceName, resourceData, overwrite) {
-    const resource = this.database.resources[resourceName];
-    if (!resource) {
-      await this.database.createResource(resourceData.config);
-    }
-    for (const record of resourceData.data) {
-      if (overwrite) {
-        await resource.upsert(record.id, record);
-      } else {
-        const [ok] = await tryFn(() => resource.insert(record));
+      if (this.config.onRestoreError) {
+        await this._executeHook(this.config.onRestoreError, backupId, { error });
       }
+      this.emit("restore_error", { id: backupId, error: error.message });
+      throw error;
     }
   }
-  async _getBackupMetadata(backupId) {
-    const [ok, err, backup] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).get(backupId)
-    );
-    return ok ? backup : null;
+  async _restoreFromBackup(backupPath, options) {
+    const restoredResources = [];
+    return restoredResources;
   }
   /**
    * List available backups
+   * @param {Object} options - List options
+   * @returns {Array} List of backups
    */
   async listBackups(options = {}) {
-    const { type = null, status = null, limit = 50 } = options;
-    const [ok, err, allBackups] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).list({
-        orderBy: { timestamp: "desc" },
-        limit: limit * 2
-        // Get more to filter client-side
-      })
-    );
-    if (!ok) return [];
-    let filteredBackups = allBackups;
-    if (type) {
-      filteredBackups = filteredBackups.filter((backup) => backup.type === type);
+    try {
+      const driverBackups = await this.driver.list(options);
+      const [metaOk, , metadataRecords] = await tryFn(
+        () => this.database.resource(this.config.backupMetadataResource).list({
+          limit: options.limit || 50,
+          sort: { timestamp: -1 }
+        })
+      );
+      const metadataMap = /* @__PURE__ */ new Map();
+      if (metaOk) {
+        metadataRecords.forEach((record) => metadataMap.set(record.id, record));
+      }
+      const combinedBackups = driverBackups.map((backup) => ({
+        ...backup,
+        ...metadataMap.get(backup.id) || {}
+      }));
+      return combinedBackups;
+    } catch (error) {
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Error listing backups: ${error.message}`);
+      }
+      return [];
     }
-    if (status) {
-      filteredBackups = filteredBackups.filter((backup) => backup.status === status);
-    }
-    return filteredBackups.slice(0, limit);
   }
   /**
    * Get backup status
+   * @param {string} backupId - Backup identifier
+   * @returns {Object|null} Backup status
    */
   async getBackupStatus(backupId) {
-    const [ok, err, backup] = await tryFn(
+    const [ok, , backup] = await tryFn(
       () => this.database.resource(this.config.backupMetadataResource).get(backupId)
     );
     return ok ? backup : null;
   }
+  async _cleanupOldBackups() {
+  }
+  async _executeHook(hook, ...args) {
+    if (typeof hook === "function") {
+      return await hook(...args);
+    }
+  }
   async start() {
     if (this.config.verbose) {
-      console.log(`[BackupPlugin] Started with ${this.config.destinations.length} destinations`);
+      const storageInfo = this.driver.getStorageInfo();
+      console.log(`[BackupPlugin] Started with driver: ${storageInfo.type}`);
     }
   }
   async stop() {
@@ -1777,10 +2300,15 @@ class BackupPlugin extends Plugin {
       this.emit("backup_cancelled", { id: backupId });
     }
     this.activeBackups.clear();
+    if (this.driver) {
+      await this.driver.cleanup();
+    }
   }
+  /**
+   * Cleanup plugin resources (alias for stop for backward compatibility)
+   */
   async cleanup() {
     await this.stop();
-    this.removeAllListeners();
   }
 }
 
@@ -9090,6 +9618,7 @@ class Database extends EventEmitter {
       parallelism: this.parallelism,
       connectionString
     });
+    this.connectionString = connectionString;
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
     if (!this._exitListenerRegistered) {

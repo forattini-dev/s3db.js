@@ -12,19 +12,17 @@ describe('CLI Backup & Restore Commands', () => {
     database = createDatabaseForTest('suite=cli/restore');
     await database.connect();
     
-    // Setup backup plugin
+    // Setup backup plugin (new driver API)
     backupPlugin = new BackupPlugin({
-      destinations: [
-        {
-          type: 'filesystem',
-          path: './tmp/backups/{date}/'
-        }
-      ],
+      driver: 'filesystem',
+      config: {
+        path: './tmp/backups/{date}/'
+      },
       compression: 'gzip',
       verbose: false
     });
     
-    await backupPlugin.setup(database);
+    await database.usePlugin(backupPlugin);
   });
 
   afterEach(async () => {
