@@ -74,6 +74,9 @@ export class Database extends EventEmitter {
       parallelism: this.parallelism,
       connectionString: connectionString,
     });
+    
+    // Store connection string for CLI access
+    this.connectionString = connectionString;
 
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;

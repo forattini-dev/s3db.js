@@ -43,7 +43,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resources = await db.listResources();
       spinner.stop();
@@ -88,7 +88,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resource = await db.resource(resourceName);
       const results = await resource.list({
@@ -154,7 +154,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resource = await db.resource(resourceName);
       const result = await resource.insert(data);
@@ -179,7 +179,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resource = await db.resource(resourceName);
       const result = await resource.get(id);
@@ -209,7 +209,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resource = await db.resource(resourceName);
       await resource.delete(id);
@@ -233,7 +233,7 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       const resource = await db.resource(resourceName);
       const count = await resource.count();
@@ -262,10 +262,10 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       // Check if backup plugin is available
-      const backupPlugin = db.plugins?.find(p => p.constructor.name === 'BackupPlugin');
+      const backupPlugin = db.pluginRegistry?.backup;
       if (!backupPlugin) {
         spinner.fail(chalk.red('BackupPlugin is not installed. Cannot create backups without backup plugin.'));
         process.exit(1);
@@ -391,10 +391,10 @@ program
       const db = new S3db({ 
         connectionString: getConnection(options) 
       });
-      await db.init();
+      await db.connect();
       
       // Check if backup plugin is available
-      const backupPlugin = db.plugins?.find(p => p.constructor.name === 'BackupPlugin');
+      const backupPlugin = db.pluginRegistry?.backup;
       if (!backupPlugin) {
         spinner.fail(chalk.red('BackupPlugin is not installed. Cannot restore without backup plugin.'));
         process.exit(1);

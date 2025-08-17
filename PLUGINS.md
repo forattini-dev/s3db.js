@@ -29,22 +29,68 @@
 
 ## 🚀 Getting Started with Plugins
 
-Plugins extend s3db.js with additional functionality. They can be used individually or combined for powerful workflows.
+Plugins extend s3db.js with additional functionality using a **driver-based architecture**. They can be used individually or combined for powerful workflows.
+
+### Plugin Architecture
+
+Most s3db.js plugins follow a **driver pattern** where you specify:
+- **`driver`**: The storage/connection type (`filesystem`, `s3`, `multi`, etc.)
+- **`config`**: Driver-specific configuration options
+- **Plugin options**: Global settings that apply across drivers
 
 ### Basic Plugin Usage
 
 ```javascript
-import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+import { S3db, CachePlugin, BackupPlugin, CostsPlugin } from 's3db.js';
 
 const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [
-    new CachePlugin(),
-    CostsPlugin // Some plugins are static objects
-  ]
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
 });
 
 await s3db.connect();
+
+// Driver-based plugins (most common)
+await s3db.usePlugin(new CachePlugin({
+  driver: 'memory',
+  config: { maxSize: 1000 }
+}));
+
+await s3db.usePlugin(new BackupPlugin({
+  driver: 'filesystem',
+  config: { path: './backups/{date}/' }
+}));
+
+// Static utility plugins
+await s3db.usePlugin(CostsPlugin);
+```
+
+### Driver-Based Configuration Pattern
+
+```javascript
+// Single driver example
+new SomePlugin({
+  driver: 'driverType',
+  config: {
+    // Driver-specific options
+    option1: 'value1',
+    option2: 'value2'
+  },
+  // Global plugin options
+  verbose: true,
+  timeout: 30000
+});
+
+// Multi-driver example  
+new SomePlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all',
+    destinations: [
+      { driver: 'driver1', config: {...} },
+      { driver: 'driver2', config: {...} }
+    ]
+  }
+});
 ```
 
 ### Plugin Types
@@ -60,24 +106,72 @@ await s3db.connect();
 
 ## 💾 Cache Plugin
 
-Intelligent caching system that reduces S3 API calls and improves performance by storing frequently accessed data in memory or S3.
+**Driver-Based Caching System** - Intelligent caching that reduces S3 API calls and improves performance using configurable storage drivers.
 
-### ⚡ Quick Start
+> 🏎️ **Performance**: Dramatically reduces S3 costs and latency by caching frequently accessed data.
 
+### 🚀 Quick Start
+
+#### Memory Driver (Fast & Temporary)
 ```javascript
 import { S3db, CachePlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new CachePlugin()]
+  plugins: [
+    new CachePlugin({
+      driver: 'memory',
+      ttl: 300000,        // 5 minutes
+      maxSize: 1000,      // Max 1000 items
+      config: {
+        evictionPolicy: 'lru',
+        enableStats: true
+      }
+    })
+  ]
 });
 
 await s3db.connect();
 
-// Cache is automatically used for read operations
+// Cache automatically intercepts read operations
 const users = s3db.resource('users');
-await users.count(); // Cached for default TTL
-await users.list();  // Cached result
+await users.count(); // ⚡ Cached for 5 minutes
+await users.list();  // ⚡ Cached result
+```
+
+#### S3 Driver (Persistent & Shared)
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    new CachePlugin({
+      driver: 's3',
+      ttl: 1800000,       // 30 minutes
+      config: {
+        bucket: 'my-cache-bucket',    // Optional: separate bucket
+        keyPrefix: 'cache/',          // Cache key prefix
+        storageClass: 'STANDARD'      // S3 storage class
+      }
+    })
+  ]
+});
+```
+
+#### Filesystem Driver (Local & Fast)
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    new CachePlugin({
+      driver: 'filesystem',
+      config: {
+        path: './cache',
+        partitionAware: true,
+        partitionStrategy: 'hierarchical'
+      }
+    })
+  ]
+});
 ```
 
 ### ⚙️ Configuration Parameters
@@ -4286,147 +4380,404 @@ stateMachine.on('action_error', ({ actionName, error, machineId, entityId }) => 
 
 ## 💾 Backup Plugin
 
-Comprehensive database backup and restore capabilities with support for multiple destinations, compression, encryption, and retention policies.
+**Driver-Based Backup System** - Comprehensive database backup and restore capabilities with configurable drivers, compression, encryption, and retention policies.
 
-### ⚡ Quick Start
+> ⚡ **NEW**: Driver-based architecture supports filesystem, S3, and multi-destination backups with flexible strategies.
 
+### 🚀 Quick Start
+
+#### Single Driver (Filesystem)
 ```javascript
 import { S3db, BackupPlugin } from 's3db.js';
 
 const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [
-    new BackupPlugin({
-      destinations: [
-        {
-          type: 'filesystem',
-          path: './backups/{date}/',
-          compression: 'gzip'
-        }
-      ],
-      retention: {
-        daily: 7,
-        weekly: 4,
-        monthly: 12
-      },
-      onBackupComplete: (type, stats) => {
-        console.log(`${type} backup completed:`, {
-          size: `${Math.round(stats.size / 1024)}KB`,
-          duration: `${stats.duration}ms`
-        });
-      }
-    })
-  ]
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
 });
 
 await s3db.connect();
 
-// Perform backups
-const fullBackup = await s3db.plugins.backup.backup('full');
+// Install backup plugin with filesystem driver
+const backupPlugin = new BackupPlugin({
+  driver: 'filesystem',
+  config: {
+    path: './backups/{date}/',
+    compression: 'gzip'
+  },
+  retention: {
+    daily: 7,
+    weekly: 4,
+    monthly: 12
+  }
+});
+
+await s3db.usePlugin(backupPlugin);
+
+// Create backups
+const fullBackup = await backupPlugin.backup('full');
 console.log('Backup ID:', fullBackup.id);
 
-const incrementalBackup = await s3db.plugins.backup.backup('incremental');
-
-// List available backups
-const backups = await s3db.plugins.backup.listBackups();
-console.log('Available backups:', backups.length);
-
-// Restore from backup
-// await s3db.plugins.backup.restore(fullBackup.id);
+// List and restore
+const backups = await backupPlugin.listBackups();
+await backupPlugin.restore(fullBackup.id);
 ```
 
-### ⚙️ Configuration Parameters
+#### Single Driver (S3)
+```javascript
+const backupPlugin = new BackupPlugin({
+  driver: 's3',
+  config: {
+    bucket: 'my-backup-bucket',
+    path: 'database/{date}/',
+    storageClass: 'STANDARD_IA',
+    serverSideEncryption: 'AES256'
+  },
+  compression: 'gzip',
+  verification: true
+});
+```
+
+#### Multi-Driver (Multiple Destinations)
+```javascript
+const backupPlugin = new BackupPlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all', // 'all', 'any', 'priority'
+    destinations: [
+      { 
+        driver: 'filesystem', 
+        config: { path: '/local/backups/{date}/' } 
+      },
+      { 
+        driver: 's3', 
+        config: { 
+          bucket: 'remote-backups',
+          storageClass: 'GLACIER'
+        } 
+      }
+    ]
+  }
+});
+```
+
+### 🎯 Driver Types
+
+#### 📁 Filesystem Driver
+**Perfect for**: Local backups, network storage, development
+
+```javascript
+{
+  driver: 'filesystem',
+  config: {
+    path: '/backups/{date}/',           // Template path with variables
+    permissions: 0o644,                 // File permissions  
+    directoryPermissions: 0o755         // Directory permissions
+  }
+}
+```
+
+**Path Templates:**
+- `{date}` → `2024-03-15`
+- `{time}` → `14-30-45`
+- `{year}` → `2024`
+- `{month}` → `03`
+- `{day}` → `15`
+- `{backupId}` → `full-2024-03-15T14-30-45-abc123`
+- `{type}` → `full` | `incremental`
+
+#### ☁️ S3 Driver
+**Perfect for**: Cloud backups, long-term storage, disaster recovery
+
+```javascript
+{
+  driver: 's3',
+  config: {
+    bucket: 'my-backup-bucket',         // S3 bucket (optional, uses database bucket)
+    path: 'backups/{date}/',            // S3 key prefix with templates
+    storageClass: 'STANDARD_IA',        // S3 storage class
+    serverSideEncryption: 'AES256',     // Server-side encryption
+    client: customS3Client              // Custom S3 client (optional)
+  }
+}
+```
+
+**Storage Classes:** `STANDARD`, `STANDARD_IA`, `ONEZONE_IA`, `REDUCED_REDUNDANCY`, `GLACIER`, `DEEP_ARCHIVE`
+
+#### 🔄 Multi Driver
+**Perfect for**: Redundancy, hybrid storage, complex backup strategies
+
+```javascript
+{
+  driver: 'multi',
+  config: {
+    strategy: 'all',                    // Backup strategy
+    concurrency: 3,                     // Max concurrent uploads
+    destinations: [
+      { driver: 'filesystem', config: {...} },
+      { driver: 's3', config: {...} }
+    ]
+  }
+}
+```
+
+**Strategies:**
+- **`all`**: Upload to all destinations (fail if any fails)
+- **`any`**: Upload to all, succeed if at least one succeeds  
+- **`priority`**: Try destinations in order, stop on first success
+
+### 🔧 Configuration Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `destinations` | array | `[]` | Backup destinations configuration |
-| `retention` | object | `{}` | Retention policy (daily, weekly, monthly, yearly) |
-| `include` | array | `null` | Resources to include (null = all) |
-| `exclude` | array | `[]` | Resources to exclude (supports wildcards) |
-| `compression` | string | `'gzip'` | Compression: `'none'`, `'gzip'`, `'brotli'` |
-| `encryption` | object | `null` | Encryption configuration |
-| `verification` | boolean | `true` | Verify backup integrity |
-| `tempDir` | string | `'./tmp/backups'` | Temporary working directory |
-| `onBackupStart` | function | `null` | Callback when backup starts |
-| `onBackupComplete` | function | `null` | Callback when backup completes |
-| `onBackupError` | function | `null` | Callback when backup fails |
-| `verbose` | boolean | `false` | Enable detailed logging |
+| **`driver`** | `string` | `'filesystem'` | Driver type: `filesystem`, `s3`, `multi` |
+| **`config`** | `object` | `{}` | Driver-specific configuration |
+| `retention` | `object` | `{}` | Retention policy (GFS rotation) |
+| `include` | `array` | `null` | Resources to include (null = all) |
+| `exclude` | `array` | `[]` | Resources to exclude |
+| `compression` | `string` | `'gzip'` | `'none'`, `'gzip'`, `'brotli'`, `'deflate'` |
+| `encryption` | `object` | `null` | Encryption configuration |
+| `verification` | `boolean` | `true` | Verify backup integrity |
+| `tempDir` | `string` | `'./tmp/backups'` | Temporary working directory |
+| `verbose` | `boolean` | `false` | Enable detailed logging |
 
-### Destination Types
-
-#### Filesystem
-```javascript
-{
-  type: 'filesystem',
-  path: '/backups/{date}/',      // {date} expands to YYYY-MM-DD
-  compression: 'gzip'
-}
-```
-
-#### Amazon S3
-```javascript
-{
-  type: 's3',
-  bucket: 'backup-bucket',
-  path: 'db-backups/{date}/',
-  region: 'us-east-1',
-  storageClass: 'STANDARD_IA'
-}
-```
-
-### Backup Types
+### 🎛️ Backup Types & Operations
 
 ```javascript
-// Full backup - complete snapshot
-const fullBackup = await backup.backup('full');
+// Full backup - complete database snapshot
+const fullBackup = await backupPlugin.backup('full');
+console.log(`✓ Full backup: ${fullBackup.id} (${fullBackup.size} bytes)`);
 
-// Incremental backup - changes since last backup
-const incrementalBackup = await backup.backup('incremental');
+// Incremental backup - changes since last backup  
+const incrementalBackup = await backupPlugin.backup('incremental');
 
-// Differential backup - changes since last full backup
-const differentialBackup = await backup.backup('differential');
+// Selective backup - specific resources only
+const selectiveBackup = await backupPlugin.backup('full', {
+  resources: ['users', 'posts']
+});
+
+// Custom backup type
+const customBackup = await backupPlugin.backup('weekly-snapshot');
 ```
 
-### Retention Policies (GFS)
+### 📋 Backup Management
+
+```javascript
+// List all backups
+const allBackups = await backupPlugin.listBackups();
+
+// List with filters
+const recentBackups = await backupPlugin.listBackups({
+  limit: 10,
+  prefix: 'full-2024'
+});
+
+// Get backup status
+const status = await backupPlugin.getBackupStatus(backupId);
+console.log(`Status: ${status.status}, Size: ${status.size}`);
+
+// Restore operations
+await backupPlugin.restore(backupId);                    // Full restore
+await backupPlugin.restore(backupId, { overwrite: true }); // Overwrite existing
+await backupPlugin.restore(backupId, { 
+  resources: ['users'] 
+}); // Selective restore
+```
+
+### 🔄 Legacy Format Support
+
+The plugin automatically converts legacy `destinations` format:
+
+```javascript
+// ❌ Old format (still works)
+new BackupPlugin({
+  destinations: [
+    { type: 'filesystem', path: '/backups/' }
+  ]
+});
+
+// ✅ Automatically converted to:
+// driver: 'multi'
+// config: { destinations: [{ driver: 'filesystem', config: { path: '/backups/' } }] }
+```
+
+### 📊 Retention Policies (GFS)
+
+Grandfather-Father-Son rotation keeps backups efficiently:
 
 ```javascript
 retention: {
-  daily: 7,      // Keep daily backups for 7 days
-  weekly: 4,     // Keep weekly backups for 4 weeks
-  monthly: 12,   // Keep monthly backups for 12 months
-  yearly: 3      // Keep yearly backups for 3 years
+  daily: 7,      // Keep 7 daily backups
+  weekly: 4,     // Keep 4 weekly backups  
+  monthly: 12,   // Keep 12 monthly backups
+  yearly: 3      // Keep 3 yearly backups
 }
 ```
 
-### API Methods
+### 🎣 Hooks & Events
 
 ```javascript
-// Backup operations
-const result = await backup.backup(type, options);
-const backups = await backup.listBackups({ type: 'full', limit: 10 });
-const status = await backup.getBackupStatus(backupId);
-await backup.restore(backupId, options);
+const backupPlugin = new BackupPlugin({
+  driver: 'filesystem',
+  config: { path: './backups/' },
+  
+  // Lifecycle hooks
+  onBackupStart: async (type, { backupId }) => {
+    console.log(`🚀 Starting ${type} backup: ${backupId}`);
+    await notifySlack(`Backup ${backupId} started`);
+  },
+  
+  onBackupComplete: async (type, stats) => {
+    console.log(`✅ ${type} backup completed:`, {
+      id: stats.backupId,
+      size: `${Math.round(stats.size / 1024)}KB`,
+      duration: `${stats.duration}ms`,
+      destinations: stats.driverInfo
+    });
+  },
+  
+  onBackupError: async (type, { backupId, error }) => {
+    console.error(`❌ Backup ${backupId} failed:`, error.message);
+    await alertOps(error);
+  }
+});
 
-// Management
-await backup.cleanup(); // Apply retention policy
-const isValid = await backup.verify(backupId);
-await backup.cancel(backupId);
+// Event listeners
+backupPlugin.on('backup_start', ({ id, type }) => {
+  updateDashboard(`Backup ${id} started`);
+});
+
+backupPlugin.on('backup_complete', ({ id, type, size, duration }) => {
+  metrics.record('backup.completed', { type, size, duration });
+});
+
+backupPlugin.on('restore_complete', ({ id, restored }) => {
+  console.log(`Restored ${restored.length} resources from ${id}`);
+});
 ```
 
-### Events
+### 🔒 Advanced Security
 
 ```javascript
-backup.on('backup_start', ({ id, type }) => {
-  console.log(`Backup ${id} started (${type})`);
+const secureBackupPlugin = new BackupPlugin({
+  driver: 's3',
+  config: {
+    bucket: 'secure-backups',
+    storageClass: 'STANDARD_IA',
+    serverSideEncryption: 'aws:kms',
+    kmsKeyId: 'arn:aws:kms:region:account:key/key-id'
+  },
+  
+  // Client-side encryption (before upload)
+  encryption: {
+    algorithm: 'AES-256-GCM',
+    key: process.env.BACKUP_ENCRYPTION_KEY,
+    keyDerivation: {
+      algorithm: 'PBKDF2',
+      iterations: 100000,
+      salt: 'backup-salt-2024'
+    }
+  },
+  
+  // Integrity verification
+  verification: true,
+  
+  // Compression for efficiency
+  compression: 'gzip'
 });
+```
 
-backup.on('backup_complete', ({ id, type, size, duration, destinations }) => {
-  console.log(`Backup ${id} completed in ${duration}ms`);
-});
+### 🚀 Production Examples
 
-backup.on('backup_error', ({ id, type, error }) => {
-  console.error(`Backup ${id} failed:`, error);
+#### Enterprise Multi-Region Setup
+```javascript
+const enterpriseBackup = new BackupPlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all',
+    destinations: [
+      {
+        driver: 's3',
+        config: {
+          bucket: 'backups-us-east-1',
+          path: 'production/{date}/',
+          storageClass: 'STANDARD_IA'
+        }
+      },
+      {
+        driver: 's3', 
+        config: {
+          bucket: 'backups-eu-west-1',
+          path: 'production/{date}/',
+          storageClass: 'STANDARD_IA'
+        }
+      },
+      {
+        driver: 'filesystem',
+        config: {
+          path: '/mnt/backup-nas/s3db/{date}/'
+        }
+      }
+    ]
+  },
+  retention: {
+    daily: 30,
+    weekly: 12, 
+    monthly: 24,
+    yearly: 7
+  },
+  verification: true,
+  compression: 'gzip'
 });
+```
+
+#### Development Quick Backup
+```javascript
+const devBackup = new BackupPlugin({
+  driver: 'filesystem',
+  config: {
+    path: './dev-backups/{date}/'
+  },
+  compression: 'none',
+  verification: false,
+  verbose: true,
+  retention: { daily: 3 }
+});
+```
+
+### 🎯 CLI Integration
+
+The BackupPlugin works with s3db CLI commands:
+
+```bash
+# Create backups
+s3db backup full --connection "s3://key:secret@bucket"
+s3db backup incremental --connection "s3://key:secret@bucket"
+
+# List and status
+s3db backup --list --connection "s3://key:secret@bucket"
+s3db backup --status backup-id --connection "s3://key:secret@bucket"
+
+# Restore operations  
+s3db restore backup-id --connection "s3://key:secret@bucket"
+s3db restore backup-id --overwrite --connection "s3://key:secret@bucket"
+```
+
+> **Note**: CLI requires the BackupPlugin to be installed in the database instance.
+
+### 🔍 Driver Information
+
+```javascript
+// Get driver details
+const driverInfo = backupPlugin.driver.getStorageInfo();
+console.log('Driver type:', driverInfo.type);
+console.log('Configuration:', driverInfo.config);
+
+// Multi-driver details
+if (driverInfo.type === 'multi') {
+  console.log('Strategy:', driverInfo.strategy);
+  driverInfo.destinations.forEach((dest, i) => {
+    console.log(`Destination ${i}:`, dest.driver, dest.info);
+  });
+}
 ```
 
 ---
