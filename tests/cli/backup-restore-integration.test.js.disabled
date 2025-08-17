@@ -1,0 +1,389 @@
+import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
+import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
+import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs/promises';
+
+describe('CLI Backup & Restore Integration Tests', () => {
+  let database;
+  let backupPlugin;
+  let tempDir;
+  let connectionString;
+
+  beforeEach(async () => {
+    // Create test database
+    database = createDatabaseForTest('suite=cli/backup-restore-integration');
+    await database.connect();
+    
+    // Create temporary directory for backups
+    tempDir = await createTemporaryPathForTest('cli-backup-test');
+    
+    // Setup backup plugin with filesystem destination (new driver API)
+    backupPlugin = new BackupPlugin({
+      driver: 'filesystem',
+      config: {
+        path: tempDir + '/{date}/'
+      },
+      compression: 'gzip',
+      verbose: false
+    });
+    
+    await database.usePlugin(backupPlugin);
+    
+    // Connection string for CLI commands
+    connectionString = database.connectionString;
+    
+    // Create test resource and data
+    const users = await database.createResource({
+      name: 'users',
+      attributes: {
+        name: 'string|required',
+        email: 'string|required',
+        department: 'string|required'
+      }
+    });
+    
+    // Insert test data
+    await users.insert({ id: 'user1', name: 'Alice', email: 'alice@example.com', department: 'Engineering' });
+    await users.insert({ id: 'user2', name: 'Bob', email: 'bob@example.com', department: 'Marketing' });
+    await users.insert({ id: 'user3', name: 'Carol', email: 'carol@example.com', department: 'Sales' });
+  });
+
+  afterEach(async () => {
+    if (backupPlugin) {
+      await backupPlugin.cleanup();
+    }
+    if (database) {
+      await database.disconnect();
+    }
+    
+    // Cleanup temp directory
+    if (tempDir) {
+      try {
+        await fs.rmdir(tempDir, { recursive: true });
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+    }
+  });
+
+  describe('Backup Command Tests', () => {
+    test('should create a full backup via CLI', async () => {
+      const result = await runCLI(['backup', 'full', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ full backup created successfully');
+      expect(result.stdout).toContain('Backup Summary:');
+      expect(result.stdout).toContain('Backup ID:');
+      expect(result.stdout).toContain('Type: full');
+      expect(result.stdout).toContain('Size:');
+      expect(result.stdout).toContain('Duration:');
+    });
+
+    test('should create an incremental backup via CLI', async () => {
+      const result = await runCLI(['backup', 'incremental', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ incremental backup created successfully');
+      expect(result.stdout).toContain('Type: incremental');
+    });
+
+    test('should list backups via CLI', async () => {
+      // First create a backup
+      await runCLI(['backup', 'full', '--connection', connectionString]);
+      
+      // Then list backups
+      const result = await runCLI(['backup', '--list', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('Backup ID');
+      expect(result.stdout).toContain('Type');
+      expect(result.stdout).toContain('Status');
+      expect(result.stdout).toContain('full');
+      expect(result.stdout).toContain('✓');
+    });
+
+    test('should get backup status via CLI', async () => {
+      // Create a backup first
+      const backupResult = await runCLI(['backup', 'full', '--connection', connectionString]);
+      
+      // Extract backup ID from output
+      const backupIdMatch = backupResult.stdout.match(/Backup ID:\s*(\S+)/);
+      expect(backupIdMatch).toBeTruthy();
+      const backupId = backupIdMatch[1];
+      
+      // Get status
+      const result = await runCLI(['backup', '--status', backupId, '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('Backup Status:');
+      expect(result.stdout).toContain(`ID: ${backupId}`);
+      expect(result.stdout).toContain('Type: full');
+      expect(result.stdout).toContain('Status: ✓ completed');
+      expect(result.stdout).toContain('Resources: users');
+    });
+
+    test('should backup specific resources via CLI', async () => {
+      const result = await runCLI(['backup', 'full', '--resources', 'users', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ full backup created successfully');
+      expect(result.stdout).toContain('Resources: users');
+    });
+
+    test('should handle invalid backup type', async () => {
+      const result = await runCLI(['backup', 'invalid-type', '--connection', connectionString]);
+      
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("Invalid backup type 'invalid-type'");
+    });
+
+    test('should handle missing BackupPlugin', async () => {
+      // Use a fresh database without backup plugin
+      const freshDb = createDatabaseForTest('suite=cli/no-backup-plugin');
+      await freshDb.connect();
+      
+      try {
+        const result = await runCLI(['backup', 'full', '--connection', freshDb.connectionString]);
+        
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain('BackupPlugin is not installed');
+      } finally {
+        await freshDb.disconnect();
+      }
+    });
+  });
+
+  describe('Restore Command Tests', () => {
+    let backupId;
+
+    beforeEach(async () => {
+      // Create a backup for restore tests
+      const backupResult = await runCLI(['backup', 'full', '--connection', connectionString]);
+      const backupIdMatch = backupResult.stdout.match(/Backup ID:\s*(\S+)/);
+      backupId = backupIdMatch[1];
+    });
+
+    test('should restore from backup via CLI', async () => {
+      // Delete some data first
+      const users = database.resources.users;
+      await users.delete('user1');
+      
+      // Verify data is gone
+      const beforeRestore = await users.get('user1');
+      expect(beforeRestore).toBeNull();
+      
+      // Restore from backup
+      const result = await runCLI(['restore', backupId, '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ Restore completed successfully');
+      expect(result.stdout).toContain('Restore Summary:');
+      expect(result.stdout).toContain(`Backup ID: ${backupId}`);
+      expect(result.stdout).toContain('Resources restored: users');
+      expect(result.stdout).toContain('Total resources: 1');
+      
+      // Verify data is restored
+      const afterRestore = await users.get('user1');
+      expect(afterRestore).toBeTruthy();
+      expect(afterRestore.name).toBe('Alice');
+    });
+
+    test('should restore with overwrite via CLI', async () => {
+      // Modify existing data
+      const users = database.resources.users;
+      await users.update('user1', { name: 'Modified Alice' });
+      
+      // Verify modification
+      const modified = await users.get('user1');
+      expect(modified.name).toBe('Modified Alice');
+      
+      // Restore with overwrite
+      const result = await runCLI(['restore', backupId, '--overwrite', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ Restore completed successfully');
+      expect(result.stdout).toContain('⚠️  Overwrite mode enabled');
+      
+      // Verify data is restored to original
+      const restored = await users.get('user1');
+      expect(restored.name).toBe('Alice');
+    });
+
+    test('should restore specific resources via CLI', async () => {
+      const result = await runCLI(['restore', backupId, '--resources', 'users', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('✓ Restore completed successfully');
+      expect(result.stdout).toContain('Restoring only: users');
+      expect(result.stdout).toContain('Resources restored: users');
+    });
+
+    test('should list backups for restore via CLI', async () => {
+      const result = await runCLI(['restore', '--list-backups', '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('Backup ID');
+      expect(result.stdout).toContain('Type');
+      expect(result.stdout).toContain('Status');
+      expect(result.stdout).toContain('Resources');
+      expect(result.stdout).toContain(backupId);
+      expect(result.stdout).toContain('Use: s3db restore <backupId>');
+    });
+
+    test('should show backup information before restore', async () => {
+      const result = await runCLI(['restore', backupId, '--connection', connectionString]);
+      
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('Backup Information:');
+      expect(result.stdout).toContain(`ID: ${backupId}`);
+      expect(result.stdout).toContain('Type: full');
+      expect(result.stdout).toContain('Size:');
+      expect(result.stdout).toContain('Resources: users');
+      expect(result.stdout).toContain('Compressed: ✓');
+    });
+
+    test('should handle non-existent backup', async () => {
+      const result = await runCLI(['restore', 'non-existent-backup', '--connection', connectionString]);
+      
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("Backup 'non-existent-backup' not found");
+    });
+
+    test('should handle missing BackupPlugin for restore', async () => {
+      // Use a fresh database without backup plugin
+      const freshDb = createDatabaseForTest('suite=cli/no-backup-plugin-restore');
+      await freshDb.connect();
+      
+      try {
+        const result = await runCLI(['restore', 'any-backup-id', '--connection', freshDb.connectionString]);
+        
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain('BackupPlugin is not installed');
+      } finally {
+        await freshDb.disconnect();
+      }
+    });
+  });
+
+  describe('Error Handling Tests', () => {
+    test('should handle missing connection string for backup', async () => {
+      const result = await runCLI(['backup', 'full']);
+      
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('Error: No connection string provided');
+    });
+
+    test('should handle missing connection string for restore', async () => {
+      const result = await runCLI(['restore', 'backup-id']);
+      
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('Error: No connection string provided');
+    });
+
+    test('should handle invalid connection string', async () => {
+      const result = await runCLI(['backup', 'full', '--connection', 'invalid://connection']);
+      
+      expect(result.code).toBe(1);
+      // Should fail with connection error
+    });
+  });
+
+  describe('End-to-End Workflow Tests', () => {
+    test('should complete full backup-restore workflow', async () => {
+      const users = database.resources.users;
+      
+      // 1. Verify initial data
+      const initialCount = await users.count();
+      expect(initialCount).toBe(3);
+      
+      // 2. Create backup
+      const backupResult = await runCLI(['backup', 'full', '--connection', connectionString]);
+      expect(backupResult.code).toBe(0);
+      
+      const backupIdMatch = backupResult.stdout.match(/Backup ID:\s*(\S+)/);
+      const backupId = backupIdMatch[1];
+      
+      // 3. Modify data
+      await users.delete('user1');
+      await users.delete('user2');
+      const modifiedCount = await users.count();
+      expect(modifiedCount).toBe(1);
+      
+      // 4. Restore from backup
+      const restoreResult = await runCLI(['restore', backupId, '--connection', connectionString]);
+      expect(restoreResult.code).toBe(0);
+      
+      // 5. Verify restoration
+      const restoredCount = await users.count();
+      expect(restoredCount).toBe(3);
+      
+      const user1 = await users.get('user1');
+      const user2 = await users.get('user2');
+      expect(user1.name).toBe('Alice');
+      expect(user2.name).toBe('Bob');
+    });
+
+    test('should handle multiple backups and selective restore', async () => {
+      const users = database.resources.users;
+      
+      // Create first backup
+      const backup1Result = await runCLI(['backup', 'full', '--connection', connectionString]);
+      const backup1Id = backup1Result.stdout.match(/Backup ID:\s*(\S+)/)[1];
+      
+      // Modify data
+      await users.update('user1', { name: 'Modified Alice' });
+      
+      // Create second backup
+      const backup2Result = await runCLI(['backup', 'incremental', '--connection', connectionString]);
+      const backup2Id = backup2Result.stdout.match(/Backup ID:\s*(\S+)/)[1];
+      
+      // List backups
+      const listResult = await runCLI(['backup', '--list', '--connection', connectionString]);
+      expect(listResult.stdout).toContain(backup1Id);
+      expect(listResult.stdout).toContain(backup2Id);
+      
+      // Restore from first backup (should restore original data)
+      const restoreResult = await runCLI(['restore', backup1Id, '--overwrite', '--connection', connectionString]);
+      expect(restoreResult.code).toBe(0);
+      
+      // Verify original data is restored
+      const user1 = await users.get('user1');
+      expect(user1.name).toBe('Alice');
+    });
+  });
+
+  // Helper function to run CLI commands
+  async function runCLI(args) {
+    const cliPath = path.join(process.cwd(), 'bin', 's3db-cli.js');
+    
+    return new Promise((resolve) => {
+      const child = spawn('node', [cliPath, ...args], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, NODE_ENV: 'test' }
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      child.on('close', (code) => {
+        resolve({ code, stdout, stderr });
+      });
+
+      // Timeout after 30 seconds for longer operations
+      setTimeout(() => {
+        child.kill();
+        resolve({ code: -1, stdout, stderr: 'Timeout' });
+      }, 30000);
+    });
+  }
+});
