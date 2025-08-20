@@ -1,6 +1,5 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
-import { EventEmitter } from 'events';
 
 /**
  * SchedulerPlugin - Cron-based Task Scheduling System

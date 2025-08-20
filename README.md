@@ -1615,7 +1615,35 @@ await users.insert({ name: 'john', email: 'john@example.com' });
 
 ### 🎧 Event Listeners Configuration
 
-s3db.js resources extend Node.js EventEmitter, providing a powerful event system for real-time monitoring and notifications. You can configure event listeners in **two ways**: programmatically using `.on()` or declaratively in the resource configuration.
+s3db.js resources extend Node.js EventEmitter, providing a powerful event system for real-time monitoring and notifications. **By default, events are emitted asynchronously** for better performance, but you can configure synchronous events when needed.
+
+#### **Async vs Sync Events**
+
+```javascript
+// Async events (default) - Non-blocking, better performance
+const asyncResource = await s3db.createResource({
+  name: "users",
+  attributes: { name: "string", email: "string" },
+  asyncEvents: true // Optional, this is the default
+});
+
+// Sync events - Blocking, useful for testing or critical operations
+const syncResource = await s3db.createResource({
+  name: "critical_ops",
+  attributes: { name: "string", value: "number" },
+  asyncEvents: false // Events will block until listeners complete
+});
+
+// Runtime mode change
+asyncResource.setAsyncMode(false); // Switch to sync mode
+syncResource.setAsyncMode(true);   // Switch to async mode
+```
+
+**When to use each mode:**
+- **Async (default)**: Best for production, logging, analytics, non-critical operations
+- **Sync**: Testing, critical validations, operations that must complete before continuing
+
+You can configure event listeners in **two ways**: programmatically using `.on()` or declaratively in the resource configuration.
 
 #### **Programmatic Event Listeners**
 Traditional EventEmitter pattern using `.on()`, `.once()`, or `.off()`:
@@ -1771,7 +1799,8 @@ await users.insert({ name: 'John' });
 - **Declarative for core functionality**: Use the `events` config for essential listeners
 - **Programmatic for conditional/dynamic**: Use `.on()` for listeners that might change at runtime
 - **Error handling**: Listeners should handle their own errors to avoid breaking operations
-- **Performance**: Keep listeners lightweight; use async operations sparingly
+- **Performance**: Keep listeners lightweight; async events (default) ensure non-blocking operations
+- **Testing**: Use `asyncEvents: false` in tests when you need predictable synchronous behavior
 - **Debugging**: Event listeners are excellent for debugging and monitoring
 - Middlewares are powerful and ideal for controlling or transforming operations.
 - You can safely combine both for maximum flexibility.
