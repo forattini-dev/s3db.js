@@ -196,6 +196,7 @@ export class Database extends EventEmitter {
           paranoid: versionData.paranoid !== undefined ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
+          asyncEvents: versionData.asyncEvents !== undefined ? versionData.asyncEvents : true,
           hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : (versionData.hooks || {}),
           versioningEnabled: this.versioningEnabled,
           map: versionData.map,
@@ -486,6 +487,7 @@ export class Database extends EventEmitter {
             allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
             autoDecrypt: resource.config.autoDecrypt,
             cache: resource.config.cache,
+            asyncEvents: resource.config.asyncEvents,
             hooks: this.persistHooks ? this._serializeHooks(resource.config.hooks) : resource.config.hooks,
             idSize: resource.idSize,
             idGenerator: resource.idGeneratorType,
@@ -889,6 +891,23 @@ export class Database extends EventEmitter {
     };
   }
 
+  /**
+   * Create or update a resource in the database
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.attributes - Resource attributes schema
+   * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
+   * @param {Object} [config.hooks] - Resource hooks
+   * @param {boolean} [config.asyncEvents=true] - Whether events should be emitted asynchronously
+   * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
+   * @param {Object} [config.partitions={}] - Partition definitions
+   * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
+   * @param {boolean} [config.cache=false] - Enable caching
+   * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
+   * @param {Function|number} [config.idGenerator] - Custom ID generator or size
+   * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @returns {Promise<Resource>} The created or updated resource
+   */
   async createResource({ name, attributes, behavior = 'user-managed', hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
@@ -948,6 +967,7 @@ export class Database extends EventEmitter {
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
+      asyncEvents: config.asyncEvents,
       events: config.events || {}
     });
     resource.database = this;

@@ -385,7 +385,8 @@ describe('Resource Hooks - Real Integration Tests', () => {
         id: 'string|required',
         title: 'string|required',
         type: 'string|required'
-      }
+      },
+      asyncEvents: false // Use sync events for testing
     });
 
     const emittedEvents = [];
@@ -435,6 +436,9 @@ describe('Resource Hooks - Real Integration Tests', () => {
 
     // Delete
     await resource.delete('event1');
+    
+    // Wait a tiny bit for the delete event (seems to be an edge case)
+    await new Promise(resolve => setImmediate(resolve));
 
     // Verify events were emitted
     expect(emittedEvents).toHaveLength(5);

@@ -549,6 +549,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false, // Use sync events for testing
         events: {
           insert: insertListener
         }
@@ -581,6 +582,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           update: [listener1, listener2, listener3]
         }
@@ -623,6 +625,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           insert: insertListener,
           update: updateListener,
@@ -669,6 +672,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           email: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           update: updateListener
         }
@@ -715,6 +719,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           insertMany: insertManyListener,
           deleteMany: deleteManyListener
@@ -749,6 +754,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           content: 'string'
         },
         behavior: 'body-overflow',
+        asyncEvents: false,
         events: {
           insert: insertListener
         }
@@ -780,6 +786,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
            name: 'string|required'
          },
          behavior: 'user-managed',
+         asyncEvents: false,
          events: {
            insert: [workingListener1, workingListener2]
          }
@@ -812,6 +819,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           insert: contextListener
         }
@@ -864,6 +872,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
           name: 'string|required'
         },
         behavior: 'user-managed',
+        asyncEvents: false,
         events: {
           insert: configListener
         }
