@@ -1,6 +1,6 @@
 import { join } from "path";
-import EventEmitter from "events";
 import { createHash } from "crypto";
+import AsyncEventEmitter from "./concerns/async-event-emitter.js";
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import jsonStableStringify from "json-stable-stringify";
 import { PromisePool } from "@supercharge/promise-pool";
@@ -16,7 +16,7 @@ import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculat
 import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError } from "./errors.js";
 
 
-export class Resource extends EventEmitter {
+export class Resource extends AsyncEventEmitter {
   /**
    * Create a new Resource instance
    * @param {Object} config - Resource configuration
@@ -40,6 +40,7 @@ export class Resource extends EventEmitter {
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
    * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
    * @param {Object} [config.events={}] - Event listeners to automatically add
+   * @param {boolean} [config.asyncEvents=true] - Whether events should be emitted asynchronously
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -133,7 +134,8 @@ export class Resource extends EventEmitter {
       idGenerator: customIdGenerator,
       idSize = 22,
       versioningEnabled = false,
-      events = {}
+      events = {},
+      asyncEvents = true
     } = config;
 
     // Set instance properties
@@ -145,6 +147,9 @@ export class Resource extends EventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
     this.versioningEnabled = versioningEnabled;
+    
+    // Configure async events mode
+    this.setAsyncMode(asyncEvents);
 
     // Configure ID generator
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
@@ -171,6 +176,7 @@ export class Resource extends EventEmitter {
       partitions,
       autoDecrypt,
       allNestedObjectsOptional,
+      asyncEvents,
     };
 
     // Initialize hooks system
@@ -2452,9 +2458,6 @@ export class Resource extends EventEmitter {
     return filtered;
   }
 
-  emit(event, ...args) {
-    return super.emit(event, ...args);
-  }
 
   async replace(id, attributes) {
     await this.delete(id);

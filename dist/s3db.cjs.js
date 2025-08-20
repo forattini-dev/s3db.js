@@ -6270,6 +6270,42 @@ class Client extends EventEmitter {
   }
 }
 
+class AsyncEventEmitter extends EventEmitter {
+  constructor() {
+    super();
+    this._asyncMode = true;
+  }
+  emit(event, ...args) {
+    if (!this._asyncMode) {
+      return super.emit(event, ...args);
+    }
+    const listeners = this.listeners(event);
+    if (listeners.length === 0) {
+      return false;
+    }
+    setImmediate(() => {
+      for (const listener of listeners) {
+        try {
+          listener(...args);
+        } catch (error) {
+          if (event !== "error") {
+            this.emit("error", error);
+          } else {
+            console.error("Error in error handler:", error);
+          }
+        }
+      }
+    });
+    return true;
+  }
+  emitSync(event, ...args) {
+    return super.emit(event, ...args);
+  }
+  setAsyncMode(enabled) {
+    this._asyncMode = enabled;
+  }
+}
+
 async function secretHandler(actual, errors, schema) {
   if (!this.passphrase) {
     errors.push(new ValidationError("Missing configuration for secrets encryption.", {
@@ -7321,7 +7357,7 @@ function getBehavior(behaviorName) {
 const AVAILABLE_BEHAVIORS = Object.keys(behaviors);
 const DEFAULT_BEHAVIOR = "user-managed";
 
-class Resource extends EventEmitter {
+class Resource extends AsyncEventEmitter {
   /**
    * Create a new Resource instance
    * @param {Object} config - Resource configuration
@@ -7345,6 +7381,7 @@ class Resource extends EventEmitter {
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
    * @param {boolean} [config.versioningEnabled=false] - Enable versioning for this resource
    * @param {Object} [config.events={}] - Event listeners to automatically add
+   * @param {boolean} [config.asyncEvents=true] - Whether events should be emitted asynchronously
    * @example
    * const users = new Resource({
    *   name: 'users',
@@ -7435,7 +7472,8 @@ ${errorDetails}`,
       idGenerator: customIdGenerator,
       idSize = 22,
       versioningEnabled = false,
-      events = {}
+      events = {},
+      asyncEvents = true
     } = config;
     this.name = name;
     this.client = client;
@@ -7445,6 +7483,7 @@ ${errorDetails}`,
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
     this.versioningEnabled = versioningEnabled;
+    this.setAsyncMode(asyncEvents);
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
     if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
       this.idSize = customIdGenerator;
@@ -7461,7 +7500,8 @@ ${errorDetails}`,
       timestamps,
       partitions,
       autoDecrypt,
-      allNestedObjectsOptional
+      allNestedObjectsOptional,
+      asyncEvents
     };
     this.hooks = {
       beforeInsert: [],
@@ -9352,9 +9392,6 @@ ${errorDetails}`,
     }
     return filtered;
   }
-  emit(event, ...args) {
-    return super.emit(event, ...args);
-  }
   async replace(id, attributes) {
     await this.delete(id);
     await new Promise((r) => setTimeout(r, 100));
@@ -9713,6 +9750,7 @@ class Database extends EventEmitter {
           paranoid: versionData.paranoid !== void 0 ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== void 0 ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== void 0 ? versionData.autoDecrypt : true,
+          asyncEvents: versionData.asyncEvents !== void 0 ? versionData.asyncEvents : true,
           hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : versionData.hooks || {},
           versioningEnabled: this.versioningEnabled,
           map: versionData.map,
@@ -9953,6 +9991,7 @@ class Database extends EventEmitter {
             allNestedObjectsOptional: resource.config.allNestedObjectsOptional,
             autoDecrypt: resource.config.autoDecrypt,
             cache: resource.config.cache,
+            asyncEvents: resource.config.asyncEvents,
             hooks: this.persistHooks ? this._serializeHooks(resource.config.hooks) : resource.config.hooks,
             idSize: resource.idSize,
             idGenerator: resource.idGeneratorType,
@@ -10282,6 +10321,23 @@ class Database extends EventEmitter {
       existingHash
     };
   }
+  /**
+   * Create or update a resource in the database
+   * @param {Object} config - Resource configuration
+   * @param {string} config.name - Resource name
+   * @param {Object} config.attributes - Resource attributes schema
+   * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
+   * @param {Object} [config.hooks] - Resource hooks
+   * @param {boolean} [config.asyncEvents=true] - Whether events should be emitted asynchronously
+   * @param {boolean} [config.timestamps=false] - Enable automatic timestamps
+   * @param {Object} [config.partitions={}] - Partition definitions
+   * @param {boolean} [config.paranoid=true] - Security flag for dangerous operations
+   * @param {boolean} [config.cache=false] - Enable caching
+   * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
+   * @param {Function|number} [config.idGenerator] - Custom ID generator or size
+   * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @returns {Promise<Resource>} The created or updated resource
+   */
   async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
     if (this.resources[name]) {
       const existingResource = this.resources[name];
@@ -10337,6 +10393,7 @@ class Database extends EventEmitter {
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
+      asyncEvents: config.asyncEvents,
       events: config.events || {}
     });
     resource.database = this;
