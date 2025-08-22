@@ -25,6 +25,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
     // Create test resource
     users = await db.createResource({
       name: 'users',
+      asyncPartitions: false, // Use sync mode for predictable tests
       attributes: {
         name: 'string|required',
         email: 'string|required',
@@ -173,6 +174,8 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         { name: 'EU Engineer 1', email: 'eue1@example.com', department: 'Engineering', region: 'EU', status: 'active' },
         { name: 'US Sales 1', email: 'uss1@example.com', department: 'Sales', region: 'US', status: 'active' }
       ]);
+      // Small delay to ensure partition indexes are ready
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     test('should cache partition-specific count queries', async () => {
@@ -325,6 +328,9 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         { name: 'IT User 2', email: 'it2@example.com', department: 'IT', region: 'US', status: 'active' },
         { name: 'HR User 1', email: 'hr1@example.com', department: 'HR', region: 'US', status: 'active' }
       ]);
+      
+      // Small delay to ensure partition indexes are ready
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // Cache IT department count
       const itCount1 = await users.count({
@@ -348,6 +354,9 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         region: 'EU',
         status: 'active'
       });
+      
+      // Small delay to ensure partition indexes are ready
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       // IT count should be updated
       const itCount2 = await users.count({

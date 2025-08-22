@@ -6279,10 +6279,10 @@ class AsyncEventEmitter extends EventEmitter {
     if (listeners.length === 0) {
       return false;
     }
-    setImmediate(() => {
+    setImmediate(async () => {
       for (const listener of listeners) {
         try {
-          listener(...args);
+          await listener(...args);
         } catch (error) {
           if (event !== "error") {
             this.emit("error", error);
@@ -7469,7 +7469,8 @@ ${errorDetails}`,
       idSize = 22,
       versioningEnabled = false,
       events = {},
-      asyncEvents = true
+      asyncEvents = true,
+      asyncPartitions = true
     } = config;
     this.name = name;
     this.client = client;
@@ -7497,7 +7498,8 @@ ${errorDetails}`,
       partitions,
       autoDecrypt,
       allNestedObjectsOptional,
-      asyncEvents
+      asyncEvents,
+      asyncPartitions
     };
     this.hooks = {
       beforeInsert: [],
@@ -8000,9 +8002,31 @@ ${errorDetails}`,
       throw errPut;
     }
     const insertedObject = await this.get(finalId);
-    const finalResult = await this.executeHooks("afterInsert", insertedObject);
-    this.emit("insert", finalResult);
-    return finalResult;
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      setImmediate(() => {
+        this.createPartitionReferences(insertedObject).catch((err) => {
+          this.emit("partitionIndexError", {
+            operation: "insert",
+            id: finalId,
+            error: err,
+            message: err.message
+          });
+        });
+      });
+      const nonPartitionHooks = this.hooks.afterInsert.filter(
+        (hook) => !hook.toString().includes("createPartitionReferences")
+      );
+      let finalResult = insertedObject;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+      this.emit("insert", finalResult);
+      return finalResult;
+    } else {
+      const finalResult = await this.executeHooks("afterInsert", insertedObject);
+      this.emit("insert", finalResult);
+      return finalResult;
+    }
   }
   /**
    * Retrieve a resource object by ID
@@ -8231,13 +8255,39 @@ ${errorDetails}`,
       body: finalBody,
       behavior: this.behavior
     });
-    const finalResult = await this.executeHooks("afterUpdate", updatedData);
-    this.emit("update", {
-      ...updatedData,
-      $before: { ...originalData },
-      $after: { ...finalResult }
-    });
-    return finalResult;
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      setImmediate(() => {
+        this.handlePartitionReferenceUpdates(originalData, updatedData).catch((err2) => {
+          this.emit("partitionIndexError", {
+            operation: "update",
+            id,
+            error: err2,
+            message: err2.message
+          });
+        });
+      });
+      const nonPartitionHooks = this.hooks.afterUpdate.filter(
+        (hook) => !hook.toString().includes("handlePartitionReferenceUpdates")
+      );
+      let finalResult = updatedData;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+      this.emit("update", {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    } else {
+      const finalResult = await this.executeHooks("afterUpdate", updatedData);
+      this.emit("update", {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    }
   }
   /**
    * Delete a resource object by ID
@@ -8282,8 +8332,29 @@ ${errorDetails}`,
       operation: "delete",
       id
     });
-    await this.executeHooks("afterDelete", objectData);
-    return response;
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      setImmediate(() => {
+        this.deletePartitionReferences(objectData).catch((err3) => {
+          this.emit("partitionIndexError", {
+            operation: "delete",
+            id,
+            error: err3,
+            message: err3.message
+          });
+        });
+      });
+      const nonPartitionHooks = this.hooks.afterDelete.filter(
+        (hook) => !hook.toString().includes("deletePartitionReferences")
+      );
+      let afterDeleteData = objectData;
+      for (const hook of nonPartitionHooks) {
+        afterDeleteData = await hook(afterDeleteData);
+      }
+      return response;
+    } else {
+      await this.executeHooks("afterDelete", objectData);
+      return response;
+    }
   }
   /**
    * Insert or update a resource object (upsert operation)
@@ -8976,19 +9047,29 @@ ${errorDetails}`,
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    const promises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         const partitionMetadata = {
           _v: String(this.version)
         };
-        await this.client.putObject({
+        return this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
           body: "",
           contentType: void 0
         });
       }
+      return null;
+    });
+    const results = await Promise.allSettled(promises);
+    const failures = results.filter((r) => r.status === "rejected");
+    if (failures.length > 0) {
+      this.emit("partitionIndexWarning", {
+        operation: "create",
+        id: data.id,
+        failures: failures.map((f) => f.reason)
+      });
     }
   }
   /**
@@ -9089,26 +9170,28 @@ ${errorDetails}`,
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    const updatePromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
-    }
+      if (!ok) {
+        return { partitionName, error: err };
+      }
+      return { partitionName, success: true };
+    });
+    await Promise.allSettled(updatePromises);
     const id = newData.id || oldData.id;
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    const cleanupPromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
-      let allKeys = [];
       const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-      if (okKeys) {
-        allKeys = keys;
-      } else {
-        continue;
+      if (!okKeys) {
+        return;
       }
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
-      for (const key of allKeys) {
-        if (key.endsWith(`/id=${id}`) && key !== validKey) {
-          const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
-        }
+      const staleKeys = keys.filter((key) => key.endsWith(`/id=${id}`) && key !== validKey);
+      if (staleKeys.length > 0) {
+        const [okDel, errDel] = await tryFn(() => this.client.deleteObjects(staleKeys));
       }
-    }
+    });
+    await Promise.allSettled(cleanupPromises);
   }
   /**
    * Handle partition reference update for a specific partition
