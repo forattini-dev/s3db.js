@@ -17,10 +17,10 @@ class AsyncEventEmitter extends EventEmitter {
       return false;
     }
 
-    setImmediate(() => {
+    setImmediate(async () => {
       for (const listener of listeners) {
         try {
-          listener(...args);
+          await listener(...args);
         } catch (error) {
           if (event !== 'error') {
             this.emit('error', error);
