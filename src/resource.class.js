@@ -135,7 +135,8 @@ export class Resource extends AsyncEventEmitter {
       idSize = 22,
       versioningEnabled = false,
       events = {},
-      asyncEvents = true
+      asyncEvents = true,
+      asyncPartitions = true
     } = config;
 
     // Set instance properties
@@ -177,6 +178,7 @@ export class Resource extends AsyncEventEmitter {
       autoDecrypt,
       allNestedObjectsOptional,
       asyncEvents,
+      asyncPartitions,
     };
 
     // Initialize hooks system
@@ -817,14 +819,42 @@ export class Resource extends AsyncEventEmitter {
     // Get the inserted object
     const insertedObject = await this.get(finalId);
     
-    // Execute afterInsert hooks
-    const finalResult = await this.executeHooks('afterInsert', insertedObject);
-    
-    // Emit insert event
-    this.emit('insert', finalResult);
-    
-    // Return the final object
-    return finalResult;
+    // Handle partition indexing based on asyncPartitions config
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      // Async mode: create partition indexes in background
+      setImmediate(() => {
+        this.createPartitionReferences(insertedObject).catch(err => {
+          this.emit('partitionIndexError', {
+            operation: 'insert',
+            id: finalId,
+            error: err,
+            message: err.message
+          });
+        });
+      });
+      
+      // Execute other afterInsert hooks synchronously (excluding partition hook)
+      const nonPartitionHooks = this.hooks.afterInsert.filter(hook => 
+        !hook.toString().includes('createPartitionReferences')
+      );
+      let finalResult = insertedObject;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+      
+      // Emit insert event
+      this.emit('insert', finalResult);
+      return finalResult;
+    } else {
+      // Sync mode: execute all hooks including partition creation
+      const finalResult = await this.executeHooks('afterInsert', insertedObject);
+      
+      // Emit insert event
+      this.emit('insert', finalResult);
+      
+      // Return the final object
+      return finalResult;
+    }
   }
 
   /**
@@ -1087,13 +1117,46 @@ export class Resource extends AsyncEventEmitter {
       body: finalBody,
       behavior: this.behavior
     });
-    const finalResult = await this.executeHooks('afterUpdate', updatedData);
-    this.emit('update', {
-      ...updatedData,
-      $before: { ...originalData },
-      $after: { ...finalResult }
-    });
-    return finalResult;
+    
+    // Handle partition updates based on asyncPartitions config
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      // Async mode: update partition indexes in background
+      setImmediate(() => {
+        this.handlePartitionReferenceUpdates(originalData, updatedData).catch(err => {
+          this.emit('partitionIndexError', {
+            operation: 'update',
+            id,
+            error: err,
+            message: err.message
+          });
+        });
+      });
+      
+      // Execute other afterUpdate hooks synchronously (excluding partition hook)
+      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook => 
+        !hook.toString().includes('handlePartitionReferenceUpdates')
+      );
+      let finalResult = updatedData;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+      
+      this.emit('update', {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    } else {
+      // Sync mode: execute all hooks including partition updates
+      const finalResult = await this.executeHooks('afterUpdate', updatedData);
+      this.emit('update', {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return finalResult;
+    }
   }
 
   /**
@@ -1149,8 +1212,34 @@ export class Resource extends AsyncEventEmitter {
       id
     });
     
-    const afterDeleteData = await this.executeHooks('afterDelete', objectData);
-    return response;
+    // Handle partition cleanup based on asyncPartitions config
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      // Async mode: delete partition indexes in background
+      setImmediate(() => {
+        this.deletePartitionReferences(objectData).catch(err => {
+          this.emit('partitionIndexError', {
+            operation: 'delete',
+            id,
+            error: err,
+            message: err.message
+          });
+        });
+      });
+      
+      // Execute other afterDelete hooks synchronously (excluding partition hook)
+      const nonPartitionHooks = this.hooks.afterDelete.filter(hook => 
+        !hook.toString().includes('deletePartitionReferences')
+      );
+      let afterDeleteData = objectData;
+      for (const hook of nonPartitionHooks) {
+        afterDeleteData = await hook(afterDeleteData);
+      }
+      return response;
+    } else {
+      // Sync mode: execute all hooks including partition deletion
+      const afterDeleteData = await this.executeHooks('afterDelete', objectData);
+      return response;
+    }
   }
 
   /**
@@ -1943,21 +2032,36 @@ export class Resource extends AsyncEventEmitter {
       return;
     }
 
-    // Create reference in each partition
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    // Create all partition references in parallel
+    const promises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
       if (partitionKey) {
         // Save only version as metadata, never object attributes
         const partitionMetadata = {
           _v: String(this.version)
         };
-        await this.client.putObject({
+        return this.client.putObject({
           key: partitionKey,
           metadata: partitionMetadata,
           body: '',
           contentType: undefined,
         });
       }
+      return null;
+    });
+
+    // Wait for all partition references to be created
+    const results = await Promise.allSettled(promises);
+    
+    // Check for any failures
+    const failures = results.filter(r => r.status === 'rejected');
+    if (failures.length > 0) {
+      // Emit warning but don't throw - partitions are secondary indexes
+      this.emit('partitionIndexWarning', {
+        operation: 'create',
+        id: data.id,
+        failures: failures.map(f => f.reason)
+      });
     }
   }
 
@@ -2077,33 +2181,41 @@ export class Resource extends AsyncEventEmitter {
     if (!partitions || Object.keys(partitions).length === 0) {
       return;
     }
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    
+    // Update all partitions in parallel
+    const updatePromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
       if (!ok) {
         // console.warn(`Failed to update partition references for ${partitionName}:`, err.message);
+        return { partitionName, error: err };
       }
-    }
+      return { partitionName, success: true };
+    });
+    
+    await Promise.allSettled(updatePromises);
+    
+    // Aggressive cleanup: remove stale partition keys in parallel
     const id = newData.id || oldData.id;
-    for (const [partitionName, partition] of Object.entries(partitions)) {
+    const cleanupPromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
       const prefix = `resource=${this.name}/partition=${partitionName}`;
-      let allKeys = [];
       const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-      if (okKeys) {
-        allKeys = keys;
-      } else {
+      if (!okKeys) {
         // console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, errKeys.message);
-        continue;
+        return;
       }
+      
       const validKey = this.getPartitionKey({ partitionName, id, data: newData });
-      for (const key of allKeys) {
-        if (key.endsWith(`/id=${id}`) && key !== validKey) {
-          const [okDel, errDel] = await tryFn(() => this.client.deleteObject(key));
-          if (!okDel) {
-            // console.warn(`Aggressive cleanup: could not delete stale partition key ${key}:`, errDel.message);
-          }
+      const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
+      
+      if (staleKeys.length > 0) {
+        const [okDel, errDel] = await tryFn(() => this.client.deleteObjects(staleKeys));
+        if (!okDel) {
+          // console.warn(`Aggressive cleanup: could not delete stale partition keys:`, errDel.message);
         }
       }
-    }
+    });
+    
+    await Promise.allSettled(cleanupPromises);
   }
 
   /**
