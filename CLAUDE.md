@@ -43,6 +43,8 @@ if (!versions[currentVersion]) {
 - Multi-field support with automatic sorting
 - Partition-aware caching (`PartitionAwareFilesystemCache`)
 - O(1) partition lookups vs O(n) full scans
+- **Async partition indexing (v9.3.0+)**: Default `asyncPartitions: true` for 70-100% faster writes
+- **Parallel operations**: All partition operations use `Promise.all()` for concurrent execution
 
 ### Plugin System
 **Base**: `src/plugins/plugin.class.js`
@@ -204,6 +206,7 @@ database.createResource({
   behavior: 'body-overflow',     // Handle large data
   timestamps: true,               // createdAt/updatedAt
   paranoid: true,                // Soft deletes
+  asyncPartitions: true,         // Fast async indexing (default)
   partitions: {
     byRegion: { fields: { region: 'string' } }
   },

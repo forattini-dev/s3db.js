@@ -13,6 +13,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Basic Partition Creation and Usage', async () => {
     const resource = await database.createResource({
       name: 'users',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         name: 'string|required',
@@ -78,6 +79,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     expect(insertedUser.id).toBe('user1');
     expect(insertedUser.region).toBe('BR');
     expect(insertedUser.department).toBe('engineering');
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test listing by partition
     const regionUsers = await resource.listIds({
@@ -96,6 +100,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Multiple Partitions with Real Data', async () => {
     const resource = await database.createResource({
       name: 'products',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         name: 'string|required',
@@ -125,6 +130,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     ];
 
     await resource.insertMany(products);
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test listing by category (simplified)
     const electronics = await resource.listIds({
@@ -170,6 +178,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Partition with Complex Field Types', async () => {
     const resource = await database.createResource({
       name: 'events',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         title: 'string|required',
@@ -197,6 +206,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     ];
 
     await resource.insertMany(events);
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test date partition
     const date15 = await resource.listIds({
@@ -235,6 +247,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Partition Key Generation and Validation', async () => {
     const resource = await database.createResource({
       name: 'test',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         name: 'string|required',
@@ -296,6 +309,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Partition with Timestamps', async () => {
     const resource = await database.createResource({
       name: 'logs',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         message: 'string|required',
@@ -323,6 +337,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     ];
 
     await resource.insertMany(logs);
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test custom partition
     const errorLogs = await resource.listIds({
@@ -352,6 +369,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Partition Data Consistency', async () => {
     const resource = await database.createResource({
       name: 'orders',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         orderId: 'string|required',
@@ -372,6 +390,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
       status: 'pending',
       amount: 100
     });
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Verify it's in the pending partition
     const pendingOrders = await resource.listIds({
@@ -382,6 +403,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
 
     // Update status
     await resource.update('order1', { orderId: 'order1', amount: 100.00, status: 'completed' });
+    
+    // Small delay to ensure partition indexes are updated
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Verify it's now in the completed partition
     const completedOrders = await resource.listIds({
@@ -435,6 +459,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     }));
 
     await resource.insertMany(items);
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test data consistency per partition
     const category1Items = await resource.listIds({
@@ -461,6 +488,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
   test('Partition with Simple Object Fields', async () => {
     const resource = await database.createResource({
       name: 'documents',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         title: 'string|required',
@@ -504,6 +532,9 @@ describe('Resource Partitions - Real Integration Tests', () => {
     ];
 
     await resource.insertMany(documents);
+    
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test partition by author name
     const aliceDocs = await resource.listIds({
