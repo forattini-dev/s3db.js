@@ -628,7 +628,7 @@ class S3dbMCPServer {
 
   setupTransport() {
     const transport = process.argv.includes('--transport=sse') || process.env.MCP_TRANSPORT === 'sse'
-      ? new SSEServerTransport('/sse', process.env.MCP_SERVER_HOST || '0.0.0.0', parseInt(process.env.MCP_SERVER_PORT || '8000'))
+      ? new SSEServerTransport('/sse', process.env.MCP_SERVER_HOST || '0.0.0.0', parseInt(process.env.MCP_SERVER_PORT || '17500'))
       : new StdioServerTransport();
 
     this.server.connect(transport);
@@ -636,7 +636,7 @@ class S3dbMCPServer {
     // SSE specific setup
     if (transport instanceof SSEServerTransport) {
       const host = process.env.MCP_SERVER_HOST || '0.0.0.0';
-      const port = process.env.MCP_SERVER_PORT || '8000';
+      const port = process.env.MCP_SERVER_PORT || '17500';
       
       console.log(`S3DB MCP Server running on http://${host}:${port}/sse`);
       
@@ -723,12 +723,16 @@ class S3dbMCPServer {
 
     // Add CachePlugin (enabled by default, configurable)
     const cacheEnabled = enableCache !== false && process.env.S3DB_CACHE_ENABLED !== 'false';
+    
+    // Declare cache variables in outer scope to avoid reference errors
+    let cacheMaxSizeEnv, cacheTtlEnv, cacheDriverEnv, cacheDirectoryEnv, cachePrefixEnv;
+    
     if (cacheEnabled) {
-      const cacheMaxSizeEnv = process.env.S3DB_CACHE_MAX_SIZE ? parseInt(process.env.S3DB_CACHE_MAX_SIZE) : cacheMaxSize;
-      const cacheTtlEnv = process.env.S3DB_CACHE_TTL ? parseInt(process.env.S3DB_CACHE_TTL) : cacheTtl;
-      const cacheDriverEnv = process.env.S3DB_CACHE_DRIVER || cacheDriver;
-      const cacheDirectoryEnv = process.env.S3DB_CACHE_DIRECTORY || cacheDirectory;
-      const cachePrefixEnv = process.env.S3DB_CACHE_PREFIX || cachePrefix;
+      cacheMaxSizeEnv = process.env.S3DB_CACHE_MAX_SIZE ? parseInt(process.env.S3DB_CACHE_MAX_SIZE) : cacheMaxSize;
+      cacheTtlEnv = process.env.S3DB_CACHE_TTL ? parseInt(process.env.S3DB_CACHE_TTL) : cacheTtl;
+      cacheDriverEnv = process.env.S3DB_CACHE_DRIVER || cacheDriver;
+      cacheDirectoryEnv = process.env.S3DB_CACHE_DIRECTORY || cacheDirectory;
+      cachePrefixEnv = process.env.S3DB_CACHE_PREFIX || cachePrefix;
       
       let cacheConfig = {
         includePartitions: true
@@ -1358,7 +1362,7 @@ function parseArgs() {
   const args = {
     transport: 'stdio',
     host: '0.0.0.0',
-    port: 8000
+    port: 17500
   };
 
   process.argv.forEach((arg, index) => {
