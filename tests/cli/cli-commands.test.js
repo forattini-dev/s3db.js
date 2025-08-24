@@ -221,10 +221,13 @@ describe('CLI Commands Basic Tests', () => {
       });
 
       // Timeout after 10 seconds
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         child.kill();
         resolve({ code: -1, stdout, stderr: 'Timeout' });
       }, 10000);
+      
+      // Clear timeout when process exits
+      child.on('exit', () => clearTimeout(timeoutId));
     });
   }
 });

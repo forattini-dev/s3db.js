@@ -366,7 +366,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
     expect(updatedToday).toHaveLength(4);
   });
 
-  test('Partition Data Consistency', async () => {
+  test('Partition Data Consistency - Auto-move on Update', async () => {
     const resource = await database.createResource({
       name: 'orders',
       asyncPartitions: false, // Use sync mode for tests
@@ -401,11 +401,18 @@ describe('Resource Partitions - Real Integration Tests', () => {
     });
     expect(pendingOrders).toContain('order1');
 
-    // Update status
+    // Update status from 'pending' to 'completed'
     await resource.update('order1', { orderId: 'order1', amount: 100.00, status: 'completed' });
     
     // Small delay to ensure partition indexes are updated
     await new Promise(resolve => setTimeout(resolve, 100));
+
+    // CRITICAL TEST: Verify it was REMOVED from the old 'pending' partition
+    const pendingOrdersAfterUpdate = await resource.listIds({
+      partition: 'byStatus',
+      partitionValues: { status: 'pending' }
+    });
+    expect(pendingOrdersAfterUpdate).not.toContain('order1'); // Should NOT be in old partition anymore!
 
     // Verify it's now in the completed partition
     const completedOrders = await resource.listIds({
@@ -414,12 +421,15 @@ describe('Resource Partitions - Real Integration Tests', () => {
     });
     expect(completedOrders).toContain('order1');
 
-    // Note: Partition references are not automatically updated on record updates
-    // This is expected behavior - partitions are only updated on insert/delete
-    // The record will still appear in the old partition until manually cleaned up
+    // Note: Partition references ARE automatically updated on record updates (since v9.2.2+)
+    // When a partitioned field is updated, the record is moved to the new partition
+    // This ensures data consistency across partitions
     
     // Delete the order
     await resource.delete('order1');
+
+    // Small delay to ensure partition cleanup is done
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Verify it's removed from all partitions
     const finalCompletedOrders = await resource.listIds({
@@ -427,9 +437,7 @@ describe('Resource Partitions - Real Integration Tests', () => {
       partitionValues: { status: 'completed' }
     });
     // The record should be removed from partitions after deletion
-    // Note: This might fail if partition cleanup doesn't work properly
-    // For now, we'll skip this assertion as it's a known limitation
-    // expect(finalCompletedOrders).not.toContain('order1');
+    expect(finalCompletedOrders).not.toContain('order1');
   });
 
   // Skipped by default: only for manual benchmarking
