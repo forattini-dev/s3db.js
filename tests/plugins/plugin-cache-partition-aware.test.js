@@ -96,6 +96,9 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
         { name: 'Bob', email: 'bob@example.com', region: 'US', department: 'Sales' },
         { name: 'Charlie', email: 'charlie@example.com', region: 'EU', department: 'Engineering' }
       ]);
+      
+      // Wait for partition indexes to be created
+      await new Promise(resolve => setTimeout(resolve, 100));
     });
 
     test('should cache non-partitioned queries', async () => {
