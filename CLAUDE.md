@@ -45,6 +45,7 @@ if (!versions[currentVersion]) {
 - O(1) partition lookups vs O(n) full scans
 - **Async partition indexing (v9.3.0+)**: Default `asyncPartitions: true` for 70-100% faster writes
 - **Parallel operations**: All partition operations use `Promise.all()` for concurrent execution
+- **Automatic partition migration on update (v9.2.2+)**: When updating a partitioned field, records automatically move between partitions to maintain consistency
 
 ### Plugin System
 **Base**: `src/plugins/plugin.class.js`
