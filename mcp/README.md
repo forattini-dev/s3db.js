@@ -26,7 +26,7 @@
 # Start immediately (no installation required)
 npx s3db-mcp-server --transport=sse
 
-# Server running at: http://localhost:8000/sse
+# Server running at: http://localhost:17500/sse
 ```
 
 ### 2. Configure Your AI Client
@@ -37,7 +37,7 @@ npx s3db-mcp-server --transport=sse
   "mcpServers": {
     "s3db": {
       "transport": "sse",
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:17500/sse"
     }
   }
 }
@@ -48,7 +48,7 @@ npx s3db-mcp-server --transport=sse
 {
   "mcpServers": {
     "s3db": {
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:17500/sse"
     }
   }
 }
@@ -96,7 +96,7 @@ resourceInsert({
 
 ### Option 1: NPX (Recommended)
 ```bash
-# SSE transport (web clients)
+# SSE transport (web clients) - Default port: 17500
 npx s3db-mcp-server --transport=sse
 
 # STDIO transport (desktop clients)
@@ -111,90 +111,277 @@ s3db-mcp --transport=sse
 
 ### Option 3: Docker
 ```bash
-docker run -p 8000:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp-server
+docker run -p 17500:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp-server
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-### Environment Variables
+### 📝 Configuration Overview
 
-Create a `.env` file or set these environment variables:
+The S3DB MCP Server can be configured through multiple methods (in order of precedence):
+1. **Command-line arguments** (highest priority)
+2. **Environment variables** 
+3. **`.env` file**
+4. **Default values** (lowest priority)
 
-#### **Server Configuration**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ENV` | `development` | Environment mode |
-| `MCP_SERVER_HOST` | `0.0.0.0` | Server bind address |
-| `MCP_SERVER_PORT` | `8000` | Server port |
-| `MCP_TRANSPORT` | `sse` | Transport method (`sse` or `stdio`) |
+### 🌐 Server Configuration
 
-#### **S3DB Configuration**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `S3DB_CONNECTION_STRING` | **Required** | S3DB connection string |
-| `S3DB_VERBOSE` | `false` | Enable verbose logging |
-| `S3DB_PARALLELISM` | `10` | Number of parallel S3 operations |
-| `S3DB_PASSPHRASE` | `secret` | Encryption passphrase |
-| `S3DB_VERSIONING_ENABLED` | `false` | Enable resource versioning |
+#### **Core Server Settings**
 
-#### **Plugin Configuration**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `S3DB_COSTS_ENABLED` | `true` | Enable automatic S3 costs tracking |
-| `S3DB_CACHE_ENABLED` | `true` | Enable cache for performance |
-| `S3DB_CACHE_DRIVER` | `memory` | Cache driver: `memory` or `filesystem` |
-| `S3DB_CACHE_MAX_SIZE` | `1000` | Maximum items in memory cache (memory driver only) |
-| `S3DB_CACHE_TTL` | `300000` | Cache TTL in milliseconds (5 minutes) |
-| `S3DB_CACHE_DIRECTORY` | `./cache` | Directory for filesystem cache (filesystem driver only) |
-| `S3DB_CACHE_PREFIX` | `s3db` | Prefix for cache files (filesystem driver only) |
+| Variable | Default | Description | Example | Notes |
+|----------|---------|-------------|---------|-------|
+| `NODE_ENV` | `development` | Environment mode | `production`, `development`, `test` | Affects logging verbosity and error details |
+| `MCP_SERVER_HOST` | `0.0.0.0` | Server bind address | `localhost`, `127.0.0.1`, `0.0.0.0` | Use `0.0.0.0` to accept connections from any interface |
+| `MCP_SERVER_PORT` | `17500` | Server port | Any port 1024-65535 | Changed from 8000 to avoid conflicts |
+| `MCP_TRANSPORT` | `sse` | Transport method | `sse`, `stdio` | SSE for web clients, stdio for CLI tools |
 
-#### **AWS Configuration**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AWS_ACCESS_KEY_ID` | - | AWS access key (optional with IAM roles) |
-| `AWS_SECRET_ACCESS_KEY` | - | AWS secret key (optional with IAM roles) |
-| `AWS_SESSION_TOKEN` | - | AWS session token (for temporary credentials) |
-| `AWS_REGION` | `us-east-1` | AWS region |
+#### **Transport Modes Explained**
 
-#### **S3-Compatible Services**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `S3_ENDPOINT` | - | Custom S3 endpoint (MinIO, DigitalOcean, etc.) |
-| `S3_FORCE_PATH_STYLE` | `false` | Use path-style URLs |
+- **SSE (Server-Sent Events)**: 
+  - Best for: Web-based AI clients, Claude Desktop, Cursor IDE
+  - Protocol: HTTP/HTTPS
+  - URL format: `http://localhost:17500/sse`
+  
+- **STDIO (Standard Input/Output)**:
+  - Best for: CLI tools, shell scripts, pipe-based communication
+  - Protocol: JSON-RPC over stdin/stdout
+  - No network port required
 
-### Connection String Examples
+### 🗄️ S3DB Core Configuration
+
+#### **Essential Database Settings**
+
+| Variable | Default | Required | Description | Example Values |
+|----------|---------|----------|-------------|----------------|
+| `S3DB_CONNECTION_STRING` | - | ✅ Yes | Complete S3 connection URL | See [Connection String Formats](#connection-string-formats) below |
+| `S3DB_VERBOSE` | `false` | No | Enable detailed operation logs | `true` for debugging, `false` for production |
+| `S3DB_PARALLELISM` | `10` | No | Max concurrent S3 operations | `5` (conservative), `20` (aggressive), `50` (high-performance) |
+| `S3DB_PASSPHRASE` | `secret` | No | Encryption key for sensitive fields | Any strong passphrase (min 12 chars recommended) |
+| `S3DB_VERSIONING_ENABLED` | `false` | No | Track resource schema versions | `true` for production, `false` for development |
+
+#### **Performance Tuning Guidelines**
 
 ```bash
-# AWS S3 with credentials
-S3DB_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@bucket-name/databases/myapp"
+# Development (fast iteration, verbose logging)
+S3DB_VERBOSE=true
+S3DB_PARALLELISM=5
+S3DB_VERSIONING_ENABLED=false
 
-# AWS S3 with IAM roles (no credentials needed)
-S3DB_CONNECTION_STRING="s3://bucket-name/databases/myapp"
+# Staging (balanced performance)
+S3DB_VERBOSE=false
+S3DB_PARALLELISM=10
+S3DB_VERSIONING_ENABLED=true
 
-# MinIO (local development)
-S3DB_CONNECTION_STRING="s3://minioadmin:minioadmin@test-bucket/databases/dev?endpoint=http://localhost:9000&forcePathStyle=true"
-
-# DigitalOcean Spaces
-S3DB_CONNECTION_STRING="s3://DO_KEY:DO_SECRET@space-name/databases/prod?endpoint=https://nyc3.digitaloceanspaces.com"
-
-# LocalStack (AWS simulation)
-S3DB_CONNECTION_STRING="s3://test:test@test-bucket/databases/local?endpoint=http://localhost:4566&forcePathStyle=true"
+# Production (optimized for scale)
+S3DB_VERBOSE=false
+S3DB_PARALLELISM=20
+S3DB_VERSIONING_ENABLED=true
 ```
 
-### Command Line Options
+### 🔌 Plugin Configuration
+
+#### **Cache Plugin Settings**
+
+| Variable | Default | Description | When to Change | Impact |
+|----------|---------|-------------|----------------|--------|
+| `S3DB_CACHE_ENABLED` | `true` | Master cache toggle | Set `false` only for debugging | 70-90% performance improvement when enabled |
+| `S3DB_CACHE_DRIVER` | `memory` | Cache storage backend | Use `filesystem` for persistent cache | Memory: faster, Filesystem: survives restarts |
+| `S3DB_CACHE_MAX_SIZE` | `1000` | Max cached items (memory only) | Increase for read-heavy workloads | Each item ~1-10KB RAM |
+| `S3DB_CACHE_TTL` | `300000` | Cache lifetime (ms) | Decrease for frequently changing data | 5 min default, 0 = no expiry |
+| `S3DB_CACHE_DIRECTORY` | `./cache` | Filesystem cache location | Use SSD path for best performance | Only for filesystem driver |
+| `S3DB_CACHE_PREFIX` | `s3db` | Cache file prefix | Change for multiple instances | Prevents cache conflicts |
+
+#### **Cache Strategy Examples**
 
 ```bash
-# Transport options
-s3db-mcp --transport=sse          # HTTP-based transport
-s3db-mcp --transport=stdio        # Pipe-based transport
+# High-traffic read-heavy API
+S3DB_CACHE_DRIVER=memory
+S3DB_CACHE_MAX_SIZE=5000
+S3DB_CACHE_TTL=600000  # 10 minutes
 
-# Network options  
-s3db-mcp --host=0.0.0.0 --port=8000
+# Data analytics workload
+S3DB_CACHE_DRIVER=filesystem
+S3DB_CACHE_DIRECTORY=/mnt/ssd/cache
+S3DB_CACHE_TTL=3600000  # 1 hour
 
-# Example with environment
-S3DB_CONNECTION_STRING="s3://..." s3db-mcp --transport=sse
+# Real-time application
+S3DB_CACHE_DRIVER=memory
+S3DB_CACHE_MAX_SIZE=500
+S3DB_CACHE_TTL=30000  # 30 seconds
+```
+
+#### **Cost Tracking Plugin**
+
+| Variable | Default | Description | Use Case |
+|----------|---------|-------------|----------|
+| `S3DB_COSTS_ENABLED` | `true` | Track S3 API costs | Disable for local MinIO/testing |
+
+Cost tracking provides:
+- Per-operation cost breakdown
+- Daily/monthly projections
+- Request type statistics
+- Data transfer metrics
+
+### 🔐 AWS & S3-Compatible Configuration
+
+#### **AWS Credentials**
+
+| Variable | Default | Description | Priority Order |
+|----------|---------|-------------|----------------|
+| `AWS_ACCESS_KEY_ID` | - | AWS access key | 1. Env var, 2. IAM role, 3. Connection string |
+| `AWS_SECRET_ACCESS_KEY` | - | AWS secret key | Required if using access key |
+| `AWS_SESSION_TOKEN` | - | Temporary credentials | For STS/assumed roles |
+| `AWS_REGION` | `us-east-1` | AWS region | Must match bucket region |
+
+#### **S3-Compatible Services**
+
+| Variable | Default | Description | Services |
+|----------|---------|-------------|----------|
+| `S3_ENDPOINT` | - | Custom S3 API endpoint | MinIO, DigitalOcean, Backblaze, Wasabi |
+| `S3_FORCE_PATH_STYLE` | `false` | URL style | Required for MinIO, LocalStack |
+
+### 🔗 Connection String Formats
+
+#### **Anatomy of a Connection String**
+
+```
+s3://[ACCESS_KEY:SECRET_KEY@]BUCKET[/PATH][?PARAMS]
+```
+
+Components:
+- `ACCESS_KEY:SECRET_KEY` - Optional inline credentials
+- `BUCKET` - S3 bucket name
+- `PATH` - Optional path prefix for organization
+- `PARAMS` - Query parameters for advanced config
+
+#### **Real-World Examples**
+
+```bash
+# AWS S3 - Production with IAM role (recommended)
+S3DB_CONNECTION_STRING="s3://my-prod-bucket/databases/main"
+
+# AWS S3 - Development with credentials
+S3DB_CONNECTION_STRING="s3://AKIA...:wJal...@my-dev-bucket/databases/dev"
+
+# MinIO - Local development
+S3DB_CONNECTION_STRING="s3://minioadmin:minioadmin123@localhost:17998/s3db?forcePathStyle=true"
+
+# DigitalOcean Spaces
+S3DB_CONNECTION_STRING="s3://DO_KEY:DO_SECRET@nyc3.digitaloceanspaces.com/space-name/databases/prod"
+
+# Backblaze B2
+S3DB_CONNECTION_STRING="s3://KEY_ID:APP_KEY@s3.us-west-002.backblazeb2.com/bucket-name/db"
+
+# Wasabi
+S3DB_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@s3.wasabisys.com/bucket-name/databases/app"
+
+# LocalStack (testing)
+S3DB_CONNECTION_STRING="s3://test:test@localhost:4566/test-bucket/db?forcePathStyle=true"
+```
+
+### 📁 Complete Configuration Examples
+
+#### **Development Setup (.env)**
+
+```bash
+# Server
+NODE_ENV=development
+MCP_SERVER_PORT=17500
+MCP_TRANSPORT=sse
+
+# S3DB
+S3DB_CONNECTION_STRING=s3://minioadmin:minioadmin123@localhost:9000/dev-bucket/db
+S3DB_VERBOSE=true
+S3DB_PARALLELISM=5
+
+# Cache
+S3DB_CACHE_ENABLED=true
+S3DB_CACHE_DRIVER=memory
+S3DB_CACHE_MAX_SIZE=100
+S3DB_CACHE_TTL=60000
+
+# Costs
+S3DB_COSTS_ENABLED=false
+```
+
+#### **Production Setup (.env)**
+
+```bash
+# Server
+NODE_ENV=production
+MCP_SERVER_PORT=17500
+MCP_TRANSPORT=sse
+
+# S3DB (using IAM role)
+S3DB_CONNECTION_STRING=s3://prod-data-bucket/databases/main
+S3DB_VERBOSE=false
+S3DB_PARALLELISM=20
+S3DB_PASSPHRASE=${SECRET_PASSPHRASE}
+S3DB_VERSIONING_ENABLED=true
+
+# Cache
+S3DB_CACHE_ENABLED=true
+S3DB_CACHE_DRIVER=filesystem
+S3DB_CACHE_DIRECTORY=/var/cache/s3db
+S3DB_CACHE_TTL=1800000
+S3DB_CACHE_PREFIX=prod
+
+# Costs
+S3DB_COSTS_ENABLED=true
+
+# AWS
+AWS_REGION=us-east-1
+```
+
+### 🚀 Command Line Options
+
+```bash
+# Basic usage
+npx s3db-mcp-server [OPTIONS]
+
+# Transport selection
+npx s3db-mcp-server --transport=sse      # Web clients (default)
+npx s3db-mcp-server --transport=stdio    # CLI/pipe communication
+
+# Network configuration
+npx s3db-mcp-server --host=0.0.0.0 --port=17500
+
+# Override environment variables
+npx s3db-mcp-server --transport=sse \
+  --host=127.0.0.1 \
+  --port=18000
+
+# Combined with environment variables
+S3DB_CONNECTION_STRING="s3://..." \
+S3DB_CACHE_DRIVER=filesystem \
+npx s3db-mcp-server --transport=sse
+
+# Debug mode with verbose output
+S3DB_VERBOSE=true \
+NODE_ENV=development \
+npx s3db-mcp-server --transport=stdio
+```
+
+### 🔍 Configuration Validation
+
+The server validates configuration on startup and will:
+1. Check for required `S3DB_CONNECTION_STRING`
+2. Test S3 connectivity
+3. Verify bucket permissions
+4. Initialize cache directory (if using filesystem)
+5. Report configuration summary
+
+Example startup log:
+```
+S3DB MCP Server v1.0.0 started
+Transport: sse
+Port: 17500
+Cache: memory (1000 items, 5 min TTL)
+Costs tracking: enabled
+Connected to: s3://my-bucket/databases/main
+Ready for connections...
 ```
 
 ---
@@ -592,6 +779,38 @@ const pendingCount = await agent.callTool('resourceCount', {
 });
 ```
 
+### Automatic Partition Migration (v9.2.2+)
+
+**🎯 NEW FEATURE**: Records automatically move between partitions when you update partition fields!
+
+```javascript
+// 1. Insert order with status 'pending' - goes to 'pending' partition
+const order = await agent.callTool('resourceInsert', {
+  resourceName: 'orders',
+  data: {
+    orderId: 'ORD-001',
+    customerId: 'CUST-123',
+    amount: 299.99,
+    status: 'pending',  // Goes to 'pending' partition
+    region: 'north'
+  }
+});
+
+// 2. Update status to 'shipped' - AUTOMATICALLY moves to 'shipped' partition!
+await agent.callTool('resourceUpdate', {
+  resourceName: 'orders',
+  id: order.id,
+  data: {
+    ...order,
+    status: 'shipped'  // Automatically moved from 'pending' to 'shipped' partition
+  }
+});
+
+// The record is now:
+// ✅ In the 'shipped' partition
+// ❌ NOT in the 'pending' partition anymore (automatically cleaned up!)
+```
+
 ### Partition Best Practices
 
 **Common Partition Patterns:**
@@ -641,9 +860,9 @@ services:
       - NODE_ENV=production
       - S3DB_CONNECTION_STRING=s3://bucket/databases/prod
       - MCP_TRANSPORT=sse
-      - MCP_SERVER_PORT=8000
+      - MCP_SERVER_PORT=17500
     ports:
-      - "8000:8000"
+      - "17500:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -663,7 +882,7 @@ services:
 docker compose --profile local-testing up
 
 # Access:
-# - MCP Server: http://localhost:8000/sse  
+# - MCP Server: http://localhost:17500/sse  
 # - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
 # - Health Check: http://localhost:8001/health
 ```
@@ -673,7 +892,7 @@ docker compose --profile local-testing up
 All the configuration variables mentioned above can be used in Docker:
 
 ```bash
-docker run -p 8000:8000 \
+docker run -p 17500:8000 \
   -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" \
   -e S3DB_VERBOSE=true \
   -e S3DB_PARALLELISM=20 \
@@ -697,7 +916,7 @@ docker run -p 8000:8000 \
   "mcpServers": {
     "s3db": {
       "transport": "sse",
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:17500/sse"
     }
   }
 }
@@ -726,7 +945,7 @@ Add to your MCP settings:
 {
   "mcpServers": {
     "s3db": {
-      "url": "http://localhost:8000/sse"
+      "url": "http://localhost:17500/sse"
     }
   }
 }
@@ -830,7 +1049,7 @@ await agent.callTool('dbCreateResource', {
 curl http://localhost:8001/health
 
 # Check MCP endpoint
-curl http://localhost:8000/sse
+curl http://localhost:17500/sse
 
 # View server logs
 docker compose logs -f s3db-mcp-server
