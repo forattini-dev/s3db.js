@@ -79,8 +79,8 @@
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.864.0",
-    "@modelcontextprotocol/sdk": "^1.17.3",
+    "@aws-sdk/client-s3": "^3.873.0",
+    "@modelcontextprotocol/sdk": "^1.17.4",
     "@smithy/node-http-handler": "^4.1.1",
     "@supercharge/promise-pool": "^3.2.0",
     "dotenv": "^17.2.1",
@@ -133,7 +133,7 @@
     "node-loader": "^2.1.0",
     "ora": "^8.2.0",
     "pkg": "^5.8.1",
-    "rollup": "^4.46.4",
+    "rollup": "^4.48.0",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-esbuild": "^6.2.1",
     "rollup-plugin-polyfill-node": "^0.13.0",
