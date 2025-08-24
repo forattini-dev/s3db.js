@@ -19,80 +19,103 @@
 
 ---
 
-## 🚀 Quick Start (5 minutes)
+## 🚀 Quick Start with Claude Desktop
 
-### 1. Instant Start with NPX
+### Prerequisites
+Before starting, ensure you have:
+1. **Claude Desktop** installed (version 0.7.0 or later)
+2. **Node.js** installed (version 18+ recommended)
+3. **S3 Bucket** or S3-compatible storage (MinIO, etc.)
+4. **Credentials** for your S3 service
+
+### Step 1: Locate Claude Desktop Configuration
+
+The configuration file location depends on your operating system:
+
 ```bash
-# Start immediately (no installation required)
-npx s3db-mcp-server --transport=sse
+# macOS
+~/Library/Application Support/Claude/claude_desktop_config.json
 
-# Server running at: http://localhost:17500/sse
+# Windows
+%APPDATA%\Claude\claude_desktop_config.json
+
+# Linux
+~/.config/Claude/claude_desktop_config.json
 ```
 
-### 2. Configure Your AI Client
+### Step 2: Configure Claude Desktop
 
-**Claude Desktop** (`claude_desktop_config.json`):
+Open the configuration file and add the S3DB MCP server:
+
 ```json
 {
   "mcpServers": {
     "s3db": {
-      "transport": "sse",
-      "url": "http://localhost:17500/sse"
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp",
+        "S3DB_CACHE_ENABLED": "true",
+        "S3DB_CACHE_DRIVER": "memory",
+        "S3DB_CACHE_MAX_SIZE": "1000",
+        "S3DB_CACHE_TTL": "300000",
+        "MCP_SERVER_PORT": "17500"
+      }
     }
   }
 }
 ```
 
-**Cursor IDE**:
-```json
-{
-  "mcpServers": {
-    "s3db": {
-      "url": "http://localhost:17500/sse"
-    }
-  }
-}
-```
+### Step 3: Restart Claude Desktop
 
-### 3. Test with Your AI Agent
-Your agent can now use these commands:
+After saving the configuration:
+1. Completely quit Claude Desktop (not just close the window)
+2. Restart Claude Desktop
+3. The MCP server should start automatically
+
+### Step 4: Test Your Setup
+
+In Claude Desktop, test with these commands:
+
 ```javascript
-// Connect to S3DB
-dbConnect({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET/databases/myapp"
-})
+// 1. Test connection
+"Can you connect to the S3DB database and show me the status?"
 
-// Create a collection
-dbCreateResource({
-  name: "users",
-  attributes: { name: "string|required", email: "email|unique" }
-})
+// 2. Create a resource
+"Please create a new resource called 'users' with these fields:
+- name (string, required)
+- email (string, required, unique)
+- age (number)
+- active (boolean, default true)"
 
-// Insert data
-resourceInsert({
-  resourceName: "users", 
-  data: { name: "John", email: "john@example.com" }
-})
+// 3. Insert data
+"Insert a new user with name 'John Doe', email 'john@example.com', age 30"
+
+// 4. Query data
+"Show me all users in the database"
+
+// 5. Check statistics
+"Can you show me the database statistics including cache hits and S3 costs?"
 ```
 
 ---
 
 ## 📋 Table of Contents
 
-- [🚀 Quick Start](#-quick-start-5-minutes)
-- [💾 Installation](#-installation)
-- [⚙️ Configuration](#️-configuration)
+- [🚀 Quick Start with Claude Desktop](#-quick-start-with-claude-desktop)
+- [💾 Alternative Installation Methods](#-alternative-installation-methods)
+- [⚙️ Configuration Examples](#️-configuration-examples)
 - [🛠️ Available Tools](#️-available-tools)
-- [📖 Usage Examples](#-usage-examples)
+- [📖 Command Line Examples](#-command-line-examples)
 - [🗂️ Partitions & Performance](#️-partitions--performance)
 - [🐳 Docker Deployment](#-docker-deployment)
-- [🤖 AI Agent Integration](#-ai-agent-integration)
+- [🔧 Advanced Configuration](#-advanced-configuration)
 - [🔒 Security](#-security)
 - [🚨 Troubleshooting](#-troubleshooting)
 
 ---
 
-## 💾 Installation
+## 💾 Alternative Installation Methods
 
 ### Option 1: NPX (Recommended)
 ```bash
@@ -114,9 +137,149 @@ s3db-mcp --transport=sse
 docker run -p 17500:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp-server
 ```
 
+### Option 4: Standalone Server
+```bash
+# Start the server (it will run in the foreground)
+npx s3db-mcp-server --transport=sse
+
+# With environment variables
+cat > s3db-mcp.env << EOF
+S3DB_CONNECTION_STRING=s3://ACCESS_KEY:SECRET_KEY@bucket-name/databases/myapp
+S3DB_CACHE_ENABLED=true
+S3DB_CACHE_DRIVER=memory
+S3DB_CACHE_MAX_SIZE=1000
+EOF
+
+env $(cat s3db-mcp.env | xargs) npx s3db-mcp-server --transport=sse
+```
+
+### Option 5: Background Process
+```bash
+# Using nohup (Linux/macOS)
+nohup npx s3db-mcp-server --transport=sse > s3db-mcp.log 2>&1 &
+echo $! > s3db-mcp.pid
+
+# To stop later
+kill $(cat s3db-mcp.pid)
+```
+
+### Option 6: Using PM2 Process Manager
+```bash
+# Install PM2 globally
+npm install -g pm2
+
+# Start with PM2
+pm2 start npx --name "s3db-mcp" -- s3db-mcp-server --transport=sse
+
+# View logs
+pm2 logs s3db-mcp
+
+# Stop/restart
+pm2 stop s3db-mcp
+pm2 restart s3db-mcp
+```
+
 ---
 
-## ⚙️ Configuration
+## ⚙️ Configuration Examples
+
+### 🏠 Local Development with MinIO
+
+```json
+{
+  "mcpServers": {
+    "s3db-local": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true",
+        "S3DB_VERBOSE": "true",
+        "S3DB_CACHE_ENABLED": "true",
+        "S3DB_COSTS_ENABLED": "false",
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}
+```
+
+### ☁️ Production with AWS S3
+
+```json
+{
+  "mcpServers": {
+    "s3db-prod": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://prod-data-bucket/databases/main",
+        "AWS_REGION": "us-east-1",
+        "AWS_ACCESS_KEY_ID": "AKIA...",
+        "AWS_SECRET_ACCESS_KEY": "wJal...",
+        "S3DB_CACHE_DRIVER": "filesystem",
+        "S3DB_CACHE_DIRECTORY": "/var/cache/s3db",
+        "S3DB_CACHE_TTL": "1800000",
+        "S3DB_PASSPHRASE": "your-strong-passphrase-here",
+        "S3DB_VERSIONING_ENABLED": "true",
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+
+### 🌊 DigitalOcean Spaces
+
+```json
+{
+  "mcpServers": {
+    "s3db-do": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://DO_ACCESS_KEY:DO_SECRET_KEY@nyc3.digitaloceanspaces.com/space-name/databases/app",
+        "S3_ENDPOINT": "https://nyc3.digitaloceanspaces.com",
+        "S3DB_CACHE_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+### 🔧 Multiple Environments
+
+```json
+{
+  "mcpServers": {
+    "s3db-dev": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse", "--port=17500"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true"
+      }
+    },
+    "s3db-staging": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse", "--port=17501"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://staging-bucket/databases/staging",
+        "AWS_REGION": "us-east-1"
+      }
+    },
+    "s3db-prod": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse", "--port=17502"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://prod-bucket/databases/production",
+        "AWS_REGION": "us-east-1",
+        "S3DB_CACHE_DRIVER": "filesystem"
+      }
+    }
+  }
+}
+```
+
+## ⚙️ Configuration Reference
 
 ### 📝 Configuration Overview
 
@@ -426,7 +589,93 @@ Ready for connections...
 
 ---
 
-## 📖 Usage Examples
+## 📖 Command Line Examples
+
+### 📝 Basic CRUD Operations
+
+```bash
+# Connect to database
+"Please connect to the S3DB database using the connection string: s3://my-bucket/databases/app"
+
+# Create a blog posts resource
+"Create a resource named 'posts' with fields: title (string, required), content (string), author (string), published (boolean), tags (array of strings)"
+
+# Insert a blog post
+"Insert a new post with title 'Getting Started with S3DB', content 'S3DB is amazing...', author 'john-doe', published true, and tags ['tutorial', 's3db']"
+
+# Query posts
+"List all published posts"
+"Find posts by author 'john-doe'"
+"Count how many posts have the tag 'tutorial'"
+
+# Update a post
+"Update the post with ID 'post-123' to set published to false"
+
+# Delete a post
+"Delete the post with ID 'post-456'"
+```
+
+### 🔍 Advanced Queries with Partitions
+
+```bash
+# Create partitioned resource
+"Create an 'orders' resource with:
+- orderId (string, required, unique)
+- customerId (string, required)
+- amount (number, required)
+- status (string: pending, processing, shipped, delivered)
+- region (string)
+- orderDate (date)
+And create partitions by status and region"
+
+# Query specific partition
+"Show me all orders with status 'pending' in the 'north' region"
+
+# Count by partition
+"Count orders by status"
+
+# List with pagination
+"List the first 10 orders, then get the next 10"
+```
+
+### 🛠️ Database Management
+
+```bash
+# Check connection status
+"Show me the current database connection status"
+
+# List all resources
+"What resources/collections exist in the database?"
+
+# Get statistics
+"Show database statistics including cache performance and S3 costs"
+
+# Clear cache
+"Clear the cache for the 'users' resource"
+"Clear all cached data"
+
+# Bulk operations
+"Insert 100 test users with random data"
+"Delete all users where active is false"
+```
+
+### 📊 Reporting and Analytics
+
+```bash
+# Cost analysis
+"How much are we spending on S3 operations today?"
+"Show me a breakdown of S3 costs by operation type"
+
+# Performance metrics
+"What's the cache hit ratio?"
+"Which queries are slowest?"
+
+# Data overview
+"Give me a summary of all resources: total records, size, last modified"
+"Which partitions have the most data?"
+```
+
+## 📖 API Usage Examples
 
 ### Basic CRUD Operations
 
@@ -984,6 +1233,100 @@ Add to your MCP settings:
 
 ---
 
+## 🔧 Advanced Usage
+
+### 🔄 Auto-restart on Failure
+
+Using systemd (Linux):
+```ini
+# /etc/systemd/system/s3db-mcp.service
+[Unit]
+Description=S3DB MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=youruser
+WorkingDirectory=/home/youruser
+ExecStart=/usr/bin/npx s3db-mcp-server --transport=sse
+Restart=always
+RestartSec=10
+Environment="S3DB_CONNECTION_STRING=s3://..."
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable s3db-mcp
+sudo systemctl start s3db-mcp
+sudo systemctl status s3db-mcp
+```
+
+### 🔐 Secure Credential Management
+
+Instead of hardcoding credentials:
+
+**Option 1: Use AWS Credentials File**
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://bucket/databases/app",
+        "AWS_PROFILE": "production"
+      }
+    }
+  }
+}
+```
+
+**Option 2: Use Environment Variables**
+```bash
+# Set in your shell profile
+export S3DB_CONNECTION_STRING="s3://..."
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+```
+
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"]
+      // No env section - uses system environment
+    }
+  }
+}
+```
+
+### 🎯 Performance Optimization
+
+For production workloads:
+```json
+{
+  "mcpServers": {
+    "s3db-optimized": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_PARALLELISM": "20",
+        "S3DB_CACHE_DRIVER": "filesystem",
+        "S3DB_CACHE_DIRECTORY": "/mnt/ssd/s3db-cache",
+        "S3DB_CACHE_MAX_SIZE": "10000",
+        "S3DB_CACHE_TTL": "3600000",
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+
+---
+
 ## 🔒 Security
 
 ### AWS IAM Policy
@@ -1041,21 +1384,106 @@ await agent.callTool('dbCreateResource', {
 
 ## 🚨 Troubleshooting
 
-### Common Issues
+### ❌ Common Issues and Solutions
 
-**Connection Problems:**
+#### 1. MCP Server Not Starting
+
+**Issue**: Claude Desktop can't connect to MCP server
+
+**Solution**:
 ```bash
-# Check if server is running
-curl http://localhost:8001/health
+# Check if port is already in use
+lsof -i :17500  # macOS/Linux
+netstat -an | findstr :17500  # Windows
 
-# Check MCP endpoint
-curl http://localhost:17500/sse
-
-# View server logs
-docker compose logs -f s3db-mcp-server
+# Use a different port
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse", "--port=18000"],
+      "env": {
+        "MCP_SERVER_PORT": "18000"
+      }
+    }
+  }
+}
 ```
 
-**S3 Access Issues:**
+#### 2. Connection String Issues
+
+**Issue**: "Invalid connection string" error
+
+**Solution**:
+```bash
+# Test connection string directly
+export S3DB_CONNECTION_STRING="s3://..."
+npx s3db-mcp-server --transport=sse
+
+# Common fixes:
+# 1. URL-encode special characters in credentials
+# 2. Add forcePathStyle=true for MinIO
+# 3. Ensure bucket exists
+```
+
+#### 3. Permission Errors
+
+**Issue**: "Access Denied" when accessing S3
+
+**Solution**:
+```json
+{
+  "env": {
+    // Ensure credentials are correct
+    "AWS_ACCESS_KEY_ID": "your-key",
+    "AWS_SECRET_ACCESS_KEY": "your-secret",
+    "AWS_REGION": "correct-region"
+  }
+}
+```
+
+#### 4. Cache Not Working
+
+**Issue**: Slow performance, no cache hits
+
+**Solution**:
+```json
+{
+  "env": {
+    "S3DB_CACHE_ENABLED": "true",  // Must be string "true"
+    "S3DB_CACHE_DRIVER": "memory",
+    "S3DB_CACHE_MAX_SIZE": "5000",  // Increase size
+    "S3DB_CACHE_TTL": "600000"      // 10 minutes
+  }
+}
+```
+
+### 🔍 Debugging
+
+Enable verbose logging:
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": ["s3db-mcp-server", "--transport=sse"],
+      "env": {
+        "S3DB_VERBOSE": "true",
+        "NODE_ENV": "development",
+        "DEBUG": "true"
+      }
+    }
+  }
+}
+```
+
+View MCP logs in Claude Desktop:
+1. Open Developer Tools: `Cmd+Option+I` (Mac) or `Ctrl+Shift+I` (Windows)
+2. Go to Console tab
+3. Filter for "mcp" messages
+
+### S3 Access Issues
+
 ```bash
 # Test S3 connection
 aws s3 ls s3://your-bucket
@@ -1121,6 +1549,22 @@ curl http://localhost:8001/health
   "uptime": 3600
 }
 ```
+
+### 🎉 Success Indicators
+
+You know your setup is working when:
+1. ✅ Claude Desktop shows "Connected to s3db" in the MCP status
+2. ✅ You can run database commands without errors
+3. ✅ Cache statistics show hits after repeated queries
+4. ✅ Cost tracking shows S3 operation counts
+
+### 💡 Pro Tips
+
+1. **Start simple**: Test with MinIO locally before using AWS S3
+2. **Monitor costs**: Use `dbGetStats` regularly to track S3 expenses
+3. **Optimize partitions**: Design partitions based on query patterns
+4. **Cache wisely**: Filesystem cache survives restarts, memory cache is faster
+5. **Use batch operations**: `insertMany` is much faster than multiple `insert` calls
 
 ---
 
@@ -1260,12 +1704,15 @@ environment:
 
 ---
 
-## 🔗 Resources
+## 📚 Additional Resources
 
-- **S3DB Documentation**: [github.com/forattini-dev/s3db.js](https://github.com/forattini-dev/s3db.js)
-- **Model Context Protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
-- **Issues & Support**: [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/forattini-dev/s3db.js/discussions)
+- [S3DB Documentation](https://github.com/forattini-dev/s3db.js)
+- [MCP Protocol Specification](https://modelcontextprotocol.io)
+- [Claude Desktop Downloads](https://claude.ai/download)
+- [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)
+- [NPM Package](https://www.npmjs.com/package/s3db-mcp-server)
+
+Need help? Check the [Troubleshooting](#troubleshooting) section or file an issue on [GitHub](https://github.com/forattini-dev/s3db.js/issues).
 
 ---
 
