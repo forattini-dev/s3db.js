@@ -16,7 +16,7 @@ describe('CLI Backup & Restore Commands', () => {
     backupPlugin = new BackupPlugin({
       driver: 'filesystem',
       config: {
-        path: './tmp/backups/{date}/'
+        path: '/tmp/s3db/backups/{date}/'
       },
       compression: 'gzip',
       verbose: false

@@ -419,8 +419,14 @@ function mapAwsError(err, context = {}) {
     suggestion = "Check if the object metadata is present and valid.";
     return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
   }
-  suggestion = "Check the error details and AWS documentation.";
-  return new UnknownError("Unknown error", { ...context, original: err, metadata, commandName, commandInput, suggestion });
+  const errorDetails = [
+    `Unknown error: ${err.message || err.toString()}`,
+    err.code && `Code: ${err.code}`,
+    err.statusCode && `Status: ${err.statusCode}`,
+    err.stack && `Stack: ${err.stack.split("\n")[0]}`
+  ].filter(Boolean).join(" | ");
+  suggestion = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
+  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, suggestion });
 }
 class ConnectionStringError extends S3dbError {
   constructor(message, details = {}) {
@@ -1899,7 +1905,7 @@ class BackupPlugin extends Plugin {
       include: options.include || null,
       exclude: options.exclude || [],
       backupMetadataResource: options.backupMetadataResource || "backup_metadata",
-      tempDir: options.tempDir || "./tmp/backups",
+      tempDir: options.tempDir || "/tmp/s3db/backups",
       verbose: options.verbose || false,
       // Hooks
       onBackupStart: options.onBackupStart || null,
@@ -4046,6 +4052,457 @@ const CostsPlugin = {
   }
 };
 
+class EventualConsistencyPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    if (!options.resource) {
+      throw new Error("EventualConsistencyPlugin requires 'resource' option");
+    }
+    if (!options.field) {
+      throw new Error("EventualConsistencyPlugin requires 'field' option");
+    }
+    this.config = {
+      resource: options.resource,
+      field: options.field,
+      cohort: {
+        interval: options.cohort?.interval || "24h",
+        timezone: options.cohort?.timezone || "UTC",
+        ...options.cohort
+      },
+      reducer: options.reducer || ((transactions) => {
+        let baseValue = 0;
+        for (const t of transactions) {
+          if (t.operation === "set") {
+            baseValue = t.value;
+          } else if (t.operation === "add") {
+            baseValue += t.value;
+          } else if (t.operation === "sub") {
+            baseValue -= t.value;
+          }
+        }
+        return baseValue;
+      }),
+      consolidationInterval: options.consolidationInterval || 36e5,
+      // 1 hour default
+      autoConsolidate: options.autoConsolidate !== false,
+      batchTransactions: options.batchTransactions || false,
+      batchSize: options.batchSize || 100,
+      mode: options.mode || "async",
+      // 'async' or 'sync'
+      ...options
+    };
+    this.transactionResource = null;
+    this.targetResource = null;
+    this.consolidationTimer = null;
+    this.pendingTransactions = /* @__PURE__ */ new Map();
+  }
+  async onSetup() {
+    this.targetResource = this.database.resources[this.config.resource];
+    if (!this.targetResource) {
+      this.deferredSetup = true;
+      this.watchForResource();
+      return;
+    }
+    await this.completeSetup();
+  }
+  watchForResource() {
+    const hookCallback = async ({ resource, config }) => {
+      if (config.name === this.config.resource && this.deferredSetup) {
+        this.targetResource = resource;
+        this.deferredSetup = false;
+        await this.completeSetup();
+      }
+    };
+    this.database.addHook("afterCreateResource", hookCallback);
+  }
+  async completeSetup() {
+    if (!this.targetResource) return;
+    const transactionResourceName = `${this.config.resource}_transactions_${this.config.field}`;
+    const partitionConfig = this.createPartitionConfig();
+    const [ok, err, transactionResource] = await tryFn(
+      () => this.database.createResource({
+        name: transactionResourceName,
+        attributes: {
+          id: "string|required",
+          originalId: "string|required",
+          field: "string|required",
+          value: "number|required",
+          operation: "string|required",
+          // 'set', 'add', or 'sub'
+          timestamp: "string|required",
+          cohortDate: "string|required",
+          // For partitioning
+          cohortMonth: "string|optional",
+          // For monthly partitioning
+          source: "string|optional",
+          applied: "boolean|optional"
+          // Track if transaction was applied
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        partitions: partitionConfig,
+        asyncPartitions: true
+        // Use async partitions for better performance
+      })
+    );
+    if (!ok && !this.database.resources[transactionResourceName]) {
+      throw new Error(`Failed to create transaction resource: ${err?.message}`);
+    }
+    this.transactionResource = ok ? transactionResource : this.database.resources[transactionResourceName];
+    this.addHelperMethods();
+    if (this.config.autoConsolidate) {
+      this.startConsolidationTimer();
+    }
+  }
+  async onStart() {
+    if (this.deferredSetup) {
+      return;
+    }
+    this.emit("eventual-consistency.started", {
+      resource: this.config.resource,
+      field: this.config.field,
+      cohort: this.config.cohort
+    });
+  }
+  async onStop() {
+    if (this.consolidationTimer) {
+      clearInterval(this.consolidationTimer);
+      this.consolidationTimer = null;
+    }
+    await this.flushPendingTransactions();
+    this.emit("eventual-consistency.stopped", {
+      resource: this.config.resource,
+      field: this.config.field
+    });
+  }
+  createPartitionConfig() {
+    const partitions = {
+      byDay: {
+        fields: {
+          cohortDate: "string"
+        }
+      },
+      byMonth: {
+        fields: {
+          cohortMonth: "string"
+        }
+      }
+    };
+    return partitions;
+  }
+  addHelperMethods() {
+    const resource = this.targetResource;
+    const defaultField = this.config.field;
+    const plugin = this;
+    if (!resource._eventualConsistencyPlugins) {
+      resource._eventualConsistencyPlugins = {};
+    }
+    resource._eventualConsistencyPlugins[defaultField] = plugin;
+    resource.set = async (id, fieldOrValue, value) => {
+      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
+      if (hasMultipleFields && value === void 0) {
+        throw new Error(`Multiple fields have eventual consistency. Please specify the field: set(id, field, value)`);
+      }
+      const field = value !== void 0 ? fieldOrValue : defaultField;
+      const actualValue = value !== void 0 ? value : fieldOrValue;
+      const fieldPlugin = resource._eventualConsistencyPlugins[field];
+      if (!fieldPlugin) {
+        throw new Error(`No eventual consistency plugin found for field "${field}"`);
+      }
+      await fieldPlugin.createTransaction({
+        originalId: id,
+        operation: "set",
+        value: actualValue,
+        source: "set"
+      });
+      if (fieldPlugin.config.mode === "sync") {
+        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
+        await resource.update(id, {
+          [field]: consolidatedValue
+        });
+        return consolidatedValue;
+      }
+      return actualValue;
+    };
+    resource.add = async (id, fieldOrAmount, amount) => {
+      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
+      if (hasMultipleFields && amount === void 0) {
+        throw new Error(`Multiple fields have eventual consistency. Please specify the field: add(id, field, amount)`);
+      }
+      const field = amount !== void 0 ? fieldOrAmount : defaultField;
+      const actualAmount = amount !== void 0 ? amount : fieldOrAmount;
+      const fieldPlugin = resource._eventualConsistencyPlugins[field];
+      if (!fieldPlugin) {
+        throw new Error(`No eventual consistency plugin found for field "${field}"`);
+      }
+      await fieldPlugin.createTransaction({
+        originalId: id,
+        operation: "add",
+        value: actualAmount,
+        source: "add"
+      });
+      if (fieldPlugin.config.mode === "sync") {
+        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
+        await resource.update(id, {
+          [field]: consolidatedValue
+        });
+        return consolidatedValue;
+      }
+      const currentValue = await fieldPlugin.getConsolidatedValue(id);
+      return currentValue + actualAmount;
+    };
+    resource.sub = async (id, fieldOrAmount, amount) => {
+      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
+      if (hasMultipleFields && amount === void 0) {
+        throw new Error(`Multiple fields have eventual consistency. Please specify the field: sub(id, field, amount)`);
+      }
+      const field = amount !== void 0 ? fieldOrAmount : defaultField;
+      const actualAmount = amount !== void 0 ? amount : fieldOrAmount;
+      const fieldPlugin = resource._eventualConsistencyPlugins[field];
+      if (!fieldPlugin) {
+        throw new Error(`No eventual consistency plugin found for field "${field}"`);
+      }
+      await fieldPlugin.createTransaction({
+        originalId: id,
+        operation: "sub",
+        value: actualAmount,
+        source: "sub"
+      });
+      if (fieldPlugin.config.mode === "sync") {
+        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
+        await resource.update(id, {
+          [field]: consolidatedValue
+        });
+        return consolidatedValue;
+      }
+      const currentValue = await fieldPlugin.getConsolidatedValue(id);
+      return currentValue - actualAmount;
+    };
+    resource.consolidate = async (id, field) => {
+      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
+      if (hasMultipleFields && !field) {
+        throw new Error(`Multiple fields have eventual consistency. Please specify the field: consolidate(id, field)`);
+      }
+      const actualField = field || defaultField;
+      const fieldPlugin = resource._eventualConsistencyPlugins[actualField];
+      if (!fieldPlugin) {
+        throw new Error(`No eventual consistency plugin found for field "${actualField}"`);
+      }
+      return await fieldPlugin.consolidateRecord(id);
+    };
+    resource.getConsolidatedValue = async (id, fieldOrOptions, options) => {
+      if (typeof fieldOrOptions === "string") {
+        const field = fieldOrOptions;
+        const fieldPlugin = resource._eventualConsistencyPlugins[field] || plugin;
+        return await fieldPlugin.getConsolidatedValue(id, options || {});
+      } else {
+        return await plugin.getConsolidatedValue(id, fieldOrOptions || {});
+      }
+    };
+  }
+  async createTransaction(data) {
+    const now = /* @__PURE__ */ new Date();
+    const cohortInfo = this.getCohortInfo(now);
+    const transaction = {
+      id: `txn-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      originalId: data.originalId,
+      field: this.config.field,
+      value: data.value || 0,
+      operation: data.operation || "set",
+      timestamp: now.toISOString(),
+      cohortDate: cohortInfo.date,
+      cohortMonth: cohortInfo.month,
+      source: data.source || "unknown",
+      applied: false
+    };
+    if (this.config.batchTransactions) {
+      this.pendingTransactions.set(transaction.id, transaction);
+      if (this.pendingTransactions.size >= this.config.batchSize) {
+        await this.flushPendingTransactions();
+      }
+    } else {
+      await this.transactionResource.insert(transaction);
+    }
+    return transaction;
+  }
+  async flushPendingTransactions() {
+    if (this.pendingTransactions.size === 0) return;
+    const transactions = Array.from(this.pendingTransactions.values());
+    this.pendingTransactions.clear();
+    for (const transaction of transactions) {
+      await this.transactionResource.insert(transaction);
+    }
+  }
+  getCohortInfo(date) {
+    const tz = this.config.cohort.timezone;
+    const offset = this.getTimezoneOffset(tz);
+    const localDate = new Date(date.getTime() + offset);
+    const year = localDate.getFullYear();
+    const month = String(localDate.getMonth() + 1).padStart(2, "0");
+    const day = String(localDate.getDate()).padStart(2, "0");
+    return {
+      date: `${year}-${month}-${day}`,
+      month: `${year}-${month}`
+    };
+  }
+  getTimezoneOffset(timezone) {
+    const offsets = {
+      "UTC": 0,
+      "America/New_York": -5 * 36e5,
+      "America/Chicago": -6 * 36e5,
+      "America/Denver": -7 * 36e5,
+      "America/Los_Angeles": -8 * 36e5,
+      "America/Sao_Paulo": -3 * 36e5,
+      "Europe/London": 0,
+      "Europe/Paris": 1 * 36e5,
+      "Europe/Berlin": 1 * 36e5,
+      "Asia/Tokyo": 9 * 36e5,
+      "Asia/Shanghai": 8 * 36e5,
+      "Australia/Sydney": 10 * 36e5
+    };
+    return offsets[timezone] || 0;
+  }
+  startConsolidationTimer() {
+    const interval = this.config.consolidationInterval;
+    this.consolidationTimer = setInterval(async () => {
+      await this.runConsolidation();
+    }, interval);
+  }
+  async runConsolidation() {
+    try {
+      const [ok, err, transactions] = await tryFn(
+        () => this.transactionResource.query({
+          applied: false
+        })
+      );
+      if (!ok) {
+        console.error("Consolidation failed to query transactions:", err);
+        return;
+      }
+      const uniqueIds = [...new Set(transactions.map((t) => t.originalId))];
+      for (const id of uniqueIds) {
+        await this.consolidateRecord(id);
+      }
+      this.emit("eventual-consistency.consolidated", {
+        resource: this.config.resource,
+        field: this.config.field,
+        recordCount: uniqueIds.length
+      });
+    } catch (error) {
+      console.error("Consolidation error:", error);
+      this.emit("eventual-consistency.consolidation-error", error);
+    }
+  }
+  async consolidateRecord(originalId) {
+    const [recordOk, recordErr, record] = await tryFn(
+      () => this.targetResource.get(originalId)
+    );
+    const currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
+    const [ok, err, transactions] = await tryFn(
+      () => this.transactionResource.query({
+        originalId,
+        applied: false
+      })
+    );
+    if (!ok || !transactions || transactions.length === 0) {
+      return currentValue;
+    }
+    transactions.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    const hasSetOperation = transactions.some((t) => t.operation === "set");
+    if (currentValue !== 0 && !hasSetOperation) {
+      transactions.unshift({
+        id: "__synthetic__",
+        // Synthetic ID that we'll skip when marking as applied
+        operation: "set",
+        value: currentValue,
+        timestamp: (/* @__PURE__ */ new Date(0)).toISOString()
+        // Very old timestamp to ensure it's first
+      });
+    }
+    const consolidatedValue = this.config.reducer(transactions);
+    const [updateOk, updateErr] = await tryFn(
+      () => this.targetResource.update(originalId, {
+        [this.config.field]: consolidatedValue
+      })
+    );
+    if (updateOk) {
+      for (const txn of transactions) {
+        if (txn.id !== "__synthetic__") {
+          await this.transactionResource.update(txn.id, {
+            applied: true
+          });
+        }
+      }
+    }
+    return consolidatedValue;
+  }
+  async getConsolidatedValue(originalId, options = {}) {
+    const includeApplied = options.includeApplied || false;
+    const startDate = options.startDate;
+    const endDate = options.endDate;
+    const query = { originalId };
+    if (!includeApplied) {
+      query.applied = false;
+    }
+    const [ok, err, transactions] = await tryFn(
+      () => this.transactionResource.query(query)
+    );
+    if (!ok || !transactions || transactions.length === 0) {
+      const [recordOk, recordErr, record] = await tryFn(
+        () => this.targetResource.get(originalId)
+      );
+      if (recordOk && record) {
+        return record[this.config.field] || 0;
+      }
+      return 0;
+    }
+    let filtered = transactions;
+    if (startDate || endDate) {
+      filtered = transactions.filter((t) => {
+        const timestamp = new Date(t.timestamp);
+        if (startDate && timestamp < new Date(startDate)) return false;
+        if (endDate && timestamp > new Date(endDate)) return false;
+        return true;
+      });
+    }
+    filtered.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    return this.config.reducer(filtered);
+  }
+  // Helper method to get cohort statistics
+  async getCohortStats(cohortDate) {
+    const [ok, err, transactions] = await tryFn(
+      () => this.transactionResource.query({
+        cohortDate
+      })
+    );
+    if (!ok) return null;
+    const stats = {
+      date: cohortDate,
+      transactionCount: transactions.length,
+      totalValue: 0,
+      byOperation: { set: 0, add: 0, sub: 0 },
+      byOriginalId: {}
+    };
+    for (const txn of transactions) {
+      stats.totalValue += txn.value || 0;
+      stats.byOperation[txn.operation] = (stats.byOperation[txn.operation] || 0) + 1;
+      if (!stats.byOriginalId[txn.originalId]) {
+        stats.byOriginalId[txn.originalId] = {
+          count: 0,
+          value: 0
+        };
+      }
+      stats.byOriginalId[txn.originalId].count++;
+      stats.byOriginalId[txn.originalId].value += txn.value || 0;
+    }
+    return stats;
+  }
+}
+
 class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -5830,10 +6287,10 @@ class Client extends EventEmitter {
       // Enabled for better performance
       keepAliveMsecs: 1e3,
       // 1 second keep-alive
-      maxSockets: 50,
-      // Balanced for most applications
-      maxFreeSockets: 10,
-      // Good connection reuse
+      maxSockets: httpClientOptions.maxSockets || 500,
+      // High concurrency support
+      maxFreeSockets: httpClientOptions.maxFreeSockets || 100,
+      // Better connection reuse
       timeout: 6e4,
       // 60 second timeout
       ...httpClientOptions
@@ -12765,5 +13222,5 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, FullTextPlugin, InvalidResourceItem, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
+export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
 //# sourceMappingURL=s3db.es.js.map
