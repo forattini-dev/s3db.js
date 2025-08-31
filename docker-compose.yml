@@ -8,6 +8,7 @@ services:
       - "9998:9000"
       - "9999:9001"
     environment:
+      MINIO_FORCE_NEW_KEYS: yes
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
       MINIO_DEFAULT_BUCKETS: s3db
