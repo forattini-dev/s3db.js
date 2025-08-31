@@ -101,7 +101,7 @@ export class BackupPlugin extends Plugin {
       include: options.include || null,
       exclude: options.exclude || [],
       backupMetadataResource: options.backupMetadataResource || 'backup_metadata',
-      tempDir: options.tempDir || './tmp/backups',
+      tempDir: options.tempDir || '/tmp/s3db/backups',
       verbose: options.verbose || false,
       
       // Hooks
