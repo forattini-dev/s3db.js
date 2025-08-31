@@ -225,8 +225,16 @@ export function mapAwsError(err, context = {}) {
     return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
   }
   // Outros mapeamentos podem ser adicionados aqui
-  suggestion = 'Check the error details and AWS documentation.';
-  return new UnknownError('Unknown error', { ...context, original: err, metadata, commandName, commandInput, suggestion });
+  // Incluir detalhes do erro original para facilitar debug
+  const errorDetails = [
+    `Unknown error: ${err.message || err.toString()}`,
+    err.code && `Code: ${err.code}`,
+    err.statusCode && `Status: ${err.statusCode}`,
+    err.stack && `Stack: ${err.stack.split('\n')[0]}`,
+  ].filter(Boolean).join(' | ');
+  
+  suggestion = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
+  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, suggestion });
 }
 
 export class ConnectionStringError extends S3dbError {

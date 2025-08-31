@@ -41,8 +41,8 @@ export class Client extends EventEmitter {
     this.httpClientOptions = {
       keepAlive: true, // Enabled for better performance
       keepAliveMsecs: 1000, // 1 second keep-alive
-      maxSockets: 50, // Balanced for most applications
-      maxFreeSockets: 10, // Good connection reuse
+      maxSockets: httpClientOptions.maxSockets || 500, // High concurrency support
+      maxFreeSockets: httpClientOptions.maxFreeSockets || 100, // Better connection reuse
       timeout: 60000, // 60 second timeout
       ...httpClientOptions,
     };
