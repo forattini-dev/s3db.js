@@ -13,3 +13,7 @@ releases/
 test-cache/
 test-cache-config/
 test-partition-cache/
+
+# Temporary directories
+tmp/
+.tmp/

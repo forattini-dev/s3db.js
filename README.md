@@ -329,11 +329,65 @@ const s3db = new S3db({
 });
 ```
 
-#### 3. S3-Compatible Services (MinIO, etc.)
+#### 3. MinIO (Self-hosted S3)
 ```javascript
+// MinIO running locally (note: http:// protocol and port)
 const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  endpoint: "http://localhost:9000"
+  connectionString: "http://minioadmin:minioadmin@localhost:9000/mybucket/databases/myapp"
+});
+
+// MinIO on custom server
+const s3db = new S3db({
+  connectionString: "http://ACCESS_KEY:SECRET_KEY@minio.example.com:9000/BUCKET_NAME/databases/myapp"
+});
+```
+
+#### 4. Digital Ocean Spaces (SaaS)
+```javascript
+// Digital Ocean Spaces (NYC3 datacenter) - uses https:// as it's a public service
+const s3db = new S3db({
+  connectionString: "https://SPACES_KEY:SPACES_SECRET@nyc3.digitaloceanspaces.com/SPACE_NAME/databases/myapp"
+});
+
+// Other regions available: sfo3, ams3, sgp1, fra1, syd1
+const s3db = new S3db({
+  connectionString: "https://SPACES_KEY:SPACES_SECRET@sgp1.digitaloceanspaces.com/SPACE_NAME/databases/myapp"
+});
+```
+
+#### 5. LocalStack (Local AWS testing)
+```javascript
+// LocalStack for local development/testing (http:// with port 4566)
+const s3db = new S3db({
+  connectionString: "http://test:test@localhost:4566/mybucket/databases/myapp"
+});
+
+// LocalStack in Docker container
+const s3db = new S3db({
+  connectionString: "http://test:test@localstack:4566/mybucket/databases/myapp"
+});
+```
+
+#### 6. Other S3-Compatible Services
+```javascript
+// Backblaze B2 (SaaS - uses https://)
+const s3db = new S3db({
+  connectionString: "https://KEY_ID:APPLICATION_KEY@s3.us-west-002.backblazeb2.com/BUCKET_NAME/databases/myapp"
+});
+
+// Wasabi (SaaS - uses https://)
+const s3db = new S3db({
+  connectionString: "https://ACCESS_KEY:SECRET_KEY@s3.wasabisys.com/BUCKET_NAME/databases/myapp"
+});
+
+// Cloudflare R2 (SaaS - uses https://)
+const s3db = new S3db({
+  connectionString: "https://ACCESS_KEY:SECRET_KEY@ACCOUNT_ID.r2.cloudflarestorage.com/BUCKET_NAME/databases/myapp"
+});
+
+// Self-hosted Ceph with S3 gateway (http:// with custom port)
+const s3db = new S3db({
+  connectionString: "http://ACCESS_KEY:SECRET_KEY@ceph.internal:7480/BUCKET_NAME/databases/myapp"
 });
 ```
 
@@ -732,16 +786,20 @@ await users.insert({ name: "John", email: "john@example.com" });
 
 #### Available Plugins
 
-- **💾 Cache Plugin** - Intelligent caching (memory/S3) for performance
-- **💰 Costs Plugin** - Real-time AWS S3 cost tracking  
-- **🔍 FullText Plugin** - Advanced search with automatic indexing
-- **📊 Metrics Plugin** - Performance monitoring and analytics
-- **🔄 Replicator Plugin** - Multi-target replication (S3DB, SQS, BigQuery, PostgreSQL)
-- **📝 Audit Plugin** - Comprehensive audit logging for compliance
-- **📬 Queue Consumer Plugin** - Message consumption from SQS/RabbitMQ
+- **💾 [Cache Plugin](./docs/plugins/cache.md)** - Intelligent caching (memory/S3) for performance
+- **💰 [Costs Plugin](./docs/plugins/costs.md)** - Real-time AWS S3 cost tracking  
+- **🔍 [FullText Plugin](./docs/plugins/fulltext.md)** - Advanced search with automatic indexing
+- **📊 [Metrics Plugin](./docs/plugins/metrics.md)** - Performance monitoring and analytics
+- **🔄 [Replicator Plugin](./docs/plugins/replicator.md)** - Multi-target replication (S3DB, SQS, BigQuery, PostgreSQL)
+- **📝 [Audit Plugin](./docs/plugins/audit.md)** - Comprehensive audit logging for compliance
+- **📬 [Queue Consumer Plugin](./docs/plugins/queue-consumer.md)** - Message consumption from SQS/RabbitMQ
+- **📈 [Eventual Consistency Plugin](./docs/plugins/eventual-consistency.md)** - Event sourcing for numeric fields
+- **📅 [Scheduler Plugin](./docs/plugins/scheduler.md)** - Task scheduling and automation
+- **🔄 [State Machine Plugin](./docs/plugins/state-machine.md)** - State management and transitions
+- **💾 [Backup Plugin](./docs/plugins/backup.md)** - Backup and restore functionality
 
-**📖 For detailed documentation, configuration options, and advanced examples, see:**
-**[📋 Complete Plugin Documentation](https://github.com/forattini-dev/s3db.js/blob/main/PLUGINS.md)**
+**📖 For complete plugin documentation and overview:**
+**[📋 Plugin Documentation Index](./docs/plugins/README.md)**
 
 ### 🎛️ Resource Behaviors
 
