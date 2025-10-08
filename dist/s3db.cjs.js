@@ -6356,7 +6356,7 @@ class Client extends EventEmitter {
     this.emit("command.response", command.constructor.name, response, command.input);
     return response;
   }
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     keyPrefix ? path.join(keyPrefix, key) : key;
     const stringMetadata = {};
@@ -6376,6 +6376,7 @@ class Client extends EventEmitter {
     if (contentType !== void 0) options.ContentType = contentType;
     if (contentEncoding !== void 0) options.ContentEncoding = contentEncoding;
     if (contentLength !== void 0) options.ContentLength = contentLength;
+    if (ifMatch !== void 0) options.IfMatch = ifMatch;
     let response, error;
     try {
       response = await this.sendCommand(new clientS3.PutObjectCommand(options));
@@ -8539,6 +8540,7 @@ ${errorDetails}`,
     data._lastModified = request.LastModified;
     data._hasContent = request.ContentLength > 0;
     data._mimeType = request.ContentType || null;
+    data._etag = request.ETag;
     data._v = objectVersion;
     if (request.VersionId) data._versionId = request.VersionId;
     if (request.Expiration) data._expiresAt = request.Expiration;
@@ -8748,6 +8750,172 @@ ${errorDetails}`,
         $after: { ...finalResult }
       });
       return finalResult;
+    }
+  }
+  /**
+   * Update with conditional check (If-Match ETag)
+   * @param {string} id - Resource ID
+   * @param {Object} attributes - Attributes to update
+   * @param {Object} options - Options including ifMatch (ETag)
+   * @returns {Promise<Object>} { success: boolean, data?: Object, etag?: string, error?: string }
+   * @example
+   * const msg = await resource.get('msg-123');
+   * const result = await resource.updateConditional('msg-123', { status: 'processing' }, { ifMatch: msg._etag });
+   * if (!result.success) {
+   *   console.log('Update failed - object was modified by another process');
+   * }
+   */
+  async updateConditional(id, attributes, options = {}) {
+    if (lodashEs.isEmpty(id)) {
+      throw new Error("id cannot be empty");
+    }
+    const { ifMatch } = options;
+    if (!ifMatch) {
+      throw new Error("updateConditional requires ifMatch option with ETag value");
+    }
+    const exists = await this.exists(id);
+    if (!exists) {
+      return {
+        success: false,
+        error: `Resource with id '${id}' does not exist`
+      };
+    }
+    const originalData = await this.get(id);
+    const attributesClone = lodashEs.cloneDeep(attributes);
+    let mergedData = lodashEs.cloneDeep(originalData);
+    for (const [key2, value] of Object.entries(attributesClone)) {
+      if (key2.includes(".")) {
+        let ref = mergedData;
+        const parts = key2.split(".");
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (typeof ref[parts[i]] !== "object" || ref[parts[i]] === null) {
+            ref[parts[i]] = {};
+          }
+          ref = ref[parts[i]];
+        }
+        ref[parts[parts.length - 1]] = lodashEs.cloneDeep(value);
+      } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        mergedData[key2] = lodashEs.merge({}, mergedData[key2], value);
+      } else {
+        mergedData[key2] = lodashEs.cloneDeep(value);
+      }
+    }
+    if (this.config.timestamps) {
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      mergedData.updatedAt = now;
+      if (!mergedData.metadata) mergedData.metadata = {};
+      mergedData.metadata.updatedAt = now;
+    }
+    const preProcessedData = await this.executeHooks("beforeUpdate", lodashEs.cloneDeep(mergedData));
+    const completeData = { ...originalData, ...preProcessedData, id };
+    const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData));
+    if (!isValid) {
+      return {
+        success: false,
+        error: "Validation failed: " + (errors && errors.length ? JSON.stringify(errors) : "unknown"),
+        validationErrors: errors
+      };
+    }
+    const { id: validatedId, ...validatedAttributes } = data;
+    const mappedData = await this.schema.mapper(validatedAttributes);
+    mappedData._v = String(this.version);
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+      resource: this,
+      id,
+      data: validatedAttributes,
+      mappedData,
+      originalData: { ...attributesClone, id }
+    });
+    const key = this.getResourceKey(id);
+    let existingContentType = void 0;
+    let finalBody = body;
+    if (body === "" && this.behavior !== "body-overflow") {
+      const [ok2, err2, existingObject] = await tryFn(() => this.client.getObject(key));
+      if (ok2 && existingObject.ContentLength > 0) {
+        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+        const existingBodyString = existingBodyBuffer.toString();
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        if (!okParse) {
+          finalBody = existingBodyBuffer;
+          existingContentType = existingObject.ContentType;
+        }
+      }
+    }
+    let finalContentType = existingContentType;
+    if (finalBody && finalBody !== "" && !finalContentType) {
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      if (okParse) finalContentType = "application/json";
+    }
+    const [ok, err, response] = await tryFn(() => this.client.putObject({
+      key,
+      body: finalBody,
+      contentType: finalContentType,
+      metadata: processedMetadata,
+      ifMatch
+      // ← Conditional write with ETag
+    }));
+    if (!ok) {
+      if (err.name === "PreconditionFailed" || err.$metadata?.httpStatusCode === 412) {
+        return {
+          success: false,
+          error: "ETag mismatch - object was modified by another process"
+        };
+      }
+      return {
+        success: false,
+        error: err.message || "Update failed"
+      };
+    }
+    const updatedData = await this.composeFullObjectFromWrite({
+      id,
+      metadata: processedMetadata,
+      body: finalBody,
+      behavior: this.behavior
+    });
+    const oldData = { ...originalData, id };
+    const newData = { ...validatedAttributes, id };
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      setImmediate(() => {
+        this.handlePartitionReferenceUpdates(oldData, newData).catch((err2) => {
+          this.emit("partitionIndexError", {
+            operation: "updateConditional",
+            id,
+            error: err2,
+            message: err2.message
+          });
+        });
+      });
+      const nonPartitionHooks = this.hooks.afterUpdate.filter(
+        (hook) => !hook.toString().includes("handlePartitionReferenceUpdates")
+      );
+      let finalResult = updatedData;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+      this.emit("update", {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return {
+        success: true,
+        data: finalResult,
+        etag: response.ETag
+      };
+    } else {
+      await this.handlePartitionReferenceUpdates(oldData, newData);
+      const finalResult = await this.executeHooks("afterUpdate", updatedData);
+      this.emit("update", {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+      return {
+        success: true,
+        data: finalResult,
+        etag: response.ETag
+      };
     }
   }
   /**
@@ -13226,6 +13394,360 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
+class TransactionsPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    if (!options.resource) {
+      throw new Error('TransactionsPlugin requires "resource" option');
+    }
+    this.config = {
+      resource: options.resource,
+      visibilityTimeout: options.visibilityTimeout || 3e4,
+      // 30 seconds
+      pollInterval: options.pollInterval || 1e3,
+      // 1 second
+      maxAttempts: options.maxAttempts || 3,
+      concurrency: options.concurrency || 1,
+      deadLetterResource: options.deadLetterResource || null,
+      autoStart: options.autoStart !== false,
+      onMessage: options.onMessage,
+      onError: options.onError,
+      onComplete: options.onComplete,
+      verbose: options.verbose || false,
+      ...options
+    };
+    this.queueResource = null;
+    this.targetResource = null;
+    this.deadLetterResourceObj = null;
+    this.workers = [];
+    this.isRunning = false;
+    this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+  async onSetup() {
+    this.targetResource = this.database.resources[this.config.resource];
+    if (!this.targetResource) {
+      throw new Error(`TransactionsPlugin: resource '${this.config.resource}' not found`);
+    }
+    const queueName = `${this.config.resource}_queue`;
+    const [ok, err] = await tryFn(
+      () => this.database.createResource({
+        name: queueName,
+        attributes: {
+          id: "string|required",
+          originalId: "string|required",
+          // ID do registro original
+          status: "string|required",
+          // pending/processing/completed/failed/dead
+          visibleAt: "number|required",
+          // Timestamp de visibilidade
+          claimedBy: "string|optional",
+          // Worker que claimed
+          claimedAt: "number|optional",
+          // Timestamp do claim
+          attempts: "number|default:0",
+          maxAttempts: "number|default:3",
+          error: "string|optional",
+          result: "json|optional",
+          createdAt: "string|required",
+          completedAt: "number|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        asyncPartitions: true,
+        partitions: {
+          byStatus: { fields: { status: "string" } },
+          byDate: { fields: { createdAt: "string|maxlength:10" } }
+        }
+      })
+    );
+    if (!ok && !this.database.resources[queueName]) {
+      throw new Error(`Failed to create queue resource: ${err?.message}`);
+    }
+    this.queueResource = this.database.resources[queueName];
+    this.addHelperMethods();
+    if (this.config.deadLetterResource) {
+      await this.createDeadLetterResource();
+    }
+    if (this.config.verbose) {
+      console.log(`[TransactionsPlugin] Setup completed for resource '${this.config.resource}'`);
+    }
+  }
+  async onStart() {
+    if (this.config.autoStart && this.config.onMessage) {
+      await this.startProcessing();
+    }
+  }
+  async onStop() {
+    await this.stopProcessing();
+  }
+  addHelperMethods() {
+    const plugin = this;
+    const resource = this.targetResource;
+    resource.enqueue = async function(data, options = {}) {
+      const recordData = {
+        id: data.id || idGenerator(),
+        ...data
+      };
+      const record = await resource.insert(recordData);
+      const queueEntry = {
+        id: idGenerator(),
+        originalId: record.id,
+        status: "pending",
+        visibleAt: Date.now(),
+        attempts: 0,
+        maxAttempts: options.maxAttempts || plugin.config.maxAttempts,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)
+      };
+      await plugin.queueResource.insert(queueEntry);
+      plugin.emit("message.enqueued", { id: record.id, queueId: queueEntry.id });
+      return record;
+    };
+    resource.queueStats = async function() {
+      return await plugin.getStats();
+    };
+    resource.startProcessing = async function(handler, options = {}) {
+      return await plugin.startProcessing(handler, options);
+    };
+    resource.stopProcessing = async function() {
+      return await plugin.stopProcessing();
+    };
+  }
+  async startProcessing(handler = null, options = {}) {
+    if (this.isRunning) {
+      if (this.config.verbose) {
+        console.log("[TransactionsPlugin] Already running");
+      }
+      return;
+    }
+    const messageHandler = handler || this.config.onMessage;
+    if (!messageHandler) {
+      throw new Error("TransactionsPlugin: onMessage handler required");
+    }
+    this.isRunning = true;
+    const concurrency = options.concurrency || this.config.concurrency;
+    for (let i = 0; i < concurrency; i++) {
+      const worker = this.createWorker(messageHandler, i);
+      this.workers.push(worker);
+    }
+    if (this.config.verbose) {
+      console.log(`[TransactionsPlugin] Started ${concurrency} workers`);
+    }
+    this.emit("workers.started", { concurrency, workerId: this.workerId });
+  }
+  async stopProcessing() {
+    if (!this.isRunning) return;
+    this.isRunning = false;
+    await Promise.all(this.workers);
+    this.workers = [];
+    if (this.config.verbose) {
+      console.log("[TransactionsPlugin] Stopped all workers");
+    }
+    this.emit("workers.stopped", { workerId: this.workerId });
+  }
+  createWorker(handler, workerIndex) {
+    return (async () => {
+      while (this.isRunning) {
+        try {
+          const message = await this.claimMessage();
+          if (message) {
+            await this.processMessage(message, handler);
+          } else {
+            await new Promise((resolve) => setTimeout(resolve, this.config.pollInterval));
+          }
+        } catch (error) {
+          if (this.config.verbose) {
+            console.error(`[Worker ${workerIndex}] Error:`, error.message);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1e3));
+        }
+      }
+    })();
+  }
+  async claimMessage() {
+    const now = Date.now();
+    const [ok, err, messages] = await tryFn(
+      () => this.queueResource.query({
+        status: "pending"
+      })
+    );
+    if (!ok || !messages || messages.length === 0) {
+      return null;
+    }
+    const available = messages.filter((m) => m.visibleAt <= now);
+    if (available.length === 0) {
+      return null;
+    }
+    for (const msg of available) {
+      const claimed = await this.attemptClaim(msg);
+      if (claimed) {
+        return claimed;
+      }
+    }
+    return null;
+  }
+  async attemptClaim(msg) {
+    const now = Date.now();
+    const [ok, err, result] = await tryFn(
+      () => this.queueResource.updateConditional(msg.id, {
+        status: "processing",
+        claimedBy: this.workerId,
+        claimedAt: now,
+        visibleAt: now + this.config.visibilityTimeout,
+        attempts: msg.attempts + 1
+      }, {
+        ifMatch: msg._etag
+        // ← ATOMIC CLAIM using ETag!
+      })
+    );
+    if (!ok || !result.success) {
+      return null;
+    }
+    const [okRecord, errRecord, record] = await tryFn(
+      () => this.targetResource.get(msg.originalId)
+    );
+    if (!okRecord) {
+      await this.failMessage(msg.id, "Original record not found");
+      return null;
+    }
+    return {
+      queueId: msg.id,
+      record,
+      attempts: msg.attempts + 1,
+      maxAttempts: msg.maxAttempts
+    };
+  }
+  async processMessage(message, handler) {
+    const startTime = Date.now();
+    try {
+      const result = await handler(message.record, {
+        queueId: message.queueId,
+        attempts: message.attempts,
+        workerId: this.workerId
+      });
+      await this.completeMessage(message.queueId, result);
+      const duration = Date.now() - startTime;
+      this.emit("message.completed", {
+        queueId: message.queueId,
+        originalId: message.record.id,
+        duration,
+        attempts: message.attempts
+      });
+      if (this.config.onComplete) {
+        await this.config.onComplete(message.record, result);
+      }
+    } catch (error) {
+      const shouldRetry = message.attempts < message.maxAttempts;
+      if (shouldRetry) {
+        await this.retryMessage(message.queueId, message.attempts, error.message);
+        this.emit("message.retry", {
+          queueId: message.queueId,
+          originalId: message.record.id,
+          attempts: message.attempts,
+          error: error.message
+        });
+      } else {
+        await this.moveToDeadLetter(message.queueId, message.record, error.message);
+        this.emit("message.dead", {
+          queueId: message.queueId,
+          originalId: message.record.id,
+          error: error.message
+        });
+      }
+      if (this.config.onError) {
+        await this.config.onError(error, message.record);
+      }
+    }
+  }
+  async completeMessage(queueId, result) {
+    await this.queueResource.update(queueId, {
+      status: "completed",
+      completedAt: Date.now(),
+      result
+    });
+  }
+  async failMessage(queueId, error) {
+    await this.queueResource.update(queueId, {
+      status: "failed",
+      error
+    });
+  }
+  async retryMessage(queueId, attempts, error) {
+    const backoff = Math.min(Math.pow(2, attempts) * 1e3, 3e4);
+    await this.queueResource.update(queueId, {
+      status: "pending",
+      visibleAt: Date.now() + backoff,
+      error
+    });
+  }
+  async moveToDeadLetter(queueId, record, error) {
+    if (this.config.deadLetterResource && this.deadLetterResourceObj) {
+      const msg = await this.queueResource.get(queueId);
+      await this.deadLetterResourceObj.insert({
+        id: idGenerator(),
+        originalId: record.id,
+        queueId,
+        data: record,
+        error,
+        attempts: msg.attempts,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    await this.queueResource.update(queueId, {
+      status: "dead",
+      error
+    });
+  }
+  async getStats() {
+    const [ok, err, allMessages] = await tryFn(
+      () => this.queueResource.list()
+    );
+    if (!ok) {
+      if (this.config.verbose) {
+        console.warn("[TransactionsPlugin] Failed to get stats:", err.message);
+      }
+      return null;
+    }
+    const stats = {
+      total: allMessages.length,
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+      dead: 0
+    };
+    for (const msg of allMessages) {
+      if (stats[msg.status] !== void 0) {
+        stats[msg.status]++;
+      }
+    }
+    return stats;
+  }
+  async createDeadLetterResource() {
+    const [ok, err] = await tryFn(
+      () => this.database.createResource({
+        name: this.config.deadLetterResource,
+        attributes: {
+          id: "string|required",
+          originalId: "string|required",
+          queueId: "string|required",
+          data: "json|required",
+          error: "string|required",
+          attempts: "number|required",
+          createdAt: "string|required"
+        },
+        behavior: "body-overflow",
+        timestamps: true
+      })
+    );
+    if (ok || this.database.resources[this.config.deadLetterResource]) {
+      this.deadLetterResourceObj = this.database.resources[this.config.deadLetterResource];
+      if (this.config.verbose) {
+        console.log(`[TransactionsPlugin] Dead letter queue created: ${this.config.deadLetterResource}`);
+      }
+    }
+  }
+}
+
 exports.AVAILABLE_BEHAVIORS = AVAILABLE_BEHAVIORS;
 exports.AuditPlugin = AuditPlugin;
 exports.AuthenticationError = AuthenticationError;
@@ -13268,6 +13790,7 @@ exports.SchedulerPlugin = SchedulerPlugin;
 exports.Schema = Schema;
 exports.SchemaError = SchemaError;
 exports.StateMachinePlugin = StateMachinePlugin;
+exports.TransactionsPlugin = TransactionsPlugin;
 exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;
