@@ -1,7 +1,7 @@
-import { TransactionsPlugin } from '#src/plugins/transactions.plugin.js';
+import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
-describe('TransactionsPlugin', () => {
+describe('S3QueuePlugin', () => {
   let database, resource, plugin;
 
   beforeEach(async () => {
@@ -32,12 +32,12 @@ describe('TransactionsPlugin', () => {
   describe('Setup and Configuration', () => {
     test('should require resource option', () => {
       expect(() => {
-        new TransactionsPlugin({});
-      }).toThrow('TransactionsPlugin requires "resource" option');
+        new S3QueuePlugin({});
+      }).toThrow('S3QueuePlugin requires "resource" option');
     });
 
     test('should setup queue resource', async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false
       });
@@ -51,7 +51,7 @@ describe('TransactionsPlugin', () => {
     });
 
     test('should add helper methods to target resource', async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false
       });
@@ -65,20 +65,20 @@ describe('TransactionsPlugin', () => {
     });
 
     test('should throw error if target resource not found', async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'nonexistent',
         autoStart: false
       });
 
       await expect(plugin.setup(database)).rejects.toThrow(
-        "TransactionsPlugin: resource 'nonexistent' not found"
+        "S3QueuePlugin: resource 'nonexistent' not found"
       );
     });
   });
 
   describe('Enqueue Messages', () => {
     beforeEach(async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false
       });
@@ -131,7 +131,7 @@ describe('TransactionsPlugin', () => {
 
   describe('Process Messages', () => {
     beforeEach(async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false,
         pollInterval: 100,  // Fast polling for tests
@@ -242,7 +242,7 @@ describe('TransactionsPlugin', () => {
 
   describe('Error Handling and Retries', () => {
     beforeEach(async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false,
         pollInterval: 100,
@@ -313,7 +313,7 @@ describe('TransactionsPlugin', () => {
     });
 
     test('should move to dead letter after max attempts', async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false,
         pollInterval: 100,
@@ -375,7 +375,7 @@ describe('TransactionsPlugin', () => {
 
   describe('Queue Statistics', () => {
     beforeEach(async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false
       });
@@ -418,7 +418,7 @@ describe('TransactionsPlugin', () => {
 
   describe('ETag-based Atomicity', () => {
     beforeEach(async () => {
-      plugin = new TransactionsPlugin({
+      plugin = new S3QueuePlugin({
         resource: 'emails',
         autoStart: false,
         pollInterval: 10  // Very fast polling
