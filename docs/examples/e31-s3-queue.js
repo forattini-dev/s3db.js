@@ -1,7 +1,7 @@
 /**
- * Example 31: Distributed Queue Processing with TransactionsPlugin
+ * Example 31: Distributed Queue Processing with S3QueuePlugin
  *
- * This example demonstrates how to use the TransactionsPlugin to create
+ * This example demonstrates how to use the S3QueuePlugin to create
  * a distributed queue processing system with:
  * - Atomic message claiming using S3 ETags (zero race conditions)
  * - Multiple concurrent workers
@@ -10,7 +10,7 @@
  * - Queue statistics and monitoring
  */
 
-import { Database, TransactionsPlugin } from '../src/index.js';
+import { Database, S3QueuePlugin } from '../src/index.js';
 
 // Simulate email sending
 async function sendEmail(email) {
@@ -52,8 +52,8 @@ async function main() {
 
   console.log('✅ Created emails resource\n');
 
-  // Setup TransactionsPlugin
-  const transactionsPlugin = new TransactionsPlugin({
+  // Setup S3QueuePlugin
+  const transactionsPlugin = new S3QueuePlugin({
     resource: 'emails',
     visibilityTimeout: 30000,        // 30 seconds
     pollInterval: 1000,               // 1 second
@@ -87,7 +87,7 @@ async function main() {
   });
 
   db.use(transactionsPlugin);
-  console.log('✅ TransactionsPlugin configured\n');
+  console.log('✅ S3QueuePlugin configured\n');
 
   // Listen to events
   transactionsPlugin.on('message.enqueued', (event) => {
@@ -240,7 +240,7 @@ main().catch(console.error);
  *
  * ✅ Created emails resource
  *
- * ✅ TransactionsPlugin configured
+ * ✅ S3QueuePlugin configured
  *
  * === Enqueueing Emails ===
  *

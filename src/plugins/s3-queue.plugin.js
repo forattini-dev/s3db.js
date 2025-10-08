@@ -3,7 +3,7 @@ import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 
 /**
- * TransactionsPlugin - Distributed Queue System with ETag-based Atomicity
+ * S3QueuePlugin - Distributed Queue System with ETag-based Atomicity
  *
  * Provides a distributed queue processing system using S3 as backend with:
  * - Atomic message claiming using S3 ETags (zero race conditions)
@@ -15,7 +15,7 @@ import { idGenerator } from "../concerns/id.js";
  *
  * === Configuration Example ===
  *
- * new TransactionsPlugin({
+ * new S3QueuePlugin({
  *   resource: 'emails',                    // Target resource name
  *   visibilityTimeout: 30000,              // 30 seconds
  *   pollInterval: 1000,                    // 1 second
@@ -60,12 +60,12 @@ import { idGenerator } from "../concerns/id.js";
  * const stats = await db.resource('emails').queueStats();
  * // { total: 100, pending: 50, processing: 20, completed: 25, failed: 5, dead: 0 }
  */
-export class TransactionsPlugin extends Plugin {
+export class S3QueuePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
 
     if (!options.resource) {
-      throw new Error('TransactionsPlugin requires "resource" option');
+      throw new Error('S3QueuePlugin requires "resource" option');
     }
 
     this.config = {
@@ -95,7 +95,7 @@ export class TransactionsPlugin extends Plugin {
     // Get target resource
     this.targetResource = this.database.resources[this.config.resource];
     if (!this.targetResource) {
-      throw new Error(`TransactionsPlugin: resource '${this.config.resource}' not found`);
+      throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
     }
 
     // Create queue metadata resource
@@ -142,7 +142,7 @@ export class TransactionsPlugin extends Plugin {
     }
 
     if (this.config.verbose) {
-      console.log(`[TransactionsPlugin] Setup completed for resource '${this.config.resource}'`);
+      console.log(`[S3QueuePlugin] Setup completed for resource '${this.config.resource}'`);
     }
   }
 
@@ -216,14 +216,14 @@ export class TransactionsPlugin extends Plugin {
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {
       if (this.config.verbose) {
-        console.log('[TransactionsPlugin] Already running');
+        console.log('[S3QueuePlugin] Already running');
       }
       return;
     }
 
     const messageHandler = handler || this.config.onMessage;
     if (!messageHandler) {
-      throw new Error('TransactionsPlugin: onMessage handler required');
+      throw new Error('S3QueuePlugin: onMessage handler required');
     }
 
     this.isRunning = true;
@@ -236,7 +236,7 @@ export class TransactionsPlugin extends Plugin {
     }
 
     if (this.config.verbose) {
-      console.log(`[TransactionsPlugin] Started ${concurrency} workers`);
+      console.log(`[S3QueuePlugin] Started ${concurrency} workers`);
     }
 
     this.emit('workers.started', { concurrency, workerId: this.workerId });
@@ -252,7 +252,7 @@ export class TransactionsPlugin extends Plugin {
     this.workers = [];
 
     if (this.config.verbose) {
-      console.log('[TransactionsPlugin] Stopped all workers');
+      console.log('[S3QueuePlugin] Stopped all workers');
     }
 
     this.emit('workers.stopped', { workerId: this.workerId });
@@ -500,7 +500,7 @@ export class TransactionsPlugin extends Plugin {
 
     if (!ok) {
       if (this.config.verbose) {
-        console.warn('[TransactionsPlugin] Failed to get stats:', err.message);
+        console.warn('[S3QueuePlugin] Failed to get stats:', err.message);
       }
       return null;
     }
@@ -545,10 +545,10 @@ export class TransactionsPlugin extends Plugin {
       this.deadLetterResourceObj = this.database.resources[this.config.deadLetterResource];
 
       if (this.config.verbose) {
-        console.log(`[TransactionsPlugin] Dead letter queue created: ${this.config.deadLetterResource}`);
+        console.log(`[S3QueuePlugin] Dead letter queue created: ${this.config.deadLetterResource}`);
       }
     }
   }
 }
 
-export default TransactionsPlugin;
+export default S3QueuePlugin;

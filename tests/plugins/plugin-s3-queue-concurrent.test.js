@@ -1,7 +1,7 @@
-import { TransactionsPlugin } from '#src/plugins/transactions.plugin.js';
+import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
-describe('TransactionsPlugin - Concurrent Workers', () => {
+describe('S3QueuePlugin - Concurrent Workers', () => {
   let database, resource, plugins;
 
   beforeEach(async () => {
@@ -34,7 +34,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
 
   test('should process messages with multiple concurrent workers', async () => {
     // Create plugin with 3 concurrent workers
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Fast polling
@@ -89,14 +89,14 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
 
   test('should prevent race conditions with ETag locking', async () => {
     // Create multiple plugin instances (simulating different containers)
-    const plugin1 = new TransactionsPlugin({
+    const plugin1 = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Very fast polling to increase race probability
       visibilityTimeout: 5000
     });
 
-    const plugin2 = new TransactionsPlugin({
+    const plugin2 = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,
@@ -161,7 +161,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
   });
 
   test('should handle visibility timeout correctly', async () => {
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -206,7 +206,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
   });
 
   test('should distribute work across workers efficiently', async () => {
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,
@@ -270,7 +270,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
   });
 
   test('should handle mixed success and failure in concurrent processing', async () => {
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -365,7 +365,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
   });
 
   test('should maintain message order within same visibility window', async () => {
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 50,
@@ -408,7 +408,7 @@ describe('TransactionsPlugin - Concurrent Workers', () => {
 
   test('should process 100+ messages with 3 concurrent workers with minimal duplicates', async () => {
     // Use single plugin with 3 workers for simplicity
-    const plugin = new TransactionsPlugin({
+    const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
       pollInterval: 20,  // Fast polling
