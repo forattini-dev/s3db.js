@@ -1,7 +1,7 @@
-import { TransactionsPlugin } from '#src/plugins/transactions.plugin.js';
+import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
-describe('TransactionsPlugin - Edge Cases', () => {
+describe('S3QueuePlugin - Edge Cases', () => {
   let database;
 
   beforeEach(async () => {
@@ -25,7 +25,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         verbose: true  // Enable verbose logging
@@ -53,7 +53,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         verbose: true,
@@ -87,7 +87,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         verbose: true,
@@ -123,7 +123,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false
       });
@@ -145,7 +145,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         pollInterval: 50,
@@ -189,7 +189,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         pollInterval: 50,
@@ -233,7 +233,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         verbose: true
@@ -260,7 +260,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         pollInterval: 50,
@@ -308,7 +308,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         pollInterval: 10  // Very fast polling
@@ -349,7 +349,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
@@ -379,7 +379,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
@@ -410,7 +410,7 @@ describe('TransactionsPlugin - Edge Cases', () => {
         }
       });
 
-      const plugin = new TransactionsPlugin({
+      const plugin = new S3QueuePlugin({
         resource: 'tasks',
         autoStart: false,
         onMessage: async (task) => ({ done: true })
