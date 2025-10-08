@@ -317,40 +317,72 @@ export class TransactionsPlugin extends Plugin {
   async attemptClaim(msg) {
     const now = Date.now();
 
+    // Fetch the message with ETag (query doesn't return _etag)
+    const [okGet, errGet, msgWithETag] = await tryFn(() =>
+      this.queueResource.get(msg.id)
+    );
+
+    if (!okGet || !msgWithETag) {
+      // Message was deleted or not found
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
+      }
+      return null;
+    }
+
+    // Check if still pending and visible
+    if (msgWithETag.status !== 'pending' || msgWithETag.visibleAt > now) {
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`);
+      }
+      return null;
+    }
+
+    if (this.config.verbose) {
+      console.log(`[attemptClaim] Attempting to claim ${msg.id} with ETag: ${msgWithETag._etag}`);
+    }
+
     // Attempt atomic claim using ETag
     const [ok, err, result] = await tryFn(() =>
-      this.queueResource.updateConditional(msg.id, {
+      this.queueResource.updateConditional(msgWithETag.id, {
         status: 'processing',
         claimedBy: this.workerId,
         claimedAt: now,
         visibleAt: now + this.config.visibilityTimeout,
-        attempts: msg.attempts + 1
+        attempts: msgWithETag.attempts + 1
       }, {
-        ifMatch: msg._etag  // ← ATOMIC CLAIM using ETag!
+        ifMatch: msgWithETag._etag  // ← ATOMIC CLAIM using ETag!
       })
     );
 
     if (!ok || !result.success) {
       // Race lost - another worker claimed it
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Failed to claim ${msg.id}: ${err?.message || result.error}`)
+      }
       return null;
+    }
+
+    if (this.config.verbose) {
+      console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
     }
 
     // Success! Now load the original record
     const [okRecord, errRecord, record] = await tryFn(() =>
-      this.targetResource.get(msg.originalId)
+      this.targetResource.get(msgWithETag.originalId)
     );
 
     if (!okRecord) {
       // Original record was deleted? Mark queue entry as failed
-      await this.failMessage(msg.id, 'Original record not found');
+      await this.failMessage(msgWithETag.id, 'Original record not found');
       return null;
     }
 
     return {
-      queueId: msg.id,
+      queueId: msgWithETag.id,
       record,
-      attempts: msg.attempts + 1,
-      maxAttempts: msg.maxAttempts
+      attempts: msgWithETag.attempts + 1,
+      maxAttempts: msgWithETag.maxAttempts
     };
   }
 
