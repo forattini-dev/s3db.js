@@ -103,7 +103,7 @@ describe('Audit Plugin', () => {
   describe('Setup and Initialization', () => {
     test('should setup audit resource', async () => {
       expect(auditPlugin.auditResource).toBeDefined();
-      expect(auditPlugin.auditResource.name).toBe('audits');
+      expect(auditPlugin.auditResource.name).toBe('plg_audits');
     });
 
     test('should create audit resource with correct attributes', async () => {

@@ -153,7 +153,7 @@ export class SchedulerPlugin extends Plugin {
       jobs: options.jobs || {},
       defaultTimeout: options.defaultTimeout || 300000, // 5 minutes
       defaultRetries: options.defaultRetries || 1,
-      jobHistoryResource: options.jobHistoryResource || 'job_executions',
+      jobHistoryResource: options.jobHistoryResource || 'plg_job_executions',
       persistJobs: options.persistJobs !== false,
       verbose: options.verbose || false,
       onJobStart: options.onJobStart || null,
@@ -262,7 +262,7 @@ export class SchedulerPlugin extends Plugin {
   async _createLockResource() {
     const [ok, err, lockResource] = await tryFn(() =>
       this.database.createResource({
-        name: 'scheduler_job_locks',
+        name: 'plg_scheduler_job_locks',
         attributes: {
           id: 'string|required',
           jobName: 'string|required',
@@ -274,11 +274,11 @@ export class SchedulerPlugin extends Plugin {
       })
     );
 
-    if (!ok && !this.database.resources.scheduler_job_locks) {
+    if (!ok && !this.database.resources.plg_scheduler_job_locks) {
       throw new Error(`Failed to create lock resource: ${err?.message}`);
     }
 
-    this.lockResource = ok ? lockResource : this.database.resources.scheduler_job_locks;
+    this.lockResource = ok ? lockResource : this.database.resources.plg_scheduler_job_locks;
   }
 
   async _createJobHistoryResource() {
