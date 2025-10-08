@@ -89,6 +89,12 @@ export class S3QueuePlugin extends Plugin {
     this.workers = [];
     this.isRunning = false;
     this.workerId = `worker-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    // Deduplication cache to prevent S3 eventual consistency issues
+    // Tracks recently processed messages to avoid reprocessing
+    this.processedCache = new Map(); // queueId -> timestamp
+    this.cacheCleanupInterval = null;
+    this.lockCleanupInterval = null;
   }
 
   async onSetup() {
@@ -132,6 +138,32 @@ export class S3QueuePlugin extends Plugin {
     }
 
     this.queueResource = this.database.resources[queueName];
+
+    // Create lock resource for distributed locking (enabled by default)
+    const lockName = `${this.config.resource}_locks`;
+    const [okLock, errLock] = await tryFn(() =>
+      this.database.createResource({
+        name: lockName,
+        attributes: {
+          id: 'string|required',
+          workerId: 'string|required',
+          timestamp: 'number|required',
+          ttl: 'number|default:5000'
+        },
+        behavior: 'body-overflow',
+        timestamps: false
+      })
+    );
+
+    if (okLock || this.database.resources[lockName]) {
+      this.lockResource = this.database.resources[lockName];
+    } else {
+      // Locks disabled if creation fails
+      this.lockResource = null;
+      if (this.config.verbose) {
+        console.log(`[S3QueuePlugin] Lock resource creation failed, locking disabled: ${errLock?.message}`);
+      }
+    }
 
     // Add helper methods to target resource
     this.addHelperMethods();
@@ -229,6 +261,27 @@ export class S3QueuePlugin extends Plugin {
     this.isRunning = true;
     const concurrency = options.concurrency || this.config.concurrency;
 
+    // Start cache cleanup (every 5 seconds, remove entries older than 30 seconds)
+    this.cacheCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      const maxAge = 30000; // 30 seconds
+
+      for (const [queueId, timestamp] of this.processedCache.entries()) {
+        if (now - timestamp > maxAge) {
+          this.processedCache.delete(queueId);
+        }
+      }
+    }, 5000);
+
+    // Start lock cleanup (every 10 seconds, remove expired locks)
+    this.lockCleanupInterval = setInterval(() => {
+      this.cleanupStaleLocks().catch(err => {
+        if (this.config.verbose) {
+          console.log(`[lockCleanup] Error: ${err.message}`);
+        }
+      });
+    }, 10000);
+
     // Start N workers
     for (let i = 0; i < concurrency; i++) {
       const worker = this.createWorker(messageHandler, i);
@@ -247,9 +300,24 @@ export class S3QueuePlugin extends Plugin {
 
     this.isRunning = false;
 
+    // Stop cache cleanup
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+
+    // Stop lock cleanup
+    if (this.lockCleanupInterval) {
+      clearInterval(this.lockCleanupInterval);
+      this.lockCleanupInterval = null;
+    }
+
     // Wait for workers to finish current tasks
     await Promise.all(this.workers);
     this.workers = [];
+
+    // Clear deduplication cache
+    this.processedCache.clear();
 
     if (this.config.verbose) {
       console.log('[S3QueuePlugin] Stopped all workers');
@@ -314,8 +382,149 @@ export class S3QueuePlugin extends Plugin {
     return null;
   }
 
+  /**
+   * Acquire a distributed lock using ETag-based conditional updates
+   * This ensures only one worker can claim a message at a time
+   *
+   * Uses a two-step process:
+   * 1. Create lock resource (similar to queue resource) if not exists
+   * 2. Try to claim lock using ETag-based conditional update
+   */
+  async acquireLock(messageId) {
+    if (!this.lockResource) {
+      return true; // Locks disabled
+    }
+
+    const lockId = `lock-${messageId}`;
+    const now = Date.now();
+
+    try {
+      // Try to get existing lock
+      const [okGet, errGet, existingLock] = await tryFn(() =>
+        this.lockResource.get(lockId)
+      );
+
+      if (existingLock) {
+        // Lock exists - check if expired
+        const lockAge = now - existingLock.timestamp;
+        if (lockAge < existingLock.ttl) {
+          // Lock still valid, owned by another worker
+          return false;
+        }
+        // Lock expired - try to claim it with ETag
+        const [ok, err, result] = await tryFn(() =>
+          this.lockResource.updateConditional(lockId, {
+            workerId: this.workerId,
+            timestamp: now,
+            ttl: 5000
+          }, {
+            ifMatch: existingLock._etag
+          })
+        );
+
+        return ok && result.success;
+      }
+
+      // Lock doesn't exist - create it
+      const [okCreate, errCreate] = await tryFn(() =>
+        this.lockResource.insert({
+          id: lockId,
+          workerId: this.workerId,
+          timestamp: now,
+          ttl: 5000
+        })
+      );
+
+      return okCreate;
+    } catch (error) {
+      // On any error, skip this message
+      if (this.config.verbose) {
+        console.log(`[acquireLock] Error: ${error.message}`);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Release a distributed lock by deleting the lock record
+   */
+  async releaseLock(messageId) {
+    if (!this.lockResource) {
+      return; // Locks disabled
+    }
+
+    const lockId = `lock-${messageId}`;
+
+    try {
+      await this.lockResource.delete(lockId);
+    } catch (error) {
+      // Ignore errors on release (lock may have expired or been cleaned up)
+      if (this.config.verbose) {
+        console.log(`[releaseLock] Failed to release lock for ${messageId}: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Clean up stale locks (older than TTL)
+   * This prevents deadlocks if a worker crashes while holding a lock
+   */
+  async cleanupStaleLocks() {
+    if (!this.lockResource) {
+      return; // Locks disabled
+    }
+
+    const now = Date.now();
+
+    try {
+      // List all locks
+      const locks = await this.lockResource.list();
+
+      // Delete expired locks
+      for (const lock of locks) {
+        const lockAge = now - lock.timestamp;
+        if (lockAge > lock.ttl) {
+          await this.lockResource.delete(lock.id);
+          if (this.config.verbose) {
+            console.log(`[cleanupStaleLocks] Removed expired lock: ${lock.id}`);
+          }
+        }
+      }
+    } catch (error) {
+      // Ignore errors in cleanup (non-critical)
+      if (this.config.verbose) {
+        console.log(`[cleanupStaleLocks] Error during cleanup: ${error.message}`);
+      }
+    }
+  }
+
   async attemptClaim(msg) {
     const now = Date.now();
+
+    // Try to acquire distributed lock for cache check
+    // This prevents race condition where multiple workers check cache simultaneously
+    const lockAcquired = await this.acquireLock(msg.id);
+
+    if (!lockAcquired) {
+      // Another worker is checking/claiming this message, skip it
+      return null;
+    }
+
+    // Check deduplication cache (protected by lock)
+    if (this.processedCache.has(msg.id)) {
+      await this.releaseLock(msg.id);
+      if (this.config.verbose) {
+        console.log(`[attemptClaim] Message ${msg.id} already processed (in cache)`);
+      }
+      return null;
+    }
+
+    // Add to cache immediately (while still holding lock)
+    // This prevents other workers from claiming this message
+    this.processedCache.set(msg.id, Date.now());
+
+    // Release lock now that cache is updated
+    await this.releaseLock(msg.id);
 
     // Fetch the message with ETag (query doesn't return _etag)
     const [okGet, errGet, msgWithETag] = await tryFn(() =>
@@ -323,7 +532,8 @@ export class S3QueuePlugin extends Plugin {
     );
 
     if (!okGet || !msgWithETag) {
-      // Message was deleted or not found
+      // Message was deleted or not found - remove from cache
+      this.processedCache.delete(msg.id);
       if (this.config.verbose) {
         console.log(`[attemptClaim] Message ${msg.id} not found or error: ${errGet?.message}`);
       }
@@ -332,6 +542,8 @@ export class S3QueuePlugin extends Plugin {
 
     // Check if still pending and visible
     if (msgWithETag.status !== 'pending' || msgWithETag.visibleAt > now) {
+      // Not claimable - remove from cache so another worker can try later
+      this.processedCache.delete(msg.id);
       if (this.config.verbose) {
         console.log(`[attemptClaim] Message ${msg.id} not claimable: status=${msgWithETag.status}, visibleAt=${msgWithETag.visibleAt}, now=${now}`);
       }
@@ -356,7 +568,8 @@ export class S3QueuePlugin extends Plugin {
     );
 
     if (!ok || !result.success) {
-      // Race lost - another worker claimed it
+      // Race lost - another worker claimed it - remove from cache
+      this.processedCache.delete(msg.id);
       if (this.config.verbose) {
         console.log(`[attemptClaim] Failed to claim ${msg.id}: ${err?.message || result.error}`)
       }
@@ -366,6 +579,8 @@ export class S3QueuePlugin extends Plugin {
     if (this.config.verbose) {
       console.log(`[attemptClaim] Successfully claimed ${msg.id}`);
     }
+
+    // Cache entry already added above, keep it
 
     // Success! Now load the original record
     const [okRecord, errRecord, record] = await tryFn(() =>
@@ -450,6 +665,8 @@ export class S3QueuePlugin extends Plugin {
       completedAt: Date.now(),
       result
     });
+
+    // Note: message already in cache from attemptClaim()
   }
 
   async failMessage(queueId, error) {
@@ -468,6 +685,9 @@ export class S3QueuePlugin extends Plugin {
       visibleAt: Date.now() + backoff,
       error
     });
+
+    // Remove from cache so it can be retried
+    this.processedCache.delete(queueId);
   }
 
   async moveToDeadLetter(queueId, record, error) {
@@ -491,6 +711,8 @@ export class S3QueuePlugin extends Plugin {
       status: 'dead',
       error
     });
+
+    // Note: message already in cache from attemptClaim()
   }
 
   async getStats() {

@@ -422,6 +422,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const processed = [];
     const workerDistribution = {};
     const errors = [];
+    const processLog = []; // Track each processing attempt with timestamp
 
     // Enqueue 100 messages in parallel batches
     console.log('Enqueuing 100 messages...');
@@ -452,6 +453,8 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
     await resource.startProcessing(async (task, context) => {
       try {
+        const timestamp = Date.now();
+        processLog.push({ name: task.name, workerId: context.workerId, timestamp });
         processed.push(task.name);
 
         // Track worker distribution
@@ -498,13 +501,29 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     console.log(`Duplicates: ${duplicateCount}`);
     console.log(`Duplication rate: ${((duplicateCount / totalProcessed) * 100).toFixed(1)}%`);
 
-    // KEY TEST: Duplicates should be under control (< 35% due to S3 eventual consistency)
-    // In production with lower polling rates, duplication rate would be much lower
-    // The key is that ETag prevents simultaneous processing of same message
-    expect(duplicateCount).toBeLessThan(totalProcessed * 0.35);
+    // Find which messages were duplicated
+    if (duplicateCount > 0) {
+      const duplicates = processed.filter((item, index) => processed.indexOf(item) !== index);
+      console.log(`Duplicated messages:`, duplicates);
 
-    // Most messages should be processed only once
-    expect(uniqueProcessed.length).toBeGreaterThanOrEqual(totalProcessed * 0.65);
+      // Show processing log for duplicated messages
+      for (const dup of [...new Set(duplicates)]) {
+        const entries = processLog.filter(e => e.name === dup);
+        console.log(`  ${dup}: processed ${entries.length} times`);
+        entries.forEach((e, i) => {
+          console.log(`    ${i + 1}. worker=${e.workerId}, time=${e.timestamp - processStart}ms`);
+        });
+      }
+    }
+
+    // KEY TEST: Zero duplication rate (0%)
+    // ETag-based atomicity + distributed locking + deduplication cache = zero duplicates
+    // The distributed lock ensures only one worker can claim a message at a time
+    // This eliminates race conditions in cache checks and achieves exactly-once processing
+    expect(duplicateCount).toBe(0);
+
+    // All processed messages should be unique (100%)
+    expect(uniqueProcessed.length).toBe(totalProcessed);
 
     // All 3 workers should have processed some messages (work distribution)
     const workerIds = Object.keys(workerDistribution);
