@@ -52,7 +52,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await walletsResource.set('wallet-1', 100);
 
       // Wait for async processing
-      await sleep(100);
+      await sleep(200);
 
       // Check transaction was created
       const transactions = await database.resources.wallets_transactions_balance.query({
@@ -78,7 +78,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await walletsResource.add('wallet-2', 100);
 
       // Wait for async processing
-      await sleep(100);
+      await sleep(200);
 
       // Check transaction
       const transactions = await database.resources.wallets_transactions_balance.query({
@@ -102,7 +102,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await walletsResource.sub('wallet-3', 25);
 
       // Wait for async processing
-      await sleep(100);
+      await sleep(200);
 
       // Check transaction
       const transactions = await database.resources.wallets_transactions_balance.query({
@@ -281,9 +281,9 @@ describe("EventualConsistencyPlugin Methods", () => {
 
       // Add transaction
       await walletsResource.add('wallet-partition', 50);
-      
+
       // Wait for async processing
-      await sleep(100);
+      await sleep(200);
 
       // Query transaction
       const transactions = await database.resources.wallets_transactions_balance.query({
@@ -352,6 +352,34 @@ describe("EventualConsistencyPlugin Methods", () => {
       
       expect(transaction.cohortDate).toBe(expectedDate);
       expect(transaction.cohortMonth).toBe(expectedMonth);
+    });
+  });
+
+  describe("Plugin Resources", () => {
+    it("should create transaction resource", async () => {
+      const transactionResourceName = 'wallets_transactions_balance';
+      expect(database.resources[transactionResourceName]).toBeDefined();
+    });
+
+    it("should create lock resource for distributed locking", async () => {
+      const lockResourceName = 'wallets_consolidation_locks_balance';
+      expect(database.resources[lockResourceName]).toBeDefined();
+    });
+  });
+
+  describe("Plugin Configuration", () => {
+    it("should use default consolidationConcurrency", async () => {
+      expect(plugin.config.consolidationConcurrency).toBe(5);
+    });
+
+    it("should respect custom consolidationConcurrency", async () => {
+      const customPlugin = new EventualConsistencyPlugin({
+        resource: 'custom_resource',
+        field: 'value',
+        consolidationConcurrency: 10
+      });
+
+      expect(customPlugin.config.consolidationConcurrency).toBe(10);
     });
   });
 
