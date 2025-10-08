@@ -926,6 +926,7 @@ export class Resource extends AsyncEventEmitter {
     data._lastModified = request.LastModified;
     data._hasContent = request.ContentLength > 0;
     data._mimeType = request.ContentType || null;
+    data._etag = request.ETag;
     data._v = objectVersion;
 
     // Add version info to returned data
@@ -1156,6 +1157,210 @@ export class Resource extends AsyncEventEmitter {
         $after: { ...finalResult }
       });
       return finalResult;
+    }
+  }
+
+  /**
+   * Update with conditional check (If-Match ETag)
+   * @param {string} id - Resource ID
+   * @param {Object} attributes - Attributes to update
+   * @param {Object} options - Options including ifMatch (ETag)
+   * @returns {Promise<Object>} { success: boolean, data?: Object, etag?: string, error?: string }
+   * @example
+   * const msg = await resource.get('msg-123');
+   * const result = await resource.updateConditional('msg-123', { status: 'processing' }, { ifMatch: msg._etag });
+   * if (!result.success) {
+   *   console.log('Update failed - object was modified by another process');
+   * }
+   */
+  async updateConditional(id, attributes, options = {}) {
+    if (isEmpty(id)) {
+      throw new Error('id cannot be empty');
+    }
+
+    const { ifMatch } = options;
+    if (!ifMatch) {
+      throw new Error('updateConditional requires ifMatch option with ETag value');
+    }
+
+    // Check if resource exists
+    const exists = await this.exists(id);
+    if (!exists) {
+      return {
+        success: false,
+        error: `Resource with id '${id}' does not exist`
+      };
+    }
+
+    // Get original data
+    const originalData = await this.get(id);
+    const attributesClone = cloneDeep(attributes);
+    let mergedData = cloneDeep(originalData);
+
+    // Merge attributes (same logic as update)
+    for (const [key, value] of Object.entries(attributesClone)) {
+      if (key.includes('.')) {
+        let ref = mergedData;
+        const parts = key.split('.');
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (typeof ref[parts[i]] !== 'object' || ref[parts[i]] === null) {
+            ref[parts[i]] = {};
+          }
+          ref = ref[parts[i]];
+        }
+        ref[parts[parts.length - 1]] = cloneDeep(value);
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        mergedData[key] = merge({}, mergedData[key], value);
+      } else {
+        mergedData[key] = cloneDeep(value);
+      }
+    }
+
+    // Update timestamps if enabled
+    if (this.config.timestamps) {
+      const now = new Date().toISOString();
+      mergedData.updatedAt = now;
+      if (!mergedData.metadata) mergedData.metadata = {};
+      mergedData.metadata.updatedAt = now;
+    }
+
+    // Execute beforeUpdate hooks
+    const preProcessedData = await this.executeHooks('beforeUpdate', cloneDeep(mergedData));
+    const completeData = { ...originalData, ...preProcessedData, id };
+
+    // Validate
+    const { isValid, errors, data } = await this.validate(cloneDeep(completeData));
+    if (!isValid) {
+      return {
+        success: false,
+        error: 'Validation failed: ' + ((errors && errors.length) ? JSON.stringify(errors) : 'unknown'),
+        validationErrors: errors
+      };
+    }
+
+    // Prepare data for storage
+    const { id: validatedId, ...validatedAttributes } = data;
+    const mappedData = await this.schema.mapper(validatedAttributes);
+    mappedData._v = String(this.version);
+
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+      resource: this,
+      id,
+      data: validatedAttributes,
+      mappedData,
+      originalData: { ...attributesClone, id }
+    });
+
+    const key = this.getResourceKey(id);
+    let existingContentType = undefined;
+    let finalBody = body;
+
+    if (body === "" && this.behavior !== 'body-overflow') {
+      const [ok, err, existingObject] = await tryFn(() => this.client.getObject(key));
+      if (ok && existingObject.ContentLength > 0) {
+        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
+        const existingBodyString = existingBodyBuffer.toString();
+        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
+        if (!okParse) {
+          finalBody = existingBodyBuffer;
+          existingContentType = existingObject.ContentType;
+        }
+      }
+    }
+
+    let finalContentType = existingContentType;
+    if (finalBody && finalBody !== "" && !finalContentType) {
+      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
+      if (okParse) finalContentType = 'application/json';
+    }
+
+    // Attempt conditional write with IfMatch
+    const [ok, err, response] = await tryFn(() => this.client.putObject({
+      key,
+      body: finalBody,
+      contentType: finalContentType,
+      metadata: processedMetadata,
+      ifMatch  // ← Conditional write with ETag
+    }));
+
+    if (!ok) {
+      // Check if it's a PreconditionFailed error (412)
+      if (err.name === 'PreconditionFailed' || err.$metadata?.httpStatusCode === 412) {
+        return {
+          success: false,
+          error: 'ETag mismatch - object was modified by another process'
+        };
+      }
+
+      // Other errors
+      return {
+        success: false,
+        error: err.message || 'Update failed'
+      };
+    }
+
+    // Success - compose updated data
+    const updatedData = await this.composeFullObjectFromWrite({
+      id,
+      metadata: processedMetadata,
+      body: finalBody,
+      behavior: this.behavior
+    });
+
+    // Handle partition updates (async if configured)
+    const oldData = { ...originalData, id };
+    const newData = { ...validatedAttributes, id };
+
+    if (this.config.asyncPartitions && this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      // Async mode
+      setImmediate(() => {
+        this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
+          this.emit('partitionIndexError', {
+            operation: 'updateConditional',
+            id,
+            error: err,
+            message: err.message
+          });
+        });
+      });
+
+      // Execute non-partition hooks
+      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
+        !hook.toString().includes('handlePartitionReferenceUpdates')
+      );
+      let finalResult = updatedData;
+      for (const hook of nonPartitionHooks) {
+        finalResult = await hook(finalResult);
+      }
+
+      this.emit('update', {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+
+      return {
+        success: true,
+        data: finalResult,
+        etag: response.ETag
+      };
+    } else {
+      // Sync mode
+      await this.handlePartitionReferenceUpdates(oldData, newData);
+      const finalResult = await this.executeHooks('afterUpdate', updatedData);
+
+      this.emit('update', {
+        ...updatedData,
+        $before: { ...originalData },
+        $after: { ...finalResult }
+      });
+
+      return {
+        success: true,
+        data: finalResult,
+        etag: response.ETag
+      };
     }
   }
 

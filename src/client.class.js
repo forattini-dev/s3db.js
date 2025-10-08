@@ -116,33 +116,34 @@ export class Client extends EventEmitter {
     return response;
   }
 
-  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength }) {
+  async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
     const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const fullKey = keyPrefix ? path.join(keyPrefix, key) : key;
-    
+
     // Ensure all metadata values are strings and use smart encoding
     const stringMetadata = {};
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
         // Ensure key is a valid string
         const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
-        
+
         // Smart encode the value
         const { encoded } = metadataEncode(v);
         stringMetadata[validKey] = encoded;
       }
     }
-    
+
     const options = {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
       Metadata: stringMetadata,
       Body: body || Buffer.alloc(0),
     };
-    
+
     if (contentType !== undefined) options.ContentType = contentType
     if (contentEncoding !== undefined) options.ContentEncoding = contentEncoding
     if (contentLength !== undefined) options.ContentLength = contentLength
+    if (ifMatch !== undefined) options.IfMatch = ifMatch
 
     let response, error;
     try {
