@@ -16,7 +16,7 @@ export class AuditPlugin extends Plugin {
   async onSetup() {
     // Create audit resource
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
-      name: 'audits',
+      name: 'plg_audits',
       attributes: {
         id: 'string|required',
         resourceName: 'string|required',
@@ -32,19 +32,19 @@ export class AuditPlugin extends Plugin {
       },
       behavior: 'body-overflow'
     }));
-    this.auditResource = ok ? auditResource : (this.database.resources.audits || null);
+    this.auditResource = ok ? auditResource : (this.database.resources.plg_audits || null);
     if (!ok && !this.auditResource) return;
 
     // Hook into database for new resources
     this.database.addHook('afterCreateResource', (context) => {
-      if (context.resource.name !== 'audits') {
+      if (context.resource.name !== 'plg_audits') {
         this.setupResourceAuditing(context.resource);
       }
     });
 
     // Setup existing resources
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== 'audits') {
+      if (resource.name !== 'plg_audits') {
         this.setupResourceAuditing(resource);
       }
     }

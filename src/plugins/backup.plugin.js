@@ -100,7 +100,7 @@ export class BackupPlugin extends Plugin {
       parallelism: options.parallelism || 4,
       include: options.include || null,
       exclude: options.exclude || [],
-      backupMetadataResource: options.backupMetadataResource || 'backup_metadata',
+      backupMetadataResource: options.backupMetadataResource || 'plg_backup_metadata',
       tempDir: options.tempDir || '/tmp/s3db/backups',
       verbose: options.verbose || false,
       

@@ -37,7 +37,7 @@ describe("SchedulerPlugin", () => {
       await plugin.start();
 
       // Verify lock resource was created
-      expect(database.resources.scheduler_job_locks).toBeDefined();
+      expect(database.resources.plg_scheduler_job_locks).toBeDefined();
 
       await plugin.cleanup();
     });
@@ -56,7 +56,7 @@ describe("SchedulerPlugin", () => {
       await database.usePlugin(plugin);
       await plugin.start();
 
-      expect(database.resources.job_executions).toBeDefined();
+      expect(database.resources.plg_job_executions).toBeDefined();
 
       await plugin.cleanup();
     });
