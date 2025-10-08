@@ -44,6 +44,7 @@ The Scheduler Plugin provides robust job scheduling capabilities using cron expr
 - **Retry Logic**: Configurable retry attempts with exponential backoff
 - **Timeout Handling**: Prevent long-running jobs from blocking the system
 - **Job History**: Complete execution history with success/failure tracking
+- **Distributed Locking**: Automatic prevention of concurrent execution across multiple instances
 
 ### 🔧 Technical Features
 - **Timezone Support**: Schedule jobs in specific timezones
@@ -51,6 +52,8 @@ The Scheduler Plugin provides robust job scheduling capabilities using cron expr
 - **Event System**: Monitor job execution through events
 - **Job Persistence**: Store job configurations in the database
 - **Performance Monitoring**: Track execution times and success rates
+- **Multi-Instance Safe**: Built-in distributed locking prevents duplicate job execution
+- **Optimized Queries**: Partition-based history queries for fast lookups
 
 ---
 
@@ -113,6 +116,17 @@ await s3db.connect();
 // Jobs will start running according to their schedules
 ```
 
+### Plugin Resources
+
+The SchedulerPlugin automatically creates internal resources:
+
+| Resource | Purpose | Structure |
+|----------|---------|-----------|
+| `scheduler_job_locks` | Distributed locking for multi-instance safety | `{ id, jobName, lockedAt, instanceId }` |
+| `job_executions` | Job execution history (when `persistJobs: true`) | Partitioned by job name and status for fast queries |
+
+> **Automatic Management**: These resources are created automatically when the plugin starts. The lock resource ensures jobs run exactly once across multiple instances, and the history resource tracks all executions with partition-based indexing for optimal query performance.
+
 ---
 
 ## Configuration Options
@@ -140,13 +154,19 @@ jobs: {
     action: function,              // Job function to execute
     enabled?: boolean,             // Enable/disable job (default: true)
     timezone?: string,             // Job-specific timezone
-    retries?: number,              // Retry attempts (default: 0)
+    retries?: number,              // Number of retries AFTER initial failure (default: 0)
+                                   // e.g., retries: 3 = 4 total attempts (1 initial + 3 retries)
     timeout?: number,              // Timeout in milliseconds (default: 60000)
     runOnStart?: boolean,          // Run immediately on startup (default: false)
     context?: object               // Additional context data
   }
 }
 ```
+
+> **Retry Behavior**: The `retries` parameter specifies the number of retry attempts **after** the initial failure. For example:
+> - `retries: 0` → 1 total attempt (no retries)
+> - `retries: 3` → 4 total attempts (1 initial + 3 retries)
+> - `retries: 5` → 6 total attempts (1 initial + 5 retries)
 
 ### Cron Expression Formats
 
@@ -662,15 +682,27 @@ const jobs = await scheduler.listJobs();
 ```
 
 #### `getJobHistory(jobName, options?)`
-Get execution history for a job.
+Get execution history for a job. Uses partition-based queries for optimized performance.
 
 ```javascript
+// Get recent history (uses byJob partition for fast lookup)
 const history = await scheduler.getJobHistory('daily_cleanup', {
-  limit: 20,
-  startDate: '2024-01-01',
-  endDate: '2024-01-31'
+  limit: 20
 });
+
+// Filter by status (uses both byJob and byStatus partitions)
+const failures = await scheduler.getJobHistory('daily_cleanup', {
+  status: 'failed',
+  limit: 10
+});
+
+// The method automatically uses partitioned queries instead of filtering
+// all history records, making it very efficient even with large history
 ```
+
+**Options:**
+- `limit` (number): Maximum number of records to return (default: 100)
+- `status` (string): Filter by status ('success', 'failed', 'timeout', etc.)
 
 ### Job Action Function
 
@@ -1007,44 +1039,46 @@ action: async (database, context) => {
 }
 ```
 
-### 5. Implement Job Locking
+### 5. Multi-Instance Deployment
 
 ```javascript
-// Prevent concurrent execution of the same job
-action: async (database, context) => {
-  const lockKey = `job_lock_${context.jobName}`;
-  
-  // Check if job is already running
-  const existingLock = await database.resource('job_locks').get(lockKey);
-  if (existingLock && existingLock.expires_at > new Date().toISOString()) {
-    console.log(`Job ${context.jobName} already running, skipping`);
-    return { skipped: true, reason: 'already_running' };
+// The SchedulerPlugin automatically handles distributed locking
+// across multiple instances - no manual locking needed!
+
+// Instance 1 (server-1)
+const scheduler1 = new SchedulerPlugin({
+  jobs: {
+    daily_cleanup: {
+      schedule: '0 2 * * *',
+      action: async (database) => {
+        // This job will only run on ONE instance
+        console.log('Running cleanup on instance 1');
+        // ... cleanup logic ...
+      }
+    }
   }
-  
-  // Create lock
-  const lockExpiry = new Date(Date.now() + context.timeout || 60000).toISOString();
-  await database.resource('job_locks').upsert(lockKey, {
-    id: lockKey,
-    job_name: context.jobName,
-    started_at: new Date().toISOString(),
-    expires_at: lockExpiry
-  });
-  
-  try {
-    // Perform job logic
-    const result = await performJobWork();
-    
-    // Release lock
-    await database.resource('job_locks').delete(lockKey);
-    
-    return result;
-  } catch (error) {
-    // Release lock on error
-    await database.resource('job_locks').delete(lockKey);
-    throw error;
+});
+
+// Instance 2 (server-2) - same configuration
+const scheduler2 = new SchedulerPlugin({
+  jobs: {
+    daily_cleanup: {
+      schedule: '0 2 * * *',
+      action: async (database) => {
+        // When instance 1 is running this job, instance 2 will skip it
+        console.log('Running cleanup on instance 2');
+        // ... cleanup logic ...
+      }
+    }
   }
-}
+});
+
+// Built-in distributed locking ensures only ONE instance executes each job
+// The lock is automatically acquired before execution and released after
+// If a job is already running, other instances skip silently
 ```
+
+> **Multi-Instance Safety**: The scheduler automatically uses a `scheduler_job_locks` resource to prevent concurrent execution across multiple instances. Locks are acquired before job execution and always released (even on errors), ensuring your jobs run exactly once per schedule.
 
 ### 6. Graceful Shutdown
 
