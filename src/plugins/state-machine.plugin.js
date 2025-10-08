@@ -79,7 +79,7 @@ import tryFn from "../concerns/try-fn.js";
  *   },
  *   
  *   persistTransitions: true,
- *   transitionLogResource: 'state_transitions'
+ *   transitionLogResource: 'plg_state_transitions'
  * });
  *
  * === Usage ===
@@ -105,8 +105,8 @@ export class StateMachinePlugin extends Plugin {
       actions: options.actions || {},
       guards: options.guards || {},
       persistTransitions: options.persistTransitions !== false,
-      transitionLogResource: options.transitionLogResource || 'state_transitions',
-      stateResource: options.stateResource || 'entity_states',
+      transitionLogResource: options.transitionLogResource || 'plg_state_transitions',
+      stateResource: options.stateResource || 'plg_entity_states',
       verbose: options.verbose || false,
       ...options
     };
