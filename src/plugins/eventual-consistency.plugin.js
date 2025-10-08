@@ -1,5 +1,7 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { idGenerator } from "../concerns/id.js";
+import { PromisePool } from "@supercharge/promise-pool";
 
 export class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
@@ -38,6 +40,7 @@ export class EventualConsistencyPlugin extends Plugin {
         return baseValue;
       }),
       consolidationInterval: options.consolidationInterval || 3600000, // 1 hour default
+      consolidationConcurrency: options.consolidationConcurrency || 5, // Parallel consolidation limit
       autoConsolidate: options.autoConsolidate !== false,
       batchTransactions: options.batchTransactions || false,
       batchSize: options.batchSize || 100,
@@ -82,12 +85,12 @@ export class EventualConsistencyPlugin extends Plugin {
 
   async completeSetup() {
     if (!this.targetResource) return;
-    
+
     // Create transaction resource with partitions (includes field name to support multiple fields)
     const transactionResourceName = `${this.config.resource}_transactions_${this.config.field}`;
     const partitionConfig = this.createPartitionConfig();
-    
-    const [ok, err, transactionResource] = await tryFn(() => 
+
+    const [ok, err, transactionResource] = await tryFn(() =>
       this.database.createResource({
         name: transactionResourceName,
         attributes: {
@@ -108,16 +111,37 @@ export class EventualConsistencyPlugin extends Plugin {
         asyncPartitions: true // Use async partitions for better performance
       })
     );
-    
+
     if (!ok && !this.database.resources[transactionResourceName]) {
       throw new Error(`Failed to create transaction resource: ${err?.message}`);
     }
-    
+
     this.transactionResource = ok ? transactionResource : this.database.resources[transactionResourceName];
-    
+
+    // Create lock resource for atomic consolidation
+    const lockResourceName = `${this.config.resource}_consolidation_locks_${this.config.field}`;
+    const [lockOk, lockErr, lockResource] = await tryFn(() =>
+      this.database.createResource({
+        name: lockResourceName,
+        attributes: {
+          id: 'string|required',
+          lockedAt: 'number|required',
+          workerId: 'string|optional'
+        },
+        behavior: 'body-only',
+        timestamps: false
+      })
+    );
+
+    if (!lockOk && !this.database.resources[lockResourceName]) {
+      throw new Error(`Failed to create lock resource: ${lockErr?.message}`);
+    }
+
+    this.lockResource = lockOk ? lockResource : this.database.resources[lockResourceName];
+
     // Add helper methods to the resource
     this.addHelperMethods();
-    
+
     // Setup consolidation if enabled
     if (this.config.autoConsolidate) {
       this.startConsolidationTimer();
@@ -172,11 +196,24 @@ export class EventualConsistencyPlugin extends Plugin {
     return partitions;
   }
 
+  /**
+   * Helper method to perform atomic consolidation in sync mode
+   * @private
+   */
+  async _syncModeConsolidate(id, field) {
+    // consolidateRecord already has distributed locking, so it's atomic
+    const consolidatedValue = await this.consolidateRecord(id);
+    await this.targetResource.update(id, {
+      [field]: consolidatedValue
+    });
+    return consolidatedValue;
+  }
+
   addHelperMethods() {
     const resource = this.targetResource;
     const defaultField = this.config.field;
     const plugin = this;
-    
+
     // Store all plugins by field name for this resource
     if (!resource._eventualConsistencyPlugins) {
       resource._eventualConsistencyPlugins = {};
@@ -209,16 +246,12 @@ export class EventualConsistencyPlugin extends Plugin {
         value: actualValue,
         source: 'set'
       });
-      
-      // In sync mode, immediately consolidate and update
+
+      // In sync mode, immediately consolidate and update (atomic with locking)
       if (fieldPlugin.config.mode === 'sync') {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
-      
+
       return actualValue;
     };
     
@@ -248,16 +281,12 @@ export class EventualConsistencyPlugin extends Plugin {
         value: actualAmount,
         source: 'add'
       });
-      
-      // In sync mode, immediately consolidate and update
+
+      // In sync mode, immediately consolidate and update (atomic with locking)
       if (fieldPlugin.config.mode === 'sync') {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
-      
+
       // In async mode, return expected value (for user feedback)
       const currentValue = await fieldPlugin.getConsolidatedValue(id);
       return currentValue + actualAmount;
@@ -289,16 +318,12 @@ export class EventualConsistencyPlugin extends Plugin {
         value: actualAmount,
         source: 'sub'
       });
-      
-      // In sync mode, immediately consolidate and update
+
+      // In sync mode, immediately consolidate and update (atomic with locking)
       if (fieldPlugin.config.mode === 'sync') {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
-      
+
       // In async mode, return expected value (for user feedback)
       const currentValue = await fieldPlugin.getConsolidatedValue(id);
       return currentValue - actualAmount;
@@ -341,9 +366,9 @@ export class EventualConsistencyPlugin extends Plugin {
   async createTransaction(data) {
     const now = new Date();
     const cohortInfo = this.getCohortInfo(now);
-    
+
     const transaction = {
-      id: `txn-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: idGenerator(), // Use nanoid for guaranteed uniqueness
       originalId: data.originalId,
       field: this.config.field,
       value: data.value || 0,
@@ -372,13 +397,23 @@ export class EventualConsistencyPlugin extends Plugin {
 
   async flushPendingTransactions() {
     if (this.pendingTransactions.size === 0) return;
-    
+
     const transactions = Array.from(this.pendingTransactions.values());
-    this.pendingTransactions.clear();
-    
-    // Insert all pending transactions
-    for (const transaction of transactions) {
-      await this.transactionResource.insert(transaction);
+
+    try {
+      // Insert all pending transactions in parallel
+      await Promise.all(
+        transactions.map(transaction =>
+          this.transactionResource.insert(transaction)
+        )
+      );
+
+      // Only clear after successful inserts (prevents data loss on crashes)
+      this.pendingTransactions.clear();
+    } catch (error) {
+      // Keep pending transactions for retry on next flush
+      console.error('Failed to flush pending transactions:', error);
+      throw error;
     }
   }
 
@@ -436,24 +471,33 @@ export class EventualConsistencyPlugin extends Plugin {
           applied: false
         })
       );
-      
+
       if (!ok) {
         console.error('Consolidation failed to query transactions:', err);
         return;
       }
-      
+
       // Get unique originalIds
       const uniqueIds = [...new Set(transactions.map(t => t.originalId))];
-      
-      // Consolidate each record
-      for (const id of uniqueIds) {
-        await this.consolidateRecord(id);
+
+      // Consolidate each record in parallel with concurrency limit
+      const { results, errors } = await PromisePool
+        .for(uniqueIds)
+        .withConcurrency(this.config.consolidationConcurrency)
+        .process(async (id) => {
+          return await this.consolidateRecord(id);
+        });
+
+      if (errors && errors.length > 0) {
+        console.error(`Consolidation completed with ${errors.length} errors:`, errors);
       }
-      
+
       this.emit('eventual-consistency.consolidated', {
         resource: this.config.resource,
         field: this.config.field,
-        recordCount: uniqueIds.length
+        recordCount: uniqueIds.length,
+        successCount: results.length,
+        errorCount: errors.length
       });
     } catch (error) {
       console.error('Consolidation error:', error);
@@ -462,99 +506,124 @@ export class EventualConsistencyPlugin extends Plugin {
   }
 
   async consolidateRecord(originalId) {
-    // Get the current record value first
-    const [recordOk, recordErr, record] = await tryFn(() =>
-      this.targetResource.get(originalId)
-    );
-    
-    const currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
-    
-    // Get all transactions for this record
-    const [ok, err, transactions] = await tryFn(() =>
-      this.transactionResource.query({
-        originalId,
-        applied: false
+    // Acquire distributed lock to prevent concurrent consolidation
+    const lockId = `lock-${originalId}`;
+    const [lockAcquired, lockErr, lock] = await tryFn(() =>
+      this.lockResource.insert({
+        id: lockId,
+        lockedAt: Date.now(),
+        workerId: process.pid ? String(process.pid) : 'unknown'
       })
     );
-    
-    if (!ok || !transactions || transactions.length === 0) {
-      return currentValue;
-    }
-    
-    // Sort transactions by timestamp
-    transactions.sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-    
-    // If there's a current value and no 'set' operations, prepend a synthetic set transaction
-    const hasSetOperation = transactions.some(t => t.operation === 'set');
-    if (currentValue !== 0 && !hasSetOperation) {
-      transactions.unshift({
-        id: '__synthetic__', // Synthetic ID that we'll skip when marking as applied
-        operation: 'set',
-        value: currentValue,
-        timestamp: new Date(0).toISOString() // Very old timestamp to ensure it's first
-      });
-    }
-    
-    // Apply reducer to get consolidated value
-    const consolidatedValue = this.config.reducer(transactions);
-    
-    // Update the original record
-    const [updateOk, updateErr] = await tryFn(() =>
-      this.targetResource.update(originalId, {
-        [this.config.field]: consolidatedValue
-      })
-    );
-    
-    if (updateOk) {
-      // Mark transactions as applied (skip synthetic ones) - parallel for performance
-      const updatePromises = transactions
-        .filter(txn => txn.id !== '__synthetic__')
-        .map(txn =>
-          this.transactionResource.update(txn.id, {
-            applied: true
-          }).catch(err => {
-            console.error(`Failed to mark transaction ${txn.id} as applied:`, err);
-            // Continue with other updates even if one fails
-          })
-        );
 
-      await Promise.all(updatePromises);
+    // If lock couldn't be acquired, another worker is consolidating
+    if (!lockAcquired) {
+      // Get current value and return (another worker will consolidate)
+      const [recordOk, recordErr, record] = await tryFn(() =>
+        this.targetResource.get(originalId)
+      );
+      return (recordOk && record) ? (record[this.config.field] || 0) : 0;
     }
-    
-    return consolidatedValue;
+
+    try {
+      // Get the current record value first
+      const [recordOk, recordErr, record] = await tryFn(() =>
+        this.targetResource.get(originalId)
+      );
+
+      const currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
+
+      // Get all transactions for this record
+      const [ok, err, transactions] = await tryFn(() =>
+        this.transactionResource.query({
+          originalId,
+          applied: false
+        })
+      );
+
+      if (!ok || !transactions || transactions.length === 0) {
+        return currentValue;
+      }
+
+      // Sort transactions by timestamp
+      transactions.sort((a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+
+      // If there's a current value and no 'set' operations, prepend a synthetic set transaction
+      const hasSetOperation = transactions.some(t => t.operation === 'set');
+      if (currentValue !== 0 && !hasSetOperation) {
+        transactions.unshift({
+          id: '__synthetic__', // Synthetic ID that we'll skip when marking as applied
+          operation: 'set',
+          value: currentValue,
+          timestamp: new Date(0).toISOString(), // Very old timestamp to ensure it's first
+          synthetic: true // Flag for custom reducers
+        });
+      }
+
+      // Apply reducer to get consolidated value
+      const consolidatedValue = this.config.reducer(transactions);
+
+      // Update the original record
+      const [updateOk, updateErr] = await tryFn(() =>
+        this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        })
+      );
+
+      if (updateOk) {
+        // Mark transactions as applied (skip synthetic ones) - parallel for performance
+        const updatePromises = transactions
+          .filter(txn => txn.id !== '__synthetic__')
+          .map(txn =>
+            this.transactionResource.update(txn.id, {
+              applied: true
+            }).catch(err => {
+              console.error(`Failed to mark transaction ${txn.id} as applied:`, err);
+              // Continue with other updates even if one fails
+            })
+          );
+
+        await Promise.all(updatePromises);
+      }
+
+      return consolidatedValue;
+    } finally {
+      // Always release the lock
+      await tryFn(() => this.lockResource.delete(lockId));
+    }
   }
 
   async getConsolidatedValue(originalId, options = {}) {
     const includeApplied = options.includeApplied || false;
     const startDate = options.startDate;
     const endDate = options.endDate;
-    
+
     // Build query
     const query = { originalId };
     if (!includeApplied) {
       query.applied = false;
     }
-    
+
     // Get transactions
     const [ok, err, transactions] = await tryFn(() =>
       this.transactionResource.query(query)
     );
-    
+
     if (!ok || !transactions || transactions.length === 0) {
       // If no transactions, check if record exists and return its current value
       const [recordOk, recordErr, record] = await tryFn(() =>
         this.targetResource.get(originalId)
       );
-      
+
       if (recordOk && record) {
         return record[this.config.field] || 0;
       }
-      
+
       return 0;
     }
-    
+
     // Filter by date range if specified
     let filtered = transactions;
     if (startDate || endDate) {
@@ -565,12 +634,31 @@ export class EventualConsistencyPlugin extends Plugin {
         return true;
       });
     }
-    
+
+    // Get current value from record
+    const [recordOk, recordErr, record] = await tryFn(() =>
+      this.targetResource.get(originalId)
+    );
+    const currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
+
+    // Check if there's a 'set' operation in filtered transactions
+    const hasSetOperation = filtered.some(t => t.operation === 'set');
+
+    // If current value exists and no 'set', prepend synthetic set transaction
+    if (currentValue !== 0 && !hasSetOperation) {
+      filtered.unshift({
+        operation: 'set',
+        value: currentValue,
+        timestamp: new Date(0).toISOString(), // Very old timestamp to ensure it's first
+        synthetic: true
+      });
+    }
+
     // Sort by timestamp
-    filtered.sort((a, b) => 
+    filtered.sort((a, b) =>
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-    
+
     // Apply reducer
     return this.config.reducer(filtered);
   }
