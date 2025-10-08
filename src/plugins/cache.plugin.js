@@ -1,4 +1,5 @@
 import { join } from "path";
+import jsonStableStringify from "json-stable-stringify";
 
 import { sha256 } from "../concerns/crypto.js";
 import Plugin from "./plugin.class.js";
@@ -11,26 +12,24 @@ import tryFn from "../concerns/try-fn.js";
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    
-    // Extract primary configuration
-    this.driverName = options.driver || 's3';
-    this.ttl = options.ttl;
-    this.maxSize = options.maxSize;
-    this.config = options.config || {};
-    
-    // Plugin-level settings
-    this.includePartitions = options.includePartitions !== false;
-    this.partitionStrategy = options.partitionStrategy || 'hierarchical';
-    this.partitionAware = options.partitionAware !== false;
-    this.trackUsage = options.trackUsage !== false;
-    this.preloadRelated = options.preloadRelated !== false;
-    
-    // Legacy support - keep the old options for backward compatibility
-    this.legacyConfig = {
-      memoryOptions: options.memoryOptions,
-      filesystemOptions: options.filesystemOptions,
-      s3Options: options.s3Options,
-      driver: options.driver
+
+    // Clean, consolidated configuration
+    this.config = {
+      // Driver configuration
+      driver: options.driver || 's3',
+      config: options.config || {}, // Driver-specific config
+      ttl: options.ttl,
+      maxSize: options.maxSize,
+
+      // Partition settings
+      includePartitions: options.includePartitions !== false,
+      partitionStrategy: options.partitionStrategy || 'hierarchical',
+      partitionAware: options.partitionAware !== false,
+      trackUsage: options.trackUsage !== false,
+      preloadRelated: options.preloadRelated !== false,
+
+      // Logging
+      verbose: options.verbose || false
     };
   }
 
@@ -40,67 +39,46 @@ export class CachePlugin extends Plugin {
 
   async onSetup() {
     // Initialize cache driver
-    if (this.driverName && typeof this.driverName === 'object') {
+    if (this.config.driver && typeof this.config.driver === 'object') {
       // Use custom driver instance if provided
-      this.driver = this.driverName;
-    } else if (this.driverName === 'memory') {
-      // Build driver configuration with proper precedence
+      this.driver = this.config.driver;
+    } else if (this.config.driver === 'memory') {
+      // Build driver configuration
       const driverConfig = {
-        ...this.legacyConfig.memoryOptions, // Legacy support (lowest priority)
-        ...this.config, // New config format (medium priority)
+        ...this.config.config,
+        ttl: this.config.ttl,
+        maxSize: this.config.maxSize
       };
-      
-      // Add global settings if defined (highest priority)
-      if (this.ttl !== undefined) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== undefined) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      
+
       this.driver = new MemoryCache(driverConfig);
-    } else if (this.driverName === 'filesystem') {
-      // Build driver configuration with proper precedence
+    } else if (this.config.driver === 'filesystem') {
+      // Build driver configuration
       const driverConfig = {
-        ...this.legacyConfig.filesystemOptions, // Legacy support (lowest priority)
-        ...this.config, // New config format (medium priority)
+        ...this.config.config,
+        ttl: this.config.ttl,
+        maxSize: this.config.maxSize
       };
-      
-      // Add global settings if defined (highest priority)
-      if (this.ttl !== undefined) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== undefined) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      
+
       // Use partition-aware filesystem cache if enabled
-      if (this.partitionAware) {
+      if (this.config.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.partitionStrategy,
-          trackUsage: this.trackUsage,
-          preloadRelated: this.preloadRelated,
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
           ...driverConfig
         });
       } else {
         this.driver = new FilesystemCache(driverConfig);
       }
     } else {
-      // Default to S3Cache - build driver configuration with proper precedence
+      // Default to S3Cache
       const driverConfig = {
-        client: this.database.client, // Required for S3Cache
-        ...this.legacyConfig.s3Options, // Legacy support (lowest priority)
-        ...this.config, // New config format (medium priority)
+        client: this.database.client,
+        ...this.config.config,
+        ttl: this.config.ttl,
+        maxSize: this.config.maxSize
       };
-      
-      // Add global settings if defined (highest priority)
-      if (this.ttl !== undefined) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== undefined) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      
+
       this.driver = new S3Cache(driverConfig);
     }
 
@@ -310,9 +288,11 @@ export class CachePlugin extends Plugin {
       for (const method of itemSpecificMethods) {
         try {
           const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
-          await resource.cache.clear(specificKey.replace('.json.gz', ''));
+          await resource.cache.clear(specificKey);
         } catch (error) {
-          // Ignore cache clearing errors for individual items
+          if (this.config.verbose) {
+            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, error.message);
+          }
         }
       }
       
@@ -325,7 +305,9 @@ export class CachePlugin extends Plugin {
               const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
               await resource.cache.clear(partitionKeyPrefix);
             } catch (error) {
-              // Ignore partition cache clearing errors
+              if (this.config.verbose) {
+                console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, error.message);
+              }
             }
           }
         }
@@ -337,6 +319,10 @@ export class CachePlugin extends Plugin {
       // Clear all cache entries for this resource - this ensures aggregate methods are invalidated
       await resource.cache.clear(keyPrefix);
     } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, error.message);
+      }
+
       // If broad clearing fails, try specific method clearing
       const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];
       for (const method of aggregateMethods) {
@@ -345,7 +331,9 @@ export class CachePlugin extends Plugin {
           await resource.cache.clear(`${keyPrefix}/action=${method}`);
           await resource.cache.clear(`resource=${resource.name}/action=${method}`);
         } catch (methodError) {
-          // Ignore individual method clearing errors
+          if (this.config.verbose) {
+            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:`, methodError.message);
+          }
         }
       }
     }
@@ -377,12 +365,10 @@ export class CachePlugin extends Plugin {
   }
 
   async hashParams(params) {
-    const sortedParams = Object.keys(params)
-      .sort()
-      .map(key => `${key}:${JSON.stringify(params[key])}`) // Use JSON.stringify for complex objects
-      .join('|') || 'empty';
-    
-    return await sha256(sortedParams);
+    // Use json-stable-stringify for deterministic serialization
+    // Handles nested objects, dates, and maintains consistent key order
+    const serialized = jsonStableStringify(params) || 'empty';
+    return await sha256(serialized);
   }
 
   // Utility methods
@@ -421,18 +407,17 @@ export class CachePlugin extends Plugin {
       return await resource.warmPartitionCache(partitionNames, options);
     }
 
-    // Fallback to standard warming
-    await resource.getAll();
+    // Fallback to standard warming - get all records once
+    const allRecords = await resource.getAll();
 
     // Warm partition caches if enabled
     if (includePartitions && resource.config.partitions) {
+      // Ensure allRecords is an array
+      const recordsArray = Array.isArray(allRecords) ? allRecords : [];
+
       for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
         if (partitionDef.fields) {
           // Get some sample partition values and warm those caches
-          const allRecords = await resource.getAll();
-          
-          // Ensure allRecords is an array
-          const recordsArray = Array.isArray(allRecords) ? allRecords : [];
           const partitionValues = new Set();
           
           for (const record of recordsArray.slice(0, 10)) { // Sample first 10 records
@@ -452,31 +437,6 @@ export class CachePlugin extends Plugin {
     }
   }
 
-  // Partition-specific methods
-  async getPartitionCacheStats(resourceName, partition = null) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error('Partition cache statistics are only available with PartitionAwareFilesystemCache');
-    }
-    
-    return await this.driver.getPartitionStats(resourceName, partition);
-  }
-
-  async getCacheRecommendations(resourceName) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error('Cache recommendations are only available with PartitionAwareFilesystemCache');
-    }
-    
-    return await this.driver.getCacheRecommendations(resourceName);
-  }
-
-  async clearPartitionCache(resourceName, partition, partitionValues = {}) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error('Partition cache clearing is only available with PartitionAwareFilesystemCache');
-    }
-    
-    return await this.driver.clearPartition(resourceName, partition, partitionValues);
-  }
-
   async analyzeCacheUsage() {
     if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
       return { message: 'Cache usage analysis is only available with PartitionAwareFilesystemCache' };
@@ -493,8 +453,13 @@ export class CachePlugin extends Plugin {
       }
     };
 
-    // Analyze each resource
+    // Analyze each resource (skip plugin-managed resources)
     for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+      // Skip plugin resources to focus on user data
+      if (resourceName.startsWith('plg_')) {
+        continue;
+      }
+
       try {
         analysis.resourceStats[resourceName] = await this.driver.getPartitionStats(resourceName);
         analysis.recommendations[resourceName] = await this.driver.getCacheRecommendations(resourceName);

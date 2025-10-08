@@ -33,7 +33,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
       partitionAware: true,
       partitionStrategy: 'hierarchical',
       trackUsage: true,
-      filesystemOptions: {
+      config: {
         directory: testDir,
         enableStats: true
       }
