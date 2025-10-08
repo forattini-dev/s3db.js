@@ -217,6 +217,7 @@ await database.usePlugin(CostsPlugin); // Static plugin
 | **[🤖 State Machine Plugin](./state-machine.md)** | Finite state machine workflows | Instance | Business processes, workflow management |
 | **[⏰ Scheduler Plugin](./scheduler.md)** | Cron-based job scheduling | Instance | Automated tasks, maintenance jobs |
 | **[📬 Queue Consumer Plugin](./queue-consumer.md)** | External queue message processing | Instance | Event-driven architecture, integration |
+| **[🔒 S3Queue Plugin](./s3-queue.md)** | Distributed queue processing with zero race conditions | Instance | Task queues, message processing, worker pools |
 
 ### Plugin Quick Reference
 
@@ -241,7 +242,8 @@ import {
 import {
   StateMachinePlugin,   // 🤖 Business workflows
   SchedulerPlugin,      // ⏰ Job scheduling
-  QueueConsumerPlugin   // 📬 Message processing
+  QueueConsumerPlugin,  // 📬 Message processing
+  S3QueuePlugin         // 🔒 Distributed queue processing
 } from 's3db.js';
 ```
 
@@ -900,6 +902,7 @@ Each plugin has comprehensive documentation:
 - [State Machine Plugin](./state-machine.md) - Workflow management
 - [Scheduler Plugin](./scheduler.md) - Job scheduling
 - [Queue Consumer Plugin](./queue-consumer.md) - Message processing
+- [S3Queue Plugin](./s3-queue.md) - Distributed queue processing
 
 ### Testing Plugins
 
@@ -965,6 +968,7 @@ docs/plugins/
 ├── replicator.md         # Replicator Plugin documentation
 ├── fulltext.md           # FullText Plugin documentation
 ├── queue-consumer.md     # Queue Consumer Plugin documentation
+├── s3-queue.md           # S3Queue Plugin documentation
 ├── state-machine.md      # State Machine Plugin documentation
 ├── scheduler.md          # Scheduler Plugin documentation
 └── eventual-consistency.md # Eventual Consistency Plugin documentation
