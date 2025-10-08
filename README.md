@@ -787,12 +787,13 @@ await users.insert({ name: "John", email: "john@example.com" });
 #### Available Plugins
 
 - **💾 [Cache Plugin](./docs/plugins/cache.md)** - Intelligent caching (memory/S3) for performance
-- **💰 [Costs Plugin](./docs/plugins/costs.md)** - Real-time AWS S3 cost tracking  
+- **💰 [Costs Plugin](./docs/plugins/costs.md)** - Real-time AWS S3 cost tracking
 - **🔍 [FullText Plugin](./docs/plugins/fulltext.md)** - Advanced search with automatic indexing
 - **📊 [Metrics Plugin](./docs/plugins/metrics.md)** - Performance monitoring and analytics
 - **🔄 [Replicator Plugin](./docs/plugins/replicator.md)** - Multi-target replication (S3DB, SQS, BigQuery, PostgreSQL)
 - **📝 [Audit Plugin](./docs/plugins/audit.md)** - Comprehensive audit logging for compliance
 - **📬 [Queue Consumer Plugin](./docs/plugins/queue-consumer.md)** - Message consumption from SQS/RabbitMQ
+- **🔒 [S3Queue Plugin](./docs/plugins/s3-queue.md)** - Distributed queue processing with zero race conditions
 - **📈 [Eventual Consistency Plugin](./docs/plugins/eventual-consistency.md)** - Event sourcing for numeric fields
 - **📅 [Scheduler Plugin](./docs/plugins/scheduler.md)** - Task scheduling and automation
 - **🔄 [State Machine Plugin](./docs/plugins/state-machine.md)** - State management and transitions
