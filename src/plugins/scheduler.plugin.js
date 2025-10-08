@@ -1,5 +1,6 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { idGenerator } from "../concerns/id.js";
 
 /**
  * SchedulerPlugin - Cron-based Task Scheduling System
@@ -14,7 +15,7 @@ import tryFn from "../concerns/try-fn.js";
  * - Error handling and retry logic
  * - Job persistence and recovery
  * - Timezone support
- * - Job dependencies and chaining
+ * - Distributed locking for multi-instance deployments
  * - Resource cleanup and maintenance tasks
  *
  * === Configuration Example ===
@@ -38,7 +39,7 @@ import tryFn from "../concerns/try-fn.js";
  *         return { deleted: expired.length };
  *       },
  *       enabled: true,
- *       retries: 3,
+ *       retries: 3, // Number of retry attempts after initial failure (total: 4 attempts)
  *       timeout: 300000 // 5 minutes
  *     },
  *     
@@ -80,7 +81,6 @@ import tryFn from "../concerns/try-fn.js";
  *         }
  *         throw new Error('BackupPlugin not available');
  *       },
- *       dependencies: ['backup_full'], // Run only after full backup exists
  *       retries: 2
  *     },
  *     
@@ -163,12 +163,23 @@ export class SchedulerPlugin extends Plugin {
     };
     
     this.database = null;
+    this.lockResource = null;
     this.jobs = new Map();
     this.activeJobs = new Map();
     this.timers = new Map();
     this.statistics = new Map();
-    
+
     this._validateConfiguration();
+  }
+
+  /**
+   * Helper to detect test environment
+   * @private
+   */
+  _isTestEnvironment() {
+    return process.env.NODE_ENV === 'test' ||
+           process.env.JEST_WORKER_ID !== undefined ||
+           global.expect !== undefined;
   }
 
   _validateConfiguration() {
@@ -208,7 +219,10 @@ export class SchedulerPlugin extends Plugin {
 
   async setup(database) {
     this.database = database;
-    
+
+    // Create lock resource for distributed locking
+    await this._createLockResource();
+
     // Create job execution history resource
     if (this.config.persistJobs) {
       await this._createJobHistoryResource();
@@ -243,6 +257,28 @@ export class SchedulerPlugin extends Plugin {
     await this._startScheduling();
     
     this.emit('initialized', { jobs: this.jobs.size });
+  }
+
+  async _createLockResource() {
+    const [ok, err, lockResource] = await tryFn(() =>
+      this.database.createResource({
+        name: 'scheduler_job_locks',
+        attributes: {
+          id: 'string|required',
+          jobName: 'string|required',
+          lockedAt: 'number|required',
+          instanceId: 'string|optional'
+        },
+        behavior: 'body-only',
+        timestamps: false
+      })
+    );
+
+    if (!ok && !this.database.resources.scheduler_job_locks) {
+      throw new Error(`Failed to create lock resource: ${err?.message}`);
+    }
+
+    this.lockResource = ok ? lockResource : this.database.resources.scheduler_job_locks;
   }
 
   async _createJobHistoryResource() {
@@ -359,10 +395,7 @@ export class SchedulerPlugin extends Plugin {
     }
     
     // For tests, ensure we always schedule in the future
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || 
-                              process.env.JEST_WORKER_ID !== undefined ||
-                              global.expect !== undefined;
-    if (isTestEnvironment) {
+    if (this._isTestEnvironment()) {
       // Add 1 second to ensure it's in the future for tests
       next.setTime(next.getTime() + 1000);
     }
@@ -375,144 +408,166 @@ export class SchedulerPlugin extends Plugin {
     if (!job || this.activeJobs.has(jobName)) {
       return;
     }
-    
-    const executionId = `${jobName}_${Date.now()}`;
+
+    // Acquire distributed lock to prevent concurrent execution across instances
+    const lockId = `lock-${jobName}`;
+    const [lockAcquired, lockErr] = await tryFn(() =>
+      this.lockResource.insert({
+        id: lockId,
+        jobName,
+        lockedAt: Date.now(),
+        instanceId: process.pid ? String(process.pid) : 'unknown'
+      })
+    );
+
+    // If lock couldn't be acquired, another instance is executing this job
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
+      }
+      return;
+    }
+
+    const executionId = `${jobName}_${idGenerator()}`;
     const startTime = Date.now();
-    
+
     const context = {
       jobName,
       executionId,
       scheduledTime: new Date(startTime),
       database: this.database
     };
-    
+
     this.activeJobs.set(jobName, executionId);
-    
-    // Execute onJobStart hook
-    if (this.config.onJobStart) {
-      await this._executeHook(this.config.onJobStart, jobName, context);
-    }
-    
-    this.emit('job_start', { jobName, executionId, startTime });
-    
-    let attempt = 0;
-    let lastError = null;
-    let result = null;
-    let status = 'success';
-    
-    // Detect test environment once
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || 
-                              process.env.JEST_WORKER_ID !== undefined ||
-                              global.expect !== undefined;
-    
-    while (attempt <= job.retries) { // attempt 0 = initial, attempt 1+ = retries
-      try {
-        // Set timeout for job execution (reduce timeout in test environment)
-        const actualTimeout = isTestEnvironment ? Math.min(job.timeout, 1000) : job.timeout; // Max 1000ms in tests
-        
-        let timeoutId;
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('Job execution timeout')), actualTimeout);
-        });
-        
-        // Execute job with timeout
-        const jobPromise = job.action(this.database, context, this);
-        
+
+    try {
+      // Execute onJobStart hook
+      if (this.config.onJobStart) {
+        await this._executeHook(this.config.onJobStart, jobName, context);
+      }
+
+      this.emit('job_start', { jobName, executionId, startTime });
+
+      let attempt = 0;
+      let lastError = null;
+      let result = null;
+      let status = 'success';
+
+      // Detect test environment once
+      const isTestEnvironment = this._isTestEnvironment();
+
+      while (attempt <= job.retries) { // attempt 0 = initial, attempt 1+ = retries
         try {
-          result = await Promise.race([jobPromise, timeoutPromise]);
-          // Clear timeout if job completes successfully
-          clearTimeout(timeoutId);
-        } catch (raceError) {
-          // Ensure timeout is cleared even on error
-          clearTimeout(timeoutId);
-          throw raceError;
-        }
-        
-        status = 'success';
-        break;
-        
-      } catch (error) {
-        lastError = error;
-        attempt++;
-        
-        if (attempt <= job.retries) {
-          if (this.config.verbose) {
-            console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
+          // Set timeout for job execution (reduce timeout in test environment)
+          const actualTimeout = isTestEnvironment ? Math.min(job.timeout, 1000) : job.timeout; // Max 1000ms in tests
+
+          let timeoutId;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('Job execution timeout')), actualTimeout);
+          });
+
+          // Execute job with timeout
+          const jobPromise = job.action(this.database, context, this);
+
+          try {
+            result = await Promise.race([jobPromise, timeoutPromise]);
+            // Clear timeout if job completes successfully
+            clearTimeout(timeoutId);
+          } catch (raceError) {
+            // Ensure timeout is cleared even on error
+            clearTimeout(timeoutId);
+            throw raceError;
           }
-          
-          // Wait before retry (exponential backoff with max delay, shorter in tests)
-          const baseDelay = Math.min(Math.pow(2, attempt) * 1000, 5000); // Max 5 seconds
-          const delay = isTestEnvironment ? 1 : baseDelay; // Just 1ms in tests
-          await new Promise(resolve => setTimeout(resolve, delay));
+
+          status = 'success';
+          break;
+
+        } catch (error) {
+          lastError = error;
+          attempt++;
+
+          if (attempt <= job.retries) {
+            if (this.config.verbose) {
+              console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
+            }
+
+            // Wait before retry (exponential backoff with max delay, shorter in tests)
+            const baseDelay = Math.min(Math.pow(2, attempt) * 1000, 5000); // Max 5 seconds
+            const delay = isTestEnvironment ? 1 : baseDelay; // Just 1ms in tests
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         }
       }
-    }
+
+      const endTime = Date.now();
+      const duration = Math.max(1, endTime - startTime); // Ensure minimum 1ms duration
+
+      if (lastError && attempt > job.retries) {
+        status = lastError.message.includes('timeout') ? 'timeout' : 'error';
+      }
+
+      // Update job statistics
+      job.lastRun = new Date(endTime);
+      job.runCount++;
+
+      if (status === 'success') {
+        job.successCount++;
+      } else {
+        job.errorCount++;
+      }
+
+      // Update plugin statistics
+      const stats = this.statistics.get(jobName);
+      stats.totalRuns++;
+      stats.lastRun = new Date(endTime);
+
+      if (status === 'success') {
+        stats.totalSuccesses++;
+        stats.lastSuccess = new Date(endTime);
+      } else {
+        stats.totalErrors++;
+        stats.lastError = { time: new Date(endTime), message: lastError?.message };
+      }
+
+      stats.avgDuration = ((stats.avgDuration * (stats.totalRuns - 1)) + duration) / stats.totalRuns;
+
+      // Persist execution history
+      if (this.config.persistJobs) {
+        await this._persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, lastError, attempt);
+      }
+
+      // Execute completion hooks
+      if (status === 'success' && this.config.onJobComplete) {
+        await this._executeHook(this.config.onJobComplete, jobName, result, duration);
+      } else if (status !== 'success' && this.config.onJobError) {
+        await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
+      }
+
+      this.emit('job_complete', {
+        jobName,
+        executionId,
+        status,
+        duration,
+        result,
+        error: lastError?.message,
+        retryCount: attempt
+      });
     
-    const endTime = Date.now();
-    const duration = Math.max(1, endTime - startTime); // Ensure minimum 1ms duration
-    
-    if (lastError && attempt > job.retries) {
-      status = lastError.message.includes('timeout') ? 'timeout' : 'error';
-    }
-    
-    // Update job statistics
-    job.lastRun = new Date(endTime);
-    job.runCount++;
-    
-    if (status === 'success') {
-      job.successCount++;
-    } else {
-      job.errorCount++;
-    }
-    
-    // Update plugin statistics
-    const stats = this.statistics.get(jobName);
-    stats.totalRuns++;
-    stats.lastRun = new Date(endTime);
-    
-    if (status === 'success') {
-      stats.totalSuccesses++;
-      stats.lastSuccess = new Date(endTime);
-    } else {
-      stats.totalErrors++;
-      stats.lastError = { time: new Date(endTime), message: lastError?.message };
-    }
-    
-    stats.avgDuration = ((stats.avgDuration * (stats.totalRuns - 1)) + duration) / stats.totalRuns;
-    
-    // Persist execution history
-    if (this.config.persistJobs) {
-      await this._persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, lastError, attempt);
-    }
-    
-    // Execute completion hooks
-    if (status === 'success' && this.config.onJobComplete) {
-      await this._executeHook(this.config.onJobComplete, jobName, result, duration);
-    } else if (status !== 'success' && this.config.onJobError) {
-      await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
-    }
-    
-    this.emit('job_complete', { 
-      jobName, 
-      executionId, 
-      status, 
-      duration, 
-      result, 
-      error: lastError?.message,
-      retryCount: attempt
-    });
-    
-    // Remove from active jobs
-    this.activeJobs.delete(jobName);
-    
-    // Schedule next execution if job is still enabled
-    if (job.enabled) {
-      this._scheduleNextExecution(jobName);
-    }
-    
-    // Throw error if all retries failed
-    if (lastError && status !== 'success') {
-      throw lastError;
+      // Remove from active jobs
+      this.activeJobs.delete(jobName);
+
+      // Schedule next execution if job is still enabled
+      if (job.enabled) {
+        this._scheduleNextExecution(jobName);
+      }
+
+      // Throw error if all retries failed
+      if (lastError && status !== 'success') {
+        throw lastError;
+      }
+    } finally {
+      // Always release the distributed lock
+      await tryFn(() => this.lockResource.delete(lockId));
     }
   }
 
@@ -548,17 +603,18 @@ export class SchedulerPlugin extends Plugin {
 
   /**
    * Manually trigger a job execution
+   * Note: Race conditions are prevented by distributed locking in _executeJob()
    */
   async runJob(jobName, context = {}) {
     const job = this.jobs.get(jobName);
     if (!job) {
       throw new Error(`Job '${jobName}' not found`);
     }
-    
+
     if (this.activeJobs.has(jobName)) {
       throw new Error(`Job '${jobName}' is already running`);
     }
-    
+
     await this._executeJob(jobName);
   }
 
@@ -647,33 +703,32 @@ export class SchedulerPlugin extends Plugin {
     if (!this.config.persistJobs) {
       return [];
     }
-    
+
     const { limit = 50, status = null } = options;
-    
-    // Get all history first, then filter client-side
-    const [ok, err, allHistory] = await tryFn(() => 
-      this.database.resource(this.config.jobHistoryResource).list({
-        orderBy: { startTime: 'desc' },
-        limit: limit * 2 // Get more to allow for filtering
-      })
+
+    // Build query to use partition (byJob)
+    const queryParams = {
+      jobName  // Uses byJob partition for efficient lookup
+    };
+
+    if (status) {
+      queryParams.status = status;
+    }
+
+    // Use query() to leverage partitions instead of list() + filter
+    const [ok, err, history] = await tryFn(() =>
+      this.database.resource(this.config.jobHistoryResource).query(queryParams)
     );
-    
+
     if (!ok) {
       if (this.config.verbose) {
         console.warn(`[SchedulerPlugin] Failed to get job history:`, err.message);
       }
       return [];
     }
-    
-    // Filter client-side
-    let filtered = allHistory.filter(h => h.jobName === jobName);
-    
-    if (status) {
-      filtered = filtered.filter(h => h.status === status);
-    }
-    
+
     // Sort by startTime descending and limit
-    filtered = filtered.sort((a, b) => b.startTime - a.startTime).slice(0, limit);
+    let filtered = history.sort((a, b) => b.startTime - a.startTime).slice(0, limit);
     
     return filtered.map(h => {
       let result = null;
@@ -791,13 +846,9 @@ export class SchedulerPlugin extends Plugin {
       clearTimeout(timer);
     }
     this.timers.clear();
-    
+
     // For tests, don't wait for active jobs - they may be mocked
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || 
-                              process.env.JEST_WORKER_ID !== undefined ||
-                              global.expect !== undefined;
-    
-    if (!isTestEnvironment && this.activeJobs.size > 0) {
+    if (!this._isTestEnvironment() && this.activeJobs.size > 0) {
       if (this.config.verbose) {
         console.log(`[SchedulerPlugin] Waiting for ${this.activeJobs.size} active jobs to complete...`);
       }
@@ -814,9 +865,9 @@ export class SchedulerPlugin extends Plugin {
         console.warn(`[SchedulerPlugin] ${this.activeJobs.size} jobs still running after timeout`);
       }
     }
-    
+
     // Clear active jobs in test environment
-    if (isTestEnvironment) {
+    if (this._isTestEnvironment()) {
       this.activeJobs.clear();
     }
   }
