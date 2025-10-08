@@ -508,14 +508,19 @@ export class EventualConsistencyPlugin extends Plugin {
     );
     
     if (updateOk) {
-      // Mark transactions as applied (skip synthetic ones)
-      for (const txn of transactions) {
-        if (txn.id !== '__synthetic__') {
-          await this.transactionResource.update(txn.id, {
+      // Mark transactions as applied (skip synthetic ones) - parallel for performance
+      const updatePromises = transactions
+        .filter(txn => txn.id !== '__synthetic__')
+        .map(txn =>
+          this.transactionResource.update(txn.id, {
             applied: true
-          });
-        }
-      }
+          }).catch(err => {
+            console.error(`Failed to mark transaction ${txn.id} as applied:`, err);
+            // Continue with other updates even if one fails
+          })
+        );
+
+      await Promise.all(updatePromises);
     }
     
     return consolidatedValue;
