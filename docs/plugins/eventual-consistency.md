@@ -46,19 +46,26 @@ The Eventual Consistency Plugin provides a robust solution for managing numeric 
 ## Key Features
 
 ### 🎯 Core Features
-- **Atomic Operations**: `add()`, `sub()`, `set()`
+- **Atomic Operations**: `add()`, `sub()`, `set()` with distributed locking
 - **Transaction History**: Complete audit trail of all changes
 - **Flexible Modes**: Sync (immediate) or Async (eventual) consistency
 - **Custom Reducers**: Define how transactions consolidate
 - **Time-based Partitions**: Automatic day and month partitions for efficient querying
 
 ### 🔧 Technical Features
+- **Distributed Locking**: Prevents race conditions in concurrent consolidation
 - **Non-blocking**: Operations don't interfere with normal CRUD
-- **Batch Support**: Batch multiple transactions for efficiency
-- **Auto-consolidation**: Periodic background consolidation
+- **Batch Support**: Batch multiple transactions for efficiency with parallel inserts
+- **Auto-consolidation**: Periodic background consolidation with configurable concurrency
 - **Dual Partitions**: Both `byDay` and `byMonth` partitions for flexible querying
 - **Timezone Support**: Cohorts respect local timezone for accurate daily/monthly grouping
 - **Deferred Setup**: Works with resources created before or after plugin initialization
+- **Zero Duplication**: Guaranteed unique transaction IDs using nanoid
+
+### 🚀 Performance Improvements
+- **Parallel Consolidation**: Process multiple records concurrently (configurable)
+- **Parallel Transaction Inserts**: Batch operations execute in parallel
+- **Lock-based Atomicity**: Prevents duplicate consolidation without blocking reads
 
 ---
 
@@ -116,24 +123,26 @@ new EventualConsistencyPlugin({
   // Required
   resource: 'resourceName',     // Name of the resource
   field: 'fieldName',           // Numeric field to manage
-  
+
   // Optional
   mode: 'async',                // 'async' (default) or 'sync'
   autoConsolidate: true,        // Enable auto-consolidation
   consolidationInterval: 3600000, // Consolidation interval (ms)
-  
-  // Cohort configuration  
+  consolidationConcurrency: 5,  // Parallel consolidation limit (default: 5)
+
+  // Cohort configuration
   cohort: {
     timezone: 'UTC'             // Timezone for cohorts (default: UTC)
   },
-  
+
   // Batching
   batchTransactions: false,     // Enable transaction batching
   batchSize: 100,              // Batch size before flush
-  
+
   // Custom reducer
   reducer: (transactions) => {
     // Custom consolidation logic
+    // Note: Transactions may include synthetic transactions with { synthetic: true }
     return transactions.reduce((sum, t) => {
       if (t.operation === 'set') return t.value;
       if (t.operation === 'add') return sum + t.value;
@@ -250,6 +259,9 @@ Supported timezones:
 - `'Asia/Tokyo'`, `'Asia/Shanghai'`
 - `'Australia/Sydney'`
 
+**Note on Daylight Saving Time (DST):**
+Timezone offsets are static and don't account for DST transitions. For most use cases, this is acceptable as cohort dates remain consistent within the configured offset. For DST-aware timezone handling, consider using a library like `date-fns-tz` with a custom cohort implementation
+
 ### Custom Reducers
 
 Define how transactions are consolidated:
@@ -266,21 +278,61 @@ reducer: (transactions) => {
 reducer: (transactions) => {
   let base = 0;
   let lastSetIndex = -1;
-  
+
   transactions.forEach((t, i) => {
     if (t.operation === 'set') lastSetIndex = i;
   });
-  
+
   if (lastSetIndex >= 0) {
     base = transactions[lastSetIndex].value;
     transactions = transactions.slice(lastSetIndex + 1);
   }
-  
+
   return transactions.reduce((sum, t) => {
     if (t.operation === 'add') return sum + t.value;
     if (t.operation === 'sub') return sum - t.value;
     return sum;
   }, base);
+}
+```
+
+**Understanding Synthetic Transactions:**
+
+When consolidating records that have a current value but no 'set' operations in pending transactions, the plugin creates a **synthetic transaction** to ensure the reducer starts from the correct base value.
+
+Synthetic transactions have these properties:
+- `synthetic: true` - Flag to identify synthetic transactions
+- `operation: 'set'` - Always a 'set' operation
+- `value: <currentValue>` - The current value from the database record
+- `timestamp: '1970-01-01T00:00:00.000Z'` - Very old timestamp to ensure it's processed first
+
+**Example:**
+```javascript
+// Record has balance: 1000
+// Pending transactions: [add(50), add(30)]
+//
+// Reducer receives:
+// [
+//   { synthetic: true, operation: 'set', value: 1000, timestamp: '1970-01-01T00:00:00.000Z' },
+//   { operation: 'add', value: 50, timestamp: '2024-01-15T10:00:00.000Z' },
+//   { operation: 'add', value: 30, timestamp: '2024-01-15T10:01:00.000Z' }
+// ]
+//
+// Result: 1000 + 50 + 30 = 1080 ✓
+
+// Custom reducers can check for synthetic transactions if needed:
+reducer: (transactions) => {
+  return transactions.reduce((sum, t) => {
+    // Skip synthetic transactions if you want different behavior
+    if (t.synthetic) {
+      return t.value; // Or handle differently
+    }
+
+    if (t.operation === 'set') return t.value;
+    if (t.operation === 'add') return sum + t.value;
+    if (t.operation === 'sub') return sum - t.value;
+    return sum;
+  }, 0);
 }
 ```
 
