@@ -30,7 +30,7 @@ describe('Cache Plugin - Partition Integration - Basic Tests', () => {
     cachePlugin = new CachePlugin({
       driver: 'filesystem',
       partitionAware: true,
-      filesystemOptions: {
+      config: {
         directory: testDir,
         enableStats: true
       }
