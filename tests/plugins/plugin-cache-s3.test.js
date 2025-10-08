@@ -54,7 +54,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
       const customCachePlugin = new CachePlugin({
         driver: 's3',
         client: db.client,
-        s3Options: {
+        config: {
           bucket: 'custom-cache-bucket',
           prefix: 'custom-prefix'
         }
