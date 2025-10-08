@@ -13583,15 +13583,24 @@ class TransactionsPlugin extends Plugin {
   }
   async attemptClaim(msg) {
     const now = Date.now();
+    const [okGet, errGet, msgWithETag] = await tryFn(
+      () => this.queueResource.get(msg.id)
+    );
+    if (!okGet || !msgWithETag) {
+      return null;
+    }
+    if (msgWithETag.status !== "pending" || msgWithETag.visibleAt > now) {
+      return null;
+    }
     const [ok, err, result] = await tryFn(
-      () => this.queueResource.updateConditional(msg.id, {
+      () => this.queueResource.updateConditional(msgWithETag.id, {
         status: "processing",
         claimedBy: this.workerId,
         claimedAt: now,
         visibleAt: now + this.config.visibilityTimeout,
-        attempts: msg.attempts + 1
+        attempts: msgWithETag.attempts + 1
       }, {
-        ifMatch: msg._etag
+        ifMatch: msgWithETag._etag
         // ← ATOMIC CLAIM using ETag!
       })
     );
@@ -13599,17 +13608,17 @@ class TransactionsPlugin extends Plugin {
       return null;
     }
     const [okRecord, errRecord, record] = await tryFn(
-      () => this.targetResource.get(msg.originalId)
+      () => this.targetResource.get(msgWithETag.originalId)
     );
     if (!okRecord) {
-      await this.failMessage(msg.id, "Original record not found");
+      await this.failMessage(msgWithETag.id, "Original record not found");
       return null;
     }
     return {
-      queueId: msg.id,
+      queueId: msgWithETag.id,
       record,
-      attempts: msg.attempts + 1,
-      maxAttempts: msg.maxAttempts
+      attempts: msgWithETag.attempts + 1,
+      maxAttempts: msgWithETag.maxAttempts
     };
   }
   async processMessage(message, handler) {
