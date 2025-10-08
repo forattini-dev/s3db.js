@@ -17,7 +17,7 @@ function normalizeResourceName(name) {
  *     If true, the plugin will persist all replicator events to a log resource.
  *     If false, no replicator log resource is created or used.
  *
- * - replicatorLogResource (string, default: 'replicator_logs')
+ * - replicatorLogResource (string, default: 'plg_replicator_logs')
  *     The name of the resource used to store replicator logs.
  *
  * === replicator Log Resource Structure ===
@@ -229,7 +229,7 @@ export class ReplicatorPlugin extends Plugin {
     // Create replicator log resource if enabled
     if (this.config.persistReplicatorLog) {
       const [ok, err, logResource] = await tryFn(() => database.createResource({
-        name: this.config.replicatorLogResource || 'replicator_logs',
+        name: this.config.replicatorLogResource || 'plg_replicator_logs',
         attributes: {
           id: 'string|required',
           resource: 'string|required',
@@ -244,7 +244,7 @@ export class ReplicatorPlugin extends Plugin {
       if (ok) {
         this.replicatorLogResource = logResource;
       } else {
-        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || 'replicator_logs'];
+        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || 'plg_replicator_logs'];
       }
     }
 
@@ -256,7 +256,7 @@ export class ReplicatorPlugin extends Plugin {
     
     // Install event listeners for existing resources
     for (const resource of Object.values(database.resources)) {
-      if (resource.name !== (this.config.replicatorLogResource || 'replicator_logs')) {
+      if (resource.name !== (this.config.replicatorLogResource || 'plg_replicator_logs')) {
         this.installEventListeners(resource, database, this);
       }
     }
@@ -281,7 +281,7 @@ export class ReplicatorPlugin extends Plugin {
   installDatabaseHooks() {
     // Use the new database hooks system for automatic resource discovery
     this.database.addHook('afterCreateResource', (resource) => {
-      if (resource.name !== (this.config.replicatorLogResource || 'replicator_logs')) {
+      if (resource.name !== (this.config.replicatorLogResource || 'plg_replicator_logs')) {
         this.installEventListeners(resource, this.database, this);
       }
     });
@@ -656,7 +656,7 @@ export class ReplicatorPlugin extends Plugin {
     this.stats.lastSync = new Date().toISOString();
 
     for (const resourceName in this.database.resources) {
-      if (normalizeResourceName(resourceName) === normalizeResourceName('replicator_logs')) continue;
+      if (normalizeResourceName(resourceName) === normalizeResourceName('plg_replicator_logs')) continue;
 
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit('replicator.sync.resource', { resourceName, replicatorId });
