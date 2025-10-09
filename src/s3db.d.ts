@@ -335,7 +335,14 @@ declare module 's3db.js' {
 
   /** Replicator Plugin config */
   export interface ReplicatorPluginConfig extends PluginConfig {
-    replicators?: ReplicatorConfig[];
+    replicators: ReplicatorConfig[];
+    persistReplicatorLog?: boolean;
+    replicatorLogResource?: string;
+    logErrors?: boolean;
+    batchSize?: number;
+    maxRetries?: number;
+    timeout?: number;
+    verbose?: boolean;
   }
 
   // ============================================================================
@@ -1027,13 +1034,29 @@ declare module 's3db.js' {
     getConsumerLogs(filters?: any): Promise<any[]>;
   }
 
+  /** Replicator stats information */
+  export interface ReplicatorStats {
+    replicators: Array<{
+      id: string;
+      driver: string;
+      config: any;
+      status: any;
+    }>;
+    stats: {
+      totalReplications: number;
+      totalErrors: number;
+      lastSync: string | null;
+    };
+    lastSync: string | null;
+  }
+
   /** Replicator Plugin */
   export class ReplicatorPlugin extends Plugin {
     constructor(config?: ReplicatorPluginConfig);
     replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
-    getReplicatorStats(): any;
+    getReplicatorStats(): Promise<ReplicatorStats>;
     getReplicatorLogs(filters?: any): Promise<any[]>;
-    retryFailedReplications(): Promise<void>;
+    retryFailedReplicators(): Promise<{ retried: number }>;
     syncAllData(targetName: string): Promise<void>;
   }
 
