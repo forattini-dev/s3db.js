@@ -223,12 +223,14 @@ export class Resource extends AsyncEventEmitter {
           // Multiple listeners for this event
           for (const listener of listeners) {
             if (typeof listener === 'function') {
-              this.on(eventName, listener);
+              // Bind listener to resource context so it has access to this.database
+              this.on(eventName, listener.bind(this));
             }
           }
         } else if (typeof listeners === 'function') {
           // Single listener for this event
-          this.on(eventName, listeners);
+          // Bind listener to resource context so it has access to this.database
+          this.on(eventName, listeners.bind(this));
         }
       }
     }

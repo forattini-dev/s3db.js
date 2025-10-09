@@ -1517,9 +1517,9 @@ const clicks = await metrics.consolidate('page-1', 'clicks');
 
 One of the most powerful patterns is using hooks to automatically trigger operations across resources. This is perfect for implementing counters, notifications, and cascading updates.
 
-#### ⚠️ Critical: Use `function`, NOT Arrow Functions
+#### ⚠️ Critical: Use `function` for Best Compatibility
 
-**Hooks MUST use regular `function` syntax to access `this.database`:**
+**Both hooks and events are bound to the resource context, but regular `function` syntax is recommended:**
 
 ```javascript
 const clicks = await s3db.createResource({
@@ -1550,10 +1550,11 @@ const clicks = await s3db.createResource({
 });
 ```
 
-**Why?**
-- Arrow functions (`=>`) don't have their own `this` - they inherit from lexical scope
-- Regular functions (`function`) have `this` bound to the resource instance
-- Only regular functions give you access to `this.database`
+**Why regular functions are recommended:**
+- Both hooks and events are `.bind(this)` to the resource
+- Regular functions (`function`) work more predictably with bind
+- Arrow functions (`=>`) inherit `this` from lexical scope, which works but is less intuitive
+- Regular functions are clearer about intent and context
 
 #### Complete Example: URL Shortener with Auto-Incrementing Counter
 
@@ -1751,21 +1752,67 @@ hooks: {
 }
 ```
 
+#### Hooks vs Events
+
+**When to use Hooks:**
+- ✅ Need to modify or validate data
+- ✅ Critical operations that must complete
+- ✅ Need to return modified data
+- ✅ Part of the transaction flow
+- ✅ Example: Increment counter, update related record
+
+**When to use Events:**
+- ✅ Fire-and-forget notifications
+- ✅ Logging and analytics
+- ✅ Non-critical side effects
+- ✅ Can fail without affecting the main operation
+- ✅ Example: Send webhook, create notification, log to external service
+
+```javascript
+// HOOKS - Critical counter increment
+hooks: {
+  afterInsert: [
+    async function(data) {
+      // MUST succeed - part of the transaction
+      await this.database.resources.urls.add(data.urlId, 'clicks', 1);
+      return data;  // Must return!
+    }
+  ]
+},
+
+// EVENTS - Non-critical notification
+events: {
+  insert: [
+    async function(data) {
+      // Fire and forget - if it fails, main operation continues
+      try {
+        await sendWebhook(data);
+      } catch (err) {
+        console.error('Webhook failed, but click was recorded:', err);
+      }
+      // No return needed
+    }
+  ]
+}
+```
+
 #### Important Notes
 
 **✅ DO:**
-- Use `function` syntax in hooks
+- Use `function` syntax in hooks and events (clearer intent)
+- Use **hooks** for operations that need to modify data
+- Use **events** for fire-and-forget notifications
 - Access other resources via `this.database.resources`
 - Return data from hooks (required for hook chain)
 - Use async/await for plugin operations
-- Handle errors in hooks (try/catch)
+- Handle errors in hooks/events (try/catch)
 
 **❌ DON'T:**
-- Use arrow functions (`=>`) - you'll lose `this`
-- Access `this.database` outside of hooks
+- Mix hooks and events for the same operation (choose one)
 - Forget to return data from hooks
 - Create circular dependencies between resources
-- Perform heavy operations in hooks (they run synchronously with inserts)
+- Perform heavy synchronous operations (use process.nextTick for async)
+- Use events for critical operations (they're fire-and-forget)
 
 ### Manual Consolidation Control
 
