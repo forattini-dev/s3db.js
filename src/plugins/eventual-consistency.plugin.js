@@ -888,15 +888,21 @@ export class EventualConsistencyPlugin extends Plugin {
 
       // Update the original record (upsert if it doesn't exist)
       const [updateOk, updateErr] = await tryFn(async () => {
-        // Try update first
-        const [ok, err] = await tryFn(() =>
-          this.targetResource.update(originalId, {
-            [this.config.field]: consolidatedValue
-          })
+        // Check if record exists first (to avoid exception in update())
+        const [existsOk, existsErr, exists] = await tryFn(() =>
+          this.targetResource.exists(originalId)
         );
 
-        // If update failed because record doesn't exist, try insert
-        if (!ok && (err?.code === 'NoSuchKey' || err?.code === 'NotFound')) {
+        // If exists check failed, try to proceed anyway
+        if (!existsOk) {
+          console.warn(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+            `Failed to check existence for ${originalId}: ${existsErr?.message}`
+          );
+        }
+
+        // If record doesn't exist, insert it
+        if (existsOk && !exists) {
           if (this.config.verbose) {
             console.log(
               `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
@@ -911,11 +917,10 @@ export class EventualConsistencyPlugin extends Plugin {
           });
         }
 
-        if (!ok) {
-          throw err;
-        }
-
-        return ok;
+        // Record exists, do update
+        return await this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        });
       });
 
       if (!updateOk) {
