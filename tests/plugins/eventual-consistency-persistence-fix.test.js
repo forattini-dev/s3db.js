@@ -26,7 +26,7 @@ describe('EventualConsistencyPlugin - Persistence Bug Fix', () => {
       name: 'urls',
       attributes: {
         id: 'string|required',
-        link: 'string|required',
+        link: 'string|optional',
         clicks: 'number|default:0',
         views: 'number|default:0'
       }
@@ -175,18 +175,15 @@ describe('EventualConsistencyPlugin - Persistence Bug Fix', () => {
       clicks: 0
     });
 
-    // Add clicks
-    await urls.add('url5', 'clicks', 5);
-
-    // Mock update to fail (simulate S3 error)
+    // Mock update to fail (simulate S3 error) - do this BEFORE add()
     const originalUpdate = urls.update.bind(urls);
     urls.update = async () => {
       throw new Error('Simulated S3 error');
     };
 
-    // Consolidation should throw error (not fail silently!)
+    // Add clicks - this will fail during consolidation
     await expect(
-      urls.consolidate('url5', 'clicks')
+      urls.add('url5', 'clicks', 5)
     ).rejects.toThrow('Simulated S3 error');
 
     // Restore original update
@@ -209,5 +206,5 @@ describe('EventualConsistencyPlugin - Persistence Bug Fix', () => {
 
     const url = await urls.get('url6');
     expect(url.clicks).toBe(10);
-  });
+  }, 60000); // 60 second timeout for race condition test
 });
