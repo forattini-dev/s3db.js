@@ -53,7 +53,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
       // Create 10 transactions
       for (let i = 0; i < 10; i++) {
-        await walletsResource.add('wallet-lock-test', 10);
+        await walletsResource.add('wallet-lock-test', 'balance', 10);
       }
 
       // Switch back to sync mode
@@ -99,7 +99,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       // Perform 20 concurrent add operations in sync mode
       const operations = [];
       for (let i = 0; i < 20; i++) {
-        operations.push(walletsResource.add('wallet-concurrent', 5));
+        operations.push(walletsResource.add('wallet-concurrent', 'balance', 5));
       }
 
       const results = await Promise.all(operations);
@@ -136,7 +136,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       // Create 50 transactions as fast as possible (reduced from 1000 for speed)
       const operations = [];
       for (let i = 0; i < 50; i++) {
-        operations.push(walletsResource.add('wallet-id-test', 1));
+        operations.push(walletsResource.add('wallet-id-test', 'balance', 1));
       }
 
       await Promise.all(operations);
@@ -188,7 +188,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
       // Create 5 transactions (won't flush yet - batch size is 10)
       for (let i = 0; i < 5; i++) {
-        await batchWallets.add('batch-1', 10);
+        await batchWallets.add('batch-1', 'balance', 10);
       }
 
       // Pending transactions should be in memory
@@ -267,8 +267,8 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       plugin.config.mode = 'async';
 
       // Add pending transactions (no 'set' operation)
-      await walletsResource.add('wallet-value-test', 50);
-      await walletsResource.add('wallet-value-test', 30);
+      await walletsResource.add('wallet-value-test', 'balance', 50);
+      await walletsResource.add('wallet-value-test', 'balance', 30);
 
       // Wait for transactions
       await sleep(100);
@@ -280,7 +280,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       expect(value).toBe(1080);
 
       // Actual consolidation should produce the same result
-      const consolidatedValue = await walletsResource.consolidate('wallet-value-test');
+      const consolidatedValue = await walletsResource.consolidate('wallet-value-test', 'balance');
       expect(consolidatedValue).toBe(1080);
 
       const wallet = await walletsResource.get('wallet-value-test');
@@ -299,8 +299,8 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       plugin.config.mode = 'async';
 
       // Set new value (should override 500)
-      await walletsResource.set('wallet-set-test', 2000);
-      await walletsResource.add('wallet-set-test', 100);
+      await walletsResource.set('wallet-set-test', 'balance', 2000);
+      await walletsResource.add('wallet-set-test', 'balance', 100);
 
       // Wait
       await sleep(100);
@@ -326,12 +326,12 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       plugin.config.mode = 'async';
 
       // Add transaction without 'set'
-      await walletsResource.add('wallet-synthetic', 23);
+      await walletsResource.add('wallet-synthetic', 'balance', 23);
 
       await sleep(100);
 
       // Consolidate (will create synthetic transaction internally)
-      await walletsResource.consolidate('wallet-synthetic');
+      await walletsResource.consolidate('wallet-synthetic', 'balance');
 
       // The synthetic flag should be present in the logic
       // (We can't easily inspect it from outside, but we test it worked correctly)

@@ -60,12 +60,12 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // Add transactions
-    await wallets.add('w1', 100);
-    await wallets.add('w1', 50);
-    await wallets.sub('w1', 25);
+    await wallets.add('w1', 'balance', 100);
+    await wallets.add('w1', 'balance', 50);
+    await wallets.sub('w1', 'balance', 25);
 
     // Consolidate (triggers analytics update)
-    await wallets.consolidate('w1');
+    await wallets.consolidate('w1', 'balance');
 
     // Check analytics were created
     const analyticsResource = database.resources.wallets_analytics_balance;
@@ -87,16 +87,16 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w2', userId: 'u2', balance: 0 });
 
     // Add transactions for w1
-    await wallets.add('w1', 100);
-    await wallets.add('w1', 200);
+    await wallets.add('w1', 'balance', 100);
+    await wallets.add('w1', 'balance', 200);
 
     // Add transactions for w2
-    await wallets.add('w2', 50);
-    await wallets.sub('w2', 10);
+    await wallets.add('w2', 'balance', 50);
+    await wallets.sub('w2', 'balance', 10);
 
     // Consolidate both
-    await wallets.consolidate('w1');
-    await wallets.consolidate('w2');
+    await wallets.consolidate('w1', 'balance');
+    await wallets.consolidate('w2', 'balance');
 
     // Query analytics
     const today = new Date().toISOString().substring(0, 10);
@@ -121,13 +121,13 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // Add different operations
-    await wallets.set('w1', 1000);
-    await wallets.add('w1', 100);
-    await wallets.add('w1', 50);
-    await wallets.sub('w1', 25);
+    await wallets.set('w1', 'balance', 1000);
+    await wallets.add('w1', 'balance', 100);
+    await wallets.add('w1', 'balance', 50);
+    await wallets.sub('w1', 'balance', 25);
 
     // Consolidate
-    await wallets.consolidate('w1');
+    await wallets.consolidate('w1', 'balance');
 
     // Query with operations breakdown
     const today = new Date().toISOString().substring(0, 10);
@@ -158,11 +158,11 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // Add transactions
-    await wallets.add('w1', 100);
-    await wallets.add('w1', 50);
+    await wallets.add('w1', 'balance', 100);
+    await wallets.add('w1', 'balance', 50);
 
     // Consolidate (triggers roll-ups)
-    await wallets.consolidate('w1');
+    await wallets.consolidate('w1', 'balance');
 
     // Query daily analytics
     const today = new Date().toISOString().substring(0, 10);
@@ -186,18 +186,18 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w3', userId: 'u3', balance: 0 });
 
     // w1: 5 transactions
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
 
     // w2: 2 transactions
-    await wallets.add('w2', 100);
-    await wallets.add('w2', 100);
+    await wallets.add('w2', 'balance', 100);
+    await wallets.add('w2', 'balance', 100);
 
     // w3: 1 transaction
-    await wallets.add('w3', 500);
+    await wallets.add('w3', 'balance', 500);
 
     // Don't need to consolidate for getTopRecords (queries transactions directly)
 
@@ -225,16 +225,16 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w3', userId: 'u3', balance: 0 });
 
     // w1: many small transactions
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
-    await wallets.add('w1', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
+    await wallets.add('w1', 'balance', 10);
 
     // w2: few large transactions
-    await wallets.add('w2', 500);
-    await wallets.add('w2', 500);
+    await wallets.add('w2', 'balance', 500);
+    await wallets.add('w2', 'balance', 500);
 
     // w3: single huge transaction
-    await wallets.add('w3', 2000);
+    await wallets.add('w3', 'balance', 2000);
 
     const today = new Date().toISOString().substring(0, 10);
     const topRecords = await plugin.getTopRecords('wallets', 'balance', {
@@ -258,12 +258,12 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // First batch
-    await wallets.add('w1', 100);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     // Second batch
-    await wallets.add('w1', 50);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
 
     // Check analytics were updated incrementally
     const today = new Date().toISOString().substring(0, 10);
@@ -283,8 +283,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // Insert wallet and add transactions only on specific days
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    await wallets.add('w1', 100);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     // Query last 7 days with fillGaps
     const last7Days = await plugin.getLastNDays('wallets', 'balance', 7, {
@@ -315,8 +315,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // Insert wallet
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    await wallets.add('w1', 50);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
 
     const today = new Date().toISOString().substring(0, 10);
 
@@ -343,8 +343,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // Insert wallet
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    await wallets.add('w1', 100);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     const currentYear = new Date().getFullYear();
 
@@ -371,8 +371,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // Insert wallet
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
-    await wallets.add('w1', 100);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
 
