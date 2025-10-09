@@ -886,12 +886,46 @@ export class EventualConsistencyPlugin extends Plugin {
         );
       }
 
-      // Update the original record
-      const [updateOk, updateErr] = await tryFn(() =>
-        this.targetResource.update(originalId, {
-          [this.config.field]: consolidatedValue
-        })
-      );
+      // Update the original record (upsert if it doesn't exist)
+      const [updateOk, updateErr] = await tryFn(async () => {
+        // Try update first
+        const [ok, err] = await tryFn(() =>
+          this.targetResource.update(originalId, {
+            [this.config.field]: consolidatedValue
+          })
+        );
+
+        // If update failed because record doesn't exist, try insert
+        if (!ok && (err?.code === 'NoSuchKey' || err?.code === 'NotFound')) {
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+              `Record ${originalId} doesn't exist, creating with ${this.config.field}=${consolidatedValue}`
+            );
+          }
+
+          // Create minimal record with just the field value
+          return await this.targetResource.insert({
+            id: originalId,
+            [this.config.field]: consolidatedValue
+          });
+        }
+
+        if (!ok) {
+          throw err;
+        }
+
+        return ok;
+      });
+
+      if (!updateOk) {
+        console.error(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
+          { error: updateErr, consolidatedValue, currentValue }
+        );
+        throw updateErr;
+      }
 
       if (updateOk) {
         // Mark transactions as applied (skip synthetic ones) - use PromisePool for controlled concurrency
