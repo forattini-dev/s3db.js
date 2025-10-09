@@ -4298,157 +4298,78 @@ const CostsPlugin = {
 class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    const usingMultipleResources = !!options.resources;
-    const usingSingleResource = !!(options.resource && options.field);
-    if (!usingMultipleResources && !usingSingleResource) {
+    if (!options.resources || typeof options.resources !== "object") {
       throw new Error(
-        "EventualConsistencyPlugin requires either:\n  - 'resource' + 'field' options (single field), or\n  - 'resources' option (multiple fields)\nExample: { resources: { urls: ['clicks', 'views'] } }"
-      );
-    }
-    if (usingMultipleResources && usingSingleResource) {
-      throw new Error(
-        "EventualConsistencyPlugin: Cannot use both 'resource'+'field' and 'resources' options. Choose one API format."
+        "EventualConsistencyPlugin requires 'resources' option.\nExample: { resources: { urls: ['clicks', 'views'], posts: ['likes'] } }"
       );
     }
     const detectedTimezone = this._detectTimezone();
-    this.isMultiResource = usingMultipleResources;
-    if (this.isMultiResource) {
-      this.fieldHandlers = /* @__PURE__ */ new Map();
-      this.sharedConfig = this._createSharedConfig(options, detectedTimezone);
-      if (typeof options.resources !== "object" || !options.resources) {
-        throw new Error("EventualConsistencyPlugin 'resources' must be an object");
-      }
-      for (const [resourceName, fields] of Object.entries(options.resources)) {
-        if (!Array.isArray(fields)) {
-          throw new Error(
-            `EventualConsistencyPlugin resources.${resourceName} must be an array of field names`
-          );
+    this.config = {
+      cohort: {
+        timezone: options.cohort?.timezone || detectedTimezone
+      },
+      reducer: options.reducer || ((transactions) => {
+        let baseValue = 0;
+        for (const t of transactions) {
+          if (t.operation === "set") {
+            baseValue = t.value;
+          } else if (t.operation === "add") {
+            baseValue += t.value;
+          } else if (t.operation === "sub") {
+            baseValue -= t.value;
+          }
         }
-        const resourceHandlers = /* @__PURE__ */ new Map();
-        for (const fieldName of fields) {
-          resourceHandlers.set(fieldName, this._createFieldHandler(resourceName, fieldName));
-        }
-        this.fieldHandlers.set(resourceName, resourceHandlers);
+        return baseValue;
+      }),
+      consolidationInterval: options.consolidationInterval ?? 300,
+      consolidationConcurrency: options.consolidationConcurrency || 5,
+      consolidationWindow: options.consolidationWindow || 24,
+      autoConsolidate: options.autoConsolidate !== false,
+      lateArrivalStrategy: options.lateArrivalStrategy || "warn",
+      batchTransactions: options.batchTransactions || false,
+      batchSize: options.batchSize || 100,
+      mode: options.mode || "async",
+      lockTimeout: options.lockTimeout || 300,
+      transactionRetention: options.transactionRetention || 30,
+      gcInterval: options.gcInterval || 86400,
+      verbose: options.verbose || false,
+      enableAnalytics: options.enableAnalytics || false,
+      analyticsConfig: {
+        periods: options.analyticsConfig?.periods || ["hour", "day", "month"],
+        metrics: options.analyticsConfig?.metrics || ["count", "sum", "avg", "min", "max"],
+        rollupStrategy: options.analyticsConfig?.rollupStrategy || "incremental",
+        retentionDays: options.analyticsConfig?.retentionDays || 365
       }
-      if (this.sharedConfig.verbose) {
-        const totalFields = Array.from(this.fieldHandlers.values()).reduce((sum, handlers) => sum + handlers.size, 0);
-        console.log(
-          `[EventualConsistency] Initialized with ${this.fieldHandlers.size} resource(s), ${totalFields} field(s) total`
+    };
+    this.fieldHandlers = /* @__PURE__ */ new Map();
+    for (const [resourceName, fields] of Object.entries(options.resources)) {
+      if (!Array.isArray(fields)) {
+        throw new Error(
+          `EventualConsistencyPlugin resources.${resourceName} must be an array of field names`
         );
       }
-      return;
-    }
-    if (!options.resource || !options.field) {
-      throw new Error("EventualConsistencyPlugin requires 'resource' and 'field' options");
-    }
-    this.config = {
-      resource: options.resource,
-      field: options.field,
-      cohort: {
-        timezone: options.cohort?.timezone || detectedTimezone
-      },
-      reducer: options.reducer || ((transactions) => {
-        let baseValue = 0;
-        for (const t of transactions) {
-          if (t.operation === "set") {
-            baseValue = t.value;
-          } else if (t.operation === "add") {
-            baseValue += t.value;
-          } else if (t.operation === "sub") {
-            baseValue -= t.value;
-          }
-        }
-        return baseValue;
-      }),
-      consolidationInterval: options.consolidationInterval ?? 300,
-      // 5 minutes (in seconds)
-      consolidationConcurrency: options.consolidationConcurrency || 5,
-      consolidationWindow: options.consolidationWindow || 24,
-      // Hours to look back for pending transactions (watermark)
-      autoConsolidate: options.autoConsolidate !== false,
-      lateArrivalStrategy: options.lateArrivalStrategy || "warn",
-      // 'ignore', 'warn', 'process'
-      batchTransactions: options.batchTransactions || false,
-      // CAUTION: Not safe in distributed environments! Loses data on container crash
-      batchSize: options.batchSize || 100,
-      mode: options.mode || "async",
-      // 'async' or 'sync'
-      lockTimeout: options.lockTimeout || 300,
-      // 5 minutes (in seconds, configurable)
-      transactionRetention: options.transactionRetention || 30,
-      // Days to keep applied transactions
-      gcInterval: options.gcInterval || 86400,
-      // 24 hours (in seconds)
-      verbose: options.verbose || false,
-      // Analytics configuration
-      enableAnalytics: options.enableAnalytics || false,
-      analyticsConfig: {
-        periods: options.analyticsConfig?.periods || ["hour", "day", "month"],
-        metrics: options.analyticsConfig?.metrics || ["count", "sum", "avg", "min", "max"],
-        rollupStrategy: options.analyticsConfig?.rollupStrategy || "incremental",
-        // 'incremental' or 'batch'
-        retentionDays: options.analyticsConfig?.retentionDays || 365
+      const resourceHandlers = /* @__PURE__ */ new Map();
+      for (const fieldName of fields) {
+        resourceHandlers.set(fieldName, this._createFieldHandler(resourceName, fieldName));
       }
-    };
-    this.transactionResource = null;
-    this.targetResource = null;
-    this.analyticsResource = null;
-    this.consolidationTimer = null;
-    this.gcTimer = null;
-    this.pendingTransactions = /* @__PURE__ */ new Map();
+      this.fieldHandlers.set(resourceName, resourceHandlers);
+    }
     if (this.config.batchTransactions && !this.config.verbose) {
       console.warn(
-        `[EventualConsistency] WARNING: batchTransactions is enabled. This stores transactions in memory and will lose data if container crashes. Not recommended for distributed/production environments. Set verbose: true to suppress this warning.`
+        `[EventualConsistency] WARNING: batchTransactions is enabled. This stores transactions in memory and will lose data if container crashes. Not recommended for distributed/production environments.`
       );
     }
-    if (this.config.verbose && !options.cohort?.timezone) {
+    if (this.config.verbose) {
+      const totalFields = Array.from(this.fieldHandlers.values()).reduce((sum, handlers) => sum + handlers.size, 0);
       console.log(
-        `[EventualConsistency] Auto-detected timezone: ${this.config.cohort.timezone} (from ${process.env.TZ ? "TZ env var" : "system Intl API"})`
+        `[EventualConsistency] Initialized with ${this.fieldHandlers.size} resource(s), ${totalFields} field(s) total`
       );
-    }
-  }
-  /**
-   * Create shared configuration for multi-resource mode
-   * @private
-   */
-  _createSharedConfig(options, detectedTimezone) {
-    return {
-      cohort: {
-        timezone: options.cohort?.timezone || detectedTimezone
-      },
-      reducer: options.reducer || ((transactions) => {
-        let baseValue = 0;
-        for (const t of transactions) {
-          if (t.operation === "set") {
-            baseValue = t.value;
-          } else if (t.operation === "add") {
-            baseValue += t.value;
-          } else if (t.operation === "sub") {
-            baseValue -= t.value;
-          }
-        }
-        return baseValue;
-      }),
-      consolidationInterval: options.consolidationInterval ?? 300,
-      consolidationConcurrency: options.consolidationConcurrency || 5,
-      consolidationWindow: options.consolidationWindow || 24,
-      autoConsolidate: options.autoConsolidate !== false,
-      lateArrivalStrategy: options.lateArrivalStrategy || "warn",
-      batchTransactions: options.batchTransactions || false,
-      batchSize: options.batchSize || 100,
-      mode: options.mode || "async",
-      lockTimeout: options.lockTimeout || 300,
-      transactionRetention: options.transactionRetention || 30,
-      gcInterval: options.gcInterval || 86400,
-      verbose: options.verbose || false,
-      enableAnalytics: options.enableAnalytics || false,
-      analyticsConfig: {
-        periods: options.analyticsConfig?.periods || ["hour", "day", "month"],
-        metrics: options.analyticsConfig?.metrics || ["count", "sum", "avg", "min", "max"],
-        rollupStrategy: options.analyticsConfig?.rollupStrategy || "incremental",
-        retentionDays: options.analyticsConfig?.retentionDays || 365
+      if (!options.cohort?.timezone) {
+        console.log(
+          `[EventualConsistency] Auto-detected timezone: ${this.config.cohort.timezone} (from ${process.env.TZ ? "TZ env var" : "system Intl API"})`
+        );
       }
-    };
+    }
   }
   /**
    * Create a field handler for a specific resource/field combination
@@ -4469,30 +4390,13 @@ class EventualConsistencyPlugin extends Plugin {
     };
   }
   async onSetup() {
-    if (this.isMultiResource) {
-      await this._setupMultiResource();
-      return;
-    }
-    this.targetResource = this.database.resources[this.config.resource];
-    if (!this.targetResource) {
-      this.deferredSetup = true;
-      this.watchForResource();
-      return;
-    }
-    await this.completeSetup();
-  }
-  /**
-   * Setup for multi-resource mode
-   * @private
-   */
-  async _setupMultiResource() {
     for (const [resourceName, fieldHandlers] of this.fieldHandlers) {
       const targetResource = this.database.resources[resourceName];
       if (!targetResource) {
         for (const handler of fieldHandlers.values()) {
           handler.deferredSetup = true;
         }
-        this._watchForMultiResource(resourceName);
+        this._watchForResource(resourceName);
         continue;
       }
       for (const [fieldName, handler] of fieldHandlers) {
@@ -4502,10 +4406,10 @@ class EventualConsistencyPlugin extends Plugin {
     }
   }
   /**
-   * Watch for a specific resource creation in multi-resource mode
+   * Watch for a specific resource creation
    * @private
    */
-  _watchForMultiResource(resourceName) {
+  _watchForResource(resourceName) {
     const hookCallback = async ({ resource, config }) => {
       if (config.name === resourceName) {
         const fieldHandlers = this.fieldHandlers.get(resourceName);
@@ -4521,103 +4425,13 @@ class EventualConsistencyPlugin extends Plugin {
     };
     this.database.addHook("afterCreateResource", hookCallback);
   }
-  watchForResource() {
-    const hookCallback = async ({ resource, config }) => {
-      if (config.name === this.config.resource && this.deferredSetup) {
-        this.targetResource = resource;
-        this.deferredSetup = false;
-        await this.completeSetup();
-      }
-    };
-    this.database.addHook("afterCreateResource", hookCallback);
-  }
-  async completeSetup() {
-    if (!this.targetResource) return;
-    const transactionResourceName = `${this.config.resource}_transactions_${this.config.field}`;
-    const partitionConfig = this.createPartitionConfig();
-    const [ok, err, transactionResource] = await tryFn(
-      () => this.database.createResource({
-        name: transactionResourceName,
-        attributes: {
-          id: "string|required",
-          originalId: "string|required",
-          field: "string|required",
-          value: "number|required",
-          operation: "string|required",
-          // 'set', 'add', or 'sub'
-          timestamp: "string|required",
-          cohortDate: "string|required",
-          // For daily partitioning
-          cohortHour: "string|required",
-          // For hourly partitioning
-          cohortMonth: "string|optional",
-          // For monthly partitioning
-          source: "string|optional",
-          applied: "boolean|optional"
-          // Track if transaction was applied
-        },
-        behavior: "body-overflow",
-        timestamps: true,
-        partitions: partitionConfig,
-        asyncPartitions: true,
-        // Use async partitions for better performance
-        createdBy: "EventualConsistencyPlugin"
-      })
-    );
-    if (!ok && !this.database.resources[transactionResourceName]) {
-      throw new Error(`Failed to create transaction resource: ${err?.message}`);
-    }
-    this.transactionResource = ok ? transactionResource : this.database.resources[transactionResourceName];
-    const lockResourceName = `${this.config.resource}_consolidation_locks_${this.config.field}`;
-    const [lockOk, lockErr, lockResource] = await tryFn(
-      () => this.database.createResource({
-        name: lockResourceName,
-        attributes: {
-          id: "string|required",
-          lockedAt: "number|required",
-          workerId: "string|optional"
-        },
-        behavior: "body-only",
-        timestamps: false,
-        createdBy: "EventualConsistencyPlugin"
-      })
-    );
-    if (!lockOk && !this.database.resources[lockResourceName]) {
-      throw new Error(`Failed to create lock resource: ${lockErr?.message}`);
-    }
-    this.lockResource = lockOk ? lockResource : this.database.resources[lockResourceName];
-    if (this.config.enableAnalytics) {
-      await this.createAnalyticsResource();
-    }
-    this.addHelperMethods();
-    if (this.config.autoConsolidate) {
-      this.startConsolidationTimer();
-      if (this.config.verbose) {
-        console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Auto-consolidation ENABLED (interval: ${this.config.consolidationInterval}s, window: ${this.config.consolidationWindow}h, mode: ${this.config.mode})`
-        );
-      }
-    } else {
-      if (this.config.verbose) {
-        console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Auto-consolidation DISABLED (manual consolidation only)`
-        );
-      }
-    }
-    this.startGarbageCollectionTimer();
-    if (this.config.verbose) {
-      console.log(
-        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Setup complete. Resources: ${this.config.resource}_transactions_${this.config.field}, ${this.config.resource}_consolidation_locks_${this.config.field}${this.config.enableAnalytics ? `, ${this.config.resource}_analytics_${this.config.field}` : ""}`
-      );
-    }
-  }
   /**
-   * Complete setup for a single field handler in multi-resource mode
+   * Complete setup for a single field handler
    * @private
    */
   async _completeFieldSetup(handler) {
     if (!handler.targetResource) return;
-    const config = this.sharedConfig;
+    const config = this.config;
     const resourceName = handler.resource;
     const fieldName = handler.field;
     const transactionResourceName = `${resourceName}_transactions_${fieldName}`;
@@ -4728,43 +4542,38 @@ class EventualConsistencyPlugin extends Plugin {
     }
   }
   async onStart() {
-    if (this.isMultiResource) {
-      for (const [resourceName, fieldHandlers] of this.fieldHandlers) {
-        for (const [fieldName, handler] of fieldHandlers) {
-          if (!handler.deferredSetup) {
-            this.emit("eventual-consistency.started", {
-              resource: resourceName,
-              field: fieldName,
-              cohort: this.sharedConfig.cohort
-            });
-          }
+    for (const [resourceName, fieldHandlers] of this.fieldHandlers) {
+      for (const [fieldName, handler] of fieldHandlers) {
+        if (!handler.deferredSetup) {
+          this.emit("eventual-consistency.started", {
+            resource: resourceName,
+            field: fieldName,
+            cohort: this.config.cohort
+          });
         }
       }
-      return;
     }
-    if (this.deferredSetup) {
-      return;
-    }
-    this.emit("eventual-consistency.started", {
-      resource: this.config.resource,
-      field: this.config.field,
-      cohort: this.config.cohort
-    });
   }
   async onStop() {
-    if (this.consolidationTimer) {
-      clearInterval(this.consolidationTimer);
-      this.consolidationTimer = null;
+    for (const [resourceName, fieldHandlers] of this.fieldHandlers) {
+      for (const [fieldName, handler] of fieldHandlers) {
+        if (handler.consolidationTimer) {
+          clearInterval(handler.consolidationTimer);
+          handler.consolidationTimer = null;
+        }
+        if (handler.gcTimer) {
+          clearInterval(handler.gcTimer);
+          handler.gcTimer = null;
+        }
+        if (handler.pendingTransactions && handler.pendingTransactions.size > 0) {
+          await this._flushPendingTransactions(handler);
+        }
+        this.emit("eventual-consistency.stopped", {
+          resource: resourceName,
+          field: fieldName
+        });
+      }
     }
-    if (this.gcTimer) {
-      clearInterval(this.gcTimer);
-      this.gcTimer = null;
-    }
-    await this.flushPendingTransactions();
-    this.emit("eventual-consistency.stopped", {
-      resource: this.config.resource,
-      field: this.config.field
-    });
   }
   createPartitionConfig() {
     const partitions = {
@@ -4786,54 +4595,6 @@ class EventualConsistencyPlugin extends Plugin {
     };
     return partitions;
   }
-  async createAnalyticsResource() {
-    const analyticsResourceName = `${this.config.resource}_analytics_${this.config.field}`;
-    const [ok, err, analyticsResource] = await tryFn(
-      () => this.database.createResource({
-        name: analyticsResourceName,
-        attributes: {
-          id: "string|required",
-          period: "string|required",
-          // 'hour', 'day', 'month'
-          cohort: "string|required",
-          // ISO format: '2025-10-09T14', '2025-10-09', '2025-10'
-          // Aggregated metrics
-          transactionCount: "number|required",
-          totalValue: "number|required",
-          avgValue: "number|required",
-          minValue: "number|required",
-          maxValue: "number|required",
-          // Operation breakdown
-          operations: "object|optional",
-          // { add: { count, sum }, sub: { count, sum }, set: { count, sum } }
-          // Metadata
-          recordCount: "number|required",
-          // Distinct originalIds
-          consolidatedAt: "string|required",
-          updatedAt: "string|required"
-        },
-        behavior: "body-overflow",
-        timestamps: false,
-        partitions: {
-          byPeriod: {
-            fields: { period: "string" }
-          },
-          byCohort: {
-            fields: { cohort: "string" }
-          }
-        },
-        createdBy: "EventualConsistencyPlugin"
-      })
-    );
-    if (!ok && !this.database.resources[analyticsResourceName]) {
-      console.warn(`[EventualConsistency] Failed to create analytics resource: ${err?.message}`);
-      return;
-    }
-    this.analyticsResource = ok ? analyticsResource : this.database.resources[analyticsResourceName];
-    if (this.config.verbose) {
-      console.log(`[EventualConsistency] Analytics resource created: ${analyticsResourceName}`);
-    }
-  }
   /**
    * Auto-detect timezone from environment or system
    * @private
@@ -4853,21 +4614,20 @@ class EventualConsistencyPlugin extends Plugin {
   }
   /**
    * Helper method to resolve field and plugin from arguments
-   * Supports both single-field (field, value) and multi-field (field, value) signatures
    * @private
    */
-  _resolveFieldAndPlugin(resource, fieldOrValue, value) {
-    const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
-    if (hasMultipleFields && value === void 0) {
-      throw new Error(`Multiple fields have eventual consistency. Please specify the field explicitly.`);
+  _resolveFieldAndPlugin(resource, field, value) {
+    if (!resource._eventualConsistencyPlugins) {
+      throw new Error(`No eventual consistency plugins configured for this resource`);
     }
-    const field = value !== void 0 ? fieldOrValue : this.config.field;
-    const actualValue = value !== void 0 ? value : fieldOrValue;
     const fieldPlugin = resource._eventualConsistencyPlugins[field];
     if (!fieldPlugin) {
-      throw new Error(`No eventual consistency plugin found for field "${field}"`);
+      const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
+      throw new Error(
+        `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
+      );
     }
-    return { field, value: actualValue, plugin: fieldPlugin };
+    return { field, value, plugin: fieldPlugin };
   }
   /**
    * Helper method to perform atomic consolidation in sync mode
@@ -4891,74 +4651,75 @@ class EventualConsistencyPlugin extends Plugin {
     };
   }
   addHelperMethods() {
-    const resource = this.targetResource;
-    const defaultField = this.config.field;
+    const firstResource = this.fieldHandlers.values().next().value;
+    if (!firstResource) return;
+    const firstHandler = firstResource.values().next().value;
+    if (!firstHandler || !firstHandler.targetResource) return;
+    const resource = firstHandler.targetResource;
     const plugin = this;
-    if (!resource._eventualConsistencyPlugins) {
-      resource._eventualConsistencyPlugins = {};
-    }
-    resource._eventualConsistencyPlugins[defaultField] = plugin;
-    resource.set = async (id, fieldOrValue, value) => {
-      const { field, value: actualValue, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrValue, value);
-      await fieldPlugin.createTransaction({
+    resource.set = async (id, field, value) => {
+      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, value);
+      await fieldPlugin.createTransaction(fieldPlugin, {
         originalId: id,
         operation: "set",
-        value: actualValue,
+        value,
         source: "set"
       });
       if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(id, field);
+        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
       }
-      return actualValue;
+      return value;
     };
-    resource.add = async (id, fieldOrAmount, amount) => {
-      const { field, value: actualAmount, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrAmount, amount);
-      await fieldPlugin.createTransaction({
+    resource.add = async (id, field, amount) => {
+      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, amount);
+      await fieldPlugin.createTransaction(fieldPlugin, {
         originalId: id,
         operation: "add",
-        value: actualAmount,
+        value: amount,
         source: "add"
       });
       if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(id, field);
+        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
       }
-      const currentValue = await fieldPlugin.getConsolidatedValue(id);
-      return currentValue + actualAmount;
+      const currentValue = await fieldPlugin.getConsolidatedValue(fieldPlugin, id);
+      return currentValue + amount;
     };
-    resource.sub = async (id, fieldOrAmount, amount) => {
-      const { field, value: actualAmount, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrAmount, amount);
-      await fieldPlugin.createTransaction({
+    resource.sub = async (id, field, amount) => {
+      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, amount);
+      await fieldPlugin.createTransaction(fieldPlugin, {
         originalId: id,
         operation: "sub",
-        value: actualAmount,
+        value: amount,
         source: "sub"
       });
       if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(id, field);
+        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
       }
-      const currentValue = await fieldPlugin.getConsolidatedValue(id);
-      return currentValue - actualAmount;
+      const currentValue = await fieldPlugin.getConsolidatedValue(fieldPlugin, id);
+      return currentValue - amount;
     };
     resource.consolidate = async (id, field) => {
-      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
-      if (hasMultipleFields && !field) {
-        throw new Error(`Multiple fields have eventual consistency. Please specify the field: consolidate(id, field)`);
+      if (!field) {
+        throw new Error(`Field parameter is required: consolidate(id, field)`);
       }
-      const actualField = field || defaultField;
-      const fieldPlugin = resource._eventualConsistencyPlugins[actualField];
+      const fieldPlugin = resource._eventualConsistencyPlugins[field];
       if (!fieldPlugin) {
-        throw new Error(`No eventual consistency plugin found for field "${actualField}"`);
+        const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
+        throw new Error(
+          `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
+        );
       }
-      return await fieldPlugin.consolidateRecord(id);
+      return await fieldPlugin.consolidateRecord(fieldPlugin, id);
     };
-    resource.getConsolidatedValue = async (id, fieldOrOptions, options) => {
-      if (typeof fieldOrOptions === "string") {
-        const field = fieldOrOptions;
-        const fieldPlugin = resource._eventualConsistencyPlugins[field] || plugin;
-        return await fieldPlugin.getConsolidatedValue(id, options || {});
-      } else {
-        return await plugin.getConsolidatedValue(id, fieldOrOptions || {});
+    resource.getConsolidatedValue = async (id, field, options = {}) => {
+      const fieldPlugin = resource._eventualConsistencyPlugins[field];
+      if (!fieldPlugin) {
+        const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
+        throw new Error(
+          `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
+        );
       }
+      return await fieldPlugin.getConsolidatedValue(fieldPlugin, id, options);
     };
   }
   async createTransaction(data) {
