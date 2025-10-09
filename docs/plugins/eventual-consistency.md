@@ -973,6 +973,90 @@ const topWeekly = await plugin.getTopRecords('wallets', 'balance', {
 });
 ```
 
+**5. Cache compatibility**
+
+```javascript
+// Cache is automatically compatible!
+await database.usePlugin(new EventualConsistencyPlugin({ ... }));
+await database.usePlugin(new CachePlugin({ driver: 'memory' }));
+
+// ✅ Plugin resources are NOT cached (transactions, locks, analytics)
+// ✅ User resources ARE cached (wallets, users, etc.)
+// ✅ Cache is invalidated after consolidation
+```
+
+### Cache Compatibility
+
+The EventualConsistencyPlugin is fully compatible with CachePlugin:
+
+**Automatic Plugin Resource Exclusion:**
+- Plugin-created resources (transactions, locks, analytics) are **automatically excluded** from cache
+- User-created resources (wallets, users, etc.) are **cached normally**
+- This prevents stale data issues with transient plugin data
+
+**Automatic Cache Invalidation:**
+- After consolidation, the cache for updated records is **automatically invalidated**
+- Next read will fetch the updated value from S3
+- No manual cache management required
+
+**Example:**
+```javascript
+// Setup both plugins
+const s3db = new S3db({ connectionString: '...' });
+await s3db.connect();
+
+// Create user resource
+const wallets = await s3db.createResource({
+  name: 'wallets',
+  attributes: {
+    id: 'string|required',
+    balance: 'number|default:0'
+  }
+});
+
+// Add EventualConsistency
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance',
+  mode: 'async'
+}));
+
+// Add Cache
+await s3db.usePlugin(new CachePlugin({
+  driver: 'memory'
+}));
+
+// Usage - cache works transparently!
+await wallets.insert({ id: 'w1', balance: 0 });
+await wallets.add('w1', 100); // Creates transaction
+
+// Before consolidation
+const before = await wallets.get('w1'); // Cached
+console.log(before.balance); // 0 (cached value)
+
+// Auto-consolidation runs (every 5min by default)
+// Cache is automatically invalidated
+
+// After consolidation
+const after = await wallets.get('w1'); // Fetches fresh, then caches
+console.log(after.balance); // 100 (updated value)
+```
+
+**Why This Works:**
+1. Plugin resources have `createdBy: 'EventualConsistencyPlugin'` in metadata
+2. CachePlugin checks `createdBy` and skips non-user resources
+3. Consolidation invalidates cache for updated records
+4. No stale data, no manual cache management
+
+**Explicit Plugin Resource Caching (Not Recommended):**
+```javascript
+// If you REALLY want to cache plugin resources (usually not needed):
+await s3db.usePlugin(new CachePlugin({
+  driver: 'memory',
+  include: ['wallets_transactions_balance'] // Explicitly include
+}));
+```
+
 ### Limitations
 
 - **recordCount** is approximate (max per batch, not total unique)
