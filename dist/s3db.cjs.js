@@ -4959,12 +4959,15 @@ class EventualConsistencyPlugin extends Plugin {
         );
       }
       const [updateOk, updateErr] = await tryFn(async () => {
-        const [ok2, err2] = await tryFn(
-          () => this.targetResource.update(originalId, {
-            [this.config.field]: consolidatedValue
-          })
+        const [existsOk, existsErr, exists] = await tryFn(
+          () => this.targetResource.exists(originalId)
         );
-        if (!ok2 && (err2?.code === "NoSuchKey" || err2?.code === "NotFound")) {
+        if (!existsOk) {
+          console.warn(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - Failed to check existence for ${originalId}: ${existsErr?.message}`
+          );
+        }
+        if (existsOk && !exists) {
           if (this.config.verbose) {
             console.log(
               `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} doesn't exist, creating with ${this.config.field}=${consolidatedValue}`
@@ -4975,10 +4978,9 @@ class EventualConsistencyPlugin extends Plugin {
             [this.config.field]: consolidatedValue
           });
         }
-        if (!ok2) {
-          throw err2;
-        }
-        return ok2;
+        return await this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        });
       });
       if (!updateOk) {
         console.error(
@@ -11803,7 +11805,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.8" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.9" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
