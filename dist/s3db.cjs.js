@@ -4726,7 +4726,7 @@ class EventualConsistencyPlugin extends Plugin {
       return await fieldPlugin.getConsolidatedValue(fieldPlugin, id, options);
     };
   }
-  async createTransaction(data) {
+  async createTransaction(handler, data) {
     const now = /* @__PURE__ */ new Date();
     const cohortInfo = this.getCohortInfo(now);
     const watermarkMs = this.config.consolidationWindow * 60 * 60 * 1e3;
@@ -4749,9 +4749,8 @@ class EventualConsistencyPlugin extends Plugin {
     }
     const transaction = {
       id: idGenerator(),
-      // Use nanoid for guaranteed uniqueness
       originalId: data.originalId,
-      field: this.config.field,
+      field: handler.field,
       value: data.value || 0,
       operation: data.operation || "set",
       timestamp: now.toISOString(),
@@ -4762,20 +4761,20 @@ class EventualConsistencyPlugin extends Plugin {
       applied: false
     };
     if (this.config.batchTransactions) {
-      this.pendingTransactions.set(transaction.id, transaction);
+      handler.pendingTransactions.set(transaction.id, transaction);
       if (this.config.verbose) {
         console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Transaction batched: ${data.operation} ${data.value} for ${data.originalId} (batch: ${this.pendingTransactions.size}/${this.config.batchSize})`
+          `[EventualConsistency] ${handler.resource}.${handler.field} - Transaction batched: ${data.operation} ${data.value} for ${data.originalId} (batch: ${handler.pendingTransactions.size}/${this.config.batchSize})`
         );
       }
-      if (this.pendingTransactions.size >= this.config.batchSize) {
-        await this.flushPendingTransactions();
+      if (handler.pendingTransactions.size >= this.config.batchSize) {
+        await this._flushPendingTransactions(handler);
       }
     } else {
-      await this.transactionResource.insert(transaction);
+      await handler.transactionResource.insert(transaction);
       if (this.config.verbose) {
         console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Transaction created: ${data.operation} ${data.value} for ${data.originalId} (cohort: ${cohortInfo.hour}, applied: false)`
+          `[EventualConsistency] ${handler.resource}.${handler.field} - Transaction created: ${data.operation} ${data.value} for ${data.originalId} (cohort: ${cohortInfo.hour}, applied: false)`
         );
       }
     }

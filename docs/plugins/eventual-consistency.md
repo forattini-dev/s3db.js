@@ -32,7 +32,7 @@ The Eventual Consistency Plugin provides a robust solution for managing numeric 
 
 > **Important**: This plugin uses explicit methods (`add`, `sub`, `set`, `consolidate`) instead of intercepting regular insert/update operations. This design provides better control and predictability.
 >
-> **Multi-field Support**: When multiple fields have eventual consistency on the same resource, the field parameter becomes required in method calls. With a single field, the field parameter is optional for cleaner syntax.
+> **Method Signatures**: All methods require the field parameter: `add(id, field, amount)`, `sub(id, field, amount)`, `set(id, field, value)`, `consolidate(id, field)`
 
 ### ⚠️ Important: How Values Are Updated
 
@@ -44,15 +44,15 @@ const wallet = await wallets.get('wallet-123');
 console.log(wallet.balance);  // 0
 
 // Create transactions (balance NOT updated yet)
-await wallets.add('wallet-123', 100);
-await wallets.add('wallet-123', 50);
+await wallets.add('wallet-123', 'balance', 100);
+await wallets.add('wallet-123', 'balance', 50);
 
 // Before consolidation
 const beforeWallet = await wallets.get('wallet-123');
 console.log(beforeWallet.balance);  // 0 ❌ (still old value)
 
 // Consolidation UPDATES the original field
-await wallets.consolidate('wallet-123');
+await wallets.consolidate('wallet-123', 'balance');
 
 // After consolidation - ORIGINAL FIELD IS UPDATED!
 const afterWallet = await wallets.get('wallet-123');
@@ -139,8 +139,6 @@ console.log(afterWallet.balance);  // 150 ✅ (UPDATED!)
 
 ## Installation & Setup
 
-### Quick Start: Multi-Resource API ⭐ **RECOMMENDED**
-
 ```javascript
 import { S3db, EventualConsistencyPlugin } from 's3db.js';
 
@@ -150,7 +148,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-// Add plugin for multiple fields at once (compact!)
+// Configure plugin with resources
 await s3db.usePlugin(new EventualConsistencyPlugin({
   resources: {
     wallets: ['balance', 'points'],
@@ -175,52 +173,18 @@ const walletsResource = await s3db.createResource({
   }
 });
 
-// Methods are now available for all fields
+// Methods are now available - always specify field
 await walletsResource.add('wallet-1', 'balance', 100);
 await walletsResource.add('wallet-1', 'points', 50);
+await walletsResource.consolidate('wallet-1', 'balance');
 ```
 
-### Single Field Setup (Legacy)
-
-```javascript
-// Option 1: Add plugin before resource exists (deferred setup)
-const plugin = new EventualConsistencyPlugin({
-  resource: 'wallets',  // Resource doesn't exist yet
-  field: 'balance',
-  mode: 'async',
-  cohort: {
-    timezone: 'America/Sao_Paulo'  // Optional, defaults to UTC
-  }
-});
-
-await s3db.usePlugin(plugin); // Plugin waits for resource
-
-// Create resource - plugin automatically sets up
-const walletsResource = await s3db.createResource({
-  name: 'wallets',
-  attributes: {
-    id: 'string|required',
-    userId: 'string|required',
-    balance: 'number|required',
-    currency: 'string|required'
-  }
-});
-
-// Methods are now available (single field, no field parameter needed)
-await walletsResource.add('wallet-1', 100);
-
-// Option 2: Add plugin after resource exists
-// const resource = await s3db.createResource({ ... });
-// const plugin = new EventualConsistencyPlugin({ ... });
-// await s3db.usePlugin(plugin); // Immediate setup
-```
-
-> **💡 Important Note**: The plugin **UPDATES the original field value** (e.g., `balance`) during consolidation. This is not just a parallel structure - the actual field in your resource IS UPDATED with the consolidated value.
+> **💡 Important**: The plugin **UPDATES the original field value** during consolidation. This is not just a parallel structure - the actual field in your resource IS UPDATED with the consolidated value.
 >
 > Example:
 > ```javascript
-> await wallets.add('wallet-1', 100);
-> await wallets.consolidate('wallet-1');  // ← Updates wallet.balance!
+> await wallets.add('wallet-1', 'balance', 100);
+> await wallets.consolidate('wallet-1', 'balance');  // ← Updates wallet.balance!
 >
 > const wallet = await wallets.get('wallet-1');
 > console.log(wallet.balance);  // 100 ✅ (original field updated!)
@@ -230,73 +194,17 @@ await walletsResource.add('wallet-1', 100);
 
 ## API Reference
 
-### 🎨 Two API Styles
-
-The EventualConsistencyPlugin supports two configuration styles:
-
-#### Style 1: Multi-Resource (Compact) ⭐ **RECOMMENDED**
-
-Perfect when you have multiple fields on the same resource(s):
-
-```javascript
-new EventualConsistencyPlugin({
-  // Define multiple resources and their fields
-  resources: {
-    urls: ['clicks', 'views', 'shares', 'scans'],
-    posts: ['likes', 'comments'],
-    users: ['points', 'credits']
-  },
-
-  // All configuration is shared across fields
-  mode: 'async',
-  autoConsolidate: true,
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' },
-  verbose: true
-})
-```
-
-**Benefits:**
-- ✅ Compact syntax (1 plugin vs 4+ plugins)
-- ✅ Shared configuration across all fields
-- ✅ Easier to maintain
-- ✅ All fields created automatically
-
-#### Style 2: Single Field (Legacy)
-
-For single fields or when you need per-field configuration:
-
-```javascript
-new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
-  mode: 'async',
-  cohort: { timezone: 'America/Sao_Paulo' }
-})
-```
-
-**When to use:**
-- Per-field custom reducers
-- Different modes per field (sync vs async)
-- Legacy code compatibility
-
----
-
 ### Constructor Options
 
-**Multi-Resource API:**
 ```javascript
 new EventualConsistencyPlugin({
-  // Required (choose one style)
-  resources: {                    // Multi-resource style
-    resourceName: ['field1', 'field2', ...]
+  // Required
+  resources: {
+    resourceName: ['field1', 'field2', ...],
+    anotherResource: ['field3', 'field4']
   },
 
-  // OR (legacy single-field style)
-  resource: 'resourceName',       // Single resource
-  field: 'fieldName',             // Single field
-
-  // Optional (shared by all fields in multi-resource mode)
+  // Optional (shared by all fields)
   mode: 'async',                      // 'async' (default) or 'sync'
   autoConsolidate: true,              // Enable auto-consolidation
   consolidationInterval: 300,         // Consolidation interval (seconds, default: 300 = 5min)
@@ -344,51 +252,39 @@ new EventualConsistencyPlugin({
 
 ### Generated Methods
 
-The plugin adds these methods to your resource. The method signatures adapt based on the number of fields with eventual consistency:
-
-#### Single Field Syntax
-When only **one** field has eventual consistency, the field parameter is optional:
+The plugin adds these methods to your resource:
 
 ```javascript
-// Simple, clean syntax for single field
-await wallets.set('wallet-123', 1000);     // Set to 1000
-await wallets.add('wallet-123', 50);       // Add 50
-await wallets.sub('wallet-123', 25);       // Subtract 25
-await wallets.consolidate('wallet-123');   // Consolidate
-```
+// Set value
+await accounts.set('acc-1', 'balance', 1000);   // Set balance to 1000
+await accounts.set('acc-1', 'points', 500);     // Set points to 500
 
-#### Multiple Fields Syntax
-When **multiple** fields have eventual consistency, the field parameter is **required**:
+// Add value
+await accounts.add('acc-1', 'balance', 100);    // Add 100 to balance
+await accounts.add('acc-1', 'points', 50);      // Add 50 to points
 
-```javascript
-// Must specify which field when multiple exist
-await accounts.set('acc-1', 'balance', 1000);   // Set balance
-await accounts.add('acc-1', 'points', 100);     // Add points
-await accounts.sub('acc-1', 'credits', 50);     // Subtract credits
-await accounts.consolidate('acc-1', 'balance'); // Consolidate specific field
+// Subtract value
+await accounts.sub('acc-1', 'balance', 25);     // Subtract 25 from balance
+await accounts.sub('acc-1', 'credits', 10);     // Subtract 10 from credits
+
+// Consolidate
+await accounts.consolidate('acc-1', 'balance'); // Consolidate balance
+await accounts.consolidate('acc-1', 'points');  // Consolidate points
 ```
 
 #### Method Reference
 
-##### `set(id, [field], value)`
+##### `set(id, field, value)`
 Sets the absolute value of the field.
-- **Single field**: `set(id, value)`
-- **Multiple fields**: `set(id, field, value)`
 
-##### `add(id, [field], amount)`
+##### `add(id, field, amount)`
 Adds to the current value.
-- **Single field**: `add(id, amount)`
-- **Multiple fields**: `add(id, field, amount)`
 
-##### `sub(id, [field], amount)`
+##### `sub(id, field, amount)`
 Subtracts from the current value.
-- **Single field**: `sub(id, amount)`
-- **Multiple fields**: `sub(id, field, amount)`
 
-##### `consolidate(id, [field])`
-Manually triggers consolidation.
-- **Single field**: `consolidate(id)`
-- **Multiple fields**: `consolidate(id, field)`
+##### `consolidate(id, field)`
+Manually triggers consolidation for a specific field.
 
 ---
 
@@ -411,8 +307,9 @@ The Analytics API automatically aggregates transaction data during consolidation
 
 ```javascript
 new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
+  resources: {
+    wallets: ['balance']
+  },
 
   // Enable analytics
   enableAnalytics: true,
@@ -1320,17 +1217,27 @@ reducer: (transactions) => {
 
 ## Usage Examples
 
-### Basic Wallet System (Single Field)
+### Basic Wallet System
 
 ```javascript
-// Setup with one field
-const plugin = new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
+// Setup plugin
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    wallets: ['balance']
+  },
   mode: 'sync'  // Immediate consistency
-});
+}));
 
-await s3db.usePlugin(plugin);
+// Create wallet resource
+const wallets = await s3db.createResource({
+  name: 'wallets',
+  attributes: {
+    id: 'string|required',
+    userId: 'string|required',
+    balance: 'number|default:0',
+    currency: 'string|required'
+  }
+});
 
 // Create a wallet
 await wallets.insert({
@@ -1344,26 +1251,24 @@ await wallets.insert({
 let wallet = await wallets.get('wallet-001');
 console.log(wallet.balance);  // 0
 
-// Simple syntax - no field parameter needed
-await wallets.set('wallet-001', 1000);  // Creates transaction, updates balance to 1000
-await wallets.add('wallet-001', 250);   // Creates transaction, adds 250 to balance
-await wallets.sub('wallet-001', 100);   // Creates transaction, subtracts 100 from balance
+// Perform operations - always specify field
+await wallets.set('wallet-001', 'balance', 1000);  // Creates transaction, updates balance to 1000
+await wallets.add('wallet-001', 'balance', 250);   // Creates transaction, adds 250 to balance
+await wallets.sub('wallet-001', 'balance', 100);   // Creates transaction, subtracts 100 from balance
 
 // Check balance after consolidation (ORIGINAL FIELD IS UPDATED!)
 wallet = await wallets.get('wallet-001');
 console.log(wallet.balance);  // 1150 ✅ - The ORIGINAL balance field was updated!
 
 // Consolidate returns the value directly
-const balance = await wallets.consolidate('wallet-001');
+const balance = await wallets.consolidate('wallet-001', 'balance');
 console.log(`Current balance: $${balance}`); // 1150
 
 // ⚠️ IMPORTANT: You're reading from wallet.balance, NOT from transactions!
 // The original field IS UPDATED during consolidation.
 ```
 
-### Multi-Currency Account (Multiple Fields)
-
-**Option A: Multi-Resource API (Compact) ⭐ RECOMMENDED**
+### Multi-Currency Account
 
 ```javascript
 // Setup ALL fields with one plugin instance
@@ -1395,7 +1300,7 @@ await accounts.insert({
   credits: 0
 });
 
-// Multiple fields require field parameter
+// Always specify field parameter
 await accounts.add('acc-001', 'balance', 500);
 await accounts.add('acc-001', 'points', 100);
 await accounts.sub('acc-001', 'credits', 50);
@@ -1407,40 +1312,13 @@ console.log(account.points);   // 600 ✅
 console.log(account.credits);  // -50 ✅
 ```
 
-**Option B: Single-Field API (Legacy)**
-
-```javascript
-// Add separate plugin for each field (verbose)
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'accounts',
-  field: 'balance',
-  mode: 'sync'
-}));
-
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'accounts',
-  field: 'points',
-  mode: 'sync'
-}));
-
-// (Same usage as Option A)
-// Multiple fields require field parameter
-await accounts.add('acc-001', 'balance', 300);  // Add to balance
-await accounts.add('acc-001', 'points', 150);   // Add to points
-await accounts.sub('acc-001', 'balance', 100);  // Subtract from balance
-
-// Consolidate specific fields
-const balance = await accounts.consolidate('acc-001', 'balance');
-const points = await accounts.consolidate('acc-001', 'points');
-console.log(`Balance: $${balance}, Points: ${points}`);
-```
-
 ### Points System with Custom Reducer
 
 ```javascript
-const plugin = new EventualConsistencyPlugin({
-  resource: 'users',
-  field: 'points',
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    users: ['points']
+  },
   reducer: (transactions) => {
     // Points can only increase
     return transactions.reduce((total, t) => {
@@ -1450,29 +1328,30 @@ const plugin = new EventualConsistencyPlugin({
       return total;
     }, 0);
   }
-});
+}));
 
-// Usage (single field, simple syntax)
-await users.add('user-123', 100);  // Award points
-await users.add('user-123', 50);   // More points
+// Usage
+await users.add('user-123', 'points', 100);  // Award points
+await users.add('user-123', 'points', 50);   // More points
 // sub would be ignored by reducer
 ```
 
 ### Inventory Counter with Sync Mode
 
 ```javascript
-const plugin = new EventualConsistencyPlugin({
-  resource: 'inventory',
-  field: 'quantity',
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    inventory: ['quantity']
+  },
   mode: 'sync', // Immediate consistency
   cohort: {
     timezone: 'America/New_York' // Group by EST/EDT
   }
-});
+}));
 
 // Every operation immediately updates the database
-await inventory.sub('item-001', 5); // Sold 5 items
-const remaining = await inventory.consolidate('item-001');
+await inventory.sub('item-001', 'quantity', 5); // Sold 5 items
+const remaining = await inventory.consolidate('item-001', 'quantity');
 // 'remaining' is guaranteed to be accurate
 ```
 
