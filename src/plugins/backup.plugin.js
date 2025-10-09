@@ -937,3 +937,5 @@ export class BackupPlugin extends Plugin {
     await this.stop();
   }
 }
+
+export default BackupPlugin;
