@@ -146,6 +146,9 @@ new EventualConsistencyPlugin({
   batchTransactions: false,     // Enable transaction batching
   batchSize: 100,              // Batch size before flush
 
+  // Debugging
+  verbose: false,               // Enable detailed logging (default: false)
+
   // Custom reducer
   reducer: (transactions) => {
     // Custom consolidation logic
@@ -1905,6 +1908,77 @@ This resource is automatically partitioned by `cohortHour` (byHour), `cohortDate
 
 ## Troubleshooting
 
+### Debugging with Verbose Mode
+
+Enable detailed logging to see exactly what the plugin is doing:
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance',
+  verbose: true  // Enable detailed logging
+});
+```
+
+**Verbose logs include:**
+- ✅ Setup and initialization status
+- ✅ Auto-consolidation timer status (enabled/disabled, interval, next run time)
+- ✅ Transaction creation (operation, value, cohort)
+- ✅ Consolidation runs (start, pending transactions found, records processed)
+- ✅ Individual record consolidation (current → new value)
+- ✅ Analytics updates (cohorts updated, roll-ups)
+- ✅ Lock acquisition/release
+- ✅ Errors and warnings
+
+**Example verbose output:**
+```
+[EventualConsistency] wallets.balance - Setup complete. Resources: wallets_transactions_balance, wallets_consolidation_locks_balance, wallets_analytics_balance
+[EventualConsistency] wallets.balance - Auto-consolidation ENABLED (interval: 300s, window: 24h, mode: async)
+[EventualConsistency] wallets.balance - Consolidation timer started. Next run at 2025-10-09T14:35:00.000Z (every 300s)
+[EventualConsistency] wallets.balance - Transaction created: add 100 for wallet-123 (cohort: 2025-10-09T14, applied: false)
+[EventualConsistency] wallets.balance - Starting consolidation run at 2025-10-09T14:35:00.000Z
+[EventualConsistency] wallets.balance - Querying 24 hour partitions for pending transactions...
+[EventualConsistency] wallets.balance - Found 3 pending transactions for 1 records. Consolidating with concurrency=5...
+[EventualConsistency] wallets.balance - Consolidating wallet-123: 3 pending transactions (current: 0)
+[EventualConsistency] wallets.balance - wallet-123: 0 → 300 (+300)
+[EventualConsistency] wallets.balance - Updating analytics for 3 transactions...
+[EventualConsistency] wallets.balance - Updating 1 hourly analytics cohorts...
+[EventualConsistency] wallets.balance - Rolling up 1 hours to daily/monthly analytics...
+[EventualConsistency] wallets.balance - Analytics update complete for 1 cohorts
+[EventualConsistency] wallets.balance - Consolidation complete: 1 records consolidated in 45ms (0 errors). Next run in 300s
+```
+
+### Issue: Auto-consolidation not running
+
+**Symptoms**: Transactions created but never consolidated, balance never updates
+
+**Diagnosis with verbose mode**:
+```javascript
+// Enable verbose to see timer status
+verbose: true
+```
+
+Check logs for:
+- ✅ `Auto-consolidation ENABLED` - Timer should start
+- ✅ `Consolidation timer started. Next run at...` - Timer is active
+- ✅ `Starting consolidation run at...` - Timer is firing
+
+**Common causes**:
+1. **autoConsolidate: false** - Consolidation disabled
+   ```javascript
+   // Solution: Enable it or use manual consolidation
+   autoConsolidate: true
+   ```
+
+2. **No pending transactions** - Nothing to consolidate
+   ```
+   [EventualConsistency] No pending transactions found. Next run in 300s
+   ```
+
+3. **Timer not started** - Plugin not fully initialized
+   - Check that `s3db.connect()` completed
+   - Verify resource was created before plugin
+
 ### Issue: Balance doesn't update immediately
 **Solution**: You're using async mode. Either switch to sync mode or manually call `consolidate()`.
 
@@ -1915,7 +1989,7 @@ This resource is automatically partitioned by `cohortHour` (byHour), `cohortDate
 **Solution**: Use smaller cohort intervals or optimize your reducer function.
 
 ### Issue: Methods not available on resource
-**Solution**: 
+**Solution**:
 - Ensure plugin is added via `s3db.usePlugin(plugin)`
 - Verify database is connected before adding plugin
 - If using deferred setup, confirm resource name matches exactly
