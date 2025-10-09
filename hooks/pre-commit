@@ -1,0 +1,18 @@
+#!/bin/sh
+
+# Pre-commit hook: Build before committing
+# This ensures dist/ files are always in sync with source code
+echo "🔨 Running build before commit..."
+
+pnpm run build
+
+if [ $? -ne 0 ]; then
+  echo "❌ Build failed! Commit aborted."
+  exit 1
+fi
+
+# Stage the built files
+git add dist/
+
+echo "✅ Build successful, dist/ files staged"
+exit 0

@@ -70,7 +70,7 @@
     "test:plugins": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/plugins/ --runInBand --testTimeout=60000",
     "test:full": "pnpm run test:js && pnpm run test:ts",
     "benchmark": "node benchmark-compression.js",
-    "prepare": "pnpm run build",
+    "prepare": "pnpm run build && bash scripts/install-hooks.sh",
     "version": "echo 'Use pnpm run release v<version> instead of npm version'",
     "release:check": "./scripts/pre-release-check.sh",
     "release:prepare": "pnpm run build:binaries && echo 'Binaries ready for GitHub release'",
