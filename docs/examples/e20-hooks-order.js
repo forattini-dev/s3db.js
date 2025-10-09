@@ -15,7 +15,7 @@ async function testHooks() {
     bucket: 's3db',
     accessKeyId: process.env.MINIO_USER,
     secretAccessKey: process.env.MINIO_PASSWORD,
-    endpoint: 'http://localhost:9998',
+    endpoint: 'http://localhost:9100',
     forcePathStyle: true,
     prefix: testPrefix
   });
@@ -75,7 +75,7 @@ async function testHooks() {
     bucket: 's3db',
     accessKeyId: process.env.MINIO_USER,
     secretAccessKey: process.env.MINIO_PASSWORD,
-    endpoint: 'http://localhost:9998',
+    endpoint: 'http://localhost:9100',
     forcePathStyle: true,
     prefix: testPrefix
   });

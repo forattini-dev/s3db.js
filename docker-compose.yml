@@ -5,8 +5,8 @@ services:
     volumes:
       - minio_data:/bitnami/minio/data 
     ports:
-      - "9998:9000"
-      - "9999:9001"
+      - "9100:9000"
+      - "9101:9001"
     environment:
       MINIO_FORCE_NEW_KEYS: yes
       MINIO_ROOT_USER: minioadmin
