@@ -4958,11 +4958,35 @@ class EventualConsistencyPlugin extends Plugin {
           `[EventualConsistency] ${this.config.resource}.${this.config.field} - ${originalId}: ${currentValue} \u2192 ${consolidatedValue} (${consolidatedValue > currentValue ? "+" : ""}${consolidatedValue - currentValue})`
         );
       }
-      const [updateOk, updateErr] = await tryFn(
-        () => this.targetResource.update(originalId, {
-          [this.config.field]: consolidatedValue
-        })
-      );
+      const [updateOk, updateErr] = await tryFn(async () => {
+        const [ok2, err2] = await tryFn(
+          () => this.targetResource.update(originalId, {
+            [this.config.field]: consolidatedValue
+          })
+        );
+        if (!ok2 && (err2?.code === "NoSuchKey" || err2?.code === "NotFound")) {
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} doesn't exist, creating with ${this.config.field}=${consolidatedValue}`
+            );
+          }
+          return await this.targetResource.insert({
+            id: originalId,
+            [this.config.field]: consolidatedValue
+          });
+        }
+        if (!ok2) {
+          throw err2;
+        }
+        return ok2;
+      });
+      if (!updateOk) {
+        console.error(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
+          { error: updateErr, consolidatedValue, currentValue }
+        );
+        throw updateErr;
+      }
       if (updateOk) {
         const transactionsToUpdate = transactions.filter((txn) => txn.id !== "__synthetic__");
         const { results, errors } = await promisePool.PromisePool.for(transactionsToUpdate).withConcurrency(10).process(async (txn) => {
