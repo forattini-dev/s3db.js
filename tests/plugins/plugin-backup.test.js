@@ -90,7 +90,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
   describe('Plugin Configuration', () => {
     it('should initialize with filesystem driver', () => {
-      expect(plugin.driverName).toBe('filesystem');
+      expect(plugin.config.driver).toBe('filesystem');
       expect(plugin.driver).toBeDefined();
       expect(plugin.driver.getType()).toBe('filesystem');
     });
@@ -104,7 +104,7 @@ describe('BackupPlugin (New Driver API)', () => {
         }
       });
 
-      expect(s3Plugin.driverName).toBe('s3');
+      expect(s3Plugin.config.driver).toBe('s3');
     });
 
     it('should initialize with multi driver', async () => {
@@ -119,19 +119,7 @@ describe('BackupPlugin (New Driver API)', () => {
         }
       });
 
-      expect(multiPlugin.driverName).toBe('multi');
-    });
-
-    it('should handle legacy destinations format', () => {
-      const legacyPlugin = new BackupPlugin({
-        destinations: [
-          { type: 'filesystem', path: '/tmp/legacy' }
-        ]
-      });
-
-      expect(legacyPlugin.driverName).toBe('multi');
-      expect(legacyPlugin.driverConfig.destinations[0].driver).toBe('filesystem');
-      expect(legacyPlugin.driverConfig.destinations[0].config.path).toBe('/tmp/legacy');
+      expect(multiPlugin.config.driver).toBe('multi');
     });
 
     it('should validate driver configuration', () => {

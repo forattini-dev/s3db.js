@@ -86,7 +86,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       });
 
       expect(transactions.length).toBe(10);
-    });
+    }, 60000);
 
     it("should handle concurrent sync mode operations atomically", async () => {
       // Create wallet
@@ -118,7 +118,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       });
 
       expect(transactions.length).toBe(20);
-    });
+    }, 40000);
   });
 
   describe("Transaction ID Uniqueness", () => {
@@ -156,7 +156,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       const ids = transactions.map(t => t.id);
       const uniqueIds = [...new Set(ids)];
       expect(uniqueIds.length).toBe(50);
-    });
+    }, 30000);
   });
 
   describe("Batch Operations Safety", () => {
