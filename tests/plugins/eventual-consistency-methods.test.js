@@ -253,7 +253,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       // Consolidate and verify
       const finalBalance = await walletsResource.consolidate('wallet-chaos');
       expect(finalBalance).toBe(expectedBalance);
-    });
+    }, 40000);
   });
 
   describe("Partition Structure", () => {

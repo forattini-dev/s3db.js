@@ -217,7 +217,7 @@ const backupPlugin = new BackupPlugin({
 | `compression` | `string` | `'gzip'` | `'none'`, `'gzip'`, `'brotli'`, `'deflate'` |
 | `encryption` | `object` | `null` | Encryption configuration |
 | `verification` | `boolean` | `true` | Verify backup integrity |
-| `tempDir` | `string` | `'/tmp/s3db/backups'` | Temporary working directory |
+| `tempDir` | `string` | `os.tmpdir()/s3db/backups` | Temporary working directory |
 | `verbose` | `boolean` | `false` | Enable detailed logging |
 
 ### Retention Policies (GFS)

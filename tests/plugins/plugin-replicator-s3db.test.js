@@ -181,9 +181,36 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
     const replicator = new S3dbReplicator({}, {
       users: { resource: 'users', actions: ['insert'] }
     });
-    
+
     expect(replicator.shouldReplicateResource('users', 'insert')).toBe(true);
     expect(replicator.shouldReplicateResource('users', 'update')).toBe(false);
     expect(replicator.shouldReplicateResource('products', 'insert')).toBe(false);
+  });
+
+  test('uses targetDatabase when accessing resources (not client)', async () => {
+    const replicator = new S3dbReplicator(
+      { connectionString: dbB.options.connectionString },
+      { users: 'users' }
+    );
+
+    replicator.targetDatabase = dbB;
+
+    // This should work using targetDatabase, not this.client
+    const resourceObj = replicator._getDestResourceObj('users');
+    expect(resourceObj).toBeDefined();
+    expect(resourceObj.name).toBe('users');
+  });
+
+  test('skips replication when enabled is false', async () => {
+    const replicator = new S3dbReplicator({}, { users: 'users' }, dbB);
+    replicator.targetDatabase = dbB;
+    replicator.enabled = false;
+
+    const result = await replicator.replicateBatch('users', [
+      { id: '1', operation: 'insert', data: { id: '1', name: 'Test' } }
+    ]);
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('replicator_disabled');
   });
 });
