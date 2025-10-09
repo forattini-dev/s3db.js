@@ -34,21 +34,87 @@ The Eventual Consistency Plugin provides a robust solution for managing numeric 
 >
 > **Multi-field Support**: When multiple fields have eventual consistency on the same resource, the field parameter becomes required in method calls. With a single field, the field parameter is optional for cleaner syntax.
 
+### ⚠️ Important: How Values Are Updated
+
+**THE PLUGIN UPDATES YOUR ORIGINAL FIELD VALUE!** This is not just a parallel structure - the actual `balance`, `points`, or counter field **IS UPDATED** during consolidation.
+
+```javascript
+// Initial state
+const wallet = await wallets.get('wallet-123');
+console.log(wallet.balance);  // 0
+
+// Create transactions (balance NOT updated yet)
+await wallets.add('wallet-123', 100);
+await wallets.add('wallet-123', 50);
+
+// Before consolidation
+const beforeWallet = await wallets.get('wallet-123');
+console.log(beforeWallet.balance);  // 0 ❌ (still old value)
+
+// Consolidation UPDATES the original field
+await wallets.consolidate('wallet-123');
+
+// After consolidation - ORIGINAL FIELD IS UPDATED!
+const afterWallet = await wallets.get('wallet-123');
+console.log(afterWallet.balance);  // 150 ✅ (UPDATED!)
+```
+
+**What happens during consolidation:**
+1. ✅ Reads pending transactions
+2. ✅ Applies reducer to calculate new value
+3. ✅ **UPDATES the original record**: `wallets.update(id, { balance: newValue })`
+4. ✅ Marks transactions as applied
+
+**Parallel structures are auxiliary:**
+- `{resource}_transactions_{field}` - Temporary transaction log (marked as applied after consolidation)
+- `{resource}_analytics_{field}` - Optional pre-calculated analytics (updated during consolidation)
+
+**But the ORIGINAL field value IS UPDATED!** 🎯
+
 ### How It Works
 
 1. **Explicit Operations**: Instead of direct updates, use `add()`, `sub()`, and `set()` methods
 2. **Transaction Log**: All operations create transactions in a dedicated resource (`{resource}_transactions_{field}`)
-3. **Consolidation**: Transactions are periodically consolidated into the final value
-4. **Flexibility**: Choose between sync (immediate) or async (eventual) consistency
-5. **Deferred Setup**: Plugin can be added before the target resource exists
+3. **Consolidation**: Transactions are periodically consolidated **and the original field value is UPDATED**
+4. **Value Update**: The actual field (e.g., `balance`) in the original resource **IS UPDATED** with the consolidated value
+5. **Flexibility**: Choose between sync (immediate) or async (eventual) consistency
+6. **Deferred Setup**: Plugin can be added before the target resource exists
+
+**Visual Flow:**
+```
+┌─────────────────────┐
+│ wallets.balance = 0 │  ← Original record
+└─────────────────────┘
+          ↓
+    add(100), add(50)   ← Creates transactions
+          ↓
+┌─────────────────────────────────┐
+│ transactions (applied: false)   │  ← Temporary log
+│ - add 100                       │
+│ - add 50                        │
+└─────────────────────────────────┘
+          ↓
+    consolidate()       ← Magic happens here!
+          ↓
+┌─────────────────────┐
+│ wallets.balance = 150│  ← ✅ ORIGINAL FIELD UPDATED!
+└─────────────────────┘
+          ↓
+┌─────────────────────────────────┐
+│ transactions (applied: true)    │  ← Marked as applied
+└─────────────────────────────────┘
+```
 
 ---
 
 ## Key Features
 
+> **🎯 Core Behavior**: The plugin **UPDATES your original field** (balance, points, etc.) during consolidation. You can read the updated value directly from your resource using `get()` - no need to query transactions!
+
 ### 🎯 Core Features
+- **Original Field Updated**: The actual field value in your resource IS UPDATED during consolidation ⚠️
 - **Atomic Operations**: `add()`, `sub()`, `set()` with distributed locking
-- **Transaction History**: Complete audit trail of all changes
+- **Transaction History**: Complete audit trail of all changes (temporary, marked as applied)
 - **Flexible Modes**: Sync (immediate) or Async (eventual) consistency
 - **Custom Reducers**: Define how transactions consolidate
 - **Time-based Partitions**: Automatic day and month partitions for efficient querying
@@ -113,6 +179,17 @@ await walletsResource.add('wallet-1', 100);
 // const plugin = new EventualConsistencyPlugin({ ... });
 // await s3db.usePlugin(plugin); // Immediate setup
 ```
+
+> **💡 Important Note**: The plugin **UPDATES the original field value** (e.g., `balance`) during consolidation. This is not just a parallel structure - the actual field in your resource IS UPDATED with the consolidated value.
+>
+> Example:
+> ```javascript
+> await wallets.add('wallet-1', 100);
+> await wallets.consolidate('wallet-1');  // ← Updates wallet.balance!
+>
+> const wallet = await wallets.get('wallet-1');
+> console.log(wallet.balance);  // 100 ✅ (original field updated!)
+> ```
 
 ---
 
@@ -1086,14 +1163,25 @@ await wallets.insert({
   currency: 'USD'
 });
 
-// Simple syntax - no field parameter needed
-await wallets.set('wallet-001', 1000);  // Set to 1000
-await wallets.add('wallet-001', 250);   // Add 250
-await wallets.sub('wallet-001', 100);   // Subtract 100
+// Check initial balance (reading from original field)
+let wallet = await wallets.get('wallet-001');
+console.log(wallet.balance);  // 0
 
-// Consolidate and check
+// Simple syntax - no field parameter needed
+await wallets.set('wallet-001', 1000);  // Creates transaction, updates balance to 1000
+await wallets.add('wallet-001', 250);   // Creates transaction, adds 250 to balance
+await wallets.sub('wallet-001', 100);   // Creates transaction, subtracts 100 from balance
+
+// Check balance after consolidation (ORIGINAL FIELD IS UPDATED!)
+wallet = await wallets.get('wallet-001');
+console.log(wallet.balance);  // 1150 ✅ - The ORIGINAL balance field was updated!
+
+// Consolidate returns the value directly
 const balance = await wallets.consolidate('wallet-001');
 console.log(`Current balance: $${balance}`); // 1150
+
+// ⚠️ IMPORTANT: You're reading from wallet.balance, NOT from transactions!
+// The original field IS UPDATED during consolidation.
 ```
 
 ### Multi-Currency Account (Multiple Fields)
@@ -1903,6 +1991,96 @@ This resource is automatically partitioned by `cohortHour` (byHour), `cohortDate
 - The transaction resource uses `asyncPartitions: true` by default for better write performance
 - Each field gets its own transaction resource (e.g., `wallets_transactions_balance`, `wallets_transactions_points`)
 - Transaction resources are created automatically when the plugin initializes
+
+---
+
+## ❌ Common Misconceptions
+
+### "The plugin only creates parallel structures, it doesn't update my field"
+
+**FALSE!** ❌ The plugin **ALWAYS UPDATES the original field** during consolidation.
+
+```javascript
+// WRONG thinking:
+// "I need to query transactions to get the balance"
+const transactions = await transactionResource.list();  // ❌ NO!
+
+// CORRECT:
+// "The balance field is UPDATED, I can read it directly"
+const wallet = await wallets.get('wallet-123');
+console.log(wallet.balance);  // ✅ YES! This is the consolidated value
+```
+
+**What actually happens:**
+- Transactions are **temporary** (marked as `applied: true` after consolidation)
+- Analytics are **optional** (for reporting only)
+- **The original field IS UPDATED**: `wallet.balance`, `user.points`, etc.
+
+### "I need to consolidate manually every time"
+
+**DEPENDS on mode:**
+
+**Async Mode (default)**: Consolidation runs automatically every 5 minutes
+```javascript
+// Auto-consolidation enabled by default
+{ mode: 'async', autoConsolidate: true }  // Runs every 5 minutes
+
+await wallets.add('wallet-123', 100);
+// Wait 5 minutes... balance will be updated automatically ✅
+```
+
+**Sync Mode**: Consolidation happens immediately
+```javascript
+{ mode: 'sync' }
+
+await wallets.add('wallet-123', 100);
+// Balance updated immediately ✅
+```
+
+**Manual consolidation** is only needed if:
+- You disabled auto-consolidation: `autoConsolidate: false`
+- You want immediate update in async mode
+- You're testing
+
+### "Transactions stay forever in the database"
+
+**FALSE!** ❌ Applied transactions are cleaned up automatically.
+
+```javascript
+{
+  transactionRetention: 30,  // Keep for 30 days (default)
+  gcInterval: 86400          // Cleanup runs daily (default)
+}
+```
+
+**After garbage collection:**
+- ✅ Old applied transactions are deleted
+- ✅ Original field value remains (it was already updated!)
+- ✅ Analytics remain (if enabled)
+
+### "Analytics are required"
+
+**FALSE!** ❌ Analytics are optional. The plugin works perfectly without them.
+
+```javascript
+// WITHOUT analytics - works perfectly
+{
+  enableAnalytics: false  // Default
+}
+// ✅ Transactions created
+// ✅ Consolidation works
+// ✅ Field value UPDATED
+// ❌ No analytics
+
+// WITH analytics - bonus features
+{
+  enableAnalytics: true
+}
+// ✅ Everything above
+// ✅ Pre-calculated reports (bonus!)
+```
+
+**TL;DR**: Analytics are for **reporting**, not for the core functionality!
 
 ---
 
