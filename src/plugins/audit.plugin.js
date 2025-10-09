@@ -341,7 +341,9 @@ export class AuditPlugin extends Plugin {
       const date = log.timestamp.split('T')[0];
       stats.timeline[date] = (stats.timeline[date] || 0) + 1;
     }
-    
+
     return stats;
   }
-} 
+}
+
+export default AuditPlugin; 
