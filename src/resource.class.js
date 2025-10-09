@@ -136,7 +136,8 @@ export class Resource extends AsyncEventEmitter {
       versioningEnabled = false,
       events = {},
       asyncEvents = true,
-      asyncPartitions = true
+      asyncPartitions = true,
+      createdBy = 'user'
     } = config;
 
     // Set instance properties
@@ -179,6 +180,7 @@ export class Resource extends AsyncEventEmitter {
       allNestedObjectsOptional,
       asyncEvents,
       asyncPartitions,
+      createdBy,
     };
 
     // Initialize hooks system

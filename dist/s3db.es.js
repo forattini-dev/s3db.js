@@ -3865,6 +3865,10 @@ class CachePlugin extends Plugin {
     }
   }
   shouldCacheResource(resourceName) {
+    const resourceMetadata = this.database.savedMetadata?.resources?.[resourceName];
+    if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== "user" && !this.config.include) {
+      return false;
+    }
     if (resourceName.startsWith("plg_") && !this.config.include) {
       return false;
     }
@@ -4414,8 +4418,9 @@ class EventualConsistencyPlugin extends Plugin {
         behavior: "body-overflow",
         timestamps: true,
         partitions: partitionConfig,
-        asyncPartitions: true
+        asyncPartitions: true,
         // Use async partitions for better performance
+        createdBy: "EventualConsistencyPlugin"
       })
     );
     if (!ok && !this.database.resources[transactionResourceName]) {
@@ -4432,7 +4437,8 @@ class EventualConsistencyPlugin extends Plugin {
           workerId: "string|optional"
         },
         behavior: "body-only",
-        timestamps: false
+        timestamps: false,
+        createdBy: "EventualConsistencyPlugin"
       })
     );
     if (!lockOk && !this.database.resources[lockResourceName]) {
@@ -4544,7 +4550,8 @@ class EventualConsistencyPlugin extends Plugin {
           byCohort: {
             fields: { cohort: "string" }
           }
-        }
+        },
+        createdBy: "EventualConsistencyPlugin"
       })
     );
     if (!ok && !this.database.resources[analyticsResourceName]) {
@@ -4968,6 +4975,23 @@ class EventualConsistencyPlugin extends Plugin {
         }
         if (this.config.enableAnalytics && transactionsToUpdate.length > 0) {
           await this.updateAnalytics(transactionsToUpdate);
+        }
+        if (this.targetResource.cache && typeof this.targetResource.cache.delete === "function") {
+          try {
+            const cacheKey = await this.targetResource.cacheKeyFor({ id: originalId });
+            await this.targetResource.cache.delete(cacheKey);
+            if (this.config.verbose) {
+              console.log(
+                `[EventualConsistency] ${this.config.resource}.${this.config.field} - Cache invalidated for ${originalId}`
+              );
+            }
+          } catch (cacheErr) {
+            if (this.config.verbose) {
+              console.warn(
+                `[EventualConsistency] ${this.config.resource}.${this.config.field} - Failed to invalidate cache for ${originalId}: ${cacheErr?.message}`
+              );
+            }
+          }
         }
       }
       return consolidatedValue;
@@ -9356,7 +9380,8 @@ ${errorDetails}`,
       versioningEnabled = false,
       events = {},
       asyncEvents = true,
-      asyncPartitions = true
+      asyncPartitions = true,
+      createdBy = "user"
     } = config;
     this.name = name;
     this.client = client;
@@ -9385,7 +9410,8 @@ ${errorDetails}`,
       autoDecrypt,
       allNestedObjectsOptional,
       asyncEvents,
-      asyncPartitions
+      asyncPartitions,
+      createdBy
     };
     this.hooks = {
       beforeInsert: [],
@@ -12110,6 +12136,7 @@ class Database extends EventEmitter {
       metadata.resources[name] = {
         currentVersion: version,
         partitions: resource.config.partitions || {},
+        createdBy: existingResource?.createdBy || resource.config.createdBy || "user",
         versions: {
           ...existingResource?.versions,
           // Preserve previous versions
@@ -12468,6 +12495,7 @@ class Database extends EventEmitter {
    * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
    * @param {Function|number} [config.idGenerator] - Custom ID generator or size
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @param {string} [config.createdBy='user'] - Who created this resource ('user', 'plugin', or plugin name)
    * @returns {Promise<Resource>} The created or updated resource
    */
   async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
@@ -12526,7 +12554,8 @@ class Database extends EventEmitter {
       idGenerator: config.idGenerator,
       idSize: config.idSize,
       asyncEvents: config.asyncEvents,
-      events: config.events || {}
+      events: config.events || {},
+      createdBy: config.createdBy || "user"
     });
     resource.database = this;
     this.resources[name] = resource;

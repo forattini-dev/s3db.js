@@ -144,7 +144,8 @@ export class EventualConsistencyPlugin extends Plugin {
         behavior: 'body-overflow',
         timestamps: true,
         partitions: partitionConfig,
-        asyncPartitions: true // Use async partitions for better performance
+        asyncPartitions: true, // Use async partitions for better performance
+        createdBy: 'EventualConsistencyPlugin'
       })
     );
 
@@ -165,7 +166,8 @@ export class EventualConsistencyPlugin extends Plugin {
           workerId: 'string|optional'
         },
         behavior: 'body-only',
-        timestamps: false
+        timestamps: false,
+        createdBy: 'EventualConsistencyPlugin'
       })
     );
 
@@ -309,7 +311,8 @@ export class EventualConsistencyPlugin extends Plugin {
           byCohort: {
             fields: { cohort: 'string' }
           }
-        }
+        },
+        createdBy: 'EventualConsistencyPlugin'
       })
     );
 
@@ -916,6 +919,29 @@ export class EventualConsistencyPlugin extends Plugin {
         // Update analytics if enabled (only for real transactions, not synthetic)
         if (this.config.enableAnalytics && transactionsToUpdate.length > 0) {
           await this.updateAnalytics(transactionsToUpdate);
+        }
+
+        // Invalidate cache for this record after consolidation
+        if (this.targetResource.cache && typeof this.targetResource.cache.delete === 'function') {
+          try {
+            const cacheKey = await this.targetResource.cacheKeyFor({ id: originalId });
+            await this.targetResource.cache.delete(cacheKey);
+
+            if (this.config.verbose) {
+              console.log(
+                `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+                `Cache invalidated for ${originalId}`
+              );
+            }
+          } catch (cacheErr) {
+            // Log but don't fail consolidation if cache invalidation fails
+            if (this.config.verbose) {
+              console.warn(
+                `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+                `Failed to invalidate cache for ${originalId}: ${cacheErr?.message}`
+              );
+            }
+          }
         }
       }
 
