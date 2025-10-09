@@ -139,6 +139,8 @@ console.log(afterWallet.balance);  // 150 ✅ (UPDATED!)
 
 ## Installation & Setup
 
+### Quick Start: Multi-Resource API ⭐ **RECOMMENDED**
+
 ```javascript
 import { S3db, EventualConsistencyPlugin } from 's3db.js';
 
@@ -148,6 +150,39 @@ const s3db = new S3db({
 
 await s3db.connect();
 
+// Add plugin for multiple fields at once (compact!)
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    wallets: ['balance', 'points'],
+    accounts: ['credits']
+  },
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: {
+    timezone: 'America/Sao_Paulo'  // Optional, defaults to UTC
+  }
+}));
+
+// Create resources - plugin automatically sets up
+const walletsResource = await s3db.createResource({
+  name: 'wallets',
+  attributes: {
+    id: 'string|required',
+    userId: 'string|required',
+    balance: 'number|default:0',
+    points: 'number|default:0',
+    currency: 'string|required'
+  }
+});
+
+// Methods are now available for all fields
+await walletsResource.add('wallet-1', 'balance', 100);
+await walletsResource.add('wallet-1', 'points', 50);
+```
+
+### Single Field Setup (Legacy)
+
+```javascript
 // Option 1: Add plugin before resource exists (deferred setup)
 const plugin = new EventualConsistencyPlugin({
   resource: 'wallets',  // Resource doesn't exist yet
@@ -171,7 +206,7 @@ const walletsResource = await s3db.createResource({
   }
 });
 
-// Methods are now available
+// Methods are now available (single field, no field parameter needed)
 await walletsResource.add('wallet-1', 100);
 
 // Option 2: Add plugin after resource exists
@@ -195,15 +230,73 @@ await walletsResource.add('wallet-1', 100);
 
 ## API Reference
 
-### Constructor Options
+### 🎨 Two API Styles
+
+The EventualConsistencyPlugin supports two configuration styles:
+
+#### Style 1: Multi-Resource (Compact) ⭐ **RECOMMENDED**
+
+Perfect when you have multiple fields on the same resource(s):
 
 ```javascript
 new EventualConsistencyPlugin({
-  // Required
-  resource: 'resourceName',     // Name of the resource
-  field: 'fieldName',           // Numeric field to manage
+  // Define multiple resources and their fields
+  resources: {
+    urls: ['clicks', 'views', 'shares', 'scans'],
+    posts: ['likes', 'comments'],
+    users: ['points', 'credits']
+  },
 
-  // Optional
+  // All configuration is shared across fields
+  mode: 'async',
+  autoConsolidate: true,
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' },
+  verbose: true
+})
+```
+
+**Benefits:**
+- ✅ Compact syntax (1 plugin vs 4+ plugins)
+- ✅ Shared configuration across all fields
+- ✅ Easier to maintain
+- ✅ All fields created automatically
+
+#### Style 2: Single Field (Legacy)
+
+For single fields or when you need per-field configuration:
+
+```javascript
+new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance',
+  mode: 'async',
+  cohort: { timezone: 'America/Sao_Paulo' }
+})
+```
+
+**When to use:**
+- Per-field custom reducers
+- Different modes per field (sync vs async)
+- Legacy code compatibility
+
+---
+
+### Constructor Options
+
+**Multi-Resource API:**
+```javascript
+new EventualConsistencyPlugin({
+  // Required (choose one style)
+  resources: {                    // Multi-resource style
+    resourceName: ['field1', 'field2', ...]
+  },
+
+  // OR (legacy single-field style)
+  resource: 'resourceName',       // Single resource
+  field: 'fieldName',             // Single field
+
+  // Optional (shared by all fields in multi-resource mode)
   mode: 'async',                      // 'async' (default) or 'sync'
   autoConsolidate: true,              // Enable auto-consolidation
   consolidationInterval: 300,         // Consolidation interval (seconds, default: 300 = 5min)
@@ -1270,8 +1363,18 @@ console.log(`Current balance: $${balance}`); // 1150
 
 ### Multi-Currency Account (Multiple Fields)
 
+**Option A: Multi-Resource API (Compact) ⭐ RECOMMENDED**
+
 ```javascript
-// Setup with multiple fields
+// Setup ALL fields with one plugin instance
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    accounts: ['balance', 'points', 'credits']  // All fields at once!
+  },
+  mode: 'sync',
+  verbose: true
+}));
+
 const accounts = await s3db.createResource({
   name: 'accounts',
   attributes: {
@@ -1283,7 +1386,31 @@ const accounts = await s3db.createResource({
   }
 });
 
-// Add plugins for each field
+// Create account
+await accounts.insert({
+  id: 'acc-001',
+  userId: 'user-123',
+  balance: 1000,
+  points: 500,
+  credits: 0
+});
+
+// Multiple fields require field parameter
+await accounts.add('acc-001', 'balance', 500);
+await accounts.add('acc-001', 'points', 100);
+await accounts.sub('acc-001', 'credits', 50);
+
+// Get consolidated values
+const account = await accounts.get('acc-001');
+console.log(account.balance);  // 1500 ✅
+console.log(account.points);   // 600 ✅
+console.log(account.credits);  // -50 ✅
+```
+
+**Option B: Single-Field API (Legacy)**
+
+```javascript
+// Add separate plugin for each field (verbose)
 await s3db.usePlugin(new EventualConsistencyPlugin({
   resource: 'accounts',
   field: 'balance',
@@ -1296,14 +1423,7 @@ await s3db.usePlugin(new EventualConsistencyPlugin({
   mode: 'sync'
 }));
 
-// Create account
-await accounts.insert({
-  id: 'acc-001',
-  userId: 'user-123',
-  balance: 1000,
-  points: 500
-});
-
+// (Same usage as Option A)
 // Multiple fields require field parameter
 await accounts.add('acc-001', 'balance', 300);  // Add to balance
 await accounts.add('acc-001', 'points', 150);   // Add to points
@@ -1474,8 +1594,19 @@ for (let i = 0; i < 1000; i++) {
 
 ### Parallel Operations Example
 
+**Option A: Multi-Resource API (Recommended)** ⭐
+
 ```javascript
-// Setup resource with multiple fields
+// Setup resource with multiple fields using ONE plugin
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    metrics: ['views', 'clicks']  // Both fields at once!
+  },
+  mode: 'async',
+  verbose: true
+}));
+
+// Create resource
 const metrics = await s3db.createResource({
   name: 'metrics',
   attributes: {
@@ -1484,19 +1615,6 @@ const metrics = await s3db.createResource({
     clicks: 'number|default:0'
   }
 });
-
-// Add plugins
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'metrics',
-  field: 'views',
-  mode: 'async'
-}));
-
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'metrics',
-  field: 'clicks',
-  mode: 'async'
-}));
 
 // Parallel operations on different fields
 const operations = [
@@ -1511,6 +1629,38 @@ await Promise.all(operations);
 // Consolidate both fields
 const views = await metrics.consolidate('page-1', 'views');
 const clicks = await metrics.consolidate('page-1', 'clicks');
+
+console.log(`Views: ${views}, Clicks: ${clicks}`);
+// Views: 300, Clicks: 30
+```
+
+**Option B: Single-Field API (Legacy)**
+
+```javascript
+// Setup resource with multiple fields using TWO plugins
+const metrics = await s3db.createResource({
+  name: 'metrics',
+  attributes: {
+    id: 'string|required',
+    views: 'number|default:0',
+    clicks: 'number|default:0'
+  }
+});
+
+// Add separate plugins for each field
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'metrics',
+  field: 'views',
+  mode: 'async'
+}));
+
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'metrics',
+  field: 'clicks',
+  mode: 'async'
+}));
+
+// (Same usage as Option A)
 ```
 
 ### Cross-Resource Operations in Hooks
@@ -1556,7 +1706,99 @@ const clicks = await s3db.createResource({
 - Arrow functions (`=>`) inherit `this` from lexical scope, which works but is less intuitive
 - Regular functions are clearer about intent and context
 
-#### Complete Example: URL Shortener with Auto-Incrementing Counter
+#### Complete Example: URL Shortener with Multiple Counters ⭐ **NEW**
+
+```javascript
+// 1. Setup plugin for ALL counters at once (compact!)
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    urls: ['clicks', 'views', 'shares', 'scans']  // All counters!
+  },
+  mode: 'sync',  // Immediate updates
+  enableAnalytics: true,  // Track hourly/daily/monthly stats
+  cohort: {
+    timezone: 'America/Sao_Paulo'
+  },
+  analyticsConfig: {
+    periods: ['hour', 'day', 'month'],
+    metrics: ['count', 'sum'],
+    retentionDays: 365
+  },
+  verbose: true
+}));
+
+// 2. Create URLs resource with all counters
+const urls = await s3db.createResource({
+  name: 'urls',
+  attributes: {
+    id: 'string|required',
+    link: 'string|required',
+    clicks: 'number|default:0',   // Managed by plugin
+    views: 'number|default:0',    // Managed by plugin
+    shares: 'number|default:0',   // Managed by plugin
+    scans: 'number|default:0'     // Managed by plugin
+  }
+});
+
+// 3. Create event resources with auto-increment hooks
+const clicks = await s3db.createResource({
+  name: 'clicks',
+  attributes: {
+    id: 'string|required',
+    urlId: 'string|required',
+    ip: 'string|optional',
+    timestamp: 'string|required'
+  },
+  hooks: {
+    afterInsert: [async function(data) {
+      // Auto-increment clicks counter
+      await this.database.resources.urls.add(data.urlId, 'clicks', 1);
+    }]
+  }
+});
+
+const views = await s3db.createResource({
+  name: 'views',
+  attributes: {
+    id: 'string|required',
+    urlId: 'string|required',
+    sessionId: 'string|required',
+    timestamp: 'string|required'
+  },
+  hooks: {
+    afterInsert: [async function(data) {
+      // Auto-increment views counter
+      await this.database.resources.urls.add(data.urlId, 'views', 1);
+    }]
+  }
+});
+
+// 4. Usage - all counters update automatically!
+await clicks.insert({ id: 'c1', urlId: 'short-123', timestamp: new Date().toISOString() });
+await clicks.insert({ id: 'c2', urlId: 'short-123', timestamp: new Date().toISOString() });
+await views.insert({ id: 'v1', urlId: 'short-123', sessionId: 's1', timestamp: new Date().toISOString() });
+
+// 5. Check consolidated values (ORIGINAL FIELDS UPDATED!)
+const url = await urls.get('short-123');
+console.log(url.clicks);  // 2 ✅
+console.log(url.views);   // 1 ✅
+console.log(url.shares);  // 0
+console.log(url.scans);   // 0
+
+// 6. Get analytics (hourly, daily, monthly stats)
+const hourlyStats = await urls.getAnalytics('short-123', 'clicks', {
+  period: 'hour',
+  startDate: '2025-10-09T00',
+  endDate: '2025-10-09T23'
+});
+console.log(hourlyStats);
+// [
+//   { cohort: '2025-10-09T14', transactionCount: 2, totalValue: 2, ... },
+//   ...
+// ]
+```
+
+#### Single Counter Example (Legacy)
 
 ```javascript
 // 1. Create URLs resource
@@ -2571,6 +2813,103 @@ await resource.add('id', 'fieldName', 100);
 ---
 
 ## Migration Guide
+
+### From Multiple Plugin Instances to Multi-Resource API ⭐ **NEW**
+
+If you're currently using multiple `EventualConsistencyPlugin` instances for the same resource, you can simplify your code by using the new multi-resource API:
+
+```javascript
+// ❌ OLD WAY: Multiple plugin instances (verbose)
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'urls',
+  field: 'clicks',
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' }
+}));
+
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'urls',
+  field: 'views',
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' }
+}));
+
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'urls',
+  field: 'shares',
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' }
+}));
+
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'urls',
+  field: 'scans',
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' }
+}));
+
+// ✅ NEW WAY: Single plugin with multi-resource API (compact!)
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: {
+    urls: ['clicks', 'views', 'shares', 'scans']  // All fields at once!
+  },
+  mode: 'async',
+  enableAnalytics: true,
+  cohort: { timezone: 'America/Sao_Paulo' }
+}));
+```
+
+**Benefits of migration:**
+- ✅ **90% less code** - 1 plugin instead of 4
+- ✅ **Easier to maintain** - One configuration object
+- ✅ **Guaranteed consistency** - All fields share the same settings
+- ✅ **Better performance** - Shared timers and resources
+- ✅ **Cleaner codebase** - Less duplication
+
+**Migration steps:**
+
+1. **Identify plugin groups** - Find all plugins for the same resource
+2. **Extract common configuration** - Mode, analytics, timezone, etc.
+3. **Group fields** - Combine field names into a `resources` object
+4. **Replace plugins** - Replace multiple `usePlugin()` calls with one
+5. **Test** - Verify all fields still work correctly
+
+**Example migration:**
+
+```javascript
+// Step 1: Identify (you have 2 plugins for 'accounts')
+// Plugin 1: accounts.balance
+// Plugin 2: accounts.points
+
+// Step 2: Extract common config
+const commonConfig = {
+  mode: 'async',
+  enableAnalytics: true,
+  consolidationInterval: 300
+};
+
+// Step 3: Group fields
+const fieldsToMigrate = {
+  accounts: ['balance', 'points']
+};
+
+// Step 4: Replace
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resources: fieldsToMigrate,
+  ...commonConfig
+}));
+
+// Step 5: Test - verify both fields work
+await accounts.add('acc-1', 'balance', 100);
+await accounts.add('acc-1', 'points', 50);
+```
+
+**Backward compatibility:**
+The old API still works! You can migrate gradually or keep using the single-field API if you need per-field custom configuration (different modes, reducers, etc.).
 
 ### From Direct Updates to Eventual Consistency
 
