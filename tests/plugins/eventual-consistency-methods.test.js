@@ -24,8 +24,9 @@ describe("EventualConsistencyPlugin Methods", () => {
 
     // Add plugin
     plugin = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       mode: 'async'
     });
 
@@ -49,7 +50,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Use set to create transaction
-      await walletsResource.set('wallet-1', 100);
+      await walletsResource.set('wallet-1', 'balance', 100);
 
       // Wait for async processing
       await sleep(200);
@@ -75,7 +76,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Use add
-      await walletsResource.add('wallet-2', 100);
+      await walletsResource.add('wallet-2', 'balance', 100);
 
       // Wait for async processing
       await sleep(200);
@@ -99,7 +100,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Use sub
-      await walletsResource.sub('wallet-3', 25);
+      await walletsResource.sub('wallet-3', 'balance', 25);
 
       // Wait for async processing
       await sleep(200);
@@ -173,14 +174,14 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Operations should be immediate in sync mode
-      await accountsResource.add('account-sync', 500);
+      await accountsResource.add('account-sync', 'balance', 500);
       
       // No need to wait in sync mode
       const account = await accountsResource.get('account-sync');
       expect(account.credits).toBe(1500);
 
       // More operations
-      await accountsResource.sub('account-sync', 200);
+      await accountsResource.sub('account-sync', 'balance', 200);
       const account2 = await accountsResource.get('account-sync');
       expect(account2.credits).toBe(1300);
     });
@@ -200,12 +201,12 @@ describe("EventualConsistencyPlugin Methods", () => {
       
       // 10 adds of 10 each = +100
       for (let i = 0; i < 10; i++) {
-        operations.push(walletsResource.add('wallet-parallel', 10));
+        operations.push(walletsResource.add('wallet-parallel', 'balance', 10));
       }
       
       // 5 subs of 20 each = -100
       for (let i = 0; i < 5; i++) {
-        operations.push(walletsResource.sub('wallet-parallel', 20));
+        operations.push(walletsResource.sub('wallet-parallel', 'balance', 20));
       }
 
       await Promise.all(operations);
@@ -214,7 +215,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(200);
 
       // Consolidate
-      const finalBalance = await walletsResource.consolidate('wallet-parallel');
+      const finalBalance = await walletsResource.consolidate('wallet-parallel', 'balance');
       
       // Should be: 1000 + 100 - 100 = 1000
       expect(finalBalance).toBe(1000);
@@ -251,7 +252,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(300);
 
       // Consolidate and verify
-      const finalBalance = await walletsResource.consolidate('wallet-chaos');
+      const finalBalance = await walletsResource.consolidate('wallet-chaos', 'balance');
       expect(finalBalance).toBe(expectedBalance);
     }, 40000);
   });
@@ -280,7 +281,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Add transaction
-      await walletsResource.add('wallet-partition', 50);
+      await walletsResource.add('wallet-partition', 'balance', 50);
 
       // Wait for async processing
       await sleep(200);
@@ -332,7 +333,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Add transaction
-      await brazilResource.add('brazil-1', 100);
+      await brazilResource.add('brazil-1', 'balance', 100);
 
       // Query transaction
       const transactions = await database.resources.brazil_accounts_transactions_balance.query({
