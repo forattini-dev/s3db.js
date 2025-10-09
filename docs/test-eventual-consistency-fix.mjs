@@ -10,14 +10,14 @@
  * Execute: node test-eventual-consistency-fix.mjs
  */
 
-import { S3DB } from 's3db.js';
-import { EventualConsistencyPlugin } from 's3db.js';
+import S3DB from '../dist/s3db.es.js';
+import { EventualConsistencyPlugin } from '../dist/s3db.es.js';
 
 console.log('\n🧪 Testing EventualConsistency Fix\n');
 console.log('=' .repeat(60));
 
 const database = new S3DB({
-  connection: process.env.S3DB_CONNECTION || 'http://minioadmin:minioadmin123@localhost:9100/s3db'
+  connectionString: process.env.S3DB_CONNECTION || 'http://minioadmin:minioadmin123@localhost:9100/s3db'
 });
 
 try {
@@ -26,20 +26,21 @@ try {
   console.log('   ✅ Connected');
 
   console.log('\n2️⃣  Creating URLs resource...');
+  const resourceName = `test_urls_${Date.now()}`;
   const urls = await database.createResource({
-    name: `test_urls_${Date.now()}`,
+    name: resourceName,
     attributes: {
       id: 'string|required',
-      link: 'string|required',
+      link: 'string|optional',
       clicks: 'number|default:0',
       views: 'number|default:0'
     }
   });
-  console.log(`   ✅ Resource created: ${urls.config.name}`);
+  console.log(`   ✅ Resource created: ${resourceName}`);
 
   console.log('\n3️⃣  Setting up EventualConsistency plugin...');
   const clicksPlugin = new EventualConsistencyPlugin({
-    resource: urls.config.name,
+    resource: resourceName,
     field: 'clicks',
     mode: 'sync',
     autoConsolidate: false,
@@ -49,7 +50,7 @@ try {
   console.log('   ✅ Plugin configured (clicks)');
 
   const viewsPlugin = new EventualConsistencyPlugin({
-    resource: urls.config.name,
+    resource: resourceName,
     field: 'views',
     mode: 'sync',
     autoConsolidate: false,
