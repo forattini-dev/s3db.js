@@ -1403,6 +1403,82 @@ export class EventualConsistencyPlugin extends Plugin {
   }
 
   /**
+   * Get analytics for entire month, broken down by days
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} month - Month in YYYY-MM format
+   * @returns {Promise<Array>} Daily analytics for the month
+   */
+  async getMonthByDay(resourceName, field, month) {
+    // month format: '2025-10'
+    const year = parseInt(month.substring(0, 4));
+    const monthNum = parseInt(month.substring(5, 7));
+
+    // Get first and last day of month
+    const firstDay = new Date(year, monthNum - 1, 1);
+    const lastDay = new Date(year, monthNum, 0);
+
+    const startDate = firstDay.toISOString().substring(0, 10);
+    const endDate = lastDay.toISOString().substring(0, 10);
+
+    return await this.getAnalytics(resourceName, field, {
+      period: 'day',
+      startDate,
+      endDate
+    });
+  }
+
+  /**
+   * Get analytics for entire day, broken down by hours
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} date - Date in YYYY-MM-DD format
+   * @returns {Promise<Array>} Hourly analytics for the day
+   */
+  async getDayByHour(resourceName, field, date) {
+    // date format: '2025-10-09'
+    return await this.getAnalytics(resourceName, field, {
+      period: 'hour',
+      date
+    });
+  }
+
+  /**
+   * Get analytics for last N days, broken down by days
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} days - Number of days to look back (default: 7)
+   * @returns {Promise<Array>} Daily analytics
+   */
+  async getLastNDays(resourceName, field, days = 7) {
+    const dates = Array.from({ length: days }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      return date.toISOString().substring(0, 10);
+    }).reverse();
+
+    return await this.getAnalytics(resourceName, field, {
+      period: 'day',
+      startDate: dates[0],
+      endDate: dates[dates.length - 1]
+    });
+  }
+
+  /**
+   * Get analytics for entire year, broken down by months
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} year - Year (e.g., 2025)
+   * @returns {Promise<Array>} Monthly analytics for the year
+   */
+  async getYearByMonth(resourceName, field, year) {
+    return await this.getAnalytics(resourceName, field, {
+      period: 'month',
+      year
+    });
+  }
+
+  /**
    * Get top records by volume
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name

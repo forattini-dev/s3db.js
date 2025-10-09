@@ -388,6 +388,116 @@ console.log('Highest value wallets:', topByValue);
 // ]
 ```
 
+### Helper Methods for Common Patterns
+
+The plugin provides convenient helper methods for common granularity queries:
+
+#### `getMonthByDay(resourceName, field, month)`
+
+Get entire month broken down by days:
+
+```javascript
+// October 2025, day by day (31 records)
+const octoberByDay = await plugin.getMonthByDay('wallets', 'balance', '2025-10');
+
+console.log('October day by day:');
+octoberByDay.forEach(day => {
+  console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
+});
+// Output:
+// 2025-10-01: 150 txns, $5000
+// 2025-10-02: 180 txns, $6200
+// 2025-10-03: 120 txns, $4100
+// ...
+```
+
+#### `getDayByHour(resourceName, field, date)`
+
+Get entire day broken down by hours:
+
+```javascript
+// Today, hour by hour (up to 24 records)
+const today = new Date().toISOString().substring(0, 10);
+const todayByHour = await plugin.getDayByHour('wallets', 'balance', today);
+
+console.log('Today hour by hour:');
+todayByHour.forEach(hour => {
+  const time = hour.cohort.substring(11);  // Extract hour
+  console.log(`${time}:00 - ${hour.count} txns, $${hour.sum}`);
+});
+// Output:
+// 00:00 - 12 txns, $500
+// 01:00 - 8 txns, $300
+// 02:00 - 5 txns, $150
+// ...
+// 14:00 - 45 txns, $2000
+```
+
+#### `getLastNDays(resourceName, field, days)`
+
+Get last N days, broken down by days:
+
+```javascript
+// Last 7 days, day by day (7 records)
+const last7Days = await plugin.getLastNDays('wallets', 'balance', 7);
+
+console.log('Last 7 days:');
+last7Days.forEach(day => {
+  console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
+});
+
+// Last 30 days
+const last30Days = await plugin.getLastNDays('wallets', 'balance', 30);
+```
+
+#### `getYearByMonth(resourceName, field, year)`
+
+Get entire year broken down by months:
+
+```javascript
+// 2025, month by month (12 records)
+const year2025 = await plugin.getYearByMonth('wallets', 'balance', 2025);
+
+console.log('2025 month by month:');
+year2025.forEach(month => {
+  console.log(`${month.cohort}: ${month.count} txns, $${month.sum}`);
+});
+// Output:
+// 2025-01: 15000 txns, $300000
+// 2025-02: 14000 txns, $280000
+// ...
+```
+
+### Manual Granularity Control
+
+For custom date ranges, use `getAnalytics` directly:
+
+```javascript
+// Custom week (Mon-Sun)
+const weeklyStats = await plugin.getAnalytics('wallets', 'balance', {
+  period: 'day',
+  startDate: '2025-10-07',  // Monday
+  endDate: '2025-10-13'     // Sunday
+});
+
+// Custom hours (9am-5pm)
+const businessHours = await plugin.getAnalytics('wallets', 'balance', {
+  period: 'hour',
+  date: '2025-10-09'
+});
+const filtered = businessHours.filter(h => {
+  const hour = parseInt(h.cohort.substring(11, 13));
+  return hour >= 9 && hour <= 17;
+});
+
+// Quarter (3 months)
+const q4 = await plugin.getAnalytics('wallets', 'balance', {
+  period: 'month',
+  startDate: '2025-10',
+  endDate: '2025-12'
+});
+```
+
 ### Use Cases
 
 **📊 Transaction Reports**
