@@ -48,10 +48,10 @@ describe('Resource Events - this.database Binding', () => {
             }
           }
         ],
-        // Test with arrow function (should ALSO have this.database after bind)
+        // Test with regular function (both regular and arrow functions work after bind fix)
         update: [
-          async (data) => {
-            // Arrow functions inherit this from bind
+          async function(data) {
+            // Regular function has access to this.database after bind
             eventCalls.push({ type: 'update', hasDatabase: !!this.database });
           }
         ]
@@ -85,13 +85,27 @@ describe('Resource Events - this.database Binding', () => {
     expect(stat.count).toBe(1);
   });
 
-  it('should bind this.database to arrow function events', async () => {
-    await users.update('user1', { name: 'Jane Doe' });
+  it('should bind this.database to update event listeners', async () => {
+    // First create the user
+    await users.insert({
+      id: 'user1',
+      name: 'John Doe',
+      email: 'john@example.com'
+    });
 
-    // Wait for event to fire
+    // Wait for insert event
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Check that event was called
+    // Clear event calls from insert
+    eventCalls = [];
+
+    // Now update the user (triggers update event)
+    await users.update('user1', { name: 'Jane Doe' });
+
+    // Wait for update event to fire
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Check that update event was called
     expect(eventCalls.some(c => c.type === 'update')).toBe(true);
   });
 
@@ -106,14 +120,20 @@ describe('Resource Events - this.database Binding', () => {
     // Wait for insert event
     await new Promise(resolve => setTimeout(resolve, 100));
 
+    // Verify insert event was triggered
+    expect(eventCalls.length).toBe(1);
+    expect(eventCalls[0].type).toBe('insert');
+
     // Update triggers update event
     await users.update('user2', { name: 'Alice Updated' });
 
     // Wait for update event
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Both events should have had access to this.database
-    expect(eventCalls.length).toBeGreaterThanOrEqual(2);
+    // Both events should have been triggered
+    expect(eventCalls.length).toBe(2);
+    expect(eventCalls[0].type).toBe('insert');
+    expect(eventCalls[1].type).toBe('update');
     expect(eventCalls.every(c => c.hasDatabase)).toBe(true);
   });
 
