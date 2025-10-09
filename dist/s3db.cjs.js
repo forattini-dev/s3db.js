@@ -10,11 +10,12 @@ var promises$1 = require('stream/promises');
 var path = require('path');
 var crypto = require('crypto');
 var zlib = require('node:zlib');
+var os = require('os');
+var jsonStableStringify = require('json-stable-stringify');
 var stream = require('stream');
 var promisePool = require('@supercharge/promise-pool');
 var web = require('node:stream/web');
 var lodashEs = require('lodash-es');
-var jsonStableStringify = require('json-stable-stringify');
 var http = require('http');
 var https = require('https');
 var nodeHttpHandler = require('@smithy/node-http-handler');
@@ -842,7 +843,7 @@ class AuditPlugin extends Plugin {
   }
   async onSetup() {
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
-      name: "audits",
+      name: "plg_audits",
       attributes: {
         id: "string|required",
         resourceName: "string|required",
@@ -858,15 +859,15 @@ class AuditPlugin extends Plugin {
       },
       behavior: "body-overflow"
     }));
-    this.auditResource = ok ? auditResource : this.database.resources.audits || null;
+    this.auditResource = ok ? auditResource : this.database.resources.plg_audits || null;
     if (!ok && !this.auditResource) return;
     this.database.addHook("afterCreateResource", (context) => {
-      if (context.resource.name !== "audits") {
+      if (context.resource.name !== "plg_audits") {
         this.setupResourceAuditing(context.resource);
       }
     });
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== "audits") {
+      if (resource.name !== "plg_audits") {
         this.setupResourceAuditing(resource);
       }
     }
@@ -1886,11 +1887,10 @@ function validateBackupConfig(driver, config = {}) {
 class BackupPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    this.driverName = options.driver || "filesystem";
-    this.driverConfig = options.config || {};
     this.config = {
-      // Legacy destinations support (will be converted to multi driver)
-      destinations: options.destinations || null,
+      // Driver configuration
+      driver: options.driver || "filesystem",
+      driverConfig: options.config || {},
       // Scheduling configuration
       schedule: options.schedule || {},
       // Retention policy (Grandfather-Father-Son)
@@ -1908,8 +1908,8 @@ class BackupPlugin extends Plugin {
       parallelism: options.parallelism || 4,
       include: options.include || null,
       exclude: options.exclude || [],
-      backupMetadataResource: options.backupMetadataResource || "backup_metadata",
-      tempDir: options.tempDir || "/tmp/s3db/backups",
+      backupMetadataResource: options.backupMetadataResource || "plg_backup_metadata",
+      tempDir: options.tempDir || path.join(os.tmpdir(), "s3db", "backups"),
       verbose: options.verbose || false,
       // Hooks
       onBackupStart: options.onBackupStart || null,
@@ -1921,31 +1921,8 @@ class BackupPlugin extends Plugin {
     };
     this.driver = null;
     this.activeBackups = /* @__PURE__ */ new Set();
-    this._handleLegacyDestinations();
-    validateBackupConfig(this.driverName, this.driverConfig);
+    validateBackupConfig(this.config.driver, this.config.driverConfig);
     this._validateConfiguration();
-  }
-  /**
-   * Convert legacy destinations format to multi driver format
-   */
-  _handleLegacyDestinations() {
-    if (this.config.destinations && Array.isArray(this.config.destinations)) {
-      this.driverName = "multi";
-      this.driverConfig = {
-        strategy: "all",
-        destinations: this.config.destinations.map((dest) => {
-          const { type, ...config } = dest;
-          return {
-            driver: type,
-            config
-          };
-        })
-      };
-      this.config.destinations = null;
-      if (this.config.verbose) {
-        console.log("[BackupPlugin] Converted legacy destinations format to multi driver");
-      }
-    }
   }
   _validateConfiguration() {
     if (this.config.encryption && (!this.config.encryption.key || !this.config.encryption.algorithm)) {
@@ -1956,7 +1933,7 @@ class BackupPlugin extends Plugin {
     }
   }
   async onSetup() {
-    this.driver = createBackupDriver(this.driverName, this.driverConfig);
+    this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);
     await promises.mkdir(this.config.tempDir, { recursive: true });
     await this._createBackupMetadataResource();
@@ -2004,6 +1981,9 @@ class BackupPlugin extends Plugin {
   async backup(type = "full", options = {}) {
     const backupId = this._generateBackupId(type);
     const startTime = Date.now();
+    if (this.activeBackups.has(backupId)) {
+      throw new Error(`Backup '${backupId}' is already in progress`);
+    }
     try {
       this.activeBackups.add(backupId);
       if (this.config.onBackupStart) {
@@ -2019,16 +1999,9 @@ class BackupPlugin extends Plugin {
         if (exportedFiles.length === 0) {
           throw new Error("No resources were exported for backup");
         }
-        let finalPath;
-        let totalSize = 0;
-        if (this.config.compression !== "none") {
-          finalPath = path.join(tempBackupDir, `${backupId}.tar.gz`);
-          totalSize = await this._createCompressedArchive(exportedFiles, finalPath);
-        } else {
-          finalPath = exportedFiles[0];
-          const [statOk, , stats] = await tryFn(() => promises.stat(finalPath));
-          totalSize = statOk ? stats.size : 0;
-        }
+        const archiveExtension = this.config.compression !== "none" ? ".tar.gz" : ".json";
+        const finalPath = path.join(tempBackupDir, `${backupId}${archiveExtension}`);
+        const totalSize = await this._createArchive(exportedFiles, finalPath, this.config.compression);
         const checksum = await this._generateChecksum(finalPath);
         const uploadResult = await this.driver.upload(finalPath, backupId, manifest);
         if (this.config.verification) {
@@ -2137,15 +2110,35 @@ class BackupPlugin extends Plugin {
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
-        console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        if (this.config.verbose) {
+          console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        }
         continue;
       }
       const exportPath = path.join(tempDir, `${resourceName}.json`);
       let records;
       if (type === "incremental") {
-        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1e3);
+        const [lastBackupOk, , lastBackups] = await tryFn(
+          () => this.database.resource(this.config.backupMetadataResource).list({
+            filter: {
+              status: "completed",
+              type: { $in: ["full", "incremental"] }
+            },
+            sort: { timestamp: -1 },
+            limit: 1
+          })
+        );
+        let sinceTimestamp;
+        if (lastBackupOk && lastBackups && lastBackups.length > 0) {
+          sinceTimestamp = new Date(lastBackups[0].timestamp);
+        } else {
+          sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1e3);
+        }
+        if (this.config.verbose) {
+          console.log(`[BackupPlugin] Incremental backup for '${resourceName}' since ${sinceTimestamp.toISOString()}`);
+        }
         records = await resource.list({
-          filter: { updatedAt: { ">": yesterday.toISOString() } }
+          filter: { updatedAt: { ">": sinceTimestamp.toISOString() } }
         });
       } else {
         records = await resource.list();
@@ -2165,29 +2158,57 @@ class BackupPlugin extends Plugin {
     }
     return exportedFiles;
   }
-  async _createCompressedArchive(files, targetPath) {
-    const output = fs.createWriteStream(targetPath);
-    const gzip = zlib.createGzip({ level: 6 });
+  async _createArchive(files, targetPath, compressionType) {
+    const archive = {
+      version: "1.0",
+      created: (/* @__PURE__ */ new Date()).toISOString(),
+      files: []
+    };
     let totalSize = 0;
-    await promises$1.pipeline(
-      async function* () {
-        for (const filePath of files) {
-          const content = await promises.readFile(filePath);
-          totalSize += content.length;
-          yield content;
+    for (const filePath of files) {
+      const [readOk, readErr, content] = await tryFn(() => promises.readFile(filePath, "utf8"));
+      if (!readOk) {
+        if (this.config.verbose) {
+          console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
         }
-      },
-      gzip,
-      output
-    );
+        continue;
+      }
+      const fileName = path.basename(filePath);
+      totalSize += content.length;
+      archive.files.push({
+        name: fileName,
+        size: content.length,
+        content
+      });
+    }
+    const archiveJson = JSON.stringify(archive);
+    if (compressionType === "none") {
+      await promises.writeFile(targetPath, archiveJson, "utf8");
+    } else {
+      const output = fs.createWriteStream(targetPath);
+      const gzip = zlib.createGzip({ level: 6 });
+      await promises$1.pipeline(
+        async function* () {
+          yield Buffer.from(archiveJson, "utf8");
+        },
+        gzip,
+        output
+      );
+    }
     const [statOk, , stats] = await tryFn(() => promises.stat(targetPath));
     return statOk ? stats.size : totalSize;
   }
   async _generateChecksum(filePath) {
-    const hash = crypto.createHash("sha256");
-    const stream = fs.createReadStream(filePath);
-    await promises$1.pipeline(stream, hash);
-    return hash.digest("hex");
+    const [ok, err, result] = await tryFn(async () => {
+      const hash = crypto.createHash("sha256");
+      const stream = fs.createReadStream(filePath);
+      await promises$1.pipeline(stream, hash);
+      return hash.digest("hex");
+    });
+    if (!ok) {
+      throw new Error(`Failed to generate checksum for ${filePath}: ${err?.message}`);
+    }
+    return result;
   }
   async _cleanupTempFiles(tempDir) {
     const [ok] = await tryFn(
@@ -2249,7 +2270,109 @@ class BackupPlugin extends Plugin {
   }
   async _restoreFromBackup(backupPath, options) {
     const restoredResources = [];
-    return restoredResources;
+    try {
+      let archiveData = "";
+      if (this.config.compression !== "none") {
+        const input = fs.createReadStream(backupPath);
+        const gunzip = zlib.createGunzip();
+        const chunks = [];
+        await new Promise((resolve, reject) => {
+          input.pipe(gunzip).on("data", (chunk) => chunks.push(chunk)).on("end", resolve).on("error", reject);
+        });
+        archiveData = Buffer.concat(chunks).toString("utf8");
+      } else {
+        archiveData = await promises.readFile(backupPath, "utf8");
+      }
+      let archive;
+      try {
+        archive = JSON.parse(archiveData);
+      } catch (parseError) {
+        throw new Error(`Failed to parse backup archive: ${parseError.message}`);
+      }
+      if (!archive || typeof archive !== "object") {
+        throw new Error("Invalid backup archive: not a valid JSON object");
+      }
+      if (!archive.version || !archive.files) {
+        throw new Error("Invalid backup archive format: missing version or files array");
+      }
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Restoring ${archive.files.length} files from backup`);
+      }
+      for (const file of archive.files) {
+        try {
+          const resourceData = JSON.parse(file.content);
+          if (!resourceData.resourceName || !resourceData.definition) {
+            if (this.config.verbose) {
+              console.warn(`[BackupPlugin] Skipping invalid file: ${file.name}`);
+            }
+            continue;
+          }
+          const resourceName = resourceData.resourceName;
+          if (options.resources && !options.resources.includes(resourceName)) {
+            continue;
+          }
+          let resource = this.database.resources[resourceName];
+          if (!resource) {
+            if (this.config.verbose) {
+              console.log(`[BackupPlugin] Creating resource '${resourceName}'`);
+            }
+            const [createOk, createErr] = await tryFn(
+              () => this.database.createResource(resourceData.definition)
+            );
+            if (!createOk) {
+              if (this.config.verbose) {
+                console.warn(`[BackupPlugin] Failed to create resource '${resourceName}': ${createErr?.message}`);
+              }
+              continue;
+            }
+            resource = this.database.resources[resourceName];
+          }
+          if (resourceData.records && Array.isArray(resourceData.records)) {
+            const mode = options.mode || "merge";
+            if (mode === "replace") {
+              const ids = await resource.listIds();
+              for (const id of ids) {
+                await resource.delete(id);
+              }
+            }
+            let insertedCount = 0;
+            for (const record of resourceData.records) {
+              const [insertOk] = await tryFn(async () => {
+                if (mode === "skip") {
+                  const existing = await resource.get(record.id);
+                  if (existing) {
+                    return false;
+                  }
+                }
+                await resource.insert(record);
+                return true;
+              });
+              if (insertOk) {
+                insertedCount++;
+              }
+            }
+            restoredResources.push({
+              name: resourceName,
+              recordsRestored: insertedCount,
+              totalRecords: resourceData.records.length
+            });
+            if (this.config.verbose) {
+              console.log(`[BackupPlugin] Restored ${insertedCount}/${resourceData.records.length} records to '${resourceName}'`);
+            }
+          }
+        } catch (fileError) {
+          if (this.config.verbose) {
+            console.warn(`[BackupPlugin] Error processing file ${file.name}: ${fileError.message}`);
+          }
+        }
+      }
+      return restoredResources;
+    } catch (error) {
+      if (this.config.verbose) {
+        console.error(`[BackupPlugin] Error restoring backup: ${error.message}`);
+      }
+      throw new Error(`Failed to restore backup: ${error.message}`);
+    }
   }
   /**
    * List available backups
@@ -2293,6 +2416,90 @@ class BackupPlugin extends Plugin {
     return ok ? backup : null;
   }
   async _cleanupOldBackups() {
+    try {
+      const [listOk, , allBackups] = await tryFn(
+        () => this.database.resource(this.config.backupMetadataResource).list({
+          filter: { status: "completed" },
+          sort: { timestamp: -1 }
+        })
+      );
+      if (!listOk || !allBackups || allBackups.length === 0) {
+        return;
+      }
+      const now = Date.now();
+      const msPerDay = 24 * 60 * 60 * 1e3;
+      const msPerWeek = 7 * msPerDay;
+      const msPerMonth = 30 * msPerDay;
+      const msPerYear = 365 * msPerDay;
+      const categorized = {
+        daily: [],
+        weekly: [],
+        monthly: [],
+        yearly: []
+      };
+      for (const backup of allBackups) {
+        const age = now - backup.timestamp;
+        if (age <= msPerDay * this.config.retention.daily) {
+          categorized.daily.push(backup);
+        } else if (age <= msPerWeek * this.config.retention.weekly) {
+          categorized.weekly.push(backup);
+        } else if (age <= msPerMonth * this.config.retention.monthly) {
+          categorized.monthly.push(backup);
+        } else if (age <= msPerYear * this.config.retention.yearly) {
+          categorized.yearly.push(backup);
+        }
+      }
+      const toKeep = /* @__PURE__ */ new Set();
+      categorized.daily.forEach((b) => toKeep.add(b.id));
+      const weeklyByWeek = /* @__PURE__ */ new Map();
+      for (const backup of categorized.weekly) {
+        const weekNum = Math.floor((now - backup.timestamp) / msPerWeek);
+        if (!weeklyByWeek.has(weekNum)) {
+          weeklyByWeek.set(weekNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+      const monthlyByMonth = /* @__PURE__ */ new Map();
+      for (const backup of categorized.monthly) {
+        const monthNum = Math.floor((now - backup.timestamp) / msPerMonth);
+        if (!monthlyByMonth.has(monthNum)) {
+          monthlyByMonth.set(monthNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+      const yearlyByYear = /* @__PURE__ */ new Map();
+      for (const backup of categorized.yearly) {
+        const yearNum = Math.floor((now - backup.timestamp) / msPerYear);
+        if (!yearlyByYear.has(yearNum)) {
+          yearlyByYear.set(yearNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+      const backupsToDelete = allBackups.filter((b) => !toKeep.has(b.id));
+      if (backupsToDelete.length === 0) {
+        return;
+      }
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Cleaning up ${backupsToDelete.length} old backups (keeping ${toKeep.size})`);
+      }
+      for (const backup of backupsToDelete) {
+        try {
+          await this.driver.delete(backup.id, backup.driverInfo);
+          await this.database.resource(this.config.backupMetadataResource).delete(backup.id);
+          if (this.config.verbose) {
+            console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
+          }
+        } catch (deleteError) {
+          if (this.config.verbose) {
+            console.warn(`[BackupPlugin] Failed to delete backup ${backup.id}: ${deleteError.message}`);
+          }
+        }
+      }
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[BackupPlugin] Error during cleanup: ${error.message}`);
+      }
+    }
   }
   async _executeHook(hook, ...args) {
     if (typeof hook === "function") {
@@ -3582,81 +3789,58 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
 class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
-    this.driverName = options.driver || "s3";
-    this.ttl = options.ttl;
-    this.maxSize = options.maxSize;
-    this.config = options.config || {};
-    this.includePartitions = options.includePartitions !== false;
-    this.partitionStrategy = options.partitionStrategy || "hierarchical";
-    this.partitionAware = options.partitionAware !== false;
-    this.trackUsage = options.trackUsage !== false;
-    this.preloadRelated = options.preloadRelated !== false;
-    this.legacyConfig = {
-      memoryOptions: options.memoryOptions,
-      filesystemOptions: options.filesystemOptions,
-      s3Options: options.s3Options,
-      driver: options.driver
+    this.config = {
+      // Driver configuration
+      driver: options.driver || "s3",
+      config: {
+        ttl: options.ttl,
+        maxSize: options.maxSize,
+        ...options.config
+        // Driver-specific config (can override ttl/maxSize)
+      },
+      // Resource filtering
+      include: options.include || null,
+      // Array of resource names to cache (null = all)
+      exclude: options.exclude || [],
+      // Array of resource names to exclude
+      // Partition settings
+      includePartitions: options.includePartitions !== false,
+      partitionStrategy: options.partitionStrategy || "hierarchical",
+      partitionAware: options.partitionAware !== false,
+      trackUsage: options.trackUsage !== false,
+      preloadRelated: options.preloadRelated !== false,
+      // Retry configuration
+      retryAttempts: options.retryAttempts || 3,
+      retryDelay: options.retryDelay || 100,
+      // ms
+      // Logging
+      verbose: options.verbose || false
     };
   }
   async setup(database) {
     await super.setup(database);
   }
   async onSetup() {
-    if (this.driverName && typeof this.driverName === "object") {
-      this.driver = this.driverName;
-    } else if (this.driverName === "memory") {
-      const driverConfig = {
-        ...this.legacyConfig.memoryOptions,
-        // Legacy support (lowest priority)
-        ...this.config
-        // New config format (medium priority)
-      };
-      if (this.ttl !== void 0) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== void 0) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      this.driver = new MemoryCache(driverConfig);
-    } else if (this.driverName === "filesystem") {
-      const driverConfig = {
-        ...this.legacyConfig.filesystemOptions,
-        // Legacy support (lowest priority)
-        ...this.config
-        // New config format (medium priority)
-      };
-      if (this.ttl !== void 0) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== void 0) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      if (this.partitionAware) {
+    if (this.config.driver && typeof this.config.driver === "object") {
+      this.driver = this.config.driver;
+    } else if (this.config.driver === "memory") {
+      this.driver = new MemoryCache(this.config.config);
+    } else if (this.config.driver === "filesystem") {
+      if (this.config.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
-          partitionStrategy: this.partitionStrategy,
-          trackUsage: this.trackUsage,
-          preloadRelated: this.preloadRelated,
-          ...driverConfig
+          partitionStrategy: this.config.partitionStrategy,
+          trackUsage: this.config.trackUsage,
+          preloadRelated: this.config.preloadRelated,
+          ...this.config.config
         });
       } else {
-        this.driver = new FilesystemCache(driverConfig);
+        this.driver = new FilesystemCache(this.config.config);
       }
     } else {
-      const driverConfig = {
+      this.driver = new S3Cache({
         client: this.database.client,
-        // Required for S3Cache
-        ...this.legacyConfig.s3Options,
-        // Legacy support (lowest priority)
-        ...this.config
-        // New config format (medium priority)
-      };
-      if (this.ttl !== void 0) {
-        driverConfig.ttl = this.ttl;
-      }
-      if (this.maxSize !== void 0) {
-        driverConfig.maxSize = this.maxSize;
-      }
-      this.driver = new S3Cache(driverConfig);
+        ...this.config.config
+      });
     }
     this.installDatabaseHooks();
     this.installResourceHooks();
@@ -3666,7 +3850,9 @@ class CachePlugin extends Plugin {
    */
   installDatabaseHooks() {
     this.database.addHook("afterCreateResource", async ({ resource }) => {
-      this.installResourceHooksForResource(resource);
+      if (this.shouldCacheResource(resource.name)) {
+        this.installResourceHooksForResource(resource);
+      }
     });
   }
   async onStart() {
@@ -3676,8 +3862,23 @@ class CachePlugin extends Plugin {
   // Remove the old installDatabaseProxy method
   installResourceHooks() {
     for (const resource of Object.values(this.database.resources)) {
+      if (!this.shouldCacheResource(resource.name)) {
+        continue;
+      }
       this.installResourceHooksForResource(resource);
     }
+  }
+  shouldCacheResource(resourceName) {
+    if (resourceName.startsWith("plg_") && !this.config.include) {
+      return false;
+    }
+    if (this.config.exclude.includes(resourceName)) {
+      return false;
+    }
+    if (this.config.include && !this.config.include.includes(resourceName)) {
+      return false;
+    }
+    return true;
   }
   installResourceHooksForResource(resource) {
     if (!this.driver) return;
@@ -3827,37 +4028,74 @@ class CachePlugin extends Plugin {
     if (data && data.id) {
       const itemSpecificMethods = ["get", "exists", "content", "hasContent"];
       for (const method of itemSpecificMethods) {
-        try {
-          const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
-          await resource.cache.clear(specificKey.replace(".json.gz", ""));
-        } catch (error) {
+        const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
+        const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, specificKey);
+        if (!ok2) {
+          this.emit("cache_clear_error", {
+            resource: resource.name,
+            method,
+            id: data.id,
+            error: err2.message
+          });
+          if (this.config.verbose) {
+            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, err2.message);
+          }
         }
       }
       if (this.config.includePartitions === true && resource.config?.partitions && Object.keys(resource.config.partitions).length > 0) {
         const partitionValues = this.getPartitionValues(data, resource);
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some((v) => v !== null && v !== void 0)) {
-            try {
-              const partitionKeyPrefix = path.join(keyPrefix, `partition=${partitionName}`);
-              await resource.cache.clear(partitionKeyPrefix);
-            } catch (error) {
+            const partitionKeyPrefix = path.join(keyPrefix, `partition=${partitionName}`);
+            const [ok2, err2] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
+            if (!ok2) {
+              this.emit("cache_clear_error", {
+                resource: resource.name,
+                partition: partitionName,
+                error: err2.message
+              });
+              if (this.config.verbose) {
+                console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, err2.message);
+              }
             }
           }
         }
       }
     }
-    try {
-      await resource.cache.clear(keyPrefix);
-    } catch (error) {
+    const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
+    if (!ok) {
+      this.emit("cache_clear_error", {
+        resource: resource.name,
+        type: "broad",
+        error: err.message
+      });
+      if (this.config.verbose) {
+        console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, err.message);
+      }
       const aggregateMethods = ["count", "list", "listIds", "getAll", "page", "query"];
       for (const method of aggregateMethods) {
-        try {
-          await resource.cache.clear(`${keyPrefix}/action=${method}`);
-          await resource.cache.clear(`resource=${resource.name}/action=${method}`);
-        } catch (methodError) {
-        }
+        await this.clearCacheWithRetry(resource.cache, `${keyPrefix}/action=${method}`);
+        await this.clearCacheWithRetry(resource.cache, `resource=${resource.name}/action=${method}`);
       }
     }
+  }
+  async clearCacheWithRetry(cache, key) {
+    let lastError;
+    for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
+      const [ok, err] = await tryFn(() => cache.clear(key));
+      if (ok) {
+        return [true, null];
+      }
+      lastError = err;
+      if (err.name === "NoSuchKey" || err.code === "NoSuchKey") {
+        return [true, null];
+      }
+      if (attempt < this.config.retryAttempts - 1) {
+        const delay = this.config.retryDelay * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    return [false, lastError];
   }
   async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
     const keyParts = [
@@ -3873,14 +4111,14 @@ class CachePlugin extends Plugin {
       }
     }
     if (Object.keys(params).length > 0) {
-      const paramsHash = await this.hashParams(params);
+      const paramsHash = this.hashParams(params);
       keyParts.push(paramsHash);
     }
     return path.join(...keyParts) + ".json.gz";
   }
-  async hashParams(params) {
-    const sortedParams = Object.keys(params).sort().map((key) => `${key}:${JSON.stringify(params[key])}`).join("|") || "empty";
-    return await sha256(sortedParams);
+  hashParams(params) {
+    const serialized = jsonStableStringify(params) || "empty";
+    return crypto.createHash("md5").update(serialized).digest("hex").substring(0, 16);
   }
   // Utility methods
   async getCacheStats() {
@@ -3905,50 +4143,48 @@ class CachePlugin extends Plugin {
     if (!resource) {
       throw new Error(`Resource '${resourceName}' not found`);
     }
-    const { includePartitions = true } = options;
+    const { includePartitions = true, sampleSize = 100 } = options;
     if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
       const partitionNames = resource.config.partitions ? Object.keys(resource.config.partitions) : [];
       return await resource.warmPartitionCache(partitionNames, options);
     }
-    await resource.getAll();
-    if (includePartitions && resource.config.partitions) {
+    let offset = 0;
+    const pageSize = 100;
+    const sampledRecords = [];
+    while (sampledRecords.length < sampleSize) {
+      const [ok, err, pageResult] = await tryFn(() => resource.page({ offset, size: pageSize }));
+      if (!ok || !pageResult) {
+        break;
+      }
+      const pageItems = Array.isArray(pageResult) ? pageResult : pageResult.items || [];
+      if (pageItems.length === 0) {
+        break;
+      }
+      sampledRecords.push(...pageItems);
+      offset += pageSize;
+    }
+    if (includePartitions && resource.config.partitions && sampledRecords.length > 0) {
       for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
         if (partitionDef.fields) {
-          const allRecords = await resource.getAll();
-          const recordsArray = Array.isArray(allRecords) ? allRecords : [];
-          const partitionValues = /* @__PURE__ */ new Set();
-          for (const record of recordsArray.slice(0, 10)) {
+          const partitionValuesSet = /* @__PURE__ */ new Set();
+          for (const record of sampledRecords) {
             const values = this.getPartitionValues(record, resource);
             if (values[partitionName]) {
-              partitionValues.add(JSON.stringify(values[partitionName]));
+              partitionValuesSet.add(JSON.stringify(values[partitionName]));
             }
           }
-          for (const partitionValueStr of partitionValues) {
-            const partitionValues2 = JSON.parse(partitionValueStr);
-            await resource.list({ partition: partitionName, partitionValues: partitionValues2 });
+          for (const partitionValueStr of partitionValuesSet) {
+            const partitionValues = JSON.parse(partitionValueStr);
+            await tryFn(() => resource.list({ partition: partitionName, partitionValues }));
           }
         }
       }
     }
-  }
-  // Partition-specific methods
-  async getPartitionCacheStats(resourceName, partition = null) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error("Partition cache statistics are only available with PartitionAwareFilesystemCache");
-    }
-    return await this.driver.getPartitionStats(resourceName, partition);
-  }
-  async getCacheRecommendations(resourceName) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error("Cache recommendations are only available with PartitionAwareFilesystemCache");
-    }
-    return await this.driver.getCacheRecommendations(resourceName);
-  }
-  async clearPartitionCache(resourceName, partition, partitionValues = {}) {
-    if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
-      throw new Error("Partition cache clearing is only available with PartitionAwareFilesystemCache");
-    }
-    return await this.driver.clearPartition(resourceName, partition, partitionValues);
+    return {
+      resourceName,
+      recordsSampled: sampledRecords.length,
+      partitionsWarmed: includePartitions && resource.config.partitions ? Object.keys(resource.config.partitions).length : 0
+    };
   }
   async analyzeCacheUsage() {
     if (!(this.driver instanceof PartitionAwareFilesystemCache)) {
@@ -3965,6 +4201,9 @@ class CachePlugin extends Plugin {
       }
     };
     for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+      if (!this.shouldCacheResource(resourceName)) {
+        continue;
+      }
       try {
         analysis.resourceStats[resourceName] = await this.driver.getPartitionStats(resourceName);
         analysis.recommendations[resourceName] = await this.driver.getCacheRecommendations(resourceName);
@@ -4065,13 +4304,12 @@ class EventualConsistencyPlugin extends Plugin {
     if (!options.field) {
       throw new Error("EventualConsistencyPlugin requires 'field' option");
     }
+    const detectedTimezone = this._detectTimezone();
     this.config = {
       resource: options.resource,
       field: options.field,
       cohort: {
-        interval: options.cohort?.interval || "24h",
-        timezone: options.cohort?.timezone || "UTC",
-        ...options.cohort
+        timezone: options.cohort?.timezone || detectedTimezone
       },
       reducer: options.reducer || ((transactions) => {
         let baseValue = 0;
@@ -4086,19 +4324,42 @@ class EventualConsistencyPlugin extends Plugin {
         }
         return baseValue;
       }),
-      consolidationInterval: options.consolidationInterval || 36e5,
-      // 1 hour default
+      consolidationInterval: options.consolidationInterval ?? 300,
+      // 5 minutes (in seconds)
+      consolidationConcurrency: options.consolidationConcurrency || 5,
+      consolidationWindow: options.consolidationWindow || 24,
+      // Hours to look back for pending transactions (watermark)
       autoConsolidate: options.autoConsolidate !== false,
+      lateArrivalStrategy: options.lateArrivalStrategy || "warn",
+      // 'ignore', 'warn', 'process'
       batchTransactions: options.batchTransactions || false,
+      // CAUTION: Not safe in distributed environments! Loses data on container crash
       batchSize: options.batchSize || 100,
       mode: options.mode || "async",
       // 'async' or 'sync'
-      ...options
+      lockTimeout: options.lockTimeout || 300,
+      // 5 minutes (in seconds, configurable)
+      transactionRetention: options.transactionRetention || 30,
+      // Days to keep applied transactions
+      gcInterval: options.gcInterval || 86400,
+      // 24 hours (in seconds)
+      verbose: options.verbose || false
     };
     this.transactionResource = null;
     this.targetResource = null;
     this.consolidationTimer = null;
+    this.gcTimer = null;
     this.pendingTransactions = /* @__PURE__ */ new Map();
+    if (this.config.batchTransactions && !this.config.verbose) {
+      console.warn(
+        `[EventualConsistency] WARNING: batchTransactions is enabled. This stores transactions in memory and will lose data if container crashes. Not recommended for distributed/production environments. Set verbose: true to suppress this warning.`
+      );
+    }
+    if (this.config.verbose && !options.cohort?.timezone) {
+      console.log(
+        `[EventualConsistency] Auto-detected timezone: ${this.config.cohort.timezone} (from ${process.env.TZ ? "TZ env var" : "system Intl API"})`
+      );
+    }
   }
   async onSetup() {
     this.targetResource = this.database.resources[this.config.resource];
@@ -4135,7 +4396,9 @@ class EventualConsistencyPlugin extends Plugin {
           // 'set', 'add', or 'sub'
           timestamp: "string|required",
           cohortDate: "string|required",
-          // For partitioning
+          // For daily partitioning
+          cohortHour: "string|required",
+          // For hourly partitioning
           cohortMonth: "string|optional",
           // For monthly partitioning
           source: "string|optional",
@@ -4153,10 +4416,28 @@ class EventualConsistencyPlugin extends Plugin {
       throw new Error(`Failed to create transaction resource: ${err?.message}`);
     }
     this.transactionResource = ok ? transactionResource : this.database.resources[transactionResourceName];
+    const lockResourceName = `${this.config.resource}_consolidation_locks_${this.config.field}`;
+    const [lockOk, lockErr, lockResource] = await tryFn(
+      () => this.database.createResource({
+        name: lockResourceName,
+        attributes: {
+          id: "string|required",
+          lockedAt: "number|required",
+          workerId: "string|optional"
+        },
+        behavior: "body-only",
+        timestamps: false
+      })
+    );
+    if (!lockOk && !this.database.resources[lockResourceName]) {
+      throw new Error(`Failed to create lock resource: ${lockErr?.message}`);
+    }
+    this.lockResource = lockOk ? lockResource : this.database.resources[lockResourceName];
     this.addHelperMethods();
     if (this.config.autoConsolidate) {
       this.startConsolidationTimer();
     }
+    this.startGarbageCollectionTimer();
   }
   async onStart() {
     if (this.deferredSetup) {
@@ -4173,6 +4454,10 @@ class EventualConsistencyPlugin extends Plugin {
       clearInterval(this.consolidationTimer);
       this.consolidationTimer = null;
     }
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
     await this.flushPendingTransactions();
     this.emit("eventual-consistency.stopped", {
       resource: this.config.resource,
@@ -4181,6 +4466,11 @@ class EventualConsistencyPlugin extends Plugin {
   }
   createPartitionConfig() {
     const partitions = {
+      byHour: {
+        fields: {
+          cohortHour: "string"
+        }
+      },
       byDay: {
         fields: {
           cohortDate: "string"
@@ -4194,6 +4484,65 @@ class EventualConsistencyPlugin extends Plugin {
     };
     return partitions;
   }
+  /**
+   * Auto-detect timezone from environment or system
+   * @private
+   */
+  _detectTimezone() {
+    if (process.env.TZ) {
+      return process.env.TZ;
+    }
+    try {
+      const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (systemTimezone) {
+        return systemTimezone;
+      }
+    } catch (err) {
+    }
+    return "UTC";
+  }
+  /**
+   * Helper method to resolve field and plugin from arguments
+   * Supports both single-field (field, value) and multi-field (field, value) signatures
+   * @private
+   */
+  _resolveFieldAndPlugin(resource, fieldOrValue, value) {
+    const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
+    if (hasMultipleFields && value === void 0) {
+      throw new Error(`Multiple fields have eventual consistency. Please specify the field explicitly.`);
+    }
+    const field = value !== void 0 ? fieldOrValue : this.config.field;
+    const actualValue = value !== void 0 ? value : fieldOrValue;
+    const fieldPlugin = resource._eventualConsistencyPlugins[field];
+    if (!fieldPlugin) {
+      throw new Error(`No eventual consistency plugin found for field "${field}"`);
+    }
+    return { field, value: actualValue, plugin: fieldPlugin };
+  }
+  /**
+   * Helper method to perform atomic consolidation in sync mode
+   * @private
+   */
+  async _syncModeConsolidate(id, field) {
+    const consolidatedValue = await this.consolidateRecord(id);
+    await this.targetResource.update(id, {
+      [field]: consolidatedValue
+    });
+    return consolidatedValue;
+  }
+  /**
+   * Create synthetic 'set' transaction from current value
+   * @private
+   */
+  _createSyntheticSetTransaction(currentValue) {
+    return {
+      id: "__synthetic__",
+      operation: "set",
+      value: currentValue,
+      timestamp: (/* @__PURE__ */ new Date(0)).toISOString(),
+      synthetic: true
+    };
+  }
   addHelperMethods() {
     const resource = this.targetResource;
     const defaultField = this.config.field;
@@ -4203,16 +4552,7 @@ class EventualConsistencyPlugin extends Plugin {
     }
     resource._eventualConsistencyPlugins[defaultField] = plugin;
     resource.set = async (id, fieldOrValue, value) => {
-      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
-      if (hasMultipleFields && value === void 0) {
-        throw new Error(`Multiple fields have eventual consistency. Please specify the field: set(id, field, value)`);
-      }
-      const field = value !== void 0 ? fieldOrValue : defaultField;
-      const actualValue = value !== void 0 ? value : fieldOrValue;
-      const fieldPlugin = resource._eventualConsistencyPlugins[field];
-      if (!fieldPlugin) {
-        throw new Error(`No eventual consistency plugin found for field "${field}"`);
-      }
+      const { field, value: actualValue, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrValue, value);
       await fieldPlugin.createTransaction({
         originalId: id,
         operation: "set",
@@ -4220,25 +4560,12 @@ class EventualConsistencyPlugin extends Plugin {
         source: "set"
       });
       if (fieldPlugin.config.mode === "sync") {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
       return actualValue;
     };
     resource.add = async (id, fieldOrAmount, amount) => {
-      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
-      if (hasMultipleFields && amount === void 0) {
-        throw new Error(`Multiple fields have eventual consistency. Please specify the field: add(id, field, amount)`);
-      }
-      const field = amount !== void 0 ? fieldOrAmount : defaultField;
-      const actualAmount = amount !== void 0 ? amount : fieldOrAmount;
-      const fieldPlugin = resource._eventualConsistencyPlugins[field];
-      if (!fieldPlugin) {
-        throw new Error(`No eventual consistency plugin found for field "${field}"`);
-      }
+      const { field, value: actualAmount, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrAmount, amount);
       await fieldPlugin.createTransaction({
         originalId: id,
         operation: "add",
@@ -4246,26 +4573,13 @@ class EventualConsistencyPlugin extends Plugin {
         source: "add"
       });
       if (fieldPlugin.config.mode === "sync") {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
       const currentValue = await fieldPlugin.getConsolidatedValue(id);
       return currentValue + actualAmount;
     };
     resource.sub = async (id, fieldOrAmount, amount) => {
-      const hasMultipleFields = Object.keys(resource._eventualConsistencyPlugins).length > 1;
-      if (hasMultipleFields && amount === void 0) {
-        throw new Error(`Multiple fields have eventual consistency. Please specify the field: sub(id, field, amount)`);
-      }
-      const field = amount !== void 0 ? fieldOrAmount : defaultField;
-      const actualAmount = amount !== void 0 ? amount : fieldOrAmount;
-      const fieldPlugin = resource._eventualConsistencyPlugins[field];
-      if (!fieldPlugin) {
-        throw new Error(`No eventual consistency plugin found for field "${field}"`);
-      }
+      const { field, value: actualAmount, plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, fieldOrAmount, amount);
       await fieldPlugin.createTransaction({
         originalId: id,
         operation: "sub",
@@ -4273,11 +4587,7 @@ class EventualConsistencyPlugin extends Plugin {
         source: "sub"
       });
       if (fieldPlugin.config.mode === "sync") {
-        const consolidatedValue = await fieldPlugin.consolidateRecord(id);
-        await resource.update(id, {
-          [field]: consolidatedValue
-        });
-        return consolidatedValue;
+        return await fieldPlugin._syncModeConsolidate(id, field);
       }
       const currentValue = await fieldPlugin.getConsolidatedValue(id);
       return currentValue - actualAmount;
@@ -4307,14 +4617,34 @@ class EventualConsistencyPlugin extends Plugin {
   async createTransaction(data) {
     const now = /* @__PURE__ */ new Date();
     const cohortInfo = this.getCohortInfo(now);
+    const watermarkMs = this.config.consolidationWindow * 60 * 60 * 1e3;
+    const watermarkTime = now.getTime() - watermarkMs;
+    const cohortHourDate = /* @__PURE__ */ new Date(cohortInfo.hour + ":00:00Z");
+    if (cohortHourDate.getTime() < watermarkTime) {
+      const hoursLate = Math.floor((now.getTime() - cohortHourDate.getTime()) / (60 * 60 * 1e3));
+      if (this.config.lateArrivalStrategy === "ignore") {
+        if (this.config.verbose) {
+          console.warn(
+            `[EventualConsistency] Late arrival ignored: transaction for ${cohortInfo.hour} is ${hoursLate}h late (watermark: ${this.config.consolidationWindow}h)`
+          );
+        }
+        return null;
+      } else if (this.config.lateArrivalStrategy === "warn") {
+        console.warn(
+          `[EventualConsistency] Late arrival detected: transaction for ${cohortInfo.hour} is ${hoursLate}h late (watermark: ${this.config.consolidationWindow}h). Processing anyway, but consolidation may not pick it up.`
+        );
+      }
+    }
     const transaction = {
-      id: `txn-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      id: idGenerator(),
+      // Use nanoid for guaranteed uniqueness
       originalId: data.originalId,
       field: this.config.field,
       value: data.value || 0,
       operation: data.operation || "set",
       timestamp: now.toISOString(),
       cohortDate: cohortInfo.date,
+      cohortHour: cohortInfo.hour,
       cohortMonth: cohortInfo.month,
       source: data.source || "unknown",
       applied: false
@@ -4332,9 +4662,16 @@ class EventualConsistencyPlugin extends Plugin {
   async flushPendingTransactions() {
     if (this.pendingTransactions.size === 0) return;
     const transactions = Array.from(this.pendingTransactions.values());
-    this.pendingTransactions.clear();
-    for (const transaction of transactions) {
-      await this.transactionResource.insert(transaction);
+    try {
+      await Promise.all(
+        transactions.map(
+          (transaction) => this.transactionResource.insert(transaction)
+        )
+      );
+      this.pendingTransactions.clear();
+    } catch (error) {
+      console.error("Failed to flush pending transactions:", error);
+      throw error;
     }
   }
   getCohortInfo(date) {
@@ -4344,53 +4681,90 @@ class EventualConsistencyPlugin extends Plugin {
     const year = localDate.getFullYear();
     const month = String(localDate.getMonth() + 1).padStart(2, "0");
     const day = String(localDate.getDate()).padStart(2, "0");
+    const hour = String(localDate.getHours()).padStart(2, "0");
     return {
       date: `${year}-${month}-${day}`,
+      hour: `${year}-${month}-${day}T${hour}`,
+      // ISO-like format for hour partition
       month: `${year}-${month}`
     };
   }
   getTimezoneOffset(timezone) {
-    const offsets = {
-      "UTC": 0,
-      "America/New_York": -5 * 36e5,
-      "America/Chicago": -6 * 36e5,
-      "America/Denver": -7 * 36e5,
-      "America/Los_Angeles": -8 * 36e5,
-      "America/Sao_Paulo": -3 * 36e5,
-      "Europe/London": 0,
-      "Europe/Paris": 1 * 36e5,
-      "Europe/Berlin": 1 * 36e5,
-      "Asia/Tokyo": 9 * 36e5,
-      "Asia/Shanghai": 8 * 36e5,
-      "Australia/Sydney": 10 * 36e5
-    };
-    return offsets[timezone] || 0;
+    try {
+      const now = /* @__PURE__ */ new Date();
+      const utcDate = new Date(now.toLocaleString("en-US", { timeZone: "UTC" }));
+      const tzDate = new Date(now.toLocaleString("en-US", { timeZone: timezone }));
+      return tzDate.getTime() - utcDate.getTime();
+    } catch (err) {
+      const offsets = {
+        "UTC": 0,
+        "America/New_York": -5 * 36e5,
+        "America/Chicago": -6 * 36e5,
+        "America/Denver": -7 * 36e5,
+        "America/Los_Angeles": -8 * 36e5,
+        "America/Sao_Paulo": -3 * 36e5,
+        "Europe/London": 0,
+        "Europe/Paris": 1 * 36e5,
+        "Europe/Berlin": 1 * 36e5,
+        "Asia/Tokyo": 9 * 36e5,
+        "Asia/Shanghai": 8 * 36e5,
+        "Australia/Sydney": 10 * 36e5
+      };
+      if (this.config.verbose && !offsets[timezone]) {
+        console.warn(
+          `[EventualConsistency] Unknown timezone '${timezone}', using UTC. Consider using a valid IANA timezone (e.g., 'America/New_York')`
+        );
+      }
+      return offsets[timezone] || 0;
+    }
   }
   startConsolidationTimer() {
-    const interval = this.config.consolidationInterval;
+    const intervalMs = this.config.consolidationInterval * 1e3;
     this.consolidationTimer = setInterval(async () => {
       await this.runConsolidation();
-    }, interval);
+    }, intervalMs);
   }
   async runConsolidation() {
     try {
-      const [ok, err, transactions] = await tryFn(
-        () => this.transactionResource.query({
-          applied: false
+      const now = /* @__PURE__ */ new Date();
+      const hoursToCheck = this.config.consolidationWindow || 24;
+      const cohortHours = [];
+      for (let i = 0; i < hoursToCheck; i++) {
+        const date = new Date(now.getTime() - i * 60 * 60 * 1e3);
+        const cohortInfo = this.getCohortInfo(date);
+        cohortHours.push(cohortInfo.hour);
+      }
+      const transactionsByHour = await Promise.all(
+        cohortHours.map(async (cohortHour) => {
+          const [ok, err, txns] = await tryFn(
+            () => this.transactionResource.query({
+              cohortHour,
+              applied: false
+            })
+          );
+          return ok ? txns : [];
         })
       );
-      if (!ok) {
-        console.error("Consolidation failed to query transactions:", err);
+      const transactions = transactionsByHour.flat();
+      if (transactions.length === 0) {
+        if (this.config.verbose) {
+          console.log(`[EventualConsistency] No pending transactions to consolidate`);
+        }
         return;
       }
       const uniqueIds = [...new Set(transactions.map((t) => t.originalId))];
-      for (const id of uniqueIds) {
-        await this.consolidateRecord(id);
+      const { results, errors } = await promisePool.PromisePool.for(uniqueIds).withConcurrency(this.config.consolidationConcurrency).process(async (id) => {
+        return await this.consolidateRecord(id);
+      });
+      if (errors && errors.length > 0) {
+        console.error(`Consolidation completed with ${errors.length} errors:`, errors);
       }
       this.emit("eventual-consistency.consolidated", {
         resource: this.config.resource,
         field: this.config.field,
-        recordCount: uniqueIds.length
+        recordCount: uniqueIds.length,
+        successCount: results.length,
+        errorCount: errors.length
       });
     } catch (error) {
       console.error("Consolidation error:", error);
@@ -4398,49 +4772,73 @@ class EventualConsistencyPlugin extends Plugin {
     }
   }
   async consolidateRecord(originalId) {
-    const [recordOk, recordErr, record] = await tryFn(
-      () => this.targetResource.get(originalId)
-    );
-    const currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
-    const [ok, err, transactions] = await tryFn(
-      () => this.transactionResource.query({
-        originalId,
-        applied: false
+    await this.cleanupStaleLocks();
+    const lockId = `lock-${originalId}`;
+    const [lockAcquired, lockErr, lock] = await tryFn(
+      () => this.lockResource.insert({
+        id: lockId,
+        lockedAt: Date.now(),
+        workerId: process.pid ? String(process.pid) : "unknown"
       })
     );
-    if (!ok || !transactions || transactions.length === 0) {
-      return currentValue;
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Lock for ${originalId} already held, skipping`);
+      }
+      const [recordOk, recordErr, record] = await tryFn(
+        () => this.targetResource.get(originalId)
+      );
+      return recordOk && record ? record[this.config.field] || 0 : 0;
     }
-    transactions.sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-    const hasSetOperation = transactions.some((t) => t.operation === "set");
-    if (currentValue !== 0 && !hasSetOperation) {
-      transactions.unshift({
-        id: "__synthetic__",
-        // Synthetic ID that we'll skip when marking as applied
-        operation: "set",
-        value: currentValue,
-        timestamp: (/* @__PURE__ */ new Date(0)).toISOString()
-        // Very old timestamp to ensure it's first
-      });
-    }
-    const consolidatedValue = this.config.reducer(transactions);
-    const [updateOk, updateErr] = await tryFn(
-      () => this.targetResource.update(originalId, {
-        [this.config.field]: consolidatedValue
-      })
-    );
-    if (updateOk) {
-      for (const txn of transactions) {
-        if (txn.id !== "__synthetic__") {
-          await this.transactionResource.update(txn.id, {
-            applied: true
-          });
+    try {
+      const [recordOk, recordErr, record] = await tryFn(
+        () => this.targetResource.get(originalId)
+      );
+      const currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
+      const [ok, err, transactions] = await tryFn(
+        () => this.transactionResource.query({
+          originalId,
+          applied: false
+        })
+      );
+      if (!ok || !transactions || transactions.length === 0) {
+        return currentValue;
+      }
+      transactions.sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      const hasSetOperation = transactions.some((t) => t.operation === "set");
+      if (currentValue !== 0 && !hasSetOperation) {
+        transactions.unshift(this._createSyntheticSetTransaction(currentValue));
+      }
+      const consolidatedValue = this.config.reducer(transactions);
+      const [updateOk, updateErr] = await tryFn(
+        () => this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        })
+      );
+      if (updateOk) {
+        const transactionsToUpdate = transactions.filter((txn) => txn.id !== "__synthetic__");
+        const { results, errors } = await promisePool.PromisePool.for(transactionsToUpdate).withConcurrency(10).process(async (txn) => {
+          const [ok2, err2] = await tryFn(
+            () => this.transactionResource.update(txn.id, { applied: true })
+          );
+          if (!ok2 && this.config.verbose) {
+            console.warn(`[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`, err2?.message);
+          }
+          return ok2;
+        });
+        if (errors && errors.length > 0 && this.config.verbose) {
+          console.warn(`[EventualConsistency] ${errors.length} transactions failed to mark as applied`);
         }
       }
+      return consolidatedValue;
+    } finally {
+      const [lockReleased, lockReleaseErr] = await tryFn(() => this.lockResource.delete(lockId));
+      if (!lockReleased && this.config.verbose) {
+        console.warn(`[EventualConsistency] Failed to release lock ${lockId}:`, lockReleaseErr?.message);
+      }
     }
-    return consolidatedValue;
   }
   async getConsolidatedValue(originalId, options = {}) {
     const includeApplied = options.includeApplied || false;
@@ -4454,11 +4852,11 @@ class EventualConsistencyPlugin extends Plugin {
       () => this.transactionResource.query(query)
     );
     if (!ok || !transactions || transactions.length === 0) {
-      const [recordOk, recordErr, record] = await tryFn(
+      const [recordOk2, recordErr2, record2] = await tryFn(
         () => this.targetResource.get(originalId)
       );
-      if (recordOk && record) {
-        return record[this.config.field] || 0;
+      if (recordOk2 && record2) {
+        return record2[this.config.field] || 0;
       }
       return 0;
     }
@@ -4470,6 +4868,14 @@ class EventualConsistencyPlugin extends Plugin {
         if (endDate && timestamp > new Date(endDate)) return false;
         return true;
       });
+    }
+    const [recordOk, recordErr, record] = await tryFn(
+      () => this.targetResource.get(originalId)
+    );
+    const currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
+    const hasSetOperation = filtered.some((t) => t.operation === "set");
+    if (currentValue !== 0 && !hasSetOperation) {
+      filtered.unshift(this._createSyntheticSetTransaction(currentValue));
     }
     filtered.sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -4505,6 +4911,133 @@ class EventualConsistencyPlugin extends Plugin {
     }
     return stats;
   }
+  /**
+   * Clean up stale locks that exceed the configured timeout
+   * Uses distributed locking to prevent multiple containers from cleaning simultaneously
+   */
+  async cleanupStaleLocks() {
+    const now = Date.now();
+    const lockTimeoutMs = this.config.lockTimeout * 1e3;
+    const cutoffTime = now - lockTimeoutMs;
+    const cleanupLockId = `lock-cleanup-${this.config.resource}-${this.config.field}`;
+    const [lockAcquired] = await tryFn(
+      () => this.lockResource.insert({
+        id: cleanupLockId,
+        lockedAt: Date.now(),
+        workerId: process.pid ? String(process.pid) : "unknown"
+      })
+    );
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Lock cleanup already running in another container`);
+      }
+      return;
+    }
+    try {
+      const [ok, err, locks] = await tryFn(() => this.lockResource.list());
+      if (!ok || !locks || locks.length === 0) return;
+      const staleLocks = locks.filter(
+        (lock) => lock.id !== cleanupLockId && lock.lockedAt < cutoffTime
+      );
+      if (staleLocks.length === 0) return;
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Cleaning up ${staleLocks.length} stale locks`);
+      }
+      const { results, errors } = await promisePool.PromisePool.for(staleLocks).withConcurrency(5).process(async (lock) => {
+        const [deleted] = await tryFn(() => this.lockResource.delete(lock.id));
+        return deleted;
+      });
+      if (errors && errors.length > 0 && this.config.verbose) {
+        console.warn(`[EventualConsistency] ${errors.length} stale locks failed to delete`);
+      }
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[EventualConsistency] Error cleaning up stale locks:`, error.message);
+      }
+    } finally {
+      await tryFn(() => this.lockResource.delete(cleanupLockId));
+    }
+  }
+  /**
+   * Start garbage collection timer for old applied transactions
+   */
+  startGarbageCollectionTimer() {
+    const gcIntervalMs = this.config.gcInterval * 1e3;
+    this.gcTimer = setInterval(async () => {
+      await this.runGarbageCollection();
+    }, gcIntervalMs);
+  }
+  /**
+   * Delete old applied transactions based on retention policy
+   * Uses distributed locking to prevent multiple containers from running GC simultaneously
+   */
+  async runGarbageCollection() {
+    const gcLockId = `lock-gc-${this.config.resource}-${this.config.field}`;
+    const [lockAcquired] = await tryFn(
+      () => this.lockResource.insert({
+        id: gcLockId,
+        lockedAt: Date.now(),
+        workerId: process.pid ? String(process.pid) : "unknown"
+      })
+    );
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] GC already running in another container`);
+      }
+      return;
+    }
+    try {
+      const now = Date.now();
+      const retentionMs = this.config.transactionRetention * 24 * 60 * 60 * 1e3;
+      const cutoffDate = new Date(now - retentionMs);
+      const cutoffIso = cutoffDate.toISOString();
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Running GC for transactions older than ${cutoffIso} (${this.config.transactionRetention} days)`);
+      }
+      const cutoffMonth = cutoffDate.toISOString().substring(0, 7);
+      const [ok, err, oldTransactions] = await tryFn(
+        () => this.transactionResource.query({
+          applied: true,
+          timestamp: { "<": cutoffIso }
+        })
+      );
+      if (!ok) {
+        if (this.config.verbose) {
+          console.warn(`[EventualConsistency] GC failed to query transactions:`, err?.message);
+        }
+        return;
+      }
+      if (!oldTransactions || oldTransactions.length === 0) {
+        if (this.config.verbose) {
+          console.log(`[EventualConsistency] No old transactions to clean up`);
+        }
+        return;
+      }
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Deleting ${oldTransactions.length} old transactions`);
+      }
+      const { results, errors } = await promisePool.PromisePool.for(oldTransactions).withConcurrency(10).process(async (txn) => {
+        const [deleted] = await tryFn(() => this.transactionResource.delete(txn.id));
+        return deleted;
+      });
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] GC completed: ${results.length} deleted, ${errors.length} errors`);
+      }
+      this.emit("eventual-consistency.gc-completed", {
+        resource: this.config.resource,
+        field: this.config.field,
+        deletedCount: results.length,
+        errorCount: errors.length
+      });
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[EventualConsistency] GC error:`, error.message);
+      }
+      this.emit("eventual-consistency.gc-error", error);
+    } finally {
+      await tryFn(() => this.lockResource.delete(gcLockId));
+    }
+  }
 }
 
 class FullTextPlugin extends Plugin {
@@ -4521,7 +5054,7 @@ class FullTextPlugin extends Plugin {
   async setup(database) {
     this.database = database;
     const [ok, err, indexResource] = await tryFn(() => database.createResource({
-      name: "fulltext_indexes",
+      name: "plg_fulltext_indexes",
       attributes: {
         id: "string|required",
         resourceName: "string|required",
@@ -4580,7 +5113,7 @@ class FullTextPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this.database.addHook("afterCreateResource", (resource) => {
-      if (resource.name !== "fulltext_indexes") {
+      if (resource.name !== "plg_fulltext_indexes") {
         this.installResourceHooks(resource);
       }
     });
@@ -4594,14 +5127,14 @@ class FullTextPlugin extends Plugin {
     }
     this.database.plugins.fulltext = this;
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name === "fulltext_indexes") continue;
+      if (resource.name === "plg_fulltext_indexes") continue;
       this.installResourceHooks(resource);
     }
     if (!this.database._fulltextProxyInstalled) {
       this.database._previousCreateResourceForFullText = this.database.createResource;
       this.database.createResource = async function(...args) {
         const resource = await this._previousCreateResourceForFullText(...args);
-        if (this.plugins?.fulltext && resource.name !== "fulltext_indexes") {
+        if (this.plugins?.fulltext && resource.name !== "plg_fulltext_indexes") {
           this.plugins.fulltext.installResourceHooks(resource);
         }
         return resource;
@@ -4609,7 +5142,7 @@ class FullTextPlugin extends Plugin {
       this.database._fulltextProxyInstalled = true;
     }
     for (const resource of Object.values(this.database.resources)) {
-      if (resource.name !== "fulltext_indexes") {
+      if (resource.name !== "plg_fulltext_indexes") {
         this.installResourceHooks(resource);
       }
     }
@@ -4852,7 +5385,7 @@ class FullTextPlugin extends Plugin {
     return this._rebuildAllIndexesInternal();
   }
   async _rebuildAllIndexesInternal() {
-    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "fulltext_indexes");
+    const resourceNames = Object.keys(this.database.resources).filter((name) => name !== "plg_fulltext_indexes");
     for (const resourceName of resourceNames) {
       const [ok, err] = await tryFn(() => this.rebuildIndex(resourceName));
     }
@@ -4904,7 +5437,7 @@ class MetricsPlugin extends Plugin {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
     const [ok, err] = await tryFn(async () => {
       const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
-        name: "metrics",
+        name: "plg_metrics",
         attributes: {
           id: "string|required",
           type: "string|required",
@@ -4919,9 +5452,9 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.metricsResource = ok1 ? metricsResource : database.resources.metrics;
+      this.metricsResource = ok1 ? metricsResource : database.resources.plg_metrics;
       const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
-        name: "error_logs",
+        name: "plg_error_logs",
         attributes: {
           id: "string|required",
           resourceName: "string|required",
@@ -4931,9 +5464,9 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.errorsResource = ok2 ? errorsResource : database.resources.error_logs;
+      this.errorsResource = ok2 ? errorsResource : database.resources.plg_error_logs;
       const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
-        name: "performance_logs",
+        name: "plg_performance_logs",
         attributes: {
           id: "string|required",
           resourceName: "string|required",
@@ -4943,12 +5476,12 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.performanceResource = ok3 ? performanceResource : database.resources.performance_logs;
+      this.performanceResource = ok3 ? performanceResource : database.resources.plg_performance_logs;
     });
     if (!ok) {
-      this.metricsResource = database.resources.metrics;
-      this.errorsResource = database.resources.error_logs;
-      this.performanceResource = database.resources.performance_logs;
+      this.metricsResource = database.resources.plg_metrics;
+      this.errorsResource = database.resources.plg_error_logs;
+      this.performanceResource = database.resources.plg_performance_logs;
     }
     this.installDatabaseHooks();
     this.installMetricsHooks();
@@ -4967,7 +5500,7 @@ class MetricsPlugin extends Plugin {
   }
   installDatabaseHooks() {
     this.database.addHook("afterCreateResource", (resource) => {
-      if (resource.name !== "metrics" && resource.name !== "error_logs" && resource.name !== "performance_logs") {
+      if (resource.name !== "plg_metrics" && resource.name !== "plg_error_logs" && resource.name !== "plg_performance_logs") {
         this.installResourceHooks(resource);
       }
     });
@@ -4977,7 +5510,7 @@ class MetricsPlugin extends Plugin {
   }
   installMetricsHooks() {
     for (const resource of Object.values(this.database.resources)) {
-      if (["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+      if (["plg_metrics", "plg_error_logs", "plg_performance_logs"].includes(resource.name)) {
         continue;
       }
       this.installResourceHooks(resource);
@@ -4985,7 +5518,7 @@ class MetricsPlugin extends Plugin {
     this.database._createResource = this.database.createResource;
     this.database.createResource = async function(...args) {
       const resource = await this._createResource(...args);
-      if (this.plugins?.metrics && !["metrics", "error_logs", "performance_logs"].includes(resource.name)) {
+      if (this.plugins?.metrics && !["plg_metrics", "plg_error_logs", "plg_performance_logs"].includes(resource.name)) {
         this.plugins.metrics.installResourceHooks(resource);
       }
       return resource;
@@ -10325,7 +10858,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.0" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.1" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -11578,16 +12111,20 @@ class S3dbReplicator extends BaseReplicator {
     return resource;
   }
   _getDestResourceObj(resource) {
-    const available = Object.keys(this.client.resources || {});
+    const db = this.targetDatabase || this.client;
+    const available = Object.keys(db.resources || {});
     const norm = normalizeResourceName$1(resource);
     const found = available.find((r) => normalizeResourceName$1(r) === norm);
     if (!found) {
       throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(", ")}`);
     }
-    return this.client.resources[found];
+    return db.resources[found];
   }
   async replicateBatch(resourceName, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: "replicator_disabled" };
+    }
+    if (!this.shouldReplicateResource(resourceName)) {
       return { skipped: true, reason: "resource_not_included" };
     }
     const results = [];
@@ -11698,11 +12235,12 @@ class SqsReplicator extends BaseReplicator {
     this.client = client;
     this.queueUrl = config.queueUrl;
     this.queues = config.queues || {};
-    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
+    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault || null;
     this.region = config.region || "us-east-1";
     this.sqsClient = client || null;
     this.messageGroupId = config.messageGroupId;
     this.deduplicationId = config.deduplicationId;
+    this.resourceQueueMap = config.resourceQueueMap || null;
     if (Array.isArray(resources)) {
       this.resources = {};
       for (const resource of resources) {
@@ -11833,7 +12371,10 @@ class SqsReplicator extends BaseReplicator {
     }
   }
   async replicate(resource, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: "replicator_disabled" };
+    }
+    if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
     const [ok, err, result] = await tryFn(async () => {
@@ -11877,7 +12418,10 @@ class SqsReplicator extends BaseReplicator {
     return { success: false, error: err.message };
   }
   async replicateBatch(resource, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: "replicator_disabled" };
+    }
+    if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: "resource_not_included" };
     }
     const [ok, err, result] = await tryFn(async () => {
@@ -12031,22 +12575,23 @@ class ReplicatorPlugin extends Plugin {
       replicators: options.replicators || [],
       logErrors: options.logErrors !== false,
       replicatorLogResource: options.replicatorLogResource || "replicator_log",
+      persistReplicatorLog: options.persistReplicatorLog || false,
       enabled: options.enabled !== false,
       batchSize: options.batchSize || 100,
       maxRetries: options.maxRetries || 3,
       timeout: options.timeout || 3e4,
-      verbose: options.verbose || false,
-      ...options
+      verbose: options.verbose || false
     };
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = /* @__PURE__ */ new Set();
-  }
-  /**
-   * Decompress data if it was compressed
-   */
-  async decompressData(data) {
-    return data;
+    this.eventHandlers = /* @__PURE__ */ new Map();
+    this.stats = {
+      totalReplications: 0,
+      totalErrors: 0,
+      lastSync: null
+    };
+    this._afterCreateResourceHook = null;
   }
   // Helper to filter out internal S3DB fields
   filterInternalFields(obj) {
@@ -12067,7 +12612,7 @@ class ReplicatorPlugin extends Plugin {
     if (!resource || this.eventListenersInstalled.has(resource.name) || resource.name === this.config.replicatorLogResource) {
       return;
     }
-    resource.on("insert", async (data) => {
+    const insertHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
         const completeData = { ...data, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
         await plugin.processReplicatorEvent("insert", resource.name, completeData.id, completeData);
@@ -12078,8 +12623,8 @@ class ReplicatorPlugin extends Plugin {
         }
         this.emit("error", { operation: "insert", error: error.message, resource: resource.name });
       }
-    });
-    resource.on("update", async (data, beforeData) => {
+    };
+    const updateHandler = async (data, beforeData) => {
       const [ok, error] = await tryFn(async () => {
         const completeData = await plugin.getCompleteData(resource, data);
         const dataWithTimestamp = { ...completeData, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
@@ -12091,8 +12636,8 @@ class ReplicatorPlugin extends Plugin {
         }
         this.emit("error", { operation: "update", error: error.message, resource: resource.name });
       }
-    });
-    resource.on("delete", async (data) => {
+    };
+    const deleteHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
         await plugin.processReplicatorEvent("delete", resource.name, data.id, data);
       });
@@ -12102,14 +12647,22 @@ class ReplicatorPlugin extends Plugin {
         }
         this.emit("error", { operation: "delete", error: error.message, resource: resource.name });
       }
+    };
+    this.eventHandlers.set(resource.name, {
+      insert: insertHandler,
+      update: updateHandler,
+      delete: deleteHandler
     });
+    resource.on("insert", insertHandler);
+    resource.on("update", updateHandler);
+    resource.on("delete", deleteHandler);
     this.eventListenersInstalled.add(resource.name);
   }
   async setup(database) {
     this.database = database;
     if (this.config.persistReplicatorLog) {
       const [ok, err, logResource] = await tryFn(() => database.createResource({
-        name: this.config.replicatorLogResource || "replicator_logs",
+        name: this.config.replicatorLogResource || "plg_replicator_logs",
         attributes: {
           id: "string|required",
           resource: "string|required",
@@ -12123,13 +12676,13 @@ class ReplicatorPlugin extends Plugin {
       if (ok) {
         this.replicatorLogResource = logResource;
       } else {
-        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || "replicator_logs"];
+        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || "plg_replicator_logs"];
       }
     }
     await this.initializeReplicators(database);
     this.installDatabaseHooks();
     for (const resource of Object.values(database.resources)) {
-      if (resource.name !== (this.config.replicatorLogResource || "replicator_logs")) {
+      if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
         this.installEventListeners(resource, database, this);
       }
     }
@@ -12145,14 +12698,18 @@ class ReplicatorPlugin extends Plugin {
     this.removeDatabaseHooks();
   }
   installDatabaseHooks() {
-    this.database.addHook("afterCreateResource", (resource) => {
-      if (resource.name !== (this.config.replicatorLogResource || "replicator_logs")) {
+    this._afterCreateResourceHook = (resource) => {
+      if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
         this.installEventListeners(resource, this.database, this);
       }
-    });
+    };
+    this.database.addHook("afterCreateResource", this._afterCreateResourceHook);
   }
   removeDatabaseHooks() {
-    this.database.removeHook("afterCreateResource", this.installEventListeners.bind(this));
+    if (this._afterCreateResourceHook) {
+      this.database.removeHook("afterCreateResource", this._afterCreateResourceHook);
+      this._afterCreateResourceHook = null;
+    }
   }
   createReplicator(driver, config, resources, client) {
     return createReplicator(driver, config, resources, client);
@@ -12177,9 +12734,9 @@ class ReplicatorPlugin extends Plugin {
   async retryWithBackoff(operation, maxRetries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const [ok, error] = await tryFn(operation);
+      const [ok, error, result] = await tryFn(operation);
       if (ok) {
-        return ok;
+        return result;
       } else {
         lastError = error;
         if (this.config.verbose) {
@@ -12274,7 +12831,7 @@ class ReplicatorPlugin extends Plugin {
     });
     return Promise.allSettled(promises);
   }
-  async processreplicatorItem(item) {
+  async processReplicatorItem(item) {
     const applicableReplicators = this.replicators.filter((replicator) => {
       const should = replicator.shouldReplicateResource && replicator.shouldReplicateResource(item.resourceName, item.operation);
       return should;
@@ -12334,12 +12891,9 @@ class ReplicatorPlugin extends Plugin {
     });
     return Promise.allSettled(promises);
   }
-  async logreplicator(item) {
+  async logReplicator(item) {
     const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
     if (!logRes) {
-      if (this.database) {
-        if (this.database.options && this.database.options.connectionString) ;
-      }
       this.emit("replicator.log.failed", { error: "replicator log resource not found", item });
       return;
     }
@@ -12361,7 +12915,7 @@ class ReplicatorPlugin extends Plugin {
       this.emit("replicator.log.failed", { error: err, item });
     }
   }
-  async updatereplicatorLog(logId, updates) {
+  async updateReplicatorLog(logId, updates) {
     if (!this.replicatorLog) return;
     const [ok, err] = await tryFn(async () => {
       await this.replicatorLog.update(logId, {
@@ -12374,7 +12928,7 @@ class ReplicatorPlugin extends Plugin {
     }
   }
   // Utility methods
-  async getreplicatorStats() {
+  async getReplicatorStats() {
     const replicatorStats = await Promise.all(
       this.replicators.map(async (replicator) => {
         const status = await replicator.getStatus();
@@ -12388,15 +12942,11 @@ class ReplicatorPlugin extends Plugin {
     );
     return {
       replicators: replicatorStats,
-      queue: {
-        length: this.queue.length,
-        isProcessing: this.isProcessing
-      },
       stats: this.stats,
       lastSync: this.stats.lastSync
     };
   }
-  async getreplicatorLogs(options = {}) {
+  async getReplicatorLogs(options = {}) {
     if (!this.replicatorLog) {
       return [];
     }
@@ -12407,32 +12957,32 @@ class ReplicatorPlugin extends Plugin {
       limit = 100,
       offset = 0
     } = options;
-    let query = {};
+    const filter = {};
     if (resourceName) {
-      query.resourceName = resourceName;
+      filter.resourceName = resourceName;
     }
     if (operation) {
-      query.operation = operation;
+      filter.operation = operation;
     }
     if (status) {
-      query.status = status;
+      filter.status = status;
     }
-    const logs = await this.replicatorLog.list(query);
-    return logs.slice(offset, offset + limit);
+    const logs = await this.replicatorLog.query(filter, { limit, offset });
+    return logs || [];
   }
-  async retryFailedreplicators() {
+  async retryFailedReplicators() {
     if (!this.replicatorLog) {
       return { retried: 0 };
     }
-    const failedLogs = await this.replicatorLog.list({
+    const failedLogs = await this.replicatorLog.query({
       status: "failed"
     });
     let retried = 0;
-    for (const log of failedLogs) {
+    for (const log of failedLogs || []) {
       const [ok, err] = await tryFn(async () => {
         await this.processReplicatorEvent(
-          log.resourceName,
           log.operation,
+          log.resourceName,
           log.recordId,
           log.data
         );
@@ -12450,13 +13000,21 @@ class ReplicatorPlugin extends Plugin {
     }
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
-      if (normalizeResourceName(resourceName) === normalizeResourceName("replicator_logs")) continue;
+      if (normalizeResourceName(resourceName) === normalizeResourceName("plg_replicator_logs")) continue;
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit("replicator.sync.resource", { resourceName, replicatorId });
         const resource = this.database.resources[resourceName];
-        const allRecords = await resource.getAll();
-        for (const record of allRecords) {
-          await replicator.replicate(resourceName, "insert", record, record.id);
+        let offset = 0;
+        const pageSize = this.config.batchSize || 100;
+        while (true) {
+          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize }));
+          if (!ok || !page) break;
+          const records = Array.isArray(page) ? page : page.items || [];
+          if (records.length === 0) break;
+          for (const record of records) {
+            await replicator.replicate(resourceName, "insert", record, record.id);
+          }
+          offset += pageSize;
         }
       }
     }
@@ -12484,9 +13042,21 @@ class ReplicatorPlugin extends Plugin {
         });
         await Promise.allSettled(cleanupPromises);
       }
+      if (this.database && this.database.resources) {
+        for (const resourceName of this.eventListenersInstalled) {
+          const resource = this.database.resources[resourceName];
+          const handlers = this.eventHandlers.get(resourceName);
+          if (resource && handlers) {
+            resource.off("insert", handlers.insert);
+            resource.off("update", handlers.update);
+            resource.off("delete", handlers.delete);
+          }
+        }
+      }
       this.replicators = [];
       this.database = null;
       this.eventListenersInstalled.clear();
+      this.eventHandlers.clear();
       this.removeAllListeners();
     });
     if (!ok) {
@@ -13046,7 +13616,7 @@ class SchedulerPlugin extends Plugin {
       defaultTimeout: options.defaultTimeout || 3e5,
       // 5 minutes
       defaultRetries: options.defaultRetries || 1,
-      jobHistoryResource: options.jobHistoryResource || "job_executions",
+      jobHistoryResource: options.jobHistoryResource || "plg_job_executions",
       persistJobs: options.persistJobs !== false,
       verbose: options.verbose || false,
       onJobStart: options.onJobStart || null,
@@ -13055,11 +13625,19 @@ class SchedulerPlugin extends Plugin {
       ...options
     };
     this.database = null;
+    this.lockResource = null;
     this.jobs = /* @__PURE__ */ new Map();
     this.activeJobs = /* @__PURE__ */ new Map();
     this.timers = /* @__PURE__ */ new Map();
     this.statistics = /* @__PURE__ */ new Map();
     this._validateConfiguration();
+  }
+  /**
+   * Helper to detect test environment
+   * @private
+   */
+  _isTestEnvironment() {
+    return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== void 0 || global.expect !== void 0;
   }
   _validateConfiguration() {
     if (Object.keys(this.config.jobs).length === 0) {
@@ -13087,6 +13665,7 @@ class SchedulerPlugin extends Plugin {
   }
   async setup(database) {
     this.database = database;
+    await this._createLockResource();
     if (this.config.persistJobs) {
       await this._createJobHistoryResource();
     }
@@ -13114,6 +13693,25 @@ class SchedulerPlugin extends Plugin {
     }
     await this._startScheduling();
     this.emit("initialized", { jobs: this.jobs.size });
+  }
+  async _createLockResource() {
+    const [ok, err, lockResource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_scheduler_job_locks",
+        attributes: {
+          id: "string|required",
+          jobName: "string|required",
+          lockedAt: "number|required",
+          instanceId: "string|optional"
+        },
+        behavior: "body-only",
+        timestamps: false
+      })
+    );
+    if (!ok && !this.database.resources.plg_scheduler_job_locks) {
+      throw new Error(`Failed to create lock resource: ${err?.message}`);
+    }
+    this.lockResource = ok ? lockResource : this.database.resources.plg_scheduler_job_locks;
   }
   async _createJobHistoryResource() {
     const [ok] = await tryFn(() => this.database.createResource({
@@ -13208,18 +13806,37 @@ class SchedulerPlugin extends Plugin {
         next.setHours(next.getHours() + 1);
       }
     }
-    const isTestEnvironment = process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== void 0 || global.expect !== void 0;
-    if (isTestEnvironment) {
+    if (this._isTestEnvironment()) {
       next.setTime(next.getTime() + 1e3);
     }
     return next;
   }
   async _executeJob(jobName) {
     const job = this.jobs.get(jobName);
-    if (!job || this.activeJobs.has(jobName)) {
+    if (!job) {
       return;
     }
-    const executionId = `${jobName}_${Date.now()}`;
+    if (this.activeJobs.has(jobName)) {
+      return;
+    }
+    this.activeJobs.set(jobName, "acquiring-lock");
+    const lockId = `lock-${jobName}`;
+    const [lockAcquired, lockErr] = await tryFn(
+      () => this.lockResource.insert({
+        id: lockId,
+        jobName,
+        lockedAt: Date.now(),
+        instanceId: process.pid ? String(process.pid) : "unknown"
+      })
+    );
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
+      }
+      this.activeJobs.delete(jobName);
+      return;
+    }
+    const executionId = `${jobName}_${idGenerator()}`;
     const startTime = Date.now();
     const context = {
       jobName,
@@ -13228,91 +13845,95 @@ class SchedulerPlugin extends Plugin {
       database: this.database
     };
     this.activeJobs.set(jobName, executionId);
-    if (this.config.onJobStart) {
-      await this._executeHook(this.config.onJobStart, jobName, context);
-    }
-    this.emit("job_start", { jobName, executionId, startTime });
-    let attempt = 0;
-    let lastError = null;
-    let result = null;
-    let status = "success";
-    const isTestEnvironment = process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== void 0 || global.expect !== void 0;
-    while (attempt <= job.retries) {
-      try {
-        const actualTimeout = isTestEnvironment ? Math.min(job.timeout, 1e3) : job.timeout;
-        let timeoutId;
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error("Job execution timeout")), actualTimeout);
-        });
-        const jobPromise = job.action(this.database, context, this);
+    try {
+      if (this.config.onJobStart) {
+        await this._executeHook(this.config.onJobStart, jobName, context);
+      }
+      this.emit("job_start", { jobName, executionId, startTime });
+      let attempt = 0;
+      let lastError = null;
+      let result = null;
+      let status = "success";
+      const isTestEnvironment = this._isTestEnvironment();
+      while (attempt <= job.retries) {
         try {
-          result = await Promise.race([jobPromise, timeoutPromise]);
-          clearTimeout(timeoutId);
-        } catch (raceError) {
-          clearTimeout(timeoutId);
-          throw raceError;
-        }
-        status = "success";
-        break;
-      } catch (error) {
-        lastError = error;
-        attempt++;
-        if (attempt <= job.retries) {
-          if (this.config.verbose) {
-            console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
+          const actualTimeout = isTestEnvironment ? Math.min(job.timeout, 1e3) : job.timeout;
+          let timeoutId;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("Job execution timeout")), actualTimeout);
+          });
+          const jobPromise = job.action(this.database, context, this);
+          try {
+            result = await Promise.race([jobPromise, timeoutPromise]);
+            clearTimeout(timeoutId);
+          } catch (raceError) {
+            clearTimeout(timeoutId);
+            throw raceError;
           }
-          const baseDelay = Math.min(Math.pow(2, attempt) * 1e3, 5e3);
-          const delay = isTestEnvironment ? 1 : baseDelay;
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          status = "success";
+          break;
+        } catch (error) {
+          lastError = error;
+          attempt++;
+          if (attempt <= job.retries) {
+            if (this.config.verbose) {
+              console.warn(`[SchedulerPlugin] Job '${jobName}' failed (attempt ${attempt + 1}):`, error.message);
+            }
+            const baseDelay = Math.min(Math.pow(2, attempt) * 1e3, 5e3);
+            const delay = isTestEnvironment ? 1 : baseDelay;
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
         }
       }
-    }
-    const endTime = Date.now();
-    const duration = Math.max(1, endTime - startTime);
-    if (lastError && attempt > job.retries) {
-      status = lastError.message.includes("timeout") ? "timeout" : "error";
-    }
-    job.lastRun = new Date(endTime);
-    job.runCount++;
-    if (status === "success") {
-      job.successCount++;
-    } else {
-      job.errorCount++;
-    }
-    const stats = this.statistics.get(jobName);
-    stats.totalRuns++;
-    stats.lastRun = new Date(endTime);
-    if (status === "success") {
-      stats.totalSuccesses++;
-      stats.lastSuccess = new Date(endTime);
-    } else {
-      stats.totalErrors++;
-      stats.lastError = { time: new Date(endTime), message: lastError?.message };
-    }
-    stats.avgDuration = (stats.avgDuration * (stats.totalRuns - 1) + duration) / stats.totalRuns;
-    if (this.config.persistJobs) {
-      await this._persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, lastError, attempt);
-    }
-    if (status === "success" && this.config.onJobComplete) {
-      await this._executeHook(this.config.onJobComplete, jobName, result, duration);
-    } else if (status !== "success" && this.config.onJobError) {
-      await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
-    }
-    this.emit("job_complete", {
-      jobName,
-      executionId,
-      status,
-      duration,
-      result,
-      error: lastError?.message,
-      retryCount: attempt
-    });
-    this.activeJobs.delete(jobName);
-    if (job.enabled) {
-      this._scheduleNextExecution(jobName);
-    }
-    if (lastError && status !== "success") {
-      throw lastError;
+      const endTime = Date.now();
+      const duration = Math.max(1, endTime - startTime);
+      if (lastError && attempt > job.retries) {
+        status = lastError.message.includes("timeout") ? "timeout" : "error";
+      }
+      job.lastRun = new Date(endTime);
+      job.runCount++;
+      if (status === "success") {
+        job.successCount++;
+      } else {
+        job.errorCount++;
+      }
+      const stats = this.statistics.get(jobName);
+      stats.totalRuns++;
+      stats.lastRun = new Date(endTime);
+      if (status === "success") {
+        stats.totalSuccesses++;
+        stats.lastSuccess = new Date(endTime);
+      } else {
+        stats.totalErrors++;
+        stats.lastError = { time: new Date(endTime), message: lastError?.message };
+      }
+      stats.avgDuration = (stats.avgDuration * (stats.totalRuns - 1) + duration) / stats.totalRuns;
+      if (this.config.persistJobs) {
+        await this._persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, lastError, attempt);
+      }
+      if (status === "success" && this.config.onJobComplete) {
+        await this._executeHook(this.config.onJobComplete, jobName, result, duration);
+      } else if (status !== "success" && this.config.onJobError) {
+        await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
+      }
+      this.emit("job_complete", {
+        jobName,
+        executionId,
+        status,
+        duration,
+        result,
+        error: lastError?.message,
+        retryCount: attempt
+      });
+      this.activeJobs.delete(jobName);
+      if (job.enabled) {
+        this._scheduleNextExecution(jobName);
+      }
+      if (lastError && status !== "success") {
+        throw lastError;
+      }
+    } finally {
+      await tryFn(() => this.lockResource.delete(lockId));
     }
   }
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {
@@ -13344,6 +13965,7 @@ class SchedulerPlugin extends Plugin {
   }
   /**
    * Manually trigger a job execution
+   * Note: Race conditions are prevented by distributed locking in _executeJob()
    */
   async runJob(jobName, context = {}) {
     const job = this.jobs.get(jobName);
@@ -13429,12 +14051,15 @@ class SchedulerPlugin extends Plugin {
       return [];
     }
     const { limit = 50, status = null } = options;
-    const [ok, err, allHistory] = await tryFn(
-      () => this.database.resource(this.config.jobHistoryResource).list({
-        orderBy: { startTime: "desc" },
-        limit: limit * 2
-        // Get more to allow for filtering
-      })
+    const queryParams = {
+      jobName
+      // Uses byJob partition for efficient lookup
+    };
+    if (status) {
+      queryParams.status = status;
+    }
+    const [ok, err, history] = await tryFn(
+      () => this.database.resource(this.config.jobHistoryResource).query(queryParams)
     );
     if (!ok) {
       if (this.config.verbose) {
@@ -13442,11 +14067,7 @@ class SchedulerPlugin extends Plugin {
       }
       return [];
     }
-    let filtered = allHistory.filter((h) => h.jobName === jobName);
-    if (status) {
-      filtered = filtered.filter((h) => h.status === status);
-    }
-    filtered = filtered.sort((a, b) => b.startTime - a.startTime).slice(0, limit);
+    let filtered = history.sort((a, b) => b.startTime - a.startTime).slice(0, limit);
     return filtered.map((h) => {
       let result = null;
       if (h.result) {
@@ -13541,8 +14162,7 @@ class SchedulerPlugin extends Plugin {
       clearTimeout(timer);
     }
     this.timers.clear();
-    const isTestEnvironment = process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== void 0 || global.expect !== void 0;
-    if (!isTestEnvironment && this.activeJobs.size > 0) {
+    if (!this._isTestEnvironment() && this.activeJobs.size > 0) {
       if (this.config.verbose) {
         console.log(`[SchedulerPlugin] Waiting for ${this.activeJobs.size} active jobs to complete...`);
       }
@@ -13555,7 +14175,7 @@ class SchedulerPlugin extends Plugin {
         console.warn(`[SchedulerPlugin] ${this.activeJobs.size} jobs still running after timeout`);
       }
     }
-    if (isTestEnvironment) {
+    if (this._isTestEnvironment()) {
       this.activeJobs.clear();
     }
   }
@@ -13576,14 +14196,14 @@ class StateMachinePlugin extends Plugin {
       actions: options.actions || {},
       guards: options.guards || {},
       persistTransitions: options.persistTransitions !== false,
-      transitionLogResource: options.transitionLogResource || "state_transitions",
-      stateResource: options.stateResource || "entity_states",
-      verbose: options.verbose || false,
-      ...options
+      transitionLogResource: options.transitionLogResource || "plg_state_transitions",
+      stateResource: options.stateResource || "plg_entity_states",
+      retryAttempts: options.retryAttempts || 3,
+      retryDelay: options.retryDelay || 100,
+      verbose: options.verbose || false
     };
     this.database = null;
     this.machines = /* @__PURE__ */ new Map();
-    this.stateStorage = /* @__PURE__ */ new Map();
     this._validateConfiguration();
   }
   _validateConfiguration() {
@@ -13724,43 +14344,55 @@ class StateMachinePlugin extends Plugin {
     machine.currentStates.set(entityId, toState);
     if (this.config.persistTransitions) {
       const transitionId = `${machineId}_${entityId}_${timestamp}`;
-      const [logOk, logErr] = await tryFn(
-        () => this.database.resource(this.config.transitionLogResource).insert({
-          id: transitionId,
-          machineId,
-          entityId,
-          fromState,
-          toState,
-          event,
-          context,
-          timestamp,
-          createdAt: now.slice(0, 10)
-          // YYYY-MM-DD for partitioning
-        })
-      );
+      let logOk = false;
+      let lastLogErr;
+      for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
+        const [ok, err] = await tryFn(
+          () => this.database.resource(this.config.transitionLogResource).insert({
+            id: transitionId,
+            machineId,
+            entityId,
+            fromState,
+            toState,
+            event,
+            context,
+            timestamp,
+            createdAt: now.slice(0, 10)
+            // YYYY-MM-DD for partitioning
+          })
+        );
+        if (ok) {
+          logOk = true;
+          break;
+        }
+        lastLogErr = err;
+        if (attempt < this.config.retryAttempts - 1) {
+          const delay = this.config.retryDelay * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
       if (!logOk && this.config.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to log transition:`, logErr.message);
+        console.warn(`[StateMachinePlugin] Failed to log transition after ${this.config.retryAttempts} attempts:`, lastLogErr.message);
       }
       const stateId = `${machineId}_${entityId}`;
-      const [stateOk, stateErr] = await tryFn(async () => {
-        const exists = await this.database.resource(this.config.stateResource).exists(stateId);
-        const stateData = {
-          id: stateId,
-          machineId,
-          entityId,
-          currentState: toState,
-          context,
-          lastTransition: transitionId,
-          updatedAt: now
-        };
-        if (exists) {
-          await this.database.resource(this.config.stateResource).update(stateId, stateData);
-        } else {
-          await this.database.resource(this.config.stateResource).insert(stateData);
+      const stateData = {
+        machineId,
+        entityId,
+        currentState: toState,
+        context,
+        lastTransition: transitionId,
+        updatedAt: now
+      };
+      const [updateOk] = await tryFn(
+        () => this.database.resource(this.config.stateResource).update(stateId, stateData)
+      );
+      if (!updateOk) {
+        const [insertOk, insertErr] = await tryFn(
+          () => this.database.resource(this.config.stateResource).insert({ id: stateId, ...stateData })
+        );
+        if (!insertOk && this.config.verbose) {
+          console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
         }
-      });
-      if (!stateOk && this.config.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to update state:`, stateErr.message);
       }
     }
   }
@@ -13791,8 +14423,9 @@ class StateMachinePlugin extends Plugin {
   }
   /**
    * Get valid events for current state
+   * Can accept either a state name (sync) or entityId (async to fetch latest state)
    */
-  getValidEvents(machineId, stateOrEntityId) {
+  async getValidEvents(machineId, stateOrEntityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
       throw new Error(`State machine '${machineId}' not found`);
@@ -13801,7 +14434,7 @@ class StateMachinePlugin extends Plugin {
     if (machine.config.states[stateOrEntityId]) {
       state = stateOrEntityId;
     } else {
-      state = machine.currentStates.get(stateOrEntityId) || machine.config.initialState;
+      state = await this.getState(machineId, stateOrEntityId);
     }
     const stateConfig = machine.config.states[state];
     return stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [];
@@ -13815,9 +14448,10 @@ class StateMachinePlugin extends Plugin {
     }
     const { limit = 50, offset = 0 } = options;
     const [ok, err, transitions] = await tryFn(
-      () => this.database.resource(this.config.transitionLogResource).list({
-        where: { machineId, entityId },
-        orderBy: { timestamp: "desc" },
+      () => this.database.resource(this.config.transitionLogResource).query({
+        machineId,
+        entityId
+      }, {
         limit,
         offset
       })
@@ -13828,8 +14462,8 @@ class StateMachinePlugin extends Plugin {
       }
       return [];
     }
-    const sortedTransitions = transitions.sort((a, b) => b.timestamp - a.timestamp);
-    return sortedTransitions.map((t) => ({
+    const sorted = (transitions || []).sort((a, b) => b.timestamp - a.timestamp);
+    return sorted.map((t) => ({
       from: t.fromState,
       to: t.toState,
       event: t.event,
@@ -13850,15 +14484,20 @@ class StateMachinePlugin extends Plugin {
     if (this.config.persistTransitions) {
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const stateId = `${machineId}_${entityId}`;
-      await this.database.resource(this.config.stateResource).insert({
-        id: stateId,
-        machineId,
-        entityId,
-        currentState: initialState,
-        context,
-        lastTransition: null,
-        updatedAt: now
-      });
+      const [ok, err] = await tryFn(
+        () => this.database.resource(this.config.stateResource).insert({
+          id: stateId,
+          machineId,
+          entityId,
+          currentState: initialState,
+          context,
+          lastTransition: null,
+          updatedAt: now
+        })
+      );
+      if (!ok && err && !err.message?.includes("already exists")) {
+        throw new Error(`Failed to initialize entity state: ${err.message}`);
+      }
     }
     const initialStateConfig = machine.config.states[initialState];
     if (initialStateConfig && initialStateConfig.entry) {
@@ -13923,7 +14562,6 @@ class StateMachinePlugin extends Plugin {
   }
   async stop() {
     this.machines.clear();
-    this.stateStorage.clear();
   }
   async cleanup() {
     await this.stop();
