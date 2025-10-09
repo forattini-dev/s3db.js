@@ -20,7 +20,7 @@ import tryFn from "../concerns/try-fn.js";
 //   reconnectInterval: 2000,
 // });
 
-export default class QueueConsumerPlugin {
+export class QueueConsumerPlugin {
   constructor(options = {}) {
     this.options = options;
     // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
@@ -131,4 +131,6 @@ export default class QueueConsumerPlugin {
 
   _handleError(err, raw, resourceName) {
   }
-} 
+}
+
+export default QueueConsumerPlugin;
