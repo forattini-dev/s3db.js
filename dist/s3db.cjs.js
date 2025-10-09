@@ -4449,8 +4449,24 @@ class EventualConsistencyPlugin extends Plugin {
     this.addHelperMethods();
     if (this.config.autoConsolidate) {
       this.startConsolidationTimer();
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Auto-consolidation ENABLED (interval: ${this.config.consolidationInterval}s, window: ${this.config.consolidationWindow}h, mode: ${this.config.mode})`
+        );
+      }
+    } else {
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Auto-consolidation DISABLED (manual consolidation only)`
+        );
+      }
     }
     this.startGarbageCollectionTimer();
+    if (this.config.verbose) {
+      console.log(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Setup complete. Resources: ${this.config.resource}_transactions_${this.config.field}, ${this.config.resource}_consolidation_locks_${this.config.field}${this.config.enableAnalytics ? `, ${this.config.resource}_analytics_${this.config.field}` : ""}`
+      );
+    }
   }
   async onStart() {
     if (this.deferredSetup) {
@@ -4711,11 +4727,21 @@ class EventualConsistencyPlugin extends Plugin {
     };
     if (this.config.batchTransactions) {
       this.pendingTransactions.set(transaction.id, transaction);
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Transaction batched: ${data.operation} ${data.value} for ${data.originalId} (batch: ${this.pendingTransactions.size}/${this.config.batchSize})`
+        );
+      }
       if (this.pendingTransactions.size >= this.config.batchSize) {
         await this.flushPendingTransactions();
       }
     } else {
       await this.transactionResource.insert(transaction);
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Transaction created: ${data.operation} ${data.value} for ${data.originalId} (cohort: ${cohortInfo.hour}, applied: false)`
+        );
+      }
     }
     return transaction;
   }
@@ -4780,11 +4806,23 @@ class EventualConsistencyPlugin extends Plugin {
   }
   startConsolidationTimer() {
     const intervalMs = this.config.consolidationInterval * 1e3;
+    if (this.config.verbose) {
+      const nextRun = new Date(Date.now() + intervalMs);
+      console.log(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidation timer started. Next run at ${nextRun.toISOString()} (every ${this.config.consolidationInterval}s)`
+      );
+    }
     this.consolidationTimer = setInterval(async () => {
       await this.runConsolidation();
     }, intervalMs);
   }
   async runConsolidation() {
+    const startTime = Date.now();
+    if (this.config.verbose) {
+      console.log(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Starting consolidation run at ${(/* @__PURE__ */ new Date()).toISOString()}`
+      );
+    }
     try {
       const now = /* @__PURE__ */ new Date();
       const hoursToCheck = this.config.consolidationWindow || 24;
@@ -4793,6 +4831,11 @@ class EventualConsistencyPlugin extends Plugin {
         const date = new Date(now.getTime() - i * 60 * 60 * 1e3);
         const cohortInfo = this.getCohortInfo(date);
         cohortHours.push(cohortInfo.hour);
+      }
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Querying ${hoursToCheck} hour partitions for pending transactions...`
+        );
       }
       const transactionsByHour = await Promise.all(
         cohortHours.map(async (cohortHour) => {
@@ -4808,26 +4851,47 @@ class EventualConsistencyPlugin extends Plugin {
       const transactions = transactionsByHour.flat();
       if (transactions.length === 0) {
         if (this.config.verbose) {
-          console.log(`[EventualConsistency] No pending transactions to consolidate`);
+          console.log(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - No pending transactions found. Next run in ${this.config.consolidationInterval}s`
+          );
         }
         return;
       }
       const uniqueIds = [...new Set(transactions.map((t) => t.originalId))];
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Found ${transactions.length} pending transactions for ${uniqueIds.length} records. Consolidating with concurrency=${this.config.consolidationConcurrency}...`
+        );
+      }
       const { results, errors } = await promisePool.PromisePool.for(uniqueIds).withConcurrency(this.config.consolidationConcurrency).process(async (id) => {
         return await this.consolidateRecord(id);
       });
+      const duration = Date.now() - startTime;
       if (errors && errors.length > 0) {
-        console.error(`Consolidation completed with ${errors.length} errors:`, errors);
+        console.error(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidation completed with ${errors.length} errors in ${duration}ms:`,
+          errors
+        );
+      }
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidation complete: ${results.length} records consolidated in ${duration}ms (${errors.length} errors). Next run in ${this.config.consolidationInterval}s`
+        );
       }
       this.emit("eventual-consistency.consolidated", {
         resource: this.config.resource,
         field: this.config.field,
         recordCount: uniqueIds.length,
         successCount: results.length,
-        errorCount: errors.length
+        errorCount: errors.length,
+        duration
       });
     } catch (error) {
-      console.error("Consolidation error:", error);
+      const duration = Date.now() - startTime;
+      console.error(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidation error after ${duration}ms:`,
+        error
+      );
       this.emit("eventual-consistency.consolidation-error", error);
     }
   }
@@ -4862,7 +4926,17 @@ class EventualConsistencyPlugin extends Plugin {
         })
       );
       if (!ok || !transactions || transactions.length === 0) {
+        if (this.config.verbose) {
+          console.log(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - No pending transactions for ${originalId}, skipping`
+          );
+        }
         return currentValue;
+      }
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidating ${originalId}: ${transactions.length} pending transactions (current: ${currentValue})`
+        );
       }
       transactions.sort(
         (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -4872,6 +4946,11 @@ class EventualConsistencyPlugin extends Plugin {
         transactions.unshift(this._createSyntheticSetTransaction(currentValue));
       }
       const consolidatedValue = this.config.reducer(transactions);
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ${originalId}: ${currentValue} \u2192 ${consolidatedValue} (${consolidatedValue > currentValue ? "+" : ""}${consolidatedValue - currentValue})`
+        );
+      }
       const [updateOk, updateErr] = await tryFn(
         () => this.targetResource.update(originalId, {
           [this.config.field]: consolidatedValue
@@ -5108,21 +5187,43 @@ class EventualConsistencyPlugin extends Plugin {
    */
   async updateAnalytics(transactions) {
     if (!this.analyticsResource || transactions.length === 0) return;
+    if (this.config.verbose) {
+      console.log(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Updating analytics for ${transactions.length} transactions...`
+      );
+    }
     try {
       const byHour = this._groupByCohort(transactions, "cohortHour");
+      const cohortCount = Object.keys(byHour).length;
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Updating ${cohortCount} hourly analytics cohorts...`
+        );
+      }
       for (const [cohort, txns] of Object.entries(byHour)) {
         await this._upsertAnalytics("hour", cohort, txns);
       }
       if (this.config.analyticsConfig.rollupStrategy === "incremental") {
         const uniqueHours = Object.keys(byHour);
+        if (this.config.verbose) {
+          console.log(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - Rolling up ${uniqueHours.length} hours to daily/monthly analytics...`
+          );
+        }
         for (const cohortHour of uniqueHours) {
           await this._rollupAnalytics(cohortHour);
         }
       }
-    } catch (error) {
       if (this.config.verbose) {
-        console.warn(`[EventualConsistency] Analytics update error:`, error.message);
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Analytics update complete for ${cohortCount} cohorts`
+        );
       }
+    } catch (error) {
+      console.warn(
+        `[EventualConsistency] ${this.config.resource}.${this.config.field} - Analytics update error:`,
+        error.message
+      );
     }
   }
   /**
@@ -11652,7 +11753,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.4" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.5" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
