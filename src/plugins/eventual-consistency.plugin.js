@@ -1479,6 +1479,41 @@ export class EventualConsistencyPlugin extends Plugin {
   }
 
   /**
+   * Get analytics for entire month, broken down by hours
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} month - Month in YYYY-MM format (or 'last' for previous month)
+   * @returns {Promise<Array>} Hourly analytics for the month (up to 24*31=744 records)
+   */
+  async getMonthByHour(resourceName, field, month) {
+    // month format: '2025-10' or 'last'
+    let year, monthNum;
+
+    if (month === 'last') {
+      const now = new Date();
+      now.setMonth(now.getMonth() - 1);
+      year = now.getFullYear();
+      monthNum = now.getMonth() + 1;
+    } else {
+      year = parseInt(month.substring(0, 4));
+      monthNum = parseInt(month.substring(5, 7));
+    }
+
+    // Get first and last day of month
+    const firstDay = new Date(year, monthNum - 1, 1);
+    const lastDay = new Date(year, monthNum, 0);
+
+    const startDate = firstDay.toISOString().substring(0, 10);
+    const endDate = lastDay.toISOString().substring(0, 10);
+
+    return await this.getAnalytics(resourceName, field, {
+      period: 'hour',
+      startDate,
+      endDate
+    });
+  }
+
+  /**
    * Get top records by volume
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
