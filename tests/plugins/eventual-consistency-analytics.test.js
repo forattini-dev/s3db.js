@@ -279,6 +279,122 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(hourStats.sum).toBe(150); // Cumulative
   });
 
+  it('should fill gaps in daily analytics', async () => {
+    // Insert wallet and add transactions only on specific days
+    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+
+    await wallets.add('w1', 100);
+    await wallets.consolidate('w1');
+
+    // Query last 7 days with fillGaps
+    const last7Days = await plugin.getLastNDays('wallets', 'balance', 7, {
+      fillGaps: true
+    });
+
+    // Should always return exactly 7 days
+    expect(last7Days.length).toBe(7);
+
+    // Check that all days are present
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const expectedDate = new Date(today);
+      expectedDate.setDate(today.getDate() - (6 - i));
+      const dateStr = expectedDate.toISOString().substring(0, 10);
+
+      expect(last7Days[i].cohort).toBe(dateStr);
+      expect(last7Days[i]).toHaveProperty('count');
+      expect(last7Days[i]).toHaveProperty('sum');
+    }
+
+    // Days without transactions should have zeros
+    const daysWithZeros = last7Days.filter(d => d.count === 0);
+    expect(daysWithZeros.length).toBeGreaterThan(0);
+  });
+
+  it('should fill gaps in hourly analytics', async () => {
+    // Insert wallet
+    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+
+    await wallets.add('w1', 50);
+    await wallets.consolidate('w1');
+
+    const today = new Date().toISOString().substring(0, 10);
+
+    // Query day by hour with fillGaps
+    const dayByHour = await plugin.getDayByHour('wallets', 'balance', today, {
+      fillGaps: true
+    });
+
+    // Should always return exactly 24 hours
+    expect(dayByHour.length).toBe(24);
+
+    // Check that all hours are present (00-23)
+    for (let hour = 0; hour < 24; hour++) {
+      const expectedCohort = `${today}T${hour.toString().padStart(2, '0')}`;
+      expect(dayByHour[hour].cohort).toBe(expectedCohort);
+    }
+
+    // Hours without transactions should have zeros
+    const hoursWithZeros = dayByHour.filter(h => h.count === 0);
+    expect(hoursWithZeros.length).toBeGreaterThan(0);
+  });
+
+  it('should fill gaps in monthly analytics', async () => {
+    // Insert wallet
+    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+
+    await wallets.add('w1', 100);
+    await wallets.consolidate('w1');
+
+    const currentYear = new Date().getFullYear();
+
+    // Query year by month with fillGaps
+    const yearByMonth = await plugin.getYearByMonth('wallets', 'balance', currentYear, {
+      fillGaps: true
+    });
+
+    // Should always return exactly 12 months
+    expect(yearByMonth.length).toBe(12);
+
+    // Check that all months are present (01-12)
+    for (let month = 1; month <= 12; month++) {
+      const expectedCohort = `${currentYear}-${month.toString().padStart(2, '0')}`;
+      expect(yearByMonth[month - 1].cohort).toBe(expectedCohort);
+    }
+
+    // Months without transactions should have zeros
+    const monthsWithZeros = yearByMonth.filter(m => m.count === 0);
+    expect(monthsWithZeros.length).toBeGreaterThan(0);
+  });
+
+  it('should fill gaps in month by day analytics', async () => {
+    // Insert wallet
+    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+
+    await wallets.add('w1', 100);
+    await wallets.consolidate('w1');
+
+    const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+
+    // Query month by day with fillGaps
+    const monthByDay = await plugin.getMonthByDay('wallets', 'balance', currentMonth, {
+      fillGaps: true
+    });
+
+    // Should return all days in the month
+    const year = parseInt(currentMonth.substring(0, 4));
+    const month = parseInt(currentMonth.substring(5, 7));
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    expect(monthByDay.length).toBe(daysInMonth);
+
+    // Check continuity
+    for (let day = 1; day <= daysInMonth; day++) {
+      const expectedCohort = `${currentMonth}-${day.toString().padStart(2, '0')}`;
+      expect(monthByDay[day - 1].cohort).toBe(expectedCohort);
+    }
+  });
+
   it('should throw error when analytics disabled', async () => {
     // Create new plugin without analytics
     const pluginNoAnalytics = new EventualConsistencyPlugin({
