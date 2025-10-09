@@ -15,7 +15,7 @@ async function demonstratePersistHooks() {
     bucket: 's3db',
     accessKeyId: process.env.MINIO_USER,
     secretAccessKey: process.env.MINIO_PASSWORD,
-    endpoint: 'http://localhost:9998',
+    endpoint: 'http://localhost:9100',
     forcePathStyle: true,
     prefix: testPrefix,
     persistHooks: true // 🎯 Enable hook persistence
@@ -87,7 +87,7 @@ async function demonstratePersistHooks() {
     bucket: 's3db',
     accessKeyId: process.env.MINIO_USER,
     secretAccessKey: process.env.MINIO_PASSWORD,
-    endpoint: 'http://localhost:9998',
+    endpoint: 'http://localhost:9100',
     forcePathStyle: true,
     prefix: testPrefix,
     persistHooks: true // 🎯 Hooks will be restored from s3db.json
