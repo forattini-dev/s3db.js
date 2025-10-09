@@ -468,6 +468,32 @@ year2025.forEach(month => {
 // ...
 ```
 
+#### `getMonthByHour(resourceName, field, month)`
+
+Get entire month broken down by hours:
+
+```javascript
+// October 2025, hour by hour (up to 24*31 = 744 records)
+const octoberByHour = await plugin.getMonthByHour('wallets', 'balance', '2025-10');
+
+console.log('October 2025 hour by hour:');
+octoberByHour.forEach(hour => {
+  console.log(`${hour.cohort}: ${hour.count} txns, $${hour.sum}`);
+});
+// Output:
+// 2025-10-01T00: 12 txns, $500
+// 2025-10-01T01: 8 txns, $300
+// 2025-10-01T02: 5 txns, $150
+// ...
+// 2025-10-31T23: 15 txns, $800
+
+// Or use 'last' for previous month
+const lastMonthByHour = await plugin.getMonthByHour('wallets', 'balance', 'last');
+console.log(`Last month: ${lastMonthByHour.length} hours with transactions`);
+```
+
+**Note**: This can return up to 744 records (24 hours × 31 days). Use with caution for real-time dashboards. Consider aggregating to daily or filtering specific date ranges.
+
 ### Manual Granularity Control
 
 For custom date ranges, use `getAnalytics` directly:

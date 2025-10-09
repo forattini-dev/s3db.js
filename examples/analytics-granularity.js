@@ -132,7 +132,40 @@ async function main() {
   console.log(`\n  Month Total: ${monthTotal.count} transactions, $${monthTotal.sum}`);
 
   // ========================================
-  // 4. Year broken down by months
+  // 4. Last month broken down by hours
+  // ========================================
+  console.log('\n' + '═'.repeat(70));
+  console.log('📊 LAST MONTH - HOUR BY HOUR');
+  console.log('═'.repeat(70));
+
+  const lastMonthByHour = await analyticsPlugin.getMonthByHour('wallets', 'balance', 'last');
+
+  console.log(`\nLast Month Total Hours with Transactions: ${lastMonthByHour.length}`);
+  console.log('(Showing first 24 hours and statistics)\n');
+
+  // Show first 24 hours
+  const hoursToShow = Math.min(24, lastMonthByHour.length);
+  lastMonthByHour.slice(0, hoursToShow).forEach(hour => {
+    const date = hour.cohort.substring(0, 10);
+    const time = hour.cohort.substring(11);
+    console.log(`  ${date} ${time}:00 → ${hour.count.toString().padStart(3)} txns, $${hour.sum.toString().padStart(6)}`);
+  });
+
+  if (lastMonthByHour.length > 24) {
+    console.log(`  ... (${lastMonthByHour.length - 24} more hours)`);
+  }
+
+  // Calculate month totals
+  const lastMonthTotal = lastMonthByHour.reduce((acc, hour) => ({
+    count: acc.count + hour.count,
+    sum: acc.sum + hour.sum
+  }), { count: 0, sum: 0 });
+
+  console.log(`\n  Last Month Total: ${lastMonthTotal.count} transactions, $${lastMonthTotal.sum}`);
+  console.log(`  Hourly Average: ${(lastMonthTotal.count / Math.max(lastMonthByHour.length, 1)).toFixed(1)} transactions, $${(lastMonthTotal.sum / Math.max(lastMonthByHour.length, 1)).toFixed(2)}`);
+
+  // ========================================
+  // 5. Year broken down by months
   // ========================================
   console.log('\n' + '═'.repeat(70));
   console.log('📊 THIS YEAR - MONTH BY MONTH');
@@ -158,7 +191,7 @@ async function main() {
   console.log(`\n  Year Total: ${yearTotal.count} transactions, $${yearTotal.sum}`);
 
   // ========================================
-  // 5. Custom granularity - Business hours
+  // 6. Custom granularity - Business hours
   // ========================================
   console.log('\n' + '═'.repeat(70));
   console.log('📊 TODAY - BUSINESS HOURS ONLY (9am-5pm)');
@@ -187,7 +220,7 @@ async function main() {
   console.log(`\n  Business Hours Total: ${businessTotal.count} transactions, $${businessTotal.sum}`);
 
   // ========================================
-  // 6. Custom range - Specific week
+  // 7. Custom range - Specific week
   // ========================================
   console.log('\n' + '═'.repeat(70));
   console.log('📊 CUSTOM RANGE - SPECIFIC WEEK (Mon-Sun)');
@@ -239,10 +272,13 @@ Available Granularity Methods:
 3. getMonthByDay(resource, field, 'YYYY-MM')
    → Returns daily records for entire month (28-31 days)
 
-4. getYearByMonth(resource, field, year)
+4. getMonthByHour(resource, field, 'YYYY-MM' or 'last')
+   → Returns hourly records for entire month (up to 744 hours)
+
+5. getYearByMonth(resource, field, year)
    → Returns 12 monthly records for entire year
 
-5. getAnalytics(resource, field, options)
+6. getAnalytics(resource, field, options)
    → Flexible queries with custom date ranges
 
 All methods return pre-calculated aggregations:
