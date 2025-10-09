@@ -390,109 +390,313 @@ console.log('Highest value wallets:', topByValue);
 
 ### Helper Methods for Common Patterns
 
-The plugin provides convenient helper methods for common granularity queries:
+The plugin provides convenient helper methods for common granularity queries.
 
-#### `getMonthByDay(resourceName, field, month)`
+**🎨 Chart-Ready Data with `fillGaps`**
+
+All helper methods support a `fillGaps` option to create continuous time series perfect for charts:
+
+```javascript
+// Without fillGaps (sparse data - only periods with transactions)
+const data = await plugin.getMonthByDay('wallets', 'balance', '2025-10');
+// Returns: [{ cohort: '2025-10-01', ... }, { cohort: '2025-10-05', ... }]
+// Missing: days 2, 3, 4
+
+// With fillGaps (continuous data - all periods filled with zeros)
+const chartData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
+  fillGaps: true
+});
+// Returns: All 31 days, missing days have count: 0, sum: 0
+// Ready for Chart.js, D3.js, etc.
+```
+
+**Benefits:**
+- ✅ No gaps in time series
+- ✅ Direct use in charting libraries
+- ✅ Consistent array length (predictable)
+- ✅ Missing periods filled with zeros
+
+#### `getMonthByDay(resourceName, field, month, options)`
 
 Get entire month broken down by days:
 
 ```javascript
-// October 2025, day by day (31 records)
+// October 2025, day by day (sparse - only days with transactions)
 const octoberByDay = await plugin.getMonthByDay('wallets', 'balance', '2025-10');
 
+// October 2025, day by day (continuous - all 31 days, gaps filled with zeros)
+const chartData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
+  fillGaps: true  // Perfect for charts!
+});
+
 console.log('October day by day:');
-octoberByDay.forEach(day => {
+chartData.forEach(day => {
   console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
 });
-// Output:
+// Output (guaranteed 31 days):
 // 2025-10-01: 150 txns, $5000
-// 2025-10-02: 180 txns, $6200
+// 2025-10-02: 0 txns, $0       ← Filled gap
 // 2025-10-03: 120 txns, $4100
 // ...
+// 2025-10-31: 95 txns, $3200
 ```
 
-#### `getDayByHour(resourceName, field, date)`
+#### `getDayByHour(resourceName, field, date, options)`
 
 Get entire day broken down by hours:
 
 ```javascript
-// Today, hour by hour (up to 24 records)
+// Today, hour by hour (all 24 hours, gaps filled)
 const today = new Date().toISOString().substring(0, 10);
-const todayByHour = await plugin.getDayByHour('wallets', 'balance', today);
+const todayByHour = await plugin.getDayByHour('wallets', 'balance', today, {
+  fillGaps: true  // Get all 24 hours
+});
 
 console.log('Today hour by hour:');
 todayByHour.forEach(hour => {
   const time = hour.cohort.substring(11);  // Extract hour
   console.log(`${time}:00 - ${hour.count} txns, $${hour.sum}`);
 });
-// Output:
+// Output (guaranteed 24 hours):
 // 00:00 - 12 txns, $500
-// 01:00 - 8 txns, $300
+// 01:00 - 0 txns, $0       ← No activity
 // 02:00 - 5 txns, $150
 // ...
-// 14:00 - 45 txns, $2000
+// 23:00 - 8 txns, $400
 ```
 
-#### `getLastNDays(resourceName, field, days)`
+#### `getLastNDays(resourceName, field, days, options)`
 
 Get last N days, broken down by days:
 
 ```javascript
-// Last 7 days, day by day (7 records)
-const last7Days = await plugin.getLastNDays('wallets', 'balance', 7);
+// Last 7 days, day by day (all 7 days guaranteed)
+const last7Days = await plugin.getLastNDays('wallets', 'balance', 7, {
+  fillGaps: true  // Perfect for weekly charts
+});
 
 console.log('Last 7 days:');
 last7Days.forEach(day => {
   console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
 });
+// Output (guaranteed 7 days):
+// 2025-10-03: 45 txns, $2000
+// 2025-10-04: 0 txns, $0       ← Weekend, no activity
+// 2025-10-05: 0 txns, $0       ← Weekend, no activity
+// 2025-10-06: 120 txns, $5500
+// ...
 
-// Last 30 days
-const last30Days = await plugin.getLastNDays('wallets', 'balance', 30);
+// Last 30 days (all 30 days)
+const last30Days = await plugin.getLastNDays('wallets', 'balance', 30, {
+  fillGaps: true
+});
 ```
 
-#### `getYearByMonth(resourceName, field, year)`
+#### `getYearByMonth(resourceName, field, year, options)`
 
 Get entire year broken down by months:
 
 ```javascript
-// 2025, month by month (12 records)
-const year2025 = await plugin.getYearByMonth('wallets', 'balance', 2025);
+// 2025, month by month (all 12 months guaranteed)
+const year2025 = await plugin.getYearByMonth('wallets', 'balance', 2025, {
+  fillGaps: true  // All 12 months, even if no transactions
+});
 
 console.log('2025 month by month:');
 year2025.forEach(month => {
   console.log(`${month.cohort}: ${month.count} txns, $${month.sum}`);
 });
-// Output:
+// Output (guaranteed 12 months):
 // 2025-01: 15000 txns, $300000
 // 2025-02: 14000 txns, $280000
+// 2025-03: 0 txns, $0           ← No activity
 // ...
+// 2025-12: 18000 txns, $350000
 ```
 
-#### `getMonthByHour(resourceName, field, month)`
+#### `getMonthByHour(resourceName, field, month, options)`
 
 Get entire month broken down by hours:
 
 ```javascript
-// October 2025, hour by hour (up to 24*31 = 744 records)
-const octoberByHour = await plugin.getMonthByHour('wallets', 'balance', '2025-10');
+// October 2025, hour by hour (all 744 hours = 24×31)
+const octoberByHour = await plugin.getMonthByHour('wallets', 'balance', '2025-10', {
+  fillGaps: true  // Perfect for detailed monthly charts
+});
 
 console.log('October 2025 hour by hour:');
-octoberByHour.forEach(hour => {
+octoberByHour.slice(0, 24).forEach(hour => {  // First day
   console.log(`${hour.cohort}: ${hour.count} txns, $${hour.sum}`);
 });
-// Output:
+// Output (744 hours total):
 // 2025-10-01T00: 12 txns, $500
-// 2025-10-01T01: 8 txns, $300
-// 2025-10-01T02: 5 txns, $150
+// 2025-10-01T01: 0 txns, $0     ← Night time
+// 2025-10-01T02: 0 txns, $0
 // ...
 // 2025-10-31T23: 15 txns, $800
 
 // Or use 'last' for previous month
-const lastMonthByHour = await plugin.getMonthByHour('wallets', 'balance', 'last');
-console.log(`Last month: ${lastMonthByHour.length} hours with transactions`);
+const lastMonthByHour = await plugin.getMonthByHour('wallets', 'balance', 'last', {
+  fillGaps: true
+});
+console.log(`Last month: ${lastMonthByHour.length} hours`);  // 672-744 depending on month
 ```
 
-**Note**: This can return up to 744 records (24 hours × 31 days). Use with caution for real-time dashboards. Consider aggregating to daily or filtering specific date ranges.
+**Note**: With `fillGaps: true`, this returns exactly 744 hours for 31-day months (696 for February, etc.). Perfect for continuous time series but large data set.
+
+### Chart Integration Examples
+
+The `fillGaps` option makes it trivial to integrate with popular charting libraries:
+
+#### Chart.js Integration
+
+```javascript
+// Get chart-ready data
+const last30Days = await plugin.getLastNDays('wallets', 'balance', 30, {
+  fillGaps: true  // Continuous data
+});
+
+// Prepare Chart.js data
+const chartData = {
+  labels: last30Days.map(d => d.cohort),  // ['2025-10-01', '2025-10-02', ...]
+  datasets: [{
+    label: 'Transaction Count',
+    data: last30Days.map(d => d.count),   // [150, 0, 120, ...]
+    borderColor: 'rgb(75, 192, 192)',
+    tension: 0.1
+  }, {
+    label: 'Total Value',
+    data: last30Days.map(d => d.sum),     // [5000, 0, 4100, ...]
+    borderColor: 'rgb(255, 99, 132)',
+    yAxisID: 'y1'
+  }]
+};
+
+// Create chart
+new Chart(ctx, {
+  type: 'line',
+  data: chartData,
+  options: {
+    responsive: true,
+    scales: {
+      y: { type: 'linear', position: 'left' },
+      y1: { type: 'linear', position: 'right' }
+    }
+  }
+});
+```
+
+#### Recharts (React) Integration
+
+```jsx
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from 'recharts';
+
+function TransactionChart() {
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    async function loadData() {
+      const plugin = s3db.plugins.find(p => p instanceof EventualConsistencyPlugin);
+      const analytics = await plugin.getLastNDays('wallets', 'balance', 30, {
+        fillGaps: true  // No gaps in chart
+      });
+      setData(analytics);  // Direct use!
+    }
+    loadData();
+  }, []);
+
+  return (
+    <LineChart width={800} height={400} data={data}>
+      <XAxis dataKey="cohort" />
+      <YAxis />
+      <Tooltip />
+      <Legend />
+      <Line type="monotone" dataKey="count" stroke="#8884d8" name="Transactions" />
+      <Line type="monotone" dataKey="sum" stroke="#82ca9d" name="Total Value" />
+    </LineChart>
+  );
+}
+```
+
+#### D3.js Integration
+
+```javascript
+// Get chart-ready data
+const hourlyData = await plugin.getDayByHour('wallets', 'balance', '2025-10-09', {
+  fillGaps: true  // All 24 hours
+});
+
+// D3 setup
+const margin = {top: 20, right: 20, bottom: 30, left: 50};
+const width = 960 - margin.left - margin.right;
+const height = 500 - margin.top - margin.bottom;
+
+const x = d3.scaleTime()
+  .domain(d3.extent(hourlyData, d => new Date(d.cohort)))
+  .range([0, width]);
+
+const y = d3.scaleLinear()
+  .domain([0, d3.max(hourlyData, d => d.count)])
+  .range([height, 0]);
+
+const line = d3.line()
+  .x(d => x(new Date(d.cohort)))
+  .y(d => y(d.count));
+
+// Draw chart
+svg.append("path")
+  .datum(hourlyData)
+  .attr("class", "line")
+  .attr("d", line);
+```
+
+#### ApexCharts Integration
+
+```javascript
+// Get chart-ready data
+const monthData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
+  fillGaps: true  // All 31 days
+});
+
+// ApexCharts configuration
+const options = {
+  chart: { type: 'area', height: 350 },
+  series: [{
+    name: 'Transactions',
+    data: monthData.map(d => d.count)
+  }, {
+    name: 'Total Value',
+    data: monthData.map(d => d.sum)
+  }],
+  xaxis: {
+    categories: monthData.map(d => d.cohort),
+    type: 'datetime'
+  }
+};
+
+const chart = new ApexCharts(document.querySelector("#chart"), options);
+chart.render();
+```
+
+#### Real-Time Dashboard Pattern
+
+```javascript
+// Update dashboard every minute
+setInterval(async () => {
+  const plugin = s3db.plugins.find(p => p instanceof EventualConsistencyPlugin);
+
+  // Today's hourly breakdown
+  const today = new Date().toISOString().substring(0, 10);
+  const hourlyData = await plugin.getDayByHour('wallets', 'balance', today, {
+    fillGaps: true  // All 24 hours, current hour included
+  });
+
+  // Update Chart.js
+  myChart.data.labels = hourlyData.map(d => d.cohort.substring(11) + ':00');
+  myChart.data.datasets[0].data = hourlyData.map(d => d.count);
+  myChart.update();
+}, 60000);  // Every minute
+```
 
 ### Manual Granularity Control
 
