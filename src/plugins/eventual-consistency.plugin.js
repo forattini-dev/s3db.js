@@ -51,11 +51,21 @@ export class EventualConsistencyPlugin extends Plugin {
       lockTimeout: options.lockTimeout || 300, // 5 minutes (in seconds, configurable)
       transactionRetention: options.transactionRetention || 30, // Days to keep applied transactions
       gcInterval: options.gcInterval || 86400, // 24 hours (in seconds)
-      verbose: options.verbose || false
+      verbose: options.verbose || false,
+
+      // Analytics configuration
+      enableAnalytics: options.enableAnalytics || false,
+      analyticsConfig: {
+        periods: options.analyticsConfig?.periods || ['hour', 'day', 'month'],
+        metrics: options.analyticsConfig?.metrics || ['count', 'sum', 'avg', 'min', 'max'],
+        rollupStrategy: options.analyticsConfig?.rollupStrategy || 'incremental', // 'incremental' or 'batch'
+        retentionDays: options.analyticsConfig?.retentionDays || 365
+      }
     };
-    
+
     this.transactionResource = null;
     this.targetResource = null;
+    this.analyticsResource = null; // Analytics resource
     this.consolidationTimer = null;
     this.gcTimer = null; // Garbage collection timer
     this.pendingTransactions = new Map(); // Cache for batching
@@ -165,6 +175,11 @@ export class EventualConsistencyPlugin extends Plugin {
 
     this.lockResource = lockOk ? lockResource : this.database.resources[lockResourceName];
 
+    // Create analytics resource if enabled
+    if (this.config.enableAnalytics) {
+      await this.createAnalyticsResource();
+    }
+
     // Add helper methods to the resource
     this.addHelperMethods();
 
@@ -234,6 +249,57 @@ export class EventualConsistencyPlugin extends Plugin {
     };
 
     return partitions;
+  }
+
+  async createAnalyticsResource() {
+    const analyticsResourceName = `${this.config.resource}_analytics_${this.config.field}`;
+
+    const [ok, err, analyticsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: analyticsResourceName,
+        attributes: {
+          id: 'string|required',
+          period: 'string|required',      // 'hour', 'day', 'month'
+          cohort: 'string|required',       // ISO format: '2025-10-09T14', '2025-10-09', '2025-10'
+
+          // Aggregated metrics
+          transactionCount: 'number|required',
+          totalValue: 'number|required',
+          avgValue: 'number|required',
+          minValue: 'number|required',
+          maxValue: 'number|required',
+
+          // Operation breakdown
+          operations: 'object|optional',   // { add: { count, sum }, sub: { count, sum }, set: { count, sum } }
+
+          // Metadata
+          recordCount: 'number|required', // Distinct originalIds
+          consolidatedAt: 'string|required',
+          updatedAt: 'string|required'
+        },
+        behavior: 'body-overflow',
+        timestamps: false,
+        partitions: {
+          byPeriod: {
+            fields: { period: 'string' }
+          },
+          byCohort: {
+            fields: { cohort: 'string' }
+          }
+        }
+      })
+    );
+
+    if (!ok && !this.database.resources[analyticsResourceName]) {
+      console.warn(`[EventualConsistency] Failed to create analytics resource: ${err?.message}`);
+      return;
+    }
+
+    this.analyticsResource = ok ? analyticsResource : this.database.resources[analyticsResourceName];
+
+    if (this.config.verbose) {
+      console.log(`[EventualConsistency] Analytics resource created: ${analyticsResourceName}`);
+    }
   }
 
   /**
@@ -729,6 +795,11 @@ export class EventualConsistencyPlugin extends Plugin {
         if (errors && errors.length > 0 && this.config.verbose) {
           console.warn(`[EventualConsistency] ${errors.length} transactions failed to mark as applied`);
         }
+
+        // Update analytics if enabled (only for real transactions, not synthetic)
+        if (this.config.enableAnalytics && transactionsToUpdate.length > 0) {
+          await this.updateAnalytics(transactionsToUpdate);
+        }
       }
 
       return consolidatedValue;
@@ -1006,6 +1077,396 @@ export class EventualConsistencyPlugin extends Plugin {
       // Always release GC lock
       await tryFn(() => this.lockResource.delete(gcLockId));
     }
+  }
+
+  /**
+   * Update analytics with consolidated transactions
+   * @param {Array} transactions - Array of transactions that were just consolidated
+   * @private
+   */
+  async updateAnalytics(transactions) {
+    if (!this.analyticsResource || transactions.length === 0) return;
+
+    try {
+      // Group transactions by cohort hour
+      const byHour = this._groupByCohort(transactions, 'cohortHour');
+
+      // Update hourly analytics
+      for (const [cohort, txns] of Object.entries(byHour)) {
+        await this._upsertAnalytics('hour', cohort, txns);
+      }
+
+      // Roll up to daily and monthly if configured
+      if (this.config.analyticsConfig.rollupStrategy === 'incremental') {
+        const uniqueHours = Object.keys(byHour);
+        for (const cohortHour of uniqueHours) {
+          await this._rollupAnalytics(cohortHour);
+        }
+      }
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[EventualConsistency] Analytics update error:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * Group transactions by cohort
+   * @private
+   */
+  _groupByCohort(transactions, cohortField) {
+    const groups = {};
+    for (const txn of transactions) {
+      const cohort = txn[cohortField];
+      if (!cohort) continue;
+
+      if (!groups[cohort]) {
+        groups[cohort] = [];
+      }
+      groups[cohort].push(txn);
+    }
+    return groups;
+  }
+
+  /**
+   * Upsert analytics for a specific period and cohort
+   * @private
+   */
+  async _upsertAnalytics(period, cohort, transactions) {
+    const id = `${period}-${cohort}`;
+
+    // Calculate metrics
+    const transactionCount = transactions.length;
+
+    // Calculate signed values (considering operation type)
+    const signedValues = transactions.map(t => {
+      if (t.operation === 'sub') return -t.value;
+      return t.value;
+    });
+
+    const totalValue = signedValues.reduce((sum, v) => sum + v, 0);
+    const avgValue = totalValue / transactionCount;
+    const minValue = Math.min(...signedValues);
+    const maxValue = Math.max(...signedValues);
+
+    // Calculate operation breakdown
+    const operations = this._calculateOperationBreakdown(transactions);
+
+    // Count distinct records
+    const recordCount = new Set(transactions.map(t => t.originalId)).size;
+
+    const now = new Date().toISOString();
+
+    // Try to get existing analytics
+    const [existingOk, existingErr, existing] = await tryFn(() =>
+      this.analyticsResource.get(id)
+    );
+
+    if (existingOk && existing) {
+      // Update existing analytics (incremental)
+      const newTransactionCount = existing.transactionCount + transactionCount;
+      const newTotalValue = existing.totalValue + totalValue;
+      const newAvgValue = newTotalValue / newTransactionCount;
+      const newMinValue = Math.min(existing.minValue, minValue);
+      const newMaxValue = Math.max(existing.maxValue, maxValue);
+
+      // Merge operation breakdown
+      const newOperations = { ...existing.operations };
+      for (const [op, stats] of Object.entries(operations)) {
+        if (!newOperations[op]) {
+          newOperations[op] = { count: 0, sum: 0 };
+        }
+        newOperations[op].count += stats.count;
+        newOperations[op].sum += stats.sum;
+      }
+
+      // Update record count (approximate - we don't track all unique IDs)
+      const newRecordCount = Math.max(existing.recordCount, recordCount);
+
+      await tryFn(() =>
+        this.analyticsResource.update(id, {
+          transactionCount: newTransactionCount,
+          totalValue: newTotalValue,
+          avgValue: newAvgValue,
+          minValue: newMinValue,
+          maxValue: newMaxValue,
+          operations: newOperations,
+          recordCount: newRecordCount,
+          updatedAt: now
+        })
+      );
+    } else {
+      // Create new analytics
+      await tryFn(() =>
+        this.analyticsResource.insert({
+          id,
+          period,
+          cohort,
+          transactionCount,
+          totalValue,
+          avgValue,
+          minValue,
+          maxValue,
+          operations,
+          recordCount,
+          consolidatedAt: now,
+          updatedAt: now
+        })
+      );
+    }
+  }
+
+  /**
+   * Calculate operation breakdown
+   * @private
+   */
+  _calculateOperationBreakdown(transactions) {
+    const breakdown = {};
+
+    for (const txn of transactions) {
+      const op = txn.operation;
+      if (!breakdown[op]) {
+        breakdown[op] = { count: 0, sum: 0 };
+      }
+      breakdown[op].count++;
+
+      // Use signed value for sum (sub operations are negative)
+      const signedValue = op === 'sub' ? -txn.value : txn.value;
+      breakdown[op].sum += signedValue;
+    }
+
+    return breakdown;
+  }
+
+  /**
+   * Roll up hourly analytics to daily and monthly
+   * @private
+   */
+  async _rollupAnalytics(cohortHour) {
+    // cohortHour format: '2025-10-09T14'
+    const cohortDate = cohortHour.substring(0, 10); // '2025-10-09'
+    const cohortMonth = cohortHour.substring(0, 7);  // '2025-10'
+
+    // Roll up to day
+    await this._rollupPeriod('day', cohortDate, cohortDate);
+
+    // Roll up to month
+    await this._rollupPeriod('month', cohortMonth, cohortMonth);
+  }
+
+  /**
+   * Roll up analytics for a specific period
+   * @private
+   */
+  async _rollupPeriod(period, cohort, sourcePrefix) {
+    // Get all source analytics (e.g., all hours for a day)
+    const sourcePeriod = period === 'day' ? 'hour' : 'day';
+
+    const [ok, err, allAnalytics] = await tryFn(() =>
+      this.analyticsResource.list()
+    );
+
+    if (!ok || !allAnalytics) return;
+
+    // Filter to matching cohorts
+    const sourceAnalytics = allAnalytics.filter(a =>
+      a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
+    );
+
+    if (sourceAnalytics.length === 0) return;
+
+    // Aggregate metrics
+    const transactionCount = sourceAnalytics.reduce((sum, a) => sum + a.transactionCount, 0);
+    const totalValue = sourceAnalytics.reduce((sum, a) => sum + a.totalValue, 0);
+    const avgValue = totalValue / transactionCount;
+    const minValue = Math.min(...sourceAnalytics.map(a => a.minValue));
+    const maxValue = Math.max(...sourceAnalytics.map(a => a.maxValue));
+
+    // Merge operation breakdown
+    const operations = {};
+    for (const analytics of sourceAnalytics) {
+      for (const [op, stats] of Object.entries(analytics.operations || {})) {
+        if (!operations[op]) {
+          operations[op] = { count: 0, sum: 0 };
+        }
+        operations[op].count += stats.count;
+        operations[op].sum += stats.sum;
+      }
+    }
+
+    // Approximate record count (max of all periods)
+    const recordCount = Math.max(...sourceAnalytics.map(a => a.recordCount));
+
+    const id = `${period}-${cohort}`;
+    const now = new Date().toISOString();
+
+    // Upsert rolled-up analytics
+    const [existingOk, existingErr, existing] = await tryFn(() =>
+      this.analyticsResource.get(id)
+    );
+
+    if (existingOk && existing) {
+      await tryFn(() =>
+        this.analyticsResource.update(id, {
+          transactionCount,
+          totalValue,
+          avgValue,
+          minValue,
+          maxValue,
+          operations,
+          recordCount,
+          updatedAt: now
+        })
+      );
+    } else {
+      await tryFn(() =>
+        this.analyticsResource.insert({
+          id,
+          period,
+          cohort,
+          transactionCount,
+          totalValue,
+          avgValue,
+          minValue,
+          maxValue,
+          operations,
+          recordCount,
+          consolidatedAt: now,
+          updatedAt: now
+        })
+      );
+    }
+  }
+
+  /**
+   * Get analytics for a specific period
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {Object} options - Query options
+   * @returns {Promise<Array>} Analytics data
+   */
+  async getAnalytics(resourceName, field, options = {}) {
+    if (!this.analyticsResource) {
+      throw new Error('Analytics not enabled for this plugin');
+    }
+
+    const { period = 'day', date, startDate, endDate, month, year, breakdown = false } = options;
+
+    const [ok, err, allAnalytics] = await tryFn(() =>
+      this.analyticsResource.list()
+    );
+
+    if (!ok || !allAnalytics) {
+      return [];
+    }
+
+    // Filter by period
+    let filtered = allAnalytics.filter(a => a.period === period);
+
+    // Filter by date/range
+    if (date) {
+      if (period === 'hour') {
+        // Match all hours of the date
+        filtered = filtered.filter(a => a.cohort.startsWith(date));
+      } else {
+        filtered = filtered.filter(a => a.cohort === date);
+      }
+    } else if (startDate && endDate) {
+      filtered = filtered.filter(a => a.cohort >= startDate && a.cohort <= endDate);
+    } else if (month) {
+      filtered = filtered.filter(a => a.cohort.startsWith(month));
+    } else if (year) {
+      filtered = filtered.filter(a => a.cohort.startsWith(String(year)));
+    }
+
+    // Sort by cohort
+    filtered.sort((a, b) => a.cohort.localeCompare(b.cohort));
+
+    // Return with or without breakdown
+    if (breakdown === 'operations') {
+      return filtered.map(a => ({
+        cohort: a.cohort,
+        ...a.operations
+      }));
+    }
+
+    return filtered.map(a => ({
+      cohort: a.cohort,
+      count: a.transactionCount,
+      sum: a.totalValue,
+      avg: a.avgValue,
+      min: a.minValue,
+      max: a.maxValue,
+      operations: a.operations,
+      recordCount: a.recordCount
+    }));
+  }
+
+  /**
+   * Get top records by volume
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {Object} options - Query options
+   * @returns {Promise<Array>} Top records
+   */
+  async getTopRecords(resourceName, field, options = {}) {
+    if (!this.transactionResource) {
+      throw new Error('Transaction resource not initialized');
+    }
+
+    const { period = 'day', date, metric = 'transactionCount', limit = 10 } = options;
+
+    // Get all transactions for the period
+    const [ok, err, transactions] = await tryFn(() =>
+      this.transactionResource.list()
+    );
+
+    if (!ok || !transactions) {
+      return [];
+    }
+
+    // Filter by date
+    let filtered = transactions;
+    if (date) {
+      if (period === 'hour') {
+        filtered = transactions.filter(t => t.cohortHour && t.cohortHour.startsWith(date));
+      } else if (period === 'day') {
+        filtered = transactions.filter(t => t.cohortDate === date);
+      } else if (period === 'month') {
+        filtered = transactions.filter(t => t.cohortMonth && t.cohortMonth.startsWith(date));
+      }
+    }
+
+    // Group by originalId
+    const byRecord = {};
+    for (const txn of filtered) {
+      const recordId = txn.originalId;
+      if (!byRecord[recordId]) {
+        byRecord[recordId] = { count: 0, sum: 0 };
+      }
+      byRecord[recordId].count++;
+      byRecord[recordId].sum += txn.value;
+    }
+
+    // Convert to array and sort
+    const records = Object.entries(byRecord).map(([recordId, stats]) => ({
+      recordId,
+      count: stats.count,
+      sum: stats.sum
+    }));
+
+    // Sort by metric
+    records.sort((a, b) => {
+      if (metric === 'transactionCount') {
+        return b.count - a.count;
+      } else if (metric === 'totalValue') {
+        return b.sum - a.sum;
+      }
+      return 0;
+    });
+
+    // Limit results
+    return records.slice(0, limit);
   }
 }
 
