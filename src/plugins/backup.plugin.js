@@ -7,6 +7,7 @@ import { pipeline } from 'stream/promises';
 import { mkdir, writeFile, readFile, unlink, stat, readdir } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
 
 /**
  * BackupPlugin - Automated Database Backup System
@@ -72,27 +73,24 @@ import crypto from 'crypto';
 export class BackupPlugin extends Plugin {
   constructor(options = {}) {
     super();
-    
-    // Extract driver configuration
-    this.driverName = options.driver || 'filesystem';
-    this.driverConfig = options.config || {};
-    
+
     this.config = {
-      // Legacy destinations support (will be converted to multi driver)
-      destinations: options.destinations || null,
-      
+      // Driver configuration
+      driver: options.driver || 'filesystem',
+      driverConfig: options.config || {},
+
       // Scheduling configuration
       schedule: options.schedule || {},
-      
+
       // Retention policy (Grandfather-Father-Son)
       retention: {
         daily: 7,
-        weekly: 4, 
+        weekly: 4,
         monthly: 12,
         yearly: 3,
         ...options.retention
       },
-      
+
       // Backup options
       compression: options.compression || 'gzip',
       encryption: options.encryption || null,
@@ -101,9 +99,9 @@ export class BackupPlugin extends Plugin {
       include: options.include || null,
       exclude: options.exclude || [],
       backupMetadataResource: options.backupMetadataResource || 'plg_backup_metadata',
-      tempDir: options.tempDir || '/tmp/s3db/backups',
+      tempDir: options.tempDir || path.join(os.tmpdir(), 's3db', 'backups'),
       verbose: options.verbose || false,
-      
+
       // Hooks
       onBackupStart: options.onBackupStart || null,
       onBackupComplete: options.onBackupComplete || null,
@@ -115,41 +113,11 @@ export class BackupPlugin extends Plugin {
 
     this.driver = null;
     this.activeBackups = new Set();
-    
-    // Handle legacy destinations format
-    this._handleLegacyDestinations();
-    
-    // Validate driver configuration (after legacy conversion)
-    validateBackupConfig(this.driverName, this.driverConfig);
-    
-    this._validateConfiguration();
-  }
 
-  /**
-   * Convert legacy destinations format to multi driver format
-   */
-  _handleLegacyDestinations() {
-    if (this.config.destinations && Array.isArray(this.config.destinations)) {
-      // Convert legacy format to multi driver
-      this.driverName = 'multi';
-      this.driverConfig = {
-        strategy: 'all',
-        destinations: this.config.destinations.map(dest => {
-          const { type, ...config } = dest; // Extract type and get the rest as config
-          return {
-            driver: type,
-            config
-          };
-        })
-      };
-      
-      // Clear legacy destinations
-      this.config.destinations = null;
-      
-      if (this.config.verbose) {
-        console.log('[BackupPlugin] Converted legacy destinations format to multi driver');
-      }
-    }
+    // Validate driver configuration
+    validateBackupConfig(this.config.driver, this.config.driverConfig);
+
+    this._validateConfiguration();
   }
 
   _validateConfiguration() {
@@ -166,21 +134,21 @@ export class BackupPlugin extends Plugin {
 
   async onSetup() {
     // Create backup driver instance
-    this.driver = createBackupDriver(this.driverName, this.driverConfig);
+    this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);
-    
+
     // Create temporary directory
     await mkdir(this.config.tempDir, { recursive: true });
-    
+
     // Create backup metadata resource
     await this._createBackupMetadataResource();
-    
+
     if (this.config.verbose) {
       const storageInfo = this.driver.getStorageInfo();
       console.log(`[BackupPlugin] Initialized with driver: ${storageInfo.type}`);
     }
-    
-    this.emit('initialized', { 
+
+    this.emit('initialized', {
       driver: this.driver.getType(),
       config: this.driver.getStorageInfo()
     });
@@ -222,7 +190,12 @@ export class BackupPlugin extends Plugin {
   async backup(type = 'full', options = {}) {
     const backupId = this._generateBackupId(type);
     const startTime = Date.now();
-    
+
+    // Check for race condition
+    if (this.activeBackups.has(backupId)) {
+      throw new Error(`Backup '${backupId}' is already in progress`);
+    }
+
     try {
       this.activeBackups.add(backupId);
       
@@ -252,18 +225,10 @@ export class BackupPlugin extends Plugin {
           throw new Error('No resources were exported for backup');
         }
         
-        // Create archive if compression is enabled
-        let finalPath;
-        let totalSize = 0;
-        
-        if (this.config.compression !== 'none') {
-          finalPath = path.join(tempBackupDir, `${backupId}.tar.gz`);
-          totalSize = await this._createCompressedArchive(exportedFiles, finalPath);
-        } else {
-          finalPath = exportedFiles[0]; // For single file backups
-          const [statOk, , stats] = await tryFn(() => stat(finalPath));
-          totalSize = statOk ? stats.size : 0;
-        }
+        // Create archive
+        const archiveExtension = this.config.compression !== 'none' ? '.tar.gz' : '.json';
+        const finalPath = path.join(tempBackupDir, `${backupId}${archiveExtension}`);
+        const totalSize = await this._createArchive(exportedFiles, finalPath, this.config.compression);
         
         // Generate checksum
         const checksum = await this._generateChecksum(finalPath);
@@ -409,7 +374,9 @@ export class BackupPlugin extends Plugin {
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
-        console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        if (this.config.verbose) {
+          console.warn(`[BackupPlugin] Resource '${resourceName}' not found, skipping`);
+        }
         continue;
       }
       
@@ -418,11 +385,33 @@ export class BackupPlugin extends Plugin {
       // Export resource data
       let records;
       if (type === 'incremental') {
-        // For incremental, only export recent changes
-        // This is simplified - in real implementation, you'd track changes
-        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        records = await resource.list({ 
-          filter: { updatedAt: { '>': yesterday.toISOString() } }
+        // For incremental, only export records changed since last successful backup
+        const [lastBackupOk, , lastBackups] = await tryFn(() =>
+          this.database.resource(this.config.backupMetadataResource).list({
+            filter: {
+              status: 'completed',
+              type: { $in: ['full', 'incremental'] }
+            },
+            sort: { timestamp: -1 },
+            limit: 1
+          })
+        );
+
+        let sinceTimestamp;
+        if (lastBackupOk && lastBackups && lastBackups.length > 0) {
+          sinceTimestamp = new Date(lastBackups[0].timestamp);
+        } else {
+          // No previous backup found, use last 24 hours as fallback
+          sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        }
+
+        if (this.config.verbose) {
+          console.log(`[BackupPlugin] Incremental backup for '${resourceName}' since ${sinceTimestamp.toISOString()}`);
+        }
+
+        // Get records updated since last backup
+        records = await resource.list({
+          filter: { updatedAt: { '>': sinceTimestamp.toISOString() } }
         });
       } else {
         records = await resource.list();
@@ -447,36 +436,75 @@ export class BackupPlugin extends Plugin {
     return exportedFiles;
   }
 
-  async _createCompressedArchive(files, targetPath) {
-    // Simple implementation - compress all files into a single stream
-    // In production, you might want to use tar or similar
-    const output = createWriteStream(targetPath);
-    const gzip = zlib.createGzip({ level: 6 });
-    
+  async _createArchive(files, targetPath, compressionType) {
+    // Create a JSON-based archive with file metadata and contents
+    const archive = {
+      version: '1.0',
+      created: new Date().toISOString(),
+      files: []
+    };
+
     let totalSize = 0;
-    
-    await pipeline(
-      async function* () {
-        for (const filePath of files) {
-          const content = await readFile(filePath);
-          totalSize += content.length;
-          yield content;
+
+    // Read all files and add to archive
+    for (const filePath of files) {
+      const [readOk, readErr, content] = await tryFn(() => readFile(filePath, 'utf8'));
+
+      if (!readOk) {
+        if (this.config.verbose) {
+          console.warn(`[BackupPlugin] Failed to read ${filePath}: ${readErr?.message}`);
         }
-      },
-      gzip,
-      output
-    );
-    
+        continue;
+      }
+
+      const fileName = path.basename(filePath);
+      totalSize += content.length;
+
+      archive.files.push({
+        name: fileName,
+        size: content.length,
+        content
+      });
+    }
+
+    // Write archive (compressed or uncompressed)
+    const archiveJson = JSON.stringify(archive);
+
+    if (compressionType === 'none') {
+      // Write uncompressed JSON
+      await writeFile(targetPath, archiveJson, 'utf8');
+    } else {
+      // Write compressed JSON
+      const output = createWriteStream(targetPath);
+      const gzip = zlib.createGzip({ level: 6 });
+
+      await pipeline(
+        async function* () {
+          yield Buffer.from(archiveJson, 'utf8');
+        },
+        gzip,
+        output
+      );
+    }
+
     const [statOk, , stats] = await tryFn(() => stat(targetPath));
     return statOk ? stats.size : totalSize;
   }
 
   async _generateChecksum(filePath) {
-    const hash = crypto.createHash('sha256');
-    const stream = createReadStream(filePath);
-    
-    await pipeline(stream, hash);
-    return hash.digest('hex');
+    const [ok, err, result] = await tryFn(async () => {
+      const hash = crypto.createHash('sha256');
+      const stream = createReadStream(filePath);
+
+      await pipeline(stream, hash);
+      return hash.digest('hex');
+    });
+
+    if (!ok) {
+      throw new Error(`Failed to generate checksum for ${filePath}: ${err?.message}`);
+    }
+
+    return result;
   }
 
   async _cleanupTempFiles(tempDir) {
@@ -562,14 +590,151 @@ export class BackupPlugin extends Plugin {
   }
 
   async _restoreFromBackup(backupPath, options) {
-    // This is a simplified implementation
-    // In reality, you'd need to handle decompression, etc.
     const restoredResources = [];
-    
-    // For now, assume the backup is a JSON file with resource data
-    // In production, handle compressed archives properly
-    
-    return restoredResources;
+
+    try {
+      // Read and decompress the archive
+      let archiveData = '';
+
+      if (this.config.compression !== 'none') {
+        // Decompress the archive
+        const input = createReadStream(backupPath);
+        const gunzip = zlib.createGunzip();
+        const chunks = [];
+
+        // Use pipeline with proper stream handling
+        await new Promise((resolve, reject) => {
+          input.pipe(gunzip)
+            .on('data', chunk => chunks.push(chunk))
+            .on('end', resolve)
+            .on('error', reject);
+        });
+
+        archiveData = Buffer.concat(chunks).toString('utf8');
+      } else {
+        // Read uncompressed archive
+        archiveData = await readFile(backupPath, 'utf8');
+      }
+
+      // Parse the archive
+      let archive;
+      try {
+        archive = JSON.parse(archiveData);
+      } catch (parseError) {
+        throw new Error(`Failed to parse backup archive: ${parseError.message}`);
+      }
+
+      if (!archive || typeof archive !== 'object') {
+        throw new Error('Invalid backup archive: not a valid JSON object');
+      }
+
+      if (!archive.version || !archive.files) {
+        throw new Error('Invalid backup archive format: missing version or files array');
+      }
+
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Restoring ${archive.files.length} files from backup`);
+      }
+
+      // Process each file in the archive
+      for (const file of archive.files) {
+        try {
+          const resourceData = JSON.parse(file.content);
+
+          if (!resourceData.resourceName || !resourceData.definition) {
+            if (this.config.verbose) {
+              console.warn(`[BackupPlugin] Skipping invalid file: ${file.name}`);
+            }
+            continue;
+          }
+
+          const resourceName = resourceData.resourceName;
+
+          // Check if we should restore this resource
+          if (options.resources && !options.resources.includes(resourceName)) {
+            continue;
+          }
+
+          // Ensure resource exists or create it
+          let resource = this.database.resources[resourceName];
+
+          if (!resource) {
+            if (this.config.verbose) {
+              console.log(`[BackupPlugin] Creating resource '${resourceName}'`);
+            }
+
+            const [createOk, createErr] = await tryFn(() =>
+              this.database.createResource(resourceData.definition)
+            );
+
+            if (!createOk) {
+              if (this.config.verbose) {
+                console.warn(`[BackupPlugin] Failed to create resource '${resourceName}': ${createErr?.message}`);
+              }
+              continue;
+            }
+
+            resource = this.database.resources[resourceName];
+          }
+
+          // Restore records
+          if (resourceData.records && Array.isArray(resourceData.records)) {
+            const mode = options.mode || 'merge'; // 'merge', 'replace', 'skip'
+
+            if (mode === 'replace') {
+              // Clear existing data
+              const ids = await resource.listIds();
+              for (const id of ids) {
+                await resource.delete(id);
+              }
+            }
+
+            // Insert records
+            let insertedCount = 0;
+            for (const record of resourceData.records) {
+              const [insertOk] = await tryFn(async () => {
+                if (mode === 'skip') {
+                  // Check if record exists
+                  const existing = await resource.get(record.id);
+                  if (existing) {
+                    return false;
+                  }
+                }
+                await resource.insert(record);
+                return true;
+              });
+
+              if (insertOk) {
+                insertedCount++;
+              }
+            }
+
+            restoredResources.push({
+              name: resourceName,
+              recordsRestored: insertedCount,
+              totalRecords: resourceData.records.length
+            });
+
+            if (this.config.verbose) {
+              console.log(`[BackupPlugin] Restored ${insertedCount}/${resourceData.records.length} records to '${resourceName}'`);
+            }
+          }
+
+        } catch (fileError) {
+          if (this.config.verbose) {
+            console.warn(`[BackupPlugin] Error processing file ${file.name}: ${fileError.message}`);
+          }
+        }
+      }
+
+      return restoredResources;
+
+    } catch (error) {
+      if (this.config.verbose) {
+        console.error(`[BackupPlugin] Error restoring backup: ${error.message}`);
+      }
+      throw new Error(`Failed to restore backup: ${error.message}`);
+    }
   }
 
   /**
@@ -625,8 +790,118 @@ export class BackupPlugin extends Plugin {
   }
 
   async _cleanupOldBackups() {
-    // Implementation of retention policy
-    // This is simplified - implement GFS rotation properly
+    try {
+      // Get all completed backups sorted by timestamp
+      const [listOk, , allBackups] = await tryFn(() =>
+        this.database.resource(this.config.backupMetadataResource).list({
+          filter: { status: 'completed' },
+          sort: { timestamp: -1 }
+        })
+      );
+
+      if (!listOk || !allBackups || allBackups.length === 0) {
+        return;
+      }
+
+      const now = Date.now();
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const msPerWeek = 7 * msPerDay;
+      const msPerMonth = 30 * msPerDay;
+      const msPerYear = 365 * msPerDay;
+
+      // Categorize backups by retention period
+      const categorized = {
+        daily: [],
+        weekly: [],
+        monthly: [],
+        yearly: []
+      };
+
+      for (const backup of allBackups) {
+        const age = now - backup.timestamp;
+
+        if (age <= msPerDay * this.config.retention.daily) {
+          categorized.daily.push(backup);
+        } else if (age <= msPerWeek * this.config.retention.weekly) {
+          categorized.weekly.push(backup);
+        } else if (age <= msPerMonth * this.config.retention.monthly) {
+          categorized.monthly.push(backup);
+        } else if (age <= msPerYear * this.config.retention.yearly) {
+          categorized.yearly.push(backup);
+        }
+      }
+
+      // Apply GFS retention: keep one backup per period
+      const toKeep = new Set();
+
+      // Keep all daily backups within retention
+      categorized.daily.forEach(b => toKeep.add(b.id));
+
+      // Keep one backup per week
+      const weeklyByWeek = new Map();
+      for (const backup of categorized.weekly) {
+        const weekNum = Math.floor((now - backup.timestamp) / msPerWeek);
+        if (!weeklyByWeek.has(weekNum)) {
+          weeklyByWeek.set(weekNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+
+      // Keep one backup per month
+      const monthlyByMonth = new Map();
+      for (const backup of categorized.monthly) {
+        const monthNum = Math.floor((now - backup.timestamp) / msPerMonth);
+        if (!monthlyByMonth.has(monthNum)) {
+          monthlyByMonth.set(monthNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+
+      // Keep one backup per year
+      const yearlyByYear = new Map();
+      for (const backup of categorized.yearly) {
+        const yearNum = Math.floor((now - backup.timestamp) / msPerYear);
+        if (!yearlyByYear.has(yearNum)) {
+          yearlyByYear.set(yearNum, backup);
+          toKeep.add(backup.id);
+        }
+      }
+
+      // Delete backups not in the keep set
+      const backupsToDelete = allBackups.filter(b => !toKeep.has(b.id));
+
+      if (backupsToDelete.length === 0) {
+        return;
+      }
+
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Cleaning up ${backupsToDelete.length} old backups (keeping ${toKeep.size})`);
+      }
+
+      // Delete old backups
+      for (const backup of backupsToDelete) {
+        try {
+          // Delete from driver
+          await this.driver.delete(backup.id, backup.driverInfo);
+
+          // Delete metadata
+          await this.database.resource(this.config.backupMetadataResource).delete(backup.id);
+
+          if (this.config.verbose) {
+            console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
+          }
+        } catch (deleteError) {
+          if (this.config.verbose) {
+            console.warn(`[BackupPlugin] Failed to delete backup ${backup.id}: ${deleteError.message}`);
+          }
+        }
+      }
+
+    } catch (error) {
+      if (this.config.verbose) {
+        console.warn(`[BackupPlugin] Error during cleanup: ${error.message}`);
+      }
+    }
   }
 
   async _executeHook(hook, ...args) {

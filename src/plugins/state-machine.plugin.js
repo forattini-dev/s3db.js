@@ -91,7 +91,7 @@ import tryFn from "../concerns/try-fn.js";
  * const state = await stateMachine.getState('order_processing', orderId);
  *
  * // Get valid events for current state
- * const validEvents = stateMachine.getValidEvents('order_processing', 'pending');
+ * const validEvents = await stateMachine.getValidEvents('order_processing', 'pending');
  *
  * // Get transition history
  * const history = await stateMachine.getTransitionHistory('order_processing', orderId);
@@ -107,13 +107,13 @@ export class StateMachinePlugin extends Plugin {
       persistTransitions: options.persistTransitions !== false,
       transitionLogResource: options.transitionLogResource || 'plg_state_transitions',
       stateResource: options.stateResource || 'plg_entity_states',
-      verbose: options.verbose || false,
-      ...options
+      retryAttempts: options.retryAttempts || 3,
+      retryDelay: options.retryDelay || 100,
+      verbose: options.verbose || false
     };
-    
+
     this.database = null;
     this.machines = new Map();
-    this.stateStorage = new Map(); // In-memory cache for states
     
     this._validateConfiguration();
   }
@@ -292,49 +292,68 @@ export class StateMachinePlugin extends Plugin {
     // Persist transition log
     if (this.config.persistTransitions) {
       const transitionId = `${machineId}_${entityId}_${timestamp}`;
-      
-      const [logOk, logErr] = await tryFn(() => 
-        this.database.resource(this.config.transitionLogResource).insert({
-          id: transitionId,
-          machineId,
-          entityId,
-          fromState,
-          toState,
-          event,
-          context,
-          timestamp,
-          createdAt: now.slice(0, 10) // YYYY-MM-DD for partitioning
-        })
-      );
-      
-      if (!logOk && this.config.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to log transition:`, logErr.message);
-      }
-      
-      // Update current state
-      const stateId = `${machineId}_${entityId}`;
-      const [stateOk, stateErr] = await tryFn(async () => {
-        const exists = await this.database.resource(this.config.stateResource).exists(stateId);
-        
-        const stateData = {
-          id: stateId,
-          machineId,
-          entityId,
-          currentState: toState,
-          context,
-          lastTransition: transitionId,
-          updatedAt: now
-        };
-        
-        if (exists) {
-          await this.database.resource(this.config.stateResource).update(stateId, stateData);
-        } else {
-          await this.database.resource(this.config.stateResource).insert(stateData);
+
+      // Retry transition logging (critical for audit trail)
+      let logOk = false;
+      let lastLogErr;
+
+      for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
+        const [ok, err] = await tryFn(() =>
+          this.database.resource(this.config.transitionLogResource).insert({
+            id: transitionId,
+            machineId,
+            entityId,
+            fromState,
+            toState,
+            event,
+            context,
+            timestamp,
+            createdAt: now.slice(0, 10) // YYYY-MM-DD for partitioning
+          })
+        );
+
+        if (ok) {
+          logOk = true;
+          break;
         }
-      });
-      
-      if (!stateOk && this.config.verbose) {
-        console.warn(`[StateMachinePlugin] Failed to update state:`, stateErr.message);
+
+        lastLogErr = err;
+
+        if (attempt < this.config.retryAttempts - 1) {
+          const delay = this.config.retryDelay * Math.pow(2, attempt);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      if (!logOk && this.config.verbose) {
+        console.warn(`[StateMachinePlugin] Failed to log transition after ${this.config.retryAttempts} attempts:`, lastLogErr.message);
+      }
+
+      // Update current state with upsert pattern
+      const stateId = `${machineId}_${entityId}`;
+      const stateData = {
+        machineId,
+        entityId,
+        currentState: toState,
+        context,
+        lastTransition: transitionId,
+        updatedAt: now
+      };
+
+      // Try update first (most common case), fallback to insert if doesn't exist
+      const [updateOk] = await tryFn(() =>
+        this.database.resource(this.config.stateResource).update(stateId, stateData)
+      );
+
+      if (!updateOk) {
+        // Record doesn't exist, insert it
+        const [insertOk, insertErr] = await tryFn(() =>
+          this.database.resource(this.config.stateResource).insert({ id: stateId, ...stateData })
+        );
+
+        if (!insertOk && this.config.verbose) {
+          console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
+        }
       }
     }
   }
@@ -374,22 +393,23 @@ export class StateMachinePlugin extends Plugin {
 
   /**
    * Get valid events for current state
+   * Can accept either a state name (sync) or entityId (async to fetch latest state)
    */
-  getValidEvents(machineId, stateOrEntityId) {
+  async getValidEvents(machineId, stateOrEntityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
       throw new Error(`State machine '${machineId}' not found`);
     }
-    
+
     let state;
     if (machine.config.states[stateOrEntityId]) {
-      // stateOrEntityId is a state name
+      // stateOrEntityId is a state name - direct lookup
       state = stateOrEntityId;
     } else {
-      // stateOrEntityId is an entityId, get current state
-      state = machine.currentStates.get(stateOrEntityId) || machine.config.initialState;
+      // stateOrEntityId is an entityId - fetch latest state from storage
+      state = await this.getState(machineId, stateOrEntityId);
     }
-    
+
     const stateConfig = machine.config.states[state];
     return stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [];
   }
@@ -401,29 +421,30 @@ export class StateMachinePlugin extends Plugin {
     if (!this.config.persistTransitions) {
       return [];
     }
-    
+
     const { limit = 50, offset = 0 } = options;
-    
-    const [ok, err, transitions] = await tryFn(() => 
-      this.database.resource(this.config.transitionLogResource).list({
-        where: { machineId, entityId },
-        orderBy: { timestamp: 'desc' },
+
+    const [ok, err, transitions] = await tryFn(() =>
+      this.database.resource(this.config.transitionLogResource).query({
+        machineId,
+        entityId
+      }, {
         limit,
         offset
       })
     );
-    
+
     if (!ok) {
       if (this.config.verbose) {
         console.warn(`[StateMachinePlugin] Failed to get transition history:`, err.message);
       }
       return [];
     }
-    
-    // Sort by timestamp descending to ensure newest first
-    const sortedTransitions = transitions.sort((a, b) => b.timestamp - a.timestamp);
-    
-    return sortedTransitions.map(t => ({
+
+    // Sort by timestamp descending (newest first)
+    const sorted = (transitions || []).sort((a, b) => b.timestamp - a.timestamp);
+
+    return sorted.map(t => ({
       from: t.fromState,
       to: t.toState,
       event: t.event,
@@ -440,33 +461,41 @@ export class StateMachinePlugin extends Plugin {
     if (!machine) {
       throw new Error(`State machine '${machineId}' not found`);
     }
-    
+
     const initialState = machine.config.initialState;
     machine.currentStates.set(entityId, initialState);
-    
+
     if (this.config.persistTransitions) {
       const now = new Date().toISOString();
       const stateId = `${machineId}_${entityId}`;
-      
-      await this.database.resource(this.config.stateResource).insert({
-        id: stateId,
-        machineId,
-        entityId,
-        currentState: initialState,
-        context,
-        lastTransition: null,
-        updatedAt: now
-      });
+
+      // Try to insert, ignore if already exists (idempotent)
+      const [ok, err] = await tryFn(() =>
+        this.database.resource(this.config.stateResource).insert({
+          id: stateId,
+          machineId,
+          entityId,
+          currentState: initialState,
+          context,
+          lastTransition: null,
+          updatedAt: now
+        })
+      );
+
+      // Only throw if error is NOT "already exists"
+      if (!ok && err && !err.message?.includes('already exists')) {
+        throw new Error(`Failed to initialize entity state: ${err.message}`);
+      }
     }
-    
+
     // Execute entry action for initial state
     const initialStateConfig = machine.config.states[initialState];
     if (initialStateConfig && initialStateConfig.entry) {
       await this._executeAction(initialStateConfig.entry, context, 'INIT', machineId, entityId);
     }
-    
+
     this.emit('entity_initialized', { machineId, entityId, initialState });
-    
+
     return initialState;
   }
 
@@ -531,7 +560,6 @@ export class StateMachinePlugin extends Plugin {
 
   async stop() {
     this.machines.clear();
-    this.stateStorage.clear();
   }
 
   async cleanup() {

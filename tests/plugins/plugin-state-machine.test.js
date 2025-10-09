@@ -461,28 +461,28 @@ describe('StateMachinePlugin', () => {
   describe('Valid Events', () => {
     it('should return valid events for current state by entity ID', async () => {
       await plugin.initializeEntity('order_processing', 'order1');
-      
-      const events = plugin.getValidEvents('order_processing', 'order1');
+
+      const events = await plugin.getValidEvents('order_processing', 'order1');
       expect(events).toEqual(['CONFIRM', 'CANCEL']);
     });
 
-    it('should return valid events for specific state name', () => {
-      const events = plugin.getValidEvents('order_processing', 'confirmed');
+    it('should return valid events for specific state name', async () => {
+      const events = await plugin.getValidEvents('order_processing', 'confirmed');
       expect(events).toEqual(['PREPARE', 'CANCEL']);
     });
 
-    it('should return empty array for final states', () => {
-      const events = plugin.getValidEvents('order_processing', 'delivered');
+    it('should return empty array for final states', async () => {
+      const events = await plugin.getValidEvents('order_processing', 'delivered');
       expect(events).toEqual([]);
     });
 
-    it('should return empty array for states without transitions', () => {
-      const events = plugin.getValidEvents('order_processing', 'cancelled');
+    it('should return empty array for states without transitions', async () => {
+      const events = await plugin.getValidEvents('order_processing', 'cancelled');
       expect(events).toEqual([]);
     });
 
-    it('should throw error for unknown machine', () => {
-      expect(() => plugin.getValidEvents('unknown', 'state')).toThrow(
+    it('should throw error for unknown machine', async () => {
+      await expect(plugin.getValidEvents('unknown', 'state')).rejects.toThrow(
         "State machine 'unknown' not found"
       );
     });
@@ -680,16 +680,14 @@ describe('StateMachinePlugin', () => {
     it('should stop successfully', async () => {
       await plugin.stop();
       expect(plugin.machines.size).toBe(0);
-      expect(plugin.stateStorage.size).toBe(0);
     });
 
     it('should cleanup successfully', async () => {
       const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
-      
+
       await plugin.cleanup();
-      
+
       expect(plugin.machines.size).toBe(0);
-      expect(plugin.stateStorage.size).toBe(0);
       expect(removeListenersSpy).toHaveBeenCalled();
     });
   });
