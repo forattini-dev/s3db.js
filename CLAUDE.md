@@ -63,6 +63,64 @@ if (!versions[currentVersion]) {
 - `metrics`: Performance monitoring
 - `fulltext`: Text search
 
+### Resource Origin Tracking (createdBy)
+**Purpose**: Track who created a resource to enable plugin-aware behavior
+**Location**: `database.class.js::uploadMetadataFile()`, `resource.class.js::constructor()`
+
+**Metadata Structure**:
+```javascript
+{
+  resources: {
+    users: {
+      createdBy: 'user', // User-created resource
+      currentVersion: 'v0',
+      versions: { ... }
+    },
+    users_transactions_balance: {
+      createdBy: 'EventualConsistencyPlugin', // Plugin-created resource
+      currentVersion: 'v0',
+      versions: { ... }
+    }
+  }
+}
+```
+
+**Values**:
+- `'user'`: Default, created programmatically by application code
+- `'plugin'`: Generic plugin-created resource
+- `'EventualConsistencyPlugin'`, `'AuditPlugin'`, etc.: Specific plugin name
+
+**Usage**:
+```javascript
+// Create user resource
+const users = await database.createResource({
+  name: 'users',
+  attributes: { ... },
+  createdBy: 'user' // Optional, defaults to 'user'
+});
+
+// Plugin creates internal resources
+const transactions = await database.createResource({
+  name: 'users_transactions',
+  attributes: { ... },
+  createdBy: 'EventualConsistencyPlugin' // Marked as plugin-created
+});
+```
+
+**Cache Behavior**: CachePlugin automatically skips plugin-created resources unless explicitly included
+```javascript
+// CachePlugin.shouldCacheResource() checks createdBy
+if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== 'user' && !this.config.include) {
+  return false; // Skip plugin resources
+}
+```
+
+**Benefits**:
+- Prevents caching of transient plugin data (transactions, locks, analytics)
+- Enables plugin-specific behavior (e.g., monitoring, replication filters)
+- Self-documenting resource ownership in metadata
+- Forward-compatible for future plugin ecosystem features
+
 ### Advanced Metadata Encoding
 **Implementation**: `src/concerns/advanced-metadata-encoding.js`
 **Optimizations**:

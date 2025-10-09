@@ -113,7 +113,15 @@ export class CachePlugin extends Plugin {
   }
 
   shouldCacheResource(resourceName) {
-    // Skip plugin resources by default (unless explicitly included)
+    // Get resource metadata to check createdBy
+    const resourceMetadata = this.database.savedMetadata?.resources?.[resourceName];
+
+    // Skip plugin-created resources by default (unless explicitly included)
+    if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== 'user' && !this.config.include) {
+      return false;
+    }
+
+    // Legacy: Skip plugin resources by name pattern (unless explicitly included)
     if (resourceName.startsWith('plg_') && !this.config.include) {
       return false;
     }

@@ -475,6 +475,7 @@ export class Database extends EventEmitter {
       metadata.resources[name] = {
         currentVersion: version,
         partitions: resource.config.partitions || {},
+        createdBy: existingResource?.createdBy || resource.config.createdBy || 'user',
         versions: {
           ...existingResource?.versions, // Preserve previous versions
           [version]: {
@@ -906,6 +907,7 @@ export class Database extends EventEmitter {
    * @param {boolean} [config.autoDecrypt=true] - Auto-decrypt secret fields
    * @param {Function|number} [config.idGenerator] - Custom ID generator or size
    * @param {number} [config.idSize=22] - Size for auto-generated IDs
+   * @param {string} [config.createdBy='user'] - Who created this resource ('user', 'plugin', or plugin name)
    * @returns {Promise<Resource>} The created or updated resource
    */
   async createResource({ name, attributes, behavior = 'user-managed', hooks, ...config }) {
@@ -968,7 +970,8 @@ export class Database extends EventEmitter {
       idGenerator: config.idGenerator,
       idSize: config.idSize,
       asyncEvents: config.asyncEvents,
-      events: config.events || {}
+      events: config.events || {},
+      createdBy: config.createdBy || 'user'
     });
     resource.database = this;
     this.resources[name] = resource;
