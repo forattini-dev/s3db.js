@@ -125,14 +125,19 @@ new EventualConsistencyPlugin({
   field: 'fieldName',           // Numeric field to manage
 
   // Optional
-  mode: 'async',                // 'async' (default) or 'sync'
-  autoConsolidate: true,        // Enable auto-consolidation
-  consolidationInterval: 3600000, // Consolidation interval (ms)
-  consolidationConcurrency: 5,  // Parallel consolidation limit (default: 5)
+  mode: 'async',                      // 'async' (default) or 'sync'
+  autoConsolidate: true,              // Enable auto-consolidation
+  consolidationInterval: 300,         // Consolidation interval (seconds, default: 300 = 5min)
+  consolidationWindow: 24,            // Hours to look back for consolidation (default: 24h)
+  consolidationConcurrency: 5,        // Parallel consolidation limit (default: 5)
+  lateArrivalStrategy: 'warn',        // 'ignore', 'warn' (default), or 'process'
+  lockTimeout: 300,                   // Lock timeout (seconds, default: 300 = 5min)
+  transactionRetention: 30,           // Days to keep applied transactions (default: 30)
+  gcInterval: 86400,                  // Garbage collection interval (seconds, default: 86400 = 24h)
 
   // Cohort configuration
   cohort: {
-    timezone: 'UTC'             // Timezone for cohorts (default: UTC)
+    timezone: 'America/Sao_Paulo'     // Timezone for cohorts (auto-detected or UTC)
   },
 
   // Batching
@@ -230,12 +235,14 @@ Manually triggers consolidation.
 ```javascript
 // Transaction resources are automatically partitioned by:
 {
+  byHour: { fields: { cohortHour: 'string' } },   // YYYY-MM-DDTHH format (e.g., 2025-10-08T14)
   byDay: { fields: { cohortDate: 'string' } },    // YYYY-MM-DD format
   byMonth: { fields: { cohortMonth: 'string' } }  // YYYY-MM format
 }
 ```
 
-This dual-partition structure enables:
+This triple-partition structure enables:
+- **O(1) hourly queries** for consolidation (most efficient)
 - Efficient daily transaction queries
 - Monthly aggregation and reporting
 - Optimized storage and retrieval
@@ -251,16 +258,38 @@ This dual-partition structure enables:
 }
 ```
 
-Supported timezones:
-- `'UTC'` (default)
-- `'America/New_York'`, `'America/Chicago'`, `'America/Los_Angeles'`
-- `'America/Sao_Paulo'`
+**Auto-Detection:**
+If no timezone is specified, the plugin uses a 3-level detection strategy:
+1. **TZ environment variable** (common in Docker/Kubernetes)
+2. **Intl API** (system timezone detection)
+3. **UTC fallback** (if detection fails)
+
+```javascript
+// Auto-detect from environment
+const plugin = new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance'
+  // timezone auto-detected from TZ env var or system
+});
+
+// Explicit timezone
+const plugin = new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance',
+  cohort: { timezone: 'America/New_York' }
+});
+```
+
+**Supported Timezones:**
+All IANA timezones are supported (~600 timezones). Common examples:
+- `'UTC'` (default if detection fails)
+- `'America/New_York'`, `'America/Chicago'`, `'America/Los_Angeles'`, `'America/Sao_Paulo'`
 - `'Europe/London'`, `'Europe/Paris'`, `'Europe/Berlin'`
-- `'Asia/Tokyo'`, `'Asia/Shanghai'`
+- `'Asia/Tokyo'`, `'Asia/Shanghai'`, `'Asia/Singapore'`
 - `'Australia/Sydney'`
 
-**Note on Daylight Saving Time (DST):**
-Timezone offsets are static and don't account for DST transitions. For most use cases, this is acceptable as cohort dates remain consistent within the configured offset. For DST-aware timezone handling, consider using a library like `date-fns-tz` with a custom cohort implementation
+**Daylight Saving Time (DST):**
+The plugin uses the Intl API for timezone offset calculation, which **automatically handles DST transitions**. Cohort dates remain accurate throughout DST changes.
 
 ### Custom Reducers
 
@@ -635,6 +664,411 @@ await accounts.consolidate('account-001');
 
 ---
 
+## Consolidation Strategy
+
+### How Consolidation Works
+
+The EventualConsistencyPlugin uses a **watermark-based consolidation strategy**, inspired by Apache Flink and Kafka Streams. This approach handles late-arriving transactions while maintaining high performance.
+
+#### Key Concepts
+
+**1. Event Time vs Processing Time**
+- **Event Time**: When the transaction happened (`cohortHour`)
+- **Processing Time**: When consolidation runs (now)
+
+**2. Watermark (Consolidation Window)**
+- `consolidationWindow: 24` = "Accept late arrivals up to 24h ago"
+- Transactions **inside** the watermark: always re-consolidated
+- Transactions **outside** the watermark: handled by `lateArrivalStrategy`
+
+**3. Idempotency**
+- Consolidation can run multiple times on the same hour
+- Doesn't duplicate values because transactions are marked `applied: true`
+- Next consolidation only picks `applied: false`
+
+### Practical Example: Wallet Balance
+
+```javascript
+new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance',
+  consolidationInterval: 300,  // 5 min (seconds)
+  consolidationWindow: 24,     // 24 hours
+  lateArrivalStrategy: 'warn'
+})
+```
+
+**Timeline:**
+
+```
+14:00 - Transactions arrive
+  14:15 → wallet.add('user1', 100)  // cohortHour: 2025-10-08T14
+  14:30 → wallet.add('user1', 50)   // cohortHour: 2025-10-08T14
+  14:45 → wallet.add('user1', 25)   // cohortHour: 2025-10-08T14
+
+14:05 - First Consolidation
+  Query: cohortHour=2025-10-08T14, applied=false
+  Found: 2 transactions (14:15, 14:30)
+  Consolidated: 0 + 100 + 50 = 150
+  Marked applied: true
+  → wallet.balance = 150 ✅
+
+14:50 - Second Consolidation
+  Query: cohortHour=2025-10-08T14, applied=false
+  Found: 1 transaction (14:45 - arrived late)
+  Consolidated: 150 + 25 = 175
+  Marked applied: true
+  → wallet.balance = 175 ✅ (Updated!)
+
+15:30 - Third Consolidation
+  Query: cohortHour=2025-10-08T14, applied=false
+  Found: 0 transactions (all applied)
+  Skip hour 14 ✅
+  Process hour 15...
+```
+
+### Late Arrivals
+
+#### Within Watermark (<24h)
+```javascript
+// Time: 10:00 (next day)
+// Late arrival: transaction for 14:00 (yesterday) = 20h ago
+// 20h < 24h watermark ✅
+
+wallet.add('user1', 10) // cohortHour: 2025-10-08T14 (yesterday)
+// Next consolidation: picks this txn and re-consolidates hour 14
+// wallet.balance = 175 + 10 = 185 ✅
+```
+
+#### Outside Watermark (>24h)
+```javascript
+// Time: 15:00 (next day)
+// Late arrival: transaction for 14:00 (yesterday) = 25h ago
+// 25h > 24h watermark ❌
+
+wallet.add('user1', 10) // cohortHour: 2025-10-08T14 (yesterday)
+
+// Strategy: 'ignore'
+// ❌ Transaction rejected
+// wallet.balance = 175 (unchanged)
+
+// Strategy: 'warn'
+// ⚠️ Warning logged, transaction created
+// But consolidation won't pick it up (outside window)
+// wallet.balance = 175 (unchanged in practice)
+
+// Strategy: 'process'
+// ✅ Transaction created AND forced in next consolidation
+// Requires extra logic (not recommended)
+```
+
+### Late Arrival Strategies
+
+#### 1. `ignore` (Most Performant)
+```javascript
+lateArrivalStrategy: 'ignore'
+
+// Late arrivals > watermark are rejected
+// Doesn't create transaction
+// Maximum performance ✅
+// Use when: Financial data with strict SLA
+```
+
+#### 2. `warn` (Default - Auditable)
+```javascript
+lateArrivalStrategy: 'warn'
+
+// Late arrivals > watermark generate warning
+// Transaction is created (for audit)
+// But consolidation won't pick it up (outside window)
+// Use when: Need to audit late arrivals
+```
+
+#### 3. `process` (Most Complex)
+```javascript
+lateArrivalStrategy: 'process'
+
+// Late arrivals always processed
+// Requires manual consolidation or infinite window
+// Lower performance ⚠️
+// Use when: Critical data, no arrival deadline
+```
+
+### Performance by Configuration
+
+#### High Frequency (Real-time)
+```javascript
+{
+  consolidationInterval: 60,   // 1 min
+  consolidationWindow: 2,      // 2 hours
+  lateArrivalStrategy: 'ignore'
+}
+
+// Queries: 2 partitions per hour
+// Late arrival tolerance: 2h
+// Use: Gaming, IoT, real-time dashboards
+```
+
+#### Medium Frequency (Near real-time)
+```javascript
+{
+  consolidationInterval: 300,  // 5 min
+  consolidationWindow: 24,     // 24 hours
+  lateArrivalStrategy: 'warn'
+}
+
+// Queries: 24 partitions per hour
+// Late arrival tolerance: 24h
+// Use: E-commerce, fintech, analytics
+```
+
+#### Low Frequency (Batch)
+```javascript
+{
+  consolidationInterval: 3600, // 1 hour
+  consolidationWindow: 168,    // 7 days
+  lateArrivalStrategy: 'warn'
+}
+
+// Queries: 168 partitions per hour
+// Late arrival tolerance: 7 days
+// Use: Reports, data warehouse, ML
+```
+
+### Consolidation Best Practices
+
+#### 1. Choose Watermark Based on SLA
+```javascript
+// SLA: "99% of transactions arrive within 1h"
+consolidationWindow: 2  // 2h watermark (covers 99% + safety margin)
+
+// SLA: "95% of transactions arrive within 30min"
+consolidationWindow: 1  // 1h watermark
+```
+
+#### 2. Balance Consolidation Interval × Window
+```javascript
+// ❌ BAD: Too frequent with large window
+consolidationInterval: 60,   // 1 min
+consolidationWindow: 168     // 7 days
+// Problem: Query 168 partitions every 1 min!
+
+// ✅ GOOD: Frequent with small window
+consolidationInterval: 60,   // 1 min
+consolidationWindow: 2       // 2 hours
+// Query only 2 partitions every 1 min
+```
+
+#### 3. Late Arrival Strategy
+```javascript
+// Production: Prefer 'warn' or 'ignore'
+// Development: Use 'warn' for debugging
+// Critical: Only use 'process' if truly necessary
+```
+
+### Monitoring Metrics
+
+**Important Metrics:**
+1. **Late Arrival Rate**: % of transactions outside watermark
+2. **Consolidation Latency**: Time until transaction is applied
+3. **Window Coverage**: % of transactions inside watermark
+
+**Logs with verbose: true:**
+```
+[EventualConsistency] Late arrival detected: transaction for 2025-10-08T14
+is 25h late (watermark: 24h). Processing anyway, but consolidation may not pick it up.
+```
+
+### Summary
+
+**How it works:**
+1. Transactions have `cohortHour` (event time)
+2. Consolidation queries last N hours (watermark)
+3. Transactions within watermark: always re-consolidated
+4. Transactions outside watermark: late arrival strategy
+
+**Doesn't accumulate by hour!**
+- Each consolidation recalculates from zero
+- Uses `applied: false` to know what to process
+- Is idempotent (can run N times)
+
+**Best practice:**
+- Window = arrival SLA + safety margin
+- Strategy = 'warn' (default, auditable)
+- Interval = Based on write frequency
+
+**Performance:**
+- Hourly partitions = O(1) lookup
+- Small window = Fewer partitions = Faster
+- Idempotency = Can run as many times as needed
+
+---
+
+## Distributed Environment
+
+### Multi-Container Safety
+
+The EventualConsistencyPlugin is **safe for distributed environments** with multiple containers/processes running in parallel. It uses S3-based distributed locks to prevent race conditions and data corruption.
+
+#### Distributed Locks for Consolidation
+
+When multiple containers try to consolidate the same record simultaneously:
+
+```javascript
+// Container 1 and Container 2 both try to consolidate 'wallet-123'
+await wallets.consolidate('wallet-123'); // Both containers
+
+// What happens:
+// 1. Both try to acquire lock: `lock-consolidation-wallets-wallet-123-balance`
+// 2. Only ONE succeeds (S3 insert is atomic via ETag)
+// 3. Winner runs consolidation
+// 4. Loser skips (lock already exists)
+// 5. Winner releases lock when done
+```
+
+**Configuration:**
+```javascript
+{
+  lockTimeout: 300  // 5 minutes (configurable)
+}
+```
+
+If a container crashes during consolidation, the lock will be cleaned up automatically after the timeout period.
+
+#### Distributed Locks for Garbage Collection
+
+Garbage collection runs periodically to delete old applied transactions:
+
+```javascript
+// Multiple containers, but only ONE runs GC at a time
+// Automatic via distributed lock: `lock-gc-{resource}-{field}`
+
+{
+  transactionRetention: 30,  // Keep transactions for 30 days
+  gcInterval: 86400          // Run GC every 24 hours
+}
+```
+
+**How it works:**
+1. Container A starts GC, acquires `lock-gc-wallets-balance`
+2. Container B tries to start GC, lock insert fails → skips
+3. Container A deletes transactions older than 30 days
+4. Container A releases lock
+5. Next GC runs 24 hours later (any container can run it)
+
+#### Distributed Lock Cleanup
+
+Stale locks (from crashed containers) are cleaned up automatically:
+
+```javascript
+// Runs before each consolidation
+// Uses its own distributed lock: `lock-cleanup-{resource}-{field}`
+
+// Finds locks older than lockTimeout
+// Deletes them
+// Only one container runs cleanup at a time
+```
+
+### Transaction Lifecycle in Distributed Environment
+
+```
+Container 1: wallet.add('user1', 100)
+  ↓
+  Transaction created: { applied: false, cohortHour: '2025-10-08T14' }
+  ↓
+Container 2: Runs consolidation (scheduled or manual)
+  ↓
+  Acquires lock: `lock-consolidation-wallets-user1-balance`
+  ↓
+  Queries: { cohortHour: '2025-10-08T14', applied: false }
+  ↓
+  Consolidates: wallet.balance = old + 100
+  ↓
+  Marks: { applied: true }
+  ↓
+  Releases lock
+  ↓
+Container 3: Runs GC (24h later)
+  ↓
+  Acquires lock: `lock-gc-wallets-balance`
+  ↓
+  Deletes transactions older than 30 days (applied: true)
+  ↓
+  Releases lock
+```
+
+### Best Practices for Distributed Deployments
+
+#### 1. Configure Appropriate Lock Timeout
+
+```javascript
+// Short timeout for high-frequency operations
+{
+  consolidationInterval: 60,   // 1 min
+  lockTimeout: 120             // 2 min (2x interval)
+}
+
+// Longer timeout for heavy consolidations
+{
+  consolidationInterval: 3600, // 1 hour
+  lockTimeout: 7200            // 2 hours
+}
+```
+
+**Rule of thumb**: Lock timeout should be at least 2x consolidation interval.
+
+#### 2. Don't Use Batching in Production
+
+```javascript
+// ❌ BAD: In-memory batching loses data on container crash
+{
+  batchTransactions: true  // Stores transactions in memory
+}
+
+// ✅ GOOD: Direct writes survive container crashes
+{
+  batchTransactions: false  // Default
+}
+```
+
+**Why**: Batched transactions are stored in memory and lost if the container crashes before flush.
+
+#### 3. Monitor Lock Contention
+
+```javascript
+{
+  verbose: true  // Enable to see lock messages
+}
+
+// Logs:
+// [EventualConsistency] Consolidation already running on another container
+// [EventualConsistency] GC already running in another container
+```
+
+If you see many "already running" messages, consider:
+- Increasing consolidation interval
+- Reducing number of containers
+- Checking for slow consolidations (optimize reducer)
+
+#### 4. Garbage Collection Timing
+
+```javascript
+// Low-traffic periods
+{
+  gcInterval: 86400  // Run GC once daily (default)
+}
+
+// High-traffic with many transactions
+{
+  gcInterval: 43200,         // Run GC twice daily
+  transactionRetention: 7    // Keep only 7 days
+}
+```
+
+**Note**: GC only deletes `applied: true` transactions, so it's safe to run frequently.
+
+---
+
 ## Best Practices
 
 ### 1. Choose the Right Mode
@@ -758,6 +1192,7 @@ The plugin creates a `${resource}_transactions_${field}` resource for each field
   value: 'number|required',      // Transaction value
   operation: 'string|required',  // 'set', 'add', or 'sub'
   timestamp: 'string|required',  // ISO timestamp
+  cohortHour: 'string|required', // YYYY-MM-DDTHH (e.g., 2025-10-08T14)
   cohortDate: 'string|required', // YYYY-MM-DD
   cohortMonth: 'string|optional',// YYYY-MM
   source: 'string|optional',     // Operation source
@@ -765,7 +1200,7 @@ The plugin creates a `${resource}_transactions_${field}` resource for each field
 }
 ```
 
-This resource is automatically partitioned by both `cohortDate` (byDay) and `cohortMonth` (byMonth) for efficient querying.
+This resource is automatically partitioned by `cohortHour` (byHour), `cohortDate` (byDay), and `cohortMonth` (byMonth) for efficient querying.
 
 **Notes**: 
 - The transaction resource uses `asyncPartitions: true` by default for better write performance

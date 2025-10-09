@@ -1,7 +1,7 @@
 import { join } from "path";
 import jsonStableStringify from "json-stable-stringify";
+import crypto from 'crypto';
 
-import { sha256 } from "../concerns/crypto.js";
 import Plugin from "./plugin.class.js";
 import S3Cache from "./cache/s3-cache.class.js";
 import MemoryCache from "./cache/memory-cache.class.js";
@@ -17,9 +17,15 @@ export class CachePlugin extends Plugin {
     this.config = {
       // Driver configuration
       driver: options.driver || 's3',
-      config: options.config || {}, // Driver-specific config
-      ttl: options.ttl,
-      maxSize: options.maxSize,
+      config: {
+        ttl: options.ttl,
+        maxSize: options.maxSize,
+        ...options.config // Driver-specific config (can override ttl/maxSize)
+      },
+
+      // Resource filtering
+      include: options.include || null, // Array of resource names to cache (null = all)
+      exclude: options.exclude || [], // Array of resource names to exclude
 
       // Partition settings
       includePartitions: options.includePartitions !== false,
@@ -27,6 +33,10 @@ export class CachePlugin extends Plugin {
       partitionAware: options.partitionAware !== false,
       trackUsage: options.trackUsage !== false,
       preloadRelated: options.preloadRelated !== false,
+
+      // Retry configuration
+      retryAttempts: options.retryAttempts || 3,
+      retryDelay: options.retryDelay || 100, // ms
 
       // Logging
       verbose: options.verbose || false
@@ -43,43 +53,25 @@ export class CachePlugin extends Plugin {
       // Use custom driver instance if provided
       this.driver = this.config.driver;
     } else if (this.config.driver === 'memory') {
-      // Build driver configuration
-      const driverConfig = {
-        ...this.config.config,
-        ttl: this.config.ttl,
-        maxSize: this.config.maxSize
-      };
-
-      this.driver = new MemoryCache(driverConfig);
+      this.driver = new MemoryCache(this.config.config);
     } else if (this.config.driver === 'filesystem') {
-      // Build driver configuration
-      const driverConfig = {
-        ...this.config.config,
-        ttl: this.config.ttl,
-        maxSize: this.config.maxSize
-      };
-
       // Use partition-aware filesystem cache if enabled
       if (this.config.partitionAware) {
         this.driver = new PartitionAwareFilesystemCache({
           partitionStrategy: this.config.partitionStrategy,
           trackUsage: this.config.trackUsage,
           preloadRelated: this.config.preloadRelated,
-          ...driverConfig
+          ...this.config.config
         });
       } else {
-        this.driver = new FilesystemCache(driverConfig);
+        this.driver = new FilesystemCache(this.config.config);
       }
     } else {
       // Default to S3Cache
-      const driverConfig = {
+      this.driver = new S3Cache({
         client: this.database.client,
-        ...this.config.config,
-        ttl: this.config.ttl,
-        maxSize: this.config.maxSize
-      };
-
-      this.driver = new S3Cache(driverConfig);
+        ...this.config.config
+      });
     }
 
     // Use database hooks instead of method overwriting
@@ -95,7 +87,9 @@ export class CachePlugin extends Plugin {
   installDatabaseHooks() {
     // Hook into resource creation to install cache middleware
     this.database.addHook('afterCreateResource', async ({ resource }) => {
-      this.installResourceHooksForResource(resource);
+      if (this.shouldCacheResource(resource.name)) {
+        this.installResourceHooksForResource(resource);
+      }
     });
   }
 
@@ -110,8 +104,31 @@ export class CachePlugin extends Plugin {
   // Remove the old installDatabaseProxy method
   installResourceHooks() {
     for (const resource of Object.values(this.database.resources)) {
+      // Check if resource should be cached
+      if (!this.shouldCacheResource(resource.name)) {
+        continue;
+      }
       this.installResourceHooksForResource(resource);
     }
+  }
+
+  shouldCacheResource(resourceName) {
+    // Skip plugin resources by default (unless explicitly included)
+    if (resourceName.startsWith('plg_') && !this.config.include) {
+      return false;
+    }
+
+    // Check exclude list
+    if (this.config.exclude.includes(resourceName)) {
+      return false;
+    }
+
+    // Check include list (if specified)
+    if (this.config.include && !this.config.include.includes(resourceName)) {
+      return false;
+    }
+
+    return true;
   }
 
   installResourceHooksForResource(resource) {
@@ -278,20 +295,27 @@ export class CachePlugin extends Plugin {
 
   async clearCacheForResource(resource, data) {
     if (!resource.cache) return; // Skip if no cache is available
-    
+
     const keyPrefix = `resource=${resource.name}`;
-    
+
     // For specific operations, only clear relevant cache entries
     if (data && data.id) {
       // Clear specific item caches for this ID
       const itemSpecificMethods = ['get', 'exists', 'content', 'hasContent'];
       for (const method of itemSpecificMethods) {
-        try {
-          const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
-          await resource.cache.clear(specificKey);
-        } catch (error) {
+        const specificKey = await this.generateCacheKey(resource, method, { id: data.id });
+        const [ok, err] = await this.clearCacheWithRetry(resource.cache, specificKey);
+
+        if (!ok) {
+          this.emit('cache_clear_error', {
+            resource: resource.name,
+            method,
+            id: data.id,
+            error: err.message
+          });
+
           if (this.config.verbose) {
-            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, error.message);
+            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:${data.id}:`, err.message);
           }
         }
       }
@@ -301,42 +325,74 @@ export class CachePlugin extends Plugin {
         const partitionValues = this.getPartitionValues(data, resource);
         for (const [partitionName, values] of Object.entries(partitionValues)) {
           if (values && Object.keys(values).length > 0 && Object.values(values).some(v => v !== null && v !== undefined)) {
-            try {
-              const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
-              await resource.cache.clear(partitionKeyPrefix);
-            } catch (error) {
+            const partitionKeyPrefix = join(keyPrefix, `partition=${partitionName}`);
+            const [ok, err] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
+
+            if (!ok) {
+              this.emit('cache_clear_error', {
+                resource: resource.name,
+                partition: partitionName,
+                error: err.message
+              });
+
               if (this.config.verbose) {
-                console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, error.message);
+                console.warn(`[CachePlugin] Failed to clear partition cache for ${resource.name}/${partitionName}:`, err.message);
               }
             }
           }
         }
       }
     }
-    
+
     // Clear aggregate caches more broadly to ensure all variants are cleared
-    try {
-      // Clear all cache entries for this resource - this ensures aggregate methods are invalidated
-      await resource.cache.clear(keyPrefix);
-    } catch (error) {
+    const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
+
+    if (!ok) {
+      this.emit('cache_clear_error', {
+        resource: resource.name,
+        type: 'broad',
+        error: err.message
+      });
+
       if (this.config.verbose) {
-        console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, error.message);
+        console.warn(`[CachePlugin] Failed to clear broad cache for ${resource.name}, trying specific methods:`, err.message);
       }
 
       // If broad clearing fails, try specific method clearing
       const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];
       for (const method of aggregateMethods) {
-        try {
-          // Try multiple key patterns to ensure we catch all variations
-          await resource.cache.clear(`${keyPrefix}/action=${method}`);
-          await resource.cache.clear(`resource=${resource.name}/action=${method}`);
-        } catch (methodError) {
-          if (this.config.verbose) {
-            console.warn(`[CachePlugin] Failed to clear ${method} cache for ${resource.name}:`, methodError.message);
-          }
-        }
+        // Try multiple key patterns to ensure we catch all variations
+        await this.clearCacheWithRetry(resource.cache, `${keyPrefix}/action=${method}`);
+        await this.clearCacheWithRetry(resource.cache, `resource=${resource.name}/action=${method}`);
       }
     }
+  }
+
+  async clearCacheWithRetry(cache, key) {
+    let lastError;
+
+    for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
+      const [ok, err] = await tryFn(() => cache.clear(key));
+
+      if (ok) {
+        return [true, null];
+      }
+
+      lastError = err;
+
+      // Don't retry if it's a "not found" error
+      if (err.name === 'NoSuchKey' || err.code === 'NoSuchKey') {
+        return [true, null]; // Key doesn't exist, that's fine
+      }
+
+      // Wait before retry (exponential backoff)
+      if (attempt < this.config.retryAttempts - 1) {
+        const delay = this.config.retryDelay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    return [false, lastError];
   }
 
   async generateCacheKey(resource, action, params = {}, partition = null, partitionValues = null) {
@@ -357,18 +413,21 @@ export class CachePlugin extends Plugin {
 
     // Add params if they exist
     if (Object.keys(params).length > 0) {
-      const paramsHash = await this.hashParams(params);
+      const paramsHash = this.hashParams(params);
       keyParts.push(paramsHash);
     }
 
     return join(...keyParts) + '.json.gz';
   }
 
-  async hashParams(params) {
+  hashParams(params) {
     // Use json-stable-stringify for deterministic serialization
     // Handles nested objects, dates, and maintains consistent key order
     const serialized = jsonStableStringify(params) || 'empty';
-    return await sha256(serialized);
+
+    // Use MD5 for fast non-cryptographic hashing (10x faster than SHA-256)
+    // Security not needed here - just need consistent, collision-resistant hash
+    return crypto.createHash('md5').update(serialized).digest('hex').substring(0, 16);
   }
 
   // Utility methods
@@ -399,7 +458,7 @@ export class CachePlugin extends Plugin {
       throw new Error(`Resource '${resourceName}' not found`);
     }
 
-    const { includePartitions = true } = options;
+    const { includePartitions = true, sampleSize = 100 } = options;
 
     // Use partition-aware warming if available
     if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
@@ -407,34 +466,63 @@ export class CachePlugin extends Plugin {
       return await resource.warmPartitionCache(partitionNames, options);
     }
 
-    // Fallback to standard warming - get all records once
-    const allRecords = await resource.getAll();
+    // Use pagination instead of getAll() for efficiency
+    let offset = 0;
+    const pageSize = 100;
+    const sampledRecords = [];
+
+    // Get sample of records using pagination
+    while (sampledRecords.length < sampleSize) {
+      const [ok, err, pageResult] = await tryFn(() => resource.page({ offset, size: pageSize }));
+
+      if (!ok || !pageResult) {
+        break;
+      }
+
+      // page() might return { items, total } or just an array
+      const pageItems = Array.isArray(pageResult) ? pageResult : (pageResult.items || []);
+
+      if (pageItems.length === 0) {
+        break;
+      }
+
+      sampledRecords.push(...pageItems);
+      offset += pageSize;
+
+      // Cache the page while we're at it
+      // (page() call already cached it via middleware)
+    }
 
     // Warm partition caches if enabled
-    if (includePartitions && resource.config.partitions) {
-      // Ensure allRecords is an array
-      const recordsArray = Array.isArray(allRecords) ? allRecords : [];
-
+    if (includePartitions && resource.config.partitions && sampledRecords.length > 0) {
       for (const [partitionName, partitionDef] of Object.entries(resource.config.partitions)) {
         if (partitionDef.fields) {
-          // Get some sample partition values and warm those caches
-          const partitionValues = new Set();
-          
-          for (const record of recordsArray.slice(0, 10)) { // Sample first 10 records
+          // Get unique partition values from sample
+          const partitionValuesSet = new Set();
+
+          for (const record of sampledRecords) {
             const values = this.getPartitionValues(record, resource);
             if (values[partitionName]) {
-              partitionValues.add(JSON.stringify(values[partitionName]));
+              partitionValuesSet.add(JSON.stringify(values[partitionName]));
             }
           }
-          
+
           // Warm cache for each partition value
-          for (const partitionValueStr of partitionValues) {
+          for (const partitionValueStr of partitionValuesSet) {
             const partitionValues = JSON.parse(partitionValueStr);
-            await resource.list({ partition: partitionName, partitionValues });
+            await tryFn(() => resource.list({ partition: partitionName, partitionValues }));
           }
         }
       }
     }
+
+    return {
+      resourceName,
+      recordsSampled: sampledRecords.length,
+      partitionsWarmed: includePartitions && resource.config.partitions
+        ? Object.keys(resource.config.partitions).length
+        : 0
+    };
   }
 
   async analyzeCacheUsage() {
@@ -453,10 +541,10 @@ export class CachePlugin extends Plugin {
       }
     };
 
-    // Analyze each resource (skip plugin-managed resources)
+    // Analyze each resource (respect include/exclude filters)
     for (const [resourceName, resource] of Object.entries(this.database.resources)) {
-      // Skip plugin resources to focus on user data
-      if (resourceName.startsWith('plg_')) {
+      // Skip resources that shouldn't be cached
+      if (!this.shouldCacheResource(resourceName)) {
         continue;
       }
 

@@ -32,11 +32,13 @@ class SqsReplicator extends BaseReplicator {
     this.client = client;
     this.queueUrl = config.queueUrl;
     this.queues = config.queues || {};
-    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault;
+    // Support legacy names but prefer defaultQueue
+    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault || null;
     this.region = config.region || 'us-east-1';
     this.sqsClient = client || null;
     this.messageGroupId = config.messageGroupId;
     this.deduplicationId = config.deduplicationId;
+    this.resourceQueueMap = config.resourceQueueMap || null;
     
     // Normalize resources to object format
     if (Array.isArray(resources)) {
@@ -188,7 +190,10 @@ class SqsReplicator extends BaseReplicator {
   }
 
   async replicate(resource, operation, data, id, beforeData = null) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: 'replicator_disabled' };
+    }
+    if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
     const [ok, err, result] = await tryFn(async () => {
@@ -234,7 +239,10 @@ class SqsReplicator extends BaseReplicator {
   }
 
   async replicateBatch(resource, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resource)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: 'replicator_disabled' };
+    }
+    if (!this.shouldReplicateResource(resource)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
     const [ok, err, result] = await tryFn(async () => {

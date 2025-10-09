@@ -291,7 +291,7 @@ describe('CLI Backup & Restore API Tests', () => {
     });
 
     test('should use correct driver type', () => {
-      expect(backupPlugin.driverName).toBe('filesystem');
+      expect(backupPlugin.config.driver).toBe('filesystem');
       expect(backupPlugin.driver.getType()).toBe('filesystem');
     });
 

@@ -328,17 +328,21 @@ class S3dbReplicator extends BaseReplicator {
   }
 
   _getDestResourceObj(resource) {
-    const available = Object.keys(this.client.resources || {});
+    const db = this.targetDatabase || this.client;
+    const available = Object.keys(db.resources || {});
     const norm = normalizeResourceName(resource);
     const found = available.find(r => normalizeResourceName(r) === norm);
     if (!found) {
       throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(', ')}`);
     }
-    return this.client.resources[found];
+    return db.resources[found];
   }
 
   async replicateBatch(resourceName, records) {
-    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: 'replicator_disabled' };
+    }
+    if (!this.shouldReplicateResource(resourceName)) {
       return { skipped: true, reason: 'resource_not_included' };
     }
 

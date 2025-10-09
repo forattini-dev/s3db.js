@@ -132,24 +132,24 @@ export class ReplicatorPlugin extends Plugin {
       replicators: options.replicators || [],
       logErrors: options.logErrors !== false,
       replicatorLogResource: options.replicatorLogResource || 'replicator_log',
+      persistReplicatorLog: options.persistReplicatorLog || false,
       enabled: options.enabled !== false,
       batchSize: options.batchSize || 100,
       maxRetries: options.maxRetries || 3,
       timeout: options.timeout || 30000,
-      verbose: options.verbose || false,
-      ...options
+      verbose: options.verbose || false
     };
-    
+
     this.replicators = [];
     this.database = null;
     this.eventListenersInstalled = new Set();
-  }
-
-  /**
-   * Decompress data if it was compressed
-   */
-  async decompressData(data) {
-    return data;
+    this.eventHandlers = new Map(); // Map<resourceName, {insert, update, delete}>
+    this.stats = {
+      totalReplications: 0,
+      totalErrors: 0,
+      lastSync: null
+    };
+    this._afterCreateResourceHook = null;
   }
 
   // Helper to filter out internal S3DB fields
@@ -172,53 +172,66 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   installEventListeners(resource, database, plugin) {
-    if (!resource || this.eventListenersInstalled.has(resource.name) || 
+    if (!resource || this.eventListenersInstalled.has(resource.name) ||
         resource.name === this.config.replicatorLogResource) {
       return;
     }
 
-    resource.on('insert', async (data) => {
+    // Create handler functions and save references for later removal
+    const insertHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
         const completeData = { ...data, createdAt: new Date().toISOString() };
         await plugin.processReplicatorEvent('insert', resource.name, completeData.id, completeData);
       });
-      
+
       if (!ok) {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Insert event failed for resource ${resource.name}: ${error.message}`);
         }
         this.emit('error', { operation: 'insert', error: error.message, resource: resource.name });
       }
-    });
+    };
 
-    resource.on('update', async (data, beforeData) => {
+    const updateHandler = async (data, beforeData) => {
       const [ok, error] = await tryFn(async () => {
         // For updates, we need to get the complete updated record, not just the changed fields
         const completeData = await plugin.getCompleteData(resource, data);
         const dataWithTimestamp = { ...completeData, updatedAt: new Date().toISOString() };
         await plugin.processReplicatorEvent('update', resource.name, completeData.id, dataWithTimestamp, beforeData);
       });
-      
+
       if (!ok) {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Update event failed for resource ${resource.name}: ${error.message}`);
         }
         this.emit('error', { operation: 'update', error: error.message, resource: resource.name });
       }
-    });
+    };
 
-    resource.on('delete', async (data) => {
+    const deleteHandler = async (data) => {
       const [ok, error] = await tryFn(async () => {
         await plugin.processReplicatorEvent('delete', resource.name, data.id, data);
       });
-      
+
       if (!ok) {
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Delete event failed for resource ${resource.name}: ${error.message}`);
         }
         this.emit('error', { operation: 'delete', error: error.message, resource: resource.name });
       }
+    };
+
+    // Save handler references
+    this.eventHandlers.set(resource.name, {
+      insert: insertHandler,
+      update: updateHandler,
+      delete: deleteHandler
     });
+
+    // Attach listeners
+    resource.on('insert', insertHandler);
+    resource.on('update', updateHandler);
+    resource.on('delete', deleteHandler);
 
     this.eventListenersInstalled.add(resource.name);
   }
@@ -279,17 +292,22 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   installDatabaseHooks() {
-    // Use the new database hooks system for automatic resource discovery
-    this.database.addHook('afterCreateResource', (resource) => {
+    // Store hook reference for later removal
+    this._afterCreateResourceHook = (resource) => {
       if (resource.name !== (this.config.replicatorLogResource || 'plg_replicator_logs')) {
         this.installEventListeners(resource, this.database, this);
       }
-    });
+    };
+
+    this.database.addHook('afterCreateResource', this._afterCreateResourceHook);
   }
 
   removeDatabaseHooks() {
-    // Remove the hook we added
-    this.database.removeHook('afterCreateResource', this.installEventListeners.bind(this));
+    // Remove the hook we added using stored reference
+    if (this._afterCreateResourceHook) {
+      this.database.removeHook('afterCreateResource', this._afterCreateResourceHook);
+      this._afterCreateResourceHook = null;
+    }
   }
 
   createReplicator(driver, config, resources, client) {
@@ -324,16 +342,16 @@ export class ReplicatorPlugin extends Plugin {
   async retryWithBackoff(operation, maxRetries = 3) {
     let lastError;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const [ok, error] = await tryFn(operation);
-      
+      const [ok, error, result] = await tryFn(operation);
+
       if (ok) {
-        return ok;
+        return result;
       } else {
         lastError = error;
         if (this.config.verbose) {
           console.warn(`[ReplicatorPlugin] Retry attempt ${attempt}/${maxRetries} failed: ${error.message}`);
         }
-        
+
         if (attempt === maxRetries) {
           throw error;
         }
@@ -438,7 +456,7 @@ export class ReplicatorPlugin extends Plugin {
     return Promise.allSettled(promises);
   }
 
-  async processreplicatorItem(item) {
+  async processReplicatorItem(item) {
     const applicableReplicators = this.replicators.filter(replicator => {
       const should = replicator.shouldReplicateResource && replicator.shouldReplicateResource(item.resourceName, item.operation);
       return should;
@@ -512,14 +530,10 @@ export class ReplicatorPlugin extends Plugin {
     return Promise.allSettled(promises);
   }
 
-  async logreplicator(item) {
-            // Always use the saved reference
+  async logReplicator(item) {
+    // Always use the saved reference
     const logRes = this.replicatorLog || this.database.resources[normalizeResourceName(this.config.replicatorLogResource)];
     if (!logRes) {
-      if (this.database) {
-        if (this.database.options && this.database.options.connectionString) {
-        }
-      }
       this.emit('replicator.log.failed', { error: 'replicator log resource not found', item });
       return;
     }
@@ -544,7 +558,7 @@ export class ReplicatorPlugin extends Plugin {
     }
   }
 
-  async updatereplicatorLog(logId, updates) {
+  async updateReplicatorLog(logId, updates) {
     if (!this.replicatorLog) return;
 
     const [ok, err] = await tryFn(async () => {
@@ -559,7 +573,7 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   // Utility methods
-  async getreplicatorStats() {
+  async getReplicatorStats() {
     const replicatorStats = await Promise.all(
       this.replicators.map(async (replicator) => {
         const status = await replicator.getStatus();
@@ -574,16 +588,12 @@ export class ReplicatorPlugin extends Plugin {
 
     return {
       replicators: replicatorStats,
-      queue: {
-        length: this.queue.length,
-        isProcessing: this.isProcessing
-      },
       stats: this.stats,
       lastSync: this.stats.lastSync
     };
   }
 
-  async getreplicatorLogs(options = {}) {
+  async getReplicatorLogs(options = {}) {
     if (!this.replicatorLog) {
       return [];
     }
@@ -596,43 +606,42 @@ export class ReplicatorPlugin extends Plugin {
       offset = 0
     } = options;
 
-    let query = {};
-    
+    const filter = {};
+
     if (resourceName) {
-      query.resourceName = resourceName;
-    }
-    
-    if (operation) {
-      query.operation = operation;
-    }
-    
-    if (status) {
-      query.status = status;
+      filter.resourceName = resourceName;
     }
 
-    const logs = await this.replicatorLog.list(query);
-    
-    // Apply pagination
-    return logs.slice(offset, offset + limit);
+    if (operation) {
+      filter.operation = operation;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    const logs = await this.replicatorLog.query(filter, { limit, offset });
+
+    return logs || [];
   }
 
-  async retryFailedreplicators() {
+  async retryFailedReplicators() {
     if (!this.replicatorLog) {
       return { retried: 0 };
     }
 
-    const failedLogs = await this.replicatorLog.list({
+    const failedLogs = await this.replicatorLog.query({
       status: 'failed'
     });
 
     let retried = 0;
-    
-    for (const log of failedLogs) {
+
+    for (const log of failedLogs || []) {
       const [ok, err] = await tryFn(async () => {
         // Re-queue the replicator
         await this.processReplicatorEvent(
-          log.resourceName,
           log.operation,
+          log.resourceName,
           log.recordId,
           log.data
         );
@@ -660,12 +669,26 @@ export class ReplicatorPlugin extends Plugin {
 
       if (replicator.shouldReplicateResource(resourceName)) {
         this.emit('replicator.sync.resource', { resourceName, replicatorId });
-        
+
         const resource = this.database.resources[resourceName];
-      const allRecords = await resource.getAll();
-      
-      for (const record of allRecords) {
-          await replicator.replicate(resourceName, 'insert', record, record.id);
+
+        // Use pagination to avoid memory issues
+        let offset = 0;
+        const pageSize = this.config.batchSize || 100;
+
+        while (true) {
+          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize }));
+
+          if (!ok || !page) break;
+
+          const records = Array.isArray(page) ? page : (page.items || []);
+          if (records.length === 0) break;
+
+          for (const record of records) {
+            await replicator.replicate(resourceName, 'insert', record, record.id);
+          }
+
+          offset += pageSize;
         }
       }
     }
@@ -698,10 +721,25 @@ export class ReplicatorPlugin extends Plugin {
         await Promise.allSettled(cleanupPromises);
       }
       
+      // Remove event listeners from resources to prevent memory leaks
+      if (this.database && this.database.resources) {
+        for (const resourceName of this.eventListenersInstalled) {
+          const resource = this.database.resources[resourceName];
+          const handlers = this.eventHandlers.get(resourceName);
+
+          if (resource && handlers) {
+            resource.off('insert', handlers.insert);
+            resource.off('update', handlers.update);
+            resource.off('delete', handlers.delete);
+          }
+        }
+      }
+
       this.replicators = [];
       this.database = null;
       this.eventListenersInstalled.clear();
-      
+      this.eventHandlers.clear();
+
       this.removeAllListeners();
     });
     

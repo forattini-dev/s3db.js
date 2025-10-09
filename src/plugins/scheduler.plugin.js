@@ -405,9 +405,17 @@ export class SchedulerPlugin extends Plugin {
 
   async _executeJob(jobName) {
     const job = this.jobs.get(jobName);
-    if (!job || this.activeJobs.has(jobName)) {
+    if (!job) {
       return;
     }
+
+    // Check and mark as active atomically to prevent race conditions
+    if (this.activeJobs.has(jobName)) {
+      return;
+    }
+
+    // Mark as active immediately (will be updated with executionId later)
+    this.activeJobs.set(jobName, 'acquiring-lock');
 
     // Acquire distributed lock to prevent concurrent execution across instances
     const lockId = `lock-${jobName}`;
@@ -425,6 +433,8 @@ export class SchedulerPlugin extends Plugin {
       if (this.config.verbose) {
         console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
       }
+      // Remove from activeJobs since we didn't acquire the lock
+      this.activeJobs.delete(jobName);
       return;
     }
 
@@ -438,6 +448,7 @@ export class SchedulerPlugin extends Plugin {
       database: this.database
     };
 
+    // Update with actual executionId
     this.activeJobs.set(jobName, executionId);
 
     try {
