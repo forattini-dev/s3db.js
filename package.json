@@ -72,7 +72,6 @@
     "benchmark": "node benchmark-compression.js",
     "prepare": "pnpm run build",
     "version": "echo 'Use pnpm run release v<version> instead of npm version'",
-    "prepack": "pnpm run build",
     "release:check": "./scripts/pre-release-check.sh",
     "release:prepare": "pnpm run build:binaries && echo 'Binaries ready for GitHub release'",
     "release": "./scripts/release.sh",
