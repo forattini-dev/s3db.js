@@ -56,7 +56,7 @@ describe('ConnectionString Class - Complete Journey', () => {
     const s3Empty = new ConnectionString('s3://user:pass@bucket');
     expect(s3Empty.keyPrefix).toBe('');
     // Minio with empty path
-    const minioEmpty = new ConnectionString('http://user:pass@localhost:9998/');
+    const minioEmpty = new ConnectionString('http://user:pass@localhost:9100/');
     expect(minioEmpty.bucket).toBe('s3db');
     expect(minioEmpty.keyPrefix).toBe('');
   });

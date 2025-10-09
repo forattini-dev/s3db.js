@@ -132,7 +132,7 @@ describe('Client Class - Coverage', () => {
     client.config.secretAccessKey = 'b';
     client.config.forcePathStyle = true;
     client.config.region = 'us-east-1';
-    client.config.endpoint = 'http://localhost:9998';
+    client.config.endpoint = 'http://localhost:9100';
     const s3 = client.createClient();
     expect(s3).toBeDefined();
   });
