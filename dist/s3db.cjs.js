@@ -9444,11 +9444,11 @@ ${errorDetails}`,
         if (Array.isArray(listeners)) {
           for (const listener of listeners) {
             if (typeof listener === "function") {
-              this.on(eventName, listener);
+              this.on(eventName, listener.bind(this));
             }
           }
         } else if (typeof listeners === "function") {
-          this.on(eventName, listeners);
+          this.on(eventName, listeners.bind(this));
         }
       }
     }
