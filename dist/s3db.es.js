@@ -5898,6 +5898,253 @@ class MetricsPlugin extends Plugin {
   }
 }
 
+class SqsConsumer {
+  constructor({ queueUrl, onMessage, onError, poolingInterval = 5e3, maxMessages = 10, region = "us-east-1", credentials, endpoint, driver = "sqs" }) {
+    this.driver = driver;
+    this.queueUrl = queueUrl;
+    this.onMessage = onMessage;
+    this.onError = onError;
+    this.poolingInterval = poolingInterval;
+    this.maxMessages = maxMessages;
+    this.region = region;
+    this.credentials = credentials;
+    this.endpoint = endpoint;
+    this.sqs = null;
+    this._stopped = false;
+    this._timer = null;
+    this._pollPromise = null;
+    this._pollResolve = null;
+    this._SQSClient = null;
+    this._ReceiveMessageCommand = null;
+    this._DeleteMessageCommand = null;
+  }
+  async start() {
+    const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
+    if (!ok) throw new Error("SqsConsumer: @aws-sdk/client-sqs is not installed. Please install it to use the SQS consumer.");
+    const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = sdk;
+    this._SQSClient = SQSClient;
+    this._ReceiveMessageCommand = ReceiveMessageCommand;
+    this._DeleteMessageCommand = DeleteMessageCommand;
+    this.sqs = new SQSClient({ region: this.region, credentials: this.credentials, endpoint: this.endpoint });
+    this._stopped = false;
+    this._pollPromise = new Promise((resolve) => {
+      this._pollResolve = resolve;
+    });
+    this._poll();
+  }
+  async stop() {
+    this._stopped = true;
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
+    if (this._pollResolve) {
+      this._pollResolve();
+    }
+  }
+  async _poll() {
+    if (this._stopped) {
+      if (this._pollResolve) this._pollResolve();
+      return;
+    }
+    const [ok, err, result] = await tryFn(async () => {
+      const cmd = new this._ReceiveMessageCommand({
+        QueueUrl: this.queueUrl,
+        MaxNumberOfMessages: this.maxMessages,
+        WaitTimeSeconds: 10,
+        MessageAttributeNames: ["All"]
+      });
+      const { Messages } = await this.sqs.send(cmd);
+      if (Messages && Messages.length > 0) {
+        for (const msg of Messages) {
+          const [okMsg, errMsg] = await tryFn(async () => {
+            const parsedMsg = this._parseMessage(msg);
+            await this.onMessage(parsedMsg, msg);
+            await this.sqs.send(new this._DeleteMessageCommand({
+              QueueUrl: this.queueUrl,
+              ReceiptHandle: msg.ReceiptHandle
+            }));
+          });
+          if (!okMsg && this.onError) {
+            this.onError(errMsg, msg);
+          }
+        }
+      }
+    });
+    if (!ok && this.onError) {
+      this.onError(err);
+    }
+    this._timer = setTimeout(() => this._poll(), this.poolingInterval);
+  }
+  _parseMessage(msg) {
+    let body;
+    const [ok, err, parsed] = tryFn(() => JSON.parse(msg.Body));
+    body = ok ? parsed : msg.Body;
+    const attributes = {};
+    if (msg.MessageAttributes) {
+      for (const [k, v] of Object.entries(msg.MessageAttributes)) {
+        attributes[k] = v.StringValue;
+      }
+    }
+    return { $body: body, $attributes: attributes, $raw: msg };
+  }
+}
+
+class RabbitMqConsumer {
+  constructor({ amqpUrl, queue, prefetch = 10, reconnectInterval = 2e3, onMessage, onError, driver = "rabbitmq" }) {
+    this.amqpUrl = amqpUrl;
+    this.queue = queue;
+    this.prefetch = prefetch;
+    this.reconnectInterval = reconnectInterval;
+    this.onMessage = onMessage;
+    this.onError = onError;
+    this.driver = driver;
+    this.connection = null;
+    this.channel = null;
+    this._stopped = false;
+  }
+  async start() {
+    this._stopped = false;
+    await this._connect();
+  }
+  async stop() {
+    this._stopped = true;
+    if (this.channel) await this.channel.close();
+    if (this.connection) await this.connection.close();
+  }
+  async _connect() {
+    const [ok, err] = await tryFn(async () => {
+      const amqp = (await import('amqplib')).default;
+      this.connection = await amqp.connect(this.amqpUrl);
+      this.channel = await this.connection.createChannel();
+      await this.channel.assertQueue(this.queue, { durable: true });
+      this.channel.prefetch(this.prefetch);
+      this.channel.consume(this.queue, async (msg) => {
+        if (msg !== null) {
+          const [okMsg, errMsg] = await tryFn(async () => {
+            const content = JSON.parse(msg.content.toString());
+            await this.onMessage({ $body: content, $raw: msg });
+            this.channel.ack(msg);
+          });
+          if (!okMsg) {
+            if (this.onError) this.onError(errMsg, msg);
+            this.channel.nack(msg, false, false);
+          }
+        }
+      });
+    });
+    if (!ok) {
+      if (this.onError) this.onError(err);
+      if (!this._stopped) {
+        setTimeout(() => this._connect(), this.reconnectInterval);
+      }
+    }
+  }
+}
+
+const CONSUMER_DRIVERS = {
+  sqs: SqsConsumer,
+  rabbitmq: RabbitMqConsumer
+  // kafka: KafkaConsumer, // futuro
+};
+function createConsumer(driver, config) {
+  const ConsumerClass = CONSUMER_DRIVERS[driver];
+  if (!ConsumerClass) {
+    throw new Error(`Unknown consumer driver: ${driver}. Available: ${Object.keys(CONSUMER_DRIVERS).join(", ")}`);
+  }
+  return new ConsumerClass(config);
+}
+
+class QueueConsumerPlugin {
+  constructor(options = {}) {
+    this.options = options;
+    this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
+    this.consumers = [];
+  }
+  async setup(database) {
+    this.database = database;
+    for (const driverDef of this.driversConfig) {
+      const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
+      if (consumerDefs.length === 0 && driverDef.resources) {
+        const { resources, driver: defDriver, config: nestedConfig, ...directConfig } = driverDef;
+        const resourceList = Array.isArray(resources) ? resources : [resources];
+        const flatConfig = nestedConfig ? { ...directConfig, ...nestedConfig } : directConfig;
+        for (const resource of resourceList) {
+          const consumer = createConsumer(driver, {
+            ...flatConfig,
+            onMessage: (msg) => this._handleMessage(msg, resource),
+            onError: (err, raw) => this._handleError(err, raw, resource)
+          });
+          await consumer.start();
+          this.consumers.push(consumer);
+        }
+      } else {
+        for (const consumerDef of consumerDefs) {
+          const { resources, ...consumerConfig } = consumerDef;
+          const resourceList = Array.isArray(resources) ? resources : [resources];
+          for (const resource of resourceList) {
+            const mergedConfig = { ...driverConfig, ...consumerConfig };
+            const consumer = createConsumer(driver, {
+              ...mergedConfig,
+              onMessage: (msg) => this._handleMessage(msg, resource),
+              onError: (err, raw) => this._handleError(err, raw, resource)
+            });
+            await consumer.start();
+            this.consumers.push(consumer);
+          }
+        }
+      }
+    }
+  }
+  async stop() {
+    if (!Array.isArray(this.consumers)) this.consumers = [];
+    for (const consumer of this.consumers) {
+      if (consumer && typeof consumer.stop === "function") {
+        await consumer.stop();
+      }
+    }
+    this.consumers = [];
+  }
+  async _handleMessage(msg, configuredResource) {
+    this.options;
+    let body = msg.$body || msg;
+    if (body.$body && !body.resource && !body.action && !body.data) {
+      body = body.$body;
+    }
+    let resource = body.resource || msg.resource;
+    let action = body.action || msg.action;
+    let data = body.data || msg.data;
+    if (!resource) {
+      throw new Error("QueueConsumerPlugin: resource not found in message");
+    }
+    if (!action) {
+      throw new Error("QueueConsumerPlugin: action not found in message");
+    }
+    const resourceObj = this.database.resources[resource];
+    if (!resourceObj) throw new Error(`QueueConsumerPlugin: resource '${resource}' not found`);
+    let result;
+    const [ok, err, res] = await tryFn(async () => {
+      if (action === "insert") {
+        result = await resourceObj.insert(data);
+      } else if (action === "update") {
+        const { id: updateId, ...updateAttributes } = data;
+        result = await resourceObj.update(updateId, updateAttributes);
+      } else if (action === "delete") {
+        result = await resourceObj.delete(data.id);
+      } else {
+        throw new Error(`QueueConsumerPlugin: unsupported action '${action}'`);
+      }
+      return result;
+    });
+    if (!ok) {
+      throw err;
+    }
+    return res;
+  }
+  _handleError(err, raw, resourceName) {
+  }
+}
+
 class BaseReplicator extends EventEmitter {
   constructor(config = {}) {
     super();
@@ -10854,7 +11101,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.1" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.2" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
@@ -14565,5 +14812,5 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
+export { AVAILABLE_BEHAVIORS, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, QueueConsumerPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
 //# sourceMappingURL=s3db.es.js.map

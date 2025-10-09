@@ -335,7 +335,14 @@ declare module 's3db.js' {
 
   /** Replicator Plugin config */
   export interface ReplicatorPluginConfig extends PluginConfig {
-    replicators?: ReplicatorConfig[];
+    replicators: ReplicatorConfig[];
+    persistReplicatorLog?: boolean;
+    replicatorLogResource?: string;
+    logErrors?: boolean;
+    batchSize?: number;
+    maxRetries?: number;
+    timeout?: number;
+    verbose?: boolean;
   }
 
   // ============================================================================
@@ -1027,14 +1034,74 @@ declare module 's3db.js' {
     getConsumerLogs(filters?: any): Promise<any[]>;
   }
 
+  /** Replicator stats information */
+  export interface ReplicatorStats {
+    replicators: Array<{
+      id: string;
+      driver: string;
+      config: any;
+      status: any;
+    }>;
+    stats: {
+      totalReplications: number;
+      totalErrors: number;
+      lastSync: string | null;
+    };
+    lastSync: string | null;
+  }
+
   /** Replicator Plugin */
   export class ReplicatorPlugin extends Plugin {
     constructor(config?: ReplicatorPluginConfig);
     replicate(operation: string, resourceName: string, data: any, oldData?: any): Promise<void>;
-    getReplicatorStats(): any;
+    getReplicatorStats(): Promise<ReplicatorStats>;
     getReplicatorLogs(filters?: any): Promise<any[]>;
-    retryFailedReplications(): Promise<void>;
+    retryFailedReplicators(): Promise<{ retried: number }>;
     syncAllData(targetName: string): Promise<void>;
+  }
+
+  /** Backup Plugin */
+  export class BackupPlugin extends Plugin {
+    constructor(config?: any);
+    backup(options?: any): Promise<any>;
+    restore(options?: any): Promise<any>;
+    listBackups(): Promise<any[]>;
+    deleteBackup(backupId: string): Promise<void>;
+  }
+
+  /** Eventual Consistency Plugin */
+  export class EventualConsistencyPlugin extends Plugin {
+    constructor(config?: any);
+    setup(database: Database): Promise<void>;
+    createTransaction(resourceName: string): any;
+  }
+
+  /** Scheduler Plugin */
+  export class SchedulerPlugin extends Plugin {
+    constructor(config?: any);
+    schedule(name: string, schedule: string, handler: Function): void;
+    unschedule(name: string): void;
+    listSchedules(): any[];
+    getScheduleStatus(name: string): any;
+  }
+
+  /** State Machine Plugin */
+  export class StateMachinePlugin extends Plugin {
+    constructor(config?: any);
+    defineMachine(config: any): void;
+    transition(options: { machineId: string; entityId: string; event: string; context?: any }): Promise<any>;
+    getCurrentState(machineId: string, entityId: string): Promise<any>;
+    getTransitionHistory(machineId: string, entityId: string, options?: any): Promise<any[]>;
+  }
+
+  /** S3 Queue Plugin */
+  export class S3QueuePlugin extends Plugin {
+    constructor(config?: any);
+    enqueue(queueName: string, item: any): Promise<void>;
+    dequeue(queueName: string): Promise<any>;
+    peek(queueName: string): Promise<any>;
+    getQueueLength(queueName: string): Promise<number>;
+    clearQueue(queueName: string): Promise<void>;
   }
 
   // ============================================================================
