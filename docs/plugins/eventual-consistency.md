@@ -1513,6 +1513,260 @@ const views = await metrics.consolidate('page-1', 'views');
 const clicks = await metrics.consolidate('page-1', 'clicks');
 ```
 
+### Cross-Resource Operations in Hooks
+
+One of the most powerful patterns is using hooks to automatically trigger operations across resources. This is perfect for implementing counters, notifications, and cascading updates.
+
+#### ⚠️ Critical: Use `function`, NOT Arrow Functions
+
+**Hooks MUST use regular `function` syntax to access `this.database`:**
+
+```javascript
+const clicks = await s3db.createResource({
+  name: 'clicks',
+  attributes: {
+    id: 'string|required',
+    urlId: 'string|required',
+    ip: 'string|optional',
+    timestamp: 'string|required'
+  },
+  hooks: {
+    // ✅ CORRECT: Use function (not arrow function!)
+    afterInsert: [async function(data) {
+      // this = clicks resource
+      // this.database = s3db instance
+
+      // Access other resources via this.database.resources
+      await this.database.resources.urls.add(data.urlId, 1);
+
+      return data;
+    }],
+
+    // ❌ WRONG: Arrow function loses 'this' context
+    // afterInsert: [async (data) => {
+    //   await this.database.resources.urls.add(data.urlId, 1); // ERROR!
+    // }]
+  }
+});
+```
+
+**Why?**
+- Arrow functions (`=>`) don't have their own `this` - they inherit from lexical scope
+- Regular functions (`function`) have `this` bound to the resource instance
+- Only regular functions give you access to `this.database`
+
+#### Complete Example: URL Shortener with Auto-Incrementing Counter
+
+```javascript
+// 1. Create URLs resource
+const urls = await s3db.createResource({
+  name: 'urls',
+  attributes: {
+    id: 'string|required',
+    url: 'string|required',
+    clicksCount: 'number|default:0',  // Counter managed by plugin
+    createdAt: 'string|required'
+  }
+});
+
+// 2. Add EventualConsistencyPlugin to manage clicksCount
+await s3db.usePlugin(new EventualConsistencyPlugin({
+  resource: 'urls',
+  field: 'clicksCount',
+  mode: 'async',
+  autoConsolidate: true,
+  consolidationInterval: 300  // 5 minutes
+}));
+
+// 3. Create Clicks resource with auto-increment hook
+const clicks = await s3db.createResource({
+  name: 'clicks',
+  attributes: {
+    id: 'string|required',
+    urlId: 'string|required',
+    ip: 'string|optional',
+    userAgent: 'string|optional',
+    timestamp: 'string|required'
+  },
+  hooks: {
+    afterInsert: [async function(data) {
+      console.log(`🔗 Click recorded for URL: ${data.urlId}`);
+
+      // Automatically increment clicksCount!
+      // this.database.resources gives access to all resources
+      await this.database.resources.urls.add(data.urlId, 1);
+
+      console.log(`✅ Counter incremented (will consolidate in 5min)`);
+
+      return data;
+    }]
+  }
+});
+
+// 4. Usage - counter updates automatically!
+await clicks.insert({
+  id: 'click-1',
+  urlId: 'google',
+  ip: '192.168.1.1',
+  userAgent: 'Mozilla/5.0',
+  timestamp: new Date().toISOString()
+});
+// → Hook triggers automatically
+// → urls.add('google', 1) called
+// → Transaction created
+// → Will consolidate in 5 minutes
+
+// 5. After consolidation (automatic or manual)
+await urls.consolidate('google');  // Or wait for auto-consolidation
+
+const url = await urls.get('google');
+console.log(url.clicksCount);  // 1 ✅ (ORIGINAL FIELD UPDATED!)
+```
+
+#### Real-World Pattern: URL Shortener Redirect
+
+```javascript
+// Express.js endpoint
+app.get('/:shortCode', async (req, res) => {
+  const { shortCode } = req.params;
+
+  // 1. Get the URL
+  const url = await urls.get(shortCode);
+  if (!url) return res.status(404).send('URL not found');
+
+  // 2. Record click (hook auto-increments counter!)
+  await clicks.insert({
+    id: generateId(),
+    urlId: shortCode,
+    ip: req.ip,
+    userAgent: req.headers['user-agent'],
+    referer: req.headers['referer'],
+    timestamp: new Date().toISOString()
+  });
+  // ↑ Hook automatically calls: urls.add(shortCode, 1)
+  // ↑ Consolidation updates: urls.clicksCount (every 5min)
+
+  // 3. Redirect (instant response, counting happens in background!)
+  res.redirect(url.url);
+});
+
+// Dashboard endpoint
+app.get('/stats/:shortCode', async (req, res) => {
+  const { shortCode } = req.params;
+
+  // Get current count (ORIGINAL FIELD, updated by consolidation!)
+  const url = await urls.get(shortCode);
+
+  res.json({
+    url: url.url,
+    totalClicks: url.clicksCount  // ← From original field!
+  });
+});
+```
+
+#### Advanced: Multiple Cross-Resource Operations
+
+```javascript
+const orders = await s3db.createResource({
+  name: 'orders',
+  attributes: {
+    id: 'string|required',
+    userId: 'string|required',
+    productId: 'string|required',
+    quantity: 'number|required',
+    total: 'number|required',
+    status: 'string|required'
+  },
+  hooks: {
+    afterInsert: [async function(data) {
+      // this.database gives access to everything!
+
+      // 1. Update user's total spent
+      await this.database.resources.users.add(data.userId, 'totalSpent', data.total);
+
+      // 2. Update product sales counter
+      await this.database.resources.products.add(data.productId, 'salesCount', 1);
+
+      // 3. Decrement inventory
+      await this.database.resources.inventory.sub(data.productId, 'quantity', data.quantity);
+
+      // 4. Update daily revenue
+      const today = new Date().toISOString().substring(0, 10);
+      await this.database.resources.revenue.add(today, 'dailyTotal', data.total);
+
+      console.log(`✅ Order ${data.id}: 4 counters updated`);
+
+      return data;
+    }]
+  }
+});
+
+// Single insert triggers 4 updates across different resources!
+await orders.insert({
+  id: 'order-123',
+  userId: 'user-456',
+  productId: 'prod-789',
+  quantity: 2,
+  total: 49.99,
+  status: 'confirmed'
+});
+// → All 4 counters updated automatically via hooks
+// → All will consolidate independently
+```
+
+#### Common Patterns
+
+**1. Counter Increment on Event**
+```javascript
+hooks: {
+  afterInsert: [async function(data) {
+    await this.database.resources.stats.add('global', 'eventCount', 1);
+    return data;
+  }]
+}
+```
+
+**2. User Activity Tracking**
+```javascript
+hooks: {
+  afterInsert: [async function(data) {
+    await this.database.resources.users.add(data.userId, 'activityCount', 1);
+    await this.database.resources.users.set(data.userId, 'lastActivityAt', Date.now());
+    return data;
+  }]
+}
+```
+
+**3. Cascading Updates**
+```javascript
+hooks: {
+  afterUpdate: [async function(oldData, newData) {
+    if (oldData.status !== newData.status && newData.status === 'completed') {
+      // Order completed - update multiple metrics
+      await this.database.resources.users.add(newData.userId, 'completedOrders', 1);
+      await this.database.resources.stats.add('daily', 'completions', 1);
+    }
+    return newData;
+  }]
+}
+```
+
+#### Important Notes
+
+**✅ DO:**
+- Use `function` syntax in hooks
+- Access other resources via `this.database.resources`
+- Return data from hooks (required for hook chain)
+- Use async/await for plugin operations
+- Handle errors in hooks (try/catch)
+
+**❌ DON'T:**
+- Use arrow functions (`=>`) - you'll lose `this`
+- Access `this.database` outside of hooks
+- Forget to return data from hooks
+- Create circular dependencies between resources
+- Perform heavy operations in hooks (they run synchronously with inserts)
+
 ### Manual Consolidation Control
 
 ```javascript
