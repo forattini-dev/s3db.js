@@ -5353,78 +5353,162 @@ class EventualConsistencyPlugin extends Plugin {
     }));
   }
   /**
+   * Fill gaps in analytics data with zeros for continuous time series
+   * @private
+   * @param {Array} data - Sparse analytics data
+   * @param {string} period - Period type ('hour', 'day', 'month')
+   * @param {string} startDate - Start date (ISO format)
+   * @param {string} endDate - End date (ISO format)
+   * @returns {Array} Complete time series with gaps filled
+   */
+  _fillGaps(data, period, startDate, endDate) {
+    if (!data || data.length === 0) {
+      data = [];
+    }
+    const dataMap = /* @__PURE__ */ new Map();
+    data.forEach((item) => {
+      dataMap.set(item.cohort, item);
+    });
+    const result = [];
+    const emptyRecord = {
+      count: 0,
+      sum: 0,
+      avg: 0,
+      min: 0,
+      max: 0,
+      recordCount: 0
+    };
+    if (period === "hour") {
+      const start = /* @__PURE__ */ new Date(startDate + "T00:00:00Z");
+      const end = /* @__PURE__ */ new Date(endDate + "T23:59:59Z");
+      for (let dt = new Date(start); dt <= end; dt.setHours(dt.getHours() + 1)) {
+        const cohort = dt.toISOString().substring(0, 13);
+        result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+      }
+    } else if (period === "day") {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+        const cohort = dt.toISOString().substring(0, 10);
+        result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+      }
+    } else if (period === "month") {
+      const startYear = parseInt(startDate.substring(0, 4));
+      const startMonth = parseInt(startDate.substring(5, 7));
+      const endYear = parseInt(endDate.substring(0, 4));
+      const endMonth = parseInt(endDate.substring(5, 7));
+      for (let year = startYear; year <= endYear; year++) {
+        const firstMonth = year === startYear ? startMonth : 1;
+        const lastMonth = year === endYear ? endMonth : 12;
+        for (let month = firstMonth; month <= lastMonth; month++) {
+          const cohort = `${year}-${month.toString().padStart(2, "0")}`;
+          result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+        }
+      }
+    }
+    return result;
+  }
+  /**
    * Get analytics for entire month, broken down by days
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
    * @param {string} month - Month in YYYY-MM format
+   * @param {Object} options - Options
+   * @param {boolean} options.fillGaps - Fill missing days with zeros (default: false)
    * @returns {Promise<Array>} Daily analytics for the month
    */
-  async getMonthByDay(resourceName, field, month) {
+  async getMonthByDay(resourceName, field, month, options = {}) {
     const year = parseInt(month.substring(0, 4));
     const monthNum = parseInt(month.substring(5, 7));
     const firstDay = new Date(year, monthNum - 1, 1);
     const lastDay = new Date(year, monthNum, 0);
     const startDate = firstDay.toISOString().substring(0, 10);
     const endDate = lastDay.toISOString().substring(0, 10);
-    return await this.getAnalytics(resourceName, field, {
+    const data = await this.getAnalytics(resourceName, field, {
       period: "day",
       startDate,
       endDate
     });
+    if (options.fillGaps) {
+      return this._fillGaps(data, "day", startDate, endDate);
+    }
+    return data;
   }
   /**
    * Get analytics for entire day, broken down by hours
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
    * @param {string} date - Date in YYYY-MM-DD format
+   * @param {Object} options - Options
+   * @param {boolean} options.fillGaps - Fill missing hours with zeros (default: false)
    * @returns {Promise<Array>} Hourly analytics for the day
    */
-  async getDayByHour(resourceName, field, date) {
-    return await this.getAnalytics(resourceName, field, {
+  async getDayByHour(resourceName, field, date, options = {}) {
+    const data = await this.getAnalytics(resourceName, field, {
       period: "hour",
       date
     });
+    if (options.fillGaps) {
+      return this._fillGaps(data, "hour", date, date);
+    }
+    return data;
   }
   /**
    * Get analytics for last N days, broken down by days
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
    * @param {number} days - Number of days to look back (default: 7)
+   * @param {Object} options - Options
+   * @param {boolean} options.fillGaps - Fill missing days with zeros (default: false)
    * @returns {Promise<Array>} Daily analytics
    */
-  async getLastNDays(resourceName, field, days = 7) {
+  async getLastNDays(resourceName, field, days = 7, options = {}) {
     const dates = Array.from({ length: days }, (_, i) => {
       const date = /* @__PURE__ */ new Date();
       date.setDate(date.getDate() - i);
       return date.toISOString().substring(0, 10);
     }).reverse();
-    return await this.getAnalytics(resourceName, field, {
+    const data = await this.getAnalytics(resourceName, field, {
       period: "day",
       startDate: dates[0],
       endDate: dates[dates.length - 1]
     });
+    if (options.fillGaps) {
+      return this._fillGaps(data, "day", dates[0], dates[dates.length - 1]);
+    }
+    return data;
   }
   /**
    * Get analytics for entire year, broken down by months
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
    * @param {number} year - Year (e.g., 2025)
+   * @param {Object} options - Options
+   * @param {boolean} options.fillGaps - Fill missing months with zeros (default: false)
    * @returns {Promise<Array>} Monthly analytics for the year
    */
-  async getYearByMonth(resourceName, field, year) {
-    return await this.getAnalytics(resourceName, field, {
+  async getYearByMonth(resourceName, field, year, options = {}) {
+    const data = await this.getAnalytics(resourceName, field, {
       period: "month",
       year
     });
+    if (options.fillGaps) {
+      const startDate = `${year}-01`;
+      const endDate = `${year}-12`;
+      return this._fillGaps(data, "month", startDate, endDate);
+    }
+    return data;
   }
   /**
    * Get analytics for entire month, broken down by hours
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
    * @param {string} month - Month in YYYY-MM format (or 'last' for previous month)
+   * @param {Object} options - Options
+   * @param {boolean} options.fillGaps - Fill missing hours with zeros (default: false)
    * @returns {Promise<Array>} Hourly analytics for the month (up to 24*31=744 records)
    */
-  async getMonthByHour(resourceName, field, month) {
+  async getMonthByHour(resourceName, field, month, options = {}) {
     let year, monthNum;
     if (month === "last") {
       const now = /* @__PURE__ */ new Date();
@@ -5439,11 +5523,15 @@ class EventualConsistencyPlugin extends Plugin {
     const lastDay = new Date(year, monthNum, 0);
     const startDate = firstDay.toISOString().substring(0, 10);
     const endDate = lastDay.toISOString().substring(0, 10);
-    return await this.getAnalytics(resourceName, field, {
+    const data = await this.getAnalytics(resourceName, field, {
       period: "hour",
       startDate,
       endDate
     });
+    if (options.fillGaps) {
+      return this._fillGaps(data, "hour", startDate, endDate);
+    }
+    return data;
   }
   /**
    * Get top records by volume
@@ -11564,7 +11652,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.3" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.4" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
