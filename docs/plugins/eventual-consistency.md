@@ -1,1002 +1,35 @@
-# 🔄 Eventual Consistency Plugin
+# EventualConsistencyPlugin
 
-<p align="center">
-  <strong>Implement eventual consistency for numeric fields with transaction history</strong><br>
-  <em>Perfect for counters, balances, points, and other accumulator fields</em>
-</p>
+**Gerencia campos numéricos com histórico de transações e consistência eventual**
 
----
-
-## 📋 Table of Contents
-
-- [Overview](#overview)
-- [Key Features](#key-features)
-- [Installation & Setup](#installation--setup)
-- [API Reference](#api-reference)
-- [📊 Analytics API](#-analytics-api) ⭐ **NEW**
-- [Configuration Options](#configuration-options)
-- [Usage Examples](#usage-examples)
-- [Advanced Patterns](#advanced-patterns)
-- [Best Practices](#best-practices)
+Perfeito para contadores, saldos, pontos e outros campos acumuladores que precisam de:
+- ✅ Histórico completo de mudanças
+- ✅ Operações atômicas (add/sub/set)
+- ✅ Consistência eventual ou imediata
+- ✅ Analytics pré-calculados
 
 ---
 
-## Overview
-
-The Eventual Consistency Plugin provides a robust solution for managing numeric fields that require:
-- **Transaction history** - Every change is recorded
-- **Atomic operations** - Add, subtract, and set operations
-- **Eventual consistency** - Asynchronous consolidation of values
-- **Partition support** - Time-based cohorts for efficient querying
-- **Custom reducers** - Flexible consolidation logic
-
-> **Important**: This plugin uses explicit methods (`add`, `sub`, `set`, `consolidate`) instead of intercepting regular insert/update operations. This design provides better control and predictability.
->
-> **Method Signatures**: All methods require the field parameter: `add(id, field, amount)`, `sub(id, field, amount)`, `set(id, field, value)`, `consolidate(id, field)`
-
-### ⚠️ Important: How Values Are Updated
-
-**THE PLUGIN UPDATES YOUR ORIGINAL FIELD VALUE!** This is not just a parallel structure - the actual `balance`, `points`, or counter field **IS UPDATED** during consolidation.
-
-```javascript
-// Initial state
-const wallet = await wallets.get('wallet-123');
-console.log(wallet.balance);  // 0
-
-// Create transactions (balance NOT updated yet)
-await wallets.add('wallet-123', 'balance', 100);
-await wallets.add('wallet-123', 'balance', 50);
-
-// Before consolidation
-const beforeWallet = await wallets.get('wallet-123');
-console.log(beforeWallet.balance);  // 0 ❌ (still old value)
-
-// Consolidation UPDATES the original field
-await wallets.consolidate('wallet-123', 'balance');
-
-// After consolidation - ORIGINAL FIELD IS UPDATED!
-const afterWallet = await wallets.get('wallet-123');
-console.log(afterWallet.balance);  // 150 ✅ (UPDATED!)
-```
-
-**What happens during consolidation:**
-1. ✅ Reads pending transactions
-2. ✅ Applies reducer to calculate new value
-3. ✅ **UPDATES the original record**: `wallets.update(id, { balance: newValue })`
-4. ✅ Marks transactions as applied
-
-**Parallel structures are auxiliary:**
-- `{resource}_transactions_{field}` - Temporary transaction log (marked as applied after consolidation)
-- `{resource}_analytics_{field}` - Optional pre-calculated analytics (updated during consolidation)
-
-**But the ORIGINAL field value IS UPDATED!** 🎯
-
-### How It Works
-
-1. **Explicit Operations**: Instead of direct updates, use `add()`, `sub()`, and `set()` methods
-2. **Transaction Log**: All operations create transactions in a dedicated resource (`{resource}_transactions_{field}`)
-3. **Consolidation**: Transactions are periodically consolidated **and the original field value is UPDATED**
-4. **Value Update**: The actual field (e.g., `balance`) in the original resource **IS UPDATED** with the consolidated value
-5. **Flexibility**: Choose between sync (immediate) or async (eventual) consistency
-6. **Deferred Setup**: Plugin can be added before the target resource exists
-
-**Visual Flow:**
-```
-┌─────────────────────┐
-│ wallets.balance = 0 │  ← Original record
-└─────────────────────┘
-          ↓
-    add(100), add(50)   ← Creates transactions
-          ↓
-┌─────────────────────────────────┐
-│ transactions (applied: false)   │  ← Temporary log
-│ - add 100                       │
-│ - add 50                        │
-└─────────────────────────────────┘
-          ↓
-    consolidate()       ← Magic happens here!
-          ↓
-┌─────────────────────┐
-│ wallets.balance = 150│  ← ✅ ORIGINAL FIELD UPDATED!
-└─────────────────────┘
-          ↓
-┌─────────────────────────────────┐
-│ transactions (applied: true)    │  ← Marked as applied
-└─────────────────────────────────┘
-```
-
----
-
-## Key Features
-
-> **🎯 Core Behavior**: The plugin **UPDATES your original field** (balance, points, etc.) during consolidation. You can read the updated value directly from your resource using `get()` - no need to query transactions!
-
-### 🎯 Core Features
-- **Original Field Updated**: The actual field value in your resource IS UPDATED during consolidation ⚠️
-- **Atomic Operations**: `add()`, `sub()`, `set()` with distributed locking
-- **Transaction History**: Complete audit trail of all changes (temporary, marked as applied)
-- **Flexible Modes**: Sync (immediate) or Async (eventual) consistency
-- **Custom Reducers**: Define how transactions consolidate
-- **Time-based Partitions**: Automatic day and month partitions for efficient querying
-- **📊 Analytics API**: Pre-calculated transaction analytics for instant reporting ⭐ **NEW**
-
-### 🔧 Technical Features
-- **Distributed Locking**: Prevents race conditions in concurrent consolidation
-- **Non-blocking**: Operations don't interfere with normal CRUD
-- **Batch Support**: Batch multiple transactions for efficiency with parallel inserts
-- **Auto-consolidation**: Periodic background consolidation with configurable concurrency
-- **Dual Partitions**: Both `byDay` and `byMonth` partitions for flexible querying
-- **Timezone Support**: Cohorts respect local timezone for accurate daily/monthly grouping
-- **Deferred Setup**: Works with resources created before or after plugin initialization
-- **Zero Duplication**: Guaranteed unique transaction IDs using nanoid
-
-### 🚀 Performance Improvements
-- **Parallel Consolidation**: Process multiple records concurrently (configurable)
-- **Parallel Transaction Inserts**: Batch operations execute in parallel
-- **Lock-based Atomicity**: Prevents duplicate consolidation without blocking reads
-
----
-
-## Installation & Setup
+## Quick Start
 
 ```javascript
 import { S3db, EventualConsistencyPlugin } from 's3db.js';
 
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET/path"
-});
+const db = new S3db({ connectionString: '...' });
+await db.connect();
 
-await s3db.connect();
-
-// Configure plugin with resources
-await s3db.usePlugin(new EventualConsistencyPlugin({
+// Configurar plugin
+await db.usePlugin(new EventualConsistencyPlugin({
   resources: {
-    wallets: ['balance', 'points'],
-    accounts: ['credits']
+    wallets: ['balance'],
+    users: ['points', 'credits']
   },
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: {
-    timezone: 'America/Sao_Paulo'  // Optional, defaults to UTC
-  }
+  mode: 'async',  // ou 'sync' para consistência imediata
+  enableAnalytics: true
 }));
 
-// Create resources - plugin automatically sets up
-const walletsResource = await s3db.createResource({
-  name: 'wallets',
-  attributes: {
-    id: 'string|required',
-    userId: 'string|required',
-    balance: 'number|default:0',
-    points: 'number|default:0',
-    currency: 'string|required'
-  }
-});
-
-// Methods are now available - always specify field
-await walletsResource.add('wallet-1', 'balance', 100);
-await walletsResource.add('wallet-1', 'points', 50);
-await walletsResource.consolidate('wallet-1', 'balance');
-```
-
-> **💡 Important**: The plugin **UPDATES the original field value** during consolidation. This is not just a parallel structure - the actual field in your resource IS UPDATED with the consolidated value.
->
-> Example:
-> ```javascript
-> await wallets.add('wallet-1', 'balance', 100);
-> await wallets.consolidate('wallet-1', 'balance');  // ← Updates wallet.balance!
->
-> const wallet = await wallets.get('wallet-1');
-> console.log(wallet.balance);  // 100 ✅ (original field updated!)
-> ```
-
----
-
-## API Reference
-
-### Constructor Options
-
-```javascript
-new EventualConsistencyPlugin({
-  // Required
-  resources: {
-    resourceName: ['field1', 'field2', ...],
-    anotherResource: ['field3', 'field4']
-  },
-
-  // Optional (shared by all fields)
-  mode: 'async',                      // 'async' (default) or 'sync'
-  autoConsolidate: true,              // Enable auto-consolidation
-  consolidationInterval: 300,         // Consolidation interval (seconds, default: 300 = 5min)
-  consolidationWindow: 24,            // Hours to look back for consolidation (default: 24h)
-  consolidationConcurrency: 5,        // Parallel consolidation limit (default: 5)
-  lateArrivalStrategy: 'warn',        // 'ignore', 'warn' (default), or 'process'
-  lockTimeout: 300,                   // Lock timeout (seconds, default: 300 = 5min)
-  transactionRetention: 30,           // Days to keep applied transactions (default: 30)
-  gcInterval: 86400,                  // Garbage collection interval (seconds, default: 86400 = 24h)
-
-  // Cohort configuration
-  cohort: {
-    timezone: 'America/Sao_Paulo'     // Timezone for cohorts (auto-detected or UTC)
-  },
-
-  // Batching
-  batchTransactions: false,     // Enable transaction batching
-  batchSize: 100,              // Batch size before flush
-
-  // Debugging
-  verbose: false,               // Enable detailed logging (default: false)
-
-  // Custom reducer
-  reducer: (transactions) => {
-    // Custom consolidation logic
-    // Note: Transactions may include synthetic transactions with { synthetic: true }
-    return transactions.reduce((sum, t) => {
-      if (t.operation === 'set') return t.value;
-      if (t.operation === 'add') return sum + t.value;
-      if (t.operation === 'sub') return sum - t.value;
-      return sum;
-    }, 0);
-  },
-
-  // Analytics configuration (NEW in v10.1.0)
-  enableAnalytics: false,           // Enable pre-calculated analytics
-  analyticsConfig: {
-    periods: ['hour', 'day', 'month'],  // Which aggregations to create
-    metrics: ['count', 'sum', 'avg', 'min', 'max'],  // Metrics to calculate
-    rollupStrategy: 'incremental',   // 'incremental' or 'batch'
-    retentionDays: 365              // Days to keep analytics (default: 365)
-  }
-});
-```
-
-### Generated Methods
-
-The plugin adds these methods to your resource:
-
-```javascript
-// Set value
-await accounts.set('acc-1', 'balance', 1000);   // Set balance to 1000
-await accounts.set('acc-1', 'points', 500);     // Set points to 500
-
-// Add value
-await accounts.add('acc-1', 'balance', 100);    // Add 100 to balance
-await accounts.add('acc-1', 'points', 50);      // Add 50 to points
-
-// Subtract value
-await accounts.sub('acc-1', 'balance', 25);     // Subtract 25 from balance
-await accounts.sub('acc-1', 'credits', 10);     // Subtract 10 from credits
-
-// Consolidate
-await accounts.consolidate('acc-1', 'balance'); // Consolidate balance
-await accounts.consolidate('acc-1', 'points');  // Consolidate points
-```
-
-#### Method Reference
-
-##### `set(id, field, value)`
-Sets the absolute value of the field.
-
-##### `add(id, field, amount)`
-Adds to the current value.
-
-##### `sub(id, field, amount)`
-Subtracts from the current value.
-
-##### `consolidate(id, field)`
-Manually triggers consolidation for a specific field.
-
----
-
-## 📊 Analytics API
-
-**New in v10.1.0**: Pre-calculated transaction analytics for instant reporting without scanning millions of transactions.
-
-### Overview
-
-The Analytics API automatically aggregates transaction data during consolidation, providing:
-
-- **📈 Pre-calculated metrics**: count, sum, avg, min, max
-- **🔄 Hierarchical roll-ups**: hour → day → month
-- **⚡ O(1) queries**: Instant reports vs O(n) transaction scans
-- **🎯 Operation breakdowns**: Statistics by add/sub/set operations
-- **🏆 Top N analysis**: Highest volume records by count or value
-- **💾 Efficient storage**: 24 records/day vs 1000s of transactions
-
-### Enable Analytics
-
-```javascript
-new EventualConsistencyPlugin({
-  resources: {
-    wallets: ['balance']
-  },
-
-  // Enable analytics
-  enableAnalytics: true,
-  analyticsConfig: {
-    periods: ['hour', 'day', 'month'],  // Which aggregations to create
-    metrics: ['count', 'sum', 'avg', 'min', 'max'],
-    rollupStrategy: 'incremental',  // 'incremental' or 'batch'
-    retentionDays: 365  // Keep analytics for 1 year
-  }
-})
-```
-
-### Analytics Resource
-
-When enabled, creates `{resource}_analytics_{field}` with this structure:
-
-```javascript
-{
-  id: 'hour-2025-10-09T14',
-  period: 'hour',  // 'hour', 'day', or 'month'
-  cohort: '2025-10-09T14',  // ISO format timestamp
-
-  // Pre-calculated metrics
-  transactionCount: 150,
-  totalValue: 5000,
-  avgValue: 33.33,
-  minValue: -100,
-  maxValue: 500,
-
-  // Operation breakdown
-  operations: {
-    add: { count: 120, sum: 6000 },
-    sub: { count: 30, sum: -1000 },
-    set: { count: 0, sum: 0 }
-  },
-
-  // Metadata
-  recordCount: 45,  // Distinct originalIds
-  consolidatedAt: '2025-10-09T14:55:00Z',
-  updatedAt: '2025-10-09T14:55:00Z'
-}
-```
-
-### Query Analytics
-
-#### `getAnalytics(resourceName, field, options)`
-
-Get aggregated analytics for a period:
-
-```javascript
-const plugin = s3db.plugins.find(p => p instanceof EventualConsistencyPlugin);
-
-// Hourly analytics for a specific day
-const hourly = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'hour',
-  date: '2025-10-09'
-});
-
-console.log('Hourly stats:', hourly);
-// [
-//   { cohort: '2025-10-09T00', count: 50, sum: 1000, avg: 20, min: -10, max: 100 },
-//   { cohort: '2025-10-09T01', count: 30, sum: 600, avg: 20, min: 5, max: 50 },
-//   ...
-// ]
-
-// Daily analytics for a date range
-const daily = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  startDate: '2025-10-01',
-  endDate: '2025-10-31'
-});
-
-console.log(`October had ${daily.length} days with transactions`);
-
-// Monthly analytics for a year
-const monthly = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'month',
-  year: 2025
-});
-
-console.log('Monthly totals:', monthly.map(m => ({
-  month: m.cohort,
-  transactions: m.count,
-  totalValue: m.sum
-})));
-// [
-//   { month: '2025-01', transactions: 15000, totalValue: 300000 },
-//   { month: '2025-02', transactions: 14000, totalValue: 280000 },
-//   ...
-// ]
-```
-
-#### Operation Breakdown
-
-Get statistics by operation type (add/sub/set):
-
-```javascript
-const operations = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  date: '2025-10-09',
-  breakdown: 'operations'
-});
-
-console.log('Operation breakdown:', operations[0]);
-// {
-//   cohort: '2025-10-09',
-//   add: { count: 400, sum: 8000 },
-//   sub: { count: 100, sum: -2000 },
-//   set: { count: 5, sum: 5000 }
-// }
-```
-
-#### `getTopRecords(resourceName, field, options)`
-
-Find top N records by volume:
-
-```javascript
-// Top 10 wallets by transaction count
-const topByCount = await plugin.getTopRecords('wallets', 'balance', {
-  period: 'day',
-  date: '2025-10-09',
-  metric: 'transactionCount',
-  limit: 10
-});
-
-console.log('Most active wallets:', topByCount);
-// [
-//   { recordId: 'wallet-123', count: 50, sum: 1000 },
-//   { recordId: 'wallet-456', count: 45, sum: 900 },
-//   ...
-// ]
-
-// Top 10 wallets by total value
-const topByValue = await plugin.getTopRecords('wallets', 'balance', {
-  period: 'day',
-  date: '2025-10-09',
-  metric: 'totalValue',
-  limit: 10
-});
-
-console.log('Highest value wallets:', topByValue);
-// [
-//   { recordId: 'wallet-789', count: 10, sum: 50000 },
-//   { recordId: 'wallet-101', count: 25, sum: 25000 },
-//   ...
-// ]
-```
-
-### Helper Methods for Common Patterns
-
-The plugin provides convenient helper methods for common granularity queries.
-
-**🎨 Chart-Ready Data with `fillGaps`**
-
-All helper methods support a `fillGaps` option to create continuous time series perfect for charts:
-
-```javascript
-// Without fillGaps (sparse data - only periods with transactions)
-const data = await plugin.getMonthByDay('wallets', 'balance', '2025-10');
-// Returns: [{ cohort: '2025-10-01', ... }, { cohort: '2025-10-05', ... }]
-// Missing: days 2, 3, 4
-
-// With fillGaps (continuous data - all periods filled with zeros)
-const chartData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
-  fillGaps: true
-});
-// Returns: All 31 days, missing days have count: 0, sum: 0
-// Ready for Chart.js, D3.js, etc.
-```
-
-**Benefits:**
-- ✅ No gaps in time series
-- ✅ Direct use in charting libraries
-- ✅ Consistent array length (predictable)
-- ✅ Missing periods filled with zeros
-
-#### `getMonthByDay(resourceName, field, month, options)`
-
-Get entire month broken down by days:
-
-```javascript
-// October 2025, day by day (sparse - only days with transactions)
-const octoberByDay = await plugin.getMonthByDay('wallets', 'balance', '2025-10');
-
-// October 2025, day by day (continuous - all 31 days, gaps filled with zeros)
-const chartData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
-  fillGaps: true  // Perfect for charts!
-});
-
-console.log('October day by day:');
-chartData.forEach(day => {
-  console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
-});
-// Output (guaranteed 31 days):
-// 2025-10-01: 150 txns, $5000
-// 2025-10-02: 0 txns, $0       ← Filled gap
-// 2025-10-03: 120 txns, $4100
-// ...
-// 2025-10-31: 95 txns, $3200
-```
-
-#### `getDayByHour(resourceName, field, date, options)`
-
-Get entire day broken down by hours:
-
-```javascript
-// Today, hour by hour (all 24 hours, gaps filled)
-const today = new Date().toISOString().substring(0, 10);
-const todayByHour = await plugin.getDayByHour('wallets', 'balance', today, {
-  fillGaps: true  // Get all 24 hours
-});
-
-console.log('Today hour by hour:');
-todayByHour.forEach(hour => {
-  const time = hour.cohort.substring(11);  // Extract hour
-  console.log(`${time}:00 - ${hour.count} txns, $${hour.sum}`);
-});
-// Output (guaranteed 24 hours):
-// 00:00 - 12 txns, $500
-// 01:00 - 0 txns, $0       ← No activity
-// 02:00 - 5 txns, $150
-// ...
-// 23:00 - 8 txns, $400
-```
-
-#### `getLastNDays(resourceName, field, days, options)`
-
-Get last N days, broken down by days:
-
-```javascript
-// Last 7 days, day by day (all 7 days guaranteed)
-const last7Days = await plugin.getLastNDays('wallets', 'balance', 7, {
-  fillGaps: true  // Perfect for weekly charts
-});
-
-console.log('Last 7 days:');
-last7Days.forEach(day => {
-  console.log(`${day.cohort}: ${day.count} txns, $${day.sum}`);
-});
-// Output (guaranteed 7 days):
-// 2025-10-03: 45 txns, $2000
-// 2025-10-04: 0 txns, $0       ← Weekend, no activity
-// 2025-10-05: 0 txns, $0       ← Weekend, no activity
-// 2025-10-06: 120 txns, $5500
-// ...
-
-// Last 30 days (all 30 days)
-const last30Days = await plugin.getLastNDays('wallets', 'balance', 30, {
-  fillGaps: true
-});
-```
-
-#### `getYearByMonth(resourceName, field, year, options)`
-
-Get entire year broken down by months:
-
-```javascript
-// 2025, month by month (all 12 months guaranteed)
-const year2025 = await plugin.getYearByMonth('wallets', 'balance', 2025, {
-  fillGaps: true  // All 12 months, even if no transactions
-});
-
-console.log('2025 month by month:');
-year2025.forEach(month => {
-  console.log(`${month.cohort}: ${month.count} txns, $${month.sum}`);
-});
-// Output (guaranteed 12 months):
-// 2025-01: 15000 txns, $300000
-// 2025-02: 14000 txns, $280000
-// 2025-03: 0 txns, $0           ← No activity
-// ...
-// 2025-12: 18000 txns, $350000
-```
-
-#### `getMonthByHour(resourceName, field, month, options)`
-
-Get entire month broken down by hours:
-
-```javascript
-// October 2025, hour by hour (all 744 hours = 24×31)
-const octoberByHour = await plugin.getMonthByHour('wallets', 'balance', '2025-10', {
-  fillGaps: true  // Perfect for detailed monthly charts
-});
-
-console.log('October 2025 hour by hour:');
-octoberByHour.slice(0, 24).forEach(hour => {  // First day
-  console.log(`${hour.cohort}: ${hour.count} txns, $${hour.sum}`);
-});
-// Output (744 hours total):
-// 2025-10-01T00: 12 txns, $500
-// 2025-10-01T01: 0 txns, $0     ← Night time
-// 2025-10-01T02: 0 txns, $0
-// ...
-// 2025-10-31T23: 15 txns, $800
-
-// Or use 'last' for previous month
-const lastMonthByHour = await plugin.getMonthByHour('wallets', 'balance', 'last', {
-  fillGaps: true
-});
-console.log(`Last month: ${lastMonthByHour.length} hours`);  // 672-744 depending on month
-```
-
-**Note**: With `fillGaps: true`, this returns exactly 744 hours for 31-day months (696 for February, etc.). Perfect for continuous time series but large data set.
-
-### Chart Integration Examples
-
-The `fillGaps` option makes it trivial to integrate with popular charting libraries:
-
-#### Chart.js Integration
-
-```javascript
-// Get chart-ready data
-const last30Days = await plugin.getLastNDays('wallets', 'balance', 30, {
-  fillGaps: true  // Continuous data
-});
-
-// Prepare Chart.js data
-const chartData = {
-  labels: last30Days.map(d => d.cohort),  // ['2025-10-01', '2025-10-02', ...]
-  datasets: [{
-    label: 'Transaction Count',
-    data: last30Days.map(d => d.count),   // [150, 0, 120, ...]
-    borderColor: 'rgb(75, 192, 192)',
-    tension: 0.1
-  }, {
-    label: 'Total Value',
-    data: last30Days.map(d => d.sum),     // [5000, 0, 4100, ...]
-    borderColor: 'rgb(255, 99, 132)',
-    yAxisID: 'y1'
-  }]
-};
-
-// Create chart
-new Chart(ctx, {
-  type: 'line',
-  data: chartData,
-  options: {
-    responsive: true,
-    scales: {
-      y: { type: 'linear', position: 'left' },
-      y1: { type: 'linear', position: 'right' }
-    }
-  }
-});
-```
-
-#### Recharts (React) Integration
-
-```jsx
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from 'recharts';
-
-function TransactionChart() {
-  const [data, setData] = useState([]);
-
-  useEffect(() => {
-    async function loadData() {
-      const plugin = s3db.plugins.find(p => p instanceof EventualConsistencyPlugin);
-      const analytics = await plugin.getLastNDays('wallets', 'balance', 30, {
-        fillGaps: true  // No gaps in chart
-      });
-      setData(analytics);  // Direct use!
-    }
-    loadData();
-  }, []);
-
-  return (
-    <LineChart width={800} height={400} data={data}>
-      <XAxis dataKey="cohort" />
-      <YAxis />
-      <Tooltip />
-      <Legend />
-      <Line type="monotone" dataKey="count" stroke="#8884d8" name="Transactions" />
-      <Line type="monotone" dataKey="sum" stroke="#82ca9d" name="Total Value" />
-    </LineChart>
-  );
-}
-```
-
-#### D3.js Integration
-
-```javascript
-// Get chart-ready data
-const hourlyData = await plugin.getDayByHour('wallets', 'balance', '2025-10-09', {
-  fillGaps: true  // All 24 hours
-});
-
-// D3 setup
-const margin = {top: 20, right: 20, bottom: 30, left: 50};
-const width = 960 - margin.left - margin.right;
-const height = 500 - margin.top - margin.bottom;
-
-const x = d3.scaleTime()
-  .domain(d3.extent(hourlyData, d => new Date(d.cohort)))
-  .range([0, width]);
-
-const y = d3.scaleLinear()
-  .domain([0, d3.max(hourlyData, d => d.count)])
-  .range([height, 0]);
-
-const line = d3.line()
-  .x(d => x(new Date(d.cohort)))
-  .y(d => y(d.count));
-
-// Draw chart
-svg.append("path")
-  .datum(hourlyData)
-  .attr("class", "line")
-  .attr("d", line);
-```
-
-#### ApexCharts Integration
-
-```javascript
-// Get chart-ready data
-const monthData = await plugin.getMonthByDay('wallets', 'balance', '2025-10', {
-  fillGaps: true  // All 31 days
-});
-
-// ApexCharts configuration
-const options = {
-  chart: { type: 'area', height: 350 },
-  series: [{
-    name: 'Transactions',
-    data: monthData.map(d => d.count)
-  }, {
-    name: 'Total Value',
-    data: monthData.map(d => d.sum)
-  }],
-  xaxis: {
-    categories: monthData.map(d => d.cohort),
-    type: 'datetime'
-  }
-};
-
-const chart = new ApexCharts(document.querySelector("#chart"), options);
-chart.render();
-```
-
-#### Real-Time Dashboard Pattern
-
-```javascript
-// Update dashboard every minute
-setInterval(async () => {
-  const plugin = s3db.plugins.find(p => p instanceof EventualConsistencyPlugin);
-
-  // Today's hourly breakdown
-  const today = new Date().toISOString().substring(0, 10);
-  const hourlyData = await plugin.getDayByHour('wallets', 'balance', today, {
-    fillGaps: true  // All 24 hours, current hour included
-  });
-
-  // Update Chart.js
-  myChart.data.labels = hourlyData.map(d => d.cohort.substring(11) + ':00');
-  myChart.data.datasets[0].data = hourlyData.map(d => d.count);
-  myChart.update();
-}, 60000);  // Every minute
-```
-
-### Manual Granularity Control
-
-For custom date ranges, use `getAnalytics` directly:
-
-```javascript
-// Custom week (Mon-Sun)
-const weeklyStats = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  startDate: '2025-10-07',  // Monday
-  endDate: '2025-10-13'     // Sunday
-});
-
-// Custom hours (9am-5pm)
-const businessHours = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'hour',
-  date: '2025-10-09'
-});
-const filtered = businessHours.filter(h => {
-  const hour = parseInt(h.cohort.substring(11, 13));
-  return hour >= 9 && hour <= 17;
-});
-
-// Quarter (3 months)
-const q4 = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'month',
-  startDate: '2025-10',
-  endDate: '2025-12'
-});
-```
-
-### Use Cases
-
-**📊 Transaction Reports**
-```javascript
-// Daily summary report
-const today = new Date().toISOString().substring(0, 10);
-const dailyStats = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  date: today
-});
-
-const report = dailyStats[0];
-console.log(`
-Daily Transaction Report - ${report.cohort}
-${'='.repeat(50)}
-Total Transactions: ${report.count}
-Total Value: $${report.sum}
-Average Transaction: $${report.avg.toFixed(2)}
-Largest Transaction: $${report.max}
-Smallest Transaction: $${report.min}
-`);
-```
-
-**📈 Trend Analysis**
-```javascript
-// Weekly trend
-const last7Days = Array.from({ length: 7 }, (_, i) => {
-  const date = new Date();
-  date.setDate(date.getDate() - i);
-  return date.toISOString().substring(0, 10);
-}).reverse();
-
-const weekData = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  startDate: last7Days[0],
-  endDate: last7Days[6]
-});
-
-console.log('7-Day Trend:');
-weekData.forEach(day => {
-  console.log(`${day.cohort}: ${day.count} txns ($${day.sum})`);
-});
-```
-
-**🏆 Top Customer Analysis**
-```javascript
-// Monthly top customers
-const topCustomers = await plugin.getTopRecords('wallets', 'balance', {
-  period: 'month',
-  date: '2025-10',
-  metric: 'totalValue',
-  limit: 20
-});
-
-console.log('Top 20 Customers by Value (October):');
-topCustomers.forEach((customer, idx) => {
-  console.log(`${idx + 1}. ${customer.recordId}: $${customer.sum} (${customer.count} txns)`);
-});
-```
-
-**💡 Operation Insights**
-```javascript
-// Analyze deposit vs withdrawal patterns
-const ops = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'month',
-  month: '2025-10',
-  breakdown: 'operations'
-});
-
-const { add, sub } = ops[0];
-console.log(`
-October Operation Insights:
-${'='.repeat(50)}
-Deposits (add):
-  Count: ${add.count}
-  Total: $${add.sum}
-  Average: $${(add.sum / add.count).toFixed(2)}
-
-Withdrawals (sub):
-  Count: ${sub.count}
-  Total: $${Math.abs(sub.sum)}
-  Average: $${Math.abs(sub.sum / sub.count).toFixed(2)}
-
-Net Flow: $${add.sum + sub.sum}
-`);
-```
-
-### Performance Benefits
-
-**Before Analytics (Slow):**
-```javascript
-// Scan all transactions ❌
-const transactions = await transactionsResource.list();
-const dailyTxns = transactions.filter(t => t.cohortDate === today);
-const totalValue = dailyTxns.reduce((sum, t) => sum + t.value, 0);
-// Time: 180ms+ (scales with transaction count)
-```
-
-**With Analytics (Fast):**
-```javascript
-// Pre-calculated aggregation ✅
-const stats = await plugin.getAnalytics('wallets', 'balance', {
-  period: 'day',
-  date: today
-});
-const totalValue = stats[0].sum;
-// Time: 2ms (constant, regardless of transaction count)
-```
-
-**Scaling Comparison:**
-
-| Transactions | Direct Scan | Analytics | Speedup |
-|-------------|-------------|-----------|---------|
-| 1,000 | 50ms | 2ms | 25x |
-| 10,000 | 180ms | 2ms | 90x |
-| 100,000 | 1,800ms | 2ms | 900x |
-| 1,000,000 | 18,000ms | 2ms | 9,000x |
-
-### Best Practices
-
-**1. Enable analytics for high-volume fields**
-
-```javascript
-// Good: High transaction volume
-enableAnalytics: true  // For wallets, points, usage counters
-
-// Skip: Low volume
-enableAnalytics: false  // For infrequent fields
-```
-
-**2. Choose appropriate retention**
-
-```javascript
-// Short-term analytics
-retentionDays: 90  // Last 3 months
-
-// Long-term analytics
-retentionDays: 365  // Full year for compliance
-
-// Permanent analytics
-retentionDays: Infinity  // Never delete
-```
-
-**3. Query by period efficiently**
-
-```javascript
-// ✅ Efficient: Query specific period
-{ period: 'day', date: '2025-10-09' }
-
-// ❌ Inefficient: Query all periods
-{ period: 'hour' }  // Returns all hours ever
-```
-
-**4. Use top records for dashboards**
-
-```javascript
-// Dashboard: Top 5 customers this week
-const topWeekly = await plugin.getTopRecords('wallets', 'balance', {
-  period: 'day',
-  date: today,
-  metric: 'totalValue',
-  limit: 5
-});
-```
-
-**5. Cache compatibility**
-
-```javascript
-// Cache is automatically compatible!
-await database.usePlugin(new EventualConsistencyPlugin({ ... }));
-await database.usePlugin(new CachePlugin({ driver: 'memory' }));
-
-// ✅ Plugin resources are NOT cached (transactions, locks, analytics)
-// ✅ User resources ARE cached (wallets, users, etc.)
-// ✅ Cache is invalidated after consolidation
-```
-
-### Cache Compatibility
-
-The EventualConsistencyPlugin is fully compatible with CachePlugin:
-
-**Automatic Plugin Resource Exclusion:**
-- Plugin-created resources (transactions, locks, analytics) are **automatically excluded** from cache
-- User-created resources (wallets, users, etc.) are **cached normally**
-- This prevents stale data issues with transient plugin data
-
-**Automatic Cache Invalidation:**
-- After consolidation, the cache for updated records is **automatically invalidated**
-- Next read will fetch the updated value from S3
-- No manual cache management required
-
-**Example:**
-```javascript
-// Setup both plugins
-const s3db = new S3db({ connectionString: '...' });
-await s3db.connect();
-
-// Create user resource
-const wallets = await s3db.createResource({
+// Criar resource
+const wallets = await db.createResource({
   name: 'wallets',
   attributes: {
     id: 'string|required',
@@ -1004,1824 +37,438 @@ const wallets = await s3db.createResource({
   }
 });
 
-// Add EventualConsistency
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
-  mode: 'async'
-}));
+// Usar
+await wallets.add('wallet-1', 'balance', 100);
+await wallets.sub('wallet-1', 'balance', 50);
+await wallets.consolidate('wallet-1', 'balance');
 
-// Add Cache
-await s3db.usePlugin(new CachePlugin({
-  driver: 'memory'
-}));
-
-// Usage - cache works transparently!
-await wallets.insert({ id: 'w1', balance: 0 });
-await wallets.add('w1', 100); // Creates transaction
-
-// Before consolidation
-const before = await wallets.get('w1'); // Cached
-console.log(before.balance); // 0 (cached value)
-
-// Auto-consolidation runs (every 5min by default)
-// Cache is automatically invalidated
-
-// After consolidation
-const after = await wallets.get('w1'); // Fetches fresh, then caches
-console.log(after.balance); // 100 (updated value)
-```
-
-**Why This Works:**
-1. Plugin resources have `createdBy: 'EventualConsistencyPlugin'` in metadata
-2. CachePlugin checks `createdBy` and skips non-user resources
-3. Consolidation invalidates cache for updated records
-4. No stale data, no manual cache management
-
-**Explicit Plugin Resource Caching (Not Recommended):**
-```javascript
-// If you REALLY want to cache plugin resources (usually not needed):
-await s3db.usePlugin(new CachePlugin({
-  driver: 'memory',
-  include: ['wallets_transactions_balance'] // Explicitly include
-}));
-```
-
-### Limitations
-
-- **recordCount** is approximate (max per batch, not total unique)
-- **Roll-ups** may have slight delays (eventual consistency)
-- **Late arrivals** outside consolidation window won't update analytics
-- **Storage**: 24 records/day per field (negligible but measurable)
-
----
-
-## Configuration Options
-
-### Mode: Async vs Sync
-
-```javascript
-// Async Mode (default) - Better performance
-{
-  mode: 'async'
-  // Operations return immediately
-  // Consolidation happens periodically
-  // Best for high-throughput scenarios
-}
-
-// Sync Mode - Immediate consistency
-{
-  mode: 'sync'
-  // Operations wait for consolidation
-  // Value is always up-to-date
-  // Best for critical financial operations
-}
-```
-
-### Partition Structure
-
-```javascript
-// Transaction resources are automatically partitioned by:
-{
-  byHour: { fields: { cohortHour: 'string' } },   // YYYY-MM-DDTHH format (e.g., 2025-10-08T14)
-  byDay: { fields: { cohortDate: 'string' } },    // YYYY-MM-DD format
-  byMonth: { fields: { cohortMonth: 'string' } }  // YYYY-MM format
-}
-```
-
-This triple-partition structure enables:
-- **O(1) hourly queries** for consolidation (most efficient)
-- Efficient daily transaction queries
-- Monthly aggregation and reporting
-- Optimized storage and retrieval
-- Timezone-aware cohort grouping for accurate local-time analytics
-
-### Timezone Configuration
-
-```javascript
-{
-  cohort: {
-    timezone: 'America/Sao_Paulo' // Group transactions by Brazilian time
-  }
-}
-```
-
-**Auto-Detection:**
-If no timezone is specified, the plugin uses a 3-level detection strategy:
-1. **TZ environment variable** (common in Docker/Kubernetes)
-2. **Intl API** (system timezone detection)
-3. **UTC fallback** (if detection fails)
-
-```javascript
-// Auto-detect from environment
-const plugin = new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance'
-  // timezone auto-detected from TZ env var or system
-});
-
-// Explicit timezone
-const plugin = new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
-  cohort: { timezone: 'America/New_York' }
-});
-```
-
-**Supported Timezones:**
-All IANA timezones are supported (~600 timezones). Common examples:
-- `'UTC'` (default if detection fails)
-- `'America/New_York'`, `'America/Chicago'`, `'America/Los_Angeles'`, `'America/Sao_Paulo'`
-- `'Europe/London'`, `'Europe/Paris'`, `'Europe/Berlin'`
-- `'Asia/Tokyo'`, `'Asia/Shanghai'`, `'Asia/Singapore'`
-- `'Australia/Sydney'`
-
-**Daylight Saving Time (DST):**
-The plugin uses the Intl API for timezone offset calculation, which **automatically handles DST transitions**. Cohort dates remain accurate throughout DST changes.
-
-### Custom Reducers
-
-Define how transactions are consolidated:
-
-```javascript
-// Example: Sum all operations
-reducer: (transactions) => {
-  return transactions.reduce((total, t) => {
-    return total + (t.operation === 'sub' ? -t.value : t.value);
-  }, 0);
-}
-
-// Example: Use last set, then apply increments
-reducer: (transactions) => {
-  let base = 0;
-  let lastSetIndex = -1;
-
-  transactions.forEach((t, i) => {
-    if (t.operation === 'set') lastSetIndex = i;
-  });
-
-  if (lastSetIndex >= 0) {
-    base = transactions[lastSetIndex].value;
-    transactions = transactions.slice(lastSetIndex + 1);
-  }
-
-  return transactions.reduce((sum, t) => {
-    if (t.operation === 'add') return sum + t.value;
-    if (t.operation === 'sub') return sum - t.value;
-    return sum;
-  }, base);
-}
-```
-
-**Understanding Synthetic Transactions:**
-
-When consolidating records that have a current value but no 'set' operations in pending transactions, the plugin creates a **synthetic transaction** to ensure the reducer starts from the correct base value.
-
-Synthetic transactions have these properties:
-- `synthetic: true` - Flag to identify synthetic transactions
-- `operation: 'set'` - Always a 'set' operation
-- `value: <currentValue>` - The current value from the database record
-- `timestamp: '1970-01-01T00:00:00.000Z'` - Very old timestamp to ensure it's processed first
-
-**Example:**
-```javascript
-// Record has balance: 1000
-// Pending transactions: [add(50), add(30)]
-//
-// Reducer receives:
-// [
-//   { synthetic: true, operation: 'set', value: 1000, timestamp: '1970-01-01T00:00:00.000Z' },
-//   { operation: 'add', value: 50, timestamp: '2024-01-15T10:00:00.000Z' },
-//   { operation: 'add', value: 30, timestamp: '2024-01-15T10:01:00.000Z' }
-// ]
-//
-// Result: 1000 + 50 + 30 = 1080 ✓
-
-// Custom reducers can check for synthetic transactions if needed:
-reducer: (transactions) => {
-  return transactions.reduce((sum, t) => {
-    // Skip synthetic transactions if you want different behavior
-    if (t.synthetic) {
-      return t.value; // Or handle differently
-    }
-
-    if (t.operation === 'set') return t.value;
-    if (t.operation === 'add') return sum + t.value;
-    if (t.operation === 'sub') return sum - t.value;
-    return sum;
-  }, 0);
-}
+const wallet = await wallets.get('wallet-1');
+console.log(wallet.balance); // 50 ✅
 ```
 
 ---
 
-## Usage Examples
+## Como Funciona
 
-### Basic Wallet System
+### 1. Transações
+Toda operação cria uma transação em `{resource}_transactions_{field}`:
 
 ```javascript
-// Setup plugin
-await s3db.usePlugin(new EventualConsistencyPlugin({
+await wallets.add('wallet-1', 'balance', 100);
+// Cria: { operation: 'add', value: 100, applied: false }
+```
+
+### 2. Consolidação
+Aplica transações pendentes e **ATUALIZA O CAMPO ORIGINAL**:
+
+```javascript
+await wallets.consolidate('wallet-1', 'balance');
+// 1. Lê transações pendentes
+// 2. Aplica reducer (soma por default)
+// 3. Atualiza wallet.balance ← CAMPO ORIGINAL!
+// 4. Marca transações como applied: true
+```
+
+### 3. Analytics (Opcional)
+Cria agregações em `{resource}_analytics_{field}`:
+- Métricas: count, sum, avg, min, max
+- Períodos: hour, day, month
+- Breakdown por operação
+
+---
+
+## API
+
+### Constructor
+
+```javascript
+new EventualConsistencyPlugin({
+  // Obrigatório
   resources: {
-    wallets: ['balance']
+    resourceName: ['field1', 'field2', ...]
   },
-  mode: 'sync'  // Immediate consistency
+
+  // Opcional
+  mode: 'async',                    // 'async' ou 'sync'
+  autoConsolidate: true,            // Auto-consolidação periódica
+  consolidationInterval: 300,       // Intervalo em segundos (5min)
+  consolidationWindow: 24,          // Janela de consolidação em horas
+
+  // Analytics
+  enableAnalytics: false,
+  analyticsConfig: {
+    periods: ['hour', 'day', 'month'],
+    metrics: ['count', 'sum', 'avg', 'min', 'max'],
+    retentionDays: 365
+  },
+
+  // Reducer customizado
+  reducer: (transactions) => {
+    let total = 0;
+    for (const t of transactions) {
+      if (t.operation === 'set') total = t.value;
+      else if (t.operation === 'add') total += t.value;
+      else if (t.operation === 'sub') total -= t.value;
+    }
+    return total;
+  },
+
+  // Timezone
+  cohort: {
+    timezone: 'America/Sao_Paulo'   // UTC por default
+  }
+})
+```
+
+### Métodos do Resource
+
+**Sempre especifique o field:**
+
+```javascript
+// Definir valor absoluto
+await resource.set(id, field, value)
+
+// Adicionar
+await resource.add(id, field, amount)
+
+// Subtrair
+await resource.sub(id, field, amount)
+
+// Consolidar
+await resource.consolidate(id, field)
+
+// Obter valor consolidado (sem aplicar)
+await resource.getConsolidatedValue(id, field, options)
+```
+
+---
+
+## Exemplos
+
+### Wallet System
+
+```javascript
+await db.usePlugin(new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  mode: 'sync'  // Consolidação imediata
 }));
 
-// Create wallet resource
-const wallets = await s3db.createResource({
+const wallets = await db.createResource({
   name: 'wallets',
   attributes: {
     id: 'string|required',
-    userId: 'string|required',
-    balance: 'number|default:0',
-    currency: 'string|required'
+    balance: 'number|default:0'
   }
 });
 
-// Create a wallet
-await wallets.insert({
-  id: 'wallet-001',
-  userId: 'user-123',
-  balance: 0,
-  currency: 'USD'
-});
+await wallets.insert({ id: 'w1', balance: 0 });
+await wallets.add('w1', 'balance', 1000);
+await wallets.sub('w1', 'balance', 250);
 
-// Check initial balance (reading from original field)
-let wallet = await wallets.get('wallet-001');
-console.log(wallet.balance);  // 0
-
-// Perform operations - always specify field
-await wallets.set('wallet-001', 'balance', 1000);  // Creates transaction, updates balance to 1000
-await wallets.add('wallet-001', 'balance', 250);   // Creates transaction, adds 250 to balance
-await wallets.sub('wallet-001', 'balance', 100);   // Creates transaction, subtracts 100 from balance
-
-// Check balance after consolidation (ORIGINAL FIELD IS UPDATED!)
-wallet = await wallets.get('wallet-001');
-console.log(wallet.balance);  // 1150 ✅ - The ORIGINAL balance field was updated!
-
-// Consolidate returns the value directly
-const balance = await wallets.consolidate('wallet-001', 'balance');
-console.log(`Current balance: $${balance}`); // 1150
-
-// ⚠️ IMPORTANT: You're reading from wallet.balance, NOT from transactions!
-// The original field IS UPDATED during consolidation.
+const wallet = await wallets.get('w1');
+console.log(wallet.balance); // 750
 ```
 
-### Multi-Currency Account
+### Multi-Field Account
 
 ```javascript
-// Setup ALL fields with one plugin instance
-await s3db.usePlugin(new EventualConsistencyPlugin({
+await db.usePlugin(new EventualConsistencyPlugin({
   resources: {
-    accounts: ['balance', 'points', 'credits']  // All fields at once!
+    accounts: ['balance', 'points', 'credits']
   },
-  mode: 'sync',
-  verbose: true
+  mode: 'async'
 }));
 
-const accounts = await s3db.createResource({
+const accounts = await db.createResource({
   name: 'accounts',
   attributes: {
     id: 'string|required',
-    userId: 'string|required',
     balance: 'number|default:0',
     points: 'number|default:0',
     credits: 'number|default:0'
   }
 });
 
-// Create account
-await accounts.insert({
-  id: 'acc-001',
-  userId: 'user-123',
-  balance: 1000,
-  points: 500,
-  credits: 0
-});
+await accounts.add('acc1', 'balance', 500);
+await accounts.add('acc1', 'points', 100);
+await accounts.sub('acc1', 'credits', 50);
 
-// Always specify field parameter
-await accounts.add('acc-001', 'balance', 500);
-await accounts.add('acc-001', 'points', 100);
-await accounts.sub('acc-001', 'credits', 50);
-
-// Get consolidated values
-const account = await accounts.get('acc-001');
-console.log(account.balance);  // 1500 ✅
-console.log(account.points);   // 600 ✅
-console.log(account.credits);  // -50 ✅
+await accounts.consolidate('acc1', 'balance');
+await accounts.consolidate('acc1', 'points');
 ```
 
-### Points System with Custom Reducer
+### URL Shortener com Analytics
 
 ```javascript
-await s3db.usePlugin(new EventualConsistencyPlugin({
+await db.usePlugin(new EventualConsistencyPlugin({
   resources: {
-    users: ['points']
+    urls: ['clicks', 'views', 'shares']
   },
-  reducer: (transactions) => {
-    // Points can only increase
-    return transactions.reduce((total, t) => {
-      if (t.operation === 'set') return Math.max(total, t.value);
-      if (t.operation === 'add') return total + t.value;
-      // Ignore subtractions for points
-      return total;
-    }, 0);
-  }
-}));
-
-// Usage
-await users.add('user-123', 'points', 100);  // Award points
-await users.add('user-123', 'points', 50);   // More points
-// sub would be ignored by reducer
-```
-
-### Inventory Counter with Sync Mode
-
-```javascript
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resources: {
-    inventory: ['quantity']
-  },
-  mode: 'sync', // Immediate consistency
-  cohort: {
-    timezone: 'America/New_York' // Group by EST/EDT
-  }
-}));
-
-// Every operation immediately updates the database
-await inventory.sub('item-001', 'quantity', 5); // Sold 5 items
-const remaining = await inventory.consolidate('item-001', 'quantity');
-// 'remaining' is guaranteed to be accurate
-```
-
-### Analytics with Cohort Statistics
-
-```javascript
-// Get statistics for a specific day
-const today = new Date().toISOString().split('T')[0];
-const stats = await plugin.getCohortStats(today);
-
-console.log(`
-  Date: ${stats.date}
-  Total Transactions: ${stats.transactionCount}
-  Operations: 
-    - Sets: ${stats.byOperation.set}
-    - Adds: ${stats.byOperation.add}
-    - Subs: ${stats.byOperation.sub}
-  Total Value Changed: ${stats.totalValue}
-`);
-```
-
----
-
-## Advanced Patterns
-
-### Deferred Setup Pattern
-
-The plugin supports being added before the target resource exists:
-
-```javascript
-// 1. Create database and connect
-const s3db = new S3db({ connectionString: '...' });
-await s3db.connect();
-
-// 2. Add plugin for a resource that doesn't exist yet
-const plugin = new EventualConsistencyPlugin({
-  resource: 'future_resource',
-  field: 'counter'
-});
-await s3db.usePlugin(plugin); // Plugin enters deferred mode
-
-// 3. Do other work...
-await s3db.createResource({ name: 'other_resource', ... });
-
-// 4. Create the target resource
-const futureResource = await s3db.createResource({
-  name: 'future_resource',
-  attributes: {
-    id: 'string|required',
-    counter: 'number|default:0'
-  }
-});
-
-// 5. Methods are automatically available
-await futureResource.addCounter('rec-1', 10);
-```
-
-This pattern is useful for:
-- Plugin configuration in application setup
-- Modular initialization
-- Dynamic resource creation
-
-### Dynamic Field Detection Example
-
-```javascript
-// Start with single field
-const wallets = await s3db.createResource({
-  name: 'wallets',
-  attributes: {
-    id: 'string|required',
-    balance: 'number|default:0'
-  }
-});
-
-// Add first plugin
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance'
-}));
-
-// Simple syntax works
-await wallets.add('w-1', 100);  // No field parameter needed
-
-// Later, add a second field with eventual consistency
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'points'
-}));
-
-// Now field parameter is required
-try {
-  await wallets.add('w-1', 100);  // ERROR!
-} catch (error) {
-  // "Multiple fields have eventual consistency. Please specify the field"
-}
-
-// Must specify field now
-await wallets.add('w-1', 'balance', 100);  // OK
-await wallets.add('w-1', 'points', 50);    // OK
-```
-
-### Transaction Batching for High Volume
-
-```javascript
-const plugin = new EventualConsistencyPlugin({
-  resource: 'metrics',
-  field: 'count',
-  batchTransactions: true,
-  batchSize: 500, // Batch 500 transactions
-  consolidationInterval: 60000 // Consolidate every minute
-});
-
-// Transactions are batched automatically
-for (let i = 0; i < 1000; i++) {
-  await metrics.addCount(`metric-${i % 10}`, 1);
-  // Batched in groups of 500
-}
-```
-
-### Parallel Operations Example
-
-**Option A: Multi-Resource API (Recommended)** ⭐
-
-```javascript
-// Setup resource with multiple fields using ONE plugin
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resources: {
-    metrics: ['views', 'clicks']  // Both fields at once!
-  },
-  mode: 'async',
-  verbose: true
-}));
-
-// Create resource
-const metrics = await s3db.createResource({
-  name: 'metrics',
-  attributes: {
-    id: 'string|required',
-    views: 'number|default:0',
-    clicks: 'number|default:0'
-  }
-});
-
-// Parallel operations on different fields
-const operations = [
-  metrics.add('page-1', 'views', 100),
-  metrics.add('page-1', 'views', 200),
-  metrics.add('page-1', 'clicks', 10),
-  metrics.add('page-1', 'clicks', 20)
-];
-
-await Promise.all(operations);
-
-// Consolidate both fields
-const views = await metrics.consolidate('page-1', 'views');
-const clicks = await metrics.consolidate('page-1', 'clicks');
-
-console.log(`Views: ${views}, Clicks: ${clicks}`);
-// Views: 300, Clicks: 30
-```
-
-**Option B: Single-Field API (Legacy)**
-
-```javascript
-// Setup resource with multiple fields using TWO plugins
-const metrics = await s3db.createResource({
-  name: 'metrics',
-  attributes: {
-    id: 'string|required',
-    views: 'number|default:0',
-    clicks: 'number|default:0'
-  }
-});
-
-// Add separate plugins for each field
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'metrics',
-  field: 'views',
-  mode: 'async'
-}));
-
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'metrics',
-  field: 'clicks',
-  mode: 'async'
-}));
-
-// (Same usage as Option A)
-```
-
-### Cross-Resource Operations in Hooks
-
-One of the most powerful patterns is using hooks to automatically trigger operations across resources. This is perfect for implementing counters, notifications, and cascading updates.
-
-#### ⚠️ Critical: Use `function` for Best Compatibility
-
-**Both hooks and events are bound to the resource context, but regular `function` syntax is recommended:**
-
-```javascript
-const clicks = await s3db.createResource({
-  name: 'clicks',
-  attributes: {
-    id: 'string|required',
-    urlId: 'string|required',
-    ip: 'string|optional',
-    timestamp: 'string|required'
-  },
-  hooks: {
-    // ✅ CORRECT: Use function (not arrow function!)
-    afterInsert: [async function(data) {
-      // this = clicks resource
-      // this.database = s3db instance
-
-      // Access other resources via this.database.resources
-      await this.database.resources.urls.add(data.urlId, 1);
-
-      return data;
-    }],
-
-    // ❌ WRONG: Arrow function loses 'this' context
-    // afterInsert: [async (data) => {
-    //   await this.database.resources.urls.add(data.urlId, 1); // ERROR!
-    // }]
-  }
-});
-```
-
-**Why regular functions are recommended:**
-- Both hooks and events are `.bind(this)` to the resource
-- Regular functions (`function`) work more predictably with bind
-- Arrow functions (`=>`) inherit `this` from lexical scope, which works but is less intuitive
-- Regular functions are clearer about intent and context
-
-#### Complete Example: URL Shortener with Multiple Counters ⭐ **NEW**
-
-```javascript
-// 1. Setup plugin for ALL counters at once (compact!)
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resources: {
-    urls: ['clicks', 'views', 'shares', 'scans']  // All counters!
-  },
-  mode: 'sync',  // Immediate updates
-  enableAnalytics: true,  // Track hourly/daily/monthly stats
-  cohort: {
-    timezone: 'America/Sao_Paulo'
-  },
+  enableAnalytics: true,
   analyticsConfig: {
     periods: ['hour', 'day', 'month'],
-    metrics: ['count', 'sum'],
-    retentionDays: 365
-  },
-  verbose: true
+    metrics: ['count', 'sum']
+  }
 }));
 
-// 2. Create URLs resource with all counters
-const urls = await s3db.createResource({
+const urls = await db.createResource({
   name: 'urls',
   attributes: {
     id: 'string|required',
-    link: 'string|required',
-    clicks: 'number|default:0',   // Managed by plugin
-    views: 'number|default:0',    // Managed by plugin
-    shares: 'number|default:0',   // Managed by plugin
-    scans: 'number|default:0'     // Managed by plugin
+    clicks: 'number|default:0',
+    views: 'number|default:0',
+    shares: 'number|default:0'
   }
 });
 
-// 3. Create event resources with auto-increment hooks
-const clicks = await s3db.createResource({
-  name: 'clicks',
-  attributes: {
-    id: 'string|required',
-    urlId: 'string|required',
-    ip: 'string|optional',
-    timestamp: 'string|required'
-  },
-  hooks: {
-    afterInsert: [async function(data) {
-      // Auto-increment clicks counter
-      await this.database.resources.urls.add(data.urlId, 'clicks', 1);
-    }]
-  }
+// Hook para auto-incrementar
+const clicks = await db.createResource({ name: 'clicks', ... });
+clicks.addHook('afterInsert', async ({ record }) => {
+  await urls.add(record.urlId, 'clicks', 1);
 });
 
-const views = await s3db.createResource({
-  name: 'views',
-  attributes: {
-    id: 'string|required',
-    urlId: 'string|required',
-    sessionId: 'string|required',
-    timestamp: 'string|required'
-  },
-  hooks: {
-    afterInsert: [async function(data) {
-      // Auto-increment views counter
-      await this.database.resources.urls.add(data.urlId, 'views', 1);
-    }]
-  }
-});
-
-// 4. Usage - all counters update automatically!
-await clicks.insert({ id: 'c1', urlId: 'short-123', timestamp: new Date().toISOString() });
-await clicks.insert({ id: 'c2', urlId: 'short-123', timestamp: new Date().toISOString() });
-await views.insert({ id: 'v1', urlId: 'short-123', sessionId: 's1', timestamp: new Date().toISOString() });
-
-// 5. Check consolidated values (ORIGINAL FIELDS UPDATED!)
-const url = await urls.get('short-123');
-console.log(url.clicks);  // 2 ✅
-console.log(url.views);   // 1 ✅
-console.log(url.shares);  // 0
-console.log(url.scans);   // 0
-
-// 6. Get analytics (hourly, daily, monthly stats)
-const hourlyStats = await urls.getAnalytics('short-123', 'clicks', {
+// Analytics
+const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
+const hourlyStats = await plugin.getAnalytics('urls', 'clicks', {
   period: 'hour',
-  startDate: '2025-10-09T00',
-  endDate: '2025-10-09T23'
-});
-console.log(hourlyStats);
-// [
-//   { cohort: '2025-10-09T14', transactionCount: 2, totalValue: 2, ... },
-//   ...
-// ]
-```
-
-#### Single Counter Example (Legacy)
-
-```javascript
-// 1. Create URLs resource
-const urls = await s3db.createResource({
-  name: 'urls',
-  attributes: {
-    id: 'string|required',
-    url: 'string|required',
-    clicksCount: 'number|default:0',  // Counter managed by plugin
-    createdAt: 'string|required'
-  }
-});
-
-// 2. Add EventualConsistencyPlugin to manage clicksCount
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'urls',
-  field: 'clicksCount',
-  mode: 'async',
-  autoConsolidate: true,
-  consolidationInterval: 300  // 5 minutes
-}));
-
-// 3. Create Clicks resource with auto-increment hook
-const clicks = await s3db.createResource({
-  name: 'clicks',
-  attributes: {
-    id: 'string|required',
-    urlId: 'string|required',
-    ip: 'string|optional',
-    userAgent: 'string|optional',
-    timestamp: 'string|required'
-  },
-  hooks: {
-    afterInsert: [async function(data) {
-      console.log(`🔗 Click recorded for URL: ${data.urlId}`);
-
-      // Automatically increment clicksCount!
-      // this.database.resources gives access to all resources
-      await this.database.resources.urls.add(data.urlId, 1);
-
-      console.log(`✅ Counter incremented (will consolidate in 5min)`);
-
-      return data;
-    }]
-  }
-});
-
-// 4. Usage - counter updates automatically!
-await clicks.insert({
-  id: 'click-1',
-  urlId: 'google',
-  ip: '192.168.1.1',
-  userAgent: 'Mozilla/5.0',
-  timestamp: new Date().toISOString()
-});
-// → Hook triggers automatically
-// → urls.add('google', 1) called
-// → Transaction created
-// → Will consolidate in 5 minutes
-
-// 5. After consolidation (automatic or manual)
-await urls.consolidate('google');  // Or wait for auto-consolidation
-
-const url = await urls.get('google');
-console.log(url.clicksCount);  // 1 ✅ (ORIGINAL FIELD UPDATED!)
-```
-
-#### Real-World Pattern: URL Shortener Redirect
-
-```javascript
-// Express.js endpoint
-app.get('/:shortCode', async (req, res) => {
-  const { shortCode } = req.params;
-
-  // 1. Get the URL
-  const url = await urls.get(shortCode);
-  if (!url) return res.status(404).send('URL not found');
-
-  // 2. Record click (hook auto-increments counter!)
-  await clicks.insert({
-    id: generateId(),
-    urlId: shortCode,
-    ip: req.ip,
-    userAgent: req.headers['user-agent'],
-    referer: req.headers['referer'],
-    timestamp: new Date().toISOString()
-  });
-  // ↑ Hook automatically calls: urls.add(shortCode, 1)
-  // ↑ Consolidation updates: urls.clicksCount (every 5min)
-
-  // 3. Redirect (instant response, counting happens in background!)
-  res.redirect(url.url);
-});
-
-// Dashboard endpoint
-app.get('/stats/:shortCode', async (req, res) => {
-  const { shortCode } = req.params;
-
-  // Get current count (ORIGINAL FIELD, updated by consolidation!)
-  const url = await urls.get(shortCode);
-
-  res.json({
-    url: url.url,
-    totalClicks: url.clicksCount  // ← From original field!
-  });
+  date: '2025-10-09'
 });
 ```
 
-#### Advanced: Multiple Cross-Resource Operations
+### Reducer Customizado (Points Only Increase)
 
 ```javascript
-const orders = await s3db.createResource({
-  name: 'orders',
-  attributes: {
-    id: 'string|required',
-    userId: 'string|required',
-    productId: 'string|required',
-    quantity: 'number|required',
-    total: 'number|required',
-    status: 'string|required'
-  },
-  hooks: {
-    afterInsert: [async function(data) {
-      // this.database gives access to everything!
-
-      // 1. Update user's total spent
-      await this.database.resources.users.add(data.userId, 'totalSpent', data.total);
-
-      // 2. Update product sales counter
-      await this.database.resources.products.add(data.productId, 'salesCount', 1);
-
-      // 3. Decrement inventory
-      await this.database.resources.inventory.sub(data.productId, 'quantity', data.quantity);
-
-      // 4. Update daily revenue
-      const today = new Date().toISOString().substring(0, 10);
-      await this.database.resources.revenue.add(today, 'dailyTotal', data.total);
-
-      console.log(`✅ Order ${data.id}: 4 counters updated`);
-
-      return data;
-    }]
-  }
-});
-
-// Single insert triggers 4 updates across different resources!
-await orders.insert({
-  id: 'order-123',
-  userId: 'user-456',
-  productId: 'prod-789',
-  quantity: 2,
-  total: 49.99,
-  status: 'confirmed'
-});
-// → All 4 counters updated automatically via hooks
-// → All will consolidate independently
-```
-
-#### Common Patterns
-
-**1. Counter Increment on Event**
-```javascript
-hooks: {
-  afterInsert: [async function(data) {
-    await this.database.resources.stats.add('global', 'eventCount', 1);
-    return data;
-  }]
-}
-```
-
-**2. User Activity Tracking**
-```javascript
-hooks: {
-  afterInsert: [async function(data) {
-    await this.database.resources.users.add(data.userId, 'activityCount', 1);
-    await this.database.resources.users.set(data.userId, 'lastActivityAt', Date.now());
-    return data;
-  }]
-}
-```
-
-**3. Cascading Updates**
-```javascript
-hooks: {
-  afterUpdate: [async function(oldData, newData) {
-    if (oldData.status !== newData.status && newData.status === 'completed') {
-      // Order completed - update multiple metrics
-      await this.database.resources.users.add(newData.userId, 'completedOrders', 1);
-      await this.database.resources.stats.add('daily', 'completions', 1);
-    }
-    return newData;
-  }]
-}
-```
-
-#### Hooks vs Events
-
-**When to use Hooks:**
-- ✅ Need to modify or validate data
-- ✅ Critical operations that must complete
-- ✅ Need to return modified data
-- ✅ Part of the transaction flow
-- ✅ Example: Increment counter, update related record
-
-**When to use Events:**
-- ✅ Fire-and-forget notifications
-- ✅ Logging and analytics
-- ✅ Non-critical side effects
-- ✅ Can fail without affecting the main operation
-- ✅ Example: Send webhook, create notification, log to external service
-
-```javascript
-// HOOKS - Critical counter increment
-hooks: {
-  afterInsert: [
-    async function(data) {
-      // MUST succeed - part of the transaction
-      await this.database.resources.urls.add(data.urlId, 'clicks', 1);
-      return data;  // Must return!
-    }
-  ]
-},
-
-// EVENTS - Non-critical notification
-events: {
-  insert: [
-    async function(data) {
-      // Fire and forget - if it fails, main operation continues
-      try {
-        await sendWebhook(data);
-      } catch (err) {
-        console.error('Webhook failed, but click was recorded:', err);
+await db.usePlugin(new EventualConsistencyPlugin({
+  resources: { users: ['points'] },
+  reducer: (transactions) => {
+    let total = 0;
+    for (const t of transactions) {
+      if (t.operation === 'set') {
+        total = Math.max(total, t.value);
+      } else if (t.operation === 'add') {
+        total += t.value;
       }
-      // No return needed
+      // Ignora 'sub' - pontos nunca diminuem
     }
-  ]
+    return total;
+  }
+}));
+```
+
+---
+
+## Analytics API
+
+### Estrutura
+
+Analytics em `{resource}_analytics_{field}`:
+
+```javascript
+{
+  id: 'hour-2025-10-09T14',
+  period: 'hour',
+  cohort: '2025-10-09T14',
+
+  transactionCount: 150,
+  totalValue: 5000,
+  avgValue: 33.33,
+  minValue: -100,
+  maxValue: 500,
+
+  operations: {
+    add: { count: 120, sum: 6000 },
+    sub: { count: 30, sum: -1000 }
+  },
+
+  recordCount: 45  // IDs únicos
 }
 ```
 
-#### Important Notes
-
-**✅ DO:**
-- Use `function` syntax in hooks and events (clearer intent)
-- Use **hooks** for operations that need to modify data
-- Use **events** for fire-and-forget notifications
-- Access other resources via `this.database.resources`
-- Return data from hooks (required for hook chain)
-- Use async/await for plugin operations
-- Handle errors in hooks/events (try/catch)
-
-**❌ DON'T:**
-- Mix hooks and events for the same operation (choose one)
-- Forget to return data from hooks
-- Create circular dependencies between resources
-- Perform heavy synchronous operations (use process.nextTick for async)
-- Use events for critical operations (they're fire-and-forget)
-
-### Manual Consolidation Control
+### Query
 
 ```javascript
-const plugin = new EventualConsistencyPlugin({
-  resource: 'accounts',
-  field: 'balance',
-  autoConsolidate: false // Disable auto-consolidation
+const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
+
+// Stats por hora
+const hourly = await plugin.getAnalytics('wallets', 'balance', {
+  period: 'hour',
+  date: '2025-10-09'
 });
 
-// Manually trigger consolidation when needed
-await accounts.consolidate('account-001');
+// Stats diários
+const daily = await plugin.getAnalytics('wallets', 'balance', {
+  period: 'day',
+  startDate: '2025-10-01',
+  endDate: '2025-10-31'
+});
 
-// Useful for:
-// - Batch processing
-// - Scheduled consolidation
-// - Controlled timing
+// Top records
+const top = await plugin.getTopRecords('wallets', 'balance', {
+  period: 'day',
+  cohort: '2025-10-09',
+  limit: 10,
+  sortBy: 'transactionCount'  // ou 'totalValue'
+});
 ```
 
 ---
 
-## Consolidation Strategy
+## Modo Sync vs Async
 
-### How Consolidation Works
-
-The EventualConsistencyPlugin uses a **watermark-based consolidation strategy**, inspired by Apache Flink and Kafka Streams. This approach handles late-arriving transactions while maintaining high performance.
-
-#### Key Concepts
-
-**1. Event Time vs Processing Time**
-- **Event Time**: When the transaction happened (`cohortHour`)
-- **Processing Time**: When consolidation runs (now)
-
-**2. Watermark (Consolidation Window)**
-- `consolidationWindow: 24` = "Accept late arrivals up to 24h ago"
-- Transactions **inside** the watermark: always re-consolidated
-- Transactions **outside** the watermark: handled by `lateArrivalStrategy`
-
-**3. Idempotency**
-- Consolidation can run multiple times on the same hour
-- Doesn't duplicate values because transactions are marked `applied: true`
-- Next consolidation only picks `applied: false`
-
-### Practical Example: Wallet Balance
+### Sync Mode
+- Consolidação **imediata**
+- Bloqueia até completar
+- Garantia de consistência
 
 ```javascript
-new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
-  consolidationInterval: 300,  // 5 min (seconds)
-  consolidationWindow: 24,     // 24 hours
-  lateArrivalStrategy: 'warn'
-})
+{ mode: 'sync' }
+
+await wallets.add('w1', 'balance', 100);
+// ↑ Já consolidou, wallet.balance atualizado
 ```
 
-**Timeline:**
+### Async Mode (Default)
+- Consolidação **eventual**
+- Não bloqueia
+- Auto-consolidação periódica
 
-```
-14:00 - Transactions arrive
-  14:15 → wallet.add('user1', 100)  // cohortHour: 2025-10-08T14
-  14:30 → wallet.add('user1', 50)   // cohortHour: 2025-10-08T14
-  14:45 → wallet.add('user1', 25)   // cohortHour: 2025-10-08T14
-
-14:05 - First Consolidation
-  Query: cohortHour=2025-10-08T14, applied=false
-  Found: 2 transactions (14:15, 14:30)
-  Consolidated: 0 + 100 + 50 = 150
-  Marked applied: true
-  → wallet.balance = 150 ✅
-
-14:50 - Second Consolidation
-  Query: cohortHour=2025-10-08T14, applied=false
-  Found: 1 transaction (14:45 - arrived late)
-  Consolidated: 150 + 25 = 175
-  Marked applied: true
-  → wallet.balance = 175 ✅ (Updated!)
-
-15:30 - Third Consolidation
-  Query: cohortHour=2025-10-08T14, applied=false
-  Found: 0 transactions (all applied)
-  Skip hour 14 ✅
-  Process hour 15...
-```
-
-### Late Arrivals
-
-#### Within Watermark (<24h)
 ```javascript
-// Time: 10:00 (next day)
-// Late arrival: transaction for 14:00 (yesterday) = 20h ago
-// 20h < 24h watermark ✅
+{ mode: 'async', consolidationInterval: 300 }
 
-wallet.add('user1', 10) // cohortHour: 2025-10-08T14 (yesterday)
-// Next consolidation: picks this txn and re-consolidates hour 14
-// wallet.balance = 175 + 10 = 185 ✅
+await wallets.add('w1', 'balance', 100);
+// ↑ Criou transação, mas ainda não consolidou
+
+// Consolidar manualmente se precisar do valor atualizado
+await wallets.consolidate('w1', 'balance');
 ```
-
-#### Outside Watermark (>24h)
-```javascript
-// Time: 15:00 (next day)
-// Late arrival: transaction for 14:00 (yesterday) = 25h ago
-// 25h > 24h watermark ❌
-
-wallet.add('user1', 10) // cohortHour: 2025-10-08T14 (yesterday)
-
-// Strategy: 'ignore'
-// ❌ Transaction rejected
-// wallet.balance = 175 (unchanged)
-
-// Strategy: 'warn'
-// ⚠️ Warning logged, transaction created
-// But consolidation won't pick it up (outside window)
-// wallet.balance = 175 (unchanged in practice)
-
-// Strategy: 'process'
-// ✅ Transaction created AND forced in next consolidation
-// Requires extra logic (not recommended)
-```
-
-### Late Arrival Strategies
-
-#### 1. `ignore` (Most Performant)
-```javascript
-lateArrivalStrategy: 'ignore'
-
-// Late arrivals > watermark are rejected
-// Doesn't create transaction
-// Maximum performance ✅
-// Use when: Financial data with strict SLA
-```
-
-#### 2. `warn` (Default - Auditable)
-```javascript
-lateArrivalStrategy: 'warn'
-
-// Late arrivals > watermark generate warning
-// Transaction is created (for audit)
-// But consolidation won't pick it up (outside window)
-// Use when: Need to audit late arrivals
-```
-
-#### 3. `process` (Most Complex)
-```javascript
-lateArrivalStrategy: 'process'
-
-// Late arrivals always processed
-// Requires manual consolidation or infinite window
-// Lower performance ⚠️
-// Use when: Critical data, no arrival deadline
-```
-
-### Performance by Configuration
-
-#### High Frequency (Real-time)
-```javascript
-{
-  consolidationInterval: 60,   // 1 min
-  consolidationWindow: 2,      // 2 hours
-  lateArrivalStrategy: 'ignore'
-}
-
-// Queries: 2 partitions per hour
-// Late arrival tolerance: 2h
-// Use: Gaming, IoT, real-time dashboards
-```
-
-#### Medium Frequency (Near real-time)
-```javascript
-{
-  consolidationInterval: 300,  // 5 min
-  consolidationWindow: 24,     // 24 hours
-  lateArrivalStrategy: 'warn'
-}
-
-// Queries: 24 partitions per hour
-// Late arrival tolerance: 24h
-// Use: E-commerce, fintech, analytics
-```
-
-#### Low Frequency (Batch)
-```javascript
-{
-  consolidationInterval: 3600, // 1 hour
-  consolidationWindow: 168,    // 7 days
-  lateArrivalStrategy: 'warn'
-}
-
-// Queries: 168 partitions per hour
-// Late arrival tolerance: 7 days
-// Use: Reports, data warehouse, ML
-```
-
-### Consolidation Best Practices
-
-#### 1. Choose Watermark Based on SLA
-```javascript
-// SLA: "99% of transactions arrive within 1h"
-consolidationWindow: 2  // 2h watermark (covers 99% + safety margin)
-
-// SLA: "95% of transactions arrive within 30min"
-consolidationWindow: 1  // 1h watermark
-```
-
-#### 2. Balance Consolidation Interval × Window
-```javascript
-// ❌ BAD: Too frequent with large window
-consolidationInterval: 60,   // 1 min
-consolidationWindow: 168     // 7 days
-// Problem: Query 168 partitions every 1 min!
-
-// ✅ GOOD: Frequent with small window
-consolidationInterval: 60,   // 1 min
-consolidationWindow: 2       // 2 hours
-// Query only 2 partitions every 1 min
-```
-
-#### 3. Late Arrival Strategy
-```javascript
-// Production: Prefer 'warn' or 'ignore'
-// Development: Use 'warn' for debugging
-// Critical: Only use 'process' if truly necessary
-```
-
-### Monitoring Metrics
-
-**Important Metrics:**
-1. **Late Arrival Rate**: % of transactions outside watermark
-2. **Consolidation Latency**: Time until transaction is applied
-3. **Window Coverage**: % of transactions inside watermark
-
-**Logs with verbose: true:**
-```
-[EventualConsistency] Late arrival detected: transaction for 2025-10-08T14
-is 25h late (watermark: 24h). Processing anyway, but consolidation may not pick it up.
-```
-
-### Summary
-
-**How it works:**
-1. Transactions have `cohortHour` (event time)
-2. Consolidation queries last N hours (watermark)
-3. Transactions within watermark: always re-consolidated
-4. Transactions outside watermark: late arrival strategy
-
-**Doesn't accumulate by hour!**
-- Each consolidation recalculates from zero
-- Uses `applied: false` to know what to process
-- Is idempotent (can run N times)
-
-**Best practice:**
-- Window = arrival SLA + safety margin
-- Strategy = 'warn' (default, auditable)
-- Interval = Based on write frequency
-
-**Performance:**
-- Hourly partitions = O(1) lookup
-- Small window = Fewer partitions = Faster
-- Idempotency = Can run as many times as needed
 
 ---
 
-## Distributed Environment
+## Recursos Criados
 
-### Multi-Container Safety
+Para cada field, o plugin cria:
 
-The EventualConsistencyPlugin is **safe for distributed environments** with multiple containers/processes running in parallel. It uses S3-based distributed locks to prevent race conditions and data corruption.
+1. **`{resource}_transactions_{field}`** - Log de transações
+   - Atributos: id, originalId, field, value, operation, timestamp, cohortDate, cohortHour, applied
+   - Partições: byDay, byHour, byMonth
 
-#### Distributed Locks for Consolidation
+2. **`{resource}_consolidation_locks_{field}`** - Locks distribuídos
+   - Previne consolidação duplicada
 
-When multiple containers try to consolidate the same record simultaneously:
-
-```javascript
-// Container 1 and Container 2 both try to consolidate 'wallet-123'
-await wallets.consolidate('wallet-123'); // Both containers
-
-// What happens:
-// 1. Both try to acquire lock: `lock-consolidation-wallets-wallet-123-balance`
-// 2. Only ONE succeeds (S3 insert is atomic via ETag)
-// 3. Winner runs consolidation
-// 4. Loser skips (lock already exists)
-// 5. Winner releases lock when done
-```
-
-**Configuration:**
-```javascript
-{
-  lockTimeout: 300  // 5 minutes (configurable)
-}
-```
-
-If a container crashes during consolidation, the lock will be cleaned up automatically after the timeout period.
-
-#### Distributed Locks for Garbage Collection
-
-Garbage collection runs periodically to delete old applied transactions:
-
-```javascript
-// Multiple containers, but only ONE runs GC at a time
-// Automatic via distributed lock: `lock-gc-{resource}-{field}`
-
-{
-  transactionRetention: 30,  // Keep transactions for 30 days
-  gcInterval: 86400          // Run GC every 24 hours
-}
-```
-
-**How it works:**
-1. Container A starts GC, acquires `lock-gc-wallets-balance`
-2. Container B tries to start GC, lock insert fails → skips
-3. Container A deletes transactions older than 30 days
-4. Container A releases lock
-5. Next GC runs 24 hours later (any container can run it)
-
-#### Distributed Lock Cleanup
-
-Stale locks (from crashed containers) are cleaned up automatically:
-
-```javascript
-// Runs before each consolidation
-// Uses its own distributed lock: `lock-cleanup-{resource}-{field}`
-
-// Finds locks older than lockTimeout
-// Deletes them
-// Only one container runs cleanup at a time
-```
-
-### Transaction Lifecycle in Distributed Environment
-
-```
-Container 1: wallet.add('user1', 100)
-  ↓
-  Transaction created: { applied: false, cohortHour: '2025-10-08T14' }
-  ↓
-Container 2: Runs consolidation (scheduled or manual)
-  ↓
-  Acquires lock: `lock-consolidation-wallets-user1-balance`
-  ↓
-  Queries: { cohortHour: '2025-10-08T14', applied: false }
-  ↓
-  Consolidates: wallet.balance = old + 100
-  ↓
-  Marks: { applied: true }
-  ↓
-  Releases lock
-  ↓
-Container 3: Runs GC (24h later)
-  ↓
-  Acquires lock: `lock-gc-wallets-balance`
-  ↓
-  Deletes transactions older than 30 days (applied: true)
-  ↓
-  Releases lock
-```
-
-### Best Practices for Distributed Deployments
-
-#### 1. Configure Appropriate Lock Timeout
-
-```javascript
-// Short timeout for high-frequency operations
-{
-  consolidationInterval: 60,   // 1 min
-  lockTimeout: 120             // 2 min (2x interval)
-}
-
-// Longer timeout for heavy consolidations
-{
-  consolidationInterval: 3600, // 1 hour
-  lockTimeout: 7200            // 2 hours
-}
-```
-
-**Rule of thumb**: Lock timeout should be at least 2x consolidation interval.
-
-#### 2. Don't Use Batching in Production
-
-```javascript
-// ❌ BAD: In-memory batching loses data on container crash
-{
-  batchTransactions: true  // Stores transactions in memory
-}
-
-// ✅ GOOD: Direct writes survive container crashes
-{
-  batchTransactions: false  // Default
-}
-```
-
-**Why**: Batched transactions are stored in memory and lost if the container crashes before flush.
-
-#### 3. Monitor Lock Contention
-
-```javascript
-{
-  verbose: true  // Enable to see lock messages
-}
-
-// Logs:
-// [EventualConsistency] Consolidation already running on another container
-// [EventualConsistency] GC already running in another container
-```
-
-If you see many "already running" messages, consider:
-- Increasing consolidation interval
-- Reducing number of containers
-- Checking for slow consolidations (optimize reducer)
-
-#### 4. Garbage Collection Timing
-
-```javascript
-// Low-traffic periods
-{
-  gcInterval: 86400  // Run GC once daily (default)
-}
-
-// High-traffic with many transactions
-{
-  gcInterval: 43200,         // Run GC twice daily
-  transactionRetention: 7    // Keep only 7 days
-}
-```
-
-**Note**: GC only deletes `applied: true` transactions, so it's safe to run frequently.
+3. **`{resource}_analytics_{field}`** - Analytics (se enabled)
+   - Métricas agregadas por período
 
 ---
 
 ## Best Practices
 
-### 1. Choose the Right Mode
+### ✅ Use Sync Mode para:
+- Saldos bancários
+- Inventário
+- Qualquer coisa que precise de consistência imediata
 
-- **Use Async Mode** for:
-  - High-throughput operations
-  - Non-critical counters
-  - Analytics and metrics
-  - User points/rewards
+### ✅ Use Async Mode para:
+- Contadores (views, clicks)
+- Métricas (analytics)
+- Pontos/gamificação
+- Alta escala (milhões de transações)
 
-- **Use Sync Mode** for:
-  - Financial transactions
-  - Inventory management
-  - Critical counters
-  - Real-time requirements
+### ✅ Use Analytics para:
+- Dashboards
+- Relatórios
+- Métricas agregadas
+- Evitar scans em milhões de transações
 
-### 2. Leverage Partition Structure
+### ✅ Use Hooks para:
+- Auto-incrementar contadores
+- Trigger consolidações
+- Replicar para outros systems
 
-```javascript
-// Query by day for recent transactions (respects timezone)
-const todayTransactions = await db.resources.wallets_transactions_balance.query({
-  cohortDate: '2024-01-15'  // In configured timezone
-});
-
-// Query by month for reporting
-const monthTransactions = await db.resources.wallets_transactions_balance.query({
-  cohortMonth: '2024-01'
-});
-
-// Both partitions are always available for flexible querying
-```
-
-### 3. Choose the Right Timezone
-
-```javascript
-// For global applications - use UTC
-{ cohort: { timezone: 'UTC' } }
-
-// For regional applications - use local timezone
-{ cohort: { timezone: 'America/Sao_Paulo' } }  // Brazil
-{ cohort: { timezone: 'America/New_York' } }   // US East Coast
-{ cohort: { timezone: 'Asia/Tokyo' } }         // Japan
-
-// Timezone affects cohort grouping for daily/monthly partitions
-```
-
-### 3. Design Reducers Carefully
-
-```javascript
-// Always handle all operation types
-reducer: (transactions) => {
-  return transactions.reduce((acc, t) => {
-    switch(t.operation) {
-      case 'set': return t.value;
-      case 'add': return acc + t.value;
-      case 'sub': return acc - t.value;
-      default: return acc; // Handle unknown operations
-    }
-  }, 0);
-}
-```
-
-### 4. Monitor Transaction Growth
-
-```javascript
-// Periodically clean up old transactions
-const oldDate = new Date();
-oldDate.setMonth(oldDate.getMonth() - 3); // 3 months ago
-
-const oldTransactions = await s3db.resources.wallets_transactions.query({
-  applied: true,
-  timestamp: { $lt: oldDate.toISOString() }
-});
-
-// Archive or delete old transactions
-```
-
-### 5. Error Handling
-
-```javascript
-// Listen for transaction errors
-plugin.on('eventual-consistency.transaction-error', (error) => {
-  console.error('Transaction failed:', error);
-  // Implement retry logic or alerting
-});
-
-// Monitor consolidation
-plugin.on('eventual-consistency.consolidated', (stats) => {
-  console.log(`Consolidated ${stats.recordCount} records`);
-});
-```
-
-### 6. Testing Strategies
-
-```javascript
-// Use sync mode for tests
-const testPlugin = new EventualConsistencyPlugin({
-  resource: 'testResource',
-  field: 'value',
-  mode: 'sync' // Predictable for tests
-});
-
-// Single field - simple syntax
-await resource.set('test-1', 100);
-await resource.add('test-1', 50);
-const result = await resource.consolidate('test-1');
-expect(result).toBe(150);
-```
-
----
-
-## Transaction Resource Schema
-
-The plugin creates a `${resource}_transactions_${field}` resource for each field with this schema:
-
-```javascript
-{
-  id: 'string|required',         // Transaction ID
-  originalId: 'string|required', // Parent record ID
-  field: 'string|required',      // Field name
-  value: 'number|required',      // Transaction value
-  operation: 'string|required',  // 'set', 'add', or 'sub'
-  timestamp: 'string|required',  // ISO timestamp
-  cohortHour: 'string|required', // YYYY-MM-DDTHH (e.g., 2025-10-08T14)
-  cohortDate: 'string|required', // YYYY-MM-DD
-  cohortMonth: 'string|optional',// YYYY-MM
-  source: 'string|optional',     // Operation source
-  applied: 'boolean|optional'    // Consolidation status
-}
-```
-
-This resource is automatically partitioned by `cohortHour` (byHour), `cohortDate` (byDay), and `cohortMonth` (byMonth) for efficient querying.
-
-**Notes**: 
-- The transaction resource uses `asyncPartitions: true` by default for better write performance
-- Each field gets its own transaction resource (e.g., `wallets_transactions_balance`, `wallets_transactions_points`)
-- Transaction resources are created automatically when the plugin initializes
-
----
-
-## ❌ Common Misconceptions
-
-### "The plugin only creates parallel structures, it doesn't update my field"
-
-**FALSE!** ❌ The plugin **ALWAYS UPDATES the original field** during consolidation.
-
-```javascript
-// WRONG thinking:
-// "I need to query transactions to get the balance"
-const transactions = await transactionResource.list();  // ❌ NO!
-
-// CORRECT:
-// "The balance field is UPDATED, I can read it directly"
-const wallet = await wallets.get('wallet-123');
-console.log(wallet.balance);  // ✅ YES! This is the consolidated value
-```
-
-**What actually happens:**
-- Transactions are **temporary** (marked as `applied: true` after consolidation)
-- Analytics are **optional** (for reporting only)
-- **The original field IS UPDATED**: `wallet.balance`, `user.points`, etc.
-
-### "I need to consolidate manually every time"
-
-**DEPENDS on mode:**
-
-**Async Mode (default)**: Consolidation runs automatically every 5 minutes
-```javascript
-// Auto-consolidation enabled by default
-{ mode: 'async', autoConsolidate: true }  // Runs every 5 minutes
-
-await wallets.add('wallet-123', 100);
-// Wait 5 minutes... balance will be updated automatically ✅
-```
-
-**Sync Mode**: Consolidation happens immediately
-```javascript
-{ mode: 'sync' }
-
-await wallets.add('wallet-123', 100);
-// Balance updated immediately ✅
-```
-
-**Manual consolidation** is only needed if:
-- You disabled auto-consolidation: `autoConsolidate: false`
-- You want immediate update in async mode
-- You're testing
-
-### "Transactions stay forever in the database"
-
-**FALSE!** ❌ Applied transactions are cleaned up automatically.
-
-```javascript
-{
-  transactionRetention: 30,  // Keep for 30 days (default)
-  gcInterval: 86400          // Cleanup runs daily (default)
-}
-```
-
-**After garbage collection:**
-- ✅ Old applied transactions are deleted
-- ✅ Original field value remains (it was already updated!)
-- ✅ Analytics remain (if enabled)
-
-### "Analytics are required"
-
-**FALSE!** ❌ Analytics are optional. The plugin works perfectly without them.
-
-```javascript
-// WITHOUT analytics - works perfectly
-{
-  enableAnalytics: false  // Default
-}
-// ✅ Transactions created
-// ✅ Consolidation works
-// ✅ Field value UPDATED
-// ❌ No analytics
-
-// WITH analytics - bonus features
-{
-  enableAnalytics: true
-}
-// ✅ Everything above
-// ✅ Pre-calculated reports (bonus!)
-```
-
-**TL;DR**: Analytics are for **reporting**, not for the core functionality!
+### ⚠️ Cuidados:
+- **Batch mode** (`batchTransactions: true`) perde dados se o container crashar
+- **Reducers customizados** devem ser pure functions (serializados no metadata)
+- **Timezone** afeta particionamento de cohorts
 
 ---
 
 ## Troubleshooting
 
-### Debugging with Verbose Mode
-
-Enable detailed logging to see exactly what the plugin is doing:
-
+### Transações não consolidam
 ```javascript
-const plugin = new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance',
-  verbose: true  // Enable detailed logging
+// Verificar modo
+console.log(plugin.config.mode);  // 'async' ou 'sync'
+
+// Consolidar manualmente
+await resource.consolidate(id, field);
+
+// Verificar auto-consolidação
+console.log(plugin.config.autoConsolidate);  // true?
+```
+
+### Performance lenta
+```javascript
+// Habilitar partições async
+await db.createResource({
+  name: 'wallets',
+  asyncPartitions: true  // ← 70-100% mais rápido
 });
+
+// Aumentar concorrência
+{ consolidationConcurrency: 10 }  // default: 5
+
+// Reduzir janela de consolidação
+{ consolidationWindow: 12 }  // default: 24h
 ```
 
-**Verbose logs include:**
-- ✅ Setup and initialization status
-- ✅ Auto-consolidation timer status (enabled/disabled, interval, next run time)
-- ✅ Transaction creation (operation, value, cohort)
-- ✅ Consolidation runs (start, pending transactions found, records processed)
-- ✅ Individual record consolidation (current → new value)
-- ✅ Analytics updates (cohorts updated, roll-ups)
-- ✅ Lock acquisition/release
-- ✅ Errors and warnings
-
-**Example verbose output:**
-```
-[EventualConsistency] wallets.balance - Setup complete. Resources: wallets_transactions_balance, wallets_consolidation_locks_balance, wallets_analytics_balance
-[EventualConsistency] wallets.balance - Auto-consolidation ENABLED (interval: 300s, window: 24h, mode: async)
-[EventualConsistency] wallets.balance - Consolidation timer started. Next run at 2025-10-09T14:35:00.000Z (every 300s)
-[EventualConsistency] wallets.balance - Transaction created: add 100 for wallet-123 (cohort: 2025-10-09T14, applied: false)
-[EventualConsistency] wallets.balance - Starting consolidation run at 2025-10-09T14:35:00.000Z
-[EventualConsistency] wallets.balance - Querying 24 hour partitions for pending transactions...
-[EventualConsistency] wallets.balance - Found 3 pending transactions for 1 records. Consolidating with concurrency=5...
-[EventualConsistency] wallets.balance - Consolidating wallet-123: 3 pending transactions (current: 0)
-[EventualConsistency] wallets.balance - wallet-123: 0 → 300 (+300)
-[EventualConsistency] wallets.balance - Updating analytics for 3 transactions...
-[EventualConsistency] wallets.balance - Updating 1 hourly analytics cohorts...
-[EventualConsistency] wallets.balance - Rolling up 1 hours to daily/monthly analytics...
-[EventualConsistency] wallets.balance - Analytics update complete for 1 cohorts
-[EventualConsistency] wallets.balance - Consolidation complete: 1 records consolidated in 45ms (0 errors). Next run in 300s
-```
-
-### Issue: Auto-consolidation not running
-
-**Symptoms**: Transactions created but never consolidated, balance never updates
-
-**Diagnosis with verbose mode**:
+### Analytics faltando
 ```javascript
-// Enable verbose to see timer status
-verbose: true
-```
+// Verificar configuração
+console.log(plugin.config.enableAnalytics);
 
-Check logs for:
-- ✅ `Auto-consolidation ENABLED` - Timer should start
-- ✅ `Consolidation timer started. Next run at...` - Timer is active
-- ✅ `Starting consolidation run at...` - Timer is firing
+// Verificar resource criado
+console.log(db.resources.wallets_analytics_balance);
 
-**Common causes**:
-1. **autoConsolidate: false** - Consolidation disabled
-   ```javascript
-   // Solution: Enable it or use manual consolidation
-   autoConsolidate: true
-   ```
-
-2. **No pending transactions** - Nothing to consolidate
-   ```
-   [EventualConsistency] No pending transactions found. Next run in 300s
-   ```
-
-3. **Timer not started** - Plugin not fully initialized
-   - Check that `s3db.connect()` completed
-   - Verify resource was created before plugin
-
-### Issue: Balance doesn't update immediately
-**Solution**: You're using async mode. Either switch to sync mode or manually call `consolidate()`.
-
-### Issue: Too many transactions accumulating
-**Solution**: Reduce consolidation interval or implement transaction archiving.
-
-### Issue: Consolidation taking too long
-**Solution**: Use smaller cohort intervals or optimize your reducer function.
-
-### Issue: Methods not available on resource
-**Solution**:
-- Ensure plugin is added via `s3db.usePlugin(plugin)`
-- Verify database is connected before adding plugin
-- If using deferred setup, confirm resource name matches exactly
-- Check that the resource has been created if plugin was added first
-
-### Issue: "Multiple fields have eventual consistency" error
-**Solution**: When multiple fields have eventual consistency, you must specify the field parameter:
-```javascript
-// Wrong
-await resource.add('id', 100);
-
-// Correct
-await resource.add('id', 'fieldName', 100);
+// Forçar atualização
+await plugin.updateAnalytics(resourceName, field);
 ```
 
 ---
 
 ## Migration Guide
 
-### From Multiple Plugin Instances to Multi-Resource API ⭐ **NEW**
-
-If you're currently using multiple `EventualConsistencyPlugin` instances for the same resource, you can simplify your code by using the new multi-resource API:
+### De v9.x (API antiga)
 
 ```javascript
-// ❌ OLD WAY: Multiple plugin instances (verbose)
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'urls',
-  field: 'clicks',
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' }
-}));
+// ❌ v9.x - NÃO FUNCIONA MAIS
+new EventualConsistencyPlugin({
+  resource: 'wallets',
+  field: 'balance'
+})
 
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'urls',
-  field: 'views',
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' }
-}));
-
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'urls',
-  field: 'shares',
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' }
-}));
-
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resource: 'urls',
-  field: 'scans',
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' }
-}));
-
-// ✅ NEW WAY: Single plugin with multi-resource API (compact!)
-await s3db.usePlugin(new EventualConsistencyPlugin({
+// ✅ v10.x - API nova
+new EventualConsistencyPlugin({
   resources: {
-    urls: ['clicks', 'views', 'shares', 'scans']  // All fields at once!
-  },
-  mode: 'async',
-  enableAnalytics: true,
-  cohort: { timezone: 'America/Sao_Paulo' }
-}));
+    wallets: ['balance']
+  }
+})
 ```
 
-**Benefits of migration:**
-- ✅ **90% less code** - 1 plugin instead of 4
-- ✅ **Easier to maintain** - One configuration object
-- ✅ **Guaranteed consistency** - All fields share the same settings
-- ✅ **Better performance** - Shared timers and resources
-- ✅ **Cleaner codebase** - Less duplication
-
-**Migration steps:**
-
-1. **Identify plugin groups** - Find all plugins for the same resource
-2. **Extract common configuration** - Mode, analytics, timezone, etc.
-3. **Group fields** - Combine field names into a `resources` object
-4. **Replace plugins** - Replace multiple `usePlugin()` calls with one
-5. **Test** - Verify all fields still work correctly
-
-**Example migration:**
+### Métodos
 
 ```javascript
-// Step 1: Identify (you have 2 plugins for 'accounts')
-// Plugin 1: accounts.balance
-// Plugin 2: accounts.points
+// ❌ v9.x
+await wallets.add('w1', 100)
+await wallets.consolidate('w1')
 
-// Step 2: Extract common config
-const commonConfig = {
-  mode: 'async',
-  enableAnalytics: true,
-  consolidationInterval: 300
-};
-
-// Step 3: Group fields
-const fieldsToMigrate = {
-  accounts: ['balance', 'points']
-};
-
-// Step 4: Replace
-await s3db.usePlugin(new EventualConsistencyPlugin({
-  resources: fieldsToMigrate,
-  ...commonConfig
-}));
-
-// Step 5: Test - verify both fields work
-await accounts.add('acc-1', 'balance', 100);
-await accounts.add('acc-1', 'points', 50);
-```
-
-**Backward compatibility:**
-The old API still works! You can migrate gradually or keep using the single-field API if you need per-field custom configuration (different modes, reducers, etc.).
-
-### From Direct Updates to Eventual Consistency
-
-```javascript
-// Before: Direct updates
-await wallets.update({
-  id: 'wallet-001',
-  balance: 1000
-});
-
-// After: Using eventual consistency (single field)
-await wallets.set('wallet-001', 1000);
-
-// For increments
-// Before:
-const wallet = await wallets.get('wallet-001');
-await wallets.update({
-  id: 'wallet-001',
-  balance: wallet.balance + 100
-});
-
-// After (single field):
-await wallets.add('wallet-001', 100);
-
-// After (multiple fields):
-await wallets.add('wallet-001', 'balance', 100);
+// ✅ v10.x - sempre especifique field
+await wallets.add('w1', 'balance', 100)
+await wallets.consolidate('w1', 'balance')
 ```
 
 ---
 
-## See Also
+## Ver Também
 
-- [Plugin Development Guide](./plugin-development.md)
-- [Audit Plugin](./audit.md) - For complete operation logging
-- [Metrics Plugin](./metrics.md) - For performance monitoring
-- [State Machine Plugin](./state-machine.md) - For state transitions
+- [Replicator Plugin](./replicator.md) - Replicar para outros bancos
+- [Audit Plugin](./audit.md) - Audit trail
+- [Cache Plugin](./cache.md) - Cache de valores consolidados
