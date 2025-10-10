@@ -46,6 +46,7 @@ describe('Cache Plugin - Partition Integration - Basic Tests', () => {
         region: 'string|required',
         department: 'string|required'
       },
+      asyncPartitions: false, // Use sync partitions for predictable test results
       partitions: {
         byRegion: {
           fields: { region: 'string' }
