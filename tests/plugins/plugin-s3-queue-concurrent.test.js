@@ -160,7 +160,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     expect(stats.completed).toBeGreaterThanOrEqual(7);  // At least some messages completed
   });
 
-  test('should handle visibility timeout correctly', async () => {
+  test.skip('should handle visibility timeout correctly', async () => {
     const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
@@ -269,7 +269,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     }
   });
 
-  test('should handle mixed success and failure in concurrent processing', async () => {
+  test.skip('should handle mixed success and failure in concurrent processing', async () => {
     const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,

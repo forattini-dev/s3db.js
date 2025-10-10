@@ -5211,7 +5211,7 @@ class EventualConsistencyPlugin extends Plugin {
         if (this.config.enableAnalytics && transactionsToUpdate.length > 0) {
           await this.updateAnalytics(transactionsToUpdate);
         }
-        if (this.targetResource.cache && typeof this.targetResource.cache.delete === "function") {
+        if (this.targetResource && this.targetResource.cache && typeof this.targetResource.cache.delete === "function") {
           try {
             const cacheKey = await this.targetResource.cacheKeyFor({ id: originalId });
             await this.targetResource.cache.delete(cacheKey);
