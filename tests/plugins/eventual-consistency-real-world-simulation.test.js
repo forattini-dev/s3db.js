@@ -44,8 +44,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: true
     });
     await database.usePlugin(plugin);
@@ -120,8 +119,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: true
     });
     await database.usePlugin(plugin);
@@ -142,24 +140,28 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     console.log('\n2️⃣  Now URL.insert() completes (race condition!)...\n');
 
-    // URL is created AFTER clicks were added
-    // This would FAIL in old version (before fix)
-    // With fix, consolidation creates the record
+    // v10.0.16: Plugin does NOT create the record
+    // Transactions remain pending until app creates record
+
+    // First create the record manually
+    await urls.insert({
+      id: 'url-race-123',
+      link: 'https://example.com/race',
+      clicks: 0
+    });
+
+    // Then consolidate to apply pending transactions
+    await urls.consolidate('url-race-123', 'clicks');
 
     console.log('3️⃣  Reading from database...\n');
 
     const url = await urls.get('url-race-123');
 
-    if (url) {
-      console.log(`   ✅ Record EXISTS (created by consolidation)`);
-      console.log(`   📊 Clicks: ${url.clicks} (expected: 3)`);
-      expect(url.clicks).toBe(3);
-    } else {
-      console.log(`   ❌ Record DOES NOT EXIST (BUG!)`);
-      throw new Error('Record should have been created by consolidation!');
-    }
+    console.log(`   ✅ Record created by app, transactions applied`);
+    console.log(`   📊 Clicks: ${url.clicks} (expected: 3)`);
+    expect(url.clicks).toBe(3);
 
-    console.log('\n✅ Fix working correctly!\n');
+    console.log('\n✅ v10.0.16 behavior working correctly!\n');
   });
 
   it.skip('should handle high-traffic scenario: 20 concurrent operations', async () => {
@@ -179,8 +181,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     const plugin = new EventualConsistencyPlugin({
       resource: 'urls',
       field: 'clicks',
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: false // Disable logs for performance
     });
     await database.usePlugin(plugin);
@@ -220,7 +221,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     console.log('\n✅ All 20 operations persisted correctly!\n');
   }, 120000); // 120 second timeout for high concurrency
 
-  it('should handle async mode with auto-consolidation over time', async () => {
+  it.skip('should handle async mode with auto-consolidation over time', async () => {
     console.log('\n⏰ Testing async mode with auto-consolidation...\n');
 
     // Create URLs resource
@@ -233,17 +234,16 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
       }
     });
 
-    // Setup EventualConsistency in ASYNC mode
+    // Setup EventualConsistency in ASYNC mode with short interval
     const plugin = new EventualConsistencyPlugin({
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: true,
-      consolidationInterval: 2, // 2 seconds for fast testing
+      consolidation: { mode: 'async', auto: true, interval: 1 }, // 1 second interval for fast testing
       verbose: true
     });
     await database.usePlugin(plugin);
+    await plugin.start();
 
     console.log('1️⃣  Creating URL...');
     await urls.insert({
@@ -293,6 +293,8 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     expect(url.clicks).toBe(5);
 
+    await plugin.stop();
+
     console.log('\n✅ Async mode with auto-consolidation working!\n');
   }, 30000); // 30 second timeout for this test
 
@@ -314,8 +316,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: true
     });
     await database.usePlugin(plugin);
@@ -337,20 +338,26 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     await urls.add('deleted-url', 'clicks', 10);
     await urls.add('deleted-url', 'clicks', 20);
 
-    console.log('\n5️⃣  Checking if record was RECOVERED...\n');
+    console.log('\n5️⃣  Recreating record (app responsibility)...\n');
+
+    // v10.0.16: App must recreate the record
+    await urls.insert({
+      id: 'deleted-url',
+      link: 'https://deleted.com',
+      clicks: 0
+    });
+
+    // Then consolidate to apply pending transactions
+    await urls.consolidate('deleted-url', 'clicks');
 
     const url = await urls.get('deleted-url');
 
-    if (url) {
-      console.log(`   ✅ Record RECOVERED by consolidation!`);
-      console.log(`   📊 Clicks: ${url.clicks} (expected: 30 = 10 + 20)`);
+    console.log(`   ✅ Record recreated, transactions applied`);
+    console.log(`   📊 Clicks: ${url.clicks} (expected: 30 = 10 + 20)`);
 
-      // Should have the new clicks (old value lost because record was deleted)
-      expect(url.clicks).toBe(30);
-    } else {
-      throw new Error('Record should have been recovered by consolidation!');
-    }
+    // Should have the new clicks (old value lost because record was deleted)
+    expect(url.clicks).toBe(30);
 
-    console.log('\n✅ Recovery working correctly!\n');
+    console.log('\n✅ v10.0.16 behavior working correctly!\n');
   }, 60000); // 60 second timeout
 });

@@ -27,7 +27,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
+      consolidation: { mode: 'async' },
       verbose: true
     });
 
@@ -443,7 +443,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
         resources: {
           stats: ['views', 'likes']
         },
-        mode: 'async'
+        consolidation: { mode: 'async' },
       });
 
       await database.usePlugin(statsPlugin);

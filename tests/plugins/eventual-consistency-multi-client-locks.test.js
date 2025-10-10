@@ -44,10 +44,8 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
       resources: {
         accounts: ['balance', 'transactions']
       },
-      mode: 'async',
-      autoConsolidate: false,
-      verbose: false,
-      lockTimeout: 30000 // 30 seconds for lock
+      consolidation: { mode: 'async', auto: false },
+      verbose: false // 30 seconds for lock
     });
     await database.usePlugin(plugin);
 
@@ -225,10 +223,8 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
       resources: {
         counters: ['value']
       },
-      mode: 'async',
-      autoConsolidate: false,
-      verbose: false,
-      lockTimeout: 5000
+      consolidation: { mode: 'async', auto: false },
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -295,10 +291,8 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
       resources: {
         votes: ['upvotes', 'downvotes']
       },
-      mode: 'async',
-      autoConsolidate: false,
-      verbose: false,
-      lockTimeout: 10000
+      consolidation: { mode: 'async', auto: false },
+      verbose: false
     });
     await database.usePlugin(plugin);
 
@@ -385,8 +379,7 @@ describe('EventualConsistencyPlugin - Multi-Client Locks & ETags', () => {
       resources: {
         wallets: ['balance']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);
