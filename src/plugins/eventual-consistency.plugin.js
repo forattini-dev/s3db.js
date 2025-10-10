@@ -1128,20 +1128,140 @@ export class EventualConsistencyPlugin extends Plugin {
       let currentValue = 0;
 
       if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
-        // We have applied transactions - use them to calculate the last consolidated value
-        // Sort by timestamp to get chronological order
-        appliedTransactions.sort((a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        // Check if record exists - if deleted, ignore old applied transactions
+        const [recordExistsOk, recordExistsErr, recordExists] = await tryFn(() =>
+          this.targetResource.get(originalId)
         );
 
-        // Apply reducer to get the last consolidated value
-        currentValue = this.config.reducer(appliedTransactions);
+        if (!recordExistsOk || !recordExists) {
+          // Record was deleted - ignore applied transactions and start fresh
+          // This prevents old values from being carried over after deletion
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+              `Record ${originalId} doesn't exist, deleting ${appliedTransactions.length} old applied transactions`
+            );
+          }
+
+          // Delete old applied transactions to prevent them from being used when record is recreated
+          const { results, errors } = await PromisePool
+            .for(appliedTransactions)
+            .withConcurrency(10)
+            .process(async (txn) => {
+              const [deleted] = await tryFn(() => this.transactionResource.delete(txn.id));
+              return deleted;
+            });
+
+          if (this.config.verbose && errors && errors.length > 0) {
+            console.warn(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+              `Failed to delete ${errors.length} old applied transactions`
+            );
+          }
+
+          currentValue = 0;
+        } else {
+          // Record exists - use applied transactions to calculate current value
+          // Sort by timestamp to get chronological order
+          appliedTransactions.sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+
+          // Check if there's a 'set' operation in applied transactions
+          const hasSetInApplied = appliedTransactions.some(t => t.operation === 'set');
+
+          if (!hasSetInApplied) {
+            // No 'set' operation in applied transactions means we're missing the base value
+            // This can only happen if:
+            // 1. Record had an initial value before first transaction
+            // 2. First consolidation didn't create an anchor transaction (legacy behavior)
+            // Solution: Get the current record value and create an anchor transaction now
+            const recordValue = recordExists[this.config.field] || 0;
+
+            // Calculate what the base value was by subtracting all applied deltas
+            let appliedDelta = 0;
+            for (const t of appliedTransactions) {
+              if (t.operation === 'add') appliedDelta += t.value;
+              else if (t.operation === 'sub') appliedDelta -= t.value;
+            }
+
+            const baseValue = recordValue - appliedDelta;
+
+            // Create and save anchor transaction with the base value
+            // Only create if baseValue is non-zero AND we don't already have an anchor transaction
+            const hasExistingAnchor = appliedTransactions.some(t => t.source === 'anchor');
+            if (baseValue !== 0 && !hasExistingAnchor) {
+              // Use the timestamp of the first applied transaction for cohort info
+              const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
+              const cohortInfo = this.getCohortInfo(firstTransactionDate);
+              const anchorTransaction = {
+                id: idGenerator(),
+                originalId: originalId,
+                field: this.config.field,
+                value: baseValue,
+                operation: 'set',
+                timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(), // 1ms before first txn to ensure it's first
+                cohortDate: cohortInfo.date,
+                cohortHour: cohortInfo.hour,
+                cohortMonth: cohortInfo.month,
+                source: 'anchor',
+                applied: true
+              };
+
+              await this.transactionResource.insert(anchorTransaction);
+
+              // Prepend to applied transactions for this consolidation
+              appliedTransactions.unshift(anchorTransaction);
+            }
+          }
+
+          // Apply reducer to get the last consolidated value
+          currentValue = this.config.reducer(appliedTransactions);
+        }
       } else {
-        // No applied transactions - try to get initial value from record
+        // No applied transactions - this is the FIRST consolidation
+        // Try to get initial value from record
         const [recordOk, recordErr, record] = await tryFn(() =>
           this.targetResource.get(originalId)
         );
         currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
+
+        // If there's an initial value, create and save an anchor transaction
+        // This ensures all future consolidations have a reliable base value
+        if (currentValue !== 0) {
+          // Use timestamp of the first pending transaction (or current time if none)
+          let anchorTimestamp;
+          if (transactions && transactions.length > 0) {
+            const firstPendingDate = new Date(transactions[0].timestamp);
+            anchorTimestamp = new Date(firstPendingDate.getTime() - 1).toISOString();
+          } else {
+            anchorTimestamp = new Date().toISOString();
+          }
+
+          const cohortInfo = this.getCohortInfo(new Date(anchorTimestamp));
+          const anchorTransaction = {
+            id: idGenerator(),
+            originalId: originalId,
+            field: this.config.field,
+            value: currentValue,
+            operation: 'set',
+            timestamp: anchorTimestamp,
+            cohortDate: cohortInfo.date,
+            cohortHour: cohortInfo.hour,
+            cohortMonth: cohortInfo.month,
+            source: 'anchor',
+            applied: true
+          };
+
+          await this.transactionResource.insert(anchorTransaction);
+
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+              `Created anchor transaction for ${originalId} with base value ${currentValue}`
+            );
+          }
+        }
       }
 
       if (this.config.verbose) {
