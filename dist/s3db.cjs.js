@@ -3926,6 +3926,14 @@ class CachePlugin extends Plugin {
     ];
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
+        let skipCache = false;
+        const lastArg = ctx.args[ctx.args.length - 1];
+        if (lastArg && typeof lastArg === "object" && lastArg.skipCache === true) {
+          skipCache = true;
+        }
+        if (skipCache) {
+          return await next();
+        }
         let key;
         if (method === "getMany") {
           key = await resource.cacheKeyFor({ action: method, params: { ids: ctx.args[0] } });
