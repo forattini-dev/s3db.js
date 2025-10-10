@@ -92,7 +92,7 @@ describe('CachePlugin - skipCache Option', () => {
   it('should work with EventualConsistency consolidation', async () => {
     console.log('\n🧪 Testing skipCache with EventualConsistency...\n');
 
-    const { EventualConsistencyPlugin } = await import('../../src/plugins/eventual-consistency.plugin.js');
+    const { EventualConsistencyPlugin } = await import('../../src/plugins/eventual-consistency/index.js');
 
     // Create resource
     const urls = await database.createResource({

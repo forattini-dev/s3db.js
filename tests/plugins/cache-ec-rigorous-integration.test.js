@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { createDatabaseForTest } from '../config.js';
 

@@ -6,7 +6,7 @@
  */
 
 import S3db from '../src/s3db.class.js';
-import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency/index.js';
 
 async function main() {
   // 1. Setup database with analytics enabled

@@ -9,7 +9,7 @@
  */
 
 import S3db from '../src/s3db.class.js';
-import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency/index.js';
 
 async function main() {
   const s3db = new S3db({
