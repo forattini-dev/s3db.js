@@ -5113,10 +5113,6 @@ class EventualConsistencyPlugin extends Plugin {
       return recordOk && record ? record[this.config.field] || 0 : 0;
     }
     try {
-      const [recordOk, recordErr, record] = await tryFn(
-        () => this.targetResource.get(originalId)
-      );
-      const currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
       const [ok, err, transactions] = await tryFn(
         () => this.transactionResource.query({
           originalId,
@@ -5124,16 +5120,38 @@ class EventualConsistencyPlugin extends Plugin {
         })
       );
       if (!ok || !transactions || transactions.length === 0) {
+        const [recordOk, recordErr, record] = await tryFn(
+          () => this.targetResource.get(originalId)
+        );
+        const currentValue2 = recordOk && record ? record[this.config.field] || 0 : 0;
         if (this.config.verbose) {
           console.log(
             `[EventualConsistency] ${this.config.resource}.${this.config.field} - No pending transactions for ${originalId}, skipping`
           );
         }
-        return currentValue;
+        return currentValue2;
+      }
+      const [appliedOk, appliedErr, appliedTransactions] = await tryFn(
+        () => this.transactionResource.query({
+          originalId,
+          applied: true
+        })
+      );
+      let currentValue = 0;
+      if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
+        appliedTransactions.sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        currentValue = this.config.reducer(appliedTransactions);
+      } else {
+        const [recordOk, recordErr, record] = await tryFn(
+          () => this.targetResource.get(originalId)
+        );
+        currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
       }
       if (this.config.verbose) {
         console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidating ${originalId}: ${transactions.length} pending transactions (current: ${currentValue})`
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - Consolidating ${originalId}: ${transactions.length} pending transactions (current: ${currentValue} from ${appliedOk && appliedTransactions?.length > 0 ? "applied transactions" : "record"})`
         );
       }
       transactions.sort(
