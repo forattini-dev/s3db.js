@@ -4662,68 +4662,175 @@ class EventualConsistencyPlugin extends Plugin {
     const resource = firstHandler.targetResource;
     const plugin = this;
     resource.set = async (id, field, value) => {
-      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, value);
-      await fieldPlugin.createTransaction(fieldPlugin, {
+      const { plugin: handler } = plugin._resolveFieldAndPlugin(resource, field, value);
+      const now = /* @__PURE__ */ new Date();
+      const cohortInfo = plugin.getCohortInfo(now);
+      const transaction = {
+        id: idGenerator(),
         originalId: id,
-        operation: "set",
+        field: handler.field,
         value,
-        source: "set"
-      });
-      if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
+        operation: "set",
+        timestamp: now.toISOString(),
+        cohortDate: cohortInfo.date,
+        cohortHour: cohortInfo.hour,
+        cohortMonth: cohortInfo.month,
+        source: "set",
+        applied: false
+      };
+      await handler.transactionResource.insert(transaction);
+      if (plugin.config.mode === "sync") {
+        const oldResource = plugin.config.resource;
+        const oldField = plugin.config.field;
+        const oldTransactionResource = plugin.transactionResource;
+        const oldTargetResource = plugin.targetResource;
+        const oldLockResource = plugin.lockResource;
+        plugin.config.resource = handler.resource;
+        plugin.config.field = handler.field;
+        plugin.transactionResource = handler.transactionResource;
+        plugin.targetResource = handler.targetResource;
+        plugin.lockResource = handler.lockResource;
+        const result = await plugin._syncModeConsolidate(id, field);
+        plugin.config.resource = oldResource;
+        plugin.config.field = oldField;
+        plugin.transactionResource = oldTransactionResource;
+        plugin.targetResource = oldTargetResource;
+        plugin.lockResource = oldLockResource;
+        return result;
       }
       return value;
     };
     resource.add = async (id, field, amount) => {
-      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, amount);
-      await fieldPlugin.createTransaction(fieldPlugin, {
+      const { plugin: handler } = plugin._resolveFieldAndPlugin(resource, field, amount);
+      const now = /* @__PURE__ */ new Date();
+      const cohortInfo = plugin.getCohortInfo(now);
+      const transaction = {
+        id: idGenerator(),
         originalId: id,
-        operation: "add",
+        field: handler.field,
         value: amount,
-        source: "add"
-      });
-      if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
+        operation: "add",
+        timestamp: now.toISOString(),
+        cohortDate: cohortInfo.date,
+        cohortHour: cohortInfo.hour,
+        cohortMonth: cohortInfo.month,
+        source: "add",
+        applied: false
+      };
+      await handler.transactionResource.insert(transaction);
+      if (plugin.config.mode === "sync") {
+        const oldResource = plugin.config.resource;
+        const oldField = plugin.config.field;
+        const oldTransactionResource = plugin.transactionResource;
+        const oldTargetResource = plugin.targetResource;
+        const oldLockResource = plugin.lockResource;
+        plugin.config.resource = handler.resource;
+        plugin.config.field = handler.field;
+        plugin.transactionResource = handler.transactionResource;
+        plugin.targetResource = handler.targetResource;
+        plugin.lockResource = handler.lockResource;
+        const result = await plugin._syncModeConsolidate(id, field);
+        plugin.config.resource = oldResource;
+        plugin.config.field = oldField;
+        plugin.transactionResource = oldTransactionResource;
+        plugin.targetResource = oldTargetResource;
+        plugin.lockResource = oldLockResource;
+        return result;
       }
-      const currentValue = await fieldPlugin.getConsolidatedValue(fieldPlugin, id);
-      return currentValue + amount;
+      const record = await handler.targetResource.get(id);
+      return (record?.[field] || 0) + amount;
     };
     resource.sub = async (id, field, amount) => {
-      const { plugin: fieldPlugin } = plugin._resolveFieldAndPlugin(resource, field, amount);
-      await fieldPlugin.createTransaction(fieldPlugin, {
+      const { plugin: handler } = plugin._resolveFieldAndPlugin(resource, field, amount);
+      const now = /* @__PURE__ */ new Date();
+      const cohortInfo = plugin.getCohortInfo(now);
+      const transaction = {
+        id: idGenerator(),
         originalId: id,
-        operation: "sub",
+        field: handler.field,
         value: amount,
-        source: "sub"
-      });
-      if (fieldPlugin.config.mode === "sync") {
-        return await fieldPlugin._syncModeConsolidate(fieldPlugin, id, field);
+        operation: "sub",
+        timestamp: now.toISOString(),
+        cohortDate: cohortInfo.date,
+        cohortHour: cohortInfo.hour,
+        cohortMonth: cohortInfo.month,
+        source: "sub",
+        applied: false
+      };
+      await handler.transactionResource.insert(transaction);
+      if (plugin.config.mode === "sync") {
+        const oldResource = plugin.config.resource;
+        const oldField = plugin.config.field;
+        const oldTransactionResource = plugin.transactionResource;
+        const oldTargetResource = plugin.targetResource;
+        const oldLockResource = plugin.lockResource;
+        plugin.config.resource = handler.resource;
+        plugin.config.field = handler.field;
+        plugin.transactionResource = handler.transactionResource;
+        plugin.targetResource = handler.targetResource;
+        plugin.lockResource = handler.lockResource;
+        const result = await plugin._syncModeConsolidate(id, field);
+        plugin.config.resource = oldResource;
+        plugin.config.field = oldField;
+        plugin.transactionResource = oldTransactionResource;
+        plugin.targetResource = oldTargetResource;
+        plugin.lockResource = oldLockResource;
+        return result;
       }
-      const currentValue = await fieldPlugin.getConsolidatedValue(fieldPlugin, id);
-      return currentValue - amount;
+      const record = await handler.targetResource.get(id);
+      return (record?.[field] || 0) - amount;
     };
     resource.consolidate = async (id, field) => {
       if (!field) {
         throw new Error(`Field parameter is required: consolidate(id, field)`);
       }
-      const fieldPlugin = resource._eventualConsistencyPlugins[field];
-      if (!fieldPlugin) {
+      const handler = resource._eventualConsistencyPlugins[field];
+      if (!handler) {
         const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
         throw new Error(
           `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
         );
       }
-      return await fieldPlugin.consolidateRecord(fieldPlugin, id);
+      const oldResource = plugin.config.resource;
+      const oldField = plugin.config.field;
+      const oldTransactionResource = plugin.transactionResource;
+      const oldTargetResource = plugin.targetResource;
+      const oldLockResource = plugin.lockResource;
+      plugin.config.resource = handler.resource;
+      plugin.config.field = handler.field;
+      plugin.transactionResource = handler.transactionResource;
+      plugin.targetResource = handler.targetResource;
+      plugin.lockResource = handler.lockResource;
+      const result = await plugin.consolidateRecord(id);
+      plugin.config.resource = oldResource;
+      plugin.config.field = oldField;
+      plugin.transactionResource = oldTransactionResource;
+      plugin.targetResource = oldTargetResource;
+      plugin.lockResource = oldLockResource;
+      return result;
     };
     resource.getConsolidatedValue = async (id, field, options = {}) => {
-      const fieldPlugin = resource._eventualConsistencyPlugins[field];
-      if (!fieldPlugin) {
+      const handler = resource._eventualConsistencyPlugins[field];
+      if (!handler) {
         const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
         throw new Error(
           `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
         );
       }
-      return await fieldPlugin.getConsolidatedValue(fieldPlugin, id, options);
+      const oldResource = plugin.config.resource;
+      const oldField = plugin.config.field;
+      const oldTransactionResource = plugin.transactionResource;
+      const oldTargetResource = plugin.targetResource;
+      plugin.config.resource = handler.resource;
+      plugin.config.field = handler.field;
+      plugin.transactionResource = handler.transactionResource;
+      plugin.targetResource = handler.targetResource;
+      const result = await plugin.getConsolidatedValue(id, options);
+      plugin.config.resource = oldResource;
+      plugin.config.field = oldField;
+      plugin.transactionResource = oldTransactionResource;
+      plugin.targetResource = oldTargetResource;
+      return result;
     };
   }
   async createTransaction(handler, data) {
