@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
 describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
