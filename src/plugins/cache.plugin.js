@@ -181,6 +181,18 @@ export class CachePlugin extends Plugin {
     
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx, next) => {
+        // Check for skipCache option in the last argument
+        let skipCache = false;
+        const lastArg = ctx.args[ctx.args.length - 1];
+        if (lastArg && typeof lastArg === 'object' && lastArg.skipCache === true) {
+          skipCache = true;
+        }
+
+        // If skipCache is true, bypass cache entirely
+        if (skipCache) {
+          return await next();
+        }
+
         // Build cache key
         let key;
         if (method === 'getMany') {
@@ -194,19 +206,19 @@ export class CachePlugin extends Plugin {
         } else if (method === 'query') {
           const filter = ctx.args[0] || {};
           const options = ctx.args[1] || {};
-          key = await resource.cacheKeyFor({ 
-            action: method, 
+          key = await resource.cacheKeyFor({
+            action: method,
             params: { filter, options: { limit: options.limit, offset: options.offset } },
             partition: options.partition,
             partitionValues: options.partitionValues
           });
         } else if (method === 'getFromPartition') {
           const { id, partitionName, partitionValues } = ctx.args[0] || {};
-          key = await resource.cacheKeyFor({ 
-            action: method, 
-            params: { id, partitionName }, 
-            partition: partitionName, 
-            partitionValues 
+          key = await resource.cacheKeyFor({
+            action: method,
+            params: { id, partitionName },
+            partition: partitionName,
+            partitionValues
           });
         } else if (method === 'getAll') {
           key = await resource.cacheKeyFor({ action: method });
