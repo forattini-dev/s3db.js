@@ -1,0 +1,298 @@
+/**
+ * Setup logic for EventualConsistencyPlugin
+ * @module eventual-consistency/setup
+ */
+
+import tryFn from "../../concerns/try-fn.js";
+import { createPartitionConfig } from "./partitions.js";
+import { addHelperMethods } from "./helpers.js";
+import { flushPendingTransactions } from "./transactions.js";
+import { startConsolidationTimer } from "./consolidation.js";
+import { startGarbageCollectionTimer } from "./garbage-collection.js";
+
+/**
+ * Setup plugin for all configured resources
+ *
+ * @param {Object} database - Database instance
+ * @param {Map} fieldHandlers - Field handlers map
+ * @param {Function} completeFieldSetupFn - Function to complete setup for a field
+ * @param {Function} watchForResourceFn - Function to watch for resource creation
+ */
+export async function onSetup(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
+  // Iterate over all resource/field combinations
+  for (const [resourceName, resourceHandlers] of fieldHandlers) {
+    const targetResource = database.resources[resourceName];
+
+    if (!targetResource) {
+      // Resource doesn't exist yet - mark for deferred setup
+      for (const handler of resourceHandlers.values()) {
+        handler.deferredSetup = true;
+      }
+      // Watch for this resource to be created
+      watchForResourceFn(resourceName);
+      continue;
+    }
+
+    // Resource exists - setup all fields for this resource
+    for (const [fieldName, handler] of resourceHandlers) {
+      handler.targetResource = targetResource;
+      await completeFieldSetupFn(handler);
+    }
+  }
+}
+
+/**
+ * Watch for a specific resource creation
+ *
+ * @param {string} resourceName - Resource name to watch for
+ * @param {Object} database - Database instance
+ * @param {Map} fieldHandlers - Field handlers map
+ * @param {Function} completeFieldSetupFn - Function to complete setup for a field
+ */
+export function watchForResource(resourceName, database, fieldHandlers, completeFieldSetupFn) {
+  const hookCallback = async ({ resource, config }) => {
+    if (config.name === resourceName) {
+      const resourceHandlers = fieldHandlers.get(resourceName);
+      if (!resourceHandlers) return;
+
+      // Setup all fields for this resource
+      for (const [fieldName, handler] of resourceHandlers) {
+        if (handler.deferredSetup) {
+          handler.targetResource = resource;
+          handler.deferredSetup = false;
+          await completeFieldSetupFn(handler);
+        }
+      }
+    }
+  };
+
+  database.addHook('afterCreateResource', hookCallback);
+}
+
+/**
+ * Complete setup for a single field handler
+ *
+ * @param {Object} handler - Field handler
+ * @param {Object} database - Database instance
+ * @param {Object} config - Plugin configuration
+ * @param {Object} plugin - Plugin instance (for adding helper methods)
+ * @returns {Promise<void>}
+ */
+export async function completeFieldSetup(handler, database, config, plugin) {
+  if (!handler.targetResource) return;
+
+  const resourceName = handler.resource;
+  const fieldName = handler.field;
+
+  // Create transaction resource with partitions
+  const transactionResourceName = `${resourceName}_transactions_${fieldName}`;
+  const partitionConfig = createPartitionConfig();
+
+  const [ok, err, transactionResource] = await tryFn(() =>
+    database.createResource({
+      name: transactionResourceName,
+      attributes: {
+        id: 'string|required',
+        originalId: 'string|required',
+        field: 'string|required',
+        value: 'number|required',
+        operation: 'string|required',
+        timestamp: 'string|required',
+        cohortDate: 'string|required',
+        cohortHour: 'string|required',
+        cohortMonth: 'string|optional',
+        source: 'string|optional',
+        applied: 'boolean|optional'
+      },
+      behavior: 'body-overflow',
+      timestamps: true,
+      partitions: partitionConfig,
+      asyncPartitions: true,
+      createdBy: 'EventualConsistencyPlugin'
+    })
+  );
+
+  if (!ok && !database.resources[transactionResourceName]) {
+    throw new Error(`Failed to create transaction resource for ${resourceName}.${fieldName}: ${err?.message}`);
+  }
+
+  handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
+
+  // Create lock resource
+  const lockResourceName = `${resourceName}_consolidation_locks_${fieldName}`;
+  const [lockOk, lockErr, lockResource] = await tryFn(() =>
+    database.createResource({
+      name: lockResourceName,
+      attributes: {
+        id: 'string|required',
+        lockedAt: 'number|required',
+        workerId: 'string|optional'
+      },
+      behavior: 'body-only',
+      timestamps: false,
+      createdBy: 'EventualConsistencyPlugin'
+    })
+  );
+
+  if (!lockOk && !database.resources[lockResourceName]) {
+    throw new Error(`Failed to create lock resource for ${resourceName}.${fieldName}: ${lockErr?.message}`);
+  }
+
+  handler.lockResource = lockOk ? lockResource : database.resources[lockResourceName];
+
+  // Create analytics resource if enabled
+  if (config.enableAnalytics) {
+    await createAnalyticsResource(handler, database, resourceName, fieldName);
+  }
+
+  // Add helper methods to the target resource
+  addHelperMethodsForHandler(handler, plugin, config);
+
+  if (config.verbose) {
+    console.log(
+      `[EventualConsistency] ${resourceName}.${fieldName} - ` +
+      `Setup complete. Resources: ${transactionResourceName}, ${lockResourceName}` +
+      `${config.enableAnalytics ? `, ${resourceName}_analytics_${fieldName}` : ''}`
+    );
+  }
+}
+
+/**
+ * Create analytics resource for a field handler
+ *
+ * @param {Object} handler - Field handler
+ * @param {Object} database - Database instance
+ * @param {string} resourceName - Resource name
+ * @param {string} fieldName - Field name
+ * @returns {Promise<void>}
+ */
+async function createAnalyticsResource(handler, database, resourceName, fieldName) {
+  const analyticsResourceName = `${resourceName}_analytics_${fieldName}`;
+
+  const [ok, err, analyticsResource] = await tryFn(() =>
+    database.createResource({
+      name: analyticsResourceName,
+      attributes: {
+        id: 'string|required',
+        period: 'string|required',
+        cohort: 'string|required',
+        transactionCount: 'number|required',
+        totalValue: 'number|required',
+        avgValue: 'number|required',
+        minValue: 'number|required',
+        maxValue: 'number|required',
+        operations: 'object|optional',
+        recordCount: 'number|required',
+        consolidatedAt: 'string|required',
+        updatedAt: 'string|required'
+      },
+      behavior: 'body-overflow',
+      timestamps: false,
+      createdBy: 'EventualConsistencyPlugin'
+    })
+  );
+
+  if (!ok && !database.resources[analyticsResourceName]) {
+    throw new Error(`Failed to create analytics resource for ${resourceName}.${fieldName}: ${err?.message}`);
+  }
+
+  handler.analyticsResource = ok ? analyticsResource : database.resources[analyticsResourceName];
+}
+
+/**
+ * Add helper methods to the target resource for a field handler
+ *
+ * @param {Object} handler - Field handler
+ * @param {Object} plugin - Plugin instance
+ * @param {Object} config - Plugin configuration
+ */
+function addHelperMethodsForHandler(handler, plugin, config) {
+  const resource = handler.targetResource;
+  const fieldName = handler.field;
+
+  // Store handler reference on the resource for later access
+  if (!resource._eventualConsistencyPlugins) {
+    resource._eventualConsistencyPlugins = {};
+  }
+  resource._eventualConsistencyPlugins[fieldName] = handler;
+
+  // Add helper methods if not already added
+  if (!resource.add) {
+    addHelperMethods(resource, plugin, config);
+  }
+}
+
+/**
+ * Start timers and emit events for all field handlers
+ *
+ * @param {Map} fieldHandlers - Field handlers map
+ * @param {Object} config - Plugin configuration
+ * @param {Function} runConsolidationFn - Function to run consolidation for a handler
+ * @param {Function} runGCFn - Function to run GC for a handler
+ * @param {Function} emitFn - Function to emit events
+ * @returns {Promise<void>}
+ */
+export async function onStart(fieldHandlers, config, runConsolidationFn, runGCFn, emitFn) {
+  // Start timers and emit events for all field handlers
+  for (const [resourceName, resourceHandlers] of fieldHandlers) {
+    for (const [fieldName, handler] of resourceHandlers) {
+      if (!handler.deferredSetup) {
+        // Start auto-consolidation timer if enabled
+        if (config.autoConsolidate && config.mode === 'async') {
+          startConsolidationTimer(handler, resourceName, fieldName, runConsolidationFn, config);
+        }
+
+        // Start garbage collection timer
+        if (config.transactionRetention && config.transactionRetention > 0) {
+          startGarbageCollectionTimer(handler, resourceName, fieldName, runGCFn, config);
+        }
+
+        if (emitFn) {
+          emitFn('eventual-consistency.started', {
+            resource: resourceName,
+            field: fieldName,
+            cohort: config.cohort
+          });
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Stop all timers and flush pending transactions
+ *
+ * @param {Map} fieldHandlers - Field handlers map
+ * @param {Function} emitFn - Function to emit events
+ * @returns {Promise<void>}
+ */
+export async function onStop(fieldHandlers, emitFn) {
+  // Stop all timers for all handlers
+  for (const [resourceName, resourceHandlers] of fieldHandlers) {
+    for (const [fieldName, handler] of resourceHandlers) {
+      // Stop consolidation timer
+      if (handler.consolidationTimer) {
+        clearInterval(handler.consolidationTimer);
+        handler.consolidationTimer = null;
+      }
+
+      // Stop garbage collection timer
+      if (handler.gcTimer) {
+        clearInterval(handler.gcTimer);
+        handler.gcTimer = null;
+      }
+
+      // Flush pending transactions
+      if (handler.pendingTransactions && handler.pendingTransactions.size > 0) {
+        await flushPendingTransactions(handler);
+      }
+
+      if (emitFn) {
+        emitFn('eventual-consistency.stopped', {
+          resource: resourceName,
+          field: fieldName
+        });
+      }
+    }
+  }
+}
