@@ -571,14 +571,14 @@ export class EventualConsistencyPlugin extends Plugin {
     };
   }
 
-  async createTransaction(data) {
+  async createTransaction(handler, data) {
     const now = new Date();
     const cohortInfo = this.getCohortInfo(now);
 
     // Check for late arrivals (transaction older than watermark)
     const watermarkMs = this.config.consolidationWindow * 60 * 60 * 1000;
     const watermarkTime = now.getTime() - watermarkMs;
-    const cohortHourDate = new Date(cohortInfo.hour + ':00:00Z'); // Parse cohortHour back to date
+    const cohortHourDate = new Date(cohortInfo.hour + ':00:00Z');
 
     if (cohortHourDate.getTime() < watermarkTime) {
       // Late arrival detected!
@@ -591,7 +591,6 @@ export class EventualConsistencyPlugin extends Plugin {
             `is ${hoursLate}h late (watermark: ${this.config.consolidationWindow}h)`
           );
         }
-        // Don't create transaction
         return null;
       } else if (this.config.lateArrivalStrategy === 'warn') {
         console.warn(
@@ -604,9 +603,9 @@ export class EventualConsistencyPlugin extends Plugin {
     }
 
     const transaction = {
-      id: idGenerator(), // Use nanoid for guaranteed uniqueness
+      id: idGenerator(),
       originalId: data.originalId,
-      field: this.config.field,
+      field: handler.field,
       value: data.value || 0,
       operation: data.operation || 'set',
       timestamp: now.toISOString(),
@@ -616,29 +615,29 @@ export class EventualConsistencyPlugin extends Plugin {
       source: data.source || 'unknown',
       applied: false
     };
-    
+
     // Batch transactions if configured
     if (this.config.batchTransactions) {
-      this.pendingTransactions.set(transaction.id, transaction);
+      handler.pendingTransactions.set(transaction.id, transaction);
 
       if (this.config.verbose) {
         console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
           `Transaction batched: ${data.operation} ${data.value} for ${data.originalId} ` +
-          `(batch: ${this.pendingTransactions.size}/${this.config.batchSize})`
+          `(batch: ${handler.pendingTransactions.size}/${this.config.batchSize})`
         );
       }
 
       // Flush if batch size reached
-      if (this.pendingTransactions.size >= this.config.batchSize) {
-        await this.flushPendingTransactions();
+      if (handler.pendingTransactions.size >= this.config.batchSize) {
+        await this._flushPendingTransactions(handler);
       }
     } else {
-      await this.transactionResource.insert(transaction);
+      await handler.transactionResource.insert(transaction);
 
       if (this.config.verbose) {
         console.log(
-          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `[EventualConsistency] ${handler.resource}.${handler.field} - ` +
           `Transaction created: ${data.operation} ${data.value} for ${data.originalId} ` +
           `(cohort: ${cohortInfo.hour}, applied: false)`
         );
