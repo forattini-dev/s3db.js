@@ -1242,7 +1242,7 @@ export class EventualConsistencyPlugin extends Plugin {
         }
 
         // Invalidate cache for this record after consolidation
-        if (this.targetResource.cache && typeof this.targetResource.cache.delete === 'function') {
+        if (this.targetResource && this.targetResource.cache && typeof this.targetResource.cache.delete === 'function') {
           try {
             const cacheKey = await this.targetResource.cacheKeyFor({ id: originalId });
             await this.targetResource.cache.delete(cacheKey);
