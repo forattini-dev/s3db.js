@@ -1,4 +1,4 @@
-import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

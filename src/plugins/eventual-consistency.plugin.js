@@ -54,7 +54,14 @@ export class EventualConsistencyPlugin extends Plugin {
         metrics: options.analyticsConfig?.metrics || ['count', 'sum', 'avg', 'min', 'max'],
         rollupStrategy: options.analyticsConfig?.rollupStrategy || 'incremental',
         retentionDays: options.analyticsConfig?.retentionDays || 365
-      }
+      },
+      // Checkpoint configuration for high-volume scenarios
+      enableCheckpoints: options.enableCheckpoints !== false, // Default: true
+      checkpointStrategy: options.checkpointStrategy || 'hourly', // 'hourly', 'daily', 'manual', 'disabled'
+      checkpointRetention: options.checkpointRetention || 90, // Days to keep checkpoints
+      checkpointThreshold: options.checkpointThreshold || 1000, // Min transactions before creating checkpoint
+      deleteConsolidatedTransactions: options.deleteConsolidatedTransactions !== false, // Delete transactions after checkpoint
+      autoCheckpoint: options.autoCheckpoint !== false // Auto-create checkpoints for old cohorts
     };
 
     // Create field handlers map
@@ -116,6 +123,7 @@ export class EventualConsistencyPlugin extends Plugin {
       targetResource: null,
       analyticsResource: null,
       lockResource: null,
+      checkpointResource: null, // NEW: Checkpoint resource for high-volume optimization
       consolidationTimer: null,
       gcTimer: null,
       pendingTransactions: new Map(),
@@ -371,8 +379,20 @@ export class EventualConsistencyPlugin extends Plugin {
   }
 
   createPartitionConfig() {
-    // Create hourly, daily and monthly partitions for transactions
+    // Create partitions for transactions
     const partitions = {
+      // Composite partition by originalId + applied status
+      // This is THE MOST CRITICAL optimization for consolidation!
+      // Why: Consolidation always queries { originalId, applied: false }
+      // Without this: Reads ALL transactions (applied + pending) and filters manually
+      // With this: Reads ONLY pending transactions - can be 1000x faster!
+      byOriginalIdAndApplied: {
+        fields: {
+          originalId: 'string',
+          applied: 'boolean'
+        }
+      },
+      // Partition by time cohorts for batch consolidation across many records
       byHour: {
         fields: {
           cohortHour: 'string'
@@ -727,6 +747,50 @@ export class EventualConsistencyPlugin extends Plugin {
       plugin.config.field = oldField;
       plugin.transactionResource = oldTransactionResource;
       plugin.targetResource = oldTargetResource;
+
+      return result;
+    };
+
+    // Add method to recalculate from scratch
+    // Signature: recalculate(id, field)
+    resource.recalculate = async (id, field) => {
+      if (!field) {
+        throw new Error(`Field parameter is required: recalculate(id, field)`);
+      }
+
+      const handler = resource._eventualConsistencyPlugins[field];
+
+      if (!handler) {
+        const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
+        throw new Error(
+          `No eventual consistency plugin found for field "${field}". ` +
+          `Available fields: ${availableFields}`
+        );
+      }
+
+      // Temporarily set config for legacy methods
+      const oldResource = plugin.config.resource;
+      const oldField = plugin.config.field;
+      const oldTransactionResource = plugin.transactionResource;
+      const oldTargetResource = plugin.targetResource;
+      const oldLockResource = plugin.lockResource;
+      const oldAnalyticsResource = plugin.analyticsResource;
+
+      plugin.config.resource = handler.resource;
+      plugin.config.field = handler.field;
+      plugin.transactionResource = handler.transactionResource;
+      plugin.targetResource = handler.targetResource;
+      plugin.lockResource = handler.lockResource;
+      plugin.analyticsResource = handler.analyticsResource;
+
+      const result = await plugin.recalculateRecord(id);
+
+      plugin.config.resource = oldResource;
+      plugin.config.field = oldField;
+      plugin.transactionResource = oldTransactionResource;
+      plugin.targetResource = oldTargetResource;
+      plugin.lockResource = oldLockResource;
+      plugin.analyticsResource = oldAnalyticsResource;
 
       return result;
     };
@@ -1491,6 +1555,135 @@ export class EventualConsistencyPlugin extends Plugin {
     }
 
     return stats;
+  }
+
+  /**
+   * Recalculate from scratch by resetting all transactions to pending
+   * This is useful for debugging, recovery, or when you want to recompute everything
+   * @param {string} originalId - The ID of the record to recalculate
+   * @returns {Promise<number>} The recalculated value
+   */
+  async recalculateRecord(originalId) {
+    // Clean up stale locks before attempting to acquire
+    await this.cleanupStaleLocks();
+
+    // Acquire distributed lock to prevent concurrent operations
+    const lockId = `lock-recalculate-${originalId}`;
+    const [lockAcquired, lockErr, lock] = await tryFn(() =>
+      this.lockResource.insert({
+        id: lockId,
+        lockedAt: Date.now(),
+        workerId: process.pid ? String(process.pid) : 'unknown'
+      })
+    );
+
+    // If lock couldn't be acquired, another worker is operating on this record
+    if (!lockAcquired) {
+      if (this.config.verbose) {
+        console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
+      }
+      throw new Error(`Cannot recalculate ${originalId}: lock already held by another worker`);
+    }
+
+    try {
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Starting recalculation for ${originalId} (resetting all transactions to pending)`
+        );
+      }
+
+      // Get ALL transactions for this record (both applied and pending)
+      const [allOk, allErr, allTransactions] = await tryFn(() =>
+        this.transactionResource.query({
+          originalId
+        })
+      );
+
+      if (!allOk || !allTransactions || allTransactions.length === 0) {
+        if (this.config.verbose) {
+          console.log(
+            `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+            `No transactions found for ${originalId}, nothing to recalculate`
+          );
+        }
+        return 0;
+      }
+
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
+        );
+      }
+
+      // Mark ALL transactions as pending (applied: false)
+      // Exclude anchor transactions (they should always be applied)
+      const transactionsToReset = allTransactions.filter(txn => txn.source !== 'anchor');
+
+      const { results, errors } = await PromisePool
+        .for(transactionsToReset)
+        .withConcurrency(10)
+        .process(async (txn) => {
+          const [ok, err] = await tryFn(() =>
+            this.transactionResource.update(txn.id, { applied: false })
+          );
+
+          if (!ok && this.config.verbose) {
+            console.warn(`[EventualConsistency] Failed to reset transaction ${txn.id}:`, err?.message);
+          }
+
+          return ok;
+        });
+
+      if (errors && errors.length > 0) {
+        console.warn(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Failed to reset ${errors.length} transactions during recalculation`
+        );
+      }
+
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Reset ${results.length} transactions to pending, now resetting record value and running consolidation...`
+        );
+      }
+
+      // Reset the record's field value to 0 to prevent double-counting
+      // This ensures consolidation starts fresh without using the old value as an anchor
+      const [resetOk, resetErr] = await tryFn(() =>
+        this.targetResource.update(originalId, {
+          [this.config.field]: 0
+        })
+      );
+
+      if (!resetOk && this.config.verbose) {
+        console.warn(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Failed to reset record value for ${originalId}: ${resetErr?.message}`
+        );
+      }
+
+      // Now run normal consolidation which will process all pending transactions
+      const consolidatedValue = await this.consolidateRecord(originalId);
+
+      if (this.config.verbose) {
+        console.log(
+          `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
+          `Recalculation complete for ${originalId}: final value = ${consolidatedValue}`
+        );
+      }
+
+      return consolidatedValue;
+    } finally {
+      // Always release the lock
+      const [lockReleased, lockReleaseErr] = await tryFn(() => this.lockResource.delete(lockId));
+
+      if (!lockReleased && this.config.verbose) {
+        console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockId}:`, lockReleaseErr?.message);
+      }
+    }
   }
 
   /**
