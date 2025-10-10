@@ -4549,6 +4549,12 @@ class EventualConsistencyPlugin extends Plugin {
     for (const [resourceName, fieldHandlers] of this.fieldHandlers) {
       for (const [fieldName, handler] of fieldHandlers) {
         if (!handler.deferredSetup) {
+          if (this.config.autoConsolidate && this.config.mode === "async") {
+            this.startConsolidationTimerForHandler(handler, resourceName, fieldName);
+          }
+          if (this.config.transactionRetention && this.config.transactionRetention > 0) {
+            this.startGarbageCollectionTimerForHandler(handler, resourceName, fieldName);
+          }
           this.emit("eventual-consistency.started", {
             resource: resourceName,
             field: fieldName,
@@ -4743,8 +4749,9 @@ class EventualConsistencyPlugin extends Plugin {
         plugin.analyticsResource = oldAnalyticsResource;
         return result;
       }
-      const record = await handler.targetResource.get(id);
-      return (record?.[field] || 0) + amount;
+      const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
+      const currentValue = ok && record ? record[field] || 0 : 0;
+      return currentValue + amount;
     };
     resource.sub = async (id, field, amount) => {
       const { plugin: handler } = plugin._resolveFieldAndPlugin(resource, field, amount);
@@ -4786,8 +4793,9 @@ class EventualConsistencyPlugin extends Plugin {
         plugin.analyticsResource = oldAnalyticsResource;
         return result;
       }
-      const record = await handler.targetResource.get(id);
-      return (record?.[field] || 0) - amount;
+      const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
+      const currentValue = ok && record ? record[field] || 0 : 0;
+      return currentValue - amount;
     };
     resource.consolidate = async (id, field) => {
       if (!field) {
@@ -4966,6 +4974,42 @@ class EventualConsistencyPlugin extends Plugin {
     this.consolidationTimer = setInterval(async () => {
       await this.runConsolidation();
     }, intervalMs);
+  }
+  startConsolidationTimerForHandler(handler, resourceName, fieldName) {
+    const intervalMs = this.config.consolidationInterval * 1e3;
+    if (this.config.verbose) {
+      const nextRun = new Date(Date.now() + intervalMs);
+      console.log(
+        `[EventualConsistency] ${resourceName}.${fieldName} - Consolidation timer started. Next run at ${nextRun.toISOString()} (every ${this.config.consolidationInterval}s)`
+      );
+    }
+    handler.consolidationTimer = setInterval(async () => {
+      await this.runConsolidationForHandler(handler, resourceName, fieldName);
+    }, intervalMs);
+  }
+  async runConsolidationForHandler(handler, resourceName, fieldName) {
+    const oldResource = this.config.resource;
+    const oldField = this.config.field;
+    const oldTransactionResource = this.transactionResource;
+    const oldTargetResource = this.targetResource;
+    const oldLockResource = this.lockResource;
+    const oldAnalyticsResource = this.analyticsResource;
+    this.config.resource = resourceName;
+    this.config.field = fieldName;
+    this.transactionResource = handler.transactionResource;
+    this.targetResource = handler.targetResource;
+    this.lockResource = handler.lockResource;
+    this.analyticsResource = handler.analyticsResource;
+    try {
+      await this.runConsolidation();
+    } finally {
+      this.config.resource = oldResource;
+      this.config.field = oldField;
+      this.transactionResource = oldTransactionResource;
+      this.targetResource = oldTargetResource;
+      this.lockResource = oldLockResource;
+      this.analyticsResource = oldAnalyticsResource;
+    }
   }
   async runConsolidation() {
     const startTime = Date.now();
@@ -5316,6 +5360,33 @@ class EventualConsistencyPlugin extends Plugin {
     this.gcTimer = setInterval(async () => {
       await this.runGarbageCollection();
     }, gcIntervalMs);
+  }
+  startGarbageCollectionTimerForHandler(handler, resourceName, fieldName) {
+    const gcIntervalMs = this.config.gcInterval * 1e3;
+    handler.gcTimer = setInterval(async () => {
+      await this.runGarbageCollectionForHandler(handler, resourceName, fieldName);
+    }, gcIntervalMs);
+  }
+  async runGarbageCollectionForHandler(handler, resourceName, fieldName) {
+    const oldResource = this.config.resource;
+    const oldField = this.config.field;
+    const oldTransactionResource = this.transactionResource;
+    const oldTargetResource = this.targetResource;
+    const oldLockResource = this.lockResource;
+    this.config.resource = resourceName;
+    this.config.field = fieldName;
+    this.transactionResource = handler.transactionResource;
+    this.targetResource = handler.targetResource;
+    this.lockResource = handler.lockResource;
+    try {
+      await this.runGarbageCollection();
+    } finally {
+      this.config.resource = oldResource;
+      this.config.field = oldField;
+      this.transactionResource = oldTransactionResource;
+      this.targetResource = oldTargetResource;
+      this.lockResource = oldLockResource;
+    }
   }
   /**
    * Delete old applied transactions based on retention policy
