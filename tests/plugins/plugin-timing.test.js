@@ -1,4 +1,4 @@
-import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { AuditPlugin } from '../../src/plugins/audit.plugin.js';
 import { MetricsPlugin } from '../../src/plugins/metrics.plugin.js';
@@ -27,7 +27,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           wallets: ['balance']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
       
       // This should not throw, but defer setup
@@ -87,7 +87,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           wallets: ['balance']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
       
       await database.usePlugin(plugin);
@@ -114,7 +114,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           accounts: ['credits']
         },
-        mode: 'async'
+        consolidation: { mode: 'async' }
       });
       
       await database.usePlugin(plugin);
@@ -268,7 +268,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           items: ['count']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
       await database.usePlugin(ecPlugin);
 
@@ -304,7 +304,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           balances: ['amount']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
       
       // Create database with plugins in constructor
@@ -349,7 +349,7 @@ describe('Plugin Timing Tests', () => {
         resources: {
           nonexistent: ['value']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
       
       // Should not throw when adding plugin
