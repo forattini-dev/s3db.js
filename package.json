@@ -75,7 +75,8 @@
     "release:check": "./scripts/pre-release-check.sh",
     "release:prepare": "pnpm run build:binaries && echo 'Binaries ready for GitHub release'",
     "release": "./scripts/release.sh",
-    "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'"
+    "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
+    "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.906.0",
@@ -138,6 +139,7 @@
     "rollup-plugin-polyfill-node": "^0.13.0",
     "rollup-plugin-shebang-bin": "^0.1.0",
     "rollup-plugin-terser": "^7.0.2",
+    "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "webpack": "^5.102.1",
     "webpack-cli": "^6.0.1"
