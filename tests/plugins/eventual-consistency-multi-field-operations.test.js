@@ -46,8 +46,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
-      mode: 'async', // Use async mode to allow manual consolidation
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);
@@ -227,8 +226,7 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
       resources: {
         metrics: fieldNames
       },
-      mode: 'async', // Use async mode to allow manual consolidation
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);

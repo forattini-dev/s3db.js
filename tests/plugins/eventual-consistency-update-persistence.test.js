@@ -40,8 +40,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true // Enable verbose logging
     });
     await database.usePlugin(ecPlugin);
@@ -120,8 +119,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);
@@ -176,8 +174,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);
@@ -247,8 +244,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);

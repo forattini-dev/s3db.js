@@ -4308,10 +4308,19 @@ const CostsPlugin = {
 };
 
 function createConfig(options, detectedTimezone) {
+  const consolidation = options.consolidation || {};
+  const locks = options.locks || {};
+  const gc = options.garbageCollection || {};
+  const analytics = options.analytics || {};
+  const batch = options.batch || {};
+  const lateArrivals = options.lateArrivals || {};
+  const checkpoints = options.checkpoints || {};
   return {
+    // Cohort (timezone)
     cohort: {
       timezone: options.cohort?.timezone || detectedTimezone
     },
+    // Reducer function
     reducer: options.reducer || ((transactions) => {
       let baseValue = 0;
       for (const t of transactions) {
@@ -4325,38 +4334,39 @@ function createConfig(options, detectedTimezone) {
       }
       return baseValue;
     }),
-    consolidationInterval: options.consolidationInterval ?? 300,
-    consolidationConcurrency: options.consolidationConcurrency || 5,
-    consolidationWindow: options.consolidationWindow || 24,
-    autoConsolidate: options.autoConsolidate !== false,
-    lateArrivalStrategy: options.lateArrivalStrategy || "warn",
-    batchTransactions: options.batchTransactions || false,
-    batchSize: options.batchSize || 100,
-    mode: options.mode || "async",
-    lockTimeout: options.lockTimeout || 300,
-    transactionRetention: options.transactionRetention || 30,
-    gcInterval: options.gcInterval || 86400,
-    verbose: options.verbose || false,
-    enableAnalytics: options.enableAnalytics || false,
+    // Consolidation settings
+    consolidationInterval: consolidation.interval ?? 300,
+    consolidationConcurrency: consolidation.concurrency ?? 5,
+    consolidationWindow: consolidation.window ?? 24,
+    autoConsolidate: consolidation.auto !== false,
+    mode: consolidation.mode || "async",
+    // Late arrivals
+    lateArrivalStrategy: lateArrivals.strategy || "warn",
+    // Batch transactions
+    batchTransactions: batch.enabled || false,
+    batchSize: batch.size || 100,
+    // Locks
+    lockTimeout: locks.timeout || 300,
+    // Garbage collection
+    transactionRetention: gc.retention ?? 30,
+    gcInterval: gc.interval ?? 86400,
+    // Analytics
+    enableAnalytics: analytics.enabled || false,
     analyticsConfig: {
-      periods: options.analyticsConfig?.periods || ["hour", "day", "month"],
-      metrics: options.analyticsConfig?.metrics || ["count", "sum", "avg", "min", "max"],
-      rollupStrategy: options.analyticsConfig?.rollupStrategy || "incremental",
-      retentionDays: options.analyticsConfig?.retentionDays || 365
+      periods: analytics.periods || ["hour", "day", "month"],
+      metrics: analytics.metrics || ["count", "sum", "avg", "min", "max"],
+      rollupStrategy: analytics.rollupStrategy || "incremental",
+      retentionDays: analytics.retentionDays ?? 365
     },
-    // Checkpoint configuration for high-volume scenarios
-    enableCheckpoints: options.enableCheckpoints !== false,
-    // Default: true
-    checkpointStrategy: options.checkpointStrategy || "hourly",
-    // 'hourly', 'daily', 'manual', 'disabled'
-    checkpointRetention: options.checkpointRetention || 90,
-    // Days to keep checkpoints
-    checkpointThreshold: options.checkpointThreshold || 1e3,
-    // Min transactions before creating checkpoint
-    deleteConsolidatedTransactions: options.deleteConsolidatedTransactions !== false,
-    // Delete transactions after checkpoint
-    autoCheckpoint: options.autoCheckpoint !== false
-    // Auto-create checkpoints for old cohorts
+    // Checkpoints
+    enableCheckpoints: checkpoints.enabled !== false,
+    checkpointStrategy: checkpoints.strategy || "hourly",
+    checkpointRetention: checkpoints.retention ?? 90,
+    checkpointThreshold: checkpoints.threshold ?? 1e3,
+    deleteConsolidatedTransactions: checkpoints.deleteConsolidated !== false,
+    autoCheckpoint: checkpoints.auto !== false,
+    // Debug
+    verbose: options.verbose || false
   };
 }
 function validateResourcesConfig(resources) {
@@ -4376,7 +4386,12 @@ function validateResourcesConfig(resources) {
 function logConfigWarnings(config) {
   if (config.batchTransactions && !config.verbose) {
     console.warn(
-      `[EventualConsistency] WARNING: batchTransactions is enabled. This stores transactions in memory and will lose data if container crashes. Not recommended for distributed/production environments.`
+      `[EventualConsistency] WARNING: batch.enabled is true. This stores transactions in memory and will lose data if container crashes. Not recommended for distributed/production environments.`
+    );
+  }
+  if (!config.enableCheckpoints && !config.verbose) {
+    console.warn(
+      `[EventualConsistency] INFO: checkpoints.enabled is false. Checkpoints improve performance in high-volume scenarios by creating snapshots. Consider enabling for production use.`
     );
   }
 }
@@ -4388,7 +4403,7 @@ function logInitialization(config, fieldHandlers, timezoneAutoDetected) {
   );
   if (timezoneAutoDetected) {
     console.log(
-      `[EventualConsistency] Auto-detected timezone: ${config.cohort.timezone} (from ${process.env.TZ ? "TZ env var" : "system Intl API"})`
+      `[EventualConsistency] Using timezone: ${config.cohort.timezone} (${process.env.TZ ? "from TZ env var" : "default UTC"})`
     );
   }
 }
@@ -4396,13 +4411,6 @@ function logInitialization(config, fieldHandlers, timezoneAutoDetected) {
 function detectTimezone() {
   if (process.env.TZ) {
     return process.env.TZ;
-  }
-  try {
-    const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (systemTimezone) {
-      return systemTimezone;
-    }
-  } catch (err) {
   }
   return "UTC";
 }

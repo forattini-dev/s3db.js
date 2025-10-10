@@ -18,7 +18,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
-      mode: 'sync',
+      consolidation: { mode: 'sync' },
       verbose: true
     });
 

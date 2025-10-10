@@ -27,7 +27,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       resources: {
         wallets: ['balance']
       },
-      mode: 'async'
+      consolidation: { mode: 'async' }
     });
 
     await database.usePlugin(plugin);
@@ -155,7 +155,7 @@ describe("EventualConsistencyPlugin Methods", () => {
         resources: {
           accounts: ['credits']
         },
-        mode: 'sync'
+        consolidation: { mode: 'sync' }
       });
 
       const accountsResource = await database.createResource({
@@ -320,7 +320,7 @@ describe("EventualConsistencyPlugin Methods", () => {
         resources: {
           brazil_accounts: ['balance']
         },
-        mode: 'sync',
+        consolidation: { mode: 'sync' },
         cohort: {
           timezone: 'America/Sao_Paulo'  // UTC-3
         }
@@ -380,7 +380,7 @@ describe("EventualConsistencyPlugin Methods", () => {
         resources: {
           custom_resource: ['value']
         },
-        consolidationConcurrency: 10
+        consolidation: { concurrency: 10 }
       });
 
       expect(customPlugin.config.consolidationConcurrency).toBe(10);
@@ -409,7 +409,7 @@ describe("EventualConsistencyPlugin Methods", () => {
         resources: {
           points: ['score']
         },
-        mode: 'async'
+        consolidation: { mode: 'async' }
       });
 
       await database.usePlugin(pointsPlugin);

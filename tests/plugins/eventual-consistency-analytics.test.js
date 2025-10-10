@@ -30,13 +30,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
       resources: {
         wallets: ['balance']
       },
-      mode: 'sync',
-      autoConsolidate: false,
-      enableAnalytics: true,
-      analyticsConfig: {
-        periods: ['hour', 'day', 'month'],
-        metrics: ['count', 'sum', 'avg', 'min', 'max']
-      }
+      consolidation: { mode: 'sync', auto: false },
+      analytics: { enabled: true }
     });
 
     await database.usePlugin(plugin);
@@ -451,8 +446,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     const pluginNoAnalytics = new EventualConsistencyPlugin({
       resources: {
         wallets: ['balance']
-      },
-      enableAnalytics: false
+      }
     });
 
     expect(() => pluginNoAnalytics.getAnalytics('wallets', 'balance')).rejects.toThrow(

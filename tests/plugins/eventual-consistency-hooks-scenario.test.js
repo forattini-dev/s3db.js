@@ -21,9 +21,8 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
       resources: {
         urls: ['clicks', 'views', 'shares', 'scans']
       },
-      mode: 'sync',  // Immediate consistency
-      verbose: true,
-      enableAnalytics: false
+      consolidation: { mode: 'sync' },// Immediate consistency
+      verbose: true
     });
 
     await database.usePlugin(plugin);
