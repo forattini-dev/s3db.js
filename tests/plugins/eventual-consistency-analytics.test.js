@@ -27,8 +27,9 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     // Add EventualConsistencyPlugin with analytics enabled
     plugin = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       mode: 'sync',
       autoConsolidate: false,
       enableAnalytics: true,
@@ -39,6 +40,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     });
 
     await database.usePlugin(plugin);
+    await plugin.start();
   });
 
   afterEach(async () => {
@@ -52,7 +54,11 @@ describe('EventualConsistencyPlugin Analytics', () => {
     const analyticsResource = database.resources[analyticsResourceName];
 
     expect(analyticsResource).toBeDefined();
-    expect(plugin.analyticsResource).toBe(analyticsResource);
+
+    // Verify the handler has analytics resource
+    const fieldHandlers = plugin.fieldHandlers.get('wallets');
+    const handler = fieldHandlers.get('balance');
+    expect(handler.analyticsResource).toBe(analyticsResource);
   });
 
   it('should update analytics after consolidation', async () => {
@@ -398,8 +404,9 @@ describe('EventualConsistencyPlugin Analytics', () => {
   it('should throw error when analytics disabled', async () => {
     // Create new plugin without analytics
     const pluginNoAnalytics = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       enableAnalytics: false
     });
 

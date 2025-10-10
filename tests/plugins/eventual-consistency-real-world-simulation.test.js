@@ -40,18 +40,15 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     });
 
     // Setup EventualConsistency for all counters (like mrt-shortner)
-    const counters = ['clicks', 'views', 'shares', 'scans'];
-
-    for (const counter of counters) {
-      const plugin = new EventualConsistencyPlugin({
-        resource: 'urls',
-        field: counter,
-        mode: 'sync',
-        autoConsolidate: false,
-        verbose: true
-      });
-      await database.usePlugin(plugin);
-    }
+    const plugin = new EventualConsistencyPlugin({
+      resources: {
+        urls: ['clicks', 'views', 'shares', 'scans']
+      },
+      mode: 'sync',
+      autoConsolidate: false,
+      verbose: true
+    });
+    await database.usePlugin(plugin);
 
     console.log('1️⃣  Creating URL...');
     await urls.insert({
@@ -120,8 +117,9 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      resource: 'urls',
-      field: 'clicks',
+      resources: {
+        urls: ['clicks']
+      },
       mode: 'sync',
       autoConsolidate: false,
       verbose: true
@@ -237,8 +235,9 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency in ASYNC mode
     const plugin = new EventualConsistencyPlugin({
-      resource: 'urls',
-      field: 'clicks',
+      resources: {
+        urls: ['clicks']
+      },
       mode: 'async',
       autoConsolidate: true,
       consolidationInterval: 2, // 2 seconds for fast testing
@@ -312,8 +311,9 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
 
     // Setup EventualConsistency
     const plugin = new EventualConsistencyPlugin({
-      resource: 'urls',
-      field: 'clicks',
+      resources: {
+        urls: ['clicks']
+      },
       mode: 'sync',
       autoConsolidate: false,
       verbose: true

@@ -34,8 +34,9 @@ describe('EventualConsistencyPlugin - Persistence Bug Fix', () => {
 
     // Add EventualConsistency plugin for clicks field
     const clicksPlugin = new EventualConsistencyPlugin({
-      resource: 'urls',
-      field: 'clicks',
+      resources: {
+        urls: ['clicks']
+      },
       mode: 'sync',
       autoConsolidate: false,
       verbose: true
@@ -143,8 +144,9 @@ describe('EventualConsistencyPlugin - Persistence Bug Fix', () => {
     });
 
     const plugin = new EventualConsistencyPlugin({
-      resource: 'urls',
-      field: 'clicks',
+      resources: {
+        urls: ['clicks']
+      },
       mode: 'async',
       autoConsolidate: true,
       consolidationInterval: 1, // 1 second for fast testing
