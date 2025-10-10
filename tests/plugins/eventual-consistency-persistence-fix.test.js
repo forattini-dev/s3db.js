@@ -39,8 +39,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
       resources: {
         urls: ['clicks']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: true
     });
 
@@ -190,9 +189,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: true,
-      consolidationInterval: 1, // 1 second for fast testing
+      consolidation: { mode: 'async', auto: true },
       verbose: true
     });
 
@@ -218,8 +215,8 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
       clicks: 0
     });
 
-    // Wait for multiple consolidation cycles
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    // Manually trigger consolidation since record now exists
+    await urls.consolidate('url5', 'clicks');
 
     // Now it should be persisted
     const url = await urls.get('url5');

@@ -57,15 +57,9 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
       resources: {
         metrics: fieldNames
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: false, // Disable logs for cleaner output
-      enableAnalytics: true,
-      analyticsConfig: {
-        periods: ['hour', 'day', 'month'],
-        metrics: ['count', 'sum'],
-        retentionDays: 365
-      }
+      analytics: { enabled: true }
     });
     await database.usePlugin(plugin);
 
@@ -133,8 +127,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
       resources: {
         metrics: fieldNames
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);
@@ -228,10 +221,8 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
       resources: {
         metrics: fieldNames
       },
-      mode: 'sync',
-      autoConsolidate: false,
-      verbose: false,
-      enableAnalytics: true
+      consolidation: { mode: 'sync', auto: false },
+      verbose: false
     });
     await database.usePlugin(plugin);
 

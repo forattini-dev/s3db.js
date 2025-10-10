@@ -23,9 +23,16 @@ async function main() {
     resources: {
       urls: ['clicks', 'views']
     },
-    mode: 'sync',  // Consolidação imediata
-    autoConsolidate: false,
-    enableAnalytics: true,
+
+    consolidation: {
+      mode: 'sync',  // Consolidação imediata
+      auto: false
+    },
+
+    analytics: {
+      enabled: true
+    },
+
     verbose: true
   });
 

@@ -40,8 +40,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);
@@ -145,8 +144,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);
@@ -234,8 +232,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'async',
-      autoConsolidate: false,
+      consolidation: { mode: 'async', auto: false },
       verbose: true
     });
     await database.usePlugin(ecPlugin);

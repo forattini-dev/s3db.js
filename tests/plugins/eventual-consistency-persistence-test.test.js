@@ -43,8 +43,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
       resources: {
         urls: ['clicks', 'views']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);
@@ -131,8 +130,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'sync',
-      autoConsolidate: false,
+      consolidation: { mode: 'sync', auto: false },
       verbose: false
     });
     await database.usePlugin(plugin);
@@ -201,7 +199,7 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
       resources: {
         urls: ['clicks']
       },
-      mode: 'sync',
+      consolidation: { mode: 'sync' },
       verbose: false
     });
     await database.usePlugin(plugin);
