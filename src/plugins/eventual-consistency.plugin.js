@@ -1295,64 +1295,35 @@ export class EventualConsistencyPlugin extends Plugin {
         );
       }
 
-      // Update the original record (use optimistic upsert pattern)
-      const [updateOk, updateErr] = await tryFn(async () => {
-        // Try update first (most common case - record exists)
-        const [ok, err] = await tryFn(() =>
-          this.targetResource.update(originalId, {
-            [this.config.field]: consolidatedValue
-          })
-        );
+      // Update the original record
+      // NOTE: We do NOT attempt to insert non-existent records because:
+      // 1. Target resources typically have required fields we don't know about
+      // 2. Record creation should be the application's responsibility
+      // 3. Transactions will remain pending until the record is created
+      const [updateOk, updateErr] = await tryFn(() =>
+        this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        })
+      );
 
-        if (ok) {
-          // Update succeeded
-          return ok;
-        }
-
-        // Update failed - check if it's because record doesn't exist
-        if (err?.message?.includes('does not exist')) {
+      if (!updateOk) {
+        // Check if record doesn't exist
+        if (updateErr?.message?.includes('does not exist')) {
+          // Record doesn't exist - skip consolidation and keep transactions pending
           if (this.config.verbose) {
-            console.log(
+            console.warn(
               `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
-              `Record ${originalId} doesn't exist, attempting to create with ${this.config.field}=${consolidatedValue}`
+              `Record ${originalId} doesn't exist. Skipping consolidation. ` +
+              `${transactions.length} transactions will remain pending until record is created.`
             );
           }
 
-          // Try to insert instead
-          const [insertOk, insertErr] = await tryFn(() =>
-            this.targetResource.insert({
-              id: originalId,
-              [this.config.field]: consolidatedValue
-            })
-          );
-
-          if (insertOk) {
-            return insertOk;
-          }
-
-          // Insert also failed - check if it's due to race condition
-          if (insertErr?.message?.includes('already exists')) {
-            if (this.config.verbose) {
-              console.log(
-                `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
-                `Record ${originalId} was created by another consolidation during retry, updating instead`
-              );
-            }
-            // Another consolidation created the record, retry update
-            return await this.targetResource.update(originalId, {
-              [this.config.field]: consolidatedValue
-            });
-          }
-
-          // Insert failed for another reason (e.g., required fields)
-          throw insertErr;
+          // Return the consolidated value (for informational purposes)
+          // Transactions remain pending and will be picked up when record exists
+          return consolidatedValue;
         }
 
-        // Update failed for another reason (not "does not exist")
-        throw err;
-      });
-
-      if (!updateOk) {
+        // Update failed for another reason - this is a real error
         console.error(
           `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
           `FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
