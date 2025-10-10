@@ -27,7 +27,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       resources: {
         wallets: ['balance']
       },
-      mode: 'sync' // Use sync mode to test locking
+      consolidation: { mode: 'sync' },// Use sync mode to test locking
     });
 
     await database.usePlugin(plugin);

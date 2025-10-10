@@ -4,8 +4,8 @@
  */
 
 /**
- * Auto-detect timezone from environment or system
- * @returns {string} Detected timezone (defaults to 'UTC')
+ * Get timezone (from environment or default to UTC)
+ * @returns {string} Timezone (defaults to 'UTC')
  */
 export function detectTimezone() {
   // 1. Try TZ environment variable (common in Docker/K8s)
@@ -13,17 +13,7 @@ export function detectTimezone() {
     return process.env.TZ;
   }
 
-  // 2. Try Intl API (works in Node.js and browsers)
-  try {
-    const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (systemTimezone) {
-      return systemTimezone;
-    }
-  } catch (err) {
-    // Intl API not available or failed
-  }
-
-  // 3. Fallback to UTC
+  // 2. Default to UTC
   return 'UTC';
 }
 

@@ -20,7 +20,10 @@ async function main() {
   // 2. Plugin com configuração MÍNIMA
   const plugin = new EventualConsistencyPlugin({
     resources: { urls: ['clicks'] },
-    mode: 'sync'  // Consolida automaticamente
+
+    consolidation: {
+      mode: 'sync'  // Consolida automaticamente
+    }
   });
 
   await db.usePlugin(plugin);
