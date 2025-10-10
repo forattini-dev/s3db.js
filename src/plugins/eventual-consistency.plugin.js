@@ -1092,14 +1092,7 @@ export class EventualConsistencyPlugin extends Plugin {
     }
 
     try {
-      // Get the current record value first
-      const [recordOk, recordErr, record] = await tryFn(() =>
-        this.targetResource.get(originalId)
-      );
-
-      const currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
-
-      // Get all transactions for this record
+      // Get all unapplied transactions for this record
       const [ok, err, transactions] = await tryFn(() =>
         this.transactionResource.query({
           originalId,
@@ -1108,6 +1101,12 @@ export class EventualConsistencyPlugin extends Plugin {
       );
 
       if (!ok || !transactions || transactions.length === 0) {
+        // No pending transactions - try to get current value from record
+        const [recordOk, recordErr, record] = await tryFn(() =>
+          this.targetResource.get(originalId)
+        );
+        const currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
+
         if (this.config.verbose) {
           console.log(
             `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
@@ -1117,20 +1116,49 @@ export class EventualConsistencyPlugin extends Plugin {
         return currentValue;
       }
 
+      // Get the LAST APPLIED VALUE from transactions (not from record - avoids S3 eventual consistency issues)
+      // This is the source of truth for the current value
+      const [appliedOk, appliedErr, appliedTransactions] = await tryFn(() =>
+        this.transactionResource.query({
+          originalId,
+          applied: true
+        })
+      );
+
+      let currentValue = 0;
+
+      if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
+        // We have applied transactions - use them to calculate the last consolidated value
+        // Sort by timestamp to get chronological order
+        appliedTransactions.sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+
+        // Apply reducer to get the last consolidated value
+        currentValue = this.config.reducer(appliedTransactions);
+      } else {
+        // No applied transactions - try to get initial value from record
+        const [recordOk, recordErr, record] = await tryFn(() =>
+          this.targetResource.get(originalId)
+        );
+        currentValue = (recordOk && record) ? (record[this.config.field] || 0) : 0;
+      }
+
       if (this.config.verbose) {
         console.log(
           `[EventualConsistency] ${this.config.resource}.${this.config.field} - ` +
           `Consolidating ${originalId}: ${transactions.length} pending transactions ` +
-          `(current: ${currentValue})`
+          `(current: ${currentValue} from ${appliedOk && appliedTransactions?.length > 0 ? 'applied transactions' : 'record'})`
         );
       }
 
-      // Sort transactions by timestamp
+      // Sort pending transactions by timestamp
       transactions.sort((a, b) =>
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
       );
 
-      // If there's a current value and no 'set' operations, prepend a synthetic set transaction
+      // If there's a current value and no 'set' operations in pending transactions,
+      // prepend a synthetic set transaction to preserve the current value
       const hasSetOperation = transactions.some(t => t.operation === 'set');
       if (currentValue !== 0 && !hasSetOperation) {
         transactions.unshift(this._createSyntheticSetTransaction(currentValue));
