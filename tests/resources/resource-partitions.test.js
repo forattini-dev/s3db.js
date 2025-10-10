@@ -428,8 +428,8 @@ describe('Resource Partitions - Real Integration Tests', () => {
     // Delete the order
     await resource.delete('order1');
 
-    // Small delay to ensure partition cleanup is done
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Delay to ensure partition cleanup is done (async partitions take longer)
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Verify it's removed from all partitions
     const finalCompletedOrders = await resource.listIds({

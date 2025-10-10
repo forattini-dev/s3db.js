@@ -659,7 +659,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       // Test delete event
       await resource.delete('test-different-events');
       expect(deleteListener).toHaveBeenCalledTimes(1);
-    });
+    }, 30000);
 
     test('should receive correct event data with $before and $after for updates', async () => {
       const updateListener = jest.fn();

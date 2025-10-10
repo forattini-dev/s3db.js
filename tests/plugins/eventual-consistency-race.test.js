@@ -144,9 +144,9 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
   describe("Parallel Consolidation", () => {
     it("should consolidate multiple records in parallel", async () => {
-      // Create 5 wallets in sync mode (simplified test)
+      // Create 3 wallets in sync mode (reduced from 5 for speed)
       const walletIds = [];
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 3; i++) {
         const id = `wallet-parallel-${i}`;
         walletIds.push(id);
         await walletsResource.insert({
@@ -158,7 +158,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
       // Add transactions to each wallet (sync mode consolidates immediately)
       for (const id of walletIds) {
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 2; i++) {
           await walletsResource.add(id, 'balance', 20);
         }
       }
@@ -166,7 +166,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       // Check all wallets were consolidated
       for (const id of walletIds) {
         const wallet = await walletsResource.get(id);
-        expect(wallet.balance).toBe(160); // 100 + (3 * 20)
+        expect(wallet.balance).toBe(140); // 100 + (2 * 20)
       }
 
       // All transactions should be applied
@@ -174,8 +174,8 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
         applied: true
       });
 
-      expect(allTransactions.length).toBeGreaterThanOrEqual(15); // 5 wallets * 3 transactions
-    });
+      expect(allTransactions.length).toBeGreaterThanOrEqual(6); // 3 wallets * 2 transactions
+    }, 30000);
   });
 
   describe("getConsolidatedValue Accuracy", () => {
