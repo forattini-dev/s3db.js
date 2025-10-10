@@ -4809,17 +4809,20 @@ class EventualConsistencyPlugin extends Plugin {
       const oldTransactionResource = plugin.transactionResource;
       const oldTargetResource = plugin.targetResource;
       const oldLockResource = plugin.lockResource;
+      const oldAnalyticsResource = plugin.analyticsResource;
       plugin.config.resource = handler.resource;
       plugin.config.field = handler.field;
       plugin.transactionResource = handler.transactionResource;
       plugin.targetResource = handler.targetResource;
       plugin.lockResource = handler.lockResource;
+      plugin.analyticsResource = handler.analyticsResource;
       const result = await plugin.consolidateRecord(id);
       plugin.config.resource = oldResource;
       plugin.config.field = oldField;
       plugin.transactionResource = oldTransactionResource;
       plugin.targetResource = oldTargetResource;
       plugin.lockResource = oldLockResource;
+      plugin.analyticsResource = oldAnalyticsResource;
       return result;
     };
     resource.getConsolidatedValue = async (id, field, options = {}) => {
