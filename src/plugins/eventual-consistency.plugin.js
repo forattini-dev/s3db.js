@@ -498,12 +498,14 @@ export class EventualConsistencyPlugin extends Plugin {
         const oldTransactionResource = plugin.transactionResource;
         const oldTargetResource = plugin.targetResource;
         const oldLockResource = plugin.lockResource;
+        const oldAnalyticsResource = plugin.analyticsResource;
 
         plugin.config.resource = handler.resource;
         plugin.config.field = handler.field;
         plugin.transactionResource = handler.transactionResource;
         plugin.targetResource = handler.targetResource;
         plugin.lockResource = handler.lockResource;
+        plugin.analyticsResource = handler.analyticsResource;
 
         const result = await plugin._syncModeConsolidate(id, field);
 
@@ -513,6 +515,7 @@ export class EventualConsistencyPlugin extends Plugin {
         plugin.transactionResource = oldTransactionResource;
         plugin.targetResource = oldTargetResource;
         plugin.lockResource = oldLockResource;
+        plugin.analyticsResource = oldAnalyticsResource;
 
         return result;
       }
@@ -553,12 +556,14 @@ export class EventualConsistencyPlugin extends Plugin {
         const oldTransactionResource = plugin.transactionResource;
         const oldTargetResource = plugin.targetResource;
         const oldLockResource = plugin.lockResource;
+        const oldAnalyticsResource = plugin.analyticsResource;
 
         plugin.config.resource = handler.resource;
         plugin.config.field = handler.field;
         plugin.transactionResource = handler.transactionResource;
         plugin.targetResource = handler.targetResource;
         plugin.lockResource = handler.lockResource;
+        plugin.analyticsResource = handler.analyticsResource;
 
         const result = await plugin._syncModeConsolidate(id, field);
 
@@ -567,6 +572,7 @@ export class EventualConsistencyPlugin extends Plugin {
         plugin.transactionResource = oldTransactionResource;
         plugin.targetResource = oldTargetResource;
         plugin.lockResource = oldLockResource;
+        plugin.analyticsResource = oldAnalyticsResource;
 
         return result;
       }
@@ -609,12 +615,14 @@ export class EventualConsistencyPlugin extends Plugin {
         const oldTransactionResource = plugin.transactionResource;
         const oldTargetResource = plugin.targetResource;
         const oldLockResource = plugin.lockResource;
+        const oldAnalyticsResource = plugin.analyticsResource;
 
         plugin.config.resource = handler.resource;
         plugin.config.field = handler.field;
         plugin.transactionResource = handler.transactionResource;
         plugin.targetResource = handler.targetResource;
         plugin.lockResource = handler.lockResource;
+        plugin.analyticsResource = handler.analyticsResource;
 
         const result = await plugin._syncModeConsolidate(id, field);
 
@@ -623,6 +631,7 @@ export class EventualConsistencyPlugin extends Plugin {
         plugin.transactionResource = oldTransactionResource;
         plugin.targetResource = oldTargetResource;
         plugin.lockResource = oldLockResource;
+        plugin.analyticsResource = oldAnalyticsResource;
 
         return result;
       }
@@ -1771,14 +1780,25 @@ export class EventualConsistencyPlugin extends Plugin {
    * @returns {Promise<Array>} Analytics data
    */
   async getAnalytics(resourceName, field, options = {}) {
-    if (!this.analyticsResource) {
+    // Get handler for this resource/field combination
+    const fieldHandlers = this.fieldHandlers.get(resourceName);
+    if (!fieldHandlers) {
+      throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    }
+
+    const handler = fieldHandlers.get(field);
+    if (!handler) {
+      throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    }
+
+    if (!handler.analyticsResource) {
       throw new Error('Analytics not enabled for this plugin');
     }
 
     const { period = 'day', date, startDate, endDate, month, year, breakdown = false } = options;
 
     const [ok, err, allAnalytics] = await tryFn(() =>
-      this.analyticsResource.list()
+      handler.analyticsResource.list()
     );
 
     if (!ok || !allAnalytics) {
@@ -2058,7 +2078,18 @@ export class EventualConsistencyPlugin extends Plugin {
    * @returns {Promise<Array>} Top records
    */
   async getTopRecords(resourceName, field, options = {}) {
-    if (!this.transactionResource) {
+    // Get handler for this resource/field combination
+    const fieldHandlers = this.fieldHandlers.get(resourceName);
+    if (!fieldHandlers) {
+      throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+    }
+
+    const handler = fieldHandlers.get(field);
+    if (!handler) {
+      throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+    }
+
+    if (!handler.transactionResource) {
       throw new Error('Transaction resource not initialized');
     }
 
@@ -2066,7 +2097,7 @@ export class EventualConsistencyPlugin extends Plugin {
 
     // Get all transactions for the period
     const [ok, err, transactions] = await tryFn(() =>
-      this.transactionResource.list()
+      handler.transactionResource.list()
     );
 
     if (!ok || !transactions) {

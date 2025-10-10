@@ -48,7 +48,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
     });
 
     // Hook: when click is created, increment URL clicks
-    clicksResource.addHook('afterInsert', async ({ record }) => {
+    clicksResource.addHook('afterInsert', async (record) => {
       await urlsResource.add(record.urlId, 'clicks', 1);
     });
 
