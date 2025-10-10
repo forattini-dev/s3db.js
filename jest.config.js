@@ -1,14 +1,14 @@
 export default {
   silent: true,
-  maxWorkers: 1,
+  maxWorkers: process.env.CI ? 1 : '50%', // Use 1 worker in CI, 50% of CPUs locally
   verbose: false,
-  testTimeout: 30000,
+  testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
   injectGlobals: true,
   testEnvironment: 'node',
-  
+
   // Configurações para evitar travamentos
   forceExit: true,
-  detectOpenHandles: true,
+  detectOpenHandles: false, // Disabled for speed (use only when debugging)
   detectLeaks: false, // Desabilitado pois é experimental e causa falsos positivos
   bail: false, // Continua executando mesmo com falhas
   clearMocks: true,
