@@ -11,7 +11,7 @@
  */
 
 import { S3db } from '../src/database.class.js';
-import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency.plugin.js';
+import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency/index.js';
 
 async function demo() {
   console.log('\n🧪 EventualConsistency Multi-Field Resources Demo\n');
