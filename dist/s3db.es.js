@@ -5252,45 +5252,20 @@ class EventualConsistencyPlugin extends Plugin {
           `[EventualConsistency] ${this.config.resource}.${this.config.field} - ${originalId}: ${currentValue} \u2192 ${consolidatedValue} (${consolidatedValue > currentValue ? "+" : ""}${consolidatedValue - currentValue})`
         );
       }
-      const [updateOk, updateErr] = await tryFn(async () => {
-        const [ok2, err2] = await tryFn(
-          () => this.targetResource.update(originalId, {
-            [this.config.field]: consolidatedValue
-          })
-        );
-        if (ok2) {
-          return ok2;
-        }
-        if (err2?.message?.includes("does not exist")) {
+      const [updateOk, updateErr] = await tryFn(
+        () => this.targetResource.update(originalId, {
+          [this.config.field]: consolidatedValue
+        })
+      );
+      if (!updateOk) {
+        if (updateErr?.message?.includes("does not exist")) {
           if (this.config.verbose) {
-            console.log(
-              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} doesn't exist, attempting to create with ${this.config.field}=${consolidatedValue}`
+            console.warn(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} doesn't exist. Skipping consolidation. ${transactions.length} transactions will remain pending until record is created.`
             );
           }
-          const [insertOk, insertErr] = await tryFn(
-            () => this.targetResource.insert({
-              id: originalId,
-              [this.config.field]: consolidatedValue
-            })
-          );
-          if (insertOk) {
-            return insertOk;
-          }
-          if (insertErr?.message?.includes("already exists")) {
-            if (this.config.verbose) {
-              console.log(
-                `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} was created by another consolidation during retry, updating instead`
-              );
-            }
-            return await this.targetResource.update(originalId, {
-              [this.config.field]: consolidatedValue
-            });
-          }
-          throw insertErr;
+          return consolidatedValue;
         }
-        throw err2;
-      });
-      if (!updateOk) {
         console.error(
           `[EventualConsistency] ${this.config.resource}.${this.config.field} - FAILED to update ${originalId}: ${updateErr?.message || updateErr}`,
           { error: updateErr, consolidatedValue, currentValue }
@@ -12156,7 +12131,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "10.0.15" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "10.0.16" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
