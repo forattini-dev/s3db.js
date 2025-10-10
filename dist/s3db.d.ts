@@ -1069,11 +1069,207 @@ declare module 's3db.js' {
     deleteBackup(backupId: string): Promise<void>;
   }
 
+  /** Eventual Consistency Plugin Config */
+  export interface EventualConsistencyPluginConfig extends PluginConfig {
+    /** Resource name to field names mapping (required) */
+    resources: Record<string, string[]>;
+
+    /** Consolidation settings */
+    consolidation?: {
+      /** Consolidation mode: 'sync' or 'async' (default: 'async') */
+      mode?: 'sync' | 'async';
+      /** Consolidation interval in seconds (default: 300) */
+      interval?: number;
+      /** Consolidation concurrency (default: 5) */
+      concurrency?: number;
+      /** Consolidation window in hours (default: 24) */
+      window?: number;
+      /** Enable auto-consolidation (default: true) */
+      auto?: boolean;
+    };
+
+    /** Lock settings */
+    locks?: {
+      /** Lock timeout in seconds (default: 300) */
+      timeout?: number;
+    };
+
+    /** Garbage collection settings */
+    garbageCollection?: {
+      /** Transaction retention in days (default: 30) */
+      retention?: number;
+      /** GC interval in seconds (default: 86400) */
+      interval?: number;
+    };
+
+    /** Analytics settings */
+    analytics?: {
+      /** Enable analytics (default: false) */
+      enabled?: boolean;
+      /** Time periods to track (default: ['hour', 'day', 'month']) */
+      periods?: Array<'hour' | 'day' | 'month'>;
+      /** Metrics to track (default: ['count', 'sum', 'avg', 'min', 'max']) */
+      metrics?: Array<'count' | 'sum' | 'avg' | 'min' | 'max'>;
+      /** Rollup strategy (default: 'incremental') */
+      rollupStrategy?: 'incremental' | 'full';
+      /** Analytics retention in days (default: 365) */
+      retentionDays?: number;
+    };
+
+    /** Batch transaction settings */
+    batch?: {
+      /** Enable batch transactions (default: false) */
+      enabled?: boolean;
+      /** Batch size (default: 100) */
+      size?: number;
+    };
+
+    /** Late arrivals handling */
+    lateArrivals?: {
+      /** Strategy for late arrivals (default: 'warn') */
+      strategy?: 'warn' | 'ignore' | 'error';
+    };
+
+    /** Checkpoint settings */
+    checkpoints?: {
+      /** Enable checkpoints (default: true) */
+      enabled?: boolean;
+      /** Checkpoint strategy (default: 'hourly') */
+      strategy?: 'hourly' | 'daily' | 'threshold';
+      /** Checkpoint retention in days (default: 90) */
+      retention?: number;
+      /** Checkpoint threshold (default: 1000) */
+      threshold?: number;
+      /** Delete consolidated transactions (default: true) */
+      deleteConsolidated?: boolean;
+      /** Enable auto-checkpoint (default: true) */
+      auto?: boolean;
+    };
+
+    /** Cohort settings */
+    cohort?: {
+      /** Timezone for cohorts (default: UTC or TZ env var) */
+      timezone?: string;
+    };
+
+    /** Custom reducer function */
+    reducer?: (transactions: any[]) => number;
+
+    /** Enable verbose logging (default: false) */
+    verbose?: boolean;
+  }
+
+  /** Analytics query options */
+  export interface EventualConsistencyAnalyticsOptions {
+    /** Period to query */
+    period?: 'hour' | 'day' | 'month';
+    /** Start date (YYYY-MM-DD or YYYY-MM-DD HH:00) */
+    startDate?: string;
+    /** End date (YYYY-MM-DD or YYYY-MM-DD HH:00) */
+    endDate?: string;
+    /** Single date (YYYY-MM-DD) */
+    date?: string;
+    /** Operation breakdown */
+    breakdown?: 'operations';
+    /** Fill gaps with zeros for continuous data (default: false) */
+    fillGaps?: boolean;
+  }
+
+  /** Top records query options */
+  export interface EventualConsistencyTopRecordsOptions {
+    /** Period to query */
+    period?: 'hour' | 'day' | 'month';
+    /** Date for the query */
+    date?: string;
+    /** Metric to sort by: 'transactionCount' or 'totalValue' */
+    metric?: 'transactionCount' | 'totalValue';
+    /** Limit results (default: 10) */
+    limit?: number;
+  }
+
+  /** Analytics result */
+  export interface EventualConsistencyAnalyticsResult {
+    /** Cohort identifier (date/hour/month string) */
+    cohort: string;
+    /** Number of transactions */
+    count: number;
+    /** Sum of values */
+    sum: number;
+    /** Average value */
+    avg: number;
+    /** Minimum value */
+    min: number;
+    /** Maximum value */
+    max: number;
+    /** Number of distinct records */
+    recordCount: number;
+    /** Breakdown by operation (if requested) */
+    add?: { count: number; sum: number };
+    sub?: { count: number; sum: number };
+    set?: { count: number; sum: number };
+  }
+
+  /** Top record result */
+  export interface EventualConsistencyTopRecordResult {
+    /** Record ID */
+    recordId: string;
+    /** Number of transactions or total value */
+    count: number;
+    /** Total value */
+    sum: number;
+  }
+
+  /** Cohort information */
+  export interface EventualConsistencyCohortInfo {
+    /** Date in YYYY-MM-DD format */
+    date: string;
+    /** Hour in YYYY-MM-DD HH:00 format */
+    hour: string;
+    /** Month in YYYY-MM format */
+    month: string;
+  }
+
   /** Eventual Consistency Plugin */
   export class EventualConsistencyPlugin extends Plugin {
-    constructor(config?: any);
+    constructor(config: EventualConsistencyPluginConfig);
+
+    // Lifecycle methods
     setup(database: Database): Promise<void>;
-    createTransaction(resourceName: string): any;
+
+    // Analytics methods
+    getAnalytics(resourceName: string, field: string, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getMonthByDay(resourceName: string, field: string, month: string, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getDayByHour(resourceName: string, field: string, date: string, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getLastNDays(resourceName: string, field: string, days?: number, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getYearByMonth(resourceName: string, field: string, year: number, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getMonthByHour(resourceName: string, field: string, month: string, options?: EventualConsistencyAnalyticsOptions): Promise<EventualConsistencyAnalyticsResult[]>;
+    getTopRecords(resourceName: string, field: string, options?: EventualConsistencyTopRecordsOptions): Promise<EventualConsistencyTopRecordResult[]>;
+
+    // Utility methods
+    getCohortInfo(date: Date): EventualConsistencyCohortInfo;
+    createPartitionConfig(): any;
+    createTransaction(handler: any, data: any): Promise<any>;
+  }
+
+  /** Resource extensions added by EventualConsistencyPlugin */
+  export interface EventualConsistencyResourceExtensions {
+    /** Set field value (replaces current value) */
+    set(id: string, field: string, value: number): Promise<number>;
+
+    /** Increment field value */
+    add(id: string, field: string, amount: number): Promise<number>;
+
+    /** Decrement field value */
+    sub(id: string, field: string, amount: number): Promise<number>;
+
+    /** Manually trigger consolidation */
+    consolidate(id: string, field: string): Promise<number>;
+
+    /** Get consolidated value without applying */
+    getConsolidatedValue(id: string, field: string, options?: any): Promise<number>;
+
+    /** Recalculate from scratch (rebuilds from transaction log) */
+    recalculate(id: string, field: string): Promise<number>;
   }
 
   /** Scheduler Plugin */
