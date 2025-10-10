@@ -5135,15 +5135,96 @@ class EventualConsistencyPlugin extends Plugin {
       );
       let currentValue = 0;
       if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
-        appliedTransactions.sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        const [recordExistsOk, recordExistsErr, recordExists] = await tryFn(
+          () => this.targetResource.get(originalId)
         );
-        currentValue = this.config.reducer(appliedTransactions);
+        if (!recordExistsOk || !recordExists) {
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Record ${originalId} doesn't exist, deleting ${appliedTransactions.length} old applied transactions`
+            );
+          }
+          const { results, errors } = await PromisePool.for(appliedTransactions).withConcurrency(10).process(async (txn) => {
+            const [deleted] = await tryFn(() => this.transactionResource.delete(txn.id));
+            return deleted;
+          });
+          if (this.config.verbose && errors && errors.length > 0) {
+            console.warn(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Failed to delete ${errors.length} old applied transactions`
+            );
+          }
+          currentValue = 0;
+        } else {
+          appliedTransactions.sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          );
+          const hasSetInApplied = appliedTransactions.some((t) => t.operation === "set");
+          if (!hasSetInApplied) {
+            const recordValue = recordExists[this.config.field] || 0;
+            let appliedDelta = 0;
+            for (const t of appliedTransactions) {
+              if (t.operation === "add") appliedDelta += t.value;
+              else if (t.operation === "sub") appliedDelta -= t.value;
+            }
+            const baseValue = recordValue - appliedDelta;
+            const hasExistingAnchor = appliedTransactions.some((t) => t.source === "anchor");
+            if (baseValue !== 0 && !hasExistingAnchor) {
+              const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
+              const cohortInfo = this.getCohortInfo(firstTransactionDate);
+              const anchorTransaction = {
+                id: idGenerator(),
+                originalId,
+                field: this.config.field,
+                value: baseValue,
+                operation: "set",
+                timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(),
+                // 1ms before first txn to ensure it's first
+                cohortDate: cohortInfo.date,
+                cohortHour: cohortInfo.hour,
+                cohortMonth: cohortInfo.month,
+                source: "anchor",
+                applied: true
+              };
+              await this.transactionResource.insert(anchorTransaction);
+              appliedTransactions.unshift(anchorTransaction);
+            }
+          }
+          currentValue = this.config.reducer(appliedTransactions);
+        }
       } else {
         const [recordOk, recordErr, record] = await tryFn(
           () => this.targetResource.get(originalId)
         );
         currentValue = recordOk && record ? record[this.config.field] || 0 : 0;
+        if (currentValue !== 0) {
+          let anchorTimestamp;
+          if (transactions && transactions.length > 0) {
+            const firstPendingDate = new Date(transactions[0].timestamp);
+            anchorTimestamp = new Date(firstPendingDate.getTime() - 1).toISOString();
+          } else {
+            anchorTimestamp = (/* @__PURE__ */ new Date()).toISOString();
+          }
+          const cohortInfo = this.getCohortInfo(new Date(anchorTimestamp));
+          const anchorTransaction = {
+            id: idGenerator(),
+            originalId,
+            field: this.config.field,
+            value: currentValue,
+            operation: "set",
+            timestamp: anchorTimestamp,
+            cohortDate: cohortInfo.date,
+            cohortHour: cohortInfo.hour,
+            cohortMonth: cohortInfo.month,
+            source: "anchor",
+            applied: true
+          };
+          await this.transactionResource.insert(anchorTransaction);
+          if (this.config.verbose) {
+            console.log(
+              `[EventualConsistency] ${this.config.resource}.${this.config.field} - Created anchor transaction for ${originalId} with base value ${currentValue}`
+            );
+          }
+        }
       }
       if (this.config.verbose) {
         console.log(
