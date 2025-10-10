@@ -128,16 +128,16 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Perform operations
-      await walletsResource.set(walletId, 100);
-      await walletsResource.add(walletId, 50);
-      await walletsResource.sub(walletId, 30);
-      await walletsResource.add(walletId, 20);
+      await walletsResource.set(walletId, 'balance', 100);
+      await walletsResource.add(walletId, 'balance', 50);
+      await walletsResource.sub(walletId, 'balance', 30);
+      await walletsResource.add(walletId, 'balance', 20);
 
       // Wait for async processing
       await sleep(200);
 
       // Consolidate
-      const consolidatedValue = await walletsResource.consolidate(walletId);
+      const consolidatedValue = await walletsResource.consolidate(walletId, 'balance');
       
       // Should be: 100 (set) + 50 - 30 + 20 = 140
       expect(consolidatedValue).toBe(140);
@@ -152,8 +152,9 @@ describe("EventualConsistencyPlugin Methods", () => {
     it("should immediately update in sync mode", async () => {
       // Create new plugin in sync mode
       const syncPlugin = new EventualConsistencyPlugin({
-        resource: 'accounts',
-        field: 'credits',
+        resources: {
+          accounts: ['credits']
+        },
         mode: 'sync'
       });
 
@@ -174,14 +175,14 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       // Operations should be immediate in sync mode
-      await accountsResource.add('account-sync', 'balance', 500);
-      
+      await accountsResource.add('account-sync', 'credits', 500);
+
       // No need to wait in sync mode
       const account = await accountsResource.get('account-sync');
       expect(account.credits).toBe(1500);
 
       // More operations
-      await accountsResource.sub('account-sync', 'balance', 200);
+      await accountsResource.sub('account-sync', 'credits', 200);
       const account2 = await accountsResource.get('account-sync');
       expect(account2.credits).toBe(1300);
     });
@@ -236,11 +237,11 @@ describe("EventualConsistencyPlugin Methods", () => {
       for (let i = 0; i < 30; i++) {
         if (Math.random() < 0.5) {
           const amount = Math.floor(Math.random() * 100) + 1;
-          operations.push(walletsResource.add('wallet-chaos', amount));
+          operations.push(walletsResource.add('wallet-chaos', 'balance', amount));
           expectedBalance += amount;
         } else {
           const amount = Math.floor(Math.random() * 50) + 1;
-          operations.push(walletsResource.sub('wallet-chaos', amount));
+          operations.push(walletsResource.sub('wallet-chaos', 'balance', amount));
           expectedBalance -= amount;
         }
       }
@@ -316,8 +317,9 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       const brazilPlugin = new EventualConsistencyPlugin({
-        resource: 'brazil_accounts',
-        field: 'balance',
+        resources: {
+          brazil_accounts: ['balance']
+        },
         mode: 'sync',
         cohort: {
           timezone: 'America/Sao_Paulo'  // UTC-3
@@ -375,8 +377,9 @@ describe("EventualConsistencyPlugin Methods", () => {
 
     it("should respect custom consolidationConcurrency", async () => {
       const customPlugin = new EventualConsistencyPlugin({
-        resource: 'custom_resource',
-        field: 'value',
+        resources: {
+          custom_resource: ['value']
+        },
         consolidationConcurrency: 10
       });
 
@@ -403,8 +406,9 @@ describe("EventualConsistencyPlugin Methods", () => {
       });
 
       const pointsPlugin = new EventualConsistencyPlugin({
-        resource: 'points',
-        field: 'score',
+        resources: {
+          points: ['score']
+        },
         mode: 'async'
       });
 

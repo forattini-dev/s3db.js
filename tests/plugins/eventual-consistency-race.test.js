@@ -24,8 +24,9 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
 
     // Add plugin in sync mode for immediate consolidation
     plugin = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       mode: 'sync' // Use sync mode to test locking
     });
 
@@ -171,8 +172,9 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       });
 
       const batchPlugin = new EventualConsistencyPlugin({
-        resource: 'batch_wallets',
-        field: 'balance',
+        resources: {
+          batch_wallets: ['balance']
+        },
         mode: 'async',
         batchTransactions: true,
         batchSize: 10
@@ -229,7 +231,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       // Add transactions to each wallet
       for (const id of walletIds) {
         for (let i = 0; i < 3; i++) {
-          await walletsResource.add(id, 20);
+          await walletsResource.add(id, 'balance', 20);
         }
       }
 
@@ -274,7 +276,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       await sleep(100);
 
       // Get consolidated value (should include base 1000)
-      const value = await walletsResource.getConsolidatedValue('wallet-value-test');
+      const value = await walletsResource.getConsolidatedValue('wallet-value-test', 'balance');
 
       // Should be: 1000 (current) + 50 + 30 = 1080
       expect(value).toBe(1080);
@@ -306,7 +308,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       await sleep(100);
 
       // Get consolidated value
-      const value = await walletsResource.getConsolidatedValue('wallet-set-test');
+      const value = await walletsResource.getConsolidatedValue('wallet-set-test', 'balance');
 
       // Should be: 2000 (from set) + 100 = 2100 (not 500 + ...)
       expect(value).toBe(2100);

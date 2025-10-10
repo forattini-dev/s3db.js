@@ -30,8 +30,9 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
 
     // Add EventualConsistencyPlugin first
     eventualPlugin = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       mode: 'sync',
       autoConsolidate: false,
       enableAnalytics: false,
@@ -105,11 +106,11 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     expect(cached1.balance).toBe(100);
 
     // Add transactions
-    await wallets.add('w1', 50);
-    await wallets.add('w1', 25);
+    await wallets.add('w1', 'balance', 50);
+    await wallets.add('w1', 'balance', 25);
 
     // Consolidate (should invalidate cache)
-    await wallets.consolidate('w1');
+    await wallets.consolidate('w1', 'balance');
 
     // Check that cache was invalidated
     const cached2 = await wallets.cache.get(cacheKey);
@@ -134,8 +135,9 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
 
     // Add EventualConsistencyPlugin
     const accountsPlugin = new EventualConsistencyPlugin({
-      resource: 'accounts',
-      field: 'balance',
+      resources: {
+        accounts: ['balance']
+      },
       mode: 'sync',
       autoConsolidate: false
     });
@@ -144,8 +146,8 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
 
     // Insert and consolidate
     await accounts.insert({ id: 'a1', balance: 0 });
-    await accounts.add('a1', 100);
-    await accounts.consolidate('a1');
+    await accounts.add('a1', 'balance', 100);
+    await accounts.consolidate('a1', 'balance');
 
     // Verify value was updated
     const account = await accounts.get('a1');
@@ -167,8 +169,9 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     });
 
     eventualPlugin = new EventualConsistencyPlugin({
-      resource: 'wallets',
-      field: 'balance',
+      resources: {
+        wallets: ['balance']
+      },
       mode: 'sync',
       autoConsolidate: false,
       enableAnalytics: false
@@ -200,22 +203,22 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // First consolidation
-    await wallets.add('w1', 100);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     const wallet1 = await wallets.get('w1');
     expect(wallet1.balance).toBe(100);
 
     // Second consolidation
-    await wallets.add('w1', 50);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
 
     const wallet2 = await wallets.get('w1');
     expect(wallet2.balance).toBe(150);
 
     // Third consolidation
-    await wallets.add('w1', 25);
-    await wallets.consolidate('w1');
+    await wallets.add('w1', 'balance', 25);
+    await wallets.consolidate('w1', 'balance');
 
     const wallet3 = await wallets.get('w1');
     expect(wallet3.balance).toBe(175);
@@ -239,13 +242,13 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
     };
 
     // Add transaction and consolidate
-    await wallets.add('w1', 100);
+    await wallets.add('w1', 'balance', 100);
 
     // Should not throw error (gracefully handles cache invalidation failure)
     let consolidateResult;
     let consolidateError;
     try {
-      consolidateResult = await wallets.consolidate('w1');
+      consolidateResult = await wallets.consolidate('w1', 'balance');
     } catch (err) {
       consolidateError = err;
     }

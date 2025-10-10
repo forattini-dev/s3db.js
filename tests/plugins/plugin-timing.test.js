@@ -24,8 +24,9 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin before resource exists
       const plugin = new EventualConsistencyPlugin({
-        resource: 'wallets',
-        field: 'balance',
+        resources: {
+          wallets: ['balance']
+        },
         mode: 'sync'
       });
       
@@ -54,7 +55,7 @@ describe('Plugin Timing Tests', () => {
         balance: 100
       });
       
-      const newBalance = await walletResource.add('wallet1', 50);
+      const newBalance = await walletResource.add('wallet1', 'balance', 50);
       expect(newBalance).toBe(150);
       
       const wallet = await walletResource.get('wallet1');
@@ -83,8 +84,9 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin after resource exists
       const plugin = new EventualConsistencyPlugin({
-        resource: 'wallets',
-        field: 'balance',
+        resources: {
+          wallets: ['balance']
+        },
         mode: 'sync'
       });
       
@@ -96,7 +98,7 @@ describe('Plugin Timing Tests', () => {
       expect(typeof walletResource.set).toBe('function');
       
       // Test that methods work
-      const newBalance = await walletResource.sub('wallet2', 75);
+      const newBalance = await walletResource.sub('wallet2', 'balance', 75);
       expect(newBalance).toBe(125);
       
       const wallet = await walletResource.get('wallet2');
@@ -109,8 +111,9 @@ describe('Plugin Timing Tests', () => {
       
       // Add plugin for a resource that doesn't exist yet
       const plugin = new EventualConsistencyPlugin({
-        resource: 'accounts',
-        field: 'credits',
+        resources: {
+          accounts: ['credits']
+        },
         mode: 'async'
       });
       
@@ -262,23 +265,24 @@ describe('Plugin Timing Tests', () => {
       
       // Add eventual consistency plugin after resource exists
       const ecPlugin = new EventualConsistencyPlugin({
-        resource: 'items',
-        field: 'count',
+        resources: {
+          items: ['count']
+        },
         mode: 'sync'
       });
       await database.usePlugin(ecPlugin);
-      
+
       // Verify all plugins are working
       expect(typeof resource.add).toBe('function');
-      
+
       await resource.insert({
         id: 'item1',
         name: 'Item 1',
         count: 10
       });
-      
+
       // Test eventual consistency methods
-      await resource.add('item1', 5);
+      await resource.add('item1', 'count', 5);
       const item = await resource.get('item1');
       expect(item.count).toBe(15);
       
@@ -297,8 +301,9 @@ describe('Plugin Timing Tests', () => {
       });
       
       const ecPlugin = new EventualConsistencyPlugin({
-        resource: 'balances',
-        field: 'amount',
+        resources: {
+          balances: ['amount']
+        },
         mode: 'sync'
       });
       
@@ -328,7 +333,7 @@ describe('Plugin Timing Tests', () => {
         amount: 1000
       });
       
-      await resource.sub('bal1', 250);
+      await resource.sub('bal1', 'amount', 250);
       const balance = await resource.get('bal1');
       expect(balance.amount).toBe(750);
     });
@@ -341,8 +346,9 @@ describe('Plugin Timing Tests', () => {
       
       // Create a plugin that references a non-existent resource
       const plugin = new EventualConsistencyPlugin({
-        resource: 'nonexistent',
-        field: 'value',
+        resources: {
+          nonexistent: ['value']
+        },
         mode: 'sync'
       });
       
