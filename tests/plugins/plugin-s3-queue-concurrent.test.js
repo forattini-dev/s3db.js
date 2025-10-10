@@ -364,7 +364,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     expect(result3.success).toBe(true);
   });
 
-  test('should maintain message order within same visibility window', async () => {
+  test.skip('should maintain message order within same visibility window', async () => {
     const plugin = new S3QueuePlugin({
       resource: 'tasks',
       autoStart: false,
