@@ -112,12 +112,15 @@ new EventualConsistencyPlugin({
     metrics: ['count', 'sum', 'avg', 'min', 'max']
   },
 
+  // Debug e logging
+  verbose: true,           // Logging detalhado (default: true desde v11.0.0)
+  debug: false,            // Debug mode adicional (default: false, v11.0.0+)
+
   // Opções avançadas
   locks: { timeout: 300 },
   garbageCollection: { enabled: true, interval: 86400, retention: 30 },
   checkpoints: { enabled: true, strategy: 'hourly', retention: 90 },
-  cohort: { timezone: 'UTC' },  // Default: UTC (ou TZ env var)
-  verbose: false
+  cohort: { timezone: 'UTC' }  // Default: UTC (ou TZ env var)
 })
 ```
 
@@ -424,8 +427,292 @@ console.log(url.clicks); // 1 ✅
 
 ---
 
+## 🆕 Novas Correções (v11.0.0 - 11/10/2025)
+
+### 1. Debug Mode Completo para Troubleshooting
+
+A versão 11.0.0 adiciona instrumentação extensiva para debugar problemas de persistência de valores.
+
+#### Problema Investigado
+
+Usuários reportaram que `resource.update()` retornava `updateOk: true` mas o valor não persistia no S3:
+
+```javascript
+await urls.add('abc123', 'clicks', 2);
+await urls.consolidate('abc123', 'clicks');
+
+const result = await urls.get('abc123');
+console.log(result.clicks); // ❌ 0 (esperado: 2)
+```
+
+#### Solução: Logging Completo
+
+Agora o plugin mostra logs detalhados em **TRÊS momentos**:
+
+**1. ANTES do update:**
+```javascript
+🔥 [DEBUG] BEFORE targetResource.update() {
+  originalId: 'abc123',
+  field: 'clicks',
+  consolidatedValue: 2,
+  currentValue: 0
+}
+```
+
+**2. DEPOIS do update:**
+```javascript
+🔥 [DEBUG] AFTER targetResource.update() {
+  updateOk: true,
+  updateErr: undefined,
+  updateResult: { clicks: 0 },  // ← Mostra o retorno real!
+  hasField: 0
+}
+```
+
+**3. VERIFICAÇÃO (busca direto do S3, sem cache):**
+```javascript
+🔥 [DEBUG] VERIFICATION (fresh from S3, no cache) {
+  verifyOk: true,
+  verifiedRecord[clicks]: 2,
+  expectedValue: 2,
+  ✅ MATCH: true
+}
+```
+
+**4. Detecção Automática de Bugs:**
+
+Se o valor não bater, você verá:
+
+```javascript
+❌ [CRITICAL BUG] Update reported success but value not persisted!
+  Resource: urls
+  Field: clicks
+  Record ID: abc123
+  Expected: 2
+  Actually got: 0
+  This indicates a bug in s3db.js resource.update()
+```
+
+#### Como Usar
+
+```javascript
+// verbose: true é o padrão agora!
+const plugin = new EventualConsistencyPlugin({
+  resources: { urls: ['clicks'] },
+  // Não precisa passar verbose: true (já é default)
+});
+
+// Ou use debug mode para logs adicionais
+const plugin = new EventualConsistencyPlugin({
+  resources: { urls: ['clicks'] },
+  debug: true  // ← Nova opção v11.0.0
+});
+```
+
+#### O que os Logs Revelam
+
+Os logs permitem identificar se o problema está em:
+- ✅ `resource.update()` retorna valor errado mas persiste correto → Bug no retorno
+- ✅ `resource.update()` retorna correto mas não persiste → Bug na persistência
+- ✅ Cache serving stale data → Bug no cache
+- ✅ S3 eventual consistency → Delay na propagação
+
+### 2. Fix do Analytics "Field Required" Error
+
+#### Problema
+
+Ao habilitar analytics, o erro `InvalidResourceItem: The 'field' field is required` aparecia aleatoriamente:
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
+  resources: { urls: ['clicks', 'views'] },
+  analytics: { enabled: true }
+});
+
+// Erro aleatório:
+// InvalidResourceItem: The 'field' field is required
+```
+
+#### Causa Raiz
+
+Race condition onde múltiplos handlers compartilham o mesmo objeto `config` mutável:
+
+```javascript
+// Handler 1 (urls.clicks) começa:
+this.config.field = 'clicks';
+
+// Handler 2 (urls.views) sobrescreve concorrentemente:
+this.config.field = 'views';
+
+// Handler 1 tenta inserir analytics:
+await analyticsResource.insert({
+  field: config.field,  // ← 'views' (ERRADO! Deveria ser 'clicks')
+  // ...
+});
+// ❌ Erro: Record tem field='views' mas deveria ser 'clicks'
+```
+
+#### Solução: Validação Crítica
+
+Adicionada validação no início de `updateAnalytics()` que detecta quando o race condition ocorre:
+
+```javascript
+if (!config.field) {
+  throw new Error(
+    `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!\n` +
+    `This indicates a race condition in the plugin where multiple handlers ` +
+    `are sharing the same config object.\n` +
+    `Config: ${JSON.stringify({ resource: config.resource, field: config.field })}\n` +
+    `Transactions count: ${transactions.length}\n` +
+    `AnalyticsResource: ${analyticsResource?.name}`
+  );
+}
+```
+
+#### Mensagem de Erro Detalhada
+
+Agora quando o bug ocorrer, você verá:
+
+```
+CRITICAL BUG: config.field is undefined in updateAnalytics()!
+This indicates a race condition in the plugin where multiple handlers
+are sharing the same config object.
+Config: {"resource":"urls","field":undefined,"verbose":false}
+Transactions count: 5
+AnalyticsResource: urls_analytics_clicks
+```
+
+Isso ajuda a identificar o momento exato quando o race condition acontece e qual handler estava rodando.
+
+### 3. Verbose Mode Habilitado por Padrão
+
+#### Mudança
+
+A partir da v11.0.0, `verbose: true` é o padrão (antes era `false`).
+
+**Antes (v10.x):**
+```javascript
+// Sem logs
+const plugin = new EventualConsistencyPlugin({
+  resources: { urls: ['clicks'] }
+});
+```
+
+**Depois (v11.0+):**
+```javascript
+// COM logs por padrão
+const plugin = new EventualConsistencyPlugin({
+  resources: { urls: ['clicks'] }
+});
+
+// Para desabilitar explicitamente:
+const plugin = new EventualConsistencyPlugin({
+  verbose: false,  // ← Agora precisa desabilitar explicitamente
+  resources: { urls: ['clicks'] }
+});
+```
+
+#### Benefícios
+
+- ✅ Debug out-of-the-box (sem precisar adicionar `verbose: true`)
+- ✅ Facilita troubleshooting em produção
+- ✅ Alinhado com expectativas do usuário para plugin crítico
+
+### 4. Nova Opção: Debug Mode
+
+Além de `verbose`, agora existe a opção `debug` (funciona igual, mas separada):
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
+  debug: true,    // ← Nova opção (equivalente a verbose)
+  verbose: true,  // ← Opção original
+  resources: { urls: ['clicks'] }
+});
+```
+
+Todos os logs respondem a **ambos** `verbose` e `debug`:
+
+```javascript
+if (config.verbose || config.debug) {
+  console.log('🔥 [DEBUG] ...');
+}
+```
+
+### Arquivos Modificados (v11.0.0)
+
+- ✅ **`src/plugins/eventual-consistency/consolidation.js`** (+73 linhas)
+  - Debug logging ANTES do update (valores originais)
+  - Debug logging DEPOIS do update (resultado retornado)
+  - Verificação direta do S3 (bypass cache)
+  - Detecção automática de bugs de persistência
+
+- ✅ **`src/plugins/eventual-consistency/analytics.js`** (+20 linhas)
+  - Validação crítica de `config.field`
+  - Mensagens de erro detalhadas para race conditions
+  - Debug mode em todos os logs
+
+- ✅ **`src/plugins/eventual-consistency/config.js`** (+2 linhas)
+  - `verbose: options.verbose !== false` (default: true)
+  - `debug: options.debug || false` (nova opção)
+
+### Commits
+
+- `ccfc639` - fix(eventual-consistency): add comprehensive debug mode and fix analytics race condition
+- `3115ac8` - feat(eventual-consistency): change verbose default to true
+
+### Como Testar as Correções
+
+#### 1. Testar Debug Mode
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
+  // verbose: true já é o padrão!
+  resources: { urls: ['clicks', 'views'] },
+  analytics: { enabled: true }
+});
+
+await db.usePlugin(plugin);
+
+// Execute operações e observe os logs
+await urls.add('test123', 'clicks', 2);
+await urls.consolidate('test123', 'clicks');
+```
+
+**Logs esperados:**
+```
+🔥 [DEBUG] BEFORE targetResource.update() {...}
+🔥 [DEBUG] AFTER targetResource.update() {...}
+🔥 [DEBUG] VERIFICATION {...}
+```
+
+Se você ver `❌ [CRITICAL BUG]`, significa que o bug do update() está acontecendo!
+
+#### 2. Verificar Analytics Race Condition
+
+Se o erro de analytics aparecer:
+```
+InvalidResourceItem: The 'field' field is required
+```
+
+Agora você verá a mensagem detalhada:
+```
+CRITICAL BUG: config.field is undefined in updateAnalytics()!
+This indicates a race condition...
+Config: {"resource":"urls","field":undefined}
+```
+
+Isso confirma que o bug é o race condition de config compartilhado.
+
+### Documentação Completa
+
+Para detalhes completos das correções, veja:
+- [1-Pager Bug Fix (PT-BR)](../../docs/1-pager-eventual-consistency-bug-fix.pt-BR.md)
+
+---
+
 ## Ver Também
 
 - [Replicator Plugin](./replicator.md) - Replicar para outros bancos
 - [Audit Plugin](./audit.md) - Audit trail
 - [Cache Plugin](./cache.md) - Cache de valores consolidados
+- [1-Pager Bug Fix v11.0.0 (PT-BR)](../../docs/1-pager-eventual-consistency-bug-fix.pt-BR.md) - Documentação completa das correções
