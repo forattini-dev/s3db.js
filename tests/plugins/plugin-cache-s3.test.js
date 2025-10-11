@@ -17,7 +17,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
       driver: 's3',
       client: db.client
     });
-    await cachePlugin.setup(db);
+    await cachePlugin.install(db);
 
     // Create test resource
     users = await db.createResource({
@@ -59,7 +59,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
           prefix: 'custom-prefix'
         }
       });
-      await customCachePlugin.setup(db);
+      await customCachePlugin.install(db);
 
       expect(customCachePlugin.driver).toBeInstanceOf(S3Cache);
       expect(customCachePlugin.driver.client).toBe(db.client);
@@ -70,7 +70,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
         driver: 's3'
         // No explicit client - should use database.client
       });
-      await defaultCachePlugin.setup(db);
+      await defaultCachePlugin.install(db);
 
       expect(defaultCachePlugin.driver).toBeInstanceOf(S3Cache);
       expect(defaultCachePlugin.driver.client).toBe(db.client);

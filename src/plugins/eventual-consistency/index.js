@@ -18,7 +18,7 @@ import {
 } from "./consolidation.js";
 import { runGarbageCollection } from "./garbage-collection.js";
 import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getMonthByHour, getTopRecords } from "./analytics.js";
-import { onSetup, onStart, onStop, watchForResource, completeFieldSetup } from "./setup.js";
+import { onInstall, onStart, onStop, watchForResource, completeFieldSetup } from "./install.js";
 
 export class EventualConsistencyPlugin extends Plugin {
   constructor(options = {}) {
@@ -53,10 +53,10 @@ export class EventualConsistencyPlugin extends Plugin {
   }
 
   /**
-   * Setup hook - create resources and register helpers
+   * Install hook - create resources and register helpers
    */
-  async onSetup() {
-    await onSetup(
+  async onInstall() {
+    await onInstall(
       this.database,
       this.fieldHandlers,
       (handler) => completeFieldSetup(handler, this.database, this.config, this),

@@ -97,7 +97,7 @@ export class S3QueuePlugin extends Plugin {
     this.lockCleanupInterval = null;
   }
 
-  async onSetup() {
+  async onInstall() {
     // Get target resource
     this.targetResource = this.database.resources[this.config.resource];
     if (!this.targetResource) {

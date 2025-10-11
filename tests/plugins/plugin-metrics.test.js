@@ -23,7 +23,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     const originalNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'development';
     try {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
     }
@@ -74,7 +74,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Plugin Setup', () => {
     test('should setup plugin without errors', async () => {
-      await expect(metricsPlugin.setup(database)).resolves.not.toThrow();
+      await expect(metricsPlugin.install(database)).resolves.not.toThrow();
       expect(metricsPlugin.database).toBe(database);
     });
 
@@ -92,12 +92,12 @@ describe('MetricsPlugin Coverage Tests', () => {
         attributes: { id: 'string|required', type: 'string|required' }
       });
       
-      await expect(metricsPlugin.setup(database)).resolves.not.toThrow();
+      await expect(metricsPlugin.install(database)).resolves.not.toThrow();
     });
 
     test('should skip setup when disabled', async () => {
       const disabledPlugin = new MetricsPlugin({ enabled: false });
-      await disabledPlugin.setup(database);
+      await disabledPlugin.install(database);
       
       expect(disabledPlugin.database).toBe(database);
       // Should not create timer when disabled
@@ -107,7 +107,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Operation Recording', () => {
     beforeEach(async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
     });
 
     test('should record operation metrics', () => {
@@ -165,7 +165,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Hook Installation', () => {
     beforeEach(async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
     });
 
     test('should install hooks on existing resources', async () => {
@@ -259,7 +259,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     });
 
     test('should skip metrics resources when installing hooks', async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
 
       // Should not install hooks on metrics resources
       const metricsResource = metricsPlugin.metricsResource;
@@ -269,7 +269,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Metrics Flushing', () => {
     beforeEach(async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
     });
 
     test('should flush metrics to storage', async () => {
@@ -304,7 +304,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Utility Methods', () => {
     beforeEach(async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
       
       // Add some test data
       await metricsPlugin.metricsResource.insert({
@@ -400,7 +400,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     });
 
     test('should stop plugin and clear timer', async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
       await metricsPlugin.start();
       
       // Simulate timer being set
@@ -432,7 +432,7 @@ describe('MetricsPlugin Coverage Tests', () => {
 
   describe('Data Cleanup', () => {
     beforeEach(async () => {
-      await metricsPlugin.setup(database);
+      await metricsPlugin.install(database);
     });
 
     test('should cleanup old data', async () => {

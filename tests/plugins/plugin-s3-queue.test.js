@@ -42,7 +42,7 @@ describe('S3QueuePlugin', () => {
         autoStart: false
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Check that queue resource was created
       const queueResource = database.resources['emails_queue'];
@@ -56,7 +56,7 @@ describe('S3QueuePlugin', () => {
         autoStart: false
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       expect(typeof resource.enqueue).toBe('function');
       expect(typeof resource.queueStats).toBe('function');
@@ -70,7 +70,7 @@ describe('S3QueuePlugin', () => {
         autoStart: false
       });
 
-      await expect(plugin.setup(database)).rejects.toThrow(
+      await expect(plugin.install(database)).rejects.toThrow(
         "S3QueuePlugin: resource 'nonexistent' not found"
       );
     });
@@ -83,7 +83,7 @@ describe('S3QueuePlugin', () => {
         autoStart: false
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     test('should enqueue a message', async () => {
@@ -138,7 +138,7 @@ describe('S3QueuePlugin', () => {
         visibilityTimeout: 5000
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     test('should process a message', async () => {
@@ -250,7 +250,7 @@ describe('S3QueuePlugin', () => {
         visibilityTimeout: 1000  // Short timeout for tests
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     test('should retry failed messages', async () => {
@@ -322,7 +322,7 @@ describe('S3QueuePlugin', () => {
         deadLetterResource: 'failed_emails'
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       await resource.enqueue({ to: 'user@example.com', subject: 'Test', body: 'Body' });
 
@@ -380,7 +380,7 @@ describe('S3QueuePlugin', () => {
         autoStart: false
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     test('should return queue stats', async () => {
@@ -424,7 +424,7 @@ describe('S3QueuePlugin', () => {
         pollInterval: 10  // Very fast polling
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     test('should expose _etag field', async () => {

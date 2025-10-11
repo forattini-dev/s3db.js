@@ -656,18 +656,496 @@ var id = /*#__PURE__*/Object.freeze({
   passwordGenerator: passwordGenerator
 });
 
+function analyzeString(str) {
+  if (!str || typeof str !== "string") {
+    return { type: "none", safe: true };
+  }
+  let hasLatin1 = false;
+  let hasMultibyte = false;
+  let asciiCount = 0;
+  let latin1Count = 0;
+  let multibyteCount = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 32 && code <= 126) {
+      asciiCount++;
+    } else if (code < 32 || code === 127) {
+      hasMultibyte = true;
+      multibyteCount++;
+    } else if (code >= 128 && code <= 255) {
+      hasLatin1 = true;
+      latin1Count++;
+    } else {
+      hasMultibyte = true;
+      multibyteCount++;
+    }
+  }
+  if (!hasLatin1 && !hasMultibyte) {
+    return {
+      type: "ascii",
+      safe: true,
+      stats: { ascii: asciiCount, latin1: 0, multibyte: 0 }
+    };
+  }
+  if (hasMultibyte) {
+    const multibyteRatio = multibyteCount / str.length;
+    if (multibyteRatio > 0.3) {
+      return {
+        type: "base64",
+        safe: false,
+        reason: "high multibyte content",
+        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
+      };
+    }
+    return {
+      type: "url",
+      safe: false,
+      reason: "contains multibyte characters",
+      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
+    };
+  }
+  const latin1Ratio = latin1Count / str.length;
+  if (latin1Ratio > 0.5) {
+    return {
+      type: "base64",
+      safe: false,
+      reason: "high Latin-1 content",
+      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+    };
+  }
+  return {
+    type: "url",
+    safe: false,
+    reason: "contains Latin-1 extended characters",
+    stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+  };
+}
+function metadataEncode(value) {
+  if (value === null) {
+    return { encoded: "null", encoding: "special" };
+  }
+  if (value === void 0) {
+    return { encoded: "undefined", encoding: "special" };
+  }
+  const stringValue = String(value);
+  const analysis = analyzeString(stringValue);
+  switch (analysis.type) {
+    case "none":
+    case "ascii":
+      return {
+        encoded: stringValue,
+        encoding: "none",
+        analysis
+      };
+    case "url":
+      return {
+        encoded: "u:" + encodeURIComponent(stringValue),
+        encoding: "url",
+        analysis
+      };
+    case "base64":
+      return {
+        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
+        encoding: "base64",
+        analysis
+      };
+    default:
+      return {
+        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
+        encoding: "base64",
+        analysis
+      };
+  }
+}
+function metadataDecode(value) {
+  if (value === "null") {
+    return null;
+  }
+  if (value === "undefined") {
+    return void 0;
+  }
+  if (value === null || value === void 0 || typeof value !== "string") {
+    return value;
+  }
+  if (value.startsWith("u:")) {
+    if (value.length === 2) return value;
+    try {
+      return decodeURIComponent(value.substring(2));
+    } catch (err) {
+      return value;
+    }
+  }
+  if (value.startsWith("b:")) {
+    if (value.length === 2) return value;
+    try {
+      const decoded = Buffer.from(value.substring(2), "base64").toString("utf8");
+      return decoded;
+    } catch (err) {
+      return value;
+    }
+  }
+  if (value.length > 0 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
+    try {
+      const decoded = Buffer.from(value, "base64").toString("utf8");
+      if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
+        return decoded;
+      }
+    } catch {
+    }
+  }
+  return value;
+}
+
+const S3_METADATA_LIMIT = 2047;
+class PluginStorage {
+  /**
+   * @param {Object} client - S3db Client instance
+   * @param {string} pluginSlug - Plugin identifier (kebab-case)
+   */
+  constructor(client, pluginSlug) {
+    if (!client) {
+      throw new Error("PluginStorage requires a client instance");
+    }
+    if (!pluginSlug) {
+      throw new Error("PluginStorage requires a pluginSlug");
+    }
+    this.client = client;
+    this.pluginSlug = pluginSlug;
+  }
+  /**
+   * Generate hierarchical plugin-scoped key
+   *
+   * @param {string} resourceName - Resource name (optional, for resource-scoped data)
+   * @param {...string} parts - Additional path parts
+   * @returns {string} S3 key
+   *
+   * @example
+   * // Resource-scoped: resource=wallets/plugin=eventual-consistency/balance/transactions/id=txn1
+   * getPluginKey('wallets', 'balance', 'transactions', 'id=txn1')
+   *
+   * // Global plugin data: plugin=eventual-consistency/config
+   * getPluginKey(null, 'config')
+   */
+  getPluginKey(resourceName, ...parts) {
+    if (resourceName) {
+      return `resource=${resourceName}/plugin=${this.pluginSlug}/${parts.join("/")}`;
+    }
+    return `plugin=${this.pluginSlug}/${parts.join("/")}`;
+  }
+  /**
+   * Save data with metadata encoding and behavior support
+   *
+   * @param {string} key - S3 key
+   * @param {Object} data - Data to save
+   * @param {Object} options - Options
+   * @param {string} options.behavior - 'body-overflow' | 'body-only' | 'enforce-limits'
+   * @param {string} options.contentType - Content type (default: application/json)
+   * @returns {Promise<void>}
+   */
+  async put(key, data, options = {}) {
+    const { behavior = "body-overflow", contentType = "application/json" } = options;
+    const { metadata, body } = this._applyBehavior(data, behavior);
+    const putParams = {
+      key,
+      metadata,
+      contentType
+    };
+    if (body !== null) {
+      putParams.body = JSON.stringify(body);
+    }
+    const [ok, err] = await tryFn(() => this.client.putObject(putParams));
+    if (!ok) {
+      throw new Error(`PluginStorage.put failed for key ${key}: ${err.message}`);
+    }
+  }
+  /**
+   * Get data with automatic metadata decoding
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<Object|null>} Data or null if not found
+   */
+  async get(key) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      if (err.name === "NoSuchKey" || err.Code === "NoSuchKey") {
+        return null;
+      }
+      throw new Error(`PluginStorage.get failed for key ${key}: ${err.message}`);
+    }
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          return { ...parsedMetadata, ...body };
+        }
+      } catch (parseErr) {
+        throw new Error(`PluginStorage.get failed to parse body for key ${key}: ${parseErr.message}`);
+      }
+    }
+    return parsedMetadata;
+  }
+  /**
+   * Parse metadata values back to their original types
+   * @private
+   */
+  _parseMetadataValues(metadata) {
+    const parsed = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      if (typeof value === "string") {
+        if (value.startsWith("{") && value.endsWith("}") || value.startsWith("[") && value.endsWith("]")) {
+          try {
+            parsed[key] = JSON.parse(value);
+            continue;
+          } catch {
+          }
+        }
+        if (!isNaN(value) && value.trim() !== "") {
+          parsed[key] = Number(value);
+          continue;
+        }
+        if (value === "true") {
+          parsed[key] = true;
+          continue;
+        }
+        if (value === "false") {
+          parsed[key] = false;
+          continue;
+        }
+      }
+      parsed[key] = value;
+    }
+    return parsed;
+  }
+  /**
+   * List all keys with plugin prefix
+   *
+   * @param {string} prefix - Additional prefix (optional)
+   * @param {Object} options - List options
+   * @param {number} options.limit - Max number of results
+   * @returns {Promise<Array<string>>} List of keys
+   */
+  async list(prefix = "", options = {}) {
+    const { limit } = options;
+    const fullPrefix = prefix ? `plugin=${this.pluginSlug}/${prefix}` : `plugin=${this.pluginSlug}/`;
+    const [ok, err, result] = await tryFn(
+      () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
+    );
+    if (!ok) {
+      throw new Error(`PluginStorage.list failed: ${err.message}`);
+    }
+    const keys = result.Contents?.map((item) => item.Key) || [];
+    return this._removeKeyPrefix(keys);
+  }
+  /**
+   * List keys for a specific resource
+   *
+   * @param {string} resourceName - Resource name
+   * @param {string} subPrefix - Additional prefix within resource (optional)
+   * @param {Object} options - List options
+   * @returns {Promise<Array<string>>} List of keys
+   */
+  async listForResource(resourceName, subPrefix = "", options = {}) {
+    const { limit } = options;
+    const fullPrefix = subPrefix ? `resource=${resourceName}/plugin=${this.pluginSlug}/${subPrefix}` : `resource=${resourceName}/plugin=${this.pluginSlug}/`;
+    const [ok, err, result] = await tryFn(
+      () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
+    );
+    if (!ok) {
+      throw new Error(`PluginStorage.listForResource failed: ${err.message}`);
+    }
+    const keys = result.Contents?.map((item) => item.Key) || [];
+    return this._removeKeyPrefix(keys);
+  }
+  /**
+   * Remove client keyPrefix from keys
+   * @private
+   */
+  _removeKeyPrefix(keys) {
+    const keyPrefix = this.client.config.keyPrefix;
+    if (!keyPrefix) return keys;
+    return keys.map((key) => key.replace(keyPrefix, "")).map((key) => key.startsWith("/") ? key.replace("/", "") : key);
+  }
+  /**
+   * Delete a single object
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<void>}
+   */
+  async delete(key) {
+    const [ok, err] = await tryFn(() => this.client.deleteObject(key));
+    if (!ok) {
+      throw new Error(`PluginStorage.delete failed for key ${key}: ${err.message}`);
+    }
+  }
+  /**
+   * Delete all plugin data (for uninstall)
+   *
+   * @param {string} resourceName - Resource name (optional, if null deletes all plugin data)
+   * @returns {Promise<number>} Number of objects deleted
+   */
+  async deleteAll(resourceName = null) {
+    let deleted = 0;
+    if (resourceName) {
+      const keys = await this.listForResource(resourceName);
+      for (const key of keys) {
+        await this.delete(key);
+        deleted++;
+      }
+    } else {
+      const allKeys = await this.client.getAllKeys({});
+      const pluginKeys = allKeys.filter(
+        (key) => key.includes(`plugin=${this.pluginSlug}/`)
+      );
+      for (const key of pluginKeys) {
+        await this.delete(key);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+  /**
+   * Batch put operations
+   *
+   * @param {Array<{key: string, data: Object, options?: Object}>} items - Items to save
+   * @returns {Promise<Array<{key: string, ok: boolean, error?: Error}>>} Results
+   */
+  async batchPut(items) {
+    const results = [];
+    for (const item of items) {
+      const [ok, err] = await tryFn(
+        () => this.put(item.key, item.data, item.options)
+      );
+      results.push({
+        key: item.key,
+        ok,
+        error: err
+      });
+    }
+    return results;
+  }
+  /**
+   * Batch get operations
+   *
+   * @param {Array<string>} keys - Keys to fetch
+   * @returns {Promise<Array<{key: string, ok: boolean, data?: Object, error?: Error}>>} Results
+   */
+  async batchGet(keys) {
+    const results = [];
+    for (const key of keys) {
+      const [ok, err, data] = await tryFn(() => this.get(key));
+      results.push({
+        key,
+        ok,
+        data,
+        error: err
+      });
+    }
+    return results;
+  }
+  /**
+   * Apply behavior to split data between metadata and body
+   *
+   * @private
+   * @param {Object} data - Data to split
+   * @param {string} behavior - Behavior strategy
+   * @returns {{metadata: Object, body: Object|null}}
+   */
+  _applyBehavior(data, behavior) {
+    const effectiveLimit = calculateEffectiveLimit({ s3Limit: S3_METADATA_LIMIT });
+    let metadata = {};
+    let body = null;
+    switch (behavior) {
+      case "body-overflow": {
+        const entries = Object.entries(data);
+        const sorted = entries.map(([key, value]) => {
+          const jsonValue = typeof value === "object" ? JSON.stringify(value) : value;
+          const { encoded } = metadataEncode(jsonValue);
+          const keySize = calculateUTF8Bytes(key);
+          const valueSize = calculateUTF8Bytes(encoded);
+          return { key, value, jsonValue, encoded, size: keySize + valueSize };
+        }).sort((a, b) => a.size - b.size);
+        let currentSize = 0;
+        for (const item of sorted) {
+          if (currentSize + item.size <= effectiveLimit) {
+            metadata[item.key] = item.jsonValue;
+            currentSize += item.size;
+          } else {
+            if (body === null) body = {};
+            body[item.key] = item.value;
+          }
+        }
+        break;
+      }
+      case "body-only": {
+        body = data;
+        break;
+      }
+      case "enforce-limits": {
+        let currentSize = 0;
+        for (const [key, value] of Object.entries(data)) {
+          const jsonValue = typeof value === "object" ? JSON.stringify(value) : value;
+          const { encoded } = metadataEncode(jsonValue);
+          const keySize = calculateUTF8Bytes(key);
+          const valueSize = calculateUTF8Bytes(encoded);
+          currentSize += keySize + valueSize;
+          if (currentSize > effectiveLimit) {
+            throw new Error(
+              `Data exceeds metadata limit (${currentSize} > ${effectiveLimit} bytes). Use 'body-overflow' or 'body-only' behavior.`
+            );
+          }
+          metadata[key] = jsonValue;
+        }
+        break;
+      }
+      default:
+        throw new Error(`Unknown behavior: ${behavior}. Use 'body-overflow', 'body-only', or 'enforce-limits'.`);
+    }
+    return { metadata, body };
+  }
+}
+
 class Plugin extends EventEmitter {
   constructor(options = {}) {
     super();
     this.name = this.constructor.name;
     this.options = options;
     this.hooks = /* @__PURE__ */ new Map();
+    this.slug = options.slug || this._generateSlug();
+    this._storage = null;
   }
-  async setup(database) {
+  /**
+   * Generate kebab-case slug from class name
+   * @private
+   * @returns {string}
+   */
+  _generateSlug() {
+    return this.name.replace(/Plugin$/, "").replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
+  }
+  /**
+   * Get PluginStorage instance (lazy-loaded)
+   * @returns {PluginStorage}
+   */
+  getStorage() {
+    if (!this._storage) {
+      if (!this.database || !this.database.client) {
+        throw new Error("Plugin must be installed before accessing storage");
+      }
+      this._storage = new PluginStorage(this.database.client, this.slug);
+    }
+    return this._storage;
+  }
+  /**
+   * Install plugin
+   * @param {Database} database - Database instance
+   */
+  async install(database) {
     this.database = database;
-    this.beforeSetup();
-    await this.onSetup();
-    this.afterSetup();
+    this.beforeInstall();
+    await this.onInstall();
+    this.afterInstall();
   }
   async start() {
     this.beforeStart();
@@ -679,12 +1157,29 @@ class Plugin extends EventEmitter {
     await this.onStop();
     this.afterStop();
   }
+  /**
+   * Uninstall plugin and cleanup all data
+   * @param {Object} options - Uninstall options
+   * @param {boolean} options.purgeData - Delete all plugin data from S3 (default: false)
+   */
+  async uninstall(options = {}) {
+    const { purgeData = false } = options;
+    this.beforeUninstall();
+    await this.onUninstall(options);
+    if (purgeData && this._storage) {
+      const deleted = await this._storage.deleteAll();
+      this.emit("plugin.dataPurged", { deleted });
+    }
+    this.afterUninstall();
+  }
   // Override these methods in subclasses
-  async onSetup() {
+  async onInstall() {
   }
   async onStart() {
   }
   async onStop() {
+  }
+  async onUninstall(options) {
   }
   // Hook management methods
   addHook(resource, event, handler) {
@@ -797,11 +1292,11 @@ class Plugin extends EventEmitter {
     return value ?? null;
   }
   // Event emission methods
-  beforeSetup() {
-    this.emit("plugin.beforeSetup", /* @__PURE__ */ new Date());
+  beforeInstall() {
+    this.emit("plugin.beforeInstall", /* @__PURE__ */ new Date());
   }
-  afterSetup() {
-    this.emit("plugin.afterSetup", /* @__PURE__ */ new Date());
+  afterInstall() {
+    this.emit("plugin.afterInstall", /* @__PURE__ */ new Date());
   }
   beforeStart() {
     this.emit("plugin.beforeStart", /* @__PURE__ */ new Date());
@@ -814,6 +1309,12 @@ class Plugin extends EventEmitter {
   }
   afterStop() {
     this.emit("plugin.afterStop", /* @__PURE__ */ new Date());
+  }
+  beforeUninstall() {
+    this.emit("plugin.beforeUninstall", /* @__PURE__ */ new Date());
+  }
+  afterUninstall() {
+    this.emit("plugin.afterUninstall", /* @__PURE__ */ new Date());
   }
 }
 
@@ -837,7 +1338,7 @@ class AuditPlugin extends Plugin {
       ...options
     };
   }
-  async onSetup() {
+  async onInstall() {
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
       name: "plg_audits",
       attributes: {
@@ -1928,7 +2429,7 @@ class BackupPlugin extends Plugin {
       throw new Error("BackupPlugin: Invalid compression type. Use: none, gzip, brotli, deflate");
     }
   }
-  async onSetup() {
+  async onInstall() {
     this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);
     await mkdir(this.config.tempDir, { recursive: true });
@@ -3813,10 +4314,7 @@ class CachePlugin extends Plugin {
       verbose: options.verbose || false
     };
   }
-  async setup(database) {
-    await super.setup(database);
-  }
-  async onSetup() {
+  async onInstall() {
     if (this.config.driver && typeof this.config.driver === "object") {
       this.driver = this.config.driver;
     } else if (this.config.driver === "memory") {
@@ -4936,7 +5434,20 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         console.warn(`[EventualConsistency] ${errors.length} transactions failed to mark as applied`);
       }
       if (config.enableAnalytics && transactionsToUpdate.length > 0 && updateAnalyticsFn) {
-        await updateAnalyticsFn(transactionsToUpdate);
+        const [analyticsOk, analyticsErr] = await tryFn(
+          () => updateAnalyticsFn(transactionsToUpdate)
+        );
+        if (!analyticsOk) {
+          console.error(
+            `[EventualConsistency] ${config.resource}.${config.field} - CRITICAL: Analytics update failed for ${originalId}, but consolidation succeeded:`,
+            {
+              error: analyticsErr?.message || analyticsErr,
+              stack: analyticsErr?.stack,
+              originalId,
+              transactionCount: transactionsToUpdate.length
+            }
+          );
+        }
       }
       if (targetResource && targetResource.cache && typeof targetResource.cache.delete === "function") {
         try {
@@ -5232,9 +5743,18 @@ async function updateAnalytics(transactions, analyticsResource, config) {
       );
     }
   } catch (error) {
-    console.warn(
-      `[EventualConsistency] ${config.resource}.${config.field} - Analytics update error:`,
-      error.message
+    console.error(
+      `[EventualConsistency] CRITICAL: ${config.resource}.${config.field} - Analytics update failed:`,
+      {
+        error: error.message,
+        stack: error.stack,
+        field: config.field,
+        resource: config.resource,
+        transactionCount: transactions.length
+      }
+    );
+    throw new Error(
+      `Analytics update failed for ${config.resource}.${config.field}: ${error.message}`
     );
   }
 }
@@ -5286,6 +5806,7 @@ async function upsertAnalytics(period, cohort, transactions, analyticsResource, 
     await tryFn(
       () => analyticsResource.insert({
         id,
+        field: config.field,
         period,
         cohort,
         transactionCount,
@@ -5317,8 +5838,8 @@ function calculateOperationBreakdown(transactions) {
 async function rollupAnalytics(cohortHour, analyticsResource, config) {
   const cohortDate = cohortHour.substring(0, 10);
   const cohortMonth = cohortHour.substring(0, 7);
-  await rollupPeriod("day", cohortDate, cohortDate, analyticsResource);
-  await rollupPeriod("month", cohortMonth, cohortMonth, analyticsResource);
+  await rollupPeriod("day", cohortDate, cohortDate, analyticsResource, config);
+  await rollupPeriod("month", cohortMonth, cohortMonth, analyticsResource, config);
 }
 async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, config) {
   const sourcePeriod = period === "day" ? "hour" : "day";
@@ -5368,6 +5889,7 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
     await tryFn(
       () => analyticsResource.insert({
         id,
+        field: config.field,
         period,
         cohort,
         transactionCount,
@@ -5727,7 +6249,7 @@ function addHelperMethods(resource, plugin, config) {
   };
 }
 
-async function onSetup(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
+async function onInstall(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
   for (const [resourceName, resourceHandlers] of fieldHandlers) {
     const targetResource = database.resources[resourceName];
     if (!targetResource) {
@@ -5827,6 +6349,7 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
       name: analyticsResourceName,
       attributes: {
         id: "string|required",
+        field: "string|required",
         period: "string|required",
         cohort: "string|required",
         transactionCount: "number|required",
@@ -5924,10 +6447,10 @@ class EventualConsistencyPlugin extends Plugin {
     logInitialization(this.config, this.fieldHandlers, timezoneAutoDetected);
   }
   /**
-   * Setup hook - create resources and register helpers
+   * Install hook - create resources and register helpers
    */
-  async onSetup() {
-    await onSetup(
+  async onInstall() {
+    await onInstall(
       this.database,
       this.fieldHandlers,
       (handler) => completeFieldSetup(handler, this.database, this.config, this),
@@ -6292,9 +6815,8 @@ class FullTextPlugin extends Plugin {
     };
     this.indexes = /* @__PURE__ */ new Map();
   }
-  async setup(database) {
-    this.database = database;
-    const [ok, err, indexResource] = await tryFn(() => database.createResource({
+  async onInstall() {
+    const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
       name: "plg_fulltext_indexes",
       attributes: {
         id: "string|required",
@@ -6307,7 +6829,7 @@ class FullTextPlugin extends Plugin {
         lastUpdated: "string|required"
       }
     }));
-    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
+    this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
     await this.loadIndexes();
     this.installDatabaseHooks();
     this.installIndexingHooks();
@@ -6673,11 +7195,10 @@ class MetricsPlugin extends Plugin {
     };
     this.flushTimer = null;
   }
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
     const [ok, err] = await tryFn(async () => {
-      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
+      const [ok1, err1, metricsResource] = await tryFn(() => this.database.createResource({
         name: "plg_metrics",
         attributes: {
           id: "string|required",
@@ -6693,8 +7214,8 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.metricsResource = ok1 ? metricsResource : database.resources.plg_metrics;
-      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
+      this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
+      const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
         name: "plg_error_logs",
         attributes: {
           id: "string|required",
@@ -6705,8 +7226,8 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.errorsResource = ok2 ? errorsResource : database.resources.plg_error_logs;
-      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
+      this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
+      const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
         name: "plg_performance_logs",
         attributes: {
           id: "string|required",
@@ -6717,12 +7238,12 @@ class MetricsPlugin extends Plugin {
           metadata: "json"
         }
       }));
-      this.performanceResource = ok3 ? performanceResource : database.resources.plg_performance_logs;
+      this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
     });
     if (!ok) {
-      this.metricsResource = database.resources.plg_metrics;
-      this.errorsResource = database.resources.plg_error_logs;
-      this.performanceResource = database.resources.plg_performance_logs;
+      this.metricsResource = this.database.resources.plg_metrics;
+      this.errorsResource = this.database.resources.plg_error_logs;
+      this.performanceResource = this.database.resources.plg_performance_logs;
     }
     this.installDatabaseHooks();
     this.installMetricsHooks();
@@ -7300,14 +7821,14 @@ function createConsumer(driver, config) {
   return new ConsumerClass(config);
 }
 
-class QueueConsumerPlugin {
+class QueueConsumerPlugin extends Plugin {
   constructor(options = {}) {
+    super(options);
     this.options = options;
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
     this.consumers = [];
   }
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
       if (consumerDefs.length === 0 && driverDef.resources) {
@@ -8090,146 +8611,6 @@ class PostgresReplicator extends BaseReplicator {
       logTable: this.logTable
     };
   }
-}
-
-function analyzeString(str) {
-  if (!str || typeof str !== "string") {
-    return { type: "none", safe: true };
-  }
-  let hasLatin1 = false;
-  let hasMultibyte = false;
-  let asciiCount = 0;
-  let latin1Count = 0;
-  let multibyteCount = 0;
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (code >= 32 && code <= 126) {
-      asciiCount++;
-    } else if (code < 32 || code === 127) {
-      hasMultibyte = true;
-      multibyteCount++;
-    } else if (code >= 128 && code <= 255) {
-      hasLatin1 = true;
-      latin1Count++;
-    } else {
-      hasMultibyte = true;
-      multibyteCount++;
-    }
-  }
-  if (!hasLatin1 && !hasMultibyte) {
-    return {
-      type: "ascii",
-      safe: true,
-      stats: { ascii: asciiCount, latin1: 0, multibyte: 0 }
-    };
-  }
-  if (hasMultibyte) {
-    const multibyteRatio = multibyteCount / str.length;
-    if (multibyteRatio > 0.3) {
-      return {
-        type: "base64",
-        safe: false,
-        reason: "high multibyte content",
-        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
-      };
-    }
-    return {
-      type: "url",
-      safe: false,
-      reason: "contains multibyte characters",
-      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
-    };
-  }
-  const latin1Ratio = latin1Count / str.length;
-  if (latin1Ratio > 0.5) {
-    return {
-      type: "base64",
-      safe: false,
-      reason: "high Latin-1 content",
-      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
-    };
-  }
-  return {
-    type: "url",
-    safe: false,
-    reason: "contains Latin-1 extended characters",
-    stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
-  };
-}
-function metadataEncode(value) {
-  if (value === null) {
-    return { encoded: "null", encoding: "special" };
-  }
-  if (value === void 0) {
-    return { encoded: "undefined", encoding: "special" };
-  }
-  const stringValue = String(value);
-  const analysis = analyzeString(stringValue);
-  switch (analysis.type) {
-    case "none":
-    case "ascii":
-      return {
-        encoded: stringValue,
-        encoding: "none",
-        analysis
-      };
-    case "url":
-      return {
-        encoded: "u:" + encodeURIComponent(stringValue),
-        encoding: "url",
-        analysis
-      };
-    case "base64":
-      return {
-        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
-        encoding: "base64",
-        analysis
-      };
-    default:
-      return {
-        encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
-        encoding: "base64",
-        analysis
-      };
-  }
-}
-function metadataDecode(value) {
-  if (value === "null") {
-    return null;
-  }
-  if (value === "undefined") {
-    return void 0;
-  }
-  if (value === null || value === void 0 || typeof value !== "string") {
-    return value;
-  }
-  if (value.startsWith("u:")) {
-    if (value.length === 2) return value;
-    try {
-      return decodeURIComponent(value.substring(2));
-    } catch (err) {
-      return value;
-    }
-  }
-  if (value.startsWith("b:")) {
-    if (value.length === 2) return value;
-    try {
-      const decoded = Buffer.from(value.substring(2), "base64").toString("utf8");
-      return decoded;
-    } catch (err) {
-      return value;
-    }
-  }
-  if (value.length > 0 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
-    try {
-      const decoded = Buffer.from(value, "base64").toString("utf8");
-      if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
-        return decoded;
-      }
-    } catch {
-    }
-  }
-  return value;
 }
 
 const S3_DEFAULT_REGION = "us-east-1";
@@ -12648,18 +13029,14 @@ class Database extends EventEmitter {
     const db = this;
     if (!isEmpty(this.pluginList)) {
       const plugins = this.pluginList.map((p) => isFunction(p) ? new p(this) : p);
-      const setupProms = plugins.map(async (plugin) => {
-        if (plugin.beforeSetup) await plugin.beforeSetup();
-        await plugin.setup(db);
-        if (plugin.afterSetup) await plugin.afterSetup();
+      const installProms = plugins.map(async (plugin) => {
+        await plugin.install(db);
         const pluginName = this._getPluginName(plugin);
         this.pluginRegistry[pluginName] = plugin;
       });
-      await Promise.all(setupProms);
+      await Promise.all(installProms);
       const startProms = plugins.map(async (plugin) => {
-        if (plugin.beforeStart) await plugin.beforeStart();
         await plugin.start();
-        if (plugin.afterStart) await plugin.afterStart();
       });
       await Promise.all(startProms);
     }
@@ -12680,10 +13057,36 @@ class Database extends EventEmitter {
     const pluginName = this._getPluginName(plugin, name);
     this.plugins[pluginName] = plugin;
     if (this.isConnected()) {
-      await plugin.setup(this);
+      await plugin.install(this);
       await plugin.start();
     }
     return plugin;
+  }
+  /**
+   * Uninstall a plugin and optionally purge its data
+   * @param {string} name - Plugin name
+   * @param {Object} options - Uninstall options
+   * @param {boolean} options.purgeData - Delete all plugin data from S3 (default: false)
+   */
+  async uninstallPlugin(name, options = {}) {
+    const pluginName = name.toLowerCase().replace("plugin", "");
+    const plugin = this.plugins[pluginName] || this.pluginRegistry[pluginName];
+    if (!plugin) {
+      throw new Error(`Plugin '${name}' not found`);
+    }
+    if (plugin.stop) {
+      await plugin.stop();
+    }
+    if (plugin.uninstall) {
+      await plugin.uninstall(options);
+    }
+    delete this.plugins[pluginName];
+    delete this.pluginRegistry[pluginName];
+    const index = this.pluginList.indexOf(plugin);
+    if (index > -1) {
+      this.pluginList.splice(index, 1);
+    }
+    this.emit("plugin.uninstalled", { name: pluginName, plugin });
   }
   async uploadMetadataFile() {
     const metadata = {
@@ -14151,10 +14554,9 @@ class ReplicatorPlugin extends Plugin {
     resource.on("delete", deleteHandler);
     this.eventListenersInstalled.add(resource.name);
   }
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     if (this.config.persistReplicatorLog) {
-      const [ok, err, logResource] = await tryFn(() => database.createResource({
+      const [ok, err, logResource] = await tryFn(() => this.database.createResource({
         name: this.config.replicatorLogResource || "plg_replicator_logs",
         attributes: {
           id: "string|required",
@@ -14169,14 +14571,14 @@ class ReplicatorPlugin extends Plugin {
       if (ok) {
         this.replicatorLogResource = logResource;
       } else {
-        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || "plg_replicator_logs"];
+        this.replicatorLogResource = this.database.resources[this.config.replicatorLogResource || "plg_replicator_logs"];
       }
     }
-    await this.initializeReplicators(database);
+    await this.initializeReplicators(this.database);
     this.installDatabaseHooks();
-    for (const resource of Object.values(database.resources)) {
+    for (const resource of Object.values(this.database.resources)) {
       if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
-        this.installEventListeners(resource, database, this);
+        this.installEventListeners(resource, this.database, this);
       }
     }
   }
@@ -14220,8 +14622,8 @@ class ReplicatorPlugin extends Plugin {
     }
   }
   async uploadMetadataFile(database) {
-    if (typeof database.uploadMetadataFile === "function") {
-      await database.uploadMetadataFile();
+    if (typeof this.database.uploadMetadataFile === "function") {
+      await this.database.uploadMetadataFile();
     }
   }
   async retryWithBackoff(operation, maxRetries = 3) {
@@ -14595,7 +14997,7 @@ class S3QueuePlugin extends Plugin {
     this.cacheCleanupInterval = null;
     this.lockCleanupInterval = null;
   }
-  async onSetup() {
+  async onInstall() {
     this.targetResource = this.database.resources[this.config.resource];
     if (!this.targetResource) {
       throw new Error(`S3QueuePlugin: resource '${this.config.resource}' not found`);
@@ -15156,8 +15558,7 @@ class SchedulerPlugin extends Plugin {
     if (parts.length !== 5) return false;
     return true;
   }
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     await this._createLockResource();
     if (this.config.persistJobs) {
       await this._createJobHistoryResource();
@@ -15715,8 +16116,7 @@ class StateMachinePlugin extends Plugin {
       }
     }
   }
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     if (this.config.persistTransitions) {
       await this._createStateResources();
     }

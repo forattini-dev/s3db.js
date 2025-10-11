@@ -162,7 +162,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -214,7 +214,7 @@ describe('SchedulerPlugin', () => {
       const newDb = createDatabaseForTest('suite=plugins/scheduler-init');
       
       await newDb.connect();
-      await newPlugin.setup(newDb);
+      await newPlugin.install(newDb);
       
       expect(initSpy).toHaveBeenCalledWith({ jobs: 1 });
       
@@ -335,7 +335,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -438,7 +438,7 @@ describe('SchedulerPlugin', () => {
       });
       
       // Setup with a minimal mock database
-      await testPlugin.setup({ createResource: jest.fn() });
+      await testPlugin.install({ createResource: jest.fn() });
       
       let errorOccurred = false;
       try {
@@ -538,7 +538,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -608,7 +608,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -694,7 +694,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Setup data for tests - just run successful job, handle failing job per test
       await plugin.runJob('test_job');
@@ -790,7 +790,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -870,7 +870,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -923,7 +923,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -991,7 +991,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -1070,7 +1070,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -1107,7 +1107,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -1174,7 +1174,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {
@@ -1292,7 +1292,7 @@ describe('SchedulerPlugin', () => {
       plugin = createTestPlugin();
       
       await database.connect();
-      await plugin.setup(database);
+      await plugin.install(database);
     });
 
     afterEach(async () => {

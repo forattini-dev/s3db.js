@@ -52,7 +52,7 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
         }
       ]
     });
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterEach(async () => {
@@ -216,7 +216,7 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
         }
       ]
     });
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterAll(async () => {
@@ -288,7 +288,7 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
         }
       ]
     });
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterAll(async () => {
@@ -358,7 +358,7 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
         }
       ]
     });
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterAll(async () => {
@@ -437,7 +437,7 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
         }
       ]
     });
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterAll(async () => {
@@ -522,7 +522,7 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
         }
       ]
     });
-    await consumer.setup(dbTarget);
+    await consumer.install(dbTarget);
   });
 
   afterAll(async () => {
