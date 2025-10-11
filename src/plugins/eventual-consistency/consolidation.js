@@ -7,7 +7,6 @@ import tryFn from "../../concerns/try-fn.js";
 import { PromisePool } from "@supercharge/promise-pool";
 import { idGenerator } from "../../concerns/id.js";
 import { getCohortInfo, createSyntheticSetTransaction } from "./utils.js";
-import { cleanupStaleLocks } from "./locks.js";
 
 /**
  * Start consolidation timer for a handler
@@ -169,7 +168,7 @@ export async function runConsolidation(transactionResource, consolidateRecordFn,
  * @param {string} originalId - ID of the record to consolidate
  * @param {Object} transactionResource - Transaction resource
  * @param {Object} targetResource - Target resource
- * @param {Object} lockResource - Lock resource
+ * @param {Object} storage - PluginStorage instance for locks
  * @param {Object} analyticsResource - Analytics resource (optional)
  * @param {Function} updateAnalyticsFn - Function to update analytics (optional)
  * @param {Object} config - Plugin configuration
@@ -179,26 +178,21 @@ export async function consolidateRecord(
   originalId,
   transactionResource,
   targetResource,
-  lockResource,
+  storage,
   analyticsResource,
   updateAnalyticsFn,
   config
 ) {
-  // Clean up stale locks before attempting to acquire
-  await cleanupStaleLocks(lockResource, config);
-
-  // Acquire distributed lock to prevent concurrent consolidation
-  const lockId = `lock-${originalId}`;
-  const [lockAcquired, lockErr, lock] = await tryFn(() =>
-    lockResource.insert({
-      id: lockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : 'unknown'
-    })
-  );
+  // Acquire distributed lock with TTL to prevent concurrent consolidation
+  const lockKey = `consolidation-${config.resource}-${config.field}-${originalId}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: config.lockTimeout || 30,
+    timeout: 0, // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : 'unknown'
+  });
 
   // If lock couldn't be acquired, another worker is consolidating
-  if (!lockAcquired) {
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] Lock for ${originalId} already held, skipping`);
     }
@@ -508,9 +502,12 @@ export async function consolidateRecord(
       // Mark transactions as applied (skip synthetic ones) - use PromisePool for controlled concurrency
       const transactionsToUpdate = transactions.filter(txn => txn.id !== '__synthetic__');
 
+      // ✅ OTIMIZAÇÃO: Usar concurrency do config (default aumentado de 10 para 50)
+      const markAppliedConcurrency = config.markAppliedConcurrency || 50;
+
       const { results, errors } = await PromisePool
         .for(transactionsToUpdate)
-        .withConcurrency(10) // Limit parallel updates
+        .withConcurrency(markAppliedConcurrency) // ✅ Configurável e maior!
         .process(async (txn) => {
           const [ok, err] = await tryFn(() =>
             transactionResource.update(txn.id, { applied: true })
@@ -576,10 +573,12 @@ export async function consolidateRecord(
     return consolidatedValue;
   } finally {
     // Always release the lock
-    const [lockReleased, lockReleaseErr] = await tryFn(() => lockResource.delete(lockId));
+    const [lockReleased, lockReleaseErr] = await tryFn(() =>
+      storage.releaseLock(lockKey)
+    );
 
     if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release lock ${lockId}:`, lockReleaseErr?.message);
+      console.warn(`[EventualConsistency] Failed to release lock ${lockKey}:`, lockReleaseErr?.message);
     }
   }
 }
@@ -705,7 +704,7 @@ export async function getCohortStats(cohortDate, transactionResource) {
  * @param {string} originalId - ID of the record to recalculate
  * @param {Object} transactionResource - Transaction resource
  * @param {Object} targetResource - Target resource
- * @param {Object} lockResource - Lock resource
+ * @param {Object} storage - PluginStorage instance for locks
  * @param {Function} consolidateRecordFn - Function to consolidate the record
  * @param {Object} config - Plugin configuration
  * @returns {Promise<number>} Recalculated value
@@ -714,25 +713,20 @@ export async function recalculateRecord(
   originalId,
   transactionResource,
   targetResource,
-  lockResource,
+  storage,
   consolidateRecordFn,
   config
 ) {
-  // Clean up stale locks before attempting to acquire
-  await cleanupStaleLocks(lockResource, config);
-
-  // Acquire distributed lock to prevent concurrent operations
-  const lockId = `lock-recalculate-${originalId}`;
-  const [lockAcquired, lockErr, lock] = await tryFn(() =>
-    lockResource.insert({
-      id: lockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : 'unknown'
-    })
-  );
+  // Acquire distributed lock with TTL to prevent concurrent operations
+  const lockKey = `recalculate-${config.resource}-${config.field}-${originalId}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: config.lockTimeout || 30,
+    timeout: 0, // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : 'unknown'
+  });
 
   // If lock couldn't be acquired, another worker is operating on this record
-  if (!lockAcquired) {
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
     }
@@ -832,10 +826,12 @@ export async function recalculateRecord(
     return consolidatedValue;
   } finally {
     // Always release the lock
-    const [lockReleased, lockReleaseErr] = await tryFn(() => lockResource.delete(lockId));
+    const [lockReleased, lockReleaseErr] = await tryFn(() =>
+      storage.releaseLock(lockKey)
+    );
 
     if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockId}:`, lockReleaseErr?.message);
+      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockKey}:`, lockReleaseErr?.message);
     }
   }
 }

@@ -1,9 +1,29 @@
 # 🔒 S3Queue Plugin
 
-<p align="center">
-  <strong>Distributed Queue Processing with Zero Race Conditions</strong><br>
-  <em>Build reliable, scalable task queues using S3 as your backend</em>
-</p>
+## ⚡ TLDR
+
+Sistema de **fila distribuída** usando S3 como backend, com garantia de zero duplicação.
+
+**3 linhas para começar:**
+```javascript
+const queue = new S3QueuePlugin({ resource: 'tasks', onMessage: async (task) => { console.log('Processing:', task); } });
+await db.usePlugin(queue);
+await tasks.enqueue({ type: 'send-email', data: {...} });
+```
+
+**Principais features:**
+- ✅ Zero duplicação (distributed locks + ETag + cache)
+- ✅ Visibility timeout (como AWS SQS)
+- ✅ Retry automático com exponential backoff
+- ✅ Dead letter queue
+- ✅ Worker pool configurável
+
+**Quando usar:**
+- 📧 Filas de email/SMS
+- 🎬 Processamento de mídia
+- 📊 Geração de relatórios
+- 🔄 Jobs em background
+- 🔔 Webhook delivery
 
 ---
 

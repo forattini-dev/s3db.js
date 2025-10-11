@@ -1,9 +1,27 @@
 # 💾 Backup Plugin
 
-<p align="center">
-  <strong>Driver-Based Backup System</strong><br>
-  <em>Comprehensive database backup and restore capabilities with configurable drivers</em>
-</p>
+## ⚡ TLDR
+
+Sistema de backup/restore com **múltiplos drivers** (filesystem/S3/multi) e políticas GFS de retenção.
+
+**2 linhas para começar:**
+```javascript
+const plugin = new BackupPlugin({ driver: 'filesystem', config: { path: './backups/' } });
+await plugin.backup('full');  // Backup completo criado!
+```
+
+**Principais features:**
+- ✅ Drivers: filesystem, S3, multi-destination
+- ✅ Tipos: full, incremental, selective
+- ✅ Compressão: gzip, brotli, deflate
+- ✅ Retenção GFS: daily/weekly/monthly/yearly
+- ✅ Path templates: `{date}`, `{time}`, `{year}`
+
+**Quando usar:**
+- 💾 Disaster recovery
+- 🔄 Migração entre ambientes
+- 📦 Arquivamento de longo prazo
+- 🌍 Backup multi-região
 
 ---
 

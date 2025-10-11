@@ -1,6 +1,26 @@
 # 📝 Audit Plugin
 
-Track every database operation automatically for compliance, security, and debugging.
+## ⚡ TLDR
+
+Rastreamento automático de **todas** operações do banco (insert/update/delete) com histórico completo para compliance, segurança e debug.
+
+**1 linha para começar:**
+```javascript
+await db.usePlugin(new AuditPlugin());  // Pronto! Todas operações agora são logadas
+```
+
+**Principais features:**
+- ✅ Log automático de insert/update/delete/deleteMany
+- ✅ Armazena before/after data (opcional)
+- ✅ Tracking de usuário via `getCurrentUserId()`
+- ✅ Query por resource/operation/user/data
+- ✅ Controle de tamanho com `maxDataSize`
+
+**Quando usar:**
+- 🔐 Compliance (GDPR, SOC2, HIPAA)
+- 🕵️ Security auditing
+- 🐛 Debug de mudanças inesperadas
+- 📊 Analytics de atividade de usuários
 
 ---
 

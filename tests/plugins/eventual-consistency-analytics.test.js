@@ -45,7 +45,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
   });
 
   it('should create analytics resource when enabled', async () => {
-    const analyticsResourceName = 'wallets_analytics_balance';
+    const analyticsResourceName = 'plg_wallets_an_balance';
     const analyticsResource = database.resources[analyticsResourceName];
 
     expect(analyticsResource).toBeDefined();
@@ -69,7 +69,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.consolidate('w1', 'balance');
 
     // Check analytics were created
-    const analyticsResource = database.resources.wallets_analytics_balance;
+    const analyticsResource = database.resources.plg_wallets_an_balance;
     const analytics = await analyticsResource.list();
 
     expect(analytics.length).toBeGreaterThan(0);
@@ -99,7 +99,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // No need to call consolidate() manually
 
     // Query all analytics directly from resource
-    const analyticsResource = database.resources.wallets_analytics_balance;
+    const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
     expect(allAnalytics.length).toBeGreaterThan(0);
@@ -128,7 +128,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     // In sync mode, analytics are created immediately during operations
     // Query analytics resource directly
-    const analyticsResource = database.resources.wallets_analytics_balance;
+    const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
     expect(allAnalytics.length).toBeGreaterThan(0);
@@ -177,7 +177,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     // In sync mode, analytics are created immediately during operations
     // Query analytics resource directly
-    const analyticsResource = database.resources.wallets_analytics_balance;
+    const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
     expect(allAnalytics.length).toBeGreaterThan(0);
@@ -215,7 +215,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.add('w3', 'balance', 500);
 
     // Query transaction resource directly and aggregate by recordId
-    const transactionResource = database.resources.wallets_transactions_balance;
+    const transactionResource = database.resources.plg_wallets_tx_balance;
     const allTransactions = await transactionResource.list();
 
     // Group by originalId and count transactions
@@ -265,7 +265,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.add('w3', 'balance', 2000);
 
     // Query transaction resource directly and aggregate by recordId
-    const transactionResource = database.resources.wallets_transactions_balance;
+    const transactionResource = database.resources.plg_wallets_tx_balance;
     const allTransactions = await transactionResource.list();
 
     // Group by originalId and sum values
@@ -308,7 +308,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     // In sync mode, analytics are created immediately during operations
     // Query analytics resource directly
-    const analyticsResource = database.resources.wallets_analytics_balance;
+    const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
     expect(allAnalytics.length).toBeGreaterThan(0);

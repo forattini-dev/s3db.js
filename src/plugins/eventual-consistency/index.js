@@ -17,7 +17,7 @@ import {
   runConsolidation
 } from "./consolidation.js";
 import { runGarbageCollection } from "./garbage-collection.js";
-import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getMonthByHour, getTopRecords } from "./analytics.js";
+import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords } from "./analytics.js";
 import { onInstall, onStart, onStop, watchForResource, completeFieldSetup } from "./install.js";
 
 export class EventualConsistencyPlugin extends Plugin {
@@ -125,7 +125,7 @@ export class EventualConsistencyPlugin extends Plugin {
       originalId,
       this.transactionResource,
       this.targetResource,
-      this.lockResource,
+      this.getStorage(),
       this.analyticsResource,
       (transactions) => this.updateAnalytics(transactions),
       this.config
@@ -164,7 +164,7 @@ export class EventualConsistencyPlugin extends Plugin {
       originalId,
       this.transactionResource,
       this.targetResource,
-      this.lockResource,
+      this.getStorage(),
       (id) => this.consolidateRecord(id),
       this.config
     );
@@ -188,14 +188,12 @@ export class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
 
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
 
     const result = await this.consolidateRecord(id);
@@ -205,7 +203,6 @@ export class EventualConsistencyPlugin extends Plugin {
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
 
     return result;
@@ -220,14 +217,12 @@ export class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
 
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
 
     const result = await this.consolidateRecord(id);
@@ -236,7 +231,6 @@ export class EventualConsistencyPlugin extends Plugin {
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
 
     return result;
@@ -276,14 +270,12 @@ export class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
 
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
 
     const result = await this.recalculateRecord(id);
@@ -292,7 +284,6 @@ export class EventualConsistencyPlugin extends Plugin {
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
 
     return result;
@@ -307,14 +298,12 @@ export class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
 
     this.config.resource = resourceName;
     this.config.field = fieldName;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
 
     try {
@@ -329,7 +318,6 @@ export class EventualConsistencyPlugin extends Plugin {
       this.config.field = oldField;
       this.transactionResource = oldTransactionResource;
       this.targetResource = oldTargetResource;
-      this.lockResource = oldLockResource;
       this.analyticsResource = oldAnalyticsResource;
     }
   }
@@ -343,18 +331,16 @@ export class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
 
     this.config.resource = resourceName;
     this.config.field = fieldName;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
 
     try {
       await runGarbageCollection(
         this.transactionResource,
-        this.lockResource,
+        this.getStorage(),
         this.config,
         (event, data) => this.emit(event, data)
       );
@@ -363,7 +349,6 @@ export class EventualConsistencyPlugin extends Plugin {
       this.config.field = oldField;
       this.transactionResource = oldTransactionResource;
       this.targetResource = oldTargetResource;
-      this.lockResource = oldLockResource;
     }
   }
 
@@ -438,6 +423,30 @@ export class EventualConsistencyPlugin extends Plugin {
    */
   async getMonthByHour(resourceName, field, month, options = {}) {
     return await getMonthByHour(resourceName, field, month, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for entire year, broken down by weeks
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} year - Year (e.g., 2025)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Weekly analytics for the year (up to 53 weeks)
+   */
+  async getYearByWeek(resourceName, field, year, options = {}) {
+    return await getYearByWeek(resourceName, field, year, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for entire month, broken down by weeks
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} month - Month in YYYY-MM format
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Weekly analytics for the month
+   */
+  async getMonthByWeek(resourceName, field, month, options = {}) {
+    return await getMonthByWeek(resourceName, field, month, options, this.fieldHandlers);
   }
 
   /**
