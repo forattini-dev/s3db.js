@@ -97,9 +97,9 @@ jobs:
       - name: 🔨 Build Binaries
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            bash build-binaries.sh
+            bash ./scripts/scripts/build-binaries.sh
           else
-            ./build-binaries.sh
+            ./scripts/scripts/build-binaries.sh
           fi
         shell: bash
 

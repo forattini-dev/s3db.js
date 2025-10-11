@@ -139,7 +139,7 @@ jobs:
       - name: 🧪 Test Binary Build (Quick)
         run: |
           echo "🔨 Testing binary build process..."
-          timeout 60s ./build-binaries.sh || echo "⚠️ Binary build test timed out (expected in CI)"
+          timeout 60s ./scripts/scripts/build-binaries.sh || echo "⚠️ Binary build test timed out (expected in CI)"
         continue-on-error: true
 
   # Job 4: Dependency Security
