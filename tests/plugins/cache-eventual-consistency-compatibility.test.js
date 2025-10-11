@@ -58,7 +58,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
 
   it('should NOT cache plugin-created resources (transactions, locks)', async () => {
     // Check that transaction resource exists
-    const transactionResourceName = 'wallets_transactions_balance';
+    const transactionResourceName = 'plg_wallets_tx_balance';
     const transactionResource = database.resources[transactionResourceName];
 
     expect(transactionResource).toBeDefined();
@@ -179,7 +179,7 @@ describe('CachePlugin + EventualConsistencyPlugin Compatibility', () => {
 
     await database.usePlugin(eventualPlugin);
 
-    const transactionResourceName = 'wallets_transactions_balance';
+    const transactionResourceName = 'plg_wallets_tx_balance';
 
     // Add cache with explicit include for transaction resource
     cachePlugin = new CachePlugin({

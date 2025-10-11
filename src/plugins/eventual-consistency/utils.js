@@ -65,11 +65,41 @@ export function getTimezoneOffset(timezone, verbose = false) {
 }
 
 /**
+ * Calculate ISO 8601 week number for a date
+ * @param {Date} date - Date to get week number for
+ * @returns {Object} Year and week number { year, week }
+ */
+function getISOWeek(date) {
+  // Copy date to avoid mutating original
+  const target = new Date(date.valueOf());
+
+  // ISO week starts on Monday (day 1)
+  // Find Thursday of this week (ISO week contains Jan 4th)
+  const dayNr = (date.getUTCDay() + 6) % 7; // Make Monday = 0 (use UTC)
+  target.setUTCDate(target.getUTCDate() - dayNr + 3); // Thursday of this week
+
+  // Get first Thursday of the year (use UTC)
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const firstThursday = new Date(yearStart.valueOf());
+  if (yearStart.getUTCDay() !== 4) {
+    firstThursday.setUTCDate(yearStart.getUTCDate() + ((4 - yearStart.getUTCDay()) + 7) % 7);
+  }
+
+  // Calculate week number
+  const weekNumber = 1 + Math.round((target - firstThursday) / 604800000);
+
+  return {
+    year: target.getUTCFullYear(),
+    week: weekNumber
+  };
+}
+
+/**
  * Get cohort information for a date
  * @param {Date} date - Date to get cohort info for
  * @param {string} timezone - IANA timezone name
  * @param {boolean} verbose - Whether to log warnings
- * @returns {Object} Cohort information (date, hour, month)
+ * @returns {Object} Cohort information (date, hour, week, month)
  */
 export function getCohortInfo(date, timezone, verbose = false) {
   // Simple timezone offset calculation
@@ -81,9 +111,14 @@ export function getCohortInfo(date, timezone, verbose = false) {
   const day = String(localDate.getDate()).padStart(2, '0');
   const hour = String(localDate.getHours()).padStart(2, '0');
 
+  // Calculate ISO week
+  const { year: weekYear, week: weekNumber } = getISOWeek(localDate);
+  const week = `${weekYear}-W${String(weekNumber).padStart(2, '0')}`;
+
   return {
     date: `${year}-${month}-${day}`,
     hour: `${year}-${month}-${day}T${hour}`, // ISO-like format for hour partition
+    week: week, // ISO 8601 week format (e.g., '2025-W42')
     month: `${year}-${month}`
   };
 }

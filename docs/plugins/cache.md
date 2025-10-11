@@ -1,6 +1,26 @@
 # 💾 Cache Plugin
 
-Dramatically reduce S3 costs and latency by caching frequently accessed data.
+## ⚡ TLDR
+
+Reduz **drasticamente** custos de S3 e latência com cache inteligente (memory/filesystem/S3).
+
+**1 linha para começar:**
+```javascript
+await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x mais rápido!
+```
+
+**Principais features:**
+- ✅ Drivers: memory (LRU/FIFO), filesystem, S3
+- ✅ TTL configurável + invalidação automática
+- ✅ Compressão opcional (gzip)
+- ✅ Stats de hit/miss rate
+- ✅ Partition-aware caching
+
+**Quando usar:**
+- 💰 Reduzir custos de S3 API
+- ⚡ Melhorar performance (2ms vs 180ms)
+- 📊 Cache de queries pesadas
+- 🌍 Multi-server com S3 driver
 
 ---
 

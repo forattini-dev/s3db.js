@@ -139,31 +139,8 @@ export class S3QueuePlugin extends Plugin {
 
     this.queueResource = this.database.resources[queueName];
 
-    // Create lock resource for distributed locking (enabled by default)
-    const lockName = `${this.config.resource}_locks`;
-    const [okLock, errLock] = await tryFn(() =>
-      this.database.createResource({
-        name: lockName,
-        attributes: {
-          id: 'string|required',
-          workerId: 'string|required',
-          timestamp: 'number|required',
-          ttl: 'number|default:5000'
-        },
-        behavior: 'body-overflow',
-        timestamps: false
-      })
-    );
-
-    if (okLock || this.database.resources[lockName]) {
-      this.lockResource = this.database.resources[lockName];
-    } else {
-      // Locks disabled if creation fails
-      this.lockResource = null;
-      if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Lock resource creation failed, locking disabled: ${errLock?.message}`);
-      }
-    }
+    // Locks are now managed by PluginStorage with TTL - no Resource needed
+    // Lock acquisition is handled via storage.acquireLock() with automatic expiration
 
     // Add helper methods to target resource
     this.addHelperMethods();
@@ -273,14 +250,7 @@ export class S3QueuePlugin extends Plugin {
       }
     }, 5000);
 
-    // Start lock cleanup (every 10 seconds, remove expired locks)
-    this.lockCleanupInterval = setInterval(() => {
-      this.cleanupStaleLocks().catch(err => {
-        if (this.config.verbose) {
-          console.log(`[lockCleanup] Error: ${err.message}`);
-        }
-      });
-    }, 10000);
+    // Lock cleanup no longer needed - TTL handles expiration automatically
 
     // Start N workers
     for (let i = 0; i < concurrency; i++) {
@@ -306,11 +276,7 @@ export class S3QueuePlugin extends Plugin {
       this.cacheCleanupInterval = null;
     }
 
-    // Stop lock cleanup
-    if (this.lockCleanupInterval) {
-      clearInterval(this.lockCleanupInterval);
-      this.lockCleanupInterval = null;
-    }
+    // Lock cleanup interval no longer exists (TTL handles it)
 
     // Wait for workers to finish current tasks
     await Promise.all(this.workers);
@@ -383,59 +349,21 @@ export class S3QueuePlugin extends Plugin {
   }
 
   /**
-   * Acquire a distributed lock using ETag-based conditional updates
+   * Acquire a distributed lock using PluginStorage TTL
    * This ensures only one worker can claim a message at a time
-   *
-   * Uses a two-step process:
-   * 1. Create lock resource (similar to queue resource) if not exists
-   * 2. Try to claim lock using ETag-based conditional update
    */
   async acquireLock(messageId) {
-    if (!this.lockResource) {
-      return true; // Locks disabled
-    }
-
-    const lockId = `lock-${messageId}`;
-    const now = Date.now();
+    const storage = this.getStorage();
+    const lockKey = `msg-${messageId}`;
 
     try {
-      // Try to get existing lock
-      const [okGet, errGet, existingLock] = await tryFn(() =>
-        this.lockResource.get(lockId)
-      );
+      const lock = await storage.acquireLock(lockKey, {
+        ttl: 5, // 5 seconds
+        timeout: 0, // Don't wait if locked
+        workerId: this.workerId
+      });
 
-      if (existingLock) {
-        // Lock exists - check if expired
-        const lockAge = now - existingLock.timestamp;
-        if (lockAge < existingLock.ttl) {
-          // Lock still valid, owned by another worker
-          return false;
-        }
-        // Lock expired - try to claim it with ETag
-        const [ok, err, result] = await tryFn(() =>
-          this.lockResource.updateConditional(lockId, {
-            workerId: this.workerId,
-            timestamp: now,
-            ttl: 5000
-          }, {
-            ifMatch: existingLock._etag
-          })
-        );
-
-        return ok && result.success;
-      }
-
-      // Lock doesn't exist - create it
-      const [okCreate, errCreate] = await tryFn(() =>
-        this.lockResource.insert({
-          id: lockId,
-          workerId: this.workerId,
-          timestamp: now,
-          ttl: 5000
-        })
-      );
-
-      return okCreate;
+      return lock !== null;
     } catch (error) {
       // On any error, skip this message
       if (this.config.verbose) {
@@ -446,17 +374,14 @@ export class S3QueuePlugin extends Plugin {
   }
 
   /**
-   * Release a distributed lock by deleting the lock record
+   * Release a distributed lock via PluginStorage
    */
   async releaseLock(messageId) {
-    if (!this.lockResource) {
-      return; // Locks disabled
-    }
-
-    const lockId = `lock-${messageId}`;
+    const storage = this.getStorage();
+    const lockKey = `msg-${messageId}`;
 
     try {
-      await this.lockResource.delete(lockId);
+      await storage.releaseLock(lockKey);
     } catch (error) {
       // Ignore errors on release (lock may have expired or been cleaned up)
       if (this.config.verbose) {
@@ -466,36 +391,12 @@ export class S3QueuePlugin extends Plugin {
   }
 
   /**
-   * Clean up stale locks (older than TTL)
-   * This prevents deadlocks if a worker crashes while holding a lock
+   * Clean up stale locks - NO LONGER NEEDED
+   * TTL handles automatic expiration, no manual cleanup required
    */
   async cleanupStaleLocks() {
-    if (!this.lockResource) {
-      return; // Locks disabled
-    }
-
-    const now = Date.now();
-
-    try {
-      // List all locks
-      const locks = await this.lockResource.list();
-
-      // Delete expired locks
-      for (const lock of locks) {
-        const lockAge = now - lock.timestamp;
-        if (lockAge > lock.ttl) {
-          await this.lockResource.delete(lock.id);
-          if (this.config.verbose) {
-            console.log(`[cleanupStaleLocks] Removed expired lock: ${lock.id}`);
-          }
-        }
-      }
-    } catch (error) {
-      // Ignore errors in cleanup (non-critical)
-      if (this.config.verbose) {
-        console.log(`[cleanupStaleLocks] Error during cleanup: ${error.message}`);
-      }
-    }
+    // TTL automatically expires locks - no manual cleanup needed! ✨
+    return;
   }
 
   async attemptClaim(msg) {

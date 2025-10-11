@@ -192,7 +192,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     }
 
     // Check pending transactions
-    const pendingBefore = await database.resources.urls_transactions_clicks.query({
+    const pendingBefore = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url-003',
       applied: false
     });
@@ -204,7 +204,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     await urls.consolidate('url-003', 'clicks');
 
     // Check applied transactions
-    const appliedAfter = await database.resources.urls_transactions_clicks.query({
+    const appliedAfter = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url-003',
       applied: true
     });
@@ -212,7 +212,7 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     expect(appliedAfter.length).toBe(5);
 
     // Check pending transactions
-    const pendingAfter = await database.resources.urls_transactions_clicks.query({
+    const pendingAfter = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url-003',
       applied: false
     });

@@ -1,9 +1,28 @@
 # 📬 Queue Consumer Plugin
 
-<p align="center">
-  <strong>External Queue Message Processing</strong><br>
-  <em>Consume messages from SQS, RabbitMQ and automatically process them into your resources</em>
-</p>
+## ⚡ TLDR
+
+Consome mensagens de **SQS/RabbitMQ** e processa automaticamente como insert/update/delete.
+
+**Exemplo básico:**
+```javascript
+await db.usePlugin(new QueueConsumerPlugin({
+  consumers: [{ driver: 'sqs', config: { queueUrl: '...' }, consumers: [{ resources: 'users' }] }]
+}));  // Mensagens viram operações automaticamente!
+```
+
+**Principais features:**
+- ✅ Drivers: SQS, RabbitMQ
+- ✅ Auto-processing: msg → insert/update/delete
+- ✅ Concurrent processing + batching
+- ✅ Retry logic + dead letter queue
+- ✅ Custom transformations
+
+**Quando usar:**
+- 🔄 Event-driven architectures
+- 🌐 Microservices communication
+- 📡 Real-time data sync
+- 📬 Webhook processing
 
 ---
 

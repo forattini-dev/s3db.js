@@ -24,11 +24,16 @@ export class AuditPlugin extends Plugin {
         recordId: 'string|required',
         userId: 'string|optional',
         timestamp: 'string|required',
+        createdAt: 'string|required', // YYYY-MM-DD for partitioning
         oldData: 'string|optional',
         newData: 'string|optional',
         partition: 'string|optional',
         partitionValues: 'string|optional',
         metadata: 'string|optional'
+      },
+      partitions: {
+        byDate: { fields: { createdAt: 'string|maxlength:10' } },
+        byResource: { fields: { resourceName: 'string' } }
       },
       behavior: 'body-overflow'
     }));
@@ -162,10 +167,12 @@ export class AuditPlugin extends Plugin {
       return;
     }
 
+    const now = new Date();
     const auditRecord = {
       id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       userId: this.getCurrentUserId?.() || 'system',
-      timestamp: new Date().toISOString(),
+      timestamp: now.toISOString(),
+      createdAt: now.toISOString().slice(0, 10), // YYYY-MM-DD for partitioning
       metadata: JSON.stringify({ source: 'audit-plugin', version: '2.0' }),
       resourceName: auditData.resourceName,
       operation: auditData.operation,
@@ -253,20 +260,37 @@ export class AuditPlugin extends Plugin {
 
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
-    
+
     const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
-    
-    // If we have specific filters, we need to fetch more items to ensure proper pagination after filtering
-    const hasFilters = resourceName || operation || recordId || partition || startDate || endDate;
-    
+
     let items = [];
-    
-    if (hasFilters) {
-      // Fetch enough items to handle filtering
+
+    // Use partition-aware queries when possible
+    if (resourceName && !operation && !recordId && !partition && !startDate && !endDate) {
+      // Query by resource partition directly (most efficient)
+      const [ok, err, result] = await tryFn(() =>
+        this.auditResource.query({ resourceName }, { limit: limit + offset })
+      );
+      items = ok && result ? result : [];
+      return items.slice(offset, offset + limit);
+    } else if (startDate && !resourceName && !operation && !recordId && !partition) {
+      // Query by date partition (efficient for date ranges)
+      const dates = this._generateDateRange(startDate, endDate);
+      for (const date of dates) {
+        const [ok, err, result] = await tryFn(() =>
+          this.auditResource.query({ createdAt: date })
+        );
+        if (ok && result) {
+          items.push(...result);
+        }
+      }
+      return items.slice(offset, offset + limit);
+    } else if (resourceName || operation || recordId || partition || startDate || endDate) {
+      // Fetch with filters (less efficient, but necessary)
       const fetchSize = Math.min(10000, Math.max(1000, (limit + offset) * 20));
       const result = await this.auditResource.list({ limit: fetchSize });
       items = result || [];
-      
+
       // Apply filters
       if (resourceName) {
         items = items.filter(log => log.resourceName === resourceName);
@@ -288,14 +312,25 @@ export class AuditPlugin extends Plugin {
           return true;
         });
       }
-      
-      // Apply offset and limit after filtering
+
       return items.slice(offset, offset + limit);
     } else {
       // No filters, use direct pagination
       const result = await this.auditResource.page({ size: limit, offset });
       return result.items || [];
     }
+  }
+
+  _generateDateRange(startDate, endDate) {
+    const dates = [];
+    const start = new Date(startDate);
+    const end = endDate ? new Date(endDate) : new Date();
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+
+    return dates;
   }
 
   async getRecordHistory(resourceName, recordId) {
@@ -312,7 +347,7 @@ export class AuditPlugin extends Plugin {
 
   async getAuditStats(options = {}) {
     const logs = await this.getAuditLogs(options);
-    
+
     const stats = {
       total: logs.length,
       byOperation: {},
@@ -321,28 +356,69 @@ export class AuditPlugin extends Plugin {
       byUser: {},
       timeline: {}
     };
-    
+
     for (const log of logs) {
       // Count by operation
       stats.byOperation[log.operation] = (stats.byOperation[log.operation] || 0) + 1;
-      
+
       // Count by resource
       stats.byResource[log.resourceName] = (stats.byResource[log.resourceName] || 0) + 1;
-      
+
       // Count by partition
       if (log.partition) {
         stats.byPartition[log.partition] = (stats.byPartition[log.partition] || 0) + 1;
       }
-      
+
       // Count by user
       stats.byUser[log.userId] = (stats.byUser[log.userId] || 0) + 1;
-      
+
       // Timeline by date
       const date = log.timestamp.split('T')[0];
       stats.timeline[date] = (stats.timeline[date] || 0) + 1;
     }
 
     return stats;
+  }
+
+  /**
+   * Clean up audit logs older than retention period
+   * @param {number} retentionDays - Number of days to retain (default: 90)
+   * @returns {Promise<number>} Number of records deleted
+   */
+  async cleanupOldAudits(retentionDays = 90) {
+    if (!this.auditResource) return 0;
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    // Generate list of dates to delete (all dates before cutoff)
+    const datesToDelete = [];
+    const startDate = new Date(cutoffDate);
+    startDate.setDate(startDate.getDate() - 365); // Go back up to 1 year to catch old data
+
+    for (let d = new Date(startDate); d < cutoffDate; d.setDate(d.getDate() + 1)) {
+      datesToDelete.push(d.toISOString().slice(0, 10));
+    }
+
+    let deletedCount = 0;
+
+    // Clean up using partition-aware queries
+    for (const dateStr of datesToDelete) {
+      const [ok, err, oldAudits] = await tryFn(() =>
+        this.auditResource.query({ createdAt: dateStr })
+      );
+
+      if (ok && oldAudits) {
+        for (const audit of oldAudits) {
+          const [delOk] = await tryFn(() => this.auditResource.delete(audit.id));
+          if (delOk) {
+            deletedCount++;
+          }
+        }
+      }
+    }
+
+    return deletedCount;
   }
 }
 
