@@ -64,6 +64,7 @@
     "dev": "rollup -c -w",
     "test": "pnpm run test:js && pnpm run test:ts",
     "test:js": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:quick": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=2 --bail",
     "test:ts": "tsc --noEmit --project tests/typescript/tsconfig.json",
     "test:coverage": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --maxWorkers=1",
     "test:serial": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
