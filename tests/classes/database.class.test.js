@@ -243,7 +243,7 @@ describe('Database Constructor and Edge Cases', () => {
 
   test('should handle constructor with all options', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
-    const mockPlugin = { setup: jest.fn(), start: jest.fn() };
+    const mockPlugin = { install: jest.fn(), start: jest.fn() };
     
     const db = new Database({
       verbose: true,
@@ -317,15 +317,15 @@ describe('Database Constructor and Edge Cases', () => {
 
 describe('Database Plugin System', () => {
   test('should start plugins with function plugins', async () => {
-    const setupMock = jest.fn();
+    const installMock = jest.fn();
     const startMock = jest.fn();
     function MockPlugin(db) {
-      setupMock(db);
+      installMock(db);
       startMock();
       return {
-        beforeSetup: jest.fn(),
-        setup: setupMock,
-        afterSetup: jest.fn(),
+        beforeInstall: jest.fn(),
+        install: installMock,
+        afterInstall: jest.fn(),
         beforeStart: jest.fn(),
         start: startMock,
         afterStart: jest.fn()
@@ -336,17 +336,17 @@ describe('Database Plugin System', () => {
       plugins: [MockPlugin]
     });
     await db.connect();
-    expect(setupMock).toHaveBeenCalledWith(expect.any(Object));
+    expect(installMock).toHaveBeenCalledWith(expect.any(Object));
     expect(startMock).toHaveBeenCalled();
   });
 
   test('should start plugins with instance plugins', async () => {
-    const setupMock = jest.fn();
+    const installMock = jest.fn();
     const startMock = jest.fn();
     const mockPlugin = {
-      beforeSetup: jest.fn(),
-      setup: setupMock,
-      afterSetup: jest.fn(),
+      beforeInstall: jest.fn(),
+      install: installMock,
+      afterInstall: jest.fn(),
       beforeStart: jest.fn(),
       start: startMock,
       afterStart: jest.fn()
@@ -356,15 +356,15 @@ describe('Database Plugin System', () => {
       plugins: [mockPlugin]
     });
     await db.connect();
-    expect(setupMock).toHaveBeenCalledWith(expect.any(Object));
+    expect(installMock).toHaveBeenCalledWith(expect.any(Object));
     expect(startMock).toHaveBeenCalled();
   });
 
   test('should handle plugins without hooks', async () => {
-    const setupMock = jest.fn();
+    const installMock = jest.fn();
     const startMock = jest.fn();
     const mockPlugin = {
-      setup: setupMock,
+      install: installMock,
       start: startMock
     };
 
@@ -372,7 +372,7 @@ describe('Database Plugin System', () => {
       plugins: [mockPlugin]
     });
     await db.connect();
-    expect(setupMock).toHaveBeenCalledWith(expect.any(Object));
+    expect(installMock).toHaveBeenCalledWith(expect.any(Object));
     expect(startMock).toHaveBeenCalled();
   });
 

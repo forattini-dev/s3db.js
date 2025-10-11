@@ -475,7 +475,24 @@ export async function consolidateRecord(
 
       // Update analytics if enabled (only for real transactions, not synthetic)
       if (config.enableAnalytics && transactionsToUpdate.length > 0 && updateAnalyticsFn) {
-        await updateAnalyticsFn(transactionsToUpdate);
+        const [analyticsOk, analyticsErr] = await tryFn(() =>
+          updateAnalyticsFn(transactionsToUpdate)
+        );
+
+        if (!analyticsOk) {
+          // Analytics failure should NOT prevent consolidation success
+          // But we should log it prominently
+          console.error(
+            `[EventualConsistency] ${config.resource}.${config.field} - ` +
+            `CRITICAL: Analytics update failed for ${originalId}, but consolidation succeeded:`,
+            {
+              error: analyticsErr?.message || analyticsErr,
+              stack: analyticsErr?.stack,
+              originalId,
+              transactionCount: transactionsToUpdate.length
+            }
+          );
+        }
       }
 
       // Invalidate cache for this record after consolidation

@@ -728,7 +728,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     plugin.initializeReplicators = jest.fn();
 
-    await plugin.setup(mockDatabase);
+    await plugin.install(mockDatabase);
 
     expect(mockDatabase.createResource).toHaveBeenCalledWith(expect.objectContaining({
       name: 'custom_log',
@@ -753,7 +753,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     plugin.initializeReplicators = jest.fn();
 
-    await plugin.setup(mockDatabase);
+    await plugin.install(mockDatabase);
 
     expect(plugin.replicatorLogResource).toBe(existingLog);
   });
@@ -1105,7 +1105,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     plugin.database = mockDatabase;
     plugin.initializeReplicators = jest.fn();
 
-    await plugin.setup(mockDatabase);
+    await plugin.install(mockDatabase);
 
     // Install event listeners manually (normally done in setup)
     plugin.installEventListeners(mockResource, mockDatabase, plugin);

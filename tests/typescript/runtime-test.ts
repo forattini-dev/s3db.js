@@ -48,7 +48,7 @@ async function main() {
     id: 'wallet-1',
     userId: 'user-1',
     balance: 100
-  });
+  } as any);
 
   console.log('✅ Wallet inserted');
 
@@ -57,7 +57,7 @@ async function main() {
   console.log(`✅ Balance after add: ${newBalance} (expected: 150)`);
 
   // 6. Get wallet
-  const wallet = await wallets.get('wallet-1');
+  const wallet = await wallets.get('wallet-1') as any;
   console.log(`✅ Wallet balance: ${wallet.balance} (expected: 150)`);
 
   // 7. Test analytics

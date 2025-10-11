@@ -18,7 +18,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
       ttl: 60000,
       maxSize: 100
     });
-    await cachePlugin.setup(db);
+    await cachePlugin.install(db);
 
     // Create test resource
     users = await db.createResource({
@@ -63,7 +63,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         driver: 'memory',
         ttl: 300000
       });
-      await defaultCachePlugin.setup(db);
+      await defaultCachePlugin.install(db);
 
       expect(defaultCachePlugin.driver).toBeInstanceOf(MemoryCache);
       expect(defaultCachePlugin.driver.ttl).toBe(300000);
@@ -74,7 +74,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         driver: 'memory',
         maxSize: 50
       });
-      await customCachePlugin.setup(db);
+      await customCachePlugin.install(db);
 
       expect(customCachePlugin.driver.maxSize).toBe(50);
     });
@@ -375,7 +375,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         driver: 'memory',
         maxSize: 2
       });
-      await smallCachePlugin.setup(db);
+      await smallCachePlugin.install(db);
 
       const smallUsers = await db.createResource({
         name: 'small_users',
@@ -407,7 +407,7 @@ describe('Cache Plugin - MemoryCache Driver', () => {
         driver: 'memory',
         ttl: 50 // 50ms
       });
-      await shortTtlPlugin.setup(db);
+      await shortTtlPlugin.install(db);
 
       const ttlUsers = await db.createResource({
         name: 'ttl_users',

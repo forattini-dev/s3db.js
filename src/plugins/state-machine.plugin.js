@@ -61,7 +61,7 @@ import tryFn from "../concerns/try-fn.js";
  *   
  *   actions: {
  *     onConfirmed: async (context, event, machine) => {
- *       await machine.database.resource('inventory').update(context.productId, {
+ *       await machine.this.database.resource('inventory').update(context.productId, {
  *         quantity: { $decrement: context.quantity }
  *       });
  *       await machine.sendNotification(context.customerEmail, 'order_confirmed');
@@ -73,7 +73,7 @@ import tryFn from "../concerns/try-fn.js";
  *   
  *   guards: {
  *     canShip: async (context, event, machine) => {
- *       const inventory = await machine.database.resource('inventory').get(context.productId);
+ *       const inventory = await machine.this.database.resource('inventory').get(context.productId);
  *       return inventory.quantity >= context.quantity;
  *     }
  *   },
@@ -138,8 +138,7 @@ export class StateMachinePlugin extends Plugin {
     }
   }
 
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     
     // Create state storage resource if persistence is enabled
     if (this.config.persistTransitions) {

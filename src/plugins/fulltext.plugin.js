@@ -13,11 +13,10 @@ export class FullTextPlugin extends Plugin {
     this.indexes = new Map(); // In-memory index for simplicity
   }
 
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     
     // Create index resource if it doesn't exist
-    const [ok, err, indexResource] = await tryFn(() => database.createResource({
+    const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
         name: 'plg_fulltext_indexes',
         attributes: {
           id: 'string|required',
@@ -29,7 +28,7 @@ export class FullTextPlugin extends Plugin {
           lastUpdated: 'string|required'
         }
       }));
-    this.indexResource = ok ? indexResource : database.resources.fulltext_indexes;
+    this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
 
     // Load existing indexes
     await this.loadIndexes();

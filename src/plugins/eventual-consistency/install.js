@@ -1,6 +1,6 @@
 /**
- * Setup logic for EventualConsistencyPlugin
- * @module eventual-consistency/setup
+ * Install logic for EventualConsistencyPlugin
+ * @module eventual-consistency/install
  */
 
 import tryFn from "../../concerns/try-fn.js";
@@ -11,14 +11,14 @@ import { startConsolidationTimer } from "./consolidation.js";
 import { startGarbageCollectionTimer } from "./garbage-collection.js";
 
 /**
- * Setup plugin for all configured resources
+ * Install plugin for all configured resources
  *
  * @param {Object} database - Database instance
  * @param {Map} fieldHandlers - Field handlers map
- * @param {Function} completeFieldSetupFn - Function to complete setup for a field
+ * @param {Function} completeFieldSetupFn - Function to complete field setup for a field
  * @param {Function} watchForResourceFn - Function to watch for resource creation
  */
-export async function onSetup(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
+export async function onInstall(database, fieldHandlers, completeFieldSetupFn, watchForResourceFn) {
   // Iterate over all resource/field combinations
   for (const [resourceName, resourceHandlers] of fieldHandlers) {
     const targetResource = database.resources[resourceName];
@@ -70,7 +70,7 @@ export function watchForResource(resourceName, database, fieldHandlers, complete
 }
 
 /**
- * Complete setup for a single field handler
+ * Complete field setup for a single field handler
  *
  * @param {Object} handler - Field handler
  * @param {Object} database - Database instance
@@ -174,6 +174,7 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
       name: analyticsResourceName,
       attributes: {
         id: 'string|required',
+        field: 'string|required',
         period: 'string|required',
         cohort: 'string|required',
         transactionCount: 'number|required',

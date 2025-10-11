@@ -71,7 +71,7 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
         }
       ]
     });
-    await plugin.setup(dbA);
+    await plugin.install(dbA);
   });
 
   afterEach(async () => {

@@ -107,7 +107,7 @@ describe('StateMachinePlugin', () => {
     });
 
     await database.connect();
-    await plugin.setup(database);
+    await plugin.install(database);
   });
 
   afterEach(async () => {
@@ -190,7 +190,7 @@ describe('StateMachinePlugin', () => {
       const newDb = createDatabaseForTest('suite=plugins/state-machine-init');
       
       await newDb.connect();
-      await newPlugin.setup(newDb);
+      await newPlugin.install(newDb);
       
       expect(initSpy).toHaveBeenCalledWith({ machines: ['test'] });
       
@@ -230,7 +230,7 @@ describe('StateMachinePlugin', () => {
       const testDb = createDatabaseForTest('suite=plugins/state-machine-entry');
       
       await testDb.connect();
-      await entryPlugin.setup(testDb);
+      await entryPlugin.install(testDb);
       
       await entryPlugin.initializeEntity('test', 'entity1');
       
@@ -411,7 +411,7 @@ describe('StateMachinePlugin', () => {
       const testDb = createDatabaseForTest('suite=plugins/state-machine-error');
       
       await testDb.connect();
-      await errorPlugin.setup(testDb);
+      await errorPlugin.install(testDb);
       
       await errorPlugin.initializeEntity('test', 'entity1');
       
@@ -446,7 +446,7 @@ describe('StateMachinePlugin', () => {
       const testDb = createDatabaseForTest('suite=plugins/state-machine-action-error');
       
       await testDb.connect();
-      await errorPlugin.setup(testDb);
+      await errorPlugin.install(testDb);
       
       await errorPlugin.initializeEntity('test', 'entity1');
       await errorPlugin.send('test', 'entity1', 'NEXT');
@@ -710,7 +710,7 @@ describe('StateMachinePlugin', () => {
       };
       
       // Should not throw during plugin setup even if resource creation fails
-      await errorPlugin.setup(mockDb);
+      await errorPlugin.install(mockDb);
       
       expect(mockDb.createResource).toHaveBeenCalled();
       expect(errorPlugin.database).toBe(mockDb);
@@ -752,7 +752,7 @@ describe('StateMachinePlugin', () => {
       const testDb = createDatabaseForTest('suite=plugins/state-machine-missing-action');
       
       await testDb.connect();
-      await missingActionPlugin.setup(testDb);
+      await missingActionPlugin.install(testDb);
       
       // Should not throw even with missing action
       await missingActionPlugin.initializeEntity('test', 'entity1');
@@ -780,7 +780,7 @@ describe('StateMachinePlugin', () => {
       const testDb = createDatabaseForTest('suite=plugins/state-machine-missing-guard');
       
       await testDb.connect();
-      await missingGuardPlugin.setup(testDb);
+      await missingGuardPlugin.install(testDb);
       
       await missingGuardPlugin.initializeEntity('test', 'entity1');
       

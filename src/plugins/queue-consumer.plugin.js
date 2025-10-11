@@ -1,3 +1,4 @@
+import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from "../concerns/try-fn.js";
 
@@ -20,16 +21,16 @@ import tryFn from "../concerns/try-fn.js";
 //   reconnectInterval: 2000,
 // });
 
-export class QueueConsumerPlugin {
+export class QueueConsumerPlugin extends Plugin {
   constructor(options = {}) {
+    super(options);
     this.options = options;
     // New pattern: consumers = [{ driver, config, consumers: [{ queueUrl, resources, ... }] }]
     this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
     this.consumers = [];
   }
 
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;

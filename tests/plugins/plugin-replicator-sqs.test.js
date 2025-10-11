@@ -27,7 +27,7 @@ describe('SqsReplicator - Comprehensive Integration Tests', () => {
         }
       ]
     });
-    await plugin.setup(db);
+    await plugin.install(db);
   });
   
   afterAll(async () => {

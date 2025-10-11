@@ -31,12 +31,11 @@ export class MetricsPlugin extends Plugin {
     this.flushTimer = null;
   }
 
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
     if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return;
 
     const [ok, err] = await tryFn(async () => {
-      const [ok1, err1, metricsResource] = await tryFn(() => database.createResource({
+      const [ok1, err1, metricsResource] = await tryFn(() => this.database.createResource({
         name: 'plg_metrics',
         attributes: {
           id: 'string|required',
@@ -51,9 +50,9 @@ export class MetricsPlugin extends Plugin {
           metadata: 'json'
         }
       }));
-      this.metricsResource = ok1 ? metricsResource : database.resources.plg_metrics;
+      this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
 
-      const [ok2, err2, errorsResource] = await tryFn(() => database.createResource({
+      const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
         name: 'plg_error_logs',
         attributes: {
           id: 'string|required',
@@ -64,9 +63,9 @@ export class MetricsPlugin extends Plugin {
           metadata: 'json'
         }
       }));
-      this.errorsResource = ok2 ? errorsResource : database.resources.plg_error_logs;
+      this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
 
-      const [ok3, err3, performanceResource] = await tryFn(() => database.createResource({
+      const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
         name: 'plg_performance_logs',
         attributes: {
           id: 'string|required',
@@ -77,13 +76,13 @@ export class MetricsPlugin extends Plugin {
           metadata: 'json'
         }
       }));
-      this.performanceResource = ok3 ? performanceResource : database.resources.plg_performance_logs;
+      this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
     });
     if (!ok) {
       // Resources might already exist
-      this.metricsResource = database.resources.plg_metrics;
-      this.errorsResource = database.resources.plg_error_logs;
-      this.performanceResource = database.resources.plg_performance_logs;
+      this.metricsResource = this.database.resources.plg_metrics;
+      this.errorsResource = this.database.resources.plg_error_logs;
+      this.performanceResource = this.database.resources.plg_performance_logs;
     }
 
     // Use database hooks for automatic resource discovery

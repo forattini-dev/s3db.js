@@ -236,12 +236,10 @@ export class ReplicatorPlugin extends Plugin {
     this.eventListenersInstalled.add(resource.name);
   }
 
-  async setup(database) {
-    this.database = database;
-    
+  async onInstall() {
     // Create replicator log resource if enabled
     if (this.config.persistReplicatorLog) {
-      const [ok, err, logResource] = await tryFn(() => database.createResource({
+      const [ok, err, logResource] = await tryFn(() => this.database.createResource({
         name: this.config.replicatorLogResource || 'plg_replicator_logs',
         attributes: {
           id: 'string|required',
@@ -253,24 +251,24 @@ export class ReplicatorPlugin extends Plugin {
         },
         behavior: 'truncate-data'
       }));
-      
+
       if (ok) {
         this.replicatorLogResource = logResource;
       } else {
-        this.replicatorLogResource = database.resources[this.config.replicatorLogResource || 'plg_replicator_logs'];
+        this.replicatorLogResource = this.database.resources[this.config.replicatorLogResource || 'plg_replicator_logs'];
       }
     }
 
     // Initialize replicators
-    await this.initializeReplicators(database);
-    
+    await this.initializeReplicators(this.database);
+
     // Use database hooks for automatic resource discovery
     this.installDatabaseHooks();
-    
+
     // Install event listeners for existing resources
-    for (const resource of Object.values(database.resources)) {
+    for (const resource of Object.values(this.database.resources)) {
       if (resource.name !== (this.config.replicatorLogResource || 'plg_replicator_logs')) {
-        this.installEventListeners(resource, database, this);
+        this.installEventListeners(resource, this.database, this);
       }
     }
   }
@@ -334,8 +332,8 @@ export class ReplicatorPlugin extends Plugin {
   }
 
   async uploadMetadataFile(database) {
-    if (typeof database.uploadMetadataFile === 'function') {
-      await database.uploadMetadataFile();
+    if (typeof this.database.uploadMetadataFile === 'function') {
+      await this.database.uploadMetadataFile();
     }
   }
 

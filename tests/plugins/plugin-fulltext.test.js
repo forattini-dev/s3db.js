@@ -54,7 +54,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Setup and Initialization', () => {
     test('should setup full-text plugin correctly', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       expect(fullTextPlugin.config.enabled).toBe(true);
       expect(fullTextPlugin.config.fields).toEqual(['name', 'description', 'content']);
       expect(fullTextPlugin.config.minWordLength).toBe(3);
@@ -64,7 +64,7 @@ describe('Full-Text Plugin', () => {
 
     test('should handle disabled configuration', async () => {
       const disabledPlugin = new FullTextPlugin({ enabled: false });
-      await disabledPlugin.setup(database);
+      await disabledPlugin.install(database);
       expect(disabledPlugin.config.enabled).toBe(false);
     });
 
@@ -95,7 +95,7 @@ describe('Full-Text Plugin', () => {
         }
       });
 
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
 
       expect(users._pluginWrappers).toBeDefined();
       expect(products._pluginWrappers).toBeDefined();
@@ -110,7 +110,7 @@ describe('Full-Text Plugin', () => {
         }
       });
 
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
 
       expect(newResource._pluginWrappers).toBeDefined();
     });
@@ -118,7 +118,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Indexing Operations', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -148,7 +148,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should index data on insert', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = {
         id: 'user-1',
         name: 'John Silva',
@@ -165,7 +165,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should index data on update', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = {
         id: 'user-2',
         name: 'Mary Santos',
@@ -189,7 +189,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should remove data from index on delete', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = {
         id: 'user-3',
         name: 'Peter Costa',
@@ -210,7 +210,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should handle bulk operations', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = [
         { id: 'user-bulk-1', name: 'Alice Johnson', email: 'alice@example.com', description: 'Graphic designer', department: 'IT' },
         { id: 'user-bulk-2', name: 'Bob Wilson', email: 'bob@example.com', description: 'Frontend developer', department: 'IT' },
@@ -224,7 +224,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should respect minWordLength configuration', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = {
         id: 'user-short',
         name: 'Jo',
@@ -241,7 +241,7 @@ describe('Full-Text Plugin', () => {
     });
 
     test('should handle special characters and accents', async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       const userData = {
         id: 'user-accents',
         name: 'Jose Maria Gonzalez',
@@ -260,7 +260,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Search Operations', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -340,7 +340,7 @@ describe('Full-Text Plugin', () => {
         enabled: true,
         maxResults: 2
       });
-      await limitedPlugin.setup(database);
+      await limitedPlugin.install(database);
 
       const results = await limitedPlugin.searchRecords('users', 'TI');
       expect(results.length).toBeLessThanOrEqual(2);
@@ -397,7 +397,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Search with Options', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -481,7 +481,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Index Management', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -569,7 +569,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Partition Support', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -627,7 +627,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Language Support', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -690,7 +690,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Error Handling', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',
@@ -760,7 +760,7 @@ describe('Full-Text Plugin', () => {
 
   describe('Performance', () => {
     beforeEach(async () => {
-      await fullTextPlugin.setup(database);
+      await fullTextPlugin.install(database);
       // Create resources for testing
       users = await database.createResource({
         name: 'users',

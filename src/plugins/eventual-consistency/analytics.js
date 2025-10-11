@@ -64,10 +64,20 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       );
     }
   } catch (error) {
-    console.warn(
-      `[EventualConsistency] ${config.resource}.${config.field} - ` +
-      `Analytics update error:`,
-      error.message
+    console.error(
+      `[EventualConsistency] CRITICAL: ${config.resource}.${config.field} - ` +
+      `Analytics update failed:`,
+      {
+        error: error.message,
+        stack: error.stack,
+        field: config.field,
+        resource: config.resource,
+        transactionCount: transactions.length
+      }
+    );
+    // Re-throw to prevent silent failures
+    throw new Error(
+      `Analytics update failed for ${config.resource}.${config.field}: ${error.message}`
     );
   }
 }
@@ -144,6 +154,7 @@ async function upsertAnalytics(period, cohort, transactions, analyticsResource, 
     await tryFn(() =>
       analyticsResource.insert({
         id,
+        field: config.field,
         period,
         cohort,
         transactionCount,
@@ -266,6 +277,7 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
     await tryFn(() =>
       analyticsResource.insert({
         id,
+        field: config.field,
         period,
         cohort,
         transactionCount,

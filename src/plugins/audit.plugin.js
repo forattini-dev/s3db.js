@@ -13,7 +13,7 @@ export class AuditPlugin extends Plugin {
     };
   }
 
-  async onSetup() {
+  async onInstall() {
     // Create audit resource
     const [ok, err, auditResource] = await tryFn(() => this.database.createResource({
       name: 'plg_audits',

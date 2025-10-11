@@ -132,7 +132,7 @@ export class BackupPlugin extends Plugin {
     }
   }
 
-  async onSetup() {
+  async onInstall() {
     // Create backup driver instance
     this.driver = createBackupDriver(this.config.driver, this.config.driverConfig);
     await this.driver.setup(this.database);

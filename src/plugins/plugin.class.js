@@ -1,4 +1,5 @@
 import EventEmitter from "events";
+import { PluginStorage } from "../concerns/plugin-storage.js";
 
 export class Plugin extends EventEmitter {
   constructor(options = {}) {
@@ -6,13 +7,50 @@ export class Plugin extends EventEmitter {
     this.name = this.constructor.name;
     this.options = options;
     this.hooks = new Map();
+
+    // Auto-generate slug from class name (CamelCase -> kebab-case)
+    // e.g., EventualConsistencyPlugin -> eventual-consistency-plugin
+    this.slug = options.slug || this._generateSlug();
+
+    // Storage instance (lazy-loaded)
+    this._storage = null;
   }
 
-  async setup(database) {
+  /**
+   * Generate kebab-case slug from class name
+   * @private
+   * @returns {string}
+   */
+  _generateSlug() {
+    return this.name
+      .replace(/Plugin$/, '') // Remove "Plugin" suffix
+      .replace(/([a-z])([A-Z])/g, '$1-$2') // CamelCase -> kebab-case
+      .toLowerCase();
+  }
+
+  /**
+   * Get PluginStorage instance (lazy-loaded)
+   * @returns {PluginStorage}
+   */
+  getStorage() {
+    if (!this._storage) {
+      if (!this.database || !this.database.client) {
+        throw new Error('Plugin must be installed before accessing storage');
+      }
+      this._storage = new PluginStorage(this.database.client, this.slug);
+    }
+    return this._storage;
+  }
+
+  /**
+   * Install plugin
+   * @param {Database} database - Database instance
+   */
+  async install(database) {
     this.database = database;
-    this.beforeSetup();
-    await this.onSetup();
-    this.afterSetup();
+    this.beforeInstall();
+    await this.onInstall();
+    this.afterInstall();
   }
 
   async start() {
@@ -27,8 +65,28 @@ export class Plugin extends EventEmitter {
     this.afterStop();
   }
 
+  /**
+   * Uninstall plugin and cleanup all data
+   * @param {Object} options - Uninstall options
+   * @param {boolean} options.purgeData - Delete all plugin data from S3 (default: false)
+   */
+  async uninstall(options = {}) {
+    const { purgeData = false } = options;
+
+    this.beforeUninstall();
+    await this.onUninstall(options);
+
+    // Purge all plugin data if requested
+    if (purgeData && this._storage) {
+      const deleted = await this._storage.deleteAll();
+      this.emit('plugin.dataPurged', { deleted });
+    }
+
+    this.afterUninstall();
+  }
+
   // Override these methods in subclasses
-  async onSetup() {
+  async onInstall() {
     // Override in subclasses
   }
 
@@ -37,6 +95,10 @@ export class Plugin extends EventEmitter {
   }
 
   async onStop() {
+    // Override in subclasses
+  }
+
+  async onUninstall(options) {
     // Override in subclasses
   }
 
@@ -182,12 +244,12 @@ export class Plugin extends EventEmitter {
   }
 
   // Event emission methods
-  beforeSetup() {
-    this.emit("plugin.beforeSetup", new Date());
+  beforeInstall() {
+    this.emit("plugin.beforeInstall", new Date());
   }
 
-  afterSetup() {
-    this.emit("plugin.afterSetup", new Date());
+  afterInstall() {
+    this.emit("plugin.afterInstall", new Date());
   }
 
   beforeStart() {
@@ -204,6 +266,14 @@ export class Plugin extends EventEmitter {
 
   afterStop() {
     this.emit("plugin.afterStop", new Date());
+  }
+
+  beforeUninstall() {
+    this.emit("plugin.beforeUninstall", new Date());
+  }
+
+  afterUninstall() {
+    this.emit("plugin.afterUninstall", new Date());
   }
 }
 
