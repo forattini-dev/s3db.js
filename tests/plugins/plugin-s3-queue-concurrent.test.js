@@ -42,7 +42,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       concurrency: 3
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     const processed = [];
@@ -103,8 +103,8 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       visibilityTimeout: 5000
     });
 
-    await plugin1.setup(database);
-    await plugin2.setup(database);
+    await plugin1.install(database);
+    await plugin2.install(database);
     plugins.push(plugin1, plugin2);
 
     const worker1Processed = [];
@@ -169,7 +169,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       maxAttempts: 3
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     let processingCount = 0;
@@ -214,7 +214,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       concurrency: 5
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     const workerActivity = {};
@@ -280,7 +280,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       deadLetterResource: 'failed_tasks'
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     // Enqueue 10 messages
@@ -373,7 +373,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       concurrency: 1  // Single worker for order testing
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     const processedOrder = [];
@@ -416,7 +416,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
       concurrency: 3  // 3 concurrent workers
     });
 
-    await plugin.setup(database);
+    await plugin.install(database);
     plugins.push(plugin);
 
     const processed = [];

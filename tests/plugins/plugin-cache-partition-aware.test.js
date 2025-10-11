@@ -38,7 +38,7 @@ describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {
         enableStats: true
       }
     });
-    await cachePlugin.setup(db);
+    await cachePlugin.install(db);
 
     // Create test resource with partitions
     users = await db.createResource({

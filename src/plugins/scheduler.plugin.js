@@ -29,11 +29,11 @@ import { idGenerator } from "../concerns/id.js";
  *       schedule: '0 3 * * *',
  *       description: 'Clean up expired records',
  *       action: async (database, context) => {
- *         const expired = await database.resource('sessions')
+ *         const expired = await this.database.resource('sessions')
  *           .list({ where: { expiresAt: { $lt: new Date() } } });
  *         
  *         for (const record of expired) {
- *           await database.resource('sessions').delete(record.id);
+ *           await this.database.resource('sessions').delete(record.id);
  *         }
  *         
  *         return { deleted: expired.length };
@@ -48,8 +48,8 @@ import { idGenerator } from "../concerns/id.js";
  *       schedule: '0 9 * * MON',
  *       description: 'Generate weekly analytics report',
  *       action: async (database, context) => {
- *         const users = await database.resource('users').count();
- *         const orders = await database.resource('orders').count({
+ *         const users = await this.database.resource('users').count();
+ *         const orders = await this.database.resource('orders').count({
  *           where: { 
  *             createdAt: { 
  *               $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) 
@@ -64,7 +64,7 @@ import { idGenerator } from "../concerns/id.js";
  *           createdAt: new Date().toISOString()
  *         };
  *         
- *         await database.resource('reports').insert(report);
+ *         await this.database.resource('reports').insert(report);
  *         return report;
  *       }
  *     },
@@ -106,7 +106,7 @@ import { idGenerator } from "../concerns/id.js";
  *         const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
  *         
  *         // Aggregate metrics from the last hour
- *         const events = await database.resource('events').list({
+ *         const events = await this.database.resource('events').list({
  *           where: { 
  *             timestamp: { 
  *               $gte: hourAgo.getTime(),
@@ -120,7 +120,7 @@ import { idGenerator } from "../concerns/id.js";
  *           return acc;
  *         }, {});
  *         
- *         await database.resource('hourly_metrics').insert({
+ *         await this.database.resource('hourly_metrics').insert({
  *           hour: hourAgo.toISOString().slice(0, 13),
  *           metrics: aggregated,
  *           total: events.length,
@@ -217,8 +217,7 @@ export class SchedulerPlugin extends Plugin {
     return true; // Simplified validation
   }
 
-  async setup(database) {
-    this.database = database;
+  async onInstall() {
 
     // Create lock resource for distributed locking
     await this._createLockResource();

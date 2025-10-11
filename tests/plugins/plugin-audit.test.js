@@ -39,7 +39,7 @@ describe('Audit Plugin', () => {
       maxDataSize: 5000
     });
 
-    await auditPlugin.setup(database);
+    await auditPlugin.install(database);
 
     users = await database.createResource({
       name: 'users',
@@ -140,11 +140,11 @@ describe('Audit Plugin', () => {
 
       // First setup
       const firstPlugin = new AuditPlugin();
-      await firstPlugin.setup(isolatedDatabase);
+      await firstPlugin.install(isolatedDatabase);
 
       // Second setup should not fail
       const secondPlugin = new AuditPlugin();
-      await expect(secondPlugin.setup(isolatedDatabase)).resolves.toBeUndefined();
+      await expect(secondPlugin.install(isolatedDatabase)).resolves.toBeUndefined();
     });
 
     test('should work without audit plugin', async () => {
@@ -247,7 +247,7 @@ describe('Audit Plugin', () => {
         includeData: true,
         includePartitions: false
       });
-      await pluginWithoutPartitions.setup(isolatedDatabase);
+      await pluginWithoutPartitions.install(isolatedDatabase);
 
       const isolatedUsers = await isolatedDatabase.createResource({
         name: 'users',
@@ -302,7 +302,7 @@ describe('Audit Plugin', () => {
         enabled: true,
         includeData: false
       });
-      await pluginWithoutData.setup(isolatedDatabase);
+      await pluginWithoutData.install(isolatedDatabase);
 
       const isolatedUsers = await isolatedDatabase.createResource({
         name: 'users',
@@ -872,7 +872,7 @@ describe('Audit Plugin', () => {
         resources: {}
       };
 
-      await errorPlugin.setup(errorDatabase);
+      await errorPlugin.install(errorDatabase);
       expect(errorPlugin.auditResource == null).toBe(true);
     });
 
@@ -1076,7 +1076,7 @@ describe('Audit Plugin', () => {
         enabled: true,
         includeData: false
       });
-      await pluginWithoutData.setup(isolatedDatabase);
+      await pluginWithoutData.install(isolatedDatabase);
       pluginWithoutData.auditResource = mockAuditResource;
       
       // Create the resource users after installing the plugin
@@ -1120,7 +1120,7 @@ describe('Audit Plugin', () => {
         includeData: true,
         includePartitions: false
       });
-      await pluginWithoutPartitions.setup(isolatedDatabase);
+      await pluginWithoutPartitions.install(isolatedDatabase);
       pluginWithoutPartitions.auditResource = mockAuditResource;
       
       // Create the resource users after installing the plugin

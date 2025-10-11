@@ -43,11 +43,7 @@ export class CachePlugin extends Plugin {
     };
   }
 
-  async setup(database) {
-    await super.setup(database);
-  }
-
-  async onSetup() {
+  async onInstall() {
     // Initialize cache driver
     if (this.config.driver && typeof this.config.driver === 'object') {
       // Use custom driver instance if provided
@@ -76,7 +72,7 @@ export class CachePlugin extends Plugin {
 
     // Use database hooks instead of method overwriting
     this.installDatabaseHooks();
-    
+
     // Install hooks for existing resources
     this.installResourceHooks();
   }

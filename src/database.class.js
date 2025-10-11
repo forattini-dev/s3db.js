@@ -393,22 +393,18 @@ export class Database extends EventEmitter {
     if (!isEmpty(this.pluginList)) {
       const plugins = this.pluginList.map(p => isFunction(p) ? new p(this) : p)
 
-      const setupProms = plugins.map(async (plugin) => {
-        if (plugin.beforeSetup) await plugin.beforeSetup()
-        await plugin.setup(db)
-        if (plugin.afterSetup) await plugin.afterSetup()
-        
-        // Register the plugin using the same naming convention as usePlugin()
+      const installProms = plugins.map(async (plugin) => {
+        await plugin.install(db)
+
+        // Register the plugin
         const pluginName = this._getPluginName(plugin);
         this.pluginRegistry[pluginName] = plugin;
       });
-      
-      await Promise.all(setupProms);
+
+      await Promise.all(installProms);
 
       const startProms = plugins.map(async (plugin) => {
-        if (plugin.beforeStart) await plugin.beforeStart()
         await plugin.start()
-        if (plugin.afterStart) await plugin.afterStart()
       });
 
       await Promise.all(startProms);
@@ -430,17 +426,54 @@ export class Database extends EventEmitter {
 
   async usePlugin(plugin, name = null) {
     const pluginName = this._getPluginName(plugin, name);
-    
+
     // Register the plugin
     this.plugins[pluginName] = plugin;
-    
-    // Setup the plugin if database is connected
+
+    // Install the plugin if database is connected
     if (this.isConnected()) {
-      await plugin.setup(this);
+      await plugin.install(this);
       await plugin.start();
     }
-    
+
     return plugin;
+  }
+
+  /**
+   * Uninstall a plugin and optionally purge its data
+   * @param {string} name - Plugin name
+   * @param {Object} options - Uninstall options
+   * @param {boolean} options.purgeData - Delete all plugin data from S3 (default: false)
+   */
+  async uninstallPlugin(name, options = {}) {
+    const pluginName = name.toLowerCase().replace('plugin', '');
+    const plugin = this.plugins[pluginName] || this.pluginRegistry[pluginName];
+
+    if (!plugin) {
+      throw new Error(`Plugin '${name}' not found`);
+    }
+
+    // Stop the plugin first
+    if (plugin.stop) {
+      await plugin.stop();
+    }
+
+    // Uninstall the plugin
+    if (plugin.uninstall) {
+      await plugin.uninstall(options);
+    }
+
+    // Remove from registries
+    delete this.plugins[pluginName];
+    delete this.pluginRegistry[pluginName];
+
+    // Remove from plugin list
+    const index = this.pluginList.indexOf(plugin);
+    if (index > -1) {
+      this.pluginList.splice(index, 1);
+    }
+
+    this.emit('plugin.uninstalled', { name: pluginName, plugin });
   }
 
   async uploadMetadataFile() {
