@@ -17,7 +17,19 @@ import { groupByCohort } from "./utils.js";
 export async function updateAnalytics(transactions, analyticsResource, config) {
   if (!analyticsResource || transactions.length === 0) return;
 
-  if (config.verbose) {
+  // CRITICAL VALIDATION: Ensure field is set in config
+  // This can be undefined due to race conditions when multiple handlers share config
+  if (!config.field) {
+    throw new Error(
+      `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!\n` +
+      `This indicates a race condition in the plugin where multiple handlers are sharing the same config object.\n` +
+      `Config: ${JSON.stringify({ resource: config.resource, field: config.field, verbose: config.verbose })}\n` +
+      `Transactions count: ${transactions.length}\n` +
+      `AnalyticsResource: ${analyticsResource?.name || 'unknown'}`
+    );
+  }
+
+  if (config.verbose || config.debug) {
     console.log(
       `[EventualConsistency] ${config.resource}.${config.field} - ` +
       `Updating analytics for ${transactions.length} transactions...`
@@ -29,7 +41,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     const byHour = groupByCohort(transactions, 'cohortHour');
     const cohortCount = Object.keys(byHour).length;
 
-    if (config.verbose) {
+    if (config.verbose || config.debug) {
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - ` +
         `Updating ${cohortCount} hourly analytics cohorts...`
@@ -45,7 +57,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     if (config.analyticsConfig.rollupStrategy === 'incremental') {
       const uniqueHours = Object.keys(byHour);
 
-      if (config.verbose) {
+      if (config.verbose || config.debug) {
         console.log(
           `[EventualConsistency] ${config.resource}.${config.field} - ` +
           `Rolling up ${uniqueHours.length} hours to daily/monthly analytics...`
@@ -57,7 +69,7 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       }
     }
 
-    if (config.verbose) {
+    if (config.verbose || config.debug) {
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - ` +
         `Analytics update complete for ${cohortCount} cohorts`
