@@ -1014,7 +1014,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.put('test-key', { data: 'test' })
-      ).rejects.toThrow('PluginStorage.put failed for key test-key');
+      ).rejects.toThrow('PluginStorage.set failed for key test-key');
     });
 
     test('should throw descriptive error on get failure (non-NoSuchKey)', async () => {

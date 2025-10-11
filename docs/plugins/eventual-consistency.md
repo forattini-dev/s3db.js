@@ -1,16 +1,29 @@
 # EventualConsistencyPlugin
 
-**Gerencia campos numéricos com histórico de transações e consistência eventual**
+## ⚡ TLDR
 
-Perfeito para contadores, saldos, pontos e outros campos acumuladores que precisam de:
-- ✅ Histórico completo de mudanças
-- ✅ Operações atômicas (add/sub/set)
-- ✅ Consistência eventual ou imediata
-- ✅ Analytics pré-calculados
-- ✅ 85.8% de cobertura de testes
-- ✅ Arquitetura modular (11 módulos separados)
+Plugin para campos numéricos com **transações auditáveis** e **analytics pré-calculados** por hora/dia/semana/mês.
 
-> **v10.0.16+**: Plugin refatorado com melhor performance, estrutura nested e comportamento corrigido para registros não-existentes.
+**3 linhas para começar:**
+```javascript
+await db.usePlugin(new EventualConsistencyPlugin({ resources: { wallets: ['balance'] } }));
+await wallets.insert({ id: 'w1', balance: 0 });
+await wallets.add('w1', 'balance', 100);  // Cria transação e consolida automaticamente
+```
+
+**Principais features:**
+- ✅ Transações atômicas (add/sub/set) com histórico completo
+- ✅ Modo sync (imediato) ou async (eventual) com auto-consolidação
+- ✅ Analytics pré-calculados (hour → day → **week** → month)
+- ✅ Partições otimizadas (query O(1) por originalId + applied status)
+- ✅ 85.8% de cobertura de testes + arquitetura modular (11 módulos)
+
+**Quando usar:**
+- 💰 Saldos/carteiras (modo sync)
+- 📊 Contadores/métricas (modo async)
+- 📈 Dashboards com analytics pré-calculados
+
+> **v11.0.2+**: Suporte para agregações semanais (ISO 8601) adicionado! 🎉
 
 ---
 
@@ -58,7 +71,7 @@ console.log(wallet.balance); // 50 ✅
 ## Como Funciona
 
 ### 1. Transações
-Toda operação cria uma transação em `{resource}_transactions_{field}`:
+Toda operação cria uma transação em `plg_{resource}_tx_{field}`:
 
 ```javascript
 await wallets.add('wallet-1', 'balance', 100);
@@ -79,7 +92,7 @@ await wallets.consolidate('wallet-1', 'balance');
 > **⚠️ IMPORTANTE**: O plugin **NÃO cria registros** que não existem. Transações ficam pendentes até você criar o registro.
 
 ### 3. Analytics (Opcional)
-Cria agregações em `{resource}_analytics_{field}`:
+Cria agregações em `plg_{resource}_an_{field}`:
 - Métricas: count, sum, avg, min, max
 - Períodos: hour, day, month
 
@@ -98,11 +111,12 @@ new EventualConsistencyPlugin({
 
   // Consolidação
   consolidation: {
-    mode: 'sync',        // 'sync' ou 'async' (default: 'async')
-    auto: true,          // Auto-consolidação (default: true)
-    interval: 300,       // Intervalo em segundos (default: 300)
-    window: 24,          // Janela em horas (default: 24)
-    concurrency: 5       // Consolidações paralelas (default: 5)
+    mode: 'sync',                   // 'sync' ou 'async' (default: 'async')
+    auto: true,                     // Auto-consolidação (default: true)
+    interval: 300,                  // Intervalo em segundos (default: 300)
+    window: 24,                     // Janela em horas (default: 24)
+    concurrency: 5,                 // Consolidações paralelas (default: 5)
+    markAppliedConcurrency: 50      // ✅ NOVO (v11.0.3): Concurrency para mark applied (default: 50)
   },
 
   // Analytics (opcional)
@@ -223,9 +237,13 @@ const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
 // Stats por período
 await plugin.getAnalytics('resource', 'field', { period: 'hour', date: '2025-10-09' });
 await plugin.getLastNDays('resource', 'field', 7);
-await plugin.getMonthByDay('resource', 'field', '2025-10');
-await plugin.getDayByHour('resource', 'field', '2025-10-09');
-await plugin.getYearByMonth('resource', 'field', 2025);
+
+// Por tempo - agregações específicas
+await plugin.getDayByHour('resource', 'field', '2025-10-09');       // Dia dividido em 24 horas
+await plugin.getMonthByDay('resource', 'field', '2025-10');         // Mês dividido em ~30 dias
+await plugin.getMonthByWeek('resource', 'field', '2025-10');        // 🆕 Mês dividido em 4-5 semanas
+await plugin.getYearByWeek('resource', 'field', 2025);              // 🆕 Ano dividido em 52-53 semanas
+await plugin.getYearByMonth('resource', 'field', 2025);             // Ano dividido em 12 meses
 
 // Top records
 await plugin.getTopRecords('resource', 'field', {
@@ -236,15 +254,60 @@ await plugin.getTopRecords('resource', 'field', {
 });
 ```
 
+### 🆕 Week Analytics (v11.0.2+)
+
+O plugin agora suporta **agregações semanais (ISO 8601)**:
+
+```javascript
+// Obter ano inteiro dividido por semanas (52-53 semanas)
+const yearWeeks = await plugin.getYearByWeek('products', 'sold', 2025);
+// [
+//   { cohort: '2025-W01', count: 150, sum: 15000, avg: 100, ... },
+//   { cohort: '2025-W02', count: 200, sum: 20000, avg: 100, ... },
+//   ...
+//   { cohort: '2025-W53', count: 100, sum: 10000, avg: 100, ... }
+// ]
+
+// Obter mês dividido por semanas (4-5 semanas)
+const monthWeeks = await plugin.getMonthByWeek('products', 'views', '2025-10');
+// [
+//   { cohort: '2025-W40', count: 500, sum: 5000, ... },
+//   { cohort: '2025-W41', count: 700, sum: 7000, ... },
+//   ...
+// ]
+```
+
+**Formato ISO 8601:**
+- `YYYY-Www` (exemplo: `2025-W42` = semana 42 de 2025)
+- Semana começa na **segunda-feira**
+- Primeira semana do ano contém 4 de janeiro
+- Anos podem ter 52 ou 53 semanas
+
+**Hierarquia de Rollup:**
+```
+Transaction (timestamp)
+  ↓
+HOUR cohort (2025-10-11T14)
+  ↓ rollup
+DAY cohort (2025-10-11)
+  ↓ rollup (🆕)
+WEEK cohort (2025-W42)
+  ↓ rollup
+MONTH cohort (2025-10)
+```
+
 **Estrutura dos Analytics:**
 ```javascript
 {
   id: 'hour-2025-10-09T14',
-  period: 'hour',
-  cohort: '2025-10-09T14',
+  period: 'hour',            // 'hour', 'day', 'week', 'month'
+  cohort: '2025-10-09T14',   // ou '2025-W42' para week
   transactionCount: 150,
   totalValue: 5000,
   avgValue: 33.33,
+  minValue: 10,
+  maxValue: 500,
+  recordCount: 25,           // Distinct originalIds
   operations: {
     add: { count: 120, sum: 6000 },
     sub: { count: 30, sum: -1000 }
@@ -279,12 +342,14 @@ await plugin.getTopRecords('resource', 'field', {
 
 Para cada field, o plugin cria:
 
-1. **`{resource}_transactions_{field}`** - Log de transações
-   - Partições: byDay, byMonth, byOriginalIdAndApplied (otimizado)
+1. **`plg_{resource}_tx_{field}`** - Log de transações
+   - Atributos: `id`, `originalId`, `field`, `value`, `operation`, `timestamp`, `cohortDate`, `cohortHour`, **`cohortWeek`** (v11.0.2+), `cohortMonth`, `applied`
+   - Partições: `byOriginalIdAndApplied` (consolidation otimizada), `byHour`, `byDay`, **`byWeek`** (v11.0.2+), `byMonth`
 
-2. **`{resource}_consolidation_locks_{field}`** - Locks distribuídos
+2. **Locks via PluginStorage** - Distributed locks com TTL automático (não usa resource)
 
-3. **`{resource}_analytics_{field}`** - Analytics (se habilitado)
+3. **`plg_{resource}_an_{field}`** - Analytics (se habilitado)
+   - Períodos: `hour`, `day`, **`week`** (v11.0.2+), `month`
 
 ---
 
@@ -327,8 +392,11 @@ await db.createResource({
   asyncPartitions: true  // ← 70-100% mais rápido
 });
 
-// Aumentar concorrência
+// ✅ Aumentar concorrência da consolidação
 { consolidation: { concurrency: 10 } }  // default: 5
+
+// ✅ Aumentar concorrência do mark applied (v11.0.3+)
+{ consolidation: { markAppliedConcurrency: 100 } }  // default: 50
 
 // Reduzir janela
 { consolidation: { window: 12 } }  // default: 24h
@@ -340,7 +408,7 @@ await db.createResource({
 console.log(plugin.config.enableAnalytics);
 
 // Verificar resource criado
-console.log(db.resources.wallets_analytics_balance);
+console.log(db.resources.plg_wallets_an_balance);
 ```
 
 ---
@@ -579,7 +647,7 @@ This indicates a race condition in the plugin where multiple handlers
 are sharing the same config object.
 Config: {"resource":"urls","field":undefined,"verbose":false}
 Transactions count: 5
-AnalyticsResource: urls_analytics_clicks
+AnalyticsResource: plg_urls_an_clicks
 ```
 
 Isso ajuda a identificar o momento exato quando o race condition acontece e qual handler estava rodando.
@@ -710,9 +778,50 @@ Para detalhes completos das correções, veja:
 
 ---
 
+## 📅 Changelog
+
+### v11.0.2 (11/10/2025)
+
+#### 🆕 Week Analytics Support (ISO 8601)
+
+Adicionado suporte completo para agregações semanais:
+
+**Novas Features:**
+- ✅ Cálculo automático de semana ISO 8601 (segunda a domingo)
+- ✅ Atributo `cohortWeek` em transações (formato: `YYYY-Www`)
+- ✅ Partição `byWeek` para queries otimizadas
+- ✅ Rollup automático: hour → day → **week** → month
+- ✅ Novas funções: `getYearByWeek()` e `getMonthByWeek()`
+
+**Arquivos Modificados:**
+- `src/plugins/eventual-consistency/utils.js` - Função `getISOWeek()` e atualização `getCohortInfo()`
+- `src/plugins/eventual-consistency/partitions.js` - Partição `byWeek`
+- `src/plugins/eventual-consistency/install.js` - Atributo `cohortWeek`
+- `src/plugins/eventual-consistency/transactions.js` - Transaction object inclui `cohortWeek`
+- `src/plugins/eventual-consistency/analytics.js` - Rollup + query functions
+- `src/plugins/eventual-consistency/index.js` - API pública
+
+**Compatibilidade:**
+- ✅ 100% backward compatible (cohortWeek é opcional)
+- ✅ Transações antigas continuam funcionando
+- ✅ Não requer migração
+- ✅ Todos os 861 testes passando
+
+**Uso:**
+```javascript
+// Obter analytics semanais
+const weeks = await plugin.getYearByWeek('products', 'sold', 2025);
+console.log(weeks[0]); // { cohort: '2025-W01', count: 150, sum: 15000, ... }
+
+// Comparar semanas de um mês
+const monthWeeks = await plugin.getMonthByWeek('urls', 'clicks', '2025-10');
+// [W40, W41, W42, W43, W44]
+```
+
+---
+
 ## Ver Também
 
 - [Replicator Plugin](./replicator.md) - Replicar para outros bancos
 - [Audit Plugin](./audit.md) - Audit trail
 - [Cache Plugin](./cache.md) - Cache de valores consolidados
-- [1-Pager Bug Fix v11.0.0 (PT-BR)](../../docs/1-pager-eventual-consistency-bug-fix.pt-BR.md) - Documentação completa das correções

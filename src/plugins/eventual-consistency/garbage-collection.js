@@ -31,24 +31,22 @@ export function startGarbageCollectionTimer(handler, resourceName, fieldName, ru
  * Uses distributed locking to prevent multiple containers from running GC simultaneously
  *
  * @param {Object} transactionResource - Transaction resource
- * @param {Object} lockResource - Lock resource
+ * @param {Object} storage - PluginStorage instance for locks
  * @param {Object} config - Plugin configuration
  * @param {Function} emitFn - Function to emit events
  * @returns {Promise<void>}
  */
-export async function runGarbageCollection(transactionResource, lockResource, config, emitFn) {
-  // Acquire distributed lock for GC operation
-  const gcLockId = `lock-gc-${config.resource}-${config.field}`;
-  const [lockAcquired] = await tryFn(() =>
-    lockResource.insert({
-      id: gcLockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : 'unknown'
-    })
-  );
+export async function runGarbageCollection(transactionResource, storage, config, emitFn) {
+  // Acquire distributed lock with TTL for GC operation
+  const lockKey = `gc-${config.resource}-${config.field}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: 300, // 5 minutes for GC
+    timeout: 0, // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : 'unknown'
+  });
 
   // If another container is already running GC, skip
-  if (!lockAcquired) {
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] GC already running in another container`);
     }
@@ -121,6 +119,6 @@ export async function runGarbageCollection(transactionResource, lockResource, co
     }
   } finally {
     // Always release GC lock
-    await tryFn(() => lockResource.delete(gcLockId));
+    await tryFn(() => storage.releaseLock(lockKey));
   }
 }

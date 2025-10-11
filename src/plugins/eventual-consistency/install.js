@@ -84,8 +84,8 @@ export async function completeFieldSetup(handler, database, config, plugin) {
   const resourceName = handler.resource;
   const fieldName = handler.field;
 
-  // Create transaction resource with partitions
-  const transactionResourceName = `${resourceName}_transactions_${fieldName}`;
+  // Create transaction resource with partitions (plg_ prefix for plugin resources)
+  const transactionResourceName = `plg_${resourceName}_tx_${fieldName}`;
   const partitionConfig = createPartitionConfig();
 
   const [ok, err, transactionResource] = await tryFn(() =>
@@ -100,6 +100,7 @@ export async function completeFieldSetup(handler, database, config, plugin) {
         timestamp: 'string|required',
         cohortDate: 'string|required',
         cohortHour: 'string|required',
+        cohortWeek: 'string|optional',
         cohortMonth: 'string|optional',
         source: 'string|optional',
         applied: 'boolean|optional'
@@ -118,27 +119,8 @@ export async function completeFieldSetup(handler, database, config, plugin) {
 
   handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
 
-  // Create lock resource
-  const lockResourceName = `${resourceName}_consolidation_locks_${fieldName}`;
-  const [lockOk, lockErr, lockResource] = await tryFn(() =>
-    database.createResource({
-      name: lockResourceName,
-      attributes: {
-        id: 'string|required',
-        lockedAt: 'number|required',
-        workerId: 'string|optional'
-      },
-      behavior: 'body-only',
-      timestamps: false,
-      createdBy: 'EventualConsistencyPlugin'
-    })
-  );
-
-  if (!lockOk && !database.resources[lockResourceName]) {
-    throw new Error(`Failed to create lock resource for ${resourceName}.${fieldName}: ${lockErr?.message}`);
-  }
-
-  handler.lockResource = lockOk ? lockResource : database.resources[lockResourceName];
+  // Locks are now managed by PluginStorage with TTL - no Resource needed
+  // Lock acquisition is handled via storage.acquireLock() with automatic expiration
 
   // Create analytics resource if enabled
   if (config.enableAnalytics) {
@@ -151,8 +133,9 @@ export async function completeFieldSetup(handler, database, config, plugin) {
   if (config.verbose) {
     console.log(
       `[EventualConsistency] ${resourceName}.${fieldName} - ` +
-      `Setup complete. Resources: ${transactionResourceName}, ${lockResourceName}` +
-      `${config.enableAnalytics ? `, ${resourceName}_analytics_${fieldName}` : ''}`
+      `Setup complete. Resources: ${transactionResourceName}` +
+      `${config.enableAnalytics ? `, plg_${resourceName}_an_${fieldName}` : ''}` +
+      ` (locks via PluginStorage TTL)`
     );
   }
 }
@@ -167,7 +150,7 @@ export async function completeFieldSetup(handler, database, config, plugin) {
  * @returns {Promise<void>}
  */
 async function createAnalyticsResource(handler, database, resourceName, fieldName) {
-  const analyticsResourceName = `${resourceName}_analytics_${fieldName}`;
+  const analyticsResourceName = `plg_${resourceName}_an_${fieldName}`;
 
   const [ok, err, analyticsResource] = await tryFn(() =>
     database.createResource({

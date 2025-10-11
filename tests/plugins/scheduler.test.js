@@ -36,8 +36,10 @@ describe("SchedulerPlugin", () => {
       await database.usePlugin(plugin);
       await plugin.start();
 
-      // Verify lock resource was created
-      expect(database.resources.plg_scheduler_job_locks).toBeDefined();
+      // Locks are now managed via PluginStorage TTL - no Resource created
+      // Verify plugin initialized successfully
+      expect(plugin.jobs.size).toBe(1);
+      expect(plugin.jobs.has('test_job')).toBe(true);
 
       await plugin.cleanup();
     });

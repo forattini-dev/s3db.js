@@ -44,14 +44,16 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
     if (config.verbose) {
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `Updating ${cohortCount} hourly analytics cohorts...`
+        `Updating ${cohortCount} hourly analytics cohorts IN PARALLEL...`
       );
     }
 
-    // Update hourly analytics
-    for (const [cohort, txns] of Object.entries(byHour)) {
-      await upsertAnalytics('hour', cohort, txns, analyticsResource, config);
-    }
+    // ✅ OTIMIZAÇÃO: Update hourly analytics EM PARALELO
+    await Promise.all(
+      Object.entries(byHour).map(([cohort, txns]) =>
+        upsertAnalytics('hour', cohort, txns, analyticsResource, config)
+      )
+    );
 
     // Roll up to daily and monthly if configured
     if (config.analyticsConfig.rollupStrategy === 'incremental') {
@@ -60,13 +62,16 @@ export async function updateAnalytics(transactions, analyticsResource, config) {
       if (config.verbose) {
         console.log(
           `[EventualConsistency] ${config.resource}.${config.field} - ` +
-          `Rolling up ${uniqueHours.length} hours to daily/monthly analytics...`
+          `Rolling up ${uniqueHours.length} hours to daily/weekly/monthly analytics IN PARALLEL...`
         );
       }
 
-      for (const cohortHour of uniqueHours) {
-        await rollupAnalytics(cohortHour, analyticsResource, config);
-      }
+      // ✅ OTIMIZAÇÃO: Rollup analytics EM PARALELO
+      await Promise.all(
+        uniqueHours.map(cohortHour =>
+          rollupAnalytics(cohortHour, analyticsResource, config)
+        )
+      );
     }
 
     if (config.verbose) {
@@ -206,7 +211,7 @@ function calculateOperationBreakdown(transactions) {
 }
 
 /**
- * Roll up hourly analytics to daily and monthly
+ * Roll up hourly analytics to daily, weekly, and monthly
  * @private
  */
 async function rollupAnalytics(cohortHour, analyticsResource, config) {
@@ -214,11 +219,40 @@ async function rollupAnalytics(cohortHour, analyticsResource, config) {
   const cohortDate = cohortHour.substring(0, 10); // '2025-10-09'
   const cohortMonth = cohortHour.substring(0, 7);  // '2025-10'
 
+  // Calculate week cohort (ISO 8601 format)
+  const date = new Date(cohortDate);
+  const cohortWeek = getCohortWeekFromDate(date);
+
   // Roll up to day
   await rollupPeriod('day', cohortDate, cohortDate, analyticsResource, config);
 
+  // Roll up to week
+  await rollupPeriod('week', cohortWeek, cohortWeek, analyticsResource, config);
+
   // Roll up to month
   await rollupPeriod('month', cohortMonth, cohortMonth, analyticsResource, config);
+}
+
+/**
+ * Get cohort week string from a date
+ * @private
+ */
+function getCohortWeekFromDate(date) {
+  // ISO week calculation (use UTC methods)
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const firstThursday = new Date(yearStart.valueOf());
+  if (yearStart.getUTCDay() !== 4) {
+    firstThursday.setUTCDate(yearStart.getUTCDate() + ((4 - yearStart.getUTCDay()) + 7) % 7);
+  }
+
+  const weekNumber = 1 + Math.round((target - firstThursday) / 604800000);
+  const weekYear = target.getUTCFullYear();
+
+  return `${weekYear}-W${String(weekNumber).padStart(2, '0')}`;
 }
 
 /**
@@ -226,8 +260,17 @@ async function rollupAnalytics(cohortHour, analyticsResource, config) {
  * @private
  */
 async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, config) {
-  // Get all source analytics (e.g., all hours for a day)
-  const sourcePeriod = period === 'day' ? 'hour' : 'day';
+  // Get all source analytics (e.g., all hours for a day, all days for a week)
+  let sourcePeriod;
+  if (period === 'day') {
+    sourcePeriod = 'hour';
+  } else if (period === 'week') {
+    sourcePeriod = 'day';
+  } else if (period === 'month') {
+    sourcePeriod = 'week'; // Aggregate weeks to month
+  } else {
+    sourcePeriod = 'day'; // Fallback
+  }
 
   const [ok, err, allAnalytics] = await tryFn(() =>
     analyticsResource.list()
@@ -236,9 +279,22 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
   if (!ok || !allAnalytics) return;
 
   // Filter to matching cohorts
-  const sourceAnalytics = allAnalytics.filter(a =>
-    a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
-  );
+  let sourceAnalytics;
+  if (period === 'week') {
+    // For week, we need to find all days that belong to this week
+    sourceAnalytics = allAnalytics.filter(a => {
+      if (a.period !== sourcePeriod) return false;
+      // Check if this day's cohort belongs to the target week
+      const dayDate = new Date(a.cohort);
+      const dayWeek = getCohortWeekFromDate(dayDate);
+      return dayWeek === cohort;
+    });
+  } else {
+    // For day and month, simple prefix matching works
+    sourceAnalytics = allAnalytics.filter(a =>
+      a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
+    );
+  }
 
   if (sourceAnalytics.length === 0) return;
 
@@ -563,6 +619,66 @@ export async function getYearByMonth(resourceName, field, year, options, fieldHa
     const endDate = `${year}-12`;
     return fillGaps(data, 'month', startDate, endDate);
   }
+
+  return data;
+}
+
+/**
+ * Get analytics for entire year, broken down by weeks
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {number} year - Year (e.g., 2025)
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Weekly analytics for the year (up to 53 weeks)
+ */
+export async function getYearByWeek(resourceName, field, year, options, fieldHandlers) {
+  const data = await getAnalytics(resourceName, field, {
+    period: 'week',
+    year
+  }, fieldHandlers);
+
+  // Week data doesn't need gap filling as much as daily/hourly
+  // But we can still provide it if requested
+  if (options.fillGaps) {
+    // ISO weeks: typically 52-53 weeks per year
+    const startWeek = `${year}-W01`;
+    const endWeek = `${year}-W53`;
+    return fillGaps(data, 'week', startWeek, endWeek);
+  }
+
+  return data;
+}
+
+/**
+ * Get analytics for entire month, broken down by weeks
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {string} month - Month in YYYY-MM format
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Weekly analytics for the month
+ */
+export async function getMonthByWeek(resourceName, field, month, options, fieldHandlers) {
+  // month format: '2025-10'
+  const year = parseInt(month.substring(0, 4));
+  const monthNum = parseInt(month.substring(5, 7));
+
+  // Get first and last day of month
+  const firstDay = new Date(year, monthNum - 1, 1);
+  const lastDay = new Date(year, monthNum, 0);
+
+  // Find which weeks this month spans
+  const firstWeek = getCohortWeekFromDate(firstDay);
+  const lastWeek = getCohortWeekFromDate(lastDay);
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'week',
+    startDate: firstWeek,
+    endDate: lastWeek
+  }, fieldHandlers);
 
   return data;
 }

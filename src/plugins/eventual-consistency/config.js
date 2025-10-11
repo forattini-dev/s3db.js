@@ -47,6 +47,9 @@ export function createConfig(options, detectedTimezone) {
     autoConsolidate: consolidation.auto !== false,
     mode: consolidation.mode || 'async',
 
+    // ✅ NOVO: Performance tuning - Mark applied concurrency (default 50, antes era 10 hardcoded)
+    markAppliedConcurrency: consolidation.markAppliedConcurrency ?? 50,
+
     // Late arrivals
     lateArrivalStrategy: lateArrivals.strategy || 'warn',
 

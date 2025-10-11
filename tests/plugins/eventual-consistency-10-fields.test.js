@@ -23,7 +23,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     }
   });
 
-  it('should create 30+ resources for 10 fields (transactions + locks + analytics)', async () => {
+  it('should create 20 resources for 10 fields (transactions + analytics, locks use PluginStorage)', async () => {
     console.log('\n🧪 Testing 10-field resource creation...\n');
 
     // Create metrics resource with 10 fields
@@ -69,31 +69,31 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
     const allResources = Object.keys(database.resources);
 
     // Count transaction resources
-    const transactionResources = allResources.filter(r => r.startsWith('metrics_transactions_'));
+    const transactionResources = allResources.filter(r => r.startsWith('plg_metrics_tx_'));
     console.log(`   📊 Transaction resources: ${transactionResources.length} / 10`);
     console.log(`      ${transactionResources.join(', ')}`);
 
-    // Count lock resources
+    // Lock resources no longer exist (migrated to PluginStorage)
     const lockResources = allResources.filter(r => r.startsWith('metrics_consolidation_locks_'));
-    console.log(`\n   🔒 Lock resources: ${lockResources.length} / 10`);
-    console.log(`      ${lockResources.join(', ')}`);
+    console.log(`\n   🔒 Lock resources: ${lockResources.length} / 0 (using PluginStorage now)`);
+    console.log(`      Locks now managed by PluginStorage with TTL`);
 
     // Count analytics resources
-    const analyticsResources = allResources.filter(r => r.startsWith('metrics_analytics_'));
+    const analyticsResources = allResources.filter(r => r.startsWith('plg_metrics_an_'));
     console.log(`\n   📈 Analytics resources: ${analyticsResources.length} / 10`);
     console.log(`      ${analyticsResources.join(', ')}`);
 
-    // Total
-    const totalCreated = transactionResources.length + lockResources.length + analyticsResources.length;
-    console.log(`\n   ✅ TOTAL: ${totalCreated} resources created (expected: 30)`);
+    // Total (transactions + analytics only, locks use PluginStorage)
+    const totalCreated = transactionResources.length + analyticsResources.length;
+    console.log(`\n   ✅ TOTAL: ${totalCreated} resources created (expected: 20, locks use PluginStorage)`);
 
     // Assertions
     expect(transactionResources.length).toBe(10);
-    expect(lockResources.length).toBe(10);
+    expect(lockResources.length).toBe(0); // No lock resources anymore
     expect(analyticsResources.length).toBe(10);
-    expect(totalCreated).toBe(30);
+    expect(totalCreated).toBe(20);
 
-    console.log('\n✅ All 30 resources created successfully!\n');
+    console.log('\n✅ All 20 resources created successfully (locks managed by PluginStorage)!\n');
   });
 
   it('should handle operations on all 10 fields correctly', async () => {
@@ -253,7 +253,7 @@ describe('EventualConsistencyPlugin - 10 Fields Scale Test', () => {
 
     // Check each analytics resource
     for (const fieldName of fieldNames) {
-      const analyticsResourceName = `metrics_analytics_${fieldName}`;
+      const analyticsResourceName = `plg_metrics_an_${fieldName}`;
       const analyticsResource = database.resources[analyticsResourceName];
 
       expect(analyticsResource).toBeDefined();

@@ -1,9 +1,26 @@
 # 🔄 Replicator Plugin
 
-<p align="center">
-  <strong>Enterprise-Grade Data Replication System</strong><br>
-  <em>Real-time synchronization to multiple targets with advanced transformations</em>
-</p>
+## ⚡ TLDR
+
+Replicação **real-time** para múltiplos destinos (S3DB, BigQuery, PostgreSQL, SQS) com transformação de dados.
+
+**1 linha para começar:**
+```javascript
+await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resources: ['users'], config: { connectionString: 's3://...' }}] }));
+```
+
+**Principais features:**
+- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, SQS
+- ✅ Transformação de dados com funções customizadas
+- ✅ Retry automático com backoff exponencial
+- ✅ Dead letter queue para falhas
+- ✅ Event monitoring completo
+
+**Quando usar:**
+- 🔄 Backup para outra instância S3DB
+- 📊 Data warehouse (BigQuery/PostgreSQL)
+- 📡 Event streaming (SQS)
+- 🌍 Multi-region sync
 
 ---
 

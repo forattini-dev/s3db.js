@@ -11,6 +11,8 @@ export class FullTextPlugin extends Plugin {
       ...options
     };
     this.indexes = new Map(); // In-memory index for simplicity
+    this.dirtyIndexes = new Set(); // Track changed index keys for incremental saves
+    this.deletedIndexes = new Set(); // Track deleted index keys
   }
 
   async onInstall() {
@@ -26,7 +28,11 @@ export class FullTextPlugin extends Plugin {
           recordIds: 'json|required', // Array of record IDs containing this word
           count: 'number|required',
           lastUpdated: 'string|required'
-        }
+        },
+        partitions: {
+          byResource: { fields: { resourceName: 'string' } }
+        },
+        behavior: 'body-overflow'
       }));
     this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
 
@@ -69,26 +75,71 @@ export class FullTextPlugin extends Plugin {
 
   async saveIndexes() {
     if (!this.indexResource) return;
-    
+
     const [ok, err] = await tryFn(async () => {
-      // Clear existing indexes
-      const existingIndexes = await this.indexResource.getAll();
-      for (const index of existingIndexes) {
-        await this.indexResource.delete(index.id);
+      // Delete indexes that were removed
+      for (const key of this.deletedIndexes) {
+        // Find and delete the index record using partition-aware query
+        const [resourceName] = key.split(':');
+        const [queryOk, queryErr, results] = await tryFn(() =>
+          this.indexResource.query({ resourceName })
+        );
+
+        if (queryOk && results) {
+          for (const index of results) {
+            const indexKey = `${index.resourceName}:${index.fieldName}:${index.word}`;
+            if (indexKey === key) {
+              await this.indexResource.delete(index.id);
+            }
+          }
+        }
       }
-      // Save current indexes
-      for (const [key, data] of this.indexes.entries()) {
+
+      // Save or update dirty indexes
+      for (const key of this.dirtyIndexes) {
         const [resourceName, fieldName, word] = key.split(':');
-        await this.indexResource.insert({
-          id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          resourceName,
-          fieldName,
-          word,
-          recordIds: data.recordIds,
-          count: data.count,
-          lastUpdated: new Date().toISOString()
-        });
+        const data = this.indexes.get(key);
+
+        if (!data) continue; // Skip if index was deleted
+
+        // Try to find existing index record
+        const [queryOk, queryErr, results] = await tryFn(() =>
+          this.indexResource.query({ resourceName })
+        );
+
+        let existingRecord = null;
+        if (queryOk && results) {
+          existingRecord = results.find(
+            (index) => index.resourceName === resourceName &&
+                      index.fieldName === fieldName &&
+                      index.word === word
+          );
+        }
+
+        if (existingRecord) {
+          // Update existing record
+          await this.indexResource.update(existingRecord.id, {
+            recordIds: data.recordIds,
+            count: data.count,
+            lastUpdated: new Date().toISOString()
+          });
+        } else {
+          // Insert new record
+          await this.indexResource.insert({
+            id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName,
+            fieldName,
+            word,
+            recordIds: data.recordIds,
+            count: data.count,
+            lastUpdated: new Date().toISOString()
+          });
+        }
       }
+
+      // Clear tracking sets after successful save
+      this.dirtyIndexes.clear();
+      this.deletedIndexes.clear();
     });
   }
 
@@ -195,21 +246,22 @@ export class FullTextPlugin extends Plugin {
       }
 
       const words = this.tokenize(fieldValue);
-      
+
       for (const word of words) {
         if (word.length < this.config.minWordLength) {
           continue;
         }
-        
+
         const key = `${resourceName}:${fieldName}:${word.toLowerCase()}`;
         const existing = this.indexes.get(key) || { recordIds: [], count: 0 };
-        
+
         if (!existing.recordIds.includes(recordId)) {
           existing.recordIds.push(recordId);
           existing.count = existing.recordIds.length;
         }
-        
+
         this.indexes.set(key, existing);
+        this.dirtyIndexes.add(key); // Mark as dirty for incremental save
       }
     }
   }
@@ -221,11 +273,13 @@ export class FullTextPlugin extends Plugin {
         if (index > -1) {
           data.recordIds.splice(index, 1);
           data.count = data.recordIds.length;
-          
+
           if (data.recordIds.length === 0) {
             this.indexes.delete(key);
+            this.deletedIndexes.add(key); // Track deletion for incremental save
           } else {
             this.indexes.set(key, data);
+            this.dirtyIndexes.add(key); // Mark as dirty for incremental save
           }
         }
       }

@@ -55,10 +55,10 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Check if ALL transaction resources exist
     const expectedTransactionResources = [
-      'urls_transactions_clicks',
-      'urls_transactions_views',
-      'urls_transactions_shares',
-      'urls_transactions_scans'
+      'plg_urls_tx_clicks',
+      'plg_urls_tx_views',
+      'plg_urls_tx_shares',
+      'plg_urls_tx_scans'
     ];
 
     for (const resourceName of expectedTransactionResources) {
@@ -104,10 +104,10 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
     // Check if ALL analytics resources exist
     const expectedAnalyticsResources = [
-      'urls_analytics_clicks',
-      'urls_analytics_views',
-      'urls_analytics_shares',
-      'urls_analytics_scans'
+      'plg_urls_an_clicks',
+      'plg_urls_an_views',
+      'plg_urls_an_shares',
+      'plg_urls_an_scans'
     ];
 
     for (const resourceName of expectedAnalyticsResources) {
@@ -120,8 +120,8 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     console.log('\n✅ All analytics resources created!\n');
   });
 
-  it('should create lock resources for ALL configured fields', async () => {
-    console.log('\n🧪 Testing multi-field lock resource creation...\n');
+  it('should use PluginStorage for locks instead of creating lock resources', async () => {
+    console.log('\n🧪 Testing that NO lock resources are created (using PluginStorage now)...\n');
 
     // Create URLs resource
     urls = await database.createResource({
@@ -148,24 +148,23 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
     });
     await database.usePlugin(plugin);
 
-    console.log('2️⃣  Checking if lock resources were created...\n');
+    console.log('2️⃣  Verifying NO lock resources were created (migrated to PluginStorage)...\n');
 
-    // Check if ALL lock resources exist
-    const expectedLockResources = [
+    // Check that lock resources do NOT exist (migrated to PluginStorage)
+    const oldLockResources = [
       'urls_consolidation_locks_clicks',
       'urls_consolidation_locks_views',
       'urls_consolidation_locks_shares',
       'urls_consolidation_locks_scans'
     ];
 
-    for (const resourceName of expectedLockResources) {
+    for (const resourceName of oldLockResources) {
       const exists = database.resources[resourceName];
-      console.log(`   ${exists ? '✅' : '❌'} ${resourceName}: ${exists ? 'EXISTS' : 'MISSING'}`);
-      expect(exists).toBeDefined();
-      expect(exists).not.toBeNull();
+      console.log(`   ${!exists ? '✅' : '❌'} ${resourceName}: ${!exists ? 'NOT CREATED (using PluginStorage)' : 'UNEXPECTED'}`);
+      expect(exists).toBeUndefined();
     }
 
-    console.log('\n✅ All lock resources created!\n');
+    console.log('\n✅ Confirmed: Using PluginStorage for locks (no lock resources)!\n');
   });
 
   it('should be able to use ALL configured fields independently', async () => {

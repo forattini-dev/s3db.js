@@ -54,6 +54,7 @@ export async function createTransaction(handler, data, config) {
     timestamp: now.toISOString(),
     cohortDate: cohortInfo.date,
     cohortHour: cohortInfo.hour,
+    cohortWeek: cohortInfo.week,
     cohortMonth: cohortInfo.month,
     source: data.source || 'unknown',
     applied: false

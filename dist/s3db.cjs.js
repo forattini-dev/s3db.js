@@ -837,18 +837,23 @@ class PluginStorage {
     return `plugin=${this.pluginSlug}/${parts.join("/")}`;
   }
   /**
-   * Save data with metadata encoding and behavior support
+   * Save data with metadata encoding, behavior support, and optional TTL
    *
    * @param {string} key - S3 key
    * @param {Object} data - Data to save
    * @param {Object} options - Options
+   * @param {number} options.ttl - Time-to-live in seconds (optional)
    * @param {string} options.behavior - 'body-overflow' | 'body-only' | 'enforce-limits'
    * @param {string} options.contentType - Content type (default: application/json)
    * @returns {Promise<void>}
    */
-  async put(key, data, options = {}) {
-    const { behavior = "body-overflow", contentType = "application/json" } = options;
-    const { metadata, body } = this._applyBehavior(data, behavior);
+  async set(key, data, options = {}) {
+    const { ttl, behavior = "body-overflow", contentType = "application/json" } = options;
+    const dataToSave = { ...data };
+    if (ttl && typeof ttl === "number" && ttl > 0) {
+      dataToSave._expiresAt = Date.now() + ttl * 1e3;
+    }
+    const { metadata, body } = this._applyBehavior(dataToSave, behavior);
     const putParams = {
       key,
       metadata,
@@ -859,14 +864,21 @@ class PluginStorage {
     }
     const [ok, err] = await tryFn(() => this.client.putObject(putParams));
     if (!ok) {
-      throw new Error(`PluginStorage.put failed for key ${key}: ${err.message}`);
+      throw new Error(`PluginStorage.set failed for key ${key}: ${err.message}`);
     }
   }
   /**
-   * Get data with automatic metadata decoding
+   * Alias for set() to maintain backward compatibility
+   * @deprecated Use set() instead
+   */
+  async put(key, data, options = {}) {
+    return this.set(key, data, options);
+  }
+  /**
+   * Get data with automatic metadata decoding and TTL check
    *
    * @param {string} key - S3 key
-   * @returns {Promise<Object|null>} Data or null if not found
+   * @returns {Promise<Object|null>} Data or null if not found/expired
    */
   async get(key) {
     const [ok, err, response] = await tryFn(() => this.client.getObject(key));
@@ -878,18 +890,28 @@ class PluginStorage {
     }
     const metadata = response.Metadata || {};
     const parsedMetadata = this._parseMetadataValues(metadata);
+    let data = parsedMetadata;
     if (response.Body) {
       try {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
+          data = { ...parsedMetadata, ...body };
         }
       } catch (parseErr) {
         throw new Error(`PluginStorage.get failed to parse body for key ${key}: ${parseErr.message}`);
       }
     }
-    return parsedMetadata;
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (expiresAt) {
+      if (Date.now() > expiresAt) {
+        await this.delete(key);
+        return null;
+      }
+      delete data._expiresat;
+      delete data._expiresAt;
+    }
+    return data;
   }
   /**
    * Parse metadata values back to their original types
@@ -973,6 +995,123 @@ class PluginStorage {
     return keys.map((key) => key.replace(keyPrefix, "")).map((key) => key.startsWith("/") ? key.replace("/", "") : key);
   }
   /**
+   * Check if a key exists (not expired)
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<boolean>} True if exists and not expired
+   */
+  async has(key) {
+    const data = await this.get(key);
+    return data !== null;
+  }
+  /**
+   * Check if a key is expired
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<boolean>} True if expired or not found
+   */
+  async isExpired(key) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      return true;
+    }
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+    let data = parsedMetadata;
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return true;
+      }
+    }
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return false;
+    }
+    return Date.now() > expiresAt;
+  }
+  /**
+   * Get remaining TTL in seconds
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<number|null>} Remaining seconds or null if no TTL/not found
+   */
+  async getTTL(key) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      return null;
+    }
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+    let data = parsedMetadata;
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return null;
+      }
+    }
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return null;
+    }
+    const remaining = Math.max(0, expiresAt - Date.now());
+    return Math.floor(remaining / 1e3);
+  }
+  /**
+   * Extend TTL by adding additional seconds
+   *
+   * @param {string} key - S3 key
+   * @param {number} additionalSeconds - Seconds to add to current TTL
+   * @returns {Promise<boolean>} True if extended, false if not found or no TTL
+   */
+  async touch(key, additionalSeconds) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    if (!ok) {
+      return false;
+    }
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+    let data = parsedMetadata;
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return false;
+      }
+    }
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return false;
+    }
+    data._expiresAt = expiresAt + additionalSeconds * 1e3;
+    delete data._expiresat;
+    const { metadata: newMetadata, body: newBody } = this._applyBehavior(data, "body-overflow");
+    const putParams = {
+      key,
+      metadata: newMetadata,
+      contentType: "application/json"
+    };
+    if (newBody !== null) {
+      putParams.body = JSON.stringify(newBody);
+    }
+    const [putOk] = await tryFn(() => this.client.putObject(putParams));
+    return putOk;
+  }
+  /**
    * Delete a single object
    *
    * @param {string} key - S3 key
@@ -1048,6 +1187,78 @@ class PluginStorage {
       });
     }
     return results;
+  }
+  /**
+   * Acquire a distributed lock with TTL and retry logic
+   *
+   * @param {string} lockName - Lock identifier
+   * @param {Object} options - Lock options
+   * @param {number} options.ttl - Lock TTL in seconds (default: 30)
+   * @param {number} options.timeout - Max wait time in ms (default: 0, no wait)
+   * @param {string} options.workerId - Worker identifier (default: 'unknown')
+   * @returns {Promise<Object|null>} Lock object or null if couldn't acquire
+   */
+  async acquireLock(lockName, options = {}) {
+    const { ttl = 30, timeout = 0, workerId = "unknown" } = options;
+    const key = this.getPluginKey(null, "locks", lockName);
+    const startTime = Date.now();
+    while (true) {
+      const existing = await this.get(key);
+      if (!existing) {
+        await this.set(key, { workerId, acquiredAt: Date.now() }, { ttl });
+        return { key, workerId };
+      }
+      if (Date.now() - startTime >= timeout) {
+        return null;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  /**
+   * Release a distributed lock
+   *
+   * @param {string} lockName - Lock identifier
+   * @returns {Promise<void>}
+   */
+  async releaseLock(lockName) {
+    const key = this.getPluginKey(null, "locks", lockName);
+    await this.delete(key);
+  }
+  /**
+   * Check if a lock is currently held
+   *
+   * @param {string} lockName - Lock identifier
+   * @returns {Promise<boolean>} True if locked
+   */
+  async isLocked(lockName) {
+    const key = this.getPluginKey(null, "locks", lockName);
+    const lock = await this.get(key);
+    return lock !== null;
+  }
+  /**
+   * Increment a counter value
+   *
+   * @param {string} key - S3 key
+   * @param {number} amount - Amount to increment (default: 1)
+   * @param {Object} options - Options (e.g., ttl)
+   * @returns {Promise<number>} New value
+   */
+  async increment(key, amount = 1, options = {}) {
+    const data = await this.get(key);
+    const value = (data?.value || 0) + amount;
+    await this.set(key, { value }, options);
+    return value;
+  }
+  /**
+   * Decrement a counter value
+   *
+   * @param {string} key - S3 key
+   * @param {number} amount - Amount to decrement (default: 1)
+   * @param {Object} options - Options (e.g., ttl)
+   * @returns {Promise<number>} New value
+   */
+  async decrement(key, amount = 1, options = {}) {
+    return this.increment(key, -amount, options);
   }
   /**
    * Apply behavior to split data between metadata and body
@@ -1352,11 +1563,17 @@ class AuditPlugin extends Plugin {
         recordId: "string|required",
         userId: "string|optional",
         timestamp: "string|required",
+        createdAt: "string|required",
+        // YYYY-MM-DD for partitioning
         oldData: "string|optional",
         newData: "string|optional",
         partition: "string|optional",
         partitionValues: "string|optional",
         metadata: "string|optional"
+      },
+      partitions: {
+        byDate: { fields: { createdAt: "string|maxlength:10" } },
+        byResource: { fields: { resourceName: "string" } }
       },
       behavior: "body-overflow"
     }));
@@ -1461,10 +1678,13 @@ class AuditPlugin extends Plugin {
     if (!this.auditResource) {
       return;
     }
+    const now = /* @__PURE__ */ new Date();
     const auditRecord = {
       id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       userId: this.getCurrentUserId?.() || "system",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      timestamp: now.toISOString(),
+      createdAt: now.toISOString().slice(0, 10),
+      // YYYY-MM-DD for partitioning
       metadata: JSON.stringify({ source: "audit-plugin", version: "2.0" }),
       resourceName: auditData.resourceName,
       operation: auditData.operation,
@@ -1539,9 +1759,25 @@ class AuditPlugin extends Plugin {
   async getAuditLogs(options = {}) {
     if (!this.auditResource) return [];
     const { resourceName, operation, recordId, partition, startDate, endDate, limit = 100, offset = 0 } = options;
-    const hasFilters = resourceName || operation || recordId || partition || startDate || endDate;
     let items = [];
-    if (hasFilters) {
+    if (resourceName && !operation && !recordId && !partition && !startDate && !endDate) {
+      const [ok, err, result] = await tryFn(
+        () => this.auditResource.query({ resourceName }, { limit: limit + offset })
+      );
+      items = ok && result ? result : [];
+      return items.slice(offset, offset + limit);
+    } else if (startDate && !resourceName && !operation && !recordId && !partition) {
+      const dates = this._generateDateRange(startDate, endDate);
+      for (const date of dates) {
+        const [ok, err, result] = await tryFn(
+          () => this.auditResource.query({ createdAt: date })
+        );
+        if (ok && result) {
+          items.push(...result);
+        }
+      }
+      return items.slice(offset, offset + limit);
+    } else if (resourceName || operation || recordId || partition || startDate || endDate) {
       const fetchSize = Math.min(1e4, Math.max(1e3, (limit + offset) * 20));
       const result = await this.auditResource.list({ limit: fetchSize });
       items = result || [];
@@ -1570,6 +1806,15 @@ class AuditPlugin extends Plugin {
       const result = await this.auditResource.page({ size: limit, offset });
       return result.items || [];
     }
+  }
+  _generateDateRange(startDate, endDate) {
+    const dates = [];
+    const start = new Date(startDate);
+    const end = endDate ? new Date(endDate) : /* @__PURE__ */ new Date();
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      dates.push(d.toISOString().slice(0, 10));
+    }
+    return dates;
   }
   async getRecordHistory(resourceName, recordId) {
     return await this.getAuditLogs({ resourceName, recordId });
@@ -1602,6 +1847,37 @@ class AuditPlugin extends Plugin {
       stats.timeline[date] = (stats.timeline[date] || 0) + 1;
     }
     return stats;
+  }
+  /**
+   * Clean up audit logs older than retention period
+   * @param {number} retentionDays - Number of days to retain (default: 90)
+   * @returns {Promise<number>} Number of records deleted
+   */
+  async cleanupOldAudits(retentionDays = 90) {
+    if (!this.auditResource) return 0;
+    const cutoffDate = /* @__PURE__ */ new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const datesToDelete = [];
+    const startDate = new Date(cutoffDate);
+    startDate.setDate(startDate.getDate() - 365);
+    for (let d = new Date(startDate); d < cutoffDate; d.setDate(d.getDate() + 1)) {
+      datesToDelete.push(d.toISOString().slice(0, 10));
+    }
+    let deletedCount = 0;
+    for (const dateStr of datesToDelete) {
+      const [ok, err, oldAudits] = await tryFn(
+        () => this.auditResource.query({ createdAt: dateStr })
+      );
+      if (ok && oldAudits) {
+        for (const audit of oldAudits) {
+          const [delOk] = await tryFn(() => this.auditResource.delete(audit.id));
+          if (delOk) {
+            deletedCount++;
+          }
+        }
+      }
+    }
+    return deletedCount;
   }
 }
 
@@ -4838,6 +5114,8 @@ function createConfig(options, detectedTimezone) {
     consolidationWindow: consolidation.window ?? 24,
     autoConsolidate: consolidation.auto !== false,
     mode: consolidation.mode || "async",
+    // ✅ NOVO: Performance tuning - Mark applied concurrency (default 50, antes era 10 hardcoded)
+    markAppliedConcurrency: consolidation.markAppliedConcurrency ?? 50,
     // Late arrivals
     lateArrivalStrategy: lateArrivals.strategy || "warn",
     // Batch transactions
@@ -4941,6 +5219,21 @@ function getTimezoneOffset(timezone, verbose = false) {
     return offsets[timezone] || 0;
   }
 }
+function getISOWeek(date) {
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const firstThursday = new Date(yearStart.valueOf());
+  if (yearStart.getUTCDay() !== 4) {
+    firstThursday.setUTCDate(yearStart.getUTCDate() + (4 - yearStart.getUTCDay() + 7) % 7);
+  }
+  const weekNumber = 1 + Math.round((target - firstThursday) / 6048e5);
+  return {
+    year: target.getUTCFullYear(),
+    week: weekNumber
+  };
+}
 function getCohortInfo(date, timezone, verbose = false) {
   const offset = getTimezoneOffset(timezone, verbose);
   const localDate = new Date(date.getTime() + offset);
@@ -4948,10 +5241,14 @@ function getCohortInfo(date, timezone, verbose = false) {
   const month = String(localDate.getMonth() + 1).padStart(2, "0");
   const day = String(localDate.getDate()).padStart(2, "0");
   const hour = String(localDate.getHours()).padStart(2, "0");
+  const { year: weekYear, week: weekNumber } = getISOWeek(localDate);
+  const week = `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
   return {
     date: `${year}-${month}-${day}`,
     hour: `${year}-${month}-${day}T${hour}`,
     // ISO-like format for hour partition
+    week,
+    // ISO 8601 week format (e.g., '2025-W42')
     month: `${year}-${month}`
   };
 }
@@ -5029,6 +5326,11 @@ function createPartitionConfig() {
         cohortDate: "string"
       }
     },
+    byWeek: {
+      fields: {
+        cohortWeek: "string"
+      }
+    },
     byMonth: {
       fields: {
         cohortMonth: "string"
@@ -5068,6 +5370,7 @@ async function createTransaction(handler, data, config) {
     timestamp: now.toISOString(),
     cohortDate: cohortInfo.date,
     cohortHour: cohortInfo.hour,
+    cohortWeek: cohortInfo.week,
     cohortMonth: cohortInfo.month,
     source: data.source || "unknown",
     applied: false
@@ -5105,50 +5408,6 @@ async function flushPendingTransactions(handler) {
   } catch (error) {
     console.error("Failed to flush pending transactions:", error);
     throw error;
-  }
-}
-
-async function cleanupStaleLocks(lockResource, config) {
-  const now = Date.now();
-  const lockTimeoutMs = config.lockTimeout * 1e3;
-  const cutoffTime = now - lockTimeoutMs;
-  const cleanupLockId = `lock-cleanup-${config.resource}-${config.field}`;
-  const [lockAcquired] = await tryFn(
-    () => lockResource.insert({
-      id: cleanupLockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : "unknown"
-    })
-  );
-  if (!lockAcquired) {
-    if (config.verbose) {
-      console.log(`[EventualConsistency] Lock cleanup already running in another container`);
-    }
-    return;
-  }
-  try {
-    const [ok, err, locks] = await tryFn(() => lockResource.list());
-    if (!ok || !locks || locks.length === 0) return;
-    const staleLocks = locks.filter(
-      (lock) => lock.id !== cleanupLockId && lock.lockedAt < cutoffTime
-    );
-    if (staleLocks.length === 0) return;
-    if (config.verbose) {
-      console.log(`[EventualConsistency] Cleaning up ${staleLocks.length} stale locks`);
-    }
-    const { results, errors } = await promisePool.PromisePool.for(staleLocks).withConcurrency(5).process(async (lock) => {
-      const [deleted] = await tryFn(() => lockResource.delete(lock.id));
-      return deleted;
-    });
-    if (errors && errors.length > 0 && config.verbose) {
-      console.warn(`[EventualConsistency] ${errors.length} stale locks failed to delete`);
-    }
-  } catch (error) {
-    if (config.verbose) {
-      console.warn(`[EventualConsistency] Error cleaning up stale locks:`, error.message);
-    }
-  } finally {
-    await tryFn(() => lockResource.delete(cleanupLockId));
   }
 }
 
@@ -5248,17 +5507,15 @@ async function runConsolidation(transactionResource, consolidateRecordFn, emitFn
     }
   }
 }
-async function consolidateRecord(originalId, transactionResource, targetResource, lockResource, analyticsResource, updateAnalyticsFn, config) {
-  await cleanupStaleLocks(lockResource, config);
-  const lockId = `lock-${originalId}`;
-  const [lockAcquired, lockErr, lock] = await tryFn(
-    () => lockResource.insert({
-      id: lockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : "unknown"
-    })
-  );
-  if (!lockAcquired) {
+async function consolidateRecord(originalId, transactionResource, targetResource, storage, analyticsResource, updateAnalyticsFn, config) {
+  const lockKey = `consolidation-${config.resource}-${config.field}-${originalId}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: config.lockTimeout || 30,
+    timeout: 0,
+    // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : "unknown"
+  });
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] Lock for ${originalId} already held, skipping`);
     }
@@ -5469,7 +5726,8 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     }
     if (updateOk) {
       const transactionsToUpdate = transactions.filter((txn) => txn.id !== "__synthetic__");
-      const { results, errors } = await promisePool.PromisePool.for(transactionsToUpdate).withConcurrency(10).process(async (txn) => {
+      const markAppliedConcurrency = config.markAppliedConcurrency || 50;
+      const { results, errors } = await promisePool.PromisePool.for(transactionsToUpdate).withConcurrency(markAppliedConcurrency).process(async (txn) => {
         const [ok2, err2] = await tryFn(
           () => transactionResource.update(txn.id, { applied: true })
         );
@@ -5517,9 +5775,11 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(() => lockResource.delete(lockId));
+    const [lockReleased, lockReleaseErr] = await tryFn(
+      () => storage.releaseLock(lockKey)
+    );
     if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release lock ${lockId}:`, lockReleaseErr?.message);
+      console.warn(`[EventualConsistency] Failed to release lock ${lockKey}:`, lockReleaseErr?.message);
     }
   }
 }
@@ -5593,17 +5853,15 @@ async function getCohortStats(cohortDate, transactionResource) {
   }
   return stats;
 }
-async function recalculateRecord(originalId, transactionResource, targetResource, lockResource, consolidateRecordFn, config) {
-  await cleanupStaleLocks(lockResource, config);
-  const lockId = `lock-recalculate-${originalId}`;
-  const [lockAcquired, lockErr, lock] = await tryFn(
-    () => lockResource.insert({
-      id: lockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : "unknown"
-    })
-  );
-  if (!lockAcquired) {
+async function recalculateRecord(originalId, transactionResource, targetResource, storage, consolidateRecordFn, config) {
+  const lockKey = `recalculate-${config.resource}-${config.field}-${originalId}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: config.lockTimeout || 30,
+    timeout: 0,
+    // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : "unknown"
+  });
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] Recalculate lock for ${originalId} already held, skipping`);
     }
@@ -5671,9 +5929,11 @@ async function recalculateRecord(originalId, transactionResource, targetResource
     }
     return consolidatedValue;
   } finally {
-    const [lockReleased, lockReleaseErr] = await tryFn(() => lockResource.delete(lockId));
+    const [lockReleased, lockReleaseErr] = await tryFn(
+      () => storage.releaseLock(lockKey)
+    );
     if (!lockReleased && config.verbose) {
-      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockId}:`, lockReleaseErr?.message);
+      console.warn(`[EventualConsistency] Failed to release recalculate lock ${lockKey}:`, lockReleaseErr?.message);
     }
   }
 }
@@ -5685,16 +5945,16 @@ function startGarbageCollectionTimer(handler, resourceName, fieldName, runGCCall
   }, gcIntervalMs);
   return handler.gcTimer;
 }
-async function runGarbageCollection(transactionResource, lockResource, config, emitFn) {
-  const gcLockId = `lock-gc-${config.resource}-${config.field}`;
-  const [lockAcquired] = await tryFn(
-    () => lockResource.insert({
-      id: gcLockId,
-      lockedAt: Date.now(),
-      workerId: process.pid ? String(process.pid) : "unknown"
-    })
-  );
-  if (!lockAcquired) {
+async function runGarbageCollection(transactionResource, storage, config, emitFn) {
+  const lockKey = `gc-${config.resource}-${config.field}`;
+  const lock = await storage.acquireLock(lockKey, {
+    ttl: 300,
+    // 5 minutes for GC
+    timeout: 0,
+    // Don't wait if locked
+    workerId: process.pid ? String(process.pid) : "unknown"
+  });
+  if (!lock) {
     if (config.verbose) {
       console.log(`[EventualConsistency] GC already running in another container`);
     }
@@ -5752,7 +6012,7 @@ async function runGarbageCollection(transactionResource, lockResource, config, e
       emitFn("eventual-consistency.gc-error", error);
     }
   } finally {
-    await tryFn(() => lockResource.delete(gcLockId));
+    await tryFn(() => storage.releaseLock(lockKey));
   }
 }
 
@@ -5777,22 +6037,26 @@ AnalyticsResource: ${analyticsResource?.name || "unknown"}`
     const cohortCount = Object.keys(byHour).length;
     if (config.verbose) {
       console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - Updating ${cohortCount} hourly analytics cohorts...`
+        `[EventualConsistency] ${config.resource}.${config.field} - Updating ${cohortCount} hourly analytics cohorts IN PARALLEL...`
       );
     }
-    for (const [cohort, txns] of Object.entries(byHour)) {
-      await upsertAnalytics("hour", cohort, txns, analyticsResource, config);
-    }
+    await Promise.all(
+      Object.entries(byHour).map(
+        ([cohort, txns]) => upsertAnalytics("hour", cohort, txns, analyticsResource, config)
+      )
+    );
     if (config.analyticsConfig.rollupStrategy === "incremental") {
       const uniqueHours = Object.keys(byHour);
       if (config.verbose) {
         console.log(
-          `[EventualConsistency] ${config.resource}.${config.field} - Rolling up ${uniqueHours.length} hours to daily/monthly analytics...`
+          `[EventualConsistency] ${config.resource}.${config.field} - Rolling up ${uniqueHours.length} hours to daily/weekly/monthly analytics IN PARALLEL...`
         );
       }
-      for (const cohortHour of uniqueHours) {
-        await rollupAnalytics(cohortHour, analyticsResource, config);
-      }
+      await Promise.all(
+        uniqueHours.map(
+          (cohortHour) => rollupAnalytics(cohortHour, analyticsResource, config)
+        )
+      );
     }
     if (config.verbose) {
       console.log(
@@ -5895,18 +6159,53 @@ function calculateOperationBreakdown(transactions) {
 async function rollupAnalytics(cohortHour, analyticsResource, config) {
   const cohortDate = cohortHour.substring(0, 10);
   const cohortMonth = cohortHour.substring(0, 7);
+  const date = new Date(cohortDate);
+  const cohortWeek = getCohortWeekFromDate(date);
   await rollupPeriod("day", cohortDate, cohortDate, analyticsResource, config);
+  await rollupPeriod("week", cohortWeek, cohortWeek, analyticsResource, config);
   await rollupPeriod("month", cohortMonth, cohortMonth, analyticsResource, config);
 }
+function getCohortWeekFromDate(date) {
+  const target = new Date(date.valueOf());
+  const dayNr = (date.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const firstThursday = new Date(yearStart.valueOf());
+  if (yearStart.getUTCDay() !== 4) {
+    firstThursday.setUTCDate(yearStart.getUTCDate() + (4 - yearStart.getUTCDay() + 7) % 7);
+  }
+  const weekNumber = 1 + Math.round((target - firstThursday) / 6048e5);
+  const weekYear = target.getUTCFullYear();
+  return `${weekYear}-W${String(weekNumber).padStart(2, "0")}`;
+}
 async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, config) {
-  const sourcePeriod = period === "day" ? "hour" : "day";
+  let sourcePeriod;
+  if (period === "day") {
+    sourcePeriod = "hour";
+  } else if (period === "week") {
+    sourcePeriod = "day";
+  } else if (period === "month") {
+    sourcePeriod = "week";
+  } else {
+    sourcePeriod = "day";
+  }
   const [ok, err, allAnalytics] = await tryFn(
     () => analyticsResource.list()
   );
   if (!ok || !allAnalytics) return;
-  const sourceAnalytics = allAnalytics.filter(
-    (a) => a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
-  );
+  let sourceAnalytics;
+  if (period === "week") {
+    sourceAnalytics = allAnalytics.filter((a) => {
+      if (a.period !== sourcePeriod) return false;
+      const dayDate = new Date(a.cohort);
+      const dayWeek = getCohortWeekFromDate(dayDate);
+      return dayWeek === cohort;
+    });
+  } else {
+    sourceAnalytics = allAnalytics.filter(
+      (a) => a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
+    );
+  }
   if (sourceAnalytics.length === 0) return;
   const transactionCount = sourceAnalytics.reduce((sum, a) => sum + a.transactionCount, 0);
   const totalValue = sourceAnalytics.reduce((sum, a) => sum + a.totalValue, 0);
@@ -6113,6 +6412,32 @@ async function getYearByMonth(resourceName, field, year, options, fieldHandlers)
     const endDate = `${year}-12`;
     return fillGaps(data, "month", startDate, endDate);
   }
+  return data;
+}
+async function getYearByWeek(resourceName, field, year, options, fieldHandlers) {
+  const data = await getAnalytics(resourceName, field, {
+    period: "week",
+    year
+  }, fieldHandlers);
+  if (options.fillGaps) {
+    const startWeek = `${year}-W01`;
+    const endWeek = `${year}-W53`;
+    return fillGaps(data, "week", startWeek, endWeek);
+  }
+  return data;
+}
+async function getMonthByWeek(resourceName, field, month, options, fieldHandlers) {
+  const year = parseInt(month.substring(0, 4));
+  const monthNum = parseInt(month.substring(5, 7));
+  const firstDay = new Date(year, monthNum - 1, 1);
+  const lastDay = new Date(year, monthNum, 0);
+  const firstWeek = getCohortWeekFromDate(firstDay);
+  const lastWeek = getCohortWeekFromDate(lastDay);
+  const data = await getAnalytics(resourceName, field, {
+    period: "week",
+    startDate: firstWeek,
+    endDate: lastWeek
+  }, fieldHandlers);
   return data;
 }
 async function getMonthByHour(resourceName, field, month, options, fieldHandlers) {
@@ -6342,7 +6667,7 @@ async function completeFieldSetup(handler, database, config, plugin) {
   if (!handler.targetResource) return;
   const resourceName = handler.resource;
   const fieldName = handler.field;
-  const transactionResourceName = `${resourceName}_transactions_${fieldName}`;
+  const transactionResourceName = `plg_${resourceName}_tx_${fieldName}`;
   const partitionConfig = createPartitionConfig();
   const [ok, err, transactionResource] = await tryFn(
     () => database.createResource({
@@ -6356,6 +6681,7 @@ async function completeFieldSetup(handler, database, config, plugin) {
         timestamp: "string|required",
         cohortDate: "string|required",
         cohortHour: "string|required",
+        cohortWeek: "string|optional",
         cohortMonth: "string|optional",
         source: "string|optional",
         applied: "boolean|optional"
@@ -6371,36 +6697,18 @@ async function completeFieldSetup(handler, database, config, plugin) {
     throw new Error(`Failed to create transaction resource for ${resourceName}.${fieldName}: ${err?.message}`);
   }
   handler.transactionResource = ok ? transactionResource : database.resources[transactionResourceName];
-  const lockResourceName = `${resourceName}_consolidation_locks_${fieldName}`;
-  const [lockOk, lockErr, lockResource] = await tryFn(
-    () => database.createResource({
-      name: lockResourceName,
-      attributes: {
-        id: "string|required",
-        lockedAt: "number|required",
-        workerId: "string|optional"
-      },
-      behavior: "body-only",
-      timestamps: false,
-      createdBy: "EventualConsistencyPlugin"
-    })
-  );
-  if (!lockOk && !database.resources[lockResourceName]) {
-    throw new Error(`Failed to create lock resource for ${resourceName}.${fieldName}: ${lockErr?.message}`);
-  }
-  handler.lockResource = lockOk ? lockResource : database.resources[lockResourceName];
   if (config.enableAnalytics) {
     await createAnalyticsResource(handler, database, resourceName, fieldName);
   }
   addHelperMethodsForHandler(handler, plugin, config);
   if (config.verbose) {
     console.log(
-      `[EventualConsistency] ${resourceName}.${fieldName} - Setup complete. Resources: ${transactionResourceName}, ${lockResourceName}${config.enableAnalytics ? `, ${resourceName}_analytics_${fieldName}` : ""}`
+      `[EventualConsistency] ${resourceName}.${fieldName} - Setup complete. Resources: ${transactionResourceName}${config.enableAnalytics ? `, plg_${resourceName}_an_${fieldName}` : ""} (locks via PluginStorage TTL)`
     );
   }
 }
 async function createAnalyticsResource(handler, database, resourceName, fieldName) {
-  const analyticsResourceName = `${resourceName}_analytics_${fieldName}`;
+  const analyticsResourceName = `plg_${resourceName}_an_${fieldName}`;
   const [ok, err, analyticsResource] = await tryFn(
     () => database.createResource({
       name: analyticsResourceName,
@@ -6574,7 +6882,7 @@ class EventualConsistencyPlugin extends Plugin {
       originalId,
       this.transactionResource,
       this.targetResource,
-      this.lockResource,
+      this.getStorage(),
       this.analyticsResource,
       (transactions) => this.updateAnalytics(transactions),
       this.config
@@ -6610,7 +6918,7 @@ class EventualConsistencyPlugin extends Plugin {
       originalId,
       this.transactionResource,
       this.targetResource,
-      this.lockResource,
+      this.getStorage(),
       (id) => this.consolidateRecord(id),
       this.config
     );
@@ -6631,20 +6939,17 @@ class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
     const result = await this.consolidateRecord(id);
     this.config.resource = oldResource;
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
     return result;
   }
@@ -6657,20 +6962,17 @@ class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
     const result = await this.consolidateRecord(id);
     this.config.resource = oldResource;
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
     return result;
   }
@@ -6703,20 +7005,17 @@ class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
     this.config.resource = handler.resource;
     this.config.field = handler.field;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
     const result = await this.recalculateRecord(id);
     this.config.resource = oldResource;
     this.config.field = oldField;
     this.transactionResource = oldTransactionResource;
     this.targetResource = oldTargetResource;
-    this.lockResource = oldLockResource;
     this.analyticsResource = oldAnalyticsResource;
     return result;
   }
@@ -6729,13 +7028,11 @@ class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     const oldAnalyticsResource = this.analyticsResource;
     this.config.resource = resourceName;
     this.config.field = fieldName;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     this.analyticsResource = handler.analyticsResource;
     try {
       await runConsolidation(
@@ -6749,7 +7046,6 @@ class EventualConsistencyPlugin extends Plugin {
       this.config.field = oldField;
       this.transactionResource = oldTransactionResource;
       this.targetResource = oldTargetResource;
-      this.lockResource = oldLockResource;
       this.analyticsResource = oldAnalyticsResource;
     }
   }
@@ -6762,16 +7058,14 @@ class EventualConsistencyPlugin extends Plugin {
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;
     const oldTargetResource = this.targetResource;
-    const oldLockResource = this.lockResource;
     this.config.resource = resourceName;
     this.config.field = fieldName;
     this.transactionResource = handler.transactionResource;
     this.targetResource = handler.targetResource;
-    this.lockResource = handler.lockResource;
     try {
       await runGarbageCollection(
         this.transactionResource,
-        this.lockResource,
+        this.getStorage(),
         this.config,
         (event, data) => this.emit(event, data)
       );
@@ -6780,7 +7074,6 @@ class EventualConsistencyPlugin extends Plugin {
       this.config.field = oldField;
       this.transactionResource = oldTransactionResource;
       this.targetResource = oldTargetResource;
-      this.lockResource = oldLockResource;
     }
   }
   // Public Analytics API
@@ -6850,6 +7143,28 @@ class EventualConsistencyPlugin extends Plugin {
     return await getMonthByHour(resourceName, field, month, options, this.fieldHandlers);
   }
   /**
+   * Get analytics for entire year, broken down by weeks
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} year - Year (e.g., 2025)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Weekly analytics for the year (up to 53 weeks)
+   */
+  async getYearByWeek(resourceName, field, year, options = {}) {
+    return await getYearByWeek(resourceName, field, year, options, this.fieldHandlers);
+  }
+  /**
+   * Get analytics for entire month, broken down by weeks
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} month - Month in YYYY-MM format
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Weekly analytics for the month
+   */
+  async getMonthByWeek(resourceName, field, month, options = {}) {
+    return await getMonthByWeek(resourceName, field, month, options, this.fieldHandlers);
+  }
+  /**
    * Get top records by volume
    * @param {string} resourceName - Resource name
    * @param {string} field - Field name
@@ -6871,6 +7186,8 @@ class FullTextPlugin extends Plugin {
       ...options
     };
     this.indexes = /* @__PURE__ */ new Map();
+    this.dirtyIndexes = /* @__PURE__ */ new Set();
+    this.deletedIndexes = /* @__PURE__ */ new Set();
   }
   async onInstall() {
     const [ok, err, indexResource] = await tryFn(() => this.database.createResource({
@@ -6884,7 +7201,11 @@ class FullTextPlugin extends Plugin {
         // Array of record IDs containing this word
         count: "number|required",
         lastUpdated: "string|required"
-      }
+      },
+      partitions: {
+        byResource: { fields: { resourceName: "string" } }
+      },
+      behavior: "body-overflow"
     }));
     this.indexResource = ok ? indexResource : this.database.resources.fulltext_indexes;
     await this.loadIndexes();
@@ -6913,22 +7234,53 @@ class FullTextPlugin extends Plugin {
   async saveIndexes() {
     if (!this.indexResource) return;
     const [ok, err] = await tryFn(async () => {
-      const existingIndexes = await this.indexResource.getAll();
-      for (const index of existingIndexes) {
-        await this.indexResource.delete(index.id);
+      for (const key of this.deletedIndexes) {
+        const [resourceName] = key.split(":");
+        const [queryOk, queryErr, results] = await tryFn(
+          () => this.indexResource.query({ resourceName })
+        );
+        if (queryOk && results) {
+          for (const index of results) {
+            const indexKey = `${index.resourceName}:${index.fieldName}:${index.word}`;
+            if (indexKey === key) {
+              await this.indexResource.delete(index.id);
+            }
+          }
+        }
       }
-      for (const [key, data] of this.indexes.entries()) {
+      for (const key of this.dirtyIndexes) {
         const [resourceName, fieldName, word] = key.split(":");
-        await this.indexResource.insert({
-          id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          resourceName,
-          fieldName,
-          word,
-          recordIds: data.recordIds,
-          count: data.count,
-          lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
-        });
+        const data = this.indexes.get(key);
+        if (!data) continue;
+        const [queryOk, queryErr, results] = await tryFn(
+          () => this.indexResource.query({ resourceName })
+        );
+        let existingRecord = null;
+        if (queryOk && results) {
+          existingRecord = results.find(
+            (index) => index.resourceName === resourceName && index.fieldName === fieldName && index.word === word
+          );
+        }
+        if (existingRecord) {
+          await this.indexResource.update(existingRecord.id, {
+            recordIds: data.recordIds,
+            count: data.count,
+            lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        } else {
+          await this.indexResource.insert({
+            id: `index-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            resourceName,
+            fieldName,
+            word,
+            recordIds: data.recordIds,
+            count: data.count,
+            lastUpdated: (/* @__PURE__ */ new Date()).toISOString()
+          });
+        }
       }
+      this.dirtyIndexes.clear();
+      this.deletedIndexes.clear();
     });
   }
   installDatabaseHooks() {
@@ -7023,6 +7375,7 @@ class FullTextPlugin extends Plugin {
           existing.count = existing.recordIds.length;
         }
         this.indexes.set(key, existing);
+        this.dirtyIndexes.add(key);
       }
     }
   }
@@ -7035,8 +7388,10 @@ class FullTextPlugin extends Plugin {
           data.count = data.recordIds.length;
           if (data.recordIds.length === 0) {
             this.indexes.delete(key);
+            this.deletedIndexes.add(key);
           } else {
             this.indexes.set(key, data);
+            this.dirtyIndexes.add(key);
           }
         }
       }
@@ -7268,8 +7623,14 @@ class MetricsPlugin extends Plugin {
           errors: "number|required",
           avgTime: "number|required",
           timestamp: "string|required",
-          metadata: "json"
-        }
+          metadata: "json",
+          createdAt: "string|required"
+          // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: "string|maxlength:10" } }
+        },
+        behavior: "body-overflow"
       }));
       this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
       const [ok2, err2, errorsResource] = await tryFn(() => this.database.createResource({
@@ -7280,8 +7641,14 @@ class MetricsPlugin extends Plugin {
           operation: "string|required",
           error: "string|required",
           timestamp: "string|required",
-          metadata: "json"
-        }
+          metadata: "json",
+          createdAt: "string|required"
+          // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: "string|maxlength:10" } }
+        },
+        behavior: "body-overflow"
       }));
       this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
       const [ok3, err3, performanceResource] = await tryFn(() => this.database.createResource({
@@ -7292,8 +7659,14 @@ class MetricsPlugin extends Plugin {
           operation: "string|required",
           duration: "number|required",
           timestamp: "string|required",
-          metadata: "json"
-        }
+          metadata: "json",
+          createdAt: "string|required"
+          // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: "string|maxlength:10" } }
+        },
+        behavior: "body-overflow"
       }));
       this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
     });
@@ -7514,6 +7887,8 @@ class MetricsPlugin extends Plugin {
         errorMetadata = { error: "true" };
         resourceMetadata = { resource: "true" };
       }
+      const now = /* @__PURE__ */ new Date();
+      const createdAt = now.toISOString().slice(0, 10);
       for (const [operation, data] of Object.entries(this.metrics.operations)) {
         if (data.count > 0) {
           await this.metricsResource.insert({
@@ -7525,7 +7900,8 @@ class MetricsPlugin extends Plugin {
             totalTime: data.totalTime,
             errors: data.errors,
             avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            timestamp: now.toISOString(),
+            createdAt,
             metadata
           });
         }
@@ -7542,7 +7918,8 @@ class MetricsPlugin extends Plugin {
               totalTime: data.totalTime,
               errors: data.errors,
               avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-              timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+              timestamp: now.toISOString(),
+              createdAt,
               metadata: resourceMetadata
             });
           }
@@ -7556,6 +7933,8 @@ class MetricsPlugin extends Plugin {
             operation: perf.operation,
             duration: perf.duration,
             timestamp: perf.timestamp,
+            createdAt: perf.timestamp.slice(0, 10),
+            // YYYY-MM-DD from timestamp
             metadata: perfMetadata
           });
         }
@@ -7569,6 +7948,8 @@ class MetricsPlugin extends Plugin {
             error: error.error,
             stack: error.stack,
             timestamp: error.timestamp,
+            createdAt: error.timestamp.slice(0, 10),
+            // YYYY-MM-DD from timestamp
             metadata: errorMetadata
           });
         }
@@ -7700,22 +8081,47 @@ class MetricsPlugin extends Plugin {
   async cleanupOldData() {
     const cutoffDate = /* @__PURE__ */ new Date();
     cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
+    cutoffDate.toISOString().slice(0, 10);
+    const datesToDelete = [];
+    const startDate = new Date(cutoffDate);
+    startDate.setDate(startDate.getDate() - 365);
+    for (let d = new Date(startDate); d < cutoffDate; d.setDate(d.getDate() + 1)) {
+      datesToDelete.push(d.toISOString().slice(0, 10));
+    }
     if (this.metricsResource) {
-      const oldMetrics = await this.getMetrics({ endDate: cutoffDate.toISOString() });
-      for (const metric of oldMetrics) {
-        await this.metricsResource.delete(metric.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldMetrics] = await tryFn(
+          () => this.metricsResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldMetrics) {
+          for (const metric of oldMetrics) {
+            await tryFn(() => this.metricsResource.delete(metric.id));
+          }
+        }
       }
     }
     if (this.errorsResource) {
-      const oldErrors = await this.getErrorLogs({ endDate: cutoffDate.toISOString() });
-      for (const error of oldErrors) {
-        await this.errorsResource.delete(error.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldErrors] = await tryFn(
+          () => this.errorsResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldErrors) {
+          for (const error of oldErrors) {
+            await tryFn(() => this.errorsResource.delete(error.id));
+          }
+        }
       }
     }
     if (this.performanceResource) {
-      const oldPerformance = await this.getPerformanceLogs({ endDate: cutoffDate.toISOString() });
-      for (const perf of oldPerformance) {
-        await this.performanceResource.delete(perf.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldPerformance] = await tryFn(
+          () => this.performanceResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldPerformance) {
+          for (const perf of oldPerformance) {
+            await tryFn(() => this.performanceResource.delete(perf.id));
+          }
+        }
       }
     }
   }
@@ -15095,28 +15501,6 @@ class S3QueuePlugin extends Plugin {
       throw new Error(`Failed to create queue resource: ${err?.message}`);
     }
     this.queueResource = this.database.resources[queueName];
-    const lockName = `${this.config.resource}_locks`;
-    const [okLock, errLock] = await tryFn(
-      () => this.database.createResource({
-        name: lockName,
-        attributes: {
-          id: "string|required",
-          workerId: "string|required",
-          timestamp: "number|required",
-          ttl: "number|default:5000"
-        },
-        behavior: "body-overflow",
-        timestamps: false
-      })
-    );
-    if (okLock || this.database.resources[lockName]) {
-      this.lockResource = this.database.resources[lockName];
-    } else {
-      this.lockResource = null;
-      if (this.config.verbose) {
-        console.log(`[S3QueuePlugin] Lock resource creation failed, locking disabled: ${errLock?.message}`);
-      }
-    }
     this.addHelperMethods();
     if (this.config.deadLetterResource) {
       await this.createDeadLetterResource();
@@ -15187,13 +15571,6 @@ class S3QueuePlugin extends Plugin {
         }
       }
     }, 5e3);
-    this.lockCleanupInterval = setInterval(() => {
-      this.cleanupStaleLocks().catch((err) => {
-        if (this.config.verbose) {
-          console.log(`[lockCleanup] Error: ${err.message}`);
-        }
-      });
-    }, 1e4);
     for (let i = 0; i < concurrency; i++) {
       const worker = this.createWorker(messageHandler, i);
       this.workers.push(worker);
@@ -15209,10 +15586,6 @@ class S3QueuePlugin extends Plugin {
     if (this.cacheCleanupInterval) {
       clearInterval(this.cacheCleanupInterval);
       this.cacheCleanupInterval = null;
-    }
-    if (this.lockCleanupInterval) {
-      clearInterval(this.lockCleanupInterval);
-      this.lockCleanupInterval = null;
     }
     await Promise.all(this.workers);
     this.workers = [];
@@ -15264,48 +15637,21 @@ class S3QueuePlugin extends Plugin {
     return null;
   }
   /**
-   * Acquire a distributed lock using ETag-based conditional updates
+   * Acquire a distributed lock using PluginStorage TTL
    * This ensures only one worker can claim a message at a time
-   *
-   * Uses a two-step process:
-   * 1. Create lock resource (similar to queue resource) if not exists
-   * 2. Try to claim lock using ETag-based conditional update
    */
   async acquireLock(messageId) {
-    if (!this.lockResource) {
-      return true;
-    }
-    const lockId = `lock-${messageId}`;
-    const now = Date.now();
+    const storage = this.getStorage();
+    const lockKey = `msg-${messageId}`;
     try {
-      const [okGet, errGet, existingLock] = await tryFn(
-        () => this.lockResource.get(lockId)
-      );
-      if (existingLock) {
-        const lockAge = now - existingLock.timestamp;
-        if (lockAge < existingLock.ttl) {
-          return false;
-        }
-        const [ok, err, result] = await tryFn(
-          () => this.lockResource.updateConditional(lockId, {
-            workerId: this.workerId,
-            timestamp: now,
-            ttl: 5e3
-          }, {
-            ifMatch: existingLock._etag
-          })
-        );
-        return ok && result.success;
-      }
-      const [okCreate, errCreate] = await tryFn(
-        () => this.lockResource.insert({
-          id: lockId,
-          workerId: this.workerId,
-          timestamp: now,
-          ttl: 5e3
-        })
-      );
-      return okCreate;
+      const lock = await storage.acquireLock(lockKey, {
+        ttl: 5,
+        // 5 seconds
+        timeout: 0,
+        // Don't wait if locked
+        workerId: this.workerId
+      });
+      return lock !== null;
     } catch (error) {
       if (this.config.verbose) {
         console.log(`[acquireLock] Error: ${error.message}`);
@@ -15314,15 +15660,13 @@ class S3QueuePlugin extends Plugin {
     }
   }
   /**
-   * Release a distributed lock by deleting the lock record
+   * Release a distributed lock via PluginStorage
    */
   async releaseLock(messageId) {
-    if (!this.lockResource) {
-      return;
-    }
-    const lockId = `lock-${messageId}`;
+    const storage = this.getStorage();
+    const lockKey = `msg-${messageId}`;
     try {
-      await this.lockResource.delete(lockId);
+      await storage.releaseLock(lockKey);
     } catch (error) {
       if (this.config.verbose) {
         console.log(`[releaseLock] Failed to release lock for ${messageId}: ${error.message}`);
@@ -15330,30 +15674,11 @@ class S3QueuePlugin extends Plugin {
     }
   }
   /**
-   * Clean up stale locks (older than TTL)
-   * This prevents deadlocks if a worker crashes while holding a lock
+   * Clean up stale locks - NO LONGER NEEDED
+   * TTL handles automatic expiration, no manual cleanup required
    */
   async cleanupStaleLocks() {
-    if (!this.lockResource) {
-      return;
-    }
-    const now = Date.now();
-    try {
-      const locks = await this.lockResource.list();
-      for (const lock of locks) {
-        const lockAge = now - lock.timestamp;
-        if (lockAge > lock.ttl) {
-          await this.lockResource.delete(lock.id);
-          if (this.config.verbose) {
-            console.log(`[cleanupStaleLocks] Removed expired lock: ${lock.id}`);
-          }
-        }
-      }
-    } catch (error) {
-      if (this.config.verbose) {
-        console.log(`[cleanupStaleLocks] Error during cleanup: ${error.message}`);
-      }
-    }
+    return;
   }
   async attemptClaim(msg) {
     const now = Date.now();
@@ -15577,7 +15902,6 @@ class SchedulerPlugin extends Plugin {
       ...options
     };
     this.database = null;
-    this.lockResource = null;
     this.jobs = /* @__PURE__ */ new Map();
     this.activeJobs = /* @__PURE__ */ new Map();
     this.timers = /* @__PURE__ */ new Map();
@@ -15616,7 +15940,6 @@ class SchedulerPlugin extends Plugin {
     return true;
   }
   async onInstall() {
-    await this._createLockResource();
     if (this.config.persistJobs) {
       await this._createJobHistoryResource();
     }
@@ -15644,25 +15967,6 @@ class SchedulerPlugin extends Plugin {
     }
     await this._startScheduling();
     this.emit("initialized", { jobs: this.jobs.size });
-  }
-  async _createLockResource() {
-    const [ok, err, lockResource] = await tryFn(
-      () => this.database.createResource({
-        name: "plg_scheduler_job_locks",
-        attributes: {
-          id: "string|required",
-          jobName: "string|required",
-          lockedAt: "number|required",
-          instanceId: "string|optional"
-        },
-        behavior: "body-only",
-        timestamps: false
-      })
-    );
-    if (!ok && !this.database.resources.plg_scheduler_job_locks) {
-      throw new Error(`Failed to create lock resource: ${err?.message}`);
-    }
-    this.lockResource = ok ? lockResource : this.database.resources.plg_scheduler_job_locks;
   }
   async _createJobHistoryResource() {
     const [ok] = await tryFn(() => this.database.createResource({
@@ -15771,16 +16075,16 @@ class SchedulerPlugin extends Plugin {
       return;
     }
     this.activeJobs.set(jobName, "acquiring-lock");
-    const lockId = `lock-${jobName}`;
-    const [lockAcquired, lockErr] = await tryFn(
-      () => this.lockResource.insert({
-        id: lockId,
-        jobName,
-        lockedAt: Date.now(),
-        instanceId: process.pid ? String(process.pid) : "unknown"
-      })
-    );
-    if (!lockAcquired) {
+    const storage = this.getStorage();
+    const lockKey = `job-${jobName}`;
+    const lock = await storage.acquireLock(lockKey, {
+      ttl: Math.ceil(job.timeout / 1e3) + 60,
+      // Job timeout + 60 seconds buffer
+      timeout: 0,
+      // Don't wait if locked
+      workerId: process.pid ? String(process.pid) : "unknown"
+    });
+    if (!lock) {
       if (this.config.verbose) {
         console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
       }
@@ -15884,7 +16188,7 @@ class SchedulerPlugin extends Plugin {
         throw lastError;
       }
     } finally {
-      await tryFn(() => this.lockResource.delete(lockId));
+      await tryFn(() => storage.releaseLock(lockKey));
     }
   }
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {

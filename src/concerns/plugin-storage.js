@@ -73,20 +73,29 @@ export class PluginStorage {
   }
 
   /**
-   * Save data with metadata encoding and behavior support
+   * Save data with metadata encoding, behavior support, and optional TTL
    *
    * @param {string} key - S3 key
    * @param {Object} data - Data to save
    * @param {Object} options - Options
+   * @param {number} options.ttl - Time-to-live in seconds (optional)
    * @param {string} options.behavior - 'body-overflow' | 'body-only' | 'enforce-limits'
    * @param {string} options.contentType - Content type (default: application/json)
    * @returns {Promise<void>}
    */
-  async put(key, data, options = {}) {
-    const { behavior = 'body-overflow', contentType = 'application/json' } = options;
+  async set(key, data, options = {}) {
+    const { ttl, behavior = 'body-overflow', contentType = 'application/json' } = options;
+
+    // Clone data to avoid mutating original
+    const dataToSave = { ...data };
+
+    // Add TTL expiration timestamp if provided
+    if (ttl && typeof ttl === 'number' && ttl > 0) {
+      dataToSave._expiresAt = Date.now() + (ttl * 1000);
+    }
 
     // Apply behavior to split data between metadata and body
-    const { metadata, body } = this._applyBehavior(data, behavior);
+    const { metadata, body } = this._applyBehavior(dataToSave, behavior);
 
     // Prepare putObject parameters
     const putParams = {
@@ -104,15 +113,23 @@ export class PluginStorage {
     const [ok, err] = await tryFn(() => this.client.putObject(putParams));
 
     if (!ok) {
-      throw new Error(`PluginStorage.put failed for key ${key}: ${err.message}`);
+      throw new Error(`PluginStorage.set failed for key ${key}: ${err.message}`);
     }
   }
 
   /**
-   * Get data with automatic metadata decoding
+   * Alias for set() to maintain backward compatibility
+   * @deprecated Use set() instead
+   */
+  async put(key, data, options = {}) {
+    return this.set(key, data, options);
+  }
+
+  /**
+   * Get data with automatic metadata decoding and TTL check
    *
    * @param {string} key - S3 key
-   * @returns {Promise<Object|null>} Data or null if not found
+   * @returns {Promise<Object|null>} Data or null if not found/expired
    */
   async get(key) {
     const [ok, err, response] = await tryFn(() => this.client.getObject(key));
@@ -130,6 +147,9 @@ export class PluginStorage {
     const metadata = response.Metadata || {};
     const parsedMetadata = this._parseMetadataValues(metadata);
 
+    // Build final data object
+    let data = parsedMetadata;
+
     // If has body, merge with metadata
     if (response.Body) {
       try {
@@ -139,14 +159,27 @@ export class PluginStorage {
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
           // Body takes precedence over metadata for same keys
-          return { ...parsedMetadata, ...body };
+          data = { ...parsedMetadata, ...body };
         }
       } catch (parseErr) {
         throw new Error(`PluginStorage.get failed to parse body for key ${key}: ${parseErr.message}`);
       }
     }
 
-    return parsedMetadata;
+    // Check TTL expiration (S3 lowercases metadata keys)
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (expiresAt) {
+      if (Date.now() > expiresAt) {
+        // Expired - delete and return null
+        await this.delete(key);
+        return null;
+      }
+      // Remove internal fields before returning
+      delete data._expiresat;
+      delete data._expiresAt;
+    }
+
+    return data;
   }
 
   /**
@@ -266,6 +299,154 @@ export class PluginStorage {
   }
 
   /**
+   * Check if a key exists (not expired)
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<boolean>} True if exists and not expired
+   */
+  async has(key) {
+    const data = await this.get(key);
+    return data !== null;
+  }
+
+  /**
+   * Check if a key is expired
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<boolean>} True if expired or not found
+   */
+  async isExpired(key) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+
+    if (!ok) {
+      return true; // Not found = expired
+    }
+
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+
+    let data = parsedMetadata;
+
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return true;
+      }
+    }
+
+    // S3 lowercases metadata keys
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return false; // No TTL = not expired
+    }
+
+    return Date.now() > expiresAt;
+  }
+
+  /**
+   * Get remaining TTL in seconds
+   *
+   * @param {string} key - S3 key
+   * @returns {Promise<number|null>} Remaining seconds or null if no TTL/not found
+   */
+  async getTTL(key) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+
+    if (!ok) {
+      return null;
+    }
+
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+
+    let data = parsedMetadata;
+
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return null;
+      }
+    }
+
+    // S3 lowercases metadata keys
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return null; // No TTL
+    }
+
+    const remaining = Math.max(0, expiresAt - Date.now());
+    return Math.floor(remaining / 1000); // Convert to seconds
+  }
+
+  /**
+   * Extend TTL by adding additional seconds
+   *
+   * @param {string} key - S3 key
+   * @param {number} additionalSeconds - Seconds to add to current TTL
+   * @returns {Promise<boolean>} True if extended, false if not found or no TTL
+   */
+  async touch(key, additionalSeconds) {
+    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+
+    if (!ok) {
+      return false;
+    }
+
+    const metadata = response.Metadata || {};
+    const parsedMetadata = this._parseMetadataValues(metadata);
+
+    let data = parsedMetadata;
+
+    if (response.Body) {
+      try {
+        const bodyContent = await response.Body.transformToString();
+        if (bodyContent && bodyContent.trim()) {
+          const body = JSON.parse(bodyContent);
+          data = { ...parsedMetadata, ...body };
+        }
+      } catch {
+        return false;
+      }
+    }
+
+    // S3 lowercases metadata keys
+    const expiresAt = data._expiresat || data._expiresAt;
+    if (!expiresAt) {
+      return false; // No TTL to extend
+    }
+
+    // Extend TTL - use the standard field name (will be lowercased by S3)
+    data._expiresAt = expiresAt + (additionalSeconds * 1000);
+    delete data._expiresat; // Remove lowercased version
+
+    // Save back (reuse same behavior)
+    const { metadata: newMetadata, body: newBody } = this._applyBehavior(data, 'body-overflow');
+
+    const putParams = {
+      key,
+      metadata: newMetadata,
+      contentType: 'application/json'
+    };
+
+    if (newBody !== null) {
+      putParams.body = JSON.stringify(newBody);
+    }
+
+    const [putOk] = await tryFn(() => this.client.putObject(putParams));
+    return putOk;
+  }
+
+  /**
    * Delete a single object
    *
    * @param {string} key - S3 key
@@ -361,6 +542,90 @@ export class PluginStorage {
     }
 
     return results;
+  }
+
+  /**
+   * Acquire a distributed lock with TTL and retry logic
+   *
+   * @param {string} lockName - Lock identifier
+   * @param {Object} options - Lock options
+   * @param {number} options.ttl - Lock TTL in seconds (default: 30)
+   * @param {number} options.timeout - Max wait time in ms (default: 0, no wait)
+   * @param {string} options.workerId - Worker identifier (default: 'unknown')
+   * @returns {Promise<Object|null>} Lock object or null if couldn't acquire
+   */
+  async acquireLock(lockName, options = {}) {
+    const { ttl = 30, timeout = 0, workerId = 'unknown' } = options;
+    const key = this.getPluginKey(null, 'locks', lockName);
+
+    const startTime = Date.now();
+
+    while (true) {
+      // Try to acquire
+      const existing = await this.get(key);
+      if (!existing) {
+        await this.set(key, { workerId, acquiredAt: Date.now() }, { ttl });
+        return { key, workerId };
+      }
+
+      // Check timeout
+      if (Date.now() - startTime >= timeout) {
+        return null; // Could not acquire
+      }
+
+      // Wait and retry (100ms intervals)
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  /**
+   * Release a distributed lock
+   *
+   * @param {string} lockName - Lock identifier
+   * @returns {Promise<void>}
+   */
+  async releaseLock(lockName) {
+    const key = this.getPluginKey(null, 'locks', lockName);
+    await this.delete(key);
+  }
+
+  /**
+   * Check if a lock is currently held
+   *
+   * @param {string} lockName - Lock identifier
+   * @returns {Promise<boolean>} True if locked
+   */
+  async isLocked(lockName) {
+    const key = this.getPluginKey(null, 'locks', lockName);
+    const lock = await this.get(key);
+    return lock !== null;
+  }
+
+  /**
+   * Increment a counter value
+   *
+   * @param {string} key - S3 key
+   * @param {number} amount - Amount to increment (default: 1)
+   * @param {Object} options - Options (e.g., ttl)
+   * @returns {Promise<number>} New value
+   */
+  async increment(key, amount = 1, options = {}) {
+    const data = await this.get(key);
+    const value = (data?.value || 0) + amount;
+    await this.set(key, { value }, options);
+    return value;
+  }
+
+  /**
+   * Decrement a counter value
+   *
+   * @param {string} key - S3 key
+   * @param {number} amount - Amount to decrement (default: 1)
+   * @param {Object} options - Options (e.g., ttl)
+   * @returns {Promise<number>} New value
+   */
+  async decrement(key, amount = 1, options = {}) {
+    return this.increment(key, -amount, options);
   }
 
   /**

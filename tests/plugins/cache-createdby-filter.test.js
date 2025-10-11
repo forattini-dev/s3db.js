@@ -44,7 +44,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     console.log('2️⃣  Installing EventualConsistencyPlugin...\n');
     const ecPlugin = new EventualConsistencyPlugin({
       resources: {
-        users: ['clicks'] // Will create users_transactions_clicks, users_consolidation_locks_clicks
+        users: ['clicks'] // Will create plg_users_tx_clicks, users_consolidation_locks_clicks
       },
       mode: 'async',
       autoConsolidate: false,
@@ -57,8 +57,8 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
 
     console.log('   Created resources:');
     console.log('   - users (createdBy: user)');
-    console.log('   - users_transactions_clicks (createdBy: EventualConsistencyPlugin)');
-    console.log('   - users_consolidation_locks_clicks (createdBy: EventualConsistencyPlugin)\n');
+    console.log('   - plg_users_tx_clicks (createdBy: EventualConsistencyPlugin)');
+    console.log('   - Note: locks use PluginStorage now, not resources\n');
 
     // Install CachePlugin AFTER plugin resources are created
     console.log('3️⃣  Installing CachePlugin...\n');
@@ -72,17 +72,14 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
 
     // Check if each resource should be cached
     const usersShould = cachePlugin.shouldCacheResource('users');
-    const transactionsShould = cachePlugin.shouldCacheResource('users_transactions_clicks');
-    const locksShould = cachePlugin.shouldCacheResource('users_consolidation_locks_clicks');
+    const transactionsShould = cachePlugin.shouldCacheResource('plg_users_tx_clicks');
 
     console.log(`   users: ${usersShould ? '✅ CACHED' : '❌ NOT CACHED'} (createdBy: user)`);
-    console.log(`   users_transactions_clicks: ${transactionsShould ? '✅ CACHED' : '❌ NOT CACHED'} (createdBy: EventualConsistencyPlugin)`);
-    console.log(`   users_consolidation_locks_clicks: ${locksShould ? '✅ CACHED' : '❌ NOT CACHED'} (createdBy: EventualConsistencyPlugin)`);
+    console.log(`   plg_users_tx_clicks: ${transactionsShould ? '✅ CACHED' : '❌ NOT CACHED'} (createdBy: EventualConsistencyPlugin)`);
 
     // Verify expectations
     expect(usersShould).toBe(true); // User resource SHOULD be cached
     expect(transactionsShould).toBe(false); // Plugin resource should NOT be cached
-    expect(locksShould).toBe(false); // Plugin resource should NOT be cached
 
     console.log('\n✅ CachePlugin correctly filters by createdBy!\n');
     console.log('   Summary:');
@@ -264,7 +261,7 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     console.log('3️⃣  Installing CachePlugin with EXPLICIT include...\n');
     const cachePlugin = new CachePlugin({
       driver: 'memory',
-      include: ['users', 'users_transactions_balance'], // Explicitly include plugin resource
+      include: ['users', 'plg_users_tx_balance'], // Explicitly include plugin resource
       verbose: false
     });
     await database.usePlugin(cachePlugin);
@@ -272,16 +269,14 @@ describe('CachePlugin - createdBy Filter & Cache Invalidation', () => {
     console.log('4️⃣  Testing which resources are cached...\n');
 
     const usersShould = cachePlugin.shouldCacheResource('users');
-    const transactionsShould = cachePlugin.shouldCacheResource('users_transactions_balance');
-    const locksShould = cachePlugin.shouldCacheResource('users_consolidation_locks_balance');
+    const transactionsShould = cachePlugin.shouldCacheResource('plg_users_tx_balance');
 
     console.log(`   users: ${usersShould ? '✅ CACHED' : '❌ NOT CACHED'}`);
-    console.log(`   users_transactions_balance: ${transactionsShould ? '✅ CACHED' : '❌ NOT CACHED'} (explicitly included)`);
-    console.log(`   users_consolidation_locks_balance: ${locksShould ? '✅ CACHED' : '❌ NOT CACHED'} (not included)`);
+    console.log(`   plg_users_tx_balance: ${transactionsShould ? '✅ CACHED' : '❌ NOT CACHED'} (explicitly included)`);
+    console.log(`   Note: locks use PluginStorage now (not a resource)`);
 
     expect(usersShould).toBe(true);
     expect(transactionsShould).toBe(true); // Should be cached because explicitly included!
-    expect(locksShould).toBe(false); // Not in include list
 
     console.log('\n✅ Explicit include works correctly!\n');
     console.log('   Summary:');

@@ -1,9 +1,27 @@
 # 🔍 FullText Plugin
 
-<p align="center">
-  <strong>Powerful Full-Text Search Engine</strong><br>
-  <em>Automatic indexing, scoring, and advanced search capabilities for your resources</em>
-</p>
+## ⚡ TLDR
+
+Motor de busca **full-text** com indexação automática, relevance scoring e highlighting.
+
+**2 linhas para começar:**
+```javascript
+await db.usePlugin(new FullTextPlugin({ fields: ['title', 'description', 'content'] }));
+const results = await db.plugins.fulltext.searchRecords('articles', 'machine learning');
+```
+
+**Principais features:**
+- ✅ Indexação automática em insert/update
+- ✅ Relevance scoring com field weights
+- ✅ Highlighting de termos encontrados
+- ✅ Fuzzy search + stemming
+- ✅ Multi-field + multi-resource search
+
+**Quando usar:**
+- 🔍 Busca em artigos/documentos
+- 📦 Catálogos de produtos
+- 💬 Fóruns e comentários
+- 📚 Knowledge bases
 
 ---
 

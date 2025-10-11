@@ -163,7 +163,6 @@ export class SchedulerPlugin extends Plugin {
     };
     
     this.database = null;
-    this.lockResource = null;
     this.jobs = new Map();
     this.activeJobs = new Map();
     this.timers = new Map();
@@ -218,9 +217,7 @@ export class SchedulerPlugin extends Plugin {
   }
 
   async onInstall() {
-
-    // Create lock resource for distributed locking
-    await this._createLockResource();
+    // Locks are now managed by PluginStorage with TTL - no Resource needed
 
     // Create job execution history resource
     if (this.config.persistJobs) {
@@ -258,27 +255,6 @@ export class SchedulerPlugin extends Plugin {
     this.emit('initialized', { jobs: this.jobs.size });
   }
 
-  async _createLockResource() {
-    const [ok, err, lockResource] = await tryFn(() =>
-      this.database.createResource({
-        name: 'plg_scheduler_job_locks',
-        attributes: {
-          id: 'string|required',
-          jobName: 'string|required',
-          lockedAt: 'number|required',
-          instanceId: 'string|optional'
-        },
-        behavior: 'body-only',
-        timestamps: false
-      })
-    );
-
-    if (!ok && !this.database.resources.plg_scheduler_job_locks) {
-      throw new Error(`Failed to create lock resource: ${err?.message}`);
-    }
-
-    this.lockResource = ok ? lockResource : this.database.resources.plg_scheduler_job_locks;
-  }
 
   async _createJobHistoryResource() {
     const [ok] = await tryFn(() => this.database.createResource({
@@ -416,19 +392,17 @@ export class SchedulerPlugin extends Plugin {
     // Mark as active immediately (will be updated with executionId later)
     this.activeJobs.set(jobName, 'acquiring-lock');
 
-    // Acquire distributed lock to prevent concurrent execution across instances
-    const lockId = `lock-${jobName}`;
-    const [lockAcquired, lockErr] = await tryFn(() =>
-      this.lockResource.insert({
-        id: lockId,
-        jobName,
-        lockedAt: Date.now(),
-        instanceId: process.pid ? String(process.pid) : 'unknown'
-      })
-    );
+    // Acquire distributed lock with TTL to prevent concurrent execution across instances
+    const storage = this.getStorage();
+    const lockKey = `job-${jobName}`;
+    const lock = await storage.acquireLock(lockKey, {
+      ttl: Math.ceil(job.timeout / 1000) + 60, // Job timeout + 60 seconds buffer
+      timeout: 0, // Don't wait if locked
+      workerId: process.pid ? String(process.pid) : 'unknown'
+    });
 
     // If lock couldn't be acquired, another instance is executing this job
-    if (!lockAcquired) {
+    if (!lock) {
       if (this.config.verbose) {
         console.log(`[SchedulerPlugin] Job '${jobName}' already running on another instance`);
       }
@@ -577,7 +551,7 @@ export class SchedulerPlugin extends Plugin {
       }
     } finally {
       // Always release the distributed lock
-      await tryFn(() => this.lockResource.delete(lockId));
+      await tryFn(() => storage.releaseLock(lockKey));
     }
   }
 

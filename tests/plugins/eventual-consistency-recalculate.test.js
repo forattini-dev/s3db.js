@@ -71,7 +71,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
 
       // Verify transactions are marked as applied
       // Note: Plugin may create anchor transaction, so we expect at least 4
-      let transactions = await database.resources.urls_transactions_clicks.query({
+      let transactions = await database.resources.plg_urls_tx_clicks.query({
         originalId: urlId,
         applied: true
       });
@@ -88,7 +88,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       expect(url.clicks).toBe(160);
 
       // Verify all transactions are now applied again
-      transactions = await database.resources.urls_transactions_clicks.query({
+      transactions = await database.resources.plg_urls_tx_clicks.query({
         originalId: urlId,
         applied: true
       });
@@ -141,7 +141,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       expect(url.clicks).toBe(100);
 
       // All transactions should be applied
-      let appliedTxns = await database.resources.urls_transactions_clicks.query({
+      let appliedTxns = await database.resources.plg_urls_tx_clicks.query({
         originalId: urlId,
         applied: true
       });
@@ -159,7 +159,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       expect(url.clicks).toBe(100);
 
       // All transactions should be applied again
-      appliedTxns = await database.resources.urls_transactions_clicks.query({
+      appliedTxns = await database.resources.plg_urls_tx_clicks.query({
         originalId: urlId,
         applied: true
       });
@@ -180,7 +180,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
 
       // Manually create an anchor transaction (simulates initial value)
       const now = new Date();
-      await database.resources.urls_transactions_clicks.insert({
+      await database.resources.plg_urls_tx_clicks.insert({
         id: 'anchor-txn-001',
         originalId: urlId,
         field: 'clicks',
@@ -204,7 +204,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       await urlsResource.consolidate(urlId, 'clicks');
 
       // Verify initial state
-      let allTxns = await database.resources.urls_transactions_clicks.query({
+      let allTxns = await database.resources.plg_urls_tx_clicks.query({
         originalId: urlId
       });
       expect(allTxns.length).toBe(3); // 1 anchor + 2 regular
@@ -216,7 +216,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       expect(recalculatedValue).toBe(1075);
 
       // Verify anchor transaction is STILL applied
-      const anchorTxn = await database.resources.urls_transactions_clicks.get('anchor-txn-001');
+      const anchorTxn = await database.resources.plg_urls_tx_clicks.get('anchor-txn-001');
       expect(anchorTxn.applied).toBe(true); // Should NOT have been reset
       expect(anchorTxn.source).toBe('anchor');
     });
@@ -318,7 +318,7 @@ describe("EventualConsistencyPlugin - Recalculate", () => {
       await urlsResource.consolidate(urlId, 'clicks');
 
       // Verify partition structure exists
-      const transactionResource = database.resources.urls_transactions_clicks;
+      const transactionResource = database.resources.plg_urls_tx_clicks;
       expect(transactionResource.config.partitions).toBeDefined();
       expect(transactionResource.config.partitions.byOriginalIdAndApplied).toBeDefined();
       expect(transactionResource.config.partitions.byOriginalIdAndApplied.fields.originalId).toBe('string');

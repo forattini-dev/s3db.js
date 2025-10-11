@@ -115,10 +115,10 @@ describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', (
     // Check transaction counts before consolidation
     console.log('\n4️⃣  Checking transaction logs before consolidation...\n');
 
-    const clicksTransactions = await database.resources.urls_transactions_clicks.list();
-    const viewsTransactions = await database.resources.urls_transactions_views.list();
-    const sharesTransactions = await database.resources.urls_transactions_shares.list();
-    const scansTransactions = await database.resources.urls_transactions_scans.list();
+    const clicksTransactions = await database.resources.plg_urls_tx_clicks.list();
+    const viewsTransactions = await database.resources.plg_urls_tx_views.list();
+    const sharesTransactions = await database.resources.plg_urls_tx_shares.list();
+    const scansTransactions = await database.resources.plg_urls_tx_scans.list();
 
     console.log(`   📊 clicks: ${clicksTransactions.length} transactions pending`);
     console.log(`   👁️  views: ${viewsTransactions.length} transactions pending`);

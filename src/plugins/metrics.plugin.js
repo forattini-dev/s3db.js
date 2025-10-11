@@ -47,8 +47,13 @@ export class MetricsPlugin extends Plugin {
           errors: 'number|required',
           avgTime: 'number|required',
           timestamp: 'string|required',
-          metadata: 'json'
-        }
+          metadata: 'json',
+          createdAt: 'string|required' // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        },
+        behavior: 'body-overflow'
       }));
       this.metricsResource = ok1 ? metricsResource : this.database.resources.plg_metrics;
 
@@ -60,8 +65,13 @@ export class MetricsPlugin extends Plugin {
           operation: 'string|required',
           error: 'string|required',
           timestamp: 'string|required',
-          metadata: 'json'
-        }
+          metadata: 'json',
+          createdAt: 'string|required' // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        },
+        behavior: 'body-overflow'
       }));
       this.errorsResource = ok2 ? errorsResource : this.database.resources.plg_error_logs;
 
@@ -73,8 +83,13 @@ export class MetricsPlugin extends Plugin {
           operation: 'string|required',
           duration: 'number|required',
           timestamp: 'string|required',
-          metadata: 'json'
-        }
+          metadata: 'json',
+          createdAt: 'string|required' // YYYY-MM-DD for partitioning
+        },
+        partitions: {
+          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        },
+        behavior: 'body-overflow'
       }));
       this.performanceResource = ok3 ? performanceResource : this.database.resources.plg_performance_logs;
     });
@@ -359,6 +374,9 @@ export class MetricsPlugin extends Plugin {
       }
 
       // Flush operation metrics
+      const now = new Date();
+      const createdAt = now.toISOString().slice(0, 10); // YYYY-MM-DD
+
       for (const [operation, data] of Object.entries(this.metrics.operations)) {
         if (data.count > 0) {
           await this.metricsResource.insert({
@@ -370,7 +388,8 @@ export class MetricsPlugin extends Plugin {
             totalTime: data.totalTime,
             errors: data.errors,
             avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-            timestamp: new Date().toISOString(),
+            timestamp: now.toISOString(),
+            createdAt,
             metadata
           });
         }
@@ -389,7 +408,8 @@ export class MetricsPlugin extends Plugin {
               totalTime: data.totalTime,
               errors: data.errors,
               avgTime: data.count > 0 ? data.totalTime / data.count : 0,
-              timestamp: new Date().toISOString(),
+              timestamp: now.toISOString(),
+              createdAt,
               metadata: resourceMetadata
             });
           }
@@ -405,6 +425,7 @@ export class MetricsPlugin extends Plugin {
             operation: perf.operation,
             duration: perf.duration,
             timestamp: perf.timestamp,
+            createdAt: perf.timestamp.slice(0, 10), // YYYY-MM-DD from timestamp
             metadata: perfMetadata
           });
         }
@@ -420,6 +441,7 @@ export class MetricsPlugin extends Plugin {
             error: error.error,
             stack: error.stack,
             timestamp: error.timestamp,
+            createdAt: error.timestamp.slice(0, 10), // YYYY-MM-DD from timestamp
             metadata: errorMetadata
           });
         }
@@ -597,28 +619,56 @@ export class MetricsPlugin extends Plugin {
   async cleanupOldData() {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
+    const cutoffDateStr = cutoffDate.toISOString().slice(0, 10); // YYYY-MM-DD
 
-    // Clean up old metrics
+    // Generate list of dates to delete (all dates before cutoff)
+    const datesToDelete = [];
+    const startDate = new Date(cutoffDate);
+    startDate.setDate(startDate.getDate() - 365); // Go back up to 1 year to catch old data
+
+    for (let d = new Date(startDate); d < cutoffDate; d.setDate(d.getDate() + 1)) {
+      datesToDelete.push(d.toISOString().slice(0, 10));
+    }
+
+    // Clean up old metrics using partition-aware deletion
     if (this.metricsResource) {
-      const oldMetrics = await this.getMetrics({ endDate: cutoffDate.toISOString() });
-      for (const metric of oldMetrics) {
-        await this.metricsResource.delete(metric.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldMetrics] = await tryFn(() =>
+          this.metricsResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldMetrics) {
+          for (const metric of oldMetrics) {
+            await tryFn(() => this.metricsResource.delete(metric.id));
+          }
+        }
       }
     }
 
-    // Clean up old error logs
+    // Clean up old error logs using partition-aware deletion
     if (this.errorsResource) {
-      const oldErrors = await this.getErrorLogs({ endDate: cutoffDate.toISOString() });
-      for (const error of oldErrors) {
-        await this.errorsResource.delete(error.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldErrors] = await tryFn(() =>
+          this.errorsResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldErrors) {
+          for (const error of oldErrors) {
+            await tryFn(() => this.errorsResource.delete(error.id));
+          }
+        }
       }
     }
 
-    // Clean up old performance logs
+    // Clean up old performance logs using partition-aware deletion
     if (this.performanceResource) {
-      const oldPerformance = await this.getPerformanceLogs({ endDate: cutoffDate.toISOString() });
-      for (const perf of oldPerformance) {
-        await this.performanceResource.delete(perf.id);
+      for (const dateStr of datesToDelete) {
+        const [ok, err, oldPerformance] = await tryFn(() =>
+          this.performanceResource.query({ createdAt: dateStr })
+        );
+        if (ok && oldPerformance) {
+          for (const perf of oldPerformance) {
+            await tryFn(() => this.performanceResource.delete(perf.id));
+          }
+        }
       }
     }
   }

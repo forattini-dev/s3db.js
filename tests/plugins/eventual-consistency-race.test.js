@@ -62,7 +62,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       expect(wallet.balance).toBe(1100);
 
       // All transactions should be marked as applied (includes anchor transaction)
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-lock-test',
         applied: true
       });
@@ -90,7 +90,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       expect(wallet.balance).toBe(525);
 
       // All transactions should be applied (includes anchor transaction)
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-concurrent',
         applied: true
       });
@@ -123,7 +123,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       await sleep(200);
 
       // Get all transactions
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-id-test'
       });
 
@@ -172,7 +172,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       }
 
       // All transactions should be applied
-      const allTransactions = await database.resources.wallets_transactions_balance.query({
+      const allTransactions = await database.resources.plg_wallets_tx_balance.query({
         applied: true
       });
 

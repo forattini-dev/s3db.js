@@ -307,6 +307,7 @@ describe('MetricsPlugin Coverage Tests', () => {
       await metricsPlugin.install(database);
       
       // Add some test data
+      const now = new Date();
       await metricsPlugin.metricsResource.insert({
         id: 'test-metric-1',
         type: 'operation',
@@ -316,7 +317,8 @@ describe('MetricsPlugin Coverage Tests', () => {
         totalTime: 500,
         errors: 0,
         avgTime: 100,
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
+        createdAt: now.toISOString().slice(0, 10),
         metadata: {}
       });
     });
@@ -346,12 +348,14 @@ describe('MetricsPlugin Coverage Tests', () => {
 
     test('should get error logs', async () => {
       // Add test error
+      const now = new Date();
       await metricsPlugin.errorsResource.insert({
         id: 'test-error-1',
         resourceName: 'test_resource',
         operation: 'insert',
         error: 'Test error',
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
+        createdAt: now.toISOString().slice(0, 10),
         metadata: {}
       });
 
@@ -365,12 +369,14 @@ describe('MetricsPlugin Coverage Tests', () => {
 
     test('should get performance logs', async () => {
       // Add test performance log
+      const now = new Date();
       await metricsPlugin.performanceResource.insert({
         id: 'test-perf-1',
         resourceName: 'test_resource',
         operation: 'get',
         duration: 150,
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
+        createdAt: now.toISOString().slice(0, 10),
         metadata: {}
       });
 
@@ -438,7 +444,7 @@ describe('MetricsPlugin Coverage Tests', () => {
     test('should cleanup old data', async () => {
       // Add old data (simulate old timestamp)
       const oldDate = new Date(Date.now() - (40 * 24 * 60 * 60 * 1000)); // 40 days ago
-      
+
       await metricsPlugin.metricsResource.insert({
         id: 'old-metric',
         type: 'operation',
@@ -449,6 +455,7 @@ describe('MetricsPlugin Coverage Tests', () => {
         errors: 0,
         avgTime: 100,
         timestamp: oldDate.toISOString(),
+        createdAt: oldDate.toISOString().slice(0, 10),
         metadata: {}
       });
 

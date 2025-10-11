@@ -1,9 +1,28 @@
 # 🤖 State Machine Plugin
 
-<p align="center">
-  <strong>Finite State Machine Capabilities</strong><br>
-  <em>Manage complex workflows and business processes with well-defined states and transitions</em>
-</p>
+## ⚡ TLDR
+
+**Máquina de estados finitos** para workflows complexos com transições controladas e validação de regras de negócio.
+
+**Exemplo de uso:**
+```javascript
+await db.usePlugin(new StateMachinePlugin({ stateMachines: { order: { initialState: 'pending', states: { pending: { on: { PAY: 'paid' }}, paid: { type: 'final' }}}}}));
+await db.stateMachine('order').send('order-123', 'PAY');
+```
+
+**Principais features:**
+- ✅ Estados e transições bem definidos
+- ✅ Guard functions (validação condicional)
+- ✅ Action handlers (lógica em transições)
+- ✅ Audit trail automático
+- ✅ State persistence no DB
+
+**Quando usar:**
+- 🛒 Processamento de pedidos
+- 👤 Onboarding de usuários
+- ✅ Workflows de aprovação
+- 📦 Status de entregas
+- 💳 Processamento de pagamentos
 
 ---
 

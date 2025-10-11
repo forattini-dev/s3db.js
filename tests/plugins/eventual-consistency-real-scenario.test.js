@@ -184,7 +184,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
     await urlsResource.add('short-txn', 'clicks', 5);
 
     // Verify transaction resource exists
-    const transactionResource = database.resources.urls_transactions_clicks;
+    const transactionResource = database.resources.plg_urls_tx_clicks;
     expect(transactionResource).toBeDefined();
 
     // Verify transaction was created and applied

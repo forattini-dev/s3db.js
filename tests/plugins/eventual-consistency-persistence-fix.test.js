@@ -93,7 +93,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     expect(err.message).toMatch(/(does not exist|No such key)/);
 
     // Transactions should remain as pending
-    const transactions = await database.resources.urls_transactions_clicks.query({
+    const transactions = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url2',
       applied: false
     });
@@ -128,7 +128,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     expect(url.clicks).toBe(5);
 
     // Transactions should be marked as applied
-    const appliedTxns = await database.resources.urls_transactions_clicks.query({
+    const appliedTxns = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url3',
       applied: true
     });
@@ -149,7 +149,7 @@ describe('EventualConsistencyPlugin - v10.0.16 Non-Existent Record Handling', ()
     expect(ok).toBe(false);
 
     // All transactions still pending
-    const pendingTxns = await database.resources.urls_transactions_clicks.query({
+    const pendingTxns = await database.resources.plg_urls_tx_clicks.query({
       originalId: 'url4',
       applied: false
     });

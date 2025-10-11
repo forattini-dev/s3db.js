@@ -34,6 +34,11 @@ export function createPartitionConfig() {
         cohortDate: 'string'
       }
     },
+    byWeek: {
+      fields: {
+        cohortWeek: 'string'
+      }
+    },
     byMonth: {
       fields: {
         cohortMonth: 'string'

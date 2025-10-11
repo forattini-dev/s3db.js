@@ -59,9 +59,9 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
     await database.uploadMetadataFile();
     console.log('  OK: EC Plugin installed');
     console.log('  Plugin resources created:');
-    console.log('    - products_transactions_sold');
-    console.log('    - products_transactions_views');
-    console.log('    - products_transactions_revenue');
+    console.log('    - plg_products_tx_sold');
+    console.log('    - plg_products_tx_views');
+    console.log('    - plg_products_tx_revenue');
     console.log('    - products_consolidation_locks_sold');
     console.log('    - products_consolidation_locks_views');
     console.log('    - products_consolidation_locks_revenue\n');
@@ -78,19 +78,17 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
     // STEP 4: Verify cache filtering
     console.log('Step 4: Verifying cache filtering by createdBy...');
     const productsCached = cachePlugin.shouldCacheResource('products');
-    const txSoldCached = cachePlugin.shouldCacheResource('products_transactions_sold');
-    const txViewsCached = cachePlugin.shouldCacheResource('products_transactions_views');
-    const locksCached = cachePlugin.shouldCacheResource('products_consolidation_locks_sold');
+    const txSoldCached = cachePlugin.shouldCacheResource('plg_products_tx_sold');
+    const txViewsCached = cachePlugin.shouldCacheResource('plg_products_tx_views');
 
     console.log('  products (user resource):', productsCached ? 'CACHED' : 'NOT CACHED');
-    console.log('  products_transactions_sold (plugin):', txSoldCached ? 'CACHED' : 'NOT CACHED');
-    console.log('  products_transactions_views (plugin):', txViewsCached ? 'CACHED' : 'NOT CACHED');
-    console.log('  products_consolidation_locks_sold (plugin):', locksCached ? 'CACHED' : 'NOT CACHED');
+    console.log('  plg_products_tx_sold (plugin):', txSoldCached ? 'CACHED' : 'NOT CACHED');
+    console.log('  plg_products_tx_views (plugin):', txViewsCached ? 'CACHED' : 'NOT CACHED');
+    console.log('  Note: locks use PluginStorage now (not a resource)');
 
     expect(productsCached).toBe(true);
     expect(txSoldCached).toBe(false);
     expect(txViewsCached).toBe(false);
-    expect(locksCached).toBe(false);
     console.log('  OK: Cache correctly filters resources\n');
 
     // STEP 5: Insert product
@@ -151,9 +149,9 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
 
     // STEP 9: Check pending transactions
     console.log('Step 9: Checking pending transactions...');
-    const soldTx = await database.resources.products_transactions_sold.list();
-    const viewsTx = await database.resources.products_transactions_views.list();
-    const revenueTx = await database.resources.products_transactions_revenue.list();
+    const soldTx = await database.resources.plg_products_tx_sold.list();
+    const viewsTx = await database.resources.plg_products_tx_views.list();
+    const revenueTx = await database.resources.plg_products_tx_revenue.list();
 
     console.log('  Pending transactions:');
     console.log('    - sold:', soldTx.length);
@@ -197,9 +195,9 @@ describe('CachePlugin + EventualConsistencyPlugin - Rigorous Integration', () =>
 
     // STEP 12: Verify transactions were applied
     console.log('Step 12: Verifying transactions were applied...');
-    const soldTxAfter = await database.resources.products_transactions_sold.list();
-    const viewsTxAfter = await database.resources.products_transactions_views.list();
-    const revenueTxAfter = await database.resources.products_transactions_revenue.list();
+    const soldTxAfter = await database.resources.plg_products_tx_sold.list();
+    const viewsTxAfter = await database.resources.plg_products_tx_views.list();
+    const revenueTxAfter = await database.resources.plg_products_tx_revenue.list();
 
     const soldApplied = soldTxAfter.filter(t => t.appliedAt).length;
     const viewsApplied = viewsTxAfter.filter(t => t.appliedAt).length;
