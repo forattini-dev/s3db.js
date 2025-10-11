@@ -856,6 +856,22 @@ this.emit('audit.logged', { operation, data });
 5. **Batch Operations**: Efficient bulk read/write operations
 6. **Easy Cleanup**: Delete all plugin data on uninstall
 
+#### When to Use PluginStorage vs Resources
+
+**✅ Use PluginStorage for:**
+- Plugin configuration and settings (low volume)
+- Distributed locks with TTL
+- Simple key-value data (< 1000 records)
+- Transient state and temporary data
+- Plugin-internal bookkeeping
+
+**❌ Use Resources for:**
+- High-volume data (> 1000 records)
+- Complex queries with filters and partitions
+- Time-series data requiring date-based partitioning
+- Audit logs and historical records
+- Data requiring structured schemas and validation
+
 #### Getting Started with PluginStorage
 
 Every plugin has access to `PluginStorage` through the `getStorage()` method:
@@ -873,7 +889,7 @@ class MyPlugin extends Plugin {
     const storage = this.getStorage();
 
     // Save global plugin configuration
-    await storage.put(
+    await storage.set(
       storage.getPluginKey(null, 'config'),
       {
         enabled: true,
@@ -883,14 +899,152 @@ class MyPlugin extends Plugin {
       { behavior: 'body-overflow' }
     );
 
-    // Save resource-scoped data
-    await storage.put(
+    // Save resource-scoped data with TTL
+    await storage.set(
       storage.getPluginKey('users', 'cache', 'user-123'),
       { name: 'Alice', email: 'alice@example.com', cachedAt: Date.now() },
-      { behavior: 'body-only' }
+      { ttl: 300, behavior: 'body-only' } // Auto-expires after 5 minutes
     );
   }
 }
+```
+
+#### TTL Support for Auto-Expiring Data
+
+PluginStorage supports automatic expiration with TTL (Time-To-Live):
+
+```javascript
+const storage = this.getStorage();
+
+// Store data that expires after 60 seconds
+await storage.set('session:abc123',
+  { userId: 'user1', token: 'xyz789' },
+  { ttl: 60 }
+);
+
+// Get data - returns null if expired
+const session = await storage.get('session:abc123');
+if (!session) {
+  console.log('Session expired or not found');
+}
+
+// Check if data is expired
+const expired = await storage.isExpired('session:abc123');
+
+// Get remaining TTL in seconds
+const remainingSeconds = await storage.getTTL('session:abc123');
+console.log(`Expires in ${remainingSeconds}s`);
+
+// Extend TTL by adding more seconds
+await storage.touch('session:abc123', 30); // Add 30 more seconds
+```
+
+**TTL Use Cases:**
+- Session storage
+- Temporary locks
+- Rate limiting counters
+- Cache entries
+- Temporary state during processing
+
+#### Distributed Locks with TTL
+
+PluginStorage provides built-in distributed lock support with automatic expiration:
+
+```javascript
+const storage = this.getStorage();
+
+// Acquire lock with auto-expiration
+const lock = await storage.acquireLock('consolidate:user123', {
+  ttl: 300,        // Auto-release after 5 minutes
+  timeout: 5000,   // Wait up to 5 seconds to acquire
+  workerId: process.pid
+});
+
+if (!lock) {
+  console.log('Could not acquire lock');
+  return;
+}
+
+try {
+  // Do critical work...
+  await this.consolidateUserData('user123');
+} finally {
+  // Always release lock
+  await storage.releaseLock('consolidate:user123');
+}
+
+// Check if locked
+const isLocked = await storage.isLocked('consolidate:user123');
+```
+
+**Before (Manual Lock Implementation):**
+```javascript
+// ❌ OLD WAY: Manual locks with Resources (33 lines)
+const lockResource = await database.createResource({
+  name: 'locks',
+  attributes: { id: 'string', lockedAt: 'number', workerId: 'string' }
+});
+
+const [lockAcquired] = await tryFn(() =>
+  lockResource.insert({
+    id: `lock-${id}`,
+    lockedAt: Date.now(),
+    workerId: process.pid
+  })
+);
+
+if (!lockAcquired) return;
+
+try {
+  // Do work
+} finally {
+  await lockResource.delete(`lock-${id}`);
+}
+
+// Manual cleanup of stale locks
+const locks = await lockResource.list();
+for (const lock of locks) {
+  if (Date.now() - lock.lockedAt > 300000) {
+    await lockResource.delete(lock.id);
+  }
+}
+```
+
+**After (PluginStorage with TTL):**
+```javascript
+// ✅ NEW WAY: TTL-based locks (6 lines, 82% less code!)
+const storage = this.getStorage();
+const lock = await storage.acquireLock(id, { ttl: 300 });
+if (!lock) return;
+
+try {
+  // Do work
+} finally {
+  await storage.releaseLock(id);
+}
+// No manual cleanup needed - TTL handles it! ✨
+```
+
+#### Convenience Methods
+
+PluginStorage includes helpful utility methods:
+
+```javascript
+const storage = this.getStorage();
+
+// Check existence (not expired)
+const exists = await storage.has('config'); // true/false
+
+// Atomic counter operations
+await storage.set('counter', { value: 0 });
+await storage.increment('counter', 5);  // +5
+await storage.decrement('counter', 2);  // -2
+const counter = await storage.get('counter'); // { value: 3 }
+
+// TTL management
+const ttl = await storage.getTTL('session'); // Remaining seconds
+await storage.touch('session', 60);          // Extend by 60s
+const expired = await storage.isExpired('session'); // true/false
 ```
 
 #### Key Structure
@@ -915,33 +1069,42 @@ storage.getPluginKey('wallets', 'transactions', 'txn-456')
 
 #### Core Methods
 
-##### `put(key, data, options)`
+##### `set(key, data, options)`
 
-Save data to S3 with automatic encoding and behavior handling:
+Save data to S3 with automatic encoding, behavior handling, and optional TTL:
 
 ```javascript
 const storage = this.getStorage();
 
-// Simple put with body-overflow (default)
-await storage.put(
+// Simple set with body-overflow (default)
+await storage.set(
   storage.getPluginKey(null, 'config'),
   { mode: 'async', interval: 5000 }
 );
 
+// Set with TTL (auto-expires after 300 seconds)
+await storage.set(
+  storage.getPluginKey('users', 'session', 'user-1'),
+  { token: 'abc123', loggedInAt: Date.now() },
+  { ttl: 300 }
+);
+
 // Force everything to body
-await storage.put(
+await storage.set(
   storage.getPluginKey('users', 'cache', 'user-1'),
   { huge: 'data'.repeat(1000) },
   { behavior: 'body-only' }
 );
 
 // Enforce strict metadata limits
-await storage.put(
+await storage.set(
   storage.getPluginKey(null, 'small-config'),
   { enabled: true },
   { behavior: 'enforce-limits' } // Throws if exceeds 2KB
 );
 ```
+
+> **Note**: `put()` is still available as a deprecated alias for backward compatibility.
 
 ##### `get(key)`
 
@@ -1048,19 +1211,136 @@ const data = await storage.batchGet(keys);
 data.forEach(d => console.log(d.ok ? d.data : d.error));
 ```
 
+#### TTL Management Methods
+
+##### `has(key)`
+
+Check if a key exists and is not expired:
+
+```javascript
+const exists = await storage.has('session:user123'); // true/false
+```
+
+##### `isExpired(key)`
+
+Check if a key is expired:
+
+```javascript
+const expired = await storage.isExpired('session:user123');
+if (expired) {
+  console.log('Session has expired');
+}
+```
+
+##### `getTTL(key)`
+
+Get remaining TTL in seconds:
+
+```javascript
+const remaining = await storage.getTTL('session:user123');
+if (remaining) {
+  console.log(`Expires in ${remaining} seconds`);
+} else {
+  console.log('No TTL set or key not found');
+}
+```
+
+##### `touch(key, additionalSeconds)`
+
+Extend TTL by adding more seconds:
+
+```javascript
+// Add 60 more seconds to current TTL
+const extended = await storage.touch('session:user123', 60);
+if (extended) {
+  console.log('TTL extended successfully');
+}
+```
+
+#### Distributed Lock Methods
+
+##### `acquireLock(lockName, options)`
+
+Acquire a distributed lock with TTL and retry logic:
+
+```javascript
+const lock = await storage.acquireLock('process:task1', {
+  ttl: 300,        // Auto-release after 5 minutes
+  timeout: 5000,   // Wait up to 5 seconds to acquire
+  workerId: process.pid
+});
+
+if (lock) {
+  console.log('Lock acquired:', lock.workerId);
+} else {
+  console.log('Could not acquire lock');
+}
+```
+
+##### `releaseLock(lockName)`
+
+Release a distributed lock:
+
+```javascript
+await storage.releaseLock('process:task1');
+```
+
+##### `isLocked(lockName)`
+
+Check if a lock is currently held:
+
+```javascript
+const locked = await storage.isLocked('process:task1');
+if (locked) {
+  console.log('Lock is currently held');
+}
+```
+
+#### Counter Methods
+
+##### `increment(key, amount, options)`
+
+Atomically increment a counter:
+
+```javascript
+// Increment by 1 (default)
+await storage.increment('api-calls');
+
+// Increment by custom amount
+await storage.increment('api-calls', 5);
+
+// Increment with TTL
+await storage.increment('hourly-requests', 1, { ttl: 3600 });
+```
+
+##### `decrement(key, amount, options)`
+
+Atomically decrement a counter:
+
+```javascript
+// Decrement by 1 (default)
+await storage.decrement('available-slots');
+
+// Decrement by custom amount
+await storage.decrement('available-slots', 3);
+```
+
 #### Real-World Patterns
 
-##### Pattern 1: Transaction Log (EventualConsistency)
+##### Pattern 1: Transaction Log with TTL (EventualConsistency)
 
 ```javascript
 class EventualConsistencyPlugin extends Plugin {
   async saveTransaction(resourceName, field, transaction) {
     const storage = this.getStorage();
 
-    await storage.put(
+    await storage.set(
       storage.getPluginKey(resourceName, field, 'transactions', `id=${transaction.id}`),
       transaction,
-      { behavior: 'body-overflow' }
+      {
+        behavior: 'body-overflow',
+        ttl: 3600 // Auto-expire after 1 hour
+      }
     );
   }
 
@@ -1073,10 +1353,10 @@ class EventualConsistencyPlugin extends Plugin {
     // Filter for specific original ID
     const txnKeys = keys.filter(key => key.includes(`/originalId=${originalId}/`));
 
-    // Batch get all transactions
+    // Batch get all transactions (expired ones return null automatically)
     const results = await storage.batchGet(txnKeys);
 
-    return results.filter(r => r.ok).map(r => r.data);
+    return results.filter(r => r.ok && r.data).map(r => r.data);
   }
 
   async deleteAppliedTransactions(resourceName, field, transactionIds) {
@@ -1091,40 +1371,45 @@ class EventualConsistencyPlugin extends Plugin {
 }
 ```
 
-##### Pattern 2: Cache Plugin
+##### Pattern 2: Cache Plugin with Automatic TTL
 
 ```javascript
 class CachePlugin extends Plugin {
-  async cacheRecord(resourceName, id, data, ttl) {
+  async cacheRecord(resourceName, id, data, ttlSeconds) {
     const storage = this.getStorage();
 
-    await storage.put(
+    // Use built-in TTL - no manual expiration needed!
+    await storage.set(
       storage.getPluginKey(resourceName, 'cache', id),
+      { ...data, cachedAt: Date.now() },
       {
-        ...data,
-        _cached_at: Date.now(),
-        _ttl: ttl
-      },
-      { behavior: 'body-only' } // Large data in body
+        ttl: ttlSeconds,
+        behavior: 'body-only' // Large data in body
+      }
     );
   }
 
   async getCachedRecord(resourceName, id) {
     const storage = this.getStorage();
 
+    // get() automatically returns null if expired
     const data = await storage.get(
       storage.getPluginKey(resourceName, 'cache', id)
     );
 
-    if (!data) return null;
+    return data; // null if expired or not found
+  }
 
-    // Check TTL
-    if (Date.now() - data._cached_at > data._ttl) {
-      await this.invalidateCache(resourceName, id);
-      return null;
-    }
+  async extendCache(resourceName, id, additionalSeconds) {
+    const storage = this.getStorage();
 
-    return data;
+    // Extend TTL without rewriting data
+    const extended = await storage.touch(
+      storage.getPluginKey(resourceName, 'cache', id),
+      additionalSeconds
+    );
+
+    return extended;
   }
 
   async invalidateCache(resourceName, id) {
@@ -1162,7 +1447,7 @@ class MyPlugin extends Plugin {
         lastRun: null
       };
 
-      await storage.put(
+      await storage.set(
         storage.getPluginKey(null, 'config'),
         config
       );
@@ -1176,7 +1461,7 @@ class MyPlugin extends Plugin {
 
     this.config = { ...this.config, ...changes };
 
-    await storage.put(
+    await storage.set(
       storage.getPluginKey(null, 'config'),
       this.config
     );
@@ -1185,7 +1470,7 @@ class MyPlugin extends Plugin {
   async saveState(state) {
     const storage = this.getStorage();
 
-    await storage.put(
+    await storage.set(
       storage.getPluginKey(null, 'state'),
       {
         ...state,
@@ -1211,7 +1496,7 @@ class AnalyticsPlugin extends Plugin {
   async recordMetric(resourceName, field, cohort, metrics) {
     const storage = this.getStorage();
 
-    await storage.put(
+    await storage.set(
       storage.getPluginKey(resourceName, field, 'analytics', cohort),
       {
         cohort,
@@ -1255,7 +1540,7 @@ PluginStorage supports three behavior strategies for handling S3's 2KB metadata 
 Automatically distributes data between metadata and body based on field size:
 
 ```javascript
-await storage.put(key, data, { behavior: 'body-overflow' });
+await storage.set(key, data, { behavior: 'body-overflow' });
 ```
 
 - **Small fields** → Metadata (fast, no additional read)
@@ -1267,7 +1552,7 @@ await storage.put(key, data, { behavior: 'body-overflow' });
 Stores all data in S3 body:
 
 ```javascript
-await storage.put(key, largeData, { behavior: 'body-only' });
+await storage.set(key, largeData, { behavior: 'body-only' });
 ```
 
 - **Best for**: Large objects (> 2KB)
@@ -1280,7 +1565,7 @@ Throws error if data exceeds metadata limit:
 
 ```javascript
 try {
-  await storage.put(key, data, { behavior: 'enforce-limits' });
+  await storage.set(key, data, { behavior: 'enforce-limits' });
 } catch (error) {
   console.error('Data exceeds 2KB limit:', error.message);
 }
@@ -1391,19 +1676,63 @@ describe('MyPlugin with PluginStorage', () => {
   it('should persist plugin configuration', async () => {
     const key = storage.getPluginKey(null, 'config');
 
-    await storage.put(key, { enabled: true });
+    await storage.set(key, { enabled: true });
 
     const retrieved = await storage.get(key);
     expect(retrieved.enabled).toBe(true);
   });
 
+  it('should handle TTL expiration', async () => {
+    const key = storage.getPluginKey(null, 'session');
+
+    // Set with 1 second TTL
+    await storage.set(key, { userId: 'user1' }, { ttl: 1 });
+
+    // Should exist immediately
+    expect(await storage.has(key)).toBe(true);
+
+    // Wait for expiration
+    await new Promise(resolve => setTimeout(resolve, 1100));
+
+    // Should be expired and return null
+    expect(await storage.get(key)).toBe(null);
+    expect(await storage.has(key)).toBe(false);
+  });
+
+  it('should handle distributed locks', async () => {
+    const lock1 = await storage.acquireLock('task1', { ttl: 5 });
+    expect(lock1).toBeTruthy();
+
+    // Second acquire should fail (already locked)
+    const lock2 = await storage.acquireLock('task1', { timeout: 0 });
+    expect(lock2).toBe(null);
+
+    // Release lock
+    await storage.releaseLock('task1');
+
+    // Now should be able to acquire
+    const lock3 = await storage.acquireLock('task1', { ttl: 5 });
+    expect(lock3).toBeTruthy();
+  });
+
+  it('should handle atomic counters', async () => {
+    await storage.set('counter', { value: 0 });
+
+    await storage.increment('counter', 5);
+    await storage.increment('counter', 3);
+    await storage.decrement('counter', 2);
+
+    const counter = await storage.get('counter');
+    expect(counter.value).toBe(6); // 0 + 5 + 3 - 2 = 6
+  });
+
   it('should isolate resource-scoped data', async () => {
-    await storage.put(
+    await storage.set(
       storage.getPluginKey('users', 'cache', 'user-1'),
       { name: 'Alice' }
     );
 
-    await storage.put(
+    await storage.set(
       storage.getPluginKey('products', 'cache', 'prod-1'),
       { title: 'Product 1' }
     );

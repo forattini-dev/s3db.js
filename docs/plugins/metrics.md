@@ -1,9 +1,32 @@
 # 📊 Metrics Plugin
 
-<p align="center">
-  <strong>Comprehensive Performance Monitoring and Usage Analytics</strong><br>
-  <em>Track operation timing, resource usage, errors, and get detailed insights</em>
-</p>
+## ⚡ TLDR
+
+Monitoramento **completo** de performance: timing, usage patterns, errors e cache hit rates.
+
+**1 linha para começar:**
+```javascript
+await db.usePlugin(new MetricsPlugin({ enabled: true }));  // Coleta automática!
+```
+
+**Principais features:**
+- ✅ Operation timing (avg/min/max)
+- ✅ Resource usage patterns
+- ✅ Error tracking + error rates
+- ✅ Slow query detection
+- ✅ Real-time alerts + thresholds
+
+**Quando usar:**
+- 📈 Performance optimization
+- 🐛 Debugging + troubleshooting
+- 📊 Capacity planning
+- ⚠️ Alerting + monitoring
+
+**Acesso:**
+```javascript
+const metrics = await db.plugins.metrics.getMetrics();
+console.log('Avg time:', metrics.performance.averageResponseTime);
+```
 
 ---
 

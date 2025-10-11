@@ -68,13 +68,11 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     console.log('4️⃣  Checking resources in metadata...\n');
 
-    // Expected resources
+    // Expected resources (locks no longer created as resources - using PluginStorage now)
     const expectedResources = {
       'urls': 'user',
-      'urls_transactions_clicks': 'EventualConsistencyPlugin',
-      'urls_transactions_views': 'EventualConsistencyPlugin',
-      'urls_consolidation_locks_clicks': 'EventualConsistencyPlugin',
-      'urls_consolidation_locks_views': 'EventualConsistencyPlugin'
+      'plg_urls_tx_clicks': 'EventualConsistencyPlugin',
+      'plg_urls_tx_views': 'EventualConsistencyPlugin'
     };
 
     for (const [resourceName, expectedCreatedBy] of Object.entries(expectedResources)) {
@@ -167,8 +165,8 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     const expectedResources = [
       'urls',
-      'urls_transactions_clicks',
-      'urls_consolidation_locks_clicks'
+      'plg_urls_tx_clicks'
+      // Note: locks no longer created as resources (using PluginStorage now)
     ];
 
     for (const resourceName of expectedResources) {
@@ -214,8 +212,8 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
 
     const expectedResources = {
       'urls': 'user',
-      'urls_transactions_clicks': 'EventualConsistencyPlugin',
-      'urls_consolidation_locks_clicks': 'EventualConsistencyPlugin'
+      'plg_urls_tx_clicks': 'EventualConsistencyPlugin'
+      // Note: locks no longer created as resources (using PluginStorage now)
     };
 
     for (const [resourceName, expectedCreatedBy] of Object.entries(expectedResources)) {

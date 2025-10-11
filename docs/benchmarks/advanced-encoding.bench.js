@@ -5,11 +5,11 @@
  * Compares different encoding strategies and measures compression efficiency
  */
 
-import { calculateUTF8Bytes } from './src/concerns/calculator.js';
+import { calculateUTF8Bytes } from '../../src/concerns/calculator.js';
 import {
   advancedEncode,
   advancedDecode
-} from './src/concerns/advanced-metadata-encoding.js';
+} from '../../src/concerns/advanced-metadata-encoding.js';
 
 // ANSI color codes
 const colors = {

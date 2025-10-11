@@ -325,7 +325,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     });
 
     // Verify transaction resource exists
-    const txnResource = database.resources.urls_transactions_clicks;
+    const txnResource = database.resources.plg_urls_tx_clicks;
     expect(txnResource).toBeDefined();
 
     // Verify transactions

@@ -56,7 +56,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(200);
 
       // Check transaction was created
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-1'
       });
 
@@ -82,7 +82,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(200);
 
       // Check transaction
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-2'
       });
 
@@ -106,7 +106,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(200);
 
       // Check transaction
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-3'
       });
 
@@ -261,7 +261,7 @@ describe("EventualConsistencyPlugin Methods", () => {
   describe("Partition Structure", () => {
     it("should create transaction resource with day and month partitions", async () => {
       // Check that the transaction resource has the correct partitions
-      const transactionResource = database.resources.wallets_transactions_balance;
+      const transactionResource = database.resources.plg_wallets_tx_balance;
       expect(transactionResource).toBeDefined();
       
       // Verify partition configuration (partitions are in config)
@@ -288,7 +288,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await sleep(200);
 
       // Query transaction
-      const transactions = await database.resources.wallets_transactions_balance.query({
+      const transactions = await database.resources.plg_wallets_tx_balance.query({
         originalId: 'wallet-partition'
       });
 
@@ -338,7 +338,7 @@ describe("EventualConsistencyPlugin Methods", () => {
       await brazilResource.add('brazil-1', 'balance', 100);
 
       // Query transaction
-      const transactions = await database.resources.brazil_accounts_transactions_balance.query({
+      const transactions = await database.resources.plg_brazil_accounts_tx_balance.query({
         originalId: 'brazil-1'
       });
 
@@ -360,11 +360,11 @@ describe("EventualConsistencyPlugin Methods", () => {
 
   describe("Plugin Resources", () => {
     it("should create transaction resource", async () => {
-      const transactionResourceName = 'wallets_transactions_balance';
+      const transactionResourceName = 'plg_wallets_tx_balance';
       expect(database.resources[transactionResourceName]).toBeDefined();
     });
 
-    it("should create lock resource for distributed locking", async () => {
+    it.skip("should create lock resource for distributed locking (SKIP: locks use PluginStorage now)", async () => {
       const lockResourceName = 'wallets_consolidation_locks_balance';
       expect(database.resources[lockResourceName]).toBeDefined();
     });

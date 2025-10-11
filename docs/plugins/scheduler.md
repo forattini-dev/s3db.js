@@ -1,9 +1,27 @@
 # ⏰ Scheduler Plugin
 
-<p align="center">
-  <strong>Robust Job Scheduling Capabilities</strong><br>
-  <em>Cron expressions, retry logic, and comprehensive monitoring for automated tasks</em>
-</p>
+## ⚡ TLDR
+
+Jobs **agendados** com cron expressions, retry automático e distributed locking para multi-instance.
+
+**1 linha para começar:**
+```javascript
+await db.usePlugin(new SchedulerPlugin({ jobs: { daily_cleanup: { schedule: '0 3 * * *', action: async (db) => { /* cleanup */ } }}}));
+```
+
+**Principais features:**
+- ✅ Cron expressions com timezone support
+- ✅ Retry automático com exponential backoff
+- ✅ Distributed locking (multi-instance safe)
+- ✅ Job history com partitions otimizadas
+- ✅ Event system completo
+
+**Quando usar:**
+- 🧹 Limpeza de dados expirados
+- 📊 Geração de relatórios periódicos
+- 💰 Billing mensal/semanal
+- 📧 Emails de reminder
+- 🔄 Sincronização de dados
 
 ---
 

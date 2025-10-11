@@ -56,7 +56,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     console.log('   ✅ 3 transactions created\n');
 
     // Check pending transactions BEFORE consolidation
-    const pendingBefore = await database.resources.urls_transactions_clicks.query({
+    const pendingBefore = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: false
     });
@@ -70,7 +70,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     console.log('   (This is informational only - record was NOT updated)\n');
 
     // Check pending transactions AFTER failed consolidation
-    const pendingAfter = await database.resources.urls_transactions_clicks.query({
+    const pendingAfter = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: false
     });
@@ -78,7 +78,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     expect(pendingAfter.length).toBe(3); // Should still be 3!
 
     // Check applied transactions
-    const appliedAfter = await database.resources.urls_transactions_clicks.query({
+    const appliedAfter = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: true
     });
@@ -103,7 +103,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     expect(consolidatedValue2).toBe(3);
 
     // Check pending transactions AFTER successful consolidation
-    const pendingFinal = await database.resources.urls_transactions_clicks.query({
+    const pendingFinal = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: false
     });
@@ -111,7 +111,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     expect(pendingFinal.length).toBe(0);
 
     // Check applied transactions
-    const appliedFinal = await database.resources.urls_transactions_clicks.query({
+    const appliedFinal = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: true
     });
@@ -185,7 +185,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     console.log('   Value:', value2, '(informational only, record not updated)');
 
     // Check that URL 2 transactions are still pending
-    const pending2 = await database.resources.urls_transactions_clicks.query({
+    const pending2 = await database.resources.plg_urls_tx_clicks.query({
       originalId: url2Id,
       applied: false
     });
@@ -251,7 +251,7 @@ describe('EventualConsistencyPlugin - Non-Existent Record Handling', () => {
     await urls.consolidate(urlId, 'clicks');
 
     // Verify transactions remain pending
-    const pending = await database.resources.urls_transactions_clicks.query({
+    const pending = await database.resources.plg_urls_tx_clicks.query({
       originalId: urlId,
       applied: false
     });
