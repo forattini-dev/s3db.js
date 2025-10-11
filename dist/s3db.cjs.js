@@ -4864,9 +4864,7 @@ function createConfig(options, detectedTimezone) {
     deleteConsolidatedTransactions: checkpoints.deleteConsolidated !== false,
     autoCheckpoint: checkpoints.auto !== false,
     // Debug
-    verbose: options.verbose !== false,
-    // Default: true (can disable with verbose: false)
-    debug: options.debug || false
+    verbose: options.verbose || false
   };
 }
 function validateResourcesConfig(resources) {
@@ -5405,7 +5403,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         `[EventualConsistency] ${config.resource}.${config.field} - ${originalId}: ${currentValue} \u2192 ${consolidatedValue} (${consolidatedValue > currentValue ? "+" : ""}${consolidatedValue - currentValue})`
       );
     }
-    if (config.debug || config.verbose) {
+    if (config.verbose) {
       console.log(
         `\u{1F525} [DEBUG] BEFORE targetResource.update() {
   originalId: '${originalId}',
@@ -5420,7 +5418,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         [config.field]: consolidatedValue
       })
     );
-    if (config.debug || config.verbose) {
+    if (config.verbose) {
       console.log(
         `\u{1F525} [DEBUG] AFTER targetResource.update() {
   updateOk: ${updateOk},
@@ -5430,7 +5428,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
 }`
       );
     }
-    if (updateOk && (config.debug || config.verbose)) {
+    if (updateOk && config.verbose) {
       const [verifyOk, verifyErr, verifiedRecord] = await tryFn(
         () => targetResource.get(originalId, { skipCache: true })
       );
@@ -5764,12 +5762,12 @@ async function updateAnalytics(transactions, analyticsResource, config) {
     throw new Error(
       `[EventualConsistency] CRITICAL BUG: config.field is undefined in updateAnalytics()!
 This indicates a race condition in the plugin where multiple handlers are sharing the same config object.
-Config: ${JSON.stringify({ resource: config.resource, field: config.field, verbose: config.verbose })}
+Config: ${JSON.stringify({ resource: config.resource, field: config.field })}
 Transactions count: ${transactions.length}
 AnalyticsResource: ${analyticsResource?.name || "unknown"}`
     );
   }
-  if (config.verbose || config.debug) {
+  if (config.verbose) {
     console.log(
       `[EventualConsistency] ${config.resource}.${config.field} - Updating analytics for ${transactions.length} transactions...`
     );
@@ -5777,7 +5775,7 @@ AnalyticsResource: ${analyticsResource?.name || "unknown"}`
   try {
     const byHour = groupByCohort(transactions, "cohortHour");
     const cohortCount = Object.keys(byHour).length;
-    if (config.verbose || config.debug) {
+    if (config.verbose) {
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - Updating ${cohortCount} hourly analytics cohorts...`
       );
@@ -5787,7 +5785,7 @@ AnalyticsResource: ${analyticsResource?.name || "unknown"}`
     }
     if (config.analyticsConfig.rollupStrategy === "incremental") {
       const uniqueHours = Object.keys(byHour);
-      if (config.verbose || config.debug) {
+      if (config.verbose) {
         console.log(
           `[EventualConsistency] ${config.resource}.${config.field} - Rolling up ${uniqueHours.length} hours to daily/monthly analytics...`
         );
@@ -5796,7 +5794,7 @@ AnalyticsResource: ${analyticsResource?.name || "unknown"}`
         await rollupAnalytics(cohortHour, analyticsResource, config);
       }
     }
-    if (config.verbose || config.debug) {
+    if (config.verbose) {
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - Analytics update complete for ${cohortCount} cohorts`
       );
