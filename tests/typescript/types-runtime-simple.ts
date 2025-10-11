@@ -9,7 +9,7 @@ import type {
   EventualConsistencyPluginConfig,
   EventualConsistencyAnalyticsOptions,
   EventualConsistencyAnalyticsResult
-} from '../../dist/s3db.d.ts';
+} from 's3db.js';
 
 console.log('🧪 Testing s3db.js TypeScript types...\n');
 

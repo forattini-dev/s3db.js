@@ -242,7 +242,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         ttl: 60000,
         maxSize: 100
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(MemoryCache);
       expect(cachePlugin.database).toBe(database);
@@ -258,7 +258,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
           directory: tempDir
         }
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(FilesystemCache);
       expect(cachePlugin.database).toBe(database);
@@ -274,7 +274,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
           directory: tempDir
         }
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(PartitionAwareFilesystemCache);
       expect(cachePlugin.database).toBe(database);
@@ -285,7 +285,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 's3',
         client: database.client
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(S3Cache);
       expect(cachePlugin.database).toBe(database);
@@ -295,7 +295,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       const cachePlugin = new CachePlugin({
         driver: 'invalid-driver'
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(S3Cache);
       expect(cachePlugin.database).toBe(database);
@@ -306,7 +306,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       const cachePlugin = new CachePlugin({
         driver: customDriver
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBe(customDriver);
       expect(cachePlugin.database).toBe(database);
@@ -318,7 +318,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         maxSize: 100
       });
       
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       expect(cachePlugin.driver).toBeDefined();
       expect(cachePlugin.driver.constructor.name).toBe('MemoryCache');
     });
@@ -331,7 +331,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         }
       });
       
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       expect(cachePlugin.driver).toBeDefined();
       expect(cachePlugin.driver.constructor.name).toBe('S3Cache');
     });
@@ -343,7 +343,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         maxSize: 1000
       });
       
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       expect(cachePlugin.driver).toBeDefined();
       expect(cachePlugin.driver.ttl).toBe(300000);
       expect(cachePlugin.driver.maxSize).toBe(1000);
@@ -355,7 +355,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         type: 'memory'
       });
       
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       
       // Should complete without errors
       expect(true).toBe(true);
@@ -369,7 +369,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         // Missing filesystemOptions.directory
       });
 
-      await expect(cachePlugin.setup(database)).rejects.toThrow();
+      await expect(cachePlugin.install(database)).rejects.toThrow();
     });
 
     test('should use database client for S3 cache by default', async () => {
@@ -377,7 +377,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 's3'
         // No explicit client - should use database.client
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver).toBeInstanceOf(S3Cache);
       expect(cachePlugin.driver.client).toBe(database.client);
@@ -388,7 +388,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 'memory'
         // No TTL specified
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       expect(cachePlugin.driver.ttl).toBeDefined();
     });
@@ -406,7 +406,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       });
 
       // Should not throw but use default strategy
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       expect(cachePlugin.driver).toBeInstanceOf(PartitionAwareFilesystemCache);
     });
   });
@@ -420,7 +420,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 'memory',
         ttl: 60000
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       users = await database.createResource({
         name: 'users',
@@ -469,7 +469,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
           directory: tempDir
         }
       });
-      await partitionCachePlugin.setup(database);
+      await partitionCachePlugin.install(database);
 
       // Verify the driver is partition-aware
       expect(partitionCachePlugin.driver).toBeInstanceOf(PartitionAwareFilesystemCache);
@@ -506,7 +506,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 'memory',
         ttl: 60000
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
     });
 
     test('should provide cache statistics', async () => {
@@ -556,7 +556,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
           directory: tempDir
         }
       });
-      await partitionCachePlugin.setup(database);
+      await partitionCachePlugin.install(database);
 
       const analysis = await partitionCachePlugin.analyzeCacheUsage();
       expect(analysis).toBeDefined();
@@ -571,7 +571,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       const cachePlugin = new CachePlugin({
         driver: 'memory'
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       const users = await database.createResource({
         name: 'error_users',
@@ -604,7 +604,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 'memory'
       });
 
-      await expect(cachePlugin.setup(null)).rejects.toThrow();
+      await expect(cachePlugin.install(null)).rejects.toThrow();
     });
 
     test('should handle plugin setup multiple times', async () => {
@@ -612,10 +612,10 @@ describe('Cache Plugin - Comprehensive Tests', () => {
         driver: 'memory'
       });
 
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
       
       // Second setup should not throw
-      await expect(cachePlugin.setup(database)).resolves.not.toThrow();
+      await expect(cachePlugin.install(database)).resolves.not.toThrow();
     });
   });
 
@@ -627,7 +627,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
       cachePlugin = new CachePlugin({
         driver: 'memory'
       });
-      await cachePlugin.setup(database);
+      await cachePlugin.install(database);
 
       users = await database.createResource({
         name: 'key_users',
@@ -709,7 +709,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
           driver: driver.type,
           ...driver.options
         });
-        await cachePlugin.setup(database);
+        await cachePlugin.install(database);
 
         const users = await database.createResource({
           name: `compat_users_${driver.type}`,

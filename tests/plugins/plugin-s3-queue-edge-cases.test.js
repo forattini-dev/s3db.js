@@ -36,7 +36,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       const logs = [];
       console.log = (...args) => logs.push(args.join(' '));
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       console.log = originalLog;
 
@@ -60,7 +60,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         onMessage: async (task) => ({ done: true })
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Capture console.log
       const originalLog = console.log;
@@ -94,7 +94,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         onMessage: async (task) => ({ done: true })
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Capture console.log
       const originalLog = console.log;
@@ -128,7 +128,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         autoStart: false
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Stop without starting (should not throw)
       await expect(plugin.stopProcessing()).resolves.not.toThrow();
@@ -155,7 +155,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         verbose: true
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Enqueue a task
       await resource.enqueue({ name: 'Task 1' });
@@ -199,7 +199,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         verbose: true
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Capture console.log
       const originalLog = console.log;
@@ -239,7 +239,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         verbose: true
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Get stats normally (should work even with empty queue)
       const stats = await plugin.getStats();
@@ -267,7 +267,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         visibilityTimeout: 5000
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Enqueue a task
       const task = await resource.enqueue({ name: 'Task 1' });
@@ -314,7 +314,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         pollInterval: 10  // Very fast polling
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       // Enqueue tasks
       for (let i = 0; i < 5; i++) {
@@ -355,7 +355,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         onMessage: async (task) => ({ done: true })
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       const eventPromise = new Promise((resolve) => {
         plugin.once('workers.started', resolve);
@@ -385,7 +385,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         onMessage: async (task) => ({ done: true })
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
 
       await plugin.startProcessing();
 
@@ -416,7 +416,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         onMessage: async (task) => ({ done: true })
       });
 
-      await plugin.setup(database);
+      await plugin.install(database);
       await plugin.startProcessing();
 
       // Call stop from plugin lifecycle
