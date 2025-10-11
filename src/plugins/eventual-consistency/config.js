@@ -79,7 +79,7 @@ export function createConfig(options, detectedTimezone) {
     autoCheckpoint: checkpoints.auto !== false,
 
     // Debug
-    verbose: options.verbose || false,
+    verbose: options.verbose !== false, // Default: true (can disable with verbose: false)
     debug: options.debug || false
   };
 }
