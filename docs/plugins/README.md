@@ -49,21 +49,40 @@ class MyPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
     this.name = 'MyPlugin';
+    this.slug = 'my-plugin'; // Used for PluginStorage namespace
     // Plugin initialization
   }
 
-  async onSetup() {
+  async onInstall() {
     // Called when plugin is attached to database
     // Access database via this.database
+    // Setup resources, storage, and configuration
+    const storage = this.getStorage();
+    await storage.put(
+      storage.getPluginKey(null, 'config'),
+      { enabled: true, version: '1.0.0' }
+    );
   }
 
   async onStart() {
-    // Called after setup is complete
-    // Plugin is ready to operate
+    // Called after install is complete
+    // Start timers, workers, and background tasks
+    this.timer = setInterval(() => this.processQueue(), 5000);
   }
 
   async onStop() {
     // Cleanup when plugin is stopped
+    // Stop timers, close connections, flush buffers
+    if (this.timer) clearInterval(this.timer);
+    await this.flushPendingData();
+  }
+
+  async onUninstall(options = {}) {
+    // Called when plugin is being removed
+    // Cleanup plugin-specific resources
+    // Note: PluginStorage is automatically cleaned if purgeData=true
+    await this.removeHooksFromResources();
+    await this.cleanupInternalState();
   }
 }
 ```
@@ -72,10 +91,296 @@ class MyPlugin extends Plugin {
 
 1. **Construction**: Plugin instance created with configuration
 2. **Registration**: Plugin added to database via `usePlugin()` or constructor
-3. **Setup**: `onSetup()` called when database is connected
-4. **Start**: `onStart()` called after setup completes
+3. **Install**: `onInstall()` called when database is connected
+   - Setup resources, hooks, and initial configuration
+   - Initialize PluginStorage
+   - Prepare deferred setups for missing resources
+4. **Start**: `onStart()` called after install completes
+   - Start background tasks, timers, workers
+   - Begin active operation
 5. **Operation**: Plugin actively processing database operations
+   - Intercept methods, respond to hooks, process events
 6. **Stop**: `onStop()` called for cleanup
+   - Stop timers and background tasks
+   - Flush pending data
+   - Close connections
+7. **Uninstall**: `onUninstall()` called when plugin is removed
+   - Remove hooks and method wrappers
+   - Cleanup internal state
+   - Optionally purge all data from S3 (`purgeData: true`)
+
+### Plugin Cleanup and Uninstall
+
+Proper cleanup is essential for preventing data leaks and resource exhaustion. The s3db.js plugin system provides robust cleanup mechanisms at multiple levels.
+
+#### Manual Uninstall
+
+Remove a plugin and optionally purge all its data:
+
+```javascript
+const plugin = new MyPlugin({ /* config */ });
+await database.usePlugin(plugin);
+
+// Later, uninstall the plugin
+await plugin.uninstall({ purgeData: true });
+// ✅ Plugin removed
+// ✅ All PluginStorage data deleted from S3
+// ✅ Hooks and method wrappers removed
+// ✅ Background tasks stopped
+```
+
+#### Automatic Data Purge
+
+When `purgeData: true` is passed to `uninstall()`, the Plugin base class automatically:
+
+1. Calls `onUninstall(options)` for custom cleanup
+2. Deletes **all** plugin data from PluginStorage
+3. Emits `plugin.dataPurged` event with deletion count
+
+```javascript
+async uninstall(options = {}) {
+  const { purgeData = false } = options;
+
+  this.beforeUninstall();
+  await this.onUninstall(options);
+
+  // Automatic purge if requested
+  if (purgeData && this._storage) {
+    const deleted = await this._storage.deleteAll();
+    this.emit('plugin.dataPurged', { deleted });
+  }
+
+  this.afterUninstall();
+}
+```
+
+#### Implementing Custom Cleanup
+
+Override `onUninstall()` for plugin-specific cleanup:
+
+```javascript
+class MyPlugin extends Plugin {
+  async onUninstall(options = {}) {
+    // Stop all timers
+    if (this.consolidationTimer) {
+      clearInterval(this.consolidationTimer);
+      this.consolidationTimer = null;
+    }
+
+    if (this.gcTimer) {
+      clearInterval(this.gcTimer);
+      this.gcTimer = null;
+    }
+
+    // Flush pending operations
+    if (this.pendingQueue.length > 0) {
+      await this.flushQueue();
+    }
+
+    // Remove hooks from all resources
+    for (const [resourceName, hooks] of this.installedHooks) {
+      const resource = this.database.resources[resourceName];
+      if (resource) {
+        hooks.forEach(hook => resource.removeHook(hook.event, hook.handler));
+      }
+    }
+
+    // Close external connections
+    if (this.externalClient) {
+      await this.externalClient.close();
+      this.externalClient = null;
+    }
+
+    // Clear caches
+    this.cache?.clear();
+
+    // Remove event listeners
+    this.removeAllListeners();
+
+    console.log(`${this.name} uninstalled successfully`);
+  }
+}
+```
+
+#### Cleanup Best Practices
+
+**✅ DO:**
+
+```javascript
+async onUninstall(options) {
+  // 1. Stop all timers/intervals
+  clearInterval(this.timer);
+
+  // 2. Flush pending data
+  await this.flushPendingData();
+
+  // 3. Close external connections
+  await this.client?.close();
+
+  // 4. Remove all hooks
+  this.removeAllHooks();
+
+  // 5. Clear caches
+  this.cache.clear();
+
+  // 6. Remove event listeners
+  this.removeAllListeners();
+
+  // 7. Let purgeData handle PluginStorage cleanup
+  // (automatic if purgeData=true)
+}
+```
+
+**❌ DON'T:**
+
+```javascript
+async onUninstall(options) {
+  // ❌ Don't forget to stop timers
+  // this.timer keeps running forever
+
+  // ❌ Don't manually delete PluginStorage data
+  await this.getStorage().deleteAll();
+  // This is redundant - base class handles it automatically
+
+  // ❌ Don't leak event listeners
+  // this.removeAllListeners() is required
+
+  // ❌ Don't leave pending operations
+  // await this.flushPendingData() is required
+}
+```
+
+#### Cleanup Examples by Plugin Type
+
+##### Timer-Based Plugins (Scheduler, EventualConsistency)
+
+```javascript
+async onUninstall(options) {
+  // Stop all scheduled jobs
+  for (const [jobName, job] of this.jobs) {
+    job.stop();
+  }
+
+  // Clear job registry
+  this.jobs.clear();
+
+  // Flush any pending execution
+  await this.flushPendingJobs();
+}
+```
+
+##### Queue-Based Plugins (S3Queue, QueueConsumer)
+
+```javascript
+async onUninstall(options) {
+  // Stop consuming messages
+  await this.stopConsuming();
+
+  // Flush pending messages
+  await this.flushQueue();
+
+  // Close queue connection
+  await this.queueClient.disconnect();
+}
+```
+
+##### Connection-Based Plugins (Replicator, External APIs)
+
+```javascript
+async onUninstall(options) {
+  // Close all replicator connections
+  for (const replicator of this.replicators) {
+    await replicator.close();
+  }
+
+  // Flush pending replications
+  await this.flushPendingReplications();
+
+  // Clear connection pool
+  this.connectionPool.clear();
+}
+```
+
+##### Cache Plugins
+
+```javascript
+async onUninstall(options) {
+  // Flush cache if needed
+  if (options.flushCache) {
+    await this.writeBackCache();
+  }
+
+  // Clear all cache entries
+  this.cache.clear();
+
+  // Close cache backend connection
+  await this.cacheBackend?.close();
+}
+```
+
+#### Monitoring Cleanup Events
+
+Listen to cleanup events for debugging:
+
+```javascript
+plugin.on('plugin.beforeUninstall', (date) => {
+  console.log(`Uninstalling plugin at ${date}`);
+});
+
+plugin.on('plugin.dataPurged', ({ deleted }) => {
+  console.log(`Purged ${deleted} objects from S3`);
+});
+
+plugin.on('plugin.afterUninstall', (date) => {
+  console.log(`Plugin uninstalled at ${date}`);
+});
+```
+
+#### Testing Cleanup
+
+Always test plugin cleanup in your test suite:
+
+```javascript
+describe('MyPlugin cleanup', () => {
+  it('should cleanup all resources on uninstall', async () => {
+    const plugin = new MyPlugin();
+    await database.usePlugin(plugin);
+
+    // Create some data
+    await plugin.doSomething();
+
+    // Verify data exists
+    const storage = plugin.getStorage();
+    const keys = await storage.list();
+    expect(keys.length).toBeGreaterThan(0);
+
+    // Uninstall with purge
+    await plugin.uninstall({ purgeData: true });
+
+    // Verify all data is gone
+    const keysAfter = await storage.list();
+    expect(keysAfter.length).toBe(0);
+
+    // Verify timers are stopped
+    expect(plugin.timer).toBeNull();
+  });
+
+  it('should keep data when purgeData=false', async () => {
+    const plugin = new MyPlugin();
+    await database.usePlugin(plugin);
+
+    await plugin.doSomething();
+
+    // Uninstall WITHOUT purge
+    await plugin.uninstall({ purgeData: false });
+
+    // Verify data still exists
+    const storage = new PluginStorage(database.client, 'my-plugin');
+    const keys = await storage.list();
+    expect(keys.length).toBeGreaterThan(0);
+  });
+});
+```
 
 ### Driver-Based Architecture
 
