@@ -413,16 +413,70 @@ export async function consolidateRecord(
       );
     }
 
+    // 🔥 DEBUG: Log BEFORE update
+    if (config.debug || config.verbose) {
+      console.log(
+        `🔥 [DEBUG] BEFORE targetResource.update() {` +
+        `\n  originalId: '${originalId}',` +
+        `\n  field: '${config.field}',` +
+        `\n  consolidatedValue: ${consolidatedValue},` +
+        `\n  currentValue: ${currentValue}` +
+        `\n}`
+      );
+    }
+
     // Update the original record
     // NOTE: We do NOT attempt to insert non-existent records because:
     // 1. Target resources typically have required fields we don't know about
     // 2. Record creation should be the application's responsibility
     // 3. Transactions will remain pending until the record is created
-    const [updateOk, updateErr] = await tryFn(() =>
+    const [updateOk, updateErr, updateResult] = await tryFn(() =>
       targetResource.update(originalId, {
         [config.field]: consolidatedValue
       })
     );
+
+    // 🔥 DEBUG: Log AFTER update
+    if (config.debug || config.verbose) {
+      console.log(
+        `🔥 [DEBUG] AFTER targetResource.update() {` +
+        `\n  updateOk: ${updateOk},` +
+        `\n  updateErr: ${updateErr?.message || 'undefined'},` +
+        `\n  updateResult: ${JSON.stringify(updateResult, null, 2)},` +
+        `\n  hasField: ${updateResult?.[config.field]}` +
+        `\n}`
+      );
+    }
+
+    // 🔥 VERIFY: Check if update actually persisted
+    if (updateOk && (config.debug || config.verbose)) {
+      // Bypass cache to get fresh data
+      const [verifyOk, verifyErr, verifiedRecord] = await tryFn(() =>
+        targetResource.get(originalId, { skipCache: true })
+      );
+
+      console.log(
+        `🔥 [DEBUG] VERIFICATION (fresh from S3, no cache) {` +
+        `\n  verifyOk: ${verifyOk},` +
+        `\n  verifiedRecord[${config.field}]: ${verifiedRecord?.[config.field]},` +
+        `\n  expectedValue: ${consolidatedValue},` +
+        `\n  ✅ MATCH: ${verifiedRecord?.[config.field] === consolidatedValue}` +
+        `\n}`
+      );
+
+      // If verification fails, this is a critical bug
+      if (verifyOk && verifiedRecord?.[config.field] !== consolidatedValue) {
+        console.error(
+          `❌ [CRITICAL BUG] Update reported success but value not persisted!` +
+          `\n  Resource: ${config.resource}` +
+          `\n  Field: ${config.field}` +
+          `\n  Record ID: ${originalId}` +
+          `\n  Expected: ${consolidatedValue}` +
+          `\n  Actually got: ${verifiedRecord?.[config.field]}` +
+          `\n  This indicates a bug in s3db.js resource.update()`
+        );
+      }
+    }
 
     if (!updateOk) {
       // Check if record doesn't exist
