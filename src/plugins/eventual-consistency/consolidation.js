@@ -414,7 +414,7 @@ export async function consolidateRecord(
     }
 
     // 🔥 DEBUG: Log BEFORE update
-    if (config.debug || config.verbose) {
+    if (config.verbose) {
       console.log(
         `🔥 [DEBUG] BEFORE targetResource.update() {` +
         `\n  originalId: '${originalId}',` +
@@ -437,7 +437,7 @@ export async function consolidateRecord(
     );
 
     // 🔥 DEBUG: Log AFTER update
-    if (config.debug || config.verbose) {
+    if (config.verbose) {
       console.log(
         `🔥 [DEBUG] AFTER targetResource.update() {` +
         `\n  updateOk: ${updateOk},` +
@@ -449,7 +449,7 @@ export async function consolidateRecord(
     }
 
     // 🔥 VERIFY: Check if update actually persisted
-    if (updateOk && (config.debug || config.verbose)) {
+    if (updateOk && config.verbose) {
       // Bypass cache to get fresh data
       const [verifyOk, verifyErr, verifiedRecord] = await tryFn(() =>
         targetResource.get(originalId, { skipCache: true })
