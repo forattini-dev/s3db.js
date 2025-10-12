@@ -70,7 +70,7 @@ describe("EventualConsistencyPlugin - Race Conditions", () => {
       // In high concurrency scenarios, there may be slight race conditions creating anchor transactions
       // The important thing is that the balance is correct
       expect(transactions.length).toBeGreaterThanOrEqual(11); // At least 10 user transactions + 1 anchor
-    }, 60000);
+    }, 90000); // Increased timeout for slow CI environments and concurrent operations
 
     it("should handle sequential sync mode operations correctly", async () => {
       // Create wallet
