@@ -121,9 +121,9 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
       expect(weekByDay.length).toBe(7);
 
       // Week should start on Monday (ISO 8601)
-      // First day should be a Monday
-      const firstDay = new Date(weekByDay[0].cohort);
-      const dayOfWeek = firstDay.getDay();
+      // First day should be a Monday (use UTC to avoid timezone issues)
+      const firstDay = new Date(weekByDay[0].cohort + 'T00:00:00Z');
+      const dayOfWeek = firstDay.getUTCDay();
       expect(dayOfWeek).toBe(1); // Monday
     });
   });
@@ -182,7 +182,7 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
 
       // Verify chronological order (oldest to newest)
       for (let i = 1; i < lastHours.length; i++) {
-        expect(lastHours[i].cohort).toBeGreaterThan(lastHours[i - 1].cohort);
+        expect(lastHours[i].cohort > lastHours[i - 1].cohort).toBe(true);
       }
     });
 
@@ -234,7 +234,7 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
 
       // Verify chronological order
       for (let i = 1; i < lastWeeks.length; i++) {
-        expect(lastWeeks[i].cohort).toBeGreaterThan(lastWeeks[i - 1].cohort);
+        expect(lastWeeks[i].cohort > lastWeeks[i - 1].cohort).toBe(true);
       }
     });
   });
@@ -258,7 +258,7 @@ describe('EventualConsistencyPlugin - New Analytics Functions', () => {
 
       // Verify chronological order
       for (let i = 1; i < lastMonths.length; i++) {
-        expect(lastMonths[i].cohort).toBeGreaterThan(lastMonths[i - 1].cohort);
+        expect(lastMonths[i].cohort > lastMonths[i - 1].cohort).toBe(true);
       }
     });
 

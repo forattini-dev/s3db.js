@@ -6534,15 +6534,15 @@ async function getYearByDay(resourceName, field, year, options, fieldHandlers) {
 async function getWeekByDay(resourceName, field, week, options, fieldHandlers) {
   const year = parseInt(week.substring(0, 4));
   const weekNum = parseInt(week.substring(6, 8));
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7;
-  const firstMonday = new Date(year, 0, 4 - jan4Day + 1);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const firstMonday = new Date(Date.UTC(year, 0, 4 - jan4Day + 1));
   const weekStart = new Date(firstMonday);
-  weekStart.setDate(weekStart.getDate() + (weekNum - 1) * 7);
+  weekStart.setUTCDate(weekStart.getUTCDate() + (weekNum - 1) * 7);
   const days = [];
   for (let i = 0; i < 7; i++) {
     const day = new Date(weekStart);
-    day.setDate(weekStart.getDate() + i);
+    day.setUTCDate(weekStart.getUTCDate() + i);
     days.push(day.toISOString().substring(0, 10));
   }
   const startDate = days[0];
@@ -6560,13 +6560,13 @@ async function getWeekByDay(resourceName, field, week, options, fieldHandlers) {
 async function getWeekByHour(resourceName, field, week, options, fieldHandlers) {
   const year = parseInt(week.substring(0, 4));
   const weekNum = parseInt(week.substring(6, 8));
-  const jan4 = new Date(year, 0, 4);
-  const jan4Day = jan4.getDay() || 7;
-  const firstMonday = new Date(year, 0, 4 - jan4Day + 1);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const firstMonday = new Date(Date.UTC(year, 0, 4 - jan4Day + 1));
   const weekStart = new Date(firstMonday);
-  weekStart.setDate(weekStart.getDate() + (weekNum - 1) * 7);
+  weekStart.setUTCDate(weekStart.getUTCDate() + (weekNum - 1) * 7);
   const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
   const startDate = weekStart.toISOString().substring(0, 10);
   const endDate = weekEnd.toISOString().substring(0, 10);
   const data = await getAnalytics(resourceName, field, {
@@ -6582,18 +6582,25 @@ async function getWeekByHour(resourceName, field, week, options, fieldHandlers) 
 async function getLastNHours(resourceName, field, hours = 24, options, fieldHandlers) {
   const now = /* @__PURE__ */ new Date();
   const hoursAgo = new Date(now);
-  hoursAgo.setHours(hoursAgo.getHours() - hours);
-  const startDate = hoursAgo.toISOString().substring(0, 13);
-  const endDate = now.toISOString().substring(0, 13);
+  hoursAgo.setHours(hoursAgo.getHours() - hours + 1);
+  const startHour = hoursAgo.toISOString().substring(0, 13);
+  const endHour = now.toISOString().substring(0, 13);
   const data = await getAnalytics(resourceName, field, {
     period: "hour",
-    startDate,
-    endDate
+    startDate: startHour,
+    endDate: endHour
   }, fieldHandlers);
   if (options.fillGaps) {
-    const startDay = hoursAgo.toISOString().substring(0, 10);
-    const endDay = now.toISOString().substring(0, 10);
-    return fillGaps(data, "hour", startDay, endDay);
+    const result = [];
+    const emptyRecord = { count: 0, sum: 0, avg: 0, min: 0, max: 0, recordCount: 0 };
+    const dataMap = new Map(data.map((d) => [d.cohort, d]));
+    const current = new Date(hoursAgo);
+    for (let i = 0; i < hours; i++) {
+      const cohort = current.toISOString().substring(0, 13);
+      result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+      current.setHours(current.getHours() + 1);
+    }
+    return result;
   }
   return data;
 }
@@ -6622,7 +6629,7 @@ async function getLastNWeeks(resourceName, field, weeks = 4, options, fieldHandl
 async function getLastNMonths(resourceName, field, months = 12, options, fieldHandlers) {
   const now = /* @__PURE__ */ new Date();
   const monthsAgo = new Date(now);
-  monthsAgo.setMonth(monthsAgo.getMonth() - months);
+  monthsAgo.setMonth(monthsAgo.getMonth() - months + 1);
   const startDate = monthsAgo.toISOString().substring(0, 7);
   const endDate = now.toISOString().substring(0, 7);
   const data = await getAnalytics(resourceName, field, {
@@ -6631,7 +6638,16 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
     endDate
   }, fieldHandlers);
   if (options.fillGaps) {
-    return fillGaps(data, "month", startDate, endDate);
+    const result = [];
+    const emptyRecord = { count: 0, sum: 0, avg: 0, min: 0, max: 0, recordCount: 0 };
+    const dataMap = new Map(data.map((d) => [d.cohort, d]));
+    const current = new Date(monthsAgo);
+    for (let i = 0; i < months; i++) {
+      const cohort = current.toISOString().substring(0, 7);
+      result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+      current.setMonth(current.getMonth() + 1);
+    }
+    return result;
   }
   return data;
 }
