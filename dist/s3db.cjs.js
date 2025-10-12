@@ -6185,7 +6185,7 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
   } else if (period === "week") {
     sourcePeriod = "day";
   } else if (period === "month") {
-    sourcePeriod = "week";
+    sourcePeriod = "day";
   } else {
     sourcePeriod = "day";
   }
