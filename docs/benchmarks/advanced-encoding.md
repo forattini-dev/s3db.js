@@ -1,5 +1,20 @@
 # Advanced Metadata Encoding Benchmark Results
 
+## TL;DR
+
+**What we're testing**: Can we save space in S3's 2KB metadata limit by optimizing common data types?
+
+**Result**: ✅ **YES** - Save **33-67% space** on timestamps, UUIDs, and dictionary values with negligible performance cost (< 0.02ms per operation)
+
+**Recommendation**: Always use advanced encoding for metadata. It frees up hundreds of bytes for more fields while maintaining excellent performance.
+
+**Key wins**:
+- ISO timestamps: 24B → 8B (67% savings)
+- UUIDs: 36B → 24B (33% savings)
+- Status strings: 6B → 1B (83% savings)
+
+---
+
 ## Summary
 
 - **Date**: 2025-01-15

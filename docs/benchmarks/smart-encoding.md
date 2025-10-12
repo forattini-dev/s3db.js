@@ -1,5 +1,20 @@
 # Smart Metadata Encoding Benchmark Results
 
+## TL;DR
+
+**What we're testing**: Should we always Base64 encode strings, or can we be smarter about it?
+
+**Result**: ✅ **Be smart** - Auto-detect ASCII/Latin-1/UTF-8 and choose optimal encoding. Only 3% slower than always-Base64, but with huge benefits.
+
+**Recommendation**: Use smart encoding for all metadata strings. ASCII passes through untouched (0% overhead + human-readable), Latin-1 saves space vs UTF-8, and Base64 is only used when necessary.
+
+**Key wins**:
+- ASCII: 0% overhead (vs 45% with always-Base64)
+- Latin-1: 0% overhead + compact encoding
+- Only 3% performance cost for automatic optimization
+
+---
+
 ## Summary
 
 - **Date**: 2025-01-15

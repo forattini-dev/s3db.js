@@ -1,5 +1,22 @@
 # EventualConsistency Plugin Benchmark Results
 
+## TL;DR
+
+**What we're testing**: Do parallelization optimizations (Promise.all) and configurable concurrency actually improve EventualConsistency plugin performance?
+
+**Result**: ✅ **HUGE YES** - Achieved **5-20x speedup** depending on scenario!
+
+**Recommendation**: Use default config (concurrency: 50). Upgrade to 100 for high-volume scenarios. The optimizations are production-ready.
+
+**Key wins**:
+- Analytics updates: **15x faster** (parallelized with Promise.all)
+- Consolidation: **5x faster** (concurrency 10 → 50)
+- Total pipeline: **8.3x faster** (10s → 1.2s for 1000 transactions)
+
+**Configuration**: Default `markAppliedConcurrency: 50` is the sweet spot for most cases.
+
+---
+
 ## Summary
 
 - **Date**: 2025-10-11
