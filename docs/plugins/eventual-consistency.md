@@ -234,18 +234,27 @@ const stats = await plugin.getLastNDays('urls', 'clicks', 7);
 ```javascript
 const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
 
-// Stats por período
+// Generic query
 await plugin.getAnalytics('resource', 'field', { period: 'hour', date: '2025-10-09' });
-await plugin.getLastNDays('resource', 'field', 7);
 
-// Por tempo - agregações específicas
-await plugin.getDayByHour('resource', 'field', '2025-10-09');       // Dia dividido em 24 horas
-await plugin.getMonthByDay('resource', 'field', '2025-10');         // Mês dividido em ~30 dias
-await plugin.getMonthByWeek('resource', 'field', '2025-10');        // 🆕 Mês dividido em 4-5 semanas
-await plugin.getYearByWeek('resource', 'field', 2025);              // 🆕 Ano dividido em 52-53 semanas
-await plugin.getYearByMonth('resource', 'field', 2025);             // Ano dividido em 12 meses
+// Time range breakdown (specific period)
+await plugin.getDayByHour('resource', 'field', '2025-10-09');       // Day → 24 hours
+await plugin.getWeekByDay('resource', 'field', '2025-W42');         // 🆕 Week → 7 days (ISO 8601)
+await plugin.getWeekByHour('resource', 'field', '2025-W42');        // 🆕 Week → 168 hours
+await plugin.getMonthByDay('resource', 'field', '2025-10');         // Month → ~30 days
+await plugin.getMonthByHour('resource', 'field', '2025-10');        // Month → ~720 hours
+await plugin.getMonthByWeek('resource', 'field', '2025-10');        // Month → 4-5 weeks
+await plugin.getYearByDay('resource', 'field', 2025);               // 🆕 Year → 365/366 days
+await plugin.getYearByWeek('resource', 'field', 2025);              // Year → 52-53 weeks
+await plugin.getYearByMonth('resource', 'field', 2025);             // Year → 12 months
 
-// Top records
+// Last N periods (convenience functions)
+await plugin.getLastNHours('resource', 'field', 24);                // 🆕 Last 24 hours
+await plugin.getLastNDays('resource', 'field', 7);                  // Last 7 days
+await plugin.getLastNWeeks('resource', 'field', 4);                 // 🆕 Last 4 weeks
+await plugin.getLastNMonths('resource', 'field', 12);               // 🆕 Last 12 months
+
+// Top records by volume
 await plugin.getTopRecords('resource', 'field', {
   period: 'day',
   cohort: '2025-10-09',
@@ -254,7 +263,114 @@ await plugin.getTopRecords('resource', 'field', {
 });
 ```
 
-### 🆕 Week Analytics (v11.0.2+)
+### Gap Filling
+
+All functions support `fillGaps` option for continuous time series:
+
+```javascript
+// Without gaps (sparse data only)
+const data = await plugin.getLastNHours('urls', 'clicks', 24);
+// Returns only hours with actual data
+
+// With gaps (continuous series with zeros)
+const data = await plugin.getLastNHours('urls', 'clicks', 24, { fillGaps: true });
+// Returns all 24 hours, filling missing periods with zeros
+```
+
+### 🆕 Complete Analytics Functions (v11.0.4+)
+
+The plugin now provides **15 analytics functions** covering all time range and granularity combinations:
+
+#### By Time Range + Granularity
+
+| Function | Time Range | Granularity | Records | Example |
+|----------|-----------|-------------|---------|---------|
+| `getDayByHour()` | Single day | Hours | 24 | `'2025-10-09'` |
+| `getWeekByDay()` ⭐ | Single week | Days | 7 | `'2025-W42'` |
+| `getWeekByHour()` ⭐ | Single week | Hours | 168 | `'2025-W42'` |
+| `getMonthByDay()` | Single month | Days | 28-31 | `'2025-10'` |
+| `getMonthByHour()` | Single month | Hours | 672-744 | `'2025-10'` |
+| `getMonthByWeek()` | Single month | Weeks | 4-5 | `'2025-10'` |
+| `getYearByDay()` ⭐ | Single year | Days | 365-366 | `2025` |
+| `getYearByWeek()` | Single year | Weeks | 52-53 | `2025` |
+| `getYearByMonth()` | Single year | Months | 12 | `2025` |
+
+⭐ = New in v11.0.4
+
+#### Last N Periods (Convenience)
+
+| Function | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `getLastNHours()` ⭐ | Last N hours | 24 | Last 24 hours |
+| `getLastNDays()` | Last N days | 7 | Last 7 days |
+| `getLastNWeeks()` ⭐ | Last N weeks | 4 | Last 4 weeks |
+| `getLastNMonths()` ⭐ | Last N months | 12 | Last 12 months |
+
+⭐ = New in v11.0.4
+
+#### Example Usage
+
+```javascript
+// Get year breakdown by days (365/366 records)
+const yearDays = await plugin.getYearByDay('products', 'sold', 2025);
+// [
+//   { cohort: '2025-01-01', count: 50, sum: 5000, avg: 100, ... },
+//   { cohort: '2025-01-02', count: 75, sum: 7500, avg: 100, ... },
+//   ...
+//   { cohort: '2025-12-31', count: 100, sum: 10000, avg: 100, ... }
+// ]
+
+// Get week breakdown by days (7 records, ISO 8601)
+const weekDays = await plugin.getWeekByDay('urls', 'clicks', '2025-W42', { fillGaps: true });
+// [
+//   { cohort: '2025-10-13', count: 0, sum: 0, ... },  // Monday
+//   { cohort: '2025-10-14', count: 150, sum: 1500, ... },
+//   ...
+//   { cohort: '2025-10-19', count: 200, sum: 2000, ... }  // Sunday
+// ]
+
+// Get week breakdown by hours (168 records)
+const weekHours = await plugin.getWeekByHour('wallets', 'balance', '2025-W42');
+
+// Get last 24 hours
+const last24h = await plugin.getLastNHours('apis', 'requests', 24, { fillGaps: true });
+
+// Get last 4 weeks
+const last4Weeks = await plugin.getLastNWeeks('sales', 'revenue', 4);
+
+// Get last 12 months
+const last12Months = await plugin.getLastNMonths('users', 'signups', 12, { fillGaps: true });
+```
+
+#### Data Format (Chart-Ready)
+
+All functions return the same structure, ready for charting:
+
+```javascript
+[
+  {
+    cohort: '2025-10-11T14',  // Time identifier (x-axis)
+    count: 145,                // Transaction count
+    sum: 52834.50,            // Total value (y-axis for bar/area charts)
+    avg: 364.38,              // Average value (y-axis for line charts)
+    min: -500.00,             // Minimum value
+    max: 10000.00,            // Maximum value
+    recordCount: 23,          // Unique records affected
+    operations: {             // Breakdown by operation type
+      add: { count: 120, sum: 60000 },
+      sub: { count: 25, sum: -7165.50 }
+    }
+  }
+]
+```
+
+**Direct chart usage** (no processing needed):
+- **Bar charts**: `data.map(d => ({ x: d.cohort, y: d.sum }))`
+- **Line charts**: `data.map(d => ({ x: d.cohort, y: d.avg }))`
+- **Area charts**: `data.map(d => ({ x: d.cohort, y1: d.operations.add.sum, y2: d.operations.sub.sum }))`
+- **Range charts**: `data.map(d => ({ x: d.cohort, min: d.min, max: d.max }))`
+
+### 🆕 Week Analytics (ISO 8601)
 
 O plugin agora suporta **agregações semanais (ISO 8601)**:
 
@@ -779,6 +895,46 @@ Para detalhes completos das correções, veja:
 ---
 
 ## 📅 Changelog
+
+### v11.0.4 (12/10/2025)
+
+#### 🆕 Complete Analytics API - 6 New Functions
+
+Completed the analytics API with **6 new functions** covering all time range/granularity combinations:
+
+**New Functions:**
+1. ✅ `getYearByDay(resource, field, year, options)` - Year broken down by days (365/366 records)
+2. ✅ `getWeekByDay(resource, field, week, options)` - Week broken down by days (7 records, ISO 8601)
+3. ✅ `getWeekByHour(resource, field, week, options)` - Week broken down by hours (168 records)
+4. ✅ `getLastNHours(resource, field, hours, options)` - Last N hours with gap filling
+5. ✅ `getLastNWeeks(resource, field, weeks, options)` - Last N weeks
+6. ✅ `getLastNMonths(resource, field, months, options)` - Last N months with gap filling
+
+**Features:**
+- ✅ ISO 8601 week numbering (Monday start, weeks identified as `YYYY-Www`)
+- ✅ Gap filling support for continuous time series
+- ✅ Chart-ready data format (cohort, count, sum, avg, min, max)
+- ✅ Precise time range calculations (no off-by-one errors)
+- ✅ UTC-based date handling (prevents timezone issues)
+
+**Total Analytics Functions:** 15
+- 9 time range + granularity combinations
+- 4 "last N periods" convenience functions
+- 1 generic query function
+- 1 top records function
+
+**Test Coverage:**
+- ✅ 31/31 analytics tests passing (100%)
+- ✅ All edge cases covered (ISO weeks, leap years, gap filling)
+
+**Compatibility:**
+- ✅ 100% backward compatible
+- ✅ No breaking changes
+- ✅ All existing functions unchanged
+
+**Commits:**
+- `a0b2f87` - feat: implement 6 new analytics functions
+- `cacb511` - fix: resolve all edge case failures
 
 ### v11.0.2 (11/10/2025)
 
