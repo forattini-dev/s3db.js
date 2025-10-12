@@ -265,9 +265,9 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
   if (period === 'day') {
     sourcePeriod = 'hour';
   } else if (period === 'week') {
-    sourcePeriod = 'day';
+    sourcePeriod = 'day';  // Week aggregates from days
   } else if (period === 'month') {
-    sourcePeriod = 'week'; // Aggregate weeks to month
+    sourcePeriod = 'day';  // ✅ Month aggregates from days AND hours (like week)
   } else {
     sourcePeriod = 'day'; // Fallback
   }
@@ -291,6 +291,8 @@ async function rollupPeriod(period, cohort, sourcePrefix, analyticsResource, con
     });
   } else {
     // For day and month, simple prefix matching works
+    // day: aggregates from hours (cohort '2025-10-09' matches '2025-10-09T14', '2025-10-09T15', etc)
+    // month: aggregates from days (cohort '2025-10' matches '2025-10-01', '2025-10-02', etc)
     sourceAnalytics = allAnalytics.filter(a =>
       a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
     );
