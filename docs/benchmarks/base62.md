@@ -1,5 +1,15 @@
 # Base62 Encoding Benchmark Results
 
+## TL;DR
+
+**What we're testing**: Is Base62 better than Base36 for encoding large numbers?
+
+**Result**: ✅ **YES for large numbers** (5x faster, 40% better compression), ❌ **NO for small numbers** (2-3x slower)
+
+**Recommendation**: Use Base62 for timestamps (Unix epoch), large IDs (> 1M), and when maximum compression is needed. Use Base36 or plain numbers for small sequential values.
+
+---
+
 ## Summary
 
 - **Date**: 2025-01-15
