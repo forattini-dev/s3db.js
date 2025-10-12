@@ -17,7 +17,7 @@ import {
   runConsolidation
 } from "./consolidation.js";
 import { runGarbageCollection } from "./garbage-collection.js";
-import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords } from "./analytics.js";
+import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords, getYearByDay, getWeekByDay, getWeekByHour, getLastNHours, getLastNWeeks, getLastNMonths } from "./analytics.js";
 import { onInstall, onStart, onStop, watchForResource, completeFieldSetup } from "./install.js";
 
 export class EventualConsistencyPlugin extends Plugin {
@@ -458,6 +458,78 @@ export class EventualConsistencyPlugin extends Plugin {
    */
   async getTopRecords(resourceName, field, options = {}) {
     return await getTopRecords(resourceName, field, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for entire year, broken down by days
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} year - Year (e.g., 2025)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Daily analytics for the year (up to 365/366 records)
+   */
+  async getYearByDay(resourceName, field, year, options = {}) {
+    return await getYearByDay(resourceName, field, year, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for entire week, broken down by days
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} week - Week in YYYY-Www format (e.g., '2025-W42')
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Daily analytics for the week (7 records)
+   */
+  async getWeekByDay(resourceName, field, week, options = {}) {
+    return await getWeekByDay(resourceName, field, week, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for entire week, broken down by hours
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {string} week - Week in YYYY-Www format (e.g., '2025-W42')
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Hourly analytics for the week (168 records)
+   */
+  async getWeekByHour(resourceName, field, week, options = {}) {
+    return await getWeekByHour(resourceName, field, week, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for last N hours
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} hours - Number of hours to look back (default: 24)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Hourly analytics
+   */
+  async getLastNHours(resourceName, field, hours = 24, options = {}) {
+    return await getLastNHours(resourceName, field, hours, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for last N weeks
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} weeks - Number of weeks to look back (default: 4)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Weekly analytics
+   */
+  async getLastNWeeks(resourceName, field, weeks = 4, options = {}) {
+    return await getLastNWeeks(resourceName, field, weeks, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get analytics for last N months
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {number} months - Number of months to look back (default: 12)
+   * @param {Object} options - Options
+   * @returns {Promise<Array>} Monthly analytics
+   */
+  async getLastNMonths(resourceName, field, months = 12, options = {}) {
+    return await getLastNMonths(resourceName, field, months, options, this.fieldHandlers);
   }
 }
 
