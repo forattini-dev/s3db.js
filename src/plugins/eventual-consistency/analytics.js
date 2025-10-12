@@ -808,3 +808,220 @@ export async function getTopRecords(resourceName, field, options, fieldHandlers)
   // Limit results
   return records.slice(0, limit);
 }
+
+/**
+ * Get analytics for entire year, broken down by days
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {number} year - Year (e.g., 2025)
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Daily analytics for the year (up to 365/366 records)
+ */
+export async function getYearByDay(resourceName, field, year, options, fieldHandlers) {
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'day',
+    startDate,
+    endDate
+  }, fieldHandlers);
+
+  if (options.fillGaps) {
+    return fillGaps(data, 'day', startDate, endDate);
+  }
+
+  return data;
+}
+
+/**
+ * Get analytics for entire week, broken down by days
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {string} week - Week in YYYY-Www format (e.g., '2025-W42')
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Daily analytics for the week (7 records)
+ */
+export async function getWeekByDay(resourceName, field, week, options, fieldHandlers) {
+  // week format: '2025-W42'
+  const year = parseInt(week.substring(0, 4));
+  const weekNum = parseInt(week.substring(6, 8));
+
+  // Calculate the first day of the week (Monday)
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = jan4.getDay() || 7; // Sunday = 7
+  const firstMonday = new Date(year, 0, 4 - jan4Day + 1);
+  const weekStart = new Date(firstMonday);
+  weekStart.setDate(weekStart.getDate() + (weekNum - 1) * 7);
+
+  // Get all 7 days of the week
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(weekStart);
+    day.setDate(weekStart.getDate() + i);
+    days.push(day.toISOString().substring(0, 10));
+  }
+
+  const startDate = days[0];
+  const endDate = days[6];
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'day',
+    startDate,
+    endDate
+  }, fieldHandlers);
+
+  if (options.fillGaps) {
+    return fillGaps(data, 'day', startDate, endDate);
+  }
+
+  return data;
+}
+
+/**
+ * Get analytics for entire week, broken down by hours
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {string} week - Week in YYYY-Www format (e.g., '2025-W42')
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Hourly analytics for the week (168 records)
+ */
+export async function getWeekByHour(resourceName, field, week, options, fieldHandlers) {
+  // week format: '2025-W42'
+  const year = parseInt(week.substring(0, 4));
+  const weekNum = parseInt(week.substring(6, 8));
+
+  // Calculate the first day of the week (Monday)
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = jan4.getDay() || 7; // Sunday = 7
+  const firstMonday = new Date(year, 0, 4 - jan4Day + 1);
+  const weekStart = new Date(firstMonday);
+  weekStart.setDate(weekStart.getDate() + (weekNum - 1) * 7);
+
+  // Get first and last day of week
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+
+  const startDate = weekStart.toISOString().substring(0, 10);
+  const endDate = weekEnd.toISOString().substring(0, 10);
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'hour',
+    startDate,
+    endDate
+  }, fieldHandlers);
+
+  if (options.fillGaps) {
+    return fillGaps(data, 'hour', startDate, endDate);
+  }
+
+  return data;
+}
+
+/**
+ * Get analytics for last N hours
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {number} hours - Number of hours to look back (default: 24)
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Hourly analytics
+ */
+export async function getLastNHours(resourceName, field, hours = 24, options, fieldHandlers) {
+  const now = new Date();
+  const hoursAgo = new Date(now);
+  hoursAgo.setHours(hoursAgo.getHours() - hours);
+
+  const startDate = hoursAgo.toISOString().substring(0, 13); // YYYY-MM-DDTHH
+  const endDate = now.toISOString().substring(0, 13);
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'hour',
+    startDate,
+    endDate
+  }, fieldHandlers);
+
+  if (options.fillGaps) {
+    const startDay = hoursAgo.toISOString().substring(0, 10);
+    const endDay = now.toISOString().substring(0, 10);
+    return fillGaps(data, 'hour', startDay, endDay);
+  }
+
+  return data;
+}
+
+/**
+ * Get analytics for last N weeks
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {number} weeks - Number of weeks to look back (default: 4)
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Weekly analytics
+ */
+export async function getLastNWeeks(resourceName, field, weeks = 4, options, fieldHandlers) {
+  const now = new Date();
+  const weeksAgo = new Date(now);
+  weeksAgo.setDate(weeksAgo.getDate() - (weeks * 7));
+
+  // Get week cohorts for the range
+  const weekCohorts = [];
+  const currentDate = new Date(weeksAgo);
+  while (currentDate <= now) {
+    const weekCohort = getCohortWeekFromDate(currentDate);
+    if (!weekCohorts.includes(weekCohort)) {
+      weekCohorts.push(weekCohort);
+    }
+    currentDate.setDate(currentDate.getDate() + 7);
+  }
+
+  const startWeek = weekCohorts[0];
+  const endWeek = weekCohorts[weekCohorts.length - 1];
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'week',
+    startDate: startWeek,
+    endDate: endWeek
+  }, fieldHandlers);
+
+  return data;
+}
+
+/**
+ * Get analytics for last N months
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {number} months - Number of months to look back (default: 12)
+ * @param {Object} options - Options
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Monthly analytics
+ */
+export async function getLastNMonths(resourceName, field, months = 12, options, fieldHandlers) {
+  const now = new Date();
+  const monthsAgo = new Date(now);
+  monthsAgo.setMonth(monthsAgo.getMonth() - months);
+
+  const startDate = monthsAgo.toISOString().substring(0, 7); // YYYY-MM
+  const endDate = now.toISOString().substring(0, 7);
+
+  const data = await getAnalytics(resourceName, field, {
+    period: 'month',
+    startDate,
+    endDate
+  }, fieldHandlers);
+
+  if (options.fillGaps) {
+    return fillGaps(data, 'month', startDate, endDate);
+  }
+
+  return data;
+}
