@@ -13,7 +13,7 @@
 - **Balanced** (mixed reads/writes): Use 3-5 partitions for 2-10x query speedup
 - **Read-heavy** (>70% reads): Use 6+ partitions for 10-100x query speedup
 
-**Hardware:** Node.js v22.6.0, tested with 1,000 records per configuration
+**Hardware:** Node.js v22.6.0, tested with 10,000 records per configuration
 
 ---
 
@@ -42,11 +42,11 @@ Tests partition performance across a matrix of configurations to quantify write 
 - **Partitions**: 0 to 10 (11 configurations)
 - **Attributes per partition**: 1 to 10 (10 configurations)
 - **Total tests**: 110 combinations
-- **Records per test**: 1,000
+- **Records per test**: 10,000
 
 **Measurements**:
 - ✅ Resource creation time
-- ✅ Bulk insert performance (1,000 records)
+- ✅ Bulk insert performance (10,000 records)
 - ✅ Query by partition (filtered)
 - ✅ Full scan query (no filter)
 - ✅ Insert throughput (records/second)
@@ -54,7 +54,7 @@ Tests partition performance across a matrix of configurations to quantify write 
 **Configuration**:
 ```javascript
 {
-  recordsPerTest: 1000,
+  recordsPerTest: 10000,
   asyncPartitions: true,  // Async indexing enabled
   batchSize: 100          // Insert batch size
 }
@@ -90,7 +90,7 @@ Before running benchmarks, ensure you have:
 
 ### Run Partitions Benchmark
 
-**Full benchmark** (110 tests, ~60-120 minutes):
+**Full benchmark** (110 tests, ~10-20 hours):
 ```bash
 pnpm run benchmark:partitions
 # or
@@ -100,7 +100,7 @@ node docs/benchmarks/partitions-matrix.js
 **Quick test** (modify constants in file for faster testing):
 ```javascript
 // Edit docs/benchmarks/partitions-matrix.js
-const RECORDS_PER_TEST = 100;  // Reduce from 1000
+const RECORDS_PER_TEST = 100;  // Reduce from 10000
 // Change loop ranges for faster testing
 for (let numPartitions = 0; numPartitions <= 2; numPartitions++) {
   for (let numAttributes = 1; numAttributes <= 3; numAttributes++) {
@@ -112,7 +112,7 @@ for (let numPartitions = 0; numPartitions <= 2; numPartitions++) {
 🚀 Starting Partitions Performance Benchmark
 
 Configuration:
-- Records per test: 1000
+- Records per test: 10000
 - Partitions range: 0 to 10
 - Attributes per partition range: 1 to 10
 - Async partitioning: Enabled
@@ -129,35 +129,35 @@ PARTITIONS PERFORMANCE BENCHMARK RESULTS
 --------------------------------------------------------------------------------
 Attrs    Create(ms)  Insert(ms)  Insert/sec  Query Part(ms)  Part Records  Query Full(ms)  Total Records
 --------------------------------------------------------------------------------
-1        245.12      3421.56     292         N/A             0             124.45          1000
-2        268.34      3534.78     283         N/A             0             128.91          1000
+1        245.12      34215.60    292         N/A             0             1244.50         10000
+2        268.34      35347.80    283         N/A             0             1289.10         10000
 ...
 
 📊 5 Partitions (5 partition dimensions)
 --------------------------------------------------------------------------------
 Attrs    Create(ms)  Insert(ms)  Insert/sec  Query Part(ms)  Part Records  Query Full(ms)  Total Records
 --------------------------------------------------------------------------------
-1        312.45      3678.23     272         45.12           100           156.78          1000
-2        334.67      3789.45     264         48.34           100           162.34          1000
+1        312.45      36782.30    272         451.20          1000          1567.80         10000
+2        334.67      37894.50    264         483.40          1000          1623.40         10000
 ...
 
 📈 Summary Statistics:
 ------------------------------------------------------------
-Average Insert Time: 3621.45ms (276 records/sec)
-Insert Time Range: 3421.56ms - 4234.12ms
-Average Query by Partition: 52.34ms
-Average Full Scan Query: 145.67ms
+Average Insert Time: 36214.50ms (276 records/sec)
+Insert Time Range: 34215.60ms - 42341.20ms
+Average Query by Partition: 523.40ms
+Average Full Scan Query: 1456.70ms
 Total Tests: 110/110 successful
 
 🏆 Best Insert Performance:
-   0 partitions, 1 attributes: 3421.56ms (292 rec/sec)
+   0 partitions, 1 attributes: 34215.60ms (292 rec/sec)
 
 🐌 Worst Insert Performance:
-   10 partitions, 10 attributes: 4234.12ms (236 rec/sec)
+   10 partitions, 10 attributes: 42341.20ms (236 rec/sec)
 
 💾 Results exported to docs/benchmarks/partitions-results.json
 
-⏱️  Total benchmark time: 12.34 minutes
+⏱️  Total benchmark time: 12-18 hours
 ```
 
 ### Results Output
@@ -171,7 +171,7 @@ Results are automatically exported to:
 {
   "timestamp": "2025-10-13T...",
   "configuration": {
-    "recordsPerTest": 1000,
+    "recordsPerTest": 10000,
     "partitionRange": [0, 10],
     "attributeRange": [1, 10],
     "asyncPartitions": true
@@ -181,12 +181,12 @@ Results are automatically exported to:
       "numPartitions": 0,
       "numAttributes": 1,
       "createMs": "245.12",
-      "insertMs": "3421.56",
+      "insertMs": "34215.60",
       "insertPerSecond": "292",
       "queryPartitionMs": "N/A",
       "queryPartitionCount": 0,
-      "queryFullMs": "124.45",
-      "totalCount": 1000,
+      "queryFullMs": "1244.50",
+      "totalCount": 10000,
       "success": true
     }
   ]
@@ -211,7 +211,7 @@ Edit benchmark files to customize:
 
 ```javascript
 // In partitions-matrix.js
-const RECORDS_PER_TEST = 1000;  // Number of records to insert
+const RECORDS_PER_TEST = 10000; // Number of records to insert
 const BATCH_SIZE = 100;         // Insert batch size
 ```
 
@@ -239,7 +239,7 @@ const BATCH_SIZE = 100;         // Insert batch size
    - Lower is better
    - More partitions = longer creation
 
-2. **Insert Time**: Time to insert 1,000 records
+2. **Insert Time**: Time to insert 10,000 records
    - Lower is better
    - More partitions/attributes = slower inserts
 
@@ -284,9 +284,9 @@ const BATCH_SIZE = 100;         // Insert batch size
 | Partitions | Query Speed | Improvement | Dataset Size |
 |------------|-------------|-------------|--------------|
 | 0 | Full scan | Baseline | Any |
-| 1+ | Filtered | **2-10x faster** | 1,000+ records |
-| 1+ | Filtered | **10-50x faster** | 10,000+ records |
-| 1+ | Filtered | **100x+ faster** | 100,000+ records |
+| 1+ | Filtered | **2-10x faster** | 10,000+ records |
+| 1+ | Filtered | **10-50x faster** | 100,000+ records |
+| 1+ | Filtered | **100x+ faster** | 1,000,000+ records |
 
 ### Performance Recommendations
 
@@ -296,19 +296,19 @@ Based on benchmark results and expected degradation:
 - ✅ Best write performance (~300 rec/sec)
 - ✅ Simplest schema
 - ⚠️ Slower queries on large datasets
-- **Best for**: Write-heavy workloads, small datasets (<1,000 records)
+- **Best for**: Write-heavy workloads, small datasets (<10,000 records)
 
 **3-5 partitions**:
 - ✅ Balanced performance (~240-270 rec/sec)
 - ✅ Good query filtering (2-10x faster)
 - ⚠️ Moderate write overhead (~10-20% slower)
-- **Best for**: Balanced workloads, medium datasets (1,000-10,000 records)
+- **Best for**: Balanced workloads, medium datasets (10,000-100,000 records)
 
 **6+ partitions**:
 - ⚠️ Slower writes (~210-240 rec/sec, 20-30% slower)
 - ✅ Excellent query filtering (10-100x faster)
 - ⚠️ Complex schema management
-- **Best for**: Read-heavy workloads, large datasets (10,000+ records)
+- **Best for**: Read-heavy workloads, large datasets (100,000+ records)
 
 ## Adding New Benchmarks
 
@@ -389,7 +389,7 @@ jobs:
 ### Timeouts
 
 If benchmarks timeout:
-1. Reduce `RECORDS_PER_TEST` (default: 1000)
+1. Reduce `RECORDS_PER_TEST` (default: 10000)
 2. Increase delay between tests
 3. Check S3 connectivity
 4. Verify LocalStack is running (for local tests)
