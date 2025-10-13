@@ -1,0 +1,51 @@
+{
+  "timestamp": "2025-10-13T13:45:23.300Z",
+  "nodeVersion": "v22.6.0",
+  "benchmark": "advanced-encoding",
+  "categories": {
+    "timestamps": {
+      "originalSize": 72,
+      "encodedSize": 45,
+      "savingsPercent": "37.5"
+    },
+    "uuids": {
+      "originalSize": 108,
+      "encodedSize": 45,
+      "savingsPercent": "58.3"
+    },
+    "dictionary": {
+      "originalSize": 37,
+      "encodedSize": 105,
+      "savingsPercent": "-183.8"
+    },
+    "hex": {
+      "originalSize": 44,
+      "encodedSize": 45,
+      "savingsPercent": "-2.3"
+    },
+    "numbers": {
+      "originalSize": 22,
+      "encodedSize": 45,
+      "savingsPercent": "-104.5"
+    },
+    "mixed": {
+      "originalSize": 87,
+      "encodedSize": 90,
+      "savingsPercent": "-3.4"
+    }
+  },
+  "performance": {
+    "iterations": 10000,
+    "testValue": "2025-01-15T10:30:45.123Z",
+    "encodeTimeMs": 10.827582999999997,
+    "decodeTimeMs": 0.3544120000000035,
+    "totalTimeMs": 11.181995,
+    "avgEncodeMsPerOp": 0.0010827582999999997,
+    "avgDecodeMsPerOp": 0.00003544120000000035
+  },
+  "overall": {
+    "grandTotalOriginal": 370,
+    "grandTotalEncoded": 375,
+    "grandTotalSavingsPercent": "-1.4"
+  }
+}

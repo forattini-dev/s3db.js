@@ -1,0 +1,136 @@
+{
+  "timestamp": "2025-10-13T13:45:07.544Z",
+  "nodeVersion": "v22.6.0",
+  "benchmark": "base62",
+  "performance": [
+    {
+      "operation": "encode (0..1e6)",
+      "base36KOpsPerSec": 53248,
+      "base62KOpsPerSec": 23655,
+      "comparison": "2.25x slower"
+    },
+    {
+      "operation": "decode (0..1e6)",
+      "base36KOpsPerSec": 26091,
+      "base62KOpsPerSec": 8339,
+      "comparison": "3.13x slower"
+    },
+    {
+      "operation": "encode (random 1e6)",
+      "base36KOpsPerSec": 2006,
+      "base62KOpsPerSec": 10462,
+      "comparison": "5.22x faster"
+    },
+    {
+      "operation": "decode (random 1e6)",
+      "base36KOpsPerSec": 1707,
+      "base62KOpsPerSec": 2500,
+      "comparison": "1.46x faster"
+    },
+    {
+      "operation": "encode (large 1e5)",
+      "base36KOpsPerSec": 1420,
+      "base62KOpsPerSec": 7741,
+      "comparison": "5.45x faster"
+    },
+    {
+      "operation": "decode (large 1e5)",
+      "base36KOpsPerSec": 1411,
+      "base62KOpsPerSec": 2386,
+      "comparison": "1.69x faster"
+    }
+  ],
+  "compression": {
+    "sequential": {
+      "base36": {
+        "compressionRatio": 32.04152249134948,
+        "avgOriginalDigits": 2.89,
+        "avgEncodedDigits": 1.964,
+        "digitsSaved": 0.9260000000000002
+      },
+      "base62": {
+        "compressionRatio": 32.94117647058824,
+        "avgOriginalDigits": 2.89,
+        "avgEncodedDigits": 1.938,
+        "digitsSaved": 0.9520000000000002
+      }
+    },
+    "random": {
+      "base36": {
+        "compressionRatio": 33.383851140860486,
+        "avgOriginalDigits": 11.877,
+        "avgEncodedDigits": 7.912,
+        "digitsSaved": 3.9650000000000007
+      },
+      "base62": {
+        "compressionRatio": 41.53405742190789,
+        "avgOriginalDigits": 11.877,
+        "avgEncodedDigits": 6.944,
+        "digitsSaved": 4.933000000000001
+      }
+    },
+    "large": {
+      "base36": {
+        "compressionRatio": 32.43012422360248,
+        "avgOriginalDigits": 12.88,
+        "avgEncodedDigits": 8.703,
+        "digitsSaved": 4.177000000000001
+      },
+      "base62": {
+        "compressionRatio": 40.714285714285715,
+        "avgOriginalDigits": 12.88,
+        "avgEncodedDigits": 7.636,
+        "digitsSaved": 5.244000000000001
+      }
+    }
+  },
+  "compressionTable": [
+    {
+      "Data Type": "Sequential (0..999)",
+      "Base36 Compression": "32.04%",
+      "Base62 Compression": "32.94%",
+      "Digits Saved (B36)": "0.93",
+      "Digits Saved (B62)": "0.95"
+    },
+    {
+      "Data Type": "Random Large",
+      "Base36 Compression": "33.38%",
+      "Base62 Compression": "41.53%",
+      "Digits Saved (B36)": "3.97",
+      "Digits Saved (B62)": "4.93"
+    },
+    {
+      "Data Type": "Very Large",
+      "Base36 Compression": "32.43%",
+      "Base62 Compression": "40.71%",
+      "Digits Saved (B36)": "4.18",
+      "Digits Saved (B62)": "5.24"
+    }
+  ],
+  "examples": [
+    {
+      "Number": "10.000",
+      "Base10": "10000",
+      "Base36": "7ps",
+      "Base62": "2Bi",
+      "B36 Saved": "2 (40.00%)",
+      "B62 Saved": "2 (40.00%)"
+    },
+    {
+      "Number": "123.456.789",
+      "Base10": "123456789",
+      "Base36": "21i3v9",
+      "Base62": "8m0Kx",
+      "B36 Saved": "3 (33.33%)",
+      "B62 Saved": "4 (44.44%)"
+    },
+    {
+      "Number": "999.999.999.999",
+      "Base10": "999999999999",
+      "Base36": "cre66i9r",
+      "Base62": "hBxM5A3",
+      "B36 Saved": "4 (33.33%)",
+      "B62 Saved": "5 (41.67%)"
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "timestamp": "2025-10-13T13:45:16.194Z",
+  "nodeVersion": "v22.6.0",
+  "benchmark": "smart-encoding",
+  "iterations": 100000,
+  "encoding": [
+    {
+      "dataType": "ascii",
+      "timeMs": 6.139099,
+      "opsPerSec": 16289035,
+      "avgTimeUs": 0.06139099
+    },
+    {
+      "dataType": "latin",
+      "timeMs": 11.399994,
+      "opsPerSec": 8771934,
+      "avgTimeUs": 0.11399994
+    },
+    {
+      "dataType": "mixed",
+      "timeMs": 10.524366,
+      "opsPerSec": 9501760,
+      "avgTimeUs": 0.10524366
+    },
+    {
+      "dataType": "emoji",
+      "timeMs": 18.961191,
+      "opsPerSec": 5273930,
+      "avgTimeUs": 0.18961191
+    },
+    {
+      "dataType": "cjk",
+      "timeMs": 31.246673,
+      "opsPerSec": 3200341,
+      "avgTimeUs": 0.31246673
+    }
+  ],
+  "decoding": [
+    {
+      "dataType": "ascii",
+      "timeMs": 31.678789,
+      "opsPerSec": 3156686,
+      "avgTimeUs": 0.31678788999999996
+    },
+    {
+      "dataType": "latin",
+      "timeMs": 27.023611,
+      "opsPerSec": 3700468,
+      "avgTimeUs": 0.27023611
+    },
+    {
+      "dataType": "mixed",
+      "timeMs": 18.522073,
+      "opsPerSec": 5398964,
+      "avgTimeUs": 0.18522073
+    },
+    {
+      "dataType": "emoji",
+      "timeMs": 24.536943,
+      "opsPerSec": 4075487,
+      "avgTimeUs": 0.24536943
+    },
+    {
+      "dataType": "cjk",
+      "timeMs": 27.208649,
+      "opsPerSec": 3675302,
+      "avgTimeUs": 0.27208649
+    }
+  ],
+  "analysis": [
+    {
+      "dataType": "ascii",
+      "timeMs": 3.073917,
+      "opsPerSec": 32531783,
+      "avgTimeUs": 0.03073917
+    },
+    {
+      "dataType": "latin",
+      "timeMs": 2.922093,
+      "opsPerSec": 34222046,
+      "avgTimeUs": 0.02922093
+    },
+    {
+      "dataType": "mixed",
+      "timeMs": 4.093804,
+      "opsPerSec": 24427159,
+      "avgTimeUs": 0.04093804000000001
+    },
+    {
+      "dataType": "emoji",
+      "timeMs": 2.802343,
+      "opsPerSec": 35684425,
+      "avgTimeUs": 0.02802343
+    },
+    {
+      "dataType": "cjk",
+      "timeMs": 1.746107,
+      "opsPerSec": 57270259,
+      "avgTimeUs": 0.01746107
+    }
+  ],
+  "comparison": {
+    "smartEncode": {
+      "avgTimeUs": 0.13420434,
+      "opsPerSec": 7451324
+    },
+    "base64Encode": {
+      "avgTimeUs": 0.21138457,
+      "opsPerSec": 4730714
+    },
+    "smartDecode": {
+      "avgTimeUs": 0.36841970999999996,
+      "opsPerSec": 2714296
+    },
+    "base64Decode": {
+      "avgTimeUs": 0.48234725,
+      "opsPerSec": 2073195
+    }
+  },
+  "worstCases": [
+    {
+      "Scenario": "Very long ASCII (1KB)",
+      "Encode μs": "2.6",
+      "Decode μs": "5.2",
+      "Method": "none",
+      "Size": 1000
+    },
+    {
+      "Scenario": "Very long Latin (1KB)",
+      "Encode μs": "4.9",
+      "Decode μs": "5.6",
+      "Method": "base64",
+      "Size": 2222
+    },
+    {
+      "Scenario": "Very long Emoji (1KB)",
+      "Encode μs": "2.8",
+      "Decode μs": "4.3",
+      "Method": "base64",
+      "Size": 1338
+    },
+    {
+      "Scenario": "Highly mixed content",
+      "Encode μs": "2.1",
+      "Decode μs": "1.7",
+      "Method": "url",
+      "Size": 992
+    },
+    {
+      "Scenario": "Looks like base64",
+      "Encode μs": "0.0",
+      "Decode μs": "0.2",
+      "Method": "none",
+      "Size": 16
+    },
+    {
+      "Scenario": "URL encoded lookalike",
+      "Encode μs": "0.0",
+      "Decode μs": "0.0",
+      "Method": "none",
+      "Size": 20
+    },
+    {
+      "Scenario": "With null bytes",
+      "Encode μs": "0.2",
+      "Decode μs": "0.1",
+      "Method": "url",
+      "Size": 22
+    },
+    {
+      "Scenario": "All special chars",
+      "Encode μs": "0.1",
+      "Decode μs": "0.0",
+      "Method": "none",
+      "Size": 29
+    }
+  ],
+  "memory": [
+    {
+      "Type": "ASCII",
+      "Original": 11,
+      "Smart Enc": 11,
+      "Base64": 16,
+      "Smart Overhead": "0%",
+      "Base64 Overhead": "45%"
+    },
+    {
+      "Type": "Latin",
+      "Original": 11,
+      "Smart Enc": 19,
+      "Base64": 16,
+      "Smart Overhead": "73%",
+      "Base64 Overhead": "45%"
+    },
+    {
+      "Type": "Emoji",
+      "Original": 13,
+      "Smart Enc": 25,
+      "Base64": 20,
+      "Smart Overhead": "92%",
+      "Base64 Overhead": "54%"
+    },
+    {
+      "Type": "CJK",
+      "Original": 12,
+      "Smart Enc": 18,
+      "Base64": 16,
+      "Smart Overhead": "50%",
+      "Base64 Overhead": "33%"
+    }
+  ],
+  "summary": {
+    "avgSmartEncodeUs": 0.156542646,
+    "avgSmartDecodeUs": 0.25794013,
+    "throughputOpsPerSec": 2412645,
+    "perfOverheadPercent": -40.253169301070834
+  }
+}
