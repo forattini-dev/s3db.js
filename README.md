@@ -794,7 +794,7 @@ await users.insert({ name: "John", email: "john@example.com" });
 - **📝 [Audit Plugin](./docs/plugins/audit.md)** - Comprehensive audit logging for compliance
 - **📬 [Queue Consumer Plugin](./docs/plugins/queue-consumer.md)** - Message consumption from SQS/RabbitMQ
 - **🔒 [S3Queue Plugin](./docs/plugins/s3-queue.md)** - Distributed queue processing with zero race conditions
-- **📈 [Eventual Consistency Plugin](./docs/plugins/eventual-consistency.md)** - Event sourcing for numeric fields
+- **📈 [Eventual Consistency Plugin](./docs/plugins/eventual-consistency.md)** - Transactional counters with pre-computed analytics (15 functions for time-series data)
 - **📅 [Scheduler Plugin](./docs/plugins/scheduler.md)** - Task scheduling and automation
 - **🔄 [State Machine Plugin](./docs/plugins/state-machine.md)** - State management and transitions
 - **💾 [Backup Plugin](./docs/plugins/backup.md)** - Backup and restore functionality
