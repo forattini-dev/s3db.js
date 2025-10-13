@@ -1868,6 +1868,12 @@ await users.insert({ name: 'John' });
 
 ## 📖 API Reference
 
+### 📚 Core Classes Documentation
+
+- **[Client Class](./docs/client.md)** - Low-level S3 operations, HTTP client configuration, and advanced object management
+- **[Database Class](./docs/database.md)** - High-level database interface (coming soon)
+- **[Resource Class](./docs/resource.md)** - Resource operations and methods (coming soon)
+
 ### 🔌 Database Operations
 
 | Method | Description | Example |
