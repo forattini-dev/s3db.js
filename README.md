@@ -1983,6 +1983,8 @@ console.log(`Total users: ${allUsers.length}`);
 
 ## 📊 Performance Benchmarks
 
+> **⚠️ Important**: All benchmark results documented below were generated using **Node.js v22.6.0**. Performance results may vary with different Node.js versions.
+
 s3db.js includes comprehensive benchmarks demonstrating real-world performance optimizations. Key areas tested:
 
 ### 🎯 Data Encoding & Compression
