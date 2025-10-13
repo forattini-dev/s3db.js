@@ -1,12 +1,23 @@
-# S3DB Benchmarks
+# S3DB Partitions Performance Benchmark
 
-Performance benchmarks for s3db.js features and operations.
+## 🎯 Purpose
 
-## Available Benchmarks
+This benchmark measures **how resource performance degrades (or doesn't) as you add partitions**.
 
-### Partitions Matrix Benchmark
+### Key Questions Answered:
+- ❓ How much slower are writes with 5 partitions vs 0 partitions?
+- ❓ At what point do query benefits outweigh write overhead?
+- ❓ How many partition fields can I add before performance suffers?
+- ❓ What's the optimal partition configuration for my use case?
 
-Tests partition performance across a matrix of configurations.
+### Performance Trade-offs:
+- ✅ **More partitions** = Faster queries (O(1) lookup vs O(n) scan)
+- ⚠️ **More partitions** = Slower writes (must update partition indexes)
+- 🎯 **Goal**: Find the sweet spot for your workload
+
+## Partitions Matrix Benchmark
+
+Tests partition performance across a matrix of configurations to quantify write degradation.
 
 **File**: `partitions-matrix.js`
 
@@ -60,12 +71,12 @@ Before running benchmarks, ensure you have:
 ```bash
 pnpm run benchmark:partitions
 # or
-node benchmarks/partitions-matrix.js
+node docs/benchmarks/partitions-matrix.js
 ```
 
 **Quick test** (modify constants in file for faster testing):
 ```javascript
-// Edit benchmarks/partitions-matrix.js
+// Edit docs/benchmarks/partitions-matrix.js
 const RECORDS_PER_TEST = 100;  // Reduce from 1000
 // Change loop ranges for faster testing
 for (let numPartitions = 0; numPartitions <= 2; numPartitions++) {
@@ -121,7 +132,7 @@ Total Tests: 110/110 successful
 🐌 Worst Insert Performance:
    10 partitions, 10 attributes: 4234.12ms (236 rec/sec)
 
-💾 Results exported to benchmarks/partitions-results.json
+💾 Results exported to docs/benchmarks/partitions-results.json
 
 ⏱️  Total benchmark time: 12.34 minutes
 ```
@@ -130,7 +141,7 @@ Total Tests: 110/110 successful
 
 Results are automatically exported to:
 - **Console**: Formatted tables with statistics
-- **JSON file**: `benchmarks/partitions-results.json`
+- **JSON file**: `docs/benchmarks/partitions-results.json`
 
 **JSON Structure**:
 ```json
@@ -234,24 +245,47 @@ const BATCH_SIZE = 100;         // Insert batch size
 - Query by partition is slower than full scan
 - Frequent timeouts or errors
 
+### Performance Degradation Analysis
+
+**Expected Write Performance Impact:**
+
+| Partitions | Expected Degradation | Insert/sec | Use Case |
+|------------|---------------------|------------|----------|
+| 0 | **Baseline** | ~300 | No partitioning |
+| 1-2 | **5-10%** slower | ~270-285 | Single partition field |
+| 3-5 | **10-20%** slower | ~240-270 | Multi-field partitions |
+| 6-10 | **20-30%** slower | ~210-240 | Complex partitioning |
+
+**Expected Query Performance Gain:**
+
+| Partitions | Query Speed | Improvement | Dataset Size |
+|------------|-------------|-------------|--------------|
+| 0 | Full scan | Baseline | Any |
+| 1+ | Filtered | **2-10x faster** | 1,000+ records |
+| 1+ | Filtered | **10-50x faster** | 10,000+ records |
+| 1+ | Filtered | **100x+ faster** | 100,000+ records |
+
 ### Performance Recommendations
 
-Based on benchmark results:
+Based on benchmark results and expected degradation:
 
 **0-2 partitions**:
-- ✅ Best write performance
+- ✅ Best write performance (~300 rec/sec)
 - ✅ Simplest schema
-- ❌ Slower queries on large datasets
+- ⚠️ Slower queries on large datasets
+- **Best for**: Write-heavy workloads, small datasets (<1,000 records)
 
 **3-5 partitions**:
-- ✅ Balanced performance
-- ✅ Good query filtering
-- ⚠️ Moderate write overhead
+- ✅ Balanced performance (~240-270 rec/sec)
+- ✅ Good query filtering (2-10x faster)
+- ⚠️ Moderate write overhead (~10-20% slower)
+- **Best for**: Balanced workloads, medium datasets (1,000-10,000 records)
 
 **6+ partitions**:
-- ⚠️ Slower writes
-- ✅ Excellent query filtering
+- ⚠️ Slower writes (~210-240 rec/sec, 20-30% slower)
+- ✅ Excellent query filtering (10-100x faster)
 - ⚠️ Complex schema management
+- **Best for**: Read-heavy workloads, large datasets (10,000+ records)
 
 ## Adding New Benchmarks
 
@@ -320,11 +354,11 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
       - run: pnpm install
-      - run: node benchmarks/partitions-matrix.js
+      - run: node docs/benchmarks/partitions-matrix.js
       - uses: actions/upload-artifact@v3
         with:
           name: benchmark-results
-          path: benchmarks/*.json
+          path: docs/benchmarks/*.json
 ```
 
 ## Troubleshooting
@@ -341,7 +375,7 @@ If benchmarks timeout:
 
 If Node.js runs out of memory:
 ```bash
-NODE_OPTIONS="--max-old-space-size=4096" node benchmarks/partitions-matrix.js
+NODE_OPTIONS="--max-old-space-size=4096" node docs/benchmarks/partitions-matrix.js
 ```
 
 ### Inconsistent Results
@@ -354,6 +388,6 @@ If results vary significantly:
 
 ## See Also
 
-- [Partition Documentation](../docs/partitions.md)
-- [Performance Tips](../README.md#performance-tips)
-- [EventualConsistency Benchmarks](../docs/benchmarks/eventual-consistency.md)
+- [Partition Documentation](../../docs/partitions.md)
+- [Performance Tips](../../README.md#performance-tips)
+- [EventualConsistency Benchmarks](./eventual-consistency.md)

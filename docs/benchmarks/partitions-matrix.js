@@ -12,7 +12,7 @@
  * - Query without filter (full scan)
  */
 
-import { createDatabaseForTest } from '../tests/config.js';
+import { createDatabaseForTest } from '../../tests/config.js';
 
 const RECORDS_PER_TEST = 1000;
 const PARTITION_FIELD_PREFIX = 'part';
@@ -316,8 +316,8 @@ async function main() {
       results
     };
 
-    fs.writeFileSync('benchmarks/partitions-results.json', JSON.stringify(data, null, 2));
-    console.log(`\n💾 Results exported to benchmarks/partitions-results.json`);
+    fs.writeFileSync('docs/benchmarks/partitions-results.json', JSON.stringify(data, null, 2));
+    console.log(`\n💾 Results exported to docs/benchmarks/partitions-results.json`);
   } catch (error) {
     console.error('\n⚠️  Failed to export JSON:', error.message);
   }

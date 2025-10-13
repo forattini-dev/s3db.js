@@ -71,7 +71,7 @@
     "test:plugins": "node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/plugins/ --testTimeout=60000",
     "test:full": "pnpm run test:js && pnpm run test:ts",
     "benchmark": "node benchmark-compression.js",
-    "benchmark:partitions": "node benchmarks/partitions-matrix.js",
+    "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
     "prepare": "pnpm run build && bash scripts/install-hooks.sh",
     "version": "echo 'Use pnpm run release v<version> instead of npm version'",
     "release:check": "./scripts/pre-release-check.sh",
