@@ -14,7 +14,7 @@
 
 import { createDatabaseForTest } from '../../tests/config.js';
 
-const RECORDS_PER_TEST = 1000;
+const RECORDS_PER_TEST = 10000;
 const PARTITION_FIELD_PREFIX = 'part';
 const ATTRIBUTE_PREFIX = 'attr';
 
