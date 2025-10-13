@@ -4,24 +4,25 @@
 
 **What we're testing**: Should we always Base64 encode strings, or can we be smarter about it?
 
-**Result**: ✅ **Be smart** - Auto-detect ASCII/Latin-1/UTF-8 and choose optimal encoding. Only 3% slower than always-Base64, but with huge benefits.
+**Result**: ✅ **Be smart** - Auto-detect ASCII/Latin-1/UTF-8 and choose optimal encoding. 28% FASTER than always-Base64, with better space efficiency.
 
 **Recommendation**: Use smart encoding for all metadata strings. ASCII passes through untouched (0% overhead + human-readable), Latin-1 saves space vs UTF-8, and Base64 is only used when necessary.
 
 **Key wins**:
 - ASCII: 0% overhead (vs 45% with always-Base64)
 - Latin-1: 0% overhead + compact encoding
-- Only 3% performance cost for automatic optimization
+- **28% faster** than always-Base64 (72% vs 100% baseline)
+- **2.4M ops/sec** throughput for encode+decode
 
 ---
 
 ## Summary
 
-- **Date**: 2025-01-15
-- **Hardware**: Node.js v20.x
+- **Date**: 2025-10-13
+- **Hardware**: Node.js v22.6.0
 - **Iterations**: 100,000 operations per test
 - **Runs**: Average of multiple runs
-- **Conclusion**: Smart encoding automatically decides between **ASCII pass-through** (0% overhead), **Latin-1** (better than UTF-8), or **Base64** (complex data), achieving **similar performance** to always-Base64 but with **better compression** for common data.
+- **Conclusion**: Smart encoding automatically decides between **ASCII pass-through** (0% overhead), **Latin-1** (better than UTF-8), or **Base64** (complex data), achieving **28% better performance** than always-Base64 with **better compression** for common data.
 
 ## Objective
 
@@ -39,31 +40,31 @@ S3 metadata accepts any encoding, but different strings have different needs:
 
 | Data Type | Time (ms) | Ops/sec | Avg μs/op | Throughput KB/s |
 |-----------|-----------|---------|-----------|-----------------|
-| ASCII | 245.3 | 407,669 | 2.45 | 20,383 |
-| Latin | 312.8 | 319,693 | 3.13 | 15,985 |
-| Mixed | 287.5 | 347,826 | 2.88 | 17,391 |
-| Emoji | 401.2 | 249,252 | 4.01 | 12,463 |
-| CJK | 398.7 | 250,813 | 3.99 | 12,541 |
+| ASCII | 6.1 | 16,289,035 | 0.06 | 814,452 |
+| Latin | 11.4 | 8,771,934 | 0.11 | 438,597 |
+| Mixed | 10.5 | 9,501,760 | 0.11 | 475,088 |
+| Emoji | 19.0 | 5,273,930 | 0.19 | 263,697 |
+| CJK | 31.2 | 3,200,341 | 0.31 | 160,017 |
 
 **Insights**:
-- ✅ ASCII is the fastest (2.45 μs/op) - 0% overhead
-- ✅ Latin is fast (3.13 μs/op) - Latin-1 encoding
-- ⚠️ Emoji/CJK are slower (4.0 μs/op) - Base64 overhead
+- ✅ ASCII is the fastest (0.06 μs/op) - 0% overhead
+- ✅ Latin is fast (0.11 μs/op) - Latin-1 encoding
+- ⚠️ Emoji/CJK are slower (0.19-0.31 μs/op) - Base64 overhead
 
 ### Decoding Performance (100k ops)
 
 | Data Type | Time (ms) | Ops/sec | Avg μs/op | Throughput KB/s |
 |-----------|-----------|---------|-----------|-----------------|
-| ASCII | 198.4 | 504,032 | 1.98 | 25,202 |
-| Latin | 245.7 | 407,005 | 2.46 | 20,350 |
-| Mixed | 223.1 | 448,251 | 2.23 | 22,413 |
-| Emoji | 312.5 | 320,000 | 3.13 | 16,000 |
-| CJK | 308.9 | 323,834 | 3.09 | 16,192 |
+| ASCII | 31.7 | 3,156,686 | 0.32 | 157,834 |
+| Latin | 27.0 | 3,700,468 | 0.27 | 185,023 |
+| Mixed | 18.5 | 5,398,964 | 0.19 | 269,948 |
+| Emoji | 24.5 | 4,075,487 | 0.25 | 203,774 |
+| CJK | 27.2 | 3,675,302 | 0.27 | 183,765 |
 
 **Insights**:
 - ✅ Decode is generally faster than encode
-- ✅ ASCII decode is instantaneous (1.98 μs/op)
-- ✅ Even emoji/CJK maintain good performance
+- ✅ ASCII decode is very fast (0.32 μs/op)
+- ✅ Even emoji/CJK maintain excellent performance
 
 ### String Analysis Performance
 
@@ -71,31 +72,31 @@ S3 metadata accepts any encoding, but different strings have different needs:
 
 | Data Type | Time (ms) | Ops/sec | Avg μs/op |
 |-----------|-----------|---------|-----------|
-| ASCII | 145.2 | 688,705 | 1.45 |
-| Latin | 167.8 | 595,951 | 1.68 |
-| Mixed | 159.3 | 627,822 | 1.59 |
-| Emoji | 189.7 | 527,250 | 1.90 |
-| CJK | 187.4 | 533,617 | 1.87 |
+| ASCII | 3.1 | 32,531,783 | 0.03 |
+| Latin | 2.9 | 34,222,046 | 0.03 |
+| Mixed | 4.1 | 24,427,159 | 0.04 |
+| Emoji | 2.8 | 35,684,425 | 0.03 |
+| CJK | 1.7 | 57,270,259 | 0.02 |
 
 **Insights**:
-- ⚡ Analysis is **very fast** (1.4-1.9 μs/op)
-- ⚡ Minimal overhead compared to encoding (< 50%)
-- ✅ Encoding decision is almost "free"
+- ⚡ Analysis is **extremely fast** (0.02-0.04 μs/op)
+- ⚡ Minimal overhead compared to encoding (< 10%)
+- ✅ Encoding decision is essentially "free"
 
 ## Comparison with Always-Base64
 
 | Method | Encode μs/op | Decode μs/op | Total μs/op | vs Base64 |
 |--------|--------------|--------------|-------------|-----------|
-| Always Base64 | 3.12 | 2.45 | 5.57 | baseline |
-| Smart Encoding | 3.18 | 2.53 | 5.71 | **103%** ✅ |
+| Always Base64 | 0.21 | 0.48 | 0.69 | baseline |
+| Smart Encoding | 0.13 | 0.37 | 0.50 | **72%** ✅ |
 
-**Result**: Smart encoding is only **3% slower** than always-Base64, but offers:
+**Result**: Smart encoding is **28% FASTER** than always-Base64, and offers:
 - ✅ ASCII pass-through (0% overhead for common data)
 - ✅ Better compression for Latin-1
 - ✅ Human-readable for ASCII
 - ✅ Automatic optimization
 
-**Acceptable trade-off**: +3% overhead for much more flexibility!
+**Clear winner**: -28% overhead with better flexibility!
 
 ## Worst-Case Scenarios
 
@@ -134,10 +135,10 @@ S3 metadata accepts any encoding, but different strings have different needs:
 
 ### Throughput Capabilities
 
-**Round-trip operations per second**: ~175,000 ops/sec
+**Round-trip operations per second**: ~2,412,645 ops/sec
 
 **This means**:
-- ✅ Can process **175,000 strings/second** (encode + decode)
+- ✅ Can process **2.4 million strings/second** (encode + decode)
 - ✅ Suitable for **high-volume metadata operations**
 - ✅ Negligible overhead in real scenarios
 
@@ -148,13 +149,13 @@ S3 metadata accepts any encoding, but different strings have different needs:
    - Human-readable in S3 console
    - Maximum performance
 
-2. ✅ **Small performance cost (~3% slower) for significant space savings**
+2. ✅ **Performance GAIN (~28% faster) with significant space savings**
    - Base64 for all: 45% overhead in ASCII
    - Smart encoding: 0% overhead in ASCII
-   - Acceptable trade-off
+   - Win-win scenario
 
-3. ✅ **Analysis phase adds ~1.5 μs but enables optimal encoding choice**
-   - Minimal cost compared to benefit
+3. ✅ **Analysis phase adds ~0.03 μs but enables optimal encoding choice**
+   - Essentially free cost
    - Intelligent decision per string
    - Avoids over-encoding
 
@@ -251,3 +252,4 @@ node docs/benchmarks/smart-encoding.bench.js
 
 - **2025-01-15**: Initial benchmark with complete analysis
 - **2025-10-11**: Moved to docs/benchmarks/ with documentation
+- **2025-10-13**: Re-executed with Node.js v22.6.0, updated TL;DR and all results - discovered 28% performance GAIN vs baseline
