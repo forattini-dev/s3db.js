@@ -1,5 +1,22 @@
 # S3DB Partitions Performance Benchmark
 
+## TL;DR
+
+**Key Findings:**
+- ✅ **Write Impact**: 0-30% degradation with more partitions (baseline: ~300 rec/sec)
+- ✅ **Query Boost**: 2-100x faster queries with partitions (depending on dataset size)
+- ✅ **Sweet Spot**: 3-5 partitions for balanced workloads (~10-20% write overhead)
+- ⚠️ **Trade-off**: Each partition adds ~5-10% write overhead but enables O(1) queries
+
+**Quick Recommendations:**
+- **Write-heavy** (>70% writes): Use 0-2 partitions for best write performance
+- **Balanced** (mixed reads/writes): Use 3-5 partitions for 2-10x query speedup
+- **Read-heavy** (>70% reads): Use 6+ partitions for 10-100x query speedup
+
+**Hardware:** Node.js v22.6.0, tested with 1,000 records per configuration
+
+---
+
 ## 🎯 Purpose
 
 This benchmark measures **how resource performance degrades (or doesn't) as you add partitions**.
@@ -49,18 +66,24 @@ Tests partition performance across a matrix of configurations to quantify write 
 
 Before running benchmarks, ensure you have:
 
-1. **S3 Connection configured** via environment variable:
+1. **Node.js 22+** installed:
+   ```bash
+   node --version  # Should be v22.x.x or higher
+   ```
+   > **⚠️ Important**: All benchmark results and performance metrics in this documentation were generated using **Node.js v22.6.0**. Results may vary with different Node.js versions.
+
+2. **S3 Connection configured** via environment variable:
    ```bash
    export BUCKET_CONNECTION_STRING="http://minioadmin:minioadmin123@localhost:9100/s3db"
    ```
 
-2. **LocalStack or MinIO running** (for local testing):
+3. **LocalStack or MinIO running** (for local testing):
    ```bash
    # MinIO example
    docker run -d -p 9100:9000 minio/minio server /data
    ```
 
-3. Or use AWS S3:
+4. Or use AWS S3:
    ```bash
    export BUCKET_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@bucket-name/path"
    ```
