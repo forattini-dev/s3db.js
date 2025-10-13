@@ -331,3 +331,63 @@ console.log(`
    • Small performance cost (~${perfOverhead.toFixed(0)}% slower) for significant space savings
    • Analysis phase adds ~${analysisResults[0].avgTimeUs.toFixed(1)} μs but enables optimal encoding choice
 `);
+
+// Export results to JSON
+try {
+  const fs = await import('fs');
+  const results = {
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    benchmark: 'smart-encoding',
+    iterations: 100000,
+    encoding: encodingResults.map(r => ({
+      dataType: r.dataType,
+      timeMs: r.timeMs,
+      opsPerSec: r.opsPerSec,
+      avgTimeUs: r.avgTimeUs
+    })),
+    decoding: decodingResults.map(r => ({
+      dataType: r.dataType,
+      timeMs: r.timeMs,
+      opsPerSec: r.opsPerSec,
+      avgTimeUs: r.avgTimeUs
+    })),
+    analysis: analysisResults.map(r => ({
+      dataType: r.dataType,
+      timeMs: r.timeMs,
+      opsPerSec: r.opsPerSec,
+      avgTimeUs: r.avgTimeUs
+    })),
+    comparison: {
+      smartEncode: {
+        avgTimeUs: metadataEncodeResult.avgTimeUs,
+        opsPerSec: metadataEncodeResult.opsPerSec
+      },
+      base64Encode: {
+        avgTimeUs: base64EncodeResult.avgTimeUs,
+        opsPerSec: base64EncodeResult.opsPerSec
+      },
+      smartDecode: {
+        avgTimeUs: metadataDecodeResult.avgTimeUs,
+        opsPerSec: metadataDecodeResult.opsPerSec
+      },
+      base64Decode: {
+        avgTimeUs: base64DecodeResult.avgTimeUs,
+        opsPerSec: base64DecodeResult.opsPerSec
+      }
+    },
+    worstCases: worstCaseResults,
+    memory: memoryTable,
+    summary: {
+      avgSmartEncodeUs: avgSmartEncode,
+      avgSmartDecodeUs: avgSmartDecode,
+      throughputOpsPerSec: Math.round(1000000 / (avgSmartEncode + avgSmartDecode)),
+      perfOverheadPercent: perfOverhead
+    }
+  };
+
+  fs.writeFileSync('docs/benchmarks/smart-encoding_results.json', JSON.stringify(results, null, 2));
+  console.log('\n💾 Results exported to docs/benchmarks/smart-encoding_results.json');
+} catch (error) {
+  console.error('\n⚠️  Failed to export JSON:', error.message);
+}

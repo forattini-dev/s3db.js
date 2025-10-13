@@ -142,4 +142,43 @@ console.log(`  Encode: ${(encodeTime / iterations).toFixed(3)}ms per operation (
 console.log(`  Decode: ${(decodeTime / iterations).toFixed(3)}ms per operation (${iterations} ops)`);
 console.log(`  Total:  ${(encodeTime + decodeTime).toFixed(2)}ms for ${iterations * 2} operations\n`);
 
+// Export results to JSON
+try {
+  const fs = await import('fs');
+  const exportResults = {
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    benchmark: 'advanced-encoding',
+    categories: {},
+    performance: {
+      iterations,
+      testValue,
+      encodeTimeMs: encodeTime,
+      decodeTimeMs: decodeTime,
+      totalTimeMs: encodeTime + decodeTime,
+      avgEncodeMsPerOp: encodeTime / iterations,
+      avgDecodeMsPerOp: decodeTime / iterations
+    },
+    overall: {
+      grandTotalOriginal,
+      grandTotalEncoded,
+      grandTotalSavingsPercent: grandTotalSavings
+    }
+  };
+
+  // Add category results
+  for (const [category, result] of Object.entries(results)) {
+    exportResults.categories[category] = {
+      originalSize: result.originalSize,
+      encodedSize: result.encodedSize,
+      savingsPercent: result.savings
+    };
+  }
+
+  fs.writeFileSync('docs/benchmarks/advanced-encoding_results.json', JSON.stringify(exportResults, null, 2));
+  console.log(`${colors.blue}💾 Results exported to docs/benchmarks/advanced-encoding_results.json${colors.reset}\n`);
+} catch (error) {
+  console.error(`${colors.red}⚠️  Failed to export JSON: ${error.message}${colors.reset}\n`);
+}
+
 console.log(`${colors.green}✅ Benchmark complete!${colors.reset}\n`);

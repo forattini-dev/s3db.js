@@ -191,6 +191,34 @@ const examplesTable = examples.map(num => {
 });
 console.table(examplesTable);
 
+// Export results to JSON
+try {
+  const fs = await import('fs');
+  const results = {
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    benchmark: 'base62',
+    performance: performanceResults.map(r => ({
+      operation: r.Operation,
+      base36KOpsPerSec: r['Base36 (k ops/s)'],
+      base62KOpsPerSec: r['Base62 (k ops/s)'],
+      comparison: r['Base62 vs Base36']
+    })),
+    compression: {
+      sequential: compressionSequential,
+      random: compressionRandom,
+      large: compressionLarge
+    },
+    compressionTable: compressionTable,
+    examples: examplesTable
+  };
+
+  fs.writeFileSync('docs/benchmarks/base62_results.json', JSON.stringify(results, null, 2));
+  console.log('\n💾 Results exported to docs/benchmarks/base62_results.json');
+} catch (error) {
+  console.error('\n⚠️  Failed to export JSON:', error.message);
+}
+
 /**
 encode (0..1e6): avg=24607037 ops/sec, fastest=28309788, slowest=18925580
 decode (0..1e6): avg=8598851 ops/sec, fastest=8762183, slowest=8416288

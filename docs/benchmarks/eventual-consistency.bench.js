@@ -300,6 +300,44 @@ async function runAllBenchmarks() {
     console.log(`  ${colors.magenta}Speedup (concurrency 10→50):${colors.reset} ${speedup.toFixed(2)}x faster`);
   }
 
+  // Export results to JSON
+  try {
+    const fs = await import('fs');
+    const exportResults = {
+      timestamp: new Date().toISOString(),
+      nodeVersion: process.version,
+      benchmark: 'eventual-consistency',
+      results: results.map(r => ({
+        test: r.Test,
+        avgOpsPerSec: parseFloat(r['Avg ops/s'].replace(/,/g, '')),
+        fastest: parseFloat(r['Fastest'].replace(/,/g, '')),
+        stdDev: r['StdDev']
+      })),
+      configs: configs.map((c, i) => ({
+        name: c.name,
+        markAppliedConcurrency: [10, 50, 100][i]
+      })),
+      analysis: {
+        consolidation100_10: consolidation100_10 ? {
+          test: consolidation100_10.Test,
+          avgOpsPerSec: parseFloat(consolidation100_10['Avg ops/s'].replace(/,/g, ''))
+        } : null,
+        consolidation100_50: consolidation100_50 ? {
+          test: consolidation100_50.Test,
+          avgOpsPerSec: parseFloat(consolidation100_50['Avg ops/s'].replace(/,/g, ''))
+        } : null,
+        speedup: consolidation100_10 && consolidation100_50 ?
+          (parseFloat(consolidation100_50['Avg ops/s'].replace(/,/g, '')) /
+           parseFloat(consolidation100_10['Avg ops/s'].replace(/,/g, ''))) : null
+      }
+    };
+
+    fs.writeFileSync('docs/benchmarks/eventual-consistency_results.json', JSON.stringify(exportResults, null, 2));
+    console.log(`${colors.blue}💾 Results exported to docs/benchmarks/eventual-consistency_results.json${colors.reset}\n`);
+  } catch (error) {
+    console.error(`${colors.red}⚠️  Failed to export JSON: ${error.message}${colors.reset}\n`);
+  }
+
   console.log(`\n${colors.green}✅ Benchmark complete!${colors.reset}\n`);
   console.log(`${colors.dim}Results saved to: docs/benchmarks/eventual-consistency.md${colors.reset}\n`);
 }
