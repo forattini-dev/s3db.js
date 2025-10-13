@@ -2,6 +2,8 @@
 
 Centralized performance benchmarks for s3db.js.
 
+> **⚠️ Important**: All benchmarks in this directory were executed with **Node.js v22.6.0**. Performance results may vary with different Node.js versions.
+
 ## 🎯 Objective
 
 Measure and document the performance of critical s3db.js components to:
@@ -27,6 +29,13 @@ docs/benchmarks/
 ```
 
 ## 🚀 How to Run
+
+### Prerequisites
+
+- **Node.js 22+** installed (all benchmarks tested with v22.6.0)
+  ```bash
+  node --version  # Should be v22.x.x or higher
+  ```
 
 ### Run All Benchmarks
 
@@ -95,8 +104,8 @@ bench('Test 2', ...);
 
 ## Summary
 - **Date**: YYYY-MM-DD
+- **Node.js**: v22.6.0
 - **Hardware**: [specs]
-- **Node.js**: v20.x
 - **Conclusion**: [executive summary]
 
 ## Results
