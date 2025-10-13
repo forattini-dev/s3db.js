@@ -2,18 +2,20 @@
 
 ## TL;DR
 
-**Key Findings:**
-- ✅ **Write Impact**: 0-30% degradation with more partitions (baseline: ~300 rec/sec)
-- ✅ **Query Boost**: 2-100x faster queries with partitions (depending on dataset size)
-- ✅ **Sweet Spot**: 3-5 partitions for balanced workloads (~10-20% write overhead)
-- ⚠️ **Trade-off**: Each partition adds ~5-10% write overhead but enables O(1) queries
+⚠️ **STATUS: PROJECTED RESULTS** - Full benchmark not yet executed (requires 10-20 hours)
 
-**Quick Recommendations:**
+**Projected Findings:**
+- ✅ **Write Impact**: 0-30% degradation expected with more partitions (baseline: ~300 rec/sec)
+- ✅ **Query Boost**: 2-100x faster queries expected with partitions (depending on dataset size)
+- ✅ **Sweet Spot**: 3-5 partitions projected for balanced workloads (~10-20% write overhead)
+- ⚠️ **Trade-off**: Each partition expected to add ~5-10% write overhead but enable O(1) queries
+
+**Quick Recommendations (Projected):**
 - **Write-heavy** (>70% writes): Use 0-2 partitions for best write performance
 - **Balanced** (mixed reads/writes): Use 3-5 partitions for 2-10x query speedup
 - **Read-heavy** (>70% reads): Use 6+ partitions for 10-100x query speedup
 
-**Hardware:** Node.js v22.6.0, tested with 10,000 records per configuration
+**Test Configuration:** Node.js v22.6.0, 10,000 records per configuration, 110 total tests
 
 ---
 
@@ -123,6 +125,7 @@ Configuration:
 
 ================================================================================
 PARTITIONS PERFORMANCE BENCHMARK RESULTS
+⚠️  NOTE: Results below are PROJECTED - actual benchmark not yet executed
 ================================================================================
 
 📊 0 Partitions (No Partitioning)

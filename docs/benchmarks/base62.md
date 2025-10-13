@@ -4,7 +4,7 @@
 
 **What we're testing**: Is Base62 better than Base36 for encoding large numbers?
 
-**Result**: ✅ **YES for large numbers** (5x faster, 40% better compression), ❌ **NO for small numbers** (2-3x slower)
+**Result**: ✅ **YES for large numbers** (5.22-5.45x faster, 41% better compression), ❌ **NO for small numbers** (2.25-3.13x slower)
 
 **Recommendation**: Use Base62 for timestamps (Unix epoch), large IDs (> 1M), and when maximum compression is needed. Use Base36 or plain numbers for small sequential values.
 
@@ -12,11 +12,11 @@
 
 ## Summary
 
-- **Date**: 2025-01-15
-- **Hardware**: Node.js v20.x
+- **Date**: 2025-10-13
+- **Hardware**: Node.js v22.6.0
 - **Iterations**: 1,000,000 operations (sequential), 100,000 operations (large numbers)
 - **Runs**: 5 runs per test (average reported)
-- **Conclusion**: Base62 is **5-5.37x faster** than Base36 for large and random numbers, but **2-3x slower** for small sequential numbers. **Superior compression** in all scenarios (32-41% vs 32-34%).
+- **Conclusion**: Base62 is **5.22-5.45x faster** than Base36 for large and random numbers, but **2.25-3.13x slower** for small sequential numbers. **Superior compression** in all scenarios (32-41% vs 32-33%).
 
 ## Results
 
@@ -24,19 +24,19 @@
 
 | Operation | Base36 (k ops/s) | Base62 (k ops/s) | Base62 vs Base36 |
 |-----------|------------------|------------------|------------------|
-| encode (0..1e6) | 60,742 | 24,607 | **2.47x slower** |
-| decode (0..1e6) | 31,856 | 8,599 | **3.70x slower** |
-| encode (random 1e6) | 2,186 | 10,936 | **5.00x faster** ✅ |
-| decode (random 1e6) | 2,058 | 2,967 | **1.44x faster** ✅ |
-| encode (large 1e5) | 1,669 | 8,956 | **5.37x faster** ✅ |
-| decode (large 1e5) | 1,599 | 2,485 | **1.55x faster** ✅ |
+| encode (0..1e6) | 53,248 | 23,655 | **2.25x slower** |
+| decode (0..1e6) | 26,091 | 8,339 | **3.13x slower** |
+| encode (random 1e6) | 2,006 | 10,462 | **5.22x faster** ✅ |
+| decode (random 1e6) | 1,707 | 2,500 | **1.46x faster** ✅ |
+| encode (large 1e5) | 1,420 | 7,741 | **5.45x faster** ✅ |
+| decode (large 1e5) | 1,411 | 2,386 | **1.69x faster** ✅ |
 
 ### Compression Analysis
 
 | Data Type | Base36 Compression | Base62 Compression | Digits Saved (B36) | Digits Saved (B62) |
 |-----------|-------------------|-------------------|-------------------|-------------------|
 | Sequential (0..999) | 32.04% | **32.94%** | 0.93 | 0.95 |
-| Random Large | 33.46% | **41.62%** ✅ | 3.98 | 4.95 |
+| Random Large | 33.38% | **41.53%** ✅ | 3.97 | 4.93 |
 | Very Large | 32.43% | **40.71%** ✅ | 4.18 | 5.24 |
 
 ### Compression Examples
@@ -106,3 +106,4 @@ node docs/benchmarks/base62.bench.js
 
 - **2025-01-15**: Initial benchmark with performance data
 - **2025-10-11**: Moved to docs/benchmarks/ with centralization
+- **2025-10-13**: Re-executed with Node.js v22.6.0, updated TL;DR and all results with real data from base62_results.json
