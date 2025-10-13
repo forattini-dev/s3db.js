@@ -2012,7 +2012,7 @@ s3db.js includes comprehensive benchmarks demonstrating real-world performance o
 
 ### 🗂️ Partitioning Performance
 
-**[Partitions Matrix Benchmark](./benchmarks/README.md#partitions-matrix-benchmark)** - Performance testing across partition configurations
+**[Partitions Matrix Benchmark](./docs/benchmarks/partitions.md)** - Performance testing across partition configurations
 - **Test matrix**: 0-10 partitions × 1-10 attributes (110 combinations)
 - **Measurements**: Create, insert, query (partition & full scan)
 - **Insights**: Find optimal partition configuration for your use case
