@@ -1972,3 +1972,44 @@ console.log(`Total users: ${allUsers.length}`);
 |--------|-------------|---------|
 | `readable(options?)` | Create readable stream | `await users.readable()` |
 | `writable(options?)` | Create writable stream | `await users.writable()` |
+
+---
+
+## 📊 Performance Benchmarks
+
+s3db.js includes comprehensive benchmarks demonstrating real-world performance optimizations. Key areas tested:
+
+### 🎯 Data Encoding & Compression
+
+**[Base62 Encoding](./docs/benchmarks/base62.md)** - Number compression for S3 metadata
+- **40-46% space savings** for large numbers
+- **5x faster encoding** vs Base36
+- **Real-world impact**: More data fits in 2KB S3 metadata limit
+
+**[Advanced Encoding](./docs/benchmarks/advanced-encoding.md)** - Multi-technique compression
+- **67% savings** on ISO timestamps (Unix Base62)
+- **33% savings** on UUIDs (Binary Base64)
+- **95% savings** on common values (Dictionary encoding)
+- **Overall**: 40-50% metadata reduction on typical datasets
+
+**[Smart Encoding](./docs/benchmarks/smart-encoding.md)** - Intelligent encoding selection
+- **Automatic type detection** and optimal encoding selection
+- **2-3x faster** UTF-8 byte calculations with caching
+- **Lazy evaluation** for performance-critical paths
+
+### 🔌 Plugin Performance
+
+**[EventualConsistency Plugin](./docs/benchmarks/eventual-consistency.md)** - Transaction processing & analytics
+- **70-100% faster writes** with async partitions
+- **Parallel analytics updates** for high-throughput scenarios
+- **O(1) partition queries** vs O(n) full scans
+
+### 📖 Benchmark Documentation
+
+All benchmarks include:
+- ✅ **TL;DR summary** - Quick results and recommendations
+- ✅ **Code examples** - Runnable benchmark scripts
+- ✅ **Performance metrics** - Real numbers with explanations
+- ✅ **Use cases** - When to apply each optimization
+
+**[📋 Complete Benchmark Index](./docs/benchmarks/README.md)**
