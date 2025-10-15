@@ -919,3 +919,123 @@ async function optimizeBasedOnMetrics() {
 - [Cache Plugin](./cache.md) - Improve performance based on metrics insights
 - [Audit Plugin](./audit.md) - Combine with audit logs for complete observability
 - [Costs Plugin](./costs.md) - Monitor costs alongside performance metrics
+
+## ❓ FAQ
+
+### Básico
+
+**P: O que o MetricsPlugin monitora?**
+R: Performance (duração), errors e contadores de operações para todos os recursos e operações (insert, update, delete, get, list, etc).
+
+**P: Onde as métricas são armazenadas?**
+R: Em três recursos S3DB: `plg_metrics` (operações), `plg_error_logs` (erros), `plg_performance_logs` (performance detalhada).
+
+**P: Qual o overhead de performance?**
+R: Mínimo (<1ms por operação). O plugin usa wrapping de métodos e flush periódico para não bloquear operações.
+
+### Configuração
+
+**P: Como desabilitar coleta de performance?**
+R: Configure `collectPerformance: false`:
+```javascript
+new MetricsPlugin({
+  collectPerformance: false,
+  collectErrors: true
+})
+```
+
+**P: Como configurar o intervalo de flush?**
+R: Use `flushInterval`:
+```javascript
+new MetricsPlugin({
+  flushInterval: 30000  // 30 segundos (padrão: 60000)
+})
+```
+
+**P: Como configurar retenção de dados?**
+R: Use `retentionDays`:
+```javascript
+new MetricsPlugin({
+  retentionDays: 7  // 7 dias (padrão: 30)
+})
+```
+
+**P: Posso monitorar apenas recursos específicos?**
+R: Sim, use `include` ou `exclude`:
+```javascript
+new MetricsPlugin({
+  include: ['users', 'orders']  // Apenas estes
+})
+```
+
+### Operações
+
+**P: Como obter métricas agregadas?**
+R: Use `getMetrics`:
+```javascript
+const metrics = await metricsPlugin.getMetrics({
+  resourceName: 'users',
+  operation: 'get',
+  startDate: '2025-01-01',
+  limit: 100
+});
+```
+
+**P: Como obter estatísticas resumidas?**
+R: Use `getStats`:
+```javascript
+const stats = await metricsPlugin.getStats();
+// Retorna: totalOperations, avgResponseTime, operationsByType, errorRate, etc.
+```
+
+**P: Como consultar logs de erro?**
+R: Use `getErrorLogs`:
+```javascript
+const errors = await metricsPlugin.getErrorLogs({
+  resourceName: 'orders',
+  operation: 'insert',
+  limit: 50
+});
+```
+
+### Manutenção
+
+**P: Como fazer cleanup de dados antigos?**
+R: Use `cleanupOldData`:
+```javascript
+await metricsPlugin.cleanupOldData();
+// Remove dados mais antigos que retentionDays
+```
+
+**P: Como forçar flush das métricas?**
+R: Use `flushMetrics`:
+```javascript
+await metricsPlugin.flushMetrics();
+// Persiste métricas em buffer no database
+```
+
+### Troubleshooting
+
+**P: Métricas não estão sendo coletadas?**
+R: Verifique:
+1. Plugin foi instalado ANTES de criar os recursos
+2. `NODE_ENV !== 'test'` (métricas desabilitadas em testes por padrão)
+3. Recursos não estão em `exclude`
+
+**P: Como debugar métricas?**
+R: Verifique o objeto interno e ative verbose:
+```javascript
+new MetricsPlugin({ verbose: true });
+console.log(metricsPlugin.metrics);
+```
+
+**P: Performance está degradando?**
+R: Aumente o `flushInterval` ou desabilite `collectPerformance`:
+```javascript
+new MetricsPlugin({
+  flushInterval: 300000,  // 5 minutos
+  collectPerformance: false
+})
+```
+
+---
