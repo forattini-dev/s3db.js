@@ -2,25 +2,25 @@
 
 ## ⚡ TLDR
 
-Reduz **drasticamente** custos de S3 e latência com cache inteligente (memory/filesystem/S3).
+**Drastically** reduces S3 costs and latency with intelligent caching (memory/filesystem/S3).
 
-**1 linha para começar:**
+**1 line to get started:**
 ```javascript
-await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x mais rápido!
+await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 ```
 
-**Principais features:**
+**Key features:**
 - ✅ Drivers: memory (LRU/FIFO), filesystem, S3
-- ✅ TTL configurável + invalidação automática
-- ✅ Compressão opcional (gzip)
-- ✅ Stats de hit/miss rate
+- ✅ Configurable TTL + automatic invalidation
+- ✅ Optional compression (gzip)
+- ✅ Hit/miss rate statistics
 - ✅ Partition-aware caching
 
-**Quando usar:**
-- 💰 Reduzir custos de S3 API
-- ⚡ Melhorar performance (2ms vs 180ms)
-- 📊 Cache de queries pesadas
-- 🌍 Multi-server com S3 driver
+**When to use:**
+- 💰 Reduce S3 API costs
+- ⚡ Improve performance (2ms vs 180ms)
+- 📊 Cache heavy queries
+- 🌍 Multi-server with S3 driver
 
 ---
 

@@ -2,23 +2,23 @@
 
 ## ⚡ TLDR
 
-Consome mensagens de **SQS/RabbitMQ** e processa automaticamente como insert/update/delete.
+Consumes messages from **SQS/RabbitMQ** and automatically processes them as insert/update/delete operations.
 
-**Exemplo básico:**
+**Basic example:**
 ```javascript
 await db.usePlugin(new QueueConsumerPlugin({
   consumers: [{ driver: 'sqs', config: { queueUrl: '...' }, consumers: [{ resources: 'users' }] }]
-}));  // Mensagens viram operações automaticamente!
+}));  // Messages become operations automatically!
 ```
 
-**Principais features:**
+**Key features:**
 - ✅ Drivers: SQS, RabbitMQ
 - ✅ Auto-processing: msg → insert/update/delete
 - ✅ Concurrent processing + batching
 - ✅ Retry logic + dead letter queue
 - ✅ Custom transformations
 
-**Quando usar:**
+**When to use:**
 - 🔄 Event-driven architectures
 - 🌐 Microservices communication
 - 📡 Real-time data sync

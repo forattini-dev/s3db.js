@@ -2,26 +2,26 @@
 
 ## ⚡ TLDR
 
-Jobs **agendados** com cron expressions, retry automático e distributed locking para multi-instance.
+**Scheduled** jobs with cron expressions, automatic retry, and distributed locking for multi-instance deployments.
 
-**1 linha para começar:**
+**Get started in 1 line:**
 ```javascript
 await db.usePlugin(new SchedulerPlugin({ jobs: { daily_cleanup: { schedule: '0 3 * * *', action: async (db) => { /* cleanup */ } }}}));
 ```
 
-**Principais features:**
-- ✅ Cron expressions com timezone support
-- ✅ Retry automático com exponential backoff
+**Key features:**
+- ✅ Cron expressions with timezone support
+- ✅ Automatic retry with exponential backoff
 - ✅ Distributed locking (multi-instance safe)
-- ✅ Job history com partitions otimizadas
-- ✅ Event system completo
+- ✅ Job history with optimized partitions
+- ✅ Complete event system
 
-**Quando usar:**
-- 🧹 Limpeza de dados expirados
-- 📊 Geração de relatórios periódicos
-- 💰 Billing mensal/semanal
-- 📧 Emails de reminder
-- 🔄 Sincronização de dados
+**When to use:**
+- 🧹 Cleanup expired data
+- 📊 Generate periodic reports
+- 💰 Monthly/weekly billing
+- 📧 Reminder emails
+- 🔄 Data synchronization
 
 ---
 

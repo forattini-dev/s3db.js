@@ -2,28 +2,27 @@
 
 ## ⚡ TLDR
 
-Plugin para campos numéricos com **transações auditáveis** e **analytics pré-calculados** por hora/dia/semana/mês.
+Plugin for numeric fields with **auditable transactions** and **pre-calculated analytics** by hour/day/week/month.
 
-**3 linhas para começar:**
+**3 lines to get started:**
 ```javascript
 await db.usePlugin(new EventualConsistencyPlugin({ resources: { wallets: ['balance'] } }));
 await wallets.insert({ id: 'w1', balance: 0 });
-await wallets.add('w1', 'balance', 100);  // Cria transação e consolida automaticamente
+await wallets.add('w1', 'balance', 100);  // Creates transaction and consolidates automatically
 ```
 
-**Principais features:**
-- ✅ Transações atômicas (add/sub/set) com histórico completo
-- ✅ Modo sync (imediato) ou async (eventual) com auto-consolidação
-- ✅ Analytics pré-calculados (hour → day → **week** → month)
-- ✅ Partições otimizadas (query O(1) por originalId + applied status)
-- ✅ 85.8% de cobertura de testes + arquitetura modular (11 módulos)
+**Main features:**
+- ✅ Atomic transactions (add/sub/set) with complete history
+- ✅ Sync (immediate) or async (eventual) mode with auto-consolidation
+- ✅ Pre-calculated analytics (hour → day → **week** → month)
+- ✅ Optimized partitions (O(1) query by originalId + applied status)
+- ✅ 85.8% test coverage + modular architecture (11 modules)
 
-**Quando usar:**
-- 💰 Saldos/carteiras (modo sync)
-- 📊 Contadores/métricas (modo async)
-- 📈 Dashboards com analytics pré-calculados
+**When to use:**
+- 💰 Balances/wallets (sync mode)
+- 📊 Counters/metrics (async mode)
+- 📈 Dashboards with pre-calculated analytics
 
-> **v11.0.2+**: Suporte para agregações semanais (ISO 8601) adicionado! 🎉
 
 ---
 
@@ -35,7 +34,7 @@ import { S3db, EventualConsistencyPlugin } from 's3db.js';
 const db = new S3db({ connectionString: '...' });
 await db.connect();
 
-// Configurar plugin
+// Configure plugin
 await db.usePlugin(new EventualConsistencyPlugin({
   resources: {
     wallets: ['balance'],
@@ -43,12 +42,12 @@ await db.usePlugin(new EventualConsistencyPlugin({
   },
 
   consolidation: {
-    mode: 'sync',  // ou 'async'
+    mode: 'sync',  // or 'async'
     auto: true
   }
 }));
 
-// Criar resource
+// Create resource
 const wallets = await db.createResource({
   name: 'wallets',
   attributes: {
@@ -57,7 +56,7 @@ const wallets = await db.createResource({
   }
 });
 
-// Usar
+// Use
 await wallets.insert({ id: 'wallet-1', balance: 0 });
 await wallets.add('wallet-1', 'balance', 100);
 await wallets.sub('wallet-1', 'balance', 50);
@@ -68,33 +67,33 @@ console.log(wallet.balance); // 50 ✅
 
 ---
 
-## Como Funciona
+## How It Works
 
-### 1. Transações
-Toda operação cria uma transação em `plg_{resource}_tx_{field}`:
+### 1. Transactions
+Every operation creates a transaction in `plg_{resource}_tx_{field}`:
 
 ```javascript
 await wallets.add('wallet-1', 'balance', 100);
-// Cria: { operation: 'add', value: 100, applied: false }
+// Creates: { operation: 'add', value: 100, applied: false }
 ```
 
-### 2. Consolidação
-Aplica transações pendentes e **atualiza o campo original**:
+### 2. Consolidation
+Applies pending transactions and **updates the original field**:
 
 ```javascript
 await wallets.consolidate('wallet-1', 'balance');
-// 1. Lê transações pendentes
-// 2. Aplica reducer (soma por default)
-// 3. Atualiza wallet.balance
-// 4. Marca transações como applied: true
+// 1. Reads pending transactions
+// 2. Applies reducer (sum by default)
+// 3. Updates wallet.balance
+// 4. Marks transactions as applied: true
 ```
 
-> **⚠️ IMPORTANTE**: O plugin **NÃO cria registros** que não existem. Transações ficam pendentes até você criar o registro.
+> **⚠️ IMPORTANT**: The plugin **DOES NOT create records** that don't exist. Transactions remain pending until you create the record.
 
-### 3. Analytics (Opcional)
-Cria agregações em `plg_{resource}_an_{field}`:
-- Métricas: count, sum, avg, min, max
-- Períodos: hour, day, month
+### 3. Analytics (Optional)
+Creates aggregations in `plg_{resource}_an_{field}`:
+- Metrics: count, sum, avg, min, max
+- Periods: hour, day, month
 
 ---
 
@@ -104,65 +103,65 @@ Cria agregações em `plg_{resource}_an_{field}`:
 
 ```javascript
 new EventualConsistencyPlugin({
-  // Obrigatório
+  // Required
   resources: {
     resourceName: ['field1', 'field2', ...]
   },
 
-  // Consolidação
+  // Consolidation
   consolidation: {
-    mode: 'sync',                   // 'sync' ou 'async' (default: 'async')
-    auto: true,                     // Auto-consolidação (default: true)
-    interval: 300,                  // Intervalo em segundos (default: 300)
-    window: 24,                     // Janela em horas (default: 24)
-    concurrency: 5,                 // Consolidações paralelas (default: 5)
-    markAppliedConcurrency: 50      // ✅ NOVO (v11.0.3): Concurrency para mark applied (default: 50)
+    mode: 'sync',                   // 'sync' or 'async' (default: 'async')
+    auto: true,                     // Auto-consolidation (default: true)
+    interval: 300,                  // Interval in seconds (default: 300)
+    window: 24,                     // Window in hours (default: 24)
+    concurrency: 5,                 // Parallel consolidations (default: 5)
+    markAppliedConcurrency: 50      // ✅ NEW: Concurrency for mark applied (default: 50)
   },
 
-  // Analytics (opcional)
+  // Analytics (optional)
   analytics: {
-    enabled: false,      // Habilitar analytics (default: false)
+    enabled: false,      // Enable analytics (default: false)
     periods: ['hour', 'day', 'month'],
     metrics: ['count', 'sum', 'avg', 'min', 'max']
   },
 
-  // Debug e logging
-  verbose: true,           // Logging detalhado (default: true desde v11.0.0)
-  debug: false,            // Debug mode adicional (default: false, v11.0.0+)
+  // Debug and logging
+  verbose: true,           // Detailed logging (default: true)
+  debug: false,            // Additional debug mode (default: false)
 
-  // Opções avançadas
+  // Advanced options
   locks: { timeout: 300 },
   garbageCollection: { enabled: true, interval: 86400, retention: 30 },
   checkpoints: { enabled: true, strategy: 'hourly', retention: 90 },
-  cohort: { timezone: 'UTC' }  // Default: UTC (ou TZ env var)
+  cohort: { timezone: 'UTC' }  // Default: UTC (or TZ env var)
 })
 ```
 
-### Métodos do Resource
+### Resource Methods
 
 ```javascript
-// Definir valor absoluto
+// Set absolute value
 await resource.set(id, field, value)
 
-// Adicionar
+// Add
 await resource.add(id, field, amount)
 
-// Subtrair
+// Subtract
 await resource.sub(id, field, amount)
 
-// Consolidar
+// Consolidate
 await resource.consolidate(id, field)
 
-// Obter valor consolidado (sem aplicar)
+// Get consolidated value (without applying)
 await resource.getConsolidatedValue(id, field, options)
 
-// Recalcular do zero
+// Recalculate from scratch
 await resource.recalculate(id, field)
 ```
 
 ---
 
-## Exemplos
+## Examples
 
 ### Wallet System (Sync Mode)
 
@@ -197,7 +196,7 @@ await db.usePlugin(new EventualConsistencyPlugin({
   consolidation: {
     mode: 'async',
     auto: true,
-    interval: 60  // 1 minuto
+    interval: 60  // 1 minute
   },
 
   analytics: {
@@ -216,7 +215,7 @@ const urls = await db.createResource({
   }
 });
 
-// Hook para auto-incrementar
+// Hook for auto-increment
 const clicks = await db.createResource({ name: 'clicks', ... });
 clicks.addHook('afterInsert', async ({ record }) => {
   await urls.add(record.urlId, 'clicks', 1);
@@ -225,6 +224,170 @@ clicks.addHook('afterInsert', async ({ record }) => {
 // Analytics
 const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
 const stats = await plugin.getLastNDays('urls', 'clicks', 7);
+```
+
+### 🆕 Nested Fields Support
+
+The plugin now supports **dot notation** to operate on nested fields inside JSON objects!
+
+#### How It Works
+
+```javascript
+// Create resource with JSON field
+const urls = await db.createResource({
+  name: 'urls',
+  attributes: {
+    id: 'string|required',
+    link: 'string|required',
+    utmResults: 'json'  // JSON field allows nested paths
+  }
+});
+
+// Use dot notation to increment nested fields
+await urls.insert({ id: 'url-1', link: 'https://example.com', utmResults: {} });
+await urls.add('url-1', 'utmResults.medium', 5);
+await urls.add('url-1', 'utmResults.google', 3);
+
+// Get values
+const url = await urls.get('url-1');
+console.log(url.utmResults); // { medium: 5, google: 3 }
+```
+
+#### Rules and Limits
+
+**1. Nesting Limit After `json`:**
+
+```javascript
+// ✅ Allowed: 1 level after 'json'
+{ utmResults: 'json' }
+// → utmResults.medium ✅
+// → utmResults.google ✅
+
+// ❌ Rejected: 2 levels after 'json'
+// → utmResults.medium.google ❌
+```
+
+**2. Nested JSON in Objects:**
+
+```javascript
+// ✅ Allowed: 1 level after nested 'json'
+{
+  utmResults: {
+    $$type: 'object',
+    medium: 'json'  // JSON nested in object
+  }
+}
+// → utmResults.medium.google ✅ (1 level after 'json')
+// → utmResults.medium.google.ads ❌ (2 levels after 'json')
+```
+
+**3. Fully Typed Objects:**
+
+```javascript
+// ✅ Allowed: any depth explicitly defined
+{
+  utmResults: {
+    $$type: 'object',
+    medium: {
+      $$type: 'object',
+      google: 'number|default:0'
+    }
+  }
+}
+// → utmResults.medium.google ✅ (explicit structure)
+```
+
+#### Multiple Independent Nested Paths
+
+Each nested path is consolidated **independently**:
+
+```javascript
+await urls.insert({ id: 'url-1', link: 'https://example.com', utmResults: {} });
+
+// Increment multiple paths
+await urls.add('url-1', 'utmResults.medium', 10);
+await urls.add('url-1', 'utmResults.source', 5);
+await urls.add('url-1', 'utmResults.campaign', 3);
+
+// Each path maintains its own value
+const url = await urls.get('url-1');
+console.log(url.utmResults); // { medium: 10, source: 5, campaign: 3 }
+
+// Incrementing one path doesn't affect others
+await urls.add('url-1', 'utmResults.medium', 5);
+const url2 = await urls.get('url-1');
+console.log(url2.utmResults); // { medium: 15, source: 5, campaign: 3 }
+```
+
+#### Analytics with Nested Fields
+
+Analytics **aggregate by root field**, independent of nested path:
+
+```javascript
+// All these transactions are aggregated together in analytics:
+await urls.add('url-1', 'utmResults.medium', 10);  // → field: 'utmResults'
+await urls.add('url-1', 'utmResults.google', 5);   // → field: 'utmResults'
+await urls.add('url-1', 'utmResults.facebook', 3); // → field: 'utmResults'
+
+// Analytics show the TOTAL activity on field 'utmResults':
+const stats = await plugin.getLastNDays('urls', 'utmResults', 7);
+// { count: 3, sum: 18, avg: 6, ... }  ← Total of all transactions
+```
+
+**This is correct!** Analytics should show the total volume of activity on the field, not individual values per nested path.
+
+#### Supported Operations
+
+All operations support nested fields:
+
+```javascript
+// Set (sets absolute value)
+await urls.set('url-1', 'utmResults.clicks', 100);
+
+// Add (increments)
+await urls.add('url-1', 'utmResults.clicks', 50);
+
+// Sub (decrements)
+await urls.sub('url-1', 'utmResults.clicks', 20);
+
+// Result: 100 + 50 - 20 = 130
+const url = await urls.get('url-1');
+console.log(url.utmResults.clicks); // 130
+```
+
+#### Error Validation
+
+The plugin validates nested paths and returns clear errors:
+
+```javascript
+// ❌ Exceed nesting limit
+await urls.add('url-1', 'utmResults.medium.google', 5);
+// Error: Path "utmResults.medium.google" exceeds 1 level after 'json' field.
+//        Maximum nesting after 'json' is 1 level.
+
+// ❌ Field doesn't exist
+await urls.add('url-1', 'utmResults.invalid.path', 5);
+// Error: Field "invalid" not found in "utmResults"
+
+// ❌ Incompatible type
+await urls.add('url-1', 'link.nested', 5);  // 'link' is string, not object
+// Error: Field "link" is type "string" and cannot be nested
+```
+
+#### Transaction Resource Schema
+
+Internally, transactions store both the root field and nested path:
+
+```javascript
+{
+  id: 'txn_abc123',
+  originalId: 'url-1',
+  field: 'utmResults',              // ← Root field (for analytics)
+  fieldPath: 'utmResults.medium',   // ← Full path (for consolidation)
+  value: 5,
+  operation: 'add',
+  // ... cohort info ...
+}
 ```
 
 ---
@@ -259,7 +422,7 @@ await plugin.getTopRecords('resource', 'field', {
   period: 'day',
   cohort: '2025-10-09',
   limit: 10,
-  sortBy: 'transactionCount'  // ou 'totalValue'
+  sortBy: 'transactionCount'  // or 'totalValue'
 });
 ```
 
@@ -277,7 +440,7 @@ const data = await plugin.getLastNHours('urls', 'clicks', 24, { fillGaps: true }
 // Returns all 24 hours, filling missing periods with zeros
 ```
 
-### 🆕 Complete Analytics Functions (v11.0.4+)
+### 🆕 Complete Analytics Functions
 
 The plugin now provides **15 analytics functions** covering all time range and granularity combinations:
 
@@ -286,27 +449,23 @@ The plugin now provides **15 analytics functions** covering all time range and g
 | Function | Time Range | Granularity | Records | Example |
 |----------|-----------|-------------|---------|---------|
 | `getDayByHour()` | Single day | Hours | 24 | `'2025-10-09'` |
-| `getWeekByDay()` ⭐ | Single week | Days | 7 | `'2025-W42'` |
-| `getWeekByHour()` ⭐ | Single week | Hours | 168 | `'2025-W42'` |
+| `getWeekByDay()` | Single week | Days | 7 | `'2025-W42'` |
+| `getWeekByHour()` | Single week | Hours | 168 | `'2025-W42'` |
 | `getMonthByDay()` | Single month | Days | 28-31 | `'2025-10'` |
 | `getMonthByHour()` | Single month | Hours | 672-744 | `'2025-10'` |
 | `getMonthByWeek()` | Single month | Weeks | 4-5 | `'2025-10'` |
-| `getYearByDay()` ⭐ | Single year | Days | 365-366 | `2025` |
+| `getYearByDay()` | Single year | Days | 365-366 | `2025` |
 | `getYearByWeek()` | Single year | Weeks | 52-53 | `2025` |
 | `getYearByMonth()` | Single year | Months | 12 | `2025` |
-
-⭐ = New in v11.0.4
 
 #### Last N Periods (Convenience)
 
 | Function | Description | Default | Example |
 |----------|-------------|---------|---------|
-| `getLastNHours()` ⭐ | Last N hours | 24 | Last 24 hours |
+| `getLastNHours()` | Last N hours | 24 | Last 24 hours |
 | `getLastNDays()` | Last N days | 7 | Last 7 days |
-| `getLastNWeeks()` ⭐ | Last N weeks | 4 | Last 4 weeks |
-| `getLastNMonths()` ⭐ | Last N months | 12 | Last 12 months |
-
-⭐ = New in v11.0.4
+| `getLastNWeeks()` | Last N weeks | 4 | Last 4 weeks |
+| `getLastNMonths()` | Last N months | 12 | Last 12 months |
 
 #### Example Usage
 
@@ -372,10 +531,10 @@ All functions return the same structure, ready for charting:
 
 ### 🆕 Week Analytics (ISO 8601)
 
-O plugin agora suporta **agregações semanais (ISO 8601)**:
+The plugin now supports **weekly aggregations (ISO 8601)**:
 
 ```javascript
-// Obter ano inteiro dividido por semanas (52-53 semanas)
+// Get entire year divided by weeks (52-53 weeks)
 const yearWeeks = await plugin.getYearByWeek('products', 'sold', 2025);
 // [
 //   { cohort: '2025-W01', count: 150, sum: 15000, avg: 100, ... },
@@ -384,7 +543,7 @@ const yearWeeks = await plugin.getYearByWeek('products', 'sold', 2025);
 //   { cohort: '2025-W53', count: 100, sum: 10000, avg: 100, ... }
 // ]
 
-// Obter mês dividido por semanas (4-5 semanas)
+// Get month divided by weeks (4-5 weeks)
 const monthWeeks = await plugin.getMonthByWeek('products', 'views', '2025-10');
 // [
 //   { cohort: '2025-W40', count: 500, sum: 5000, ... },
@@ -393,13 +552,13 @@ const monthWeeks = await plugin.getMonthByWeek('products', 'views', '2025-10');
 // ]
 ```
 
-**Formato ISO 8601:**
-- `YYYY-Www` (exemplo: `2025-W42` = semana 42 de 2025)
-- Semana começa na **segunda-feira**
-- Primeira semana do ano contém 4 de janeiro
-- Anos podem ter 52 ou 53 semanas
+**ISO 8601 Format:**
+- `YYYY-Www` (example: `2025-W42` = week 42 of 2025)
+- Week starts on **Monday**
+- First week of year contains January 4th
+- Years can have 52 or 53 weeks
 
-**Hierarquia de Rollup:**
+**Rollup Hierarchy:**
 ```
 Transaction (timestamp)
   ↓
@@ -412,12 +571,12 @@ WEEK cohort (2025-W42)
 MONTH cohort (2025-10)
 ```
 
-**Estrutura dos Analytics:**
+**Analytics Structure:**
 ```javascript
 {
   id: 'hour-2025-10-09T14',
   period: 'hour',            // 'hour', 'day', 'week', 'month'
-  cohort: '2025-10-09T14',   // ou '2025-W42' para week
+  cohort: '2025-10-09T14',   // or '2025-W42' for week
   transactionCount: 150,
   totalValue: 5000,
   avgValue: 33.33,
@@ -433,207 +592,175 @@ MONTH cohort (2025-10)
 
 ---
 
-## Modo Sync vs Async
+## Sync vs Async Mode
 
 ### Sync Mode
-- ✅ Consolidação imediata
-- ✅ Bloqueia até completar
-- ✅ Garantia de consistência
-- ❌ Mais lento em alto volume
+- ✅ Immediate consolidation
+- ✅ Blocks until complete
+- ✅ Consistency guarantee
+- ❌ Slower on high volume
 
-**Use para:** Saldos bancários, inventário, pagamentos
+**Use for:** Bank balances, inventory, payments
 
 ### Async Mode (Default)
-- ✅ Consolidação eventual
-- ✅ Não bloqueia
-- ✅ Auto-consolidação periódica
-- ✅ Alto volume (milhões de transações)
-- ❌ Valor pode estar desatualizado
+- ✅ Eventual consolidation
+- ✅ Non-blocking
+- ✅ Periodic auto-consolidation
+- ✅ High volume (millions of transactions)
+- ❌ Value may be outdated
 
-**Use para:** Contadores, métricas, pontos, analytics
+**Use for:** Counters, metrics, points, analytics
 
 ---
 
-## Recursos Criados
+## Resources Created
 
-Para cada field, o plugin cria:
+For each field, the plugin creates:
 
-1. **`plg_{resource}_tx_{field}`** - Log de transações
-   - Atributos: `id`, `originalId`, `field`, `value`, `operation`, `timestamp`, `cohortDate`, `cohortHour`, **`cohortWeek`** (v11.0.2+), `cohortMonth`, `applied`
-   - Partições: `byOriginalIdAndApplied` (consolidation otimizada), `byHour`, `byDay`, **`byWeek`** (v11.0.2+), `byMonth`
+1. **`plg_{resource}_tx_{field}`** - Transaction log
+   - Attributes: `id`, `originalId`, `field`, `value`, `operation`, `timestamp`, `cohortDate`, `cohortHour`, **`cohortWeek`**, `cohortMonth`, `applied`
+   - Partitions: `byOriginalIdAndApplied` (optimized consolidation), `byHour`, `byDay`, **`byWeek`**, `byMonth`
 
-2. **Locks via PluginStorage** - Distributed locks com TTL automático (não usa resource)
+2. **Locks via PluginStorage** - Distributed locks with automatic TTL (doesn't use resource)
 
-3. **`plg_{resource}_an_{field}`** - Analytics (se habilitado)
-   - Períodos: `hour`, `day`, **`week`** (v11.0.2+), `month`
+3. **`plg_{resource}_an_{field}`** - Analytics (if enabled)
+   - Periods: `hour`, `day`, **`week`**, `month`
 
 ---
 
 ## Best Practices
 
-### ✅ Recomendações
-- Use **sync mode** para dados críticos (dinheiro, inventário)
-- Use **async mode** para métricas e contadores
-- Habilite **analytics** para dashboards
-- Use **hooks** para auto-incrementar
-- Sempre **crie o registro antes** de incrementar
-- Configure `asyncPartitions: true` no resource (70-100% mais rápido)
+### ✅ Recommendations
+- Use **sync mode** for critical data (money, inventory)
+- Use **async mode** for metrics and counters
+- Enable **analytics** for dashboards
+- Use **hooks** for auto-increment
+- Always **create the record first** before incrementing
+- Configure `asyncPartitions: true` on resource (70-100% faster)
 
-### ⚠️ Cuidados
-- **Batch mode** perde dados em crash
-- **Reducers customizados** devem ser pure functions
-- **Timezone** afeta particionamento de cohorts
+### ⚠️ Cautions
+- **Batch mode** loses data on crash
+- **Custom reducers** must be pure functions
+- **Timezone** affects cohort partitioning
 
 ---
 
 ## Troubleshooting
 
-### Transações não consolidam
+### Transactions don't consolidate
 ```javascript
-// Verificar modo
-console.log(plugin.config.mode);  // 'async' ou 'sync'
+// Check mode
+console.log(plugin.config.mode);  // 'async' or 'sync'
 
-// Consolidar manualmente
+// Consolidate manually
 await resource.consolidate(id, field);
 
-// Verificar auto-consolidação
+// Check auto-consolidation
 console.log(plugin.config.autoConsolidate);  // true?
 ```
 
-### Performance lenta
+### Slow performance
 ```javascript
-// Habilitar partições async
+// Enable async partitions
 await db.createResource({
   name: 'wallets',
-  asyncPartitions: true  // ← 70-100% mais rápido
+  asyncPartitions: true  // ← 70-100% faster
 });
 
-// ✅ Aumentar concorrência da consolidação
+// ✅ Increase consolidation concurrency
 { consolidation: { concurrency: 10 } }  // default: 5
 
-// ✅ Aumentar concorrência do mark applied (v11.0.3+)
+// ✅ Increase mark applied concurrency
 { consolidation: { markAppliedConcurrency: 100 } }  // default: 50
 
-// Reduzir janela
+// Reduce window
 { consolidation: { window: 12 } }  // default: 24h
 ```
 
-### Analytics faltando
+### Missing analytics
 ```javascript
-// Verificar configuração
+// Check configuration
 console.log(plugin.config.enableAnalytics);
 
-// Verificar resource criado
+// Check resource created
 console.log(db.resources.plg_wallets_an_balance);
 ```
 
 ---
 
-## Migration Guide (v9.x → v10.x)
-
-### Configuração
-
-```javascript
-// ❌ v9.x - NÃO FUNCIONA MAIS
-new EventualConsistencyPlugin({
-  resource: 'wallets',
-  field: 'balance'
-})
-
-// ✅ v10.x - Nova estrutura nested
-new EventualConsistencyPlugin({
-  resources: {
-    wallets: ['balance']
-  },
-  consolidation: { mode: 'sync' }
-})
-```
-
-### Métodos
-
-```javascript
-// ❌ v9.x
-await wallets.add('w1', 100)
-await wallets.consolidate('w1')
-
-// ✅ v10.x - sempre especifique field
-await wallets.add('w1', 'balance', 100)
-await wallets.consolidate('w1', 'balance')
-```
-
 ---
 
-## O Que Mudou (v10.0.16+)
+## What Changed
 
-### 🎯 Principais Mudanças
+### 🎯 Main Changes
 
-1. **Estrutura Nested**: Config organizada em seções (`consolidation`, `analytics`, `locks`, etc)
-2. **Multi-Field**: Suporte a múltiplos campos por resource
-3. **Arquitetura Modular**: 11 módulos ao invés de 1 arquivo monolítico
-4. **Não Cria Registros**: Plugin não cria registros inexistentes (evita erros com campos obrigatórios)
-5. **Composite Partition**: Query 1000x mais rápida com `byOriginalIdAndApplied`
-6. **Timezone UTC**: Padrão UTC ao invés de detecção automática
+1. **Nested Structure**: Config organized in sections (`consolidation`, `analytics`, `locks`, etc)
+2. **Multi-Field**: Support for multiple fields per resource
+3. **Modular Architecture**: 11 modules instead of 1 monolithic file
+4. **Doesn't Create Records**: Plugin doesn't create non-existent records (avoids errors with required fields)
+5. **Composite Partition**: 1000x faster query with `byOriginalIdAndApplied`
+6. **UTC Timezone**: UTC default instead of automatic detection
 
-### 📦 Arquitetura
+### 📦 Architecture
 
 ```
 src/plugins/eventual-consistency/
-├── index.js              # Classe principal
-├── config.js             # Configuração
-├── consolidation.js      # Consolidação
-├── transactions.js       # Transações
+├── index.js              # Main class
+├── config.js             # Configuration
+├── consolidation.js      # Consolidation
+├── transactions.js       # Transactions
 ├── analytics.js          # Analytics
-├── locks.js              # Locks distribuídos
+├── locks.js              # Distributed locks
 ├── garbage-collection.js # GC
 ├── helpers.js            # add/sub/set
 ├── setup.js              # Setup
-├── utils.js              # Utilitários
-└── partitions.js         # Partições
+├── utils.js              # Utilities
+└── partitions.js         # Partitions
 ```
 
-### 🔧 Fluxo Correto
+### 🔧 Correct Flow
 
 ```javascript
-// ✅ SEMPRE crie o registro primeiro
+// ✅ ALWAYS create the record first
 await urls.insert({
   id: 'url-123',
   link: 'https://example.com',
   clicks: 0
 });
 
-// ✅ Depois incremente
+// ✅ Then increment
 await urls.add('url-123', 'clicks', 1);
 
-// ✅ Modo sync consolida automaticamente
+// ✅ Sync mode consolidates automatically
 const url = await urls.get('url-123');
 console.log(url.clicks); // 1 ✅
 ```
 
 ---
 
-## 🆕 Novas Correções (v11.0.0 - 11/10/2025)
+## New Fixes
 
-### 1. Debug Mode Completo para Troubleshooting
+### 1. Complete Debug Mode for Troubleshooting
 
-A versão 11.0.0 adiciona instrumentação extensiva para debugar problemas de persistência de valores.
+Extensive instrumentation to debug value persistence issues.
 
-#### Problema Investigado
+#### Problem Investigated
 
-Usuários reportaram que `resource.update()` retornava `updateOk: true` mas o valor não persistia no S3:
+Users reported that `resource.update()` returned `updateOk: true` but the value didn't persist to S3:
 
 ```javascript
 await urls.add('abc123', 'clicks', 2);
 await urls.consolidate('abc123', 'clicks');
 
 const result = await urls.get('abc123');
-console.log(result.clicks); // ❌ 0 (esperado: 2)
+console.log(result.clicks); // ❌ 0 (expected: 2)
 ```
 
-#### Solução: Logging Completo
+#### Solution: Complete Logging
 
-Agora o plugin mostra logs detalhados em **TRÊS momentos**:
+The plugin now shows detailed logs at **THREE moments**:
 
-**1. ANTES do update:**
+**1. BEFORE update:**
 ```javascript
 🔥 [DEBUG] BEFORE targetResource.update() {
   originalId: 'abc123',
@@ -643,17 +770,17 @@ Agora o plugin mostra logs detalhados em **TRÊS momentos**:
 }
 ```
 
-**2. DEPOIS do update:**
+**2. AFTER update:**
 ```javascript
 🔥 [DEBUG] AFTER targetResource.update() {
   updateOk: true,
   updateErr: undefined,
-  updateResult: { clicks: 0 },  // ← Mostra o retorno real!
+  updateResult: { clicks: 0 },  // ← Shows actual return!
   hasField: 0
 }
 ```
 
-**3. VERIFICAÇÃO (busca direto do S3, sem cache):**
+**3. VERIFICATION (fresh from S3, no cache):**
 ```javascript
 🔥 [DEBUG] VERIFICATION (fresh from S3, no cache) {
   verifyOk: true,
@@ -663,9 +790,9 @@ Agora o plugin mostra logs detalhados em **TRÊS momentos**:
 }
 ```
 
-**4. Detecção Automática de Bugs:**
+**4. Automatic Bug Detection:**
 
-Se o valor não bater, você verá:
+If the value doesn't match, you'll see:
 
 ```javascript
 ❌ [CRITICAL BUG] Update reported success but value not persisted!
@@ -677,35 +804,35 @@ Se o valor não bater, você verá:
   This indicates a bug in s3db.js resource.update()
 ```
 
-#### Como Usar
+#### How to Use
 
 ```javascript
-// verbose: true é o padrão agora!
+// verbose: true is now the default!
 const plugin = new EventualConsistencyPlugin({
   resources: { urls: ['clicks'] },
-  // Não precisa passar verbose: true (já é default)
+  // Don't need to pass verbose: true (already default)
 });
 
-// Ou use debug mode para logs adicionais
+// Or use debug mode for additional logs
 const plugin = new EventualConsistencyPlugin({
   resources: { urls: ['clicks'] },
-  debug: true  // ← Nova opção v11.0.0
+  debug: true
 });
 ```
 
-#### O que os Logs Revelam
+#### What the Logs Reveal
 
-Os logs permitem identificar se o problema está em:
-- ✅ `resource.update()` retorna valor errado mas persiste correto → Bug no retorno
-- ✅ `resource.update()` retorna correto mas não persiste → Bug na persistência
-- ✅ Cache serving stale data → Bug no cache
-- ✅ S3 eventual consistency → Delay na propagação
+The logs allow identifying if the problem is in:
+- ✅ `resource.update()` returns wrong value but persists correctly → Return bug
+- ✅ `resource.update()` returns correctly but doesn't persist → Persistence bug
+- ✅ Cache serving stale data → Cache bug
+- ✅ S3 eventual consistency → Propagation delay
 
-### 2. Fix do Analytics "Field Required" Error
+### 2. Analytics "Field Required" Error Fix
 
-#### Problema
+#### Problem
 
-Ao habilitar analytics, o erro `InvalidResourceItem: The 'field' field is required` aparecia aleatoriamente:
+When enabling analytics, the error `InvalidResourceItem: The 'field' field is required` appeared randomly:
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
@@ -713,32 +840,32 @@ const plugin = new EventualConsistencyPlugin({
   analytics: { enabled: true }
 });
 
-// Erro aleatório:
+// Random error:
 // InvalidResourceItem: The 'field' field is required
 ```
 
-#### Causa Raiz
+#### Root Cause
 
-Race condition onde múltiplos handlers compartilham o mesmo objeto `config` mutável:
+Race condition where multiple handlers share the same mutable `config` object:
 
 ```javascript
-// Handler 1 (urls.clicks) começa:
+// Handler 1 (urls.clicks) starts:
 this.config.field = 'clicks';
 
-// Handler 2 (urls.views) sobrescreve concorrentemente:
+// Handler 2 (urls.views) overwrites concurrently:
 this.config.field = 'views';
 
-// Handler 1 tenta inserir analytics:
+// Handler 1 tries to insert analytics:
 await analyticsResource.insert({
-  field: config.field,  // ← 'views' (ERRADO! Deveria ser 'clicks')
+  field: config.field,  // ← 'views' (WRONG! Should be 'clicks')
   // ...
 });
-// ❌ Erro: Record tem field='views' mas deveria ser 'clicks'
+// ❌ Error: Record has field='views' but should be 'clicks'
 ```
 
-#### Solução: Validação Crítica
+#### Solution: Critical Validation
 
-Adicionada validação no início de `updateAnalytics()` que detecta quando o race condition ocorre:
+Added validation at the beginning of `updateAnalytics()` that detects when the race condition occurs:
 
 ```javascript
 if (!config.field) {
@@ -753,9 +880,9 @@ if (!config.field) {
 }
 ```
 
-#### Mensagem de Erro Detalhada
+#### Detailed Error Message
 
-Agora quando o bug ocorrer, você verá:
+Now when the bug occurs, you'll see:
 
 ```
 CRITICAL BUG: config.field is undefined in updateAnalytics()!
@@ -766,55 +893,55 @@ Transactions count: 5
 AnalyticsResource: plg_urls_an_clicks
 ```
 
-Isso ajuda a identificar o momento exato quando o race condition acontece e qual handler estava rodando.
+This helps identify the exact moment when the race condition happens and which handler was running.
 
-### 3. Verbose Mode Habilitado por Padrão
+### 3. Verbose Mode Enabled by Default
 
-#### Mudança
+#### Change
 
-A partir da v11.0.0, `verbose: true` é o padrão (antes era `false`).
+`verbose: true` is the default (before it was `false`).
 
-**Antes (v10.x):**
+**Before:**
 ```javascript
-// Sem logs
+// No logs
 const plugin = new EventualConsistencyPlugin({
   resources: { urls: ['clicks'] }
 });
 ```
 
-**Depois (v11.0+):**
+**Now:**
 ```javascript
-// COM logs por padrão
+// WITH logs by default
 const plugin = new EventualConsistencyPlugin({
   resources: { urls: ['clicks'] }
 });
 
-// Para desabilitar explicitamente:
+// To disable explicitly:
 const plugin = new EventualConsistencyPlugin({
-  verbose: false,  // ← Agora precisa desabilitar explicitamente
+  verbose: false,  // ← Now need to disable explicitly
   resources: { urls: ['clicks'] }
 });
 ```
 
-#### Benefícios
+#### Benefits
 
-- ✅ Debug out-of-the-box (sem precisar adicionar `verbose: true`)
-- ✅ Facilita troubleshooting em produção
-- ✅ Alinhado com expectativas do usuário para plugin crítico
+- ✅ Debug out-of-the-box (no need to add `verbose: true`)
+- ✅ Facilitates troubleshooting in production
+- ✅ Aligned with user expectations for critical plugin
 
-### 4. Nova Opção: Debug Mode
+### 4. New Option: Debug Mode
 
-Além de `verbose`, agora existe a opção `debug` (funciona igual, mas separada):
+In addition to `verbose`, there's now a `debug` option (works the same, but separate):
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
-  debug: true,    // ← Nova opção (equivalente a verbose)
-  verbose: true,  // ← Opção original
+  debug: true,    // ← New option (equivalent to verbose)
+  verbose: true,  // ← Original option
   resources: { urls: ['clicks'] }
 });
 ```
 
-Todos os logs respondem a **ambos** `verbose` e `debug`:
+All logs respond to **both** `verbose` and `debug`:
 
 ```javascript
 if (config.verbose || config.debug) {
@@ -822,162 +949,54 @@ if (config.verbose || config.debug) {
 }
 ```
 
-### Arquivos Modificados (v11.0.0)
+### How to Test the Fixes
 
-- ✅ **`src/plugins/eventual-consistency/consolidation.js`** (+73 linhas)
-  - Debug logging ANTES do update (valores originais)
-  - Debug logging DEPOIS do update (resultado retornado)
-  - Verificação direta do S3 (bypass cache)
-  - Detecção automática de bugs de persistência
-
-- ✅ **`src/plugins/eventual-consistency/analytics.js`** (+20 linhas)
-  - Validação crítica de `config.field`
-  - Mensagens de erro detalhadas para race conditions
-  - Debug mode em todos os logs
-
-- ✅ **`src/plugins/eventual-consistency/config.js`** (+2 linhas)
-  - `verbose: options.verbose !== false` (default: true)
-  - `debug: options.debug || false` (nova opção)
-
-### Commits
-
-- `ccfc639` - fix(eventual-consistency): add comprehensive debug mode and fix analytics race condition
-- `3115ac8` - feat(eventual-consistency): change verbose default to true
-
-### Como Testar as Correções
-
-#### 1. Testar Debug Mode
+#### 1. Test Debug Mode
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
-  // verbose: true já é o padrão!
+  // verbose: true is already the default!
   resources: { urls: ['clicks', 'views'] },
   analytics: { enabled: true }
 });
 
 await db.usePlugin(plugin);
 
-// Execute operações e observe os logs
+// Execute operations and observe logs
 await urls.add('test123', 'clicks', 2);
 await urls.consolidate('test123', 'clicks');
 ```
 
-**Logs esperados:**
+**Expected logs:**
 ```
 🔥 [DEBUG] BEFORE targetResource.update() {...}
 🔥 [DEBUG] AFTER targetResource.update() {...}
 🔥 [DEBUG] VERIFICATION {...}
 ```
 
-Se você ver `❌ [CRITICAL BUG]`, significa que o bug do update() está acontecendo!
+If you see `❌ [CRITICAL BUG]`, it means the update() bug is happening!
 
-#### 2. Verificar Analytics Race Condition
+#### 2. Verify Analytics Race Condition
 
-Se o erro de analytics aparecer:
+If the analytics error appears:
 ```
 InvalidResourceItem: The 'field' field is required
 ```
 
-Agora você verá a mensagem detalhada:
+Now you'll see the detailed message:
 ```
 CRITICAL BUG: config.field is undefined in updateAnalytics()!
 This indicates a race condition...
 Config: {"resource":"urls","field":undefined}
 ```
 
-Isso confirma que o bug é o race condition de config compartilhado.
+This confirms the bug is the shared config race condition.
 
-### Documentação Completa
-
-Para detalhes completos das correções, veja:
-- [1-Pager Bug Fix (PT-BR)](../../docs/1-pager-eventual-consistency-bug-fix.pt-BR.md)
 
 ---
 
-## 📅 Changelog
+## See Also
 
-### v11.0.4 (12/10/2025)
-
-#### 🆕 Complete Analytics API - 6 New Functions
-
-Completed the analytics API with **6 new functions** covering all time range/granularity combinations:
-
-**New Functions:**
-1. ✅ `getYearByDay(resource, field, year, options)` - Year broken down by days (365/366 records)
-2. ✅ `getWeekByDay(resource, field, week, options)` - Week broken down by days (7 records, ISO 8601)
-3. ✅ `getWeekByHour(resource, field, week, options)` - Week broken down by hours (168 records)
-4. ✅ `getLastNHours(resource, field, hours, options)` - Last N hours with gap filling
-5. ✅ `getLastNWeeks(resource, field, weeks, options)` - Last N weeks
-6. ✅ `getLastNMonths(resource, field, months, options)` - Last N months with gap filling
-
-**Features:**
-- ✅ ISO 8601 week numbering (Monday start, weeks identified as `YYYY-Www`)
-- ✅ Gap filling support for continuous time series
-- ✅ Chart-ready data format (cohort, count, sum, avg, min, max)
-- ✅ Precise time range calculations (no off-by-one errors)
-- ✅ UTC-based date handling (prevents timezone issues)
-
-**Total Analytics Functions:** 15
-- 9 time range + granularity combinations
-- 4 "last N periods" convenience functions
-- 1 generic query function
-- 1 top records function
-
-**Test Coverage:**
-- ✅ 31/31 analytics tests passing (100%)
-- ✅ All edge cases covered (ISO weeks, leap years, gap filling)
-
-**Compatibility:**
-- ✅ 100% backward compatible
-- ✅ No breaking changes
-- ✅ All existing functions unchanged
-
-**Commits:**
-- `a0b2f87` - feat: implement 6 new analytics functions
-- `cacb511` - fix: resolve all edge case failures
-
-### v11.0.2 (11/10/2025)
-
-#### 🆕 Week Analytics Support (ISO 8601)
-
-Adicionado suporte completo para agregações semanais:
-
-**Novas Features:**
-- ✅ Cálculo automático de semana ISO 8601 (segunda a domingo)
-- ✅ Atributo `cohortWeek` em transações (formato: `YYYY-Www`)
-- ✅ Partição `byWeek` para queries otimizadas
-- ✅ Rollup automático: hour → day → **week** → month
-- ✅ Novas funções: `getYearByWeek()` e `getMonthByWeek()`
-
-**Arquivos Modificados:**
-- `src/plugins/eventual-consistency/utils.js` - Função `getISOWeek()` e atualização `getCohortInfo()`
-- `src/plugins/eventual-consistency/partitions.js` - Partição `byWeek`
-- `src/plugins/eventual-consistency/install.js` - Atributo `cohortWeek`
-- `src/plugins/eventual-consistency/transactions.js` - Transaction object inclui `cohortWeek`
-- `src/plugins/eventual-consistency/analytics.js` - Rollup + query functions
-- `src/plugins/eventual-consistency/index.js` - API pública
-
-**Compatibilidade:**
-- ✅ 100% backward compatible (cohortWeek é opcional)
-- ✅ Transações antigas continuam funcionando
-- ✅ Não requer migração
-- ✅ Todos os 861 testes passando
-
-**Uso:**
-```javascript
-// Obter analytics semanais
-const weeks = await plugin.getYearByWeek('products', 'sold', 2025);
-console.log(weeks[0]); // { cohort: '2025-W01', count: 150, sum: 15000, ... }
-
-// Comparar semanas de um mês
-const monthWeeks = await plugin.getMonthByWeek('urls', 'clicks', '2025-10');
-// [W40, W41, W42, W43, W44]
-```
-
----
-
-## Ver Também
-
-- [Replicator Plugin](./replicator.md) - Replicar para outros bancos
+- [Replicator Plugin](./replicator.md) - Replicate to other databases
 - [Audit Plugin](./audit.md) - Audit trail
-- [Cache Plugin](./cache.md) - Cache de valores consolidados
+- [Cache Plugin](./cache.md) - Cache consolidated values
