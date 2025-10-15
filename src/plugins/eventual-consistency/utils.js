@@ -161,18 +161,168 @@ export function createFieldHandler(resourceName, fieldName) {
 }
 
 /**
- * Resolve field and plugin from arguments
+ * Validate nested path in resource schema
+ * Allows 1 level of nesting after 'json' type fields
+ *
  * @param {Object} resource - Resource object
- * @param {string} field - Field name
+ * @param {string} fieldPath - Dot-notation path (e.g., 'utmResults.medium.google')
+ * @returns {Object} { valid: boolean, rootField: string, fullPath: string, error?: string }
+ */
+export function validateNestedPath(resource, fieldPath) {
+  const parts = fieldPath.split('.');
+  const rootField = parts[0];
+
+  // Root field must exist in resource attributes
+  if (!resource.attributes || !resource.attributes[rootField]) {
+    return {
+      valid: false,
+      rootField,
+      fullPath: fieldPath,
+      error: `Root field "${rootField}" not found in resource attributes`
+    };
+  }
+
+  // If no nesting, just return valid
+  if (parts.length === 1) {
+    return { valid: true, rootField, fullPath: fieldPath };
+  }
+
+  // Validate nested path
+  let current = resource.attributes[rootField];
+  let foundJson = false;
+  let levelsAfterJson = 0;
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+
+    // If we found 'json' before, count levels
+    if (foundJson) {
+      levelsAfterJson++;
+      // Only allow 1 level after 'json'
+      if (levelsAfterJson > 1) {
+        return {
+          valid: false,
+          rootField,
+          fullPath: fieldPath,
+          error: `Path "${fieldPath}" exceeds 1 level after 'json' field. Maximum nesting after 'json' is 1 level.`
+        };
+      }
+      // After 'json', we can't validate further, but we allow 1 level
+      continue;
+    }
+
+    // Check if current level is 'json' type
+    if (typeof current === 'string') {
+      if (current === 'json' || current.startsWith('json|')) {
+        foundJson = true;
+        levelsAfterJson++;
+        // Allow 1 level after json
+        if (levelsAfterJson > 1) {
+          return {
+            valid: false,
+            rootField,
+            fullPath: fieldPath,
+            error: `Path "${fieldPath}" exceeds 1 level after 'json' field`
+          };
+        }
+        continue;
+      }
+      // Other string types can't be nested
+      return {
+        valid: false,
+        rootField,
+        fullPath: fieldPath,
+        error: `Field "${parts.slice(0, i).join('.')}" is type "${current}" and cannot be nested`
+      };
+    }
+
+    // Check if current is an object with nested structure
+    if (typeof current === 'object') {
+      // Check for $$type
+      if (current.$$type) {
+        const type = current.$$type;
+        if (type === 'json' || type.includes('json')) {
+          foundJson = true;
+          levelsAfterJson++;
+          continue;
+        }
+        if (type !== 'object' && !type.includes('object')) {
+          return {
+            valid: false,
+            rootField,
+            fullPath: fieldPath,
+            error: `Field "${parts.slice(0, i).join('.')}" is type "${type}" and cannot be nested`
+          };
+        }
+      }
+
+      // Navigate to next level
+      if (!current[part]) {
+        return {
+          valid: false,
+          rootField,
+          fullPath: fieldPath,
+          error: `Field "${part}" not found in "${parts.slice(0, i).join('.')}"`
+        };
+      }
+      current = current[part];
+    } else {
+      return {
+        valid: false,
+        rootField,
+        fullPath: fieldPath,
+        error: `Invalid structure at "${parts.slice(0, i).join('.')}"`
+      };
+    }
+  }
+
+  return { valid: true, rootField, fullPath: fieldPath };
+}
+
+/**
+ * Resolve field and plugin from arguments
+ * Supports dot notation for nested fields (e.g., 'utmResults.medium.google')
+ *
+ * @param {Object} resource - Resource object
+ * @param {string} field - Field name or path (supports dot notation)
  * @param {*} value - Value (for error reporting)
- * @returns {Object} Resolved field and plugin handler
- * @throws {Error} If field or plugin not found
+ * @returns {Object} Resolved field, path, and plugin handler
+ * @throws {Error} If field or plugin not found, or path is invalid
  */
 export function resolveFieldAndPlugin(resource, field, value) {
   if (!resource._eventualConsistencyPlugins) {
     throw new Error(`No eventual consistency plugins configured for this resource`);
   }
 
+  // Check if field contains dot notation (nested path)
+  if (field.includes('.')) {
+    const validation = validateNestedPath(resource, field);
+
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
+    // Get plugin for root field
+    const rootField = validation.rootField;
+    const fieldPlugin = resource._eventualConsistencyPlugins[rootField];
+
+    if (!fieldPlugin) {
+      const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(', ');
+      throw new Error(
+        `No eventual consistency plugin found for root field "${rootField}". ` +
+        `Available fields: ${availableFields}`
+      );
+    }
+
+    return {
+      field: rootField,           // Root field for plugin lookup
+      fieldPath: field,            // Full path for nested access
+      value,
+      plugin: fieldPlugin
+    };
+  }
+
+  // Simple field (no nesting)
   const fieldPlugin = resource._eventualConsistencyPlugins[field];
 
   if (!fieldPlugin) {
@@ -183,7 +333,7 @@ export function resolveFieldAndPlugin(resource, field, value) {
     );
   }
 
-  return { field, value, plugin: fieldPlugin };
+  return { field, fieldPath: field, value, plugin: fieldPlugin };
 }
 
 /**

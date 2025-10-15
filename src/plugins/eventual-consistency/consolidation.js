@@ -272,6 +272,8 @@ export async function consolidateRecord(
         }
 
         currentValue = 0;
+        // Clear the applied transactions array since we deleted them
+        appliedTransactions.length = 0;
       } else {
         // Record exists - use applied transactions to calculate current value
         // Sort by timestamp to get chronological order
@@ -290,40 +292,44 @@ export async function consolidateRecord(
           // Solution: Get the current record value and create an anchor transaction now
           const recordValue = recordExists[config.field] || 0;
 
-          // Calculate what the base value was by subtracting all applied deltas
-          let appliedDelta = 0;
-          for (const t of appliedTransactions) {
-            if (t.operation === 'add') appliedDelta += t.value;
-            else if (t.operation === 'sub') appliedDelta -= t.value;
-          }
+          // Only create anchor if recordValue is a number (not object/array for nested fields)
+          if (typeof recordValue === 'number') {
+            // Calculate what the base value was by subtracting all applied deltas
+            let appliedDelta = 0;
+            for (const t of appliedTransactions) {
+              if (t.operation === 'add') appliedDelta += t.value;
+              else if (t.operation === 'sub') appliedDelta -= t.value;
+            }
 
-          const baseValue = recordValue - appliedDelta;
+            const baseValue = recordValue - appliedDelta;
 
-          // Create and save anchor transaction with the base value
-          // Only create if baseValue is non-zero AND we don't already have an anchor transaction
-          const hasExistingAnchor = appliedTransactions.some(t => t.source === 'anchor');
-          if (baseValue !== 0 && !hasExistingAnchor) {
-            // Use the timestamp of the first applied transaction for cohort info
-            const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
-            const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.verbose);
-            const anchorTransaction = {
-              id: idGenerator(),
-              originalId: originalId,
-              field: config.field,
-              value: baseValue,
-              operation: 'set',
-              timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(), // 1ms before first txn to ensure it's first
-              cohortDate: cohortInfo.date,
-              cohortHour: cohortInfo.hour,
-              cohortMonth: cohortInfo.month,
-              source: 'anchor',
-              applied: true
-            };
+            // Create and save anchor transaction with the base value
+            // Only create if baseValue is non-zero AND we don't already have an anchor transaction
+            const hasExistingAnchor = appliedTransactions.some(t => t.source === 'anchor');
+            if (baseValue !== 0 && typeof baseValue === 'number' && !hasExistingAnchor) {
+              // Use the timestamp of the first applied transaction for cohort info
+              const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
+              const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.verbose);
+              const anchorTransaction = {
+                id: idGenerator(),
+                originalId: originalId,
+                field: config.field,
+                fieldPath: config.field,  // Add fieldPath for consistency
+                value: baseValue,
+                operation: 'set',
+                timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(), // 1ms before first txn to ensure it's first
+                cohortDate: cohortInfo.date,
+                cohortHour: cohortInfo.hour,
+                cohortMonth: cohortInfo.month,
+                source: 'anchor',
+                applied: true
+              };
 
-            await transactionResource.insert(anchorTransaction);
+              await transactionResource.insert(anchorTransaction);
 
-            // Prepend to applied transactions for this consolidation
-            appliedTransactions.unshift(anchorTransaction);
+              // Prepend to applied transactions for this consolidation
+              appliedTransactions.unshift(anchorTransaction);
+            }
           }
         }
 
@@ -340,7 +346,8 @@ export async function consolidateRecord(
 
       // If there's an initial value, create and save an anchor transaction
       // This ensures all future consolidations have a reliable base value
-      if (currentValue !== 0) {
+      // IMPORTANT: Only create anchor if currentValue is a number (not object/array for nested fields)
+      if (currentValue !== 0 && typeof currentValue === 'number') {
         // Use timestamp of the first pending transaction (or current time if none)
         let anchorTimestamp;
         if (transactions && transactions.length > 0) {
@@ -355,6 +362,7 @@ export async function consolidateRecord(
           id: idGenerator(),
           originalId: originalId,
           field: config.field,
+          fieldPath: config.field,  // Add fieldPath for consistency
           value: currentValue,
           operation: 'set',
           timestamp: anchorTimestamp,
@@ -389,22 +397,75 @@ export async function consolidateRecord(
       new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
-    // If there's a current value and no 'set' operations in pending transactions,
-    // prepend a synthetic set transaction to preserve the current value
-    const hasSetOperation = transactions.some(t => t.operation === 'set');
-    if (currentValue !== 0 && !hasSetOperation) {
-      transactions.unshift(createSyntheticSetTransaction(currentValue));
+    // Group PENDING transactions by fieldPath to support nested fields
+    const transactionsByPath = {};
+    for (const txn of transactions) {
+      const path = txn.fieldPath || txn.field || config.field;
+      if (!transactionsByPath[path]) {
+        transactionsByPath[path] = [];
+      }
+      transactionsByPath[path].push(txn);
     }
 
-    // Apply reducer to get consolidated value
-    const consolidatedValue = config.reducer(transactions);
+    // For each fieldPath, we need the currentValue from applied transactions
+    // Group APPLIED transactions by fieldPath
+    const appliedByPath = {};
+    if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
+      for (const txn of appliedTransactions) {
+        const path = txn.fieldPath || txn.field || config.field;
+        if (!appliedByPath[path]) {
+          appliedByPath[path] = [];
+        }
+        appliedByPath[path].push(txn);
+      }
+    }
 
-    if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ` +
-        `${originalId}: ${currentValue} → ${consolidatedValue} ` +
-        `(${consolidatedValue > currentValue ? '+' : ''}${consolidatedValue - currentValue})`
-      );
+    // Consolidate each fieldPath group separately
+    const consolidatedValues = {};
+    const lodash = await import('lodash-es');
+
+    // Get current record to extract existing values for nested paths
+    const [currentRecordOk, currentRecordErr, currentRecord] = await tryFn(() =>
+      targetResource.get(originalId)
+    );
+
+    for (const [fieldPath, pathTransactions] of Object.entries(transactionsByPath)) {
+      // Calculate current value for this path from applied transactions
+      let pathCurrentValue = 0;
+      if (appliedByPath[fieldPath] && appliedByPath[fieldPath].length > 0) {
+        // Sort applied transactions by timestamp
+        appliedByPath[fieldPath].sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        // Apply reducer to get current value from applied transactions
+        pathCurrentValue = config.reducer(appliedByPath[fieldPath]);
+      } else {
+        // No applied transactions yet - use value from record (first consolidation)
+        // This happens when there's an initial value in the record before any consolidation
+        if (currentRecordOk && currentRecord) {
+          const recordValue = lodash.get(currentRecord, fieldPath, 0);
+          if (typeof recordValue === 'number') {
+            pathCurrentValue = recordValue;
+          }
+        }
+      }
+
+      // Prepend synthetic set transaction with current value
+      if (pathCurrentValue !== 0) {
+        pathTransactions.unshift(createSyntheticSetTransaction(pathCurrentValue));
+      }
+
+      // Apply reducer to get consolidated value for this path
+      const pathConsolidatedValue = config.reducer(pathTransactions);
+      consolidatedValues[fieldPath] = pathConsolidatedValue;
+
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${fieldPath} - ` +
+          `${originalId}: ${pathCurrentValue} → ${pathConsolidatedValue} ` +
+          `(${pathTransactions.length - (pathCurrentValue !== 0 ? 1 : 0)} pending txns)`
+        );
+      }
     }
 
     // 🔥 DEBUG: Log BEFORE update
@@ -412,23 +473,61 @@ export async function consolidateRecord(
       console.log(
         `🔥 [DEBUG] BEFORE targetResource.update() {` +
         `\n  originalId: '${originalId}',` +
-        `\n  field: '${config.field}',` +
-        `\n  consolidatedValue: ${consolidatedValue},` +
-        `\n  currentValue: ${currentValue}` +
+        `\n  consolidatedValues: ${JSON.stringify(consolidatedValues, null, 2)}` +
         `\n}`
       );
     }
 
-    // Update the original record
-    // NOTE: We do NOT attempt to insert non-existent records because:
-    // 1. Target resources typically have required fields we don't know about
-    // 2. Record creation should be the application's responsibility
-    // 3. Transactions will remain pending until the record is created
-    const [updateOk, updateErr, updateResult] = await tryFn(() =>
-      targetResource.update(originalId, {
-        [config.field]: consolidatedValue
-      })
+    // Build update object using lodash.set for nested paths
+    // Get fresh record to avoid overwriting other fields
+    const [recordOk, recordErr, record] = await tryFn(() =>
+      targetResource.get(originalId)
     );
+
+    let updateOk, updateErr, updateResult;
+
+    if (!recordOk || !record) {
+      // Record doesn't exist - we'll let the update fail and handle it below
+      // This ensures transactions remain pending until record is created
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          `Record ${originalId} doesn't exist yet. Will attempt update anyway (expected to fail).`
+        );
+      }
+
+      // Create a minimal record object with just our field
+      const minimalRecord = { id: originalId };
+      for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
+        lodash.set(minimalRecord, fieldPath, value);
+      }
+
+      // Try to update (will fail, handled below)
+      const result = await tryFn(() =>
+        targetResource.update(originalId, minimalRecord)
+      );
+      updateOk = result[0];
+      updateErr = result[1];
+      updateResult = result[2];
+    } else {
+      // Record exists - apply all consolidated values using lodash.set
+      for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
+        lodash.set(record, fieldPath, value);
+      }
+
+      // Update the original record with all changes
+      // NOTE: We update the entire record to preserve nested structures
+      const result = await tryFn(() =>
+        targetResource.update(originalId, record)
+      );
+      updateOk = result[0];
+      updateErr = result[1];
+      updateResult = result[2];
+    }
+
+    // For backward compatibility, return the value of the main field
+    const consolidatedValue = consolidatedValues[config.field] ||
+                             (record ? lodash.get(record, config.field, 0) : 0);
 
     // 🔥 DEBUG: Log AFTER update
     if (config.verbose) {
@@ -436,39 +535,43 @@ export async function consolidateRecord(
         `🔥 [DEBUG] AFTER targetResource.update() {` +
         `\n  updateOk: ${updateOk},` +
         `\n  updateErr: ${updateErr?.message || 'undefined'},` +
-        `\n  updateResult: ${JSON.stringify(updateResult, null, 2)},` +
-        `\n  hasField: ${updateResult?.[config.field]}` +
+        `\n  consolidatedValue (main field): ${consolidatedValue}` +
         `\n}`
       );
     }
 
-    // 🔥 VERIFY: Check if update actually persisted
+    // 🔥 VERIFY: Check if update actually persisted for all fieldPaths
     if (updateOk && config.verbose) {
       // Bypass cache to get fresh data
       const [verifyOk, verifyErr, verifiedRecord] = await tryFn(() =>
         targetResource.get(originalId, { skipCache: true })
       );
 
-      console.log(
-        `🔥 [DEBUG] VERIFICATION (fresh from S3, no cache) {` +
-        `\n  verifyOk: ${verifyOk},` +
-        `\n  verifiedRecord[${config.field}]: ${verifiedRecord?.[config.field]},` +
-        `\n  expectedValue: ${consolidatedValue},` +
-        `\n  ✅ MATCH: ${verifiedRecord?.[config.field] === consolidatedValue}` +
-        `\n}`
-      );
+      // Verify each fieldPath
+      for (const [fieldPath, expectedValue] of Object.entries(consolidatedValues)) {
+        const actualValue = lodash.get(verifiedRecord, fieldPath);
+        const match = actualValue === expectedValue;
 
-      // If verification fails, this is a critical bug
-      if (verifyOk && verifiedRecord?.[config.field] !== consolidatedValue) {
-        console.error(
-          `❌ [CRITICAL BUG] Update reported success but value not persisted!` +
-          `\n  Resource: ${config.resource}` +
-          `\n  Field: ${config.field}` +
-          `\n  Record ID: ${originalId}` +
-          `\n  Expected: ${consolidatedValue}` +
-          `\n  Actually got: ${verifiedRecord?.[config.field]}` +
-          `\n  This indicates a bug in s3db.js resource.update()`
+        console.log(
+          `🔥 [DEBUG] VERIFICATION ${fieldPath} {` +
+          `\n  expectedValue: ${expectedValue},` +
+          `\n  actualValue: ${actualValue},` +
+          `\n  ${match ? '✅ MATCH' : '❌ MISMATCH'}` +
+          `\n}`
         );
+
+        // If verification fails, this is a critical bug
+        if (!match) {
+          console.error(
+            `❌ [CRITICAL BUG] Update reported success but value not persisted!` +
+            `\n  Resource: ${config.resource}` +
+            `\n  FieldPath: ${fieldPath}` +
+            `\n  Record ID: ${originalId}` +
+            `\n  Expected: ${expectedValue}` +
+            `\n  Actually got: ${actualValue}` +
+            `\n  This indicates a bug in s3db.js resource.update()`
+          );
+        }
       }
     }
 
@@ -763,6 +866,51 @@ export async function recalculateRecord(
         `[EventualConsistency] ${config.resource}.${config.field} - ` +
         `Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
       );
+    }
+
+    // Check if there's an anchor transaction
+    const hasAnchor = allTransactions.some(txn => txn.source === 'anchor');
+
+    // If no anchor exists, create one with value 0 to serve as the baseline
+    // This ensures recalculate is idempotent - running it multiple times produces same result
+    if (!hasAnchor) {
+      const now = new Date();
+      const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+
+      // Create anchor transaction with timestamp before all other transactions
+      const oldestTransaction = allTransactions.sort((a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      )[0];
+
+      const anchorTimestamp = oldestTransaction
+        ? new Date(new Date(oldestTransaction.timestamp).getTime() - 1).toISOString()
+        : now.toISOString();
+
+      const anchorCohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.verbose);
+
+      const anchorTransaction = {
+        id: idGenerator(),
+        originalId: originalId,
+        field: config.field,
+        fieldPath: config.field,
+        value: 0,  // Always 0 for recalculate - we start from scratch
+        operation: 'set',
+        timestamp: anchorTimestamp,
+        cohortDate: anchorCohortInfo.date,
+        cohortHour: anchorCohortInfo.hour,
+        cohortMonth: anchorCohortInfo.month,
+        source: 'anchor',
+        applied: true  // Anchor is always applied
+      };
+
+      await transactionResource.insert(anchorTransaction);
+
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${config.field} - ` +
+          `Created anchor transaction for ${originalId} with value 0`
+        );
+      }
     }
 
     // Mark ALL transactions as pending (applied: false)
