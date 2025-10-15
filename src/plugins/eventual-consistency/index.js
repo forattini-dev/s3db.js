@@ -17,7 +17,7 @@ import {
   runConsolidation
 } from "./consolidation.js";
 import { runGarbageCollection } from "./garbage-collection.js";
-import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords, getYearByDay, getWeekByDay, getWeekByHour, getLastNHours, getLastNWeeks, getLastNMonths } from "./analytics.js";
+import { updateAnalytics, getAnalytics, getMonthByDay, getDayByHour, getLastNDays, getYearByMonth, getYearByWeek, getMonthByWeek, getMonthByHour, getTopRecords, getYearByDay, getWeekByDay, getWeekByHour, getLastNHours, getLastNWeeks, getLastNMonths, getRawEvents } from "./analytics.js";
 import { onInstall, onStart, onStop, watchForResource, completeFieldSetup } from "./install.js";
 
 export class EventualConsistencyPlugin extends Plugin {
@@ -530,6 +530,208 @@ export class EventualConsistencyPlugin extends Plugin {
    */
   async getLastNMonths(resourceName, field, months = 12, options = {}) {
     return await getLastNMonths(resourceName, field, months, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get raw transaction events for custom aggregation
+   *
+   * This method provides direct access to the underlying transaction events,
+   * allowing developers to perform custom aggregations beyond the pre-built analytics.
+   * Useful for complex queries, custom metrics, or when you need the raw event data.
+   *
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {Object} options - Query options
+   * @param {string} options.recordId - Filter by specific record ID
+   * @param {string} options.startDate - Start date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+   * @param {string} options.endDate - End date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+   * @param {string} options.cohortDate - Filter by cohort date (YYYY-MM-DD)
+   * @param {string} options.cohortHour - Filter by cohort hour (YYYY-MM-DDTHH)
+   * @param {string} options.cohortMonth - Filter by cohort month (YYYY-MM)
+   * @param {boolean} options.applied - Filter by applied status (true/false/undefined for both)
+   * @param {string} options.operation - Filter by operation type ('add', 'sub', 'set')
+   * @param {number} options.limit - Maximum number of events to return
+   * @returns {Promise<Array>} Raw transaction events
+   *
+   * @example
+   * // Get all events for a specific record
+   * const events = await plugin.getRawEvents('wallets', 'balance', {
+   *   recordId: 'wallet1'
+   * });
+   *
+   * @example
+   * // Get events for a specific time range
+   * const events = await plugin.getRawEvents('wallets', 'balance', {
+   *   startDate: '2025-10-01',
+   *   endDate: '2025-10-31'
+   * });
+   *
+   * @example
+   * // Get only pending (unapplied) transactions
+   * const pending = await plugin.getRawEvents('wallets', 'balance', {
+   *   applied: false
+   * });
+   */
+  async getRawEvents(resourceName, field, options = {}) {
+    return await getRawEvents(resourceName, field, options, this.fieldHandlers);
+  }
+
+  /**
+   * Get diagnostics information about the plugin state
+   *
+   * This method provides comprehensive diagnostic information about the EventualConsistencyPlugin,
+   * including configured resources, field handlers, timers, and overall health status.
+   * Useful for debugging initialization issues, configuration problems, or runtime errors.
+   *
+   * @param {Object} options - Diagnostic options
+   * @param {string} options.resourceName - Optional: limit diagnostics to specific resource
+   * @param {string} options.field - Optional: limit diagnostics to specific field
+   * @param {boolean} options.includeStats - Include transaction statistics (default: false)
+   * @returns {Promise<Object>} Diagnostic information
+   *
+   * @example
+   * // Get overall plugin diagnostics
+   * const diagnostics = await plugin.getDiagnostics();
+   * console.log(diagnostics);
+   *
+   * @example
+   * // Get diagnostics for specific resource/field with stats
+   * const diagnostics = await plugin.getDiagnostics({
+   *   resourceName: 'wallets',
+   *   field: 'balance',
+   *   includeStats: true
+   * });
+   */
+  async getDiagnostics(options = {}) {
+    const { resourceName, field, includeStats = false } = options;
+
+    const diagnostics = {
+      plugin: {
+        name: 'EventualConsistencyPlugin',
+        initialized: this.database !== null && this.database !== undefined,
+        verbose: this.config.verbose || false,
+        timezone: this.config.cohort?.timezone || 'UTC',
+        consolidation: {
+          mode: this.config.consolidation?.mode || 'timer',
+          interval: this.config.consolidation?.interval || 60000,
+          batchSize: this.config.consolidation?.batchSize || 100
+        },
+        garbageCollection: {
+          enabled: this.config.garbageCollection?.enabled !== false,
+          retentionDays: this.config.garbageCollection?.retentionDays || 30,
+          interval: this.config.garbageCollection?.interval || 3600000
+        }
+      },
+      resources: [],
+      errors: [],
+      warnings: []
+    };
+
+    // Iterate through configured resources
+    for (const [resName, resourceHandlers] of this.fieldHandlers.entries()) {
+      // Skip if filtering by resource and this isn't it
+      if (resourceName && resName !== resourceName) {
+        continue;
+      }
+
+      const resourceDiag = {
+        name: resName,
+        fields: []
+      };
+
+      for (const [fieldName, handler] of resourceHandlers.entries()) {
+        // Skip if filtering by field and this isn't it
+        if (field && fieldName !== field) {
+          continue;
+        }
+
+        const fieldDiag = {
+          name: fieldName,
+          type: handler.type || 'counter',
+          analyticsEnabled: handler.analyticsResource !== null && handler.analyticsResource !== undefined,
+          resources: {
+            transaction: handler.transactionResource?.name || null,
+            target: handler.targetResource?.name || null,
+            analytics: handler.analyticsResource?.name || null
+          },
+          timers: {
+            consolidation: handler.consolidationTimer !== null && handler.consolidationTimer !== undefined,
+            garbageCollection: handler.garbageCollectionTimer !== null && handler.garbageCollectionTimer !== undefined
+          }
+        };
+
+        // Check for common issues
+        if (!handler.transactionResource) {
+          diagnostics.errors.push({
+            resource: resName,
+            field: fieldName,
+            issue: 'Missing transaction resource',
+            suggestion: 'Ensure plugin is installed and resources are created after plugin installation'
+          });
+        }
+
+        if (!handler.targetResource) {
+          diagnostics.warnings.push({
+            resource: resName,
+            field: fieldName,
+            issue: 'Missing target resource',
+            suggestion: 'Target resource may not have been created yet'
+          });
+        }
+
+        if (handler.analyticsResource && !handler.analyticsResource.name) {
+          diagnostics.errors.push({
+            resource: resName,
+            field: fieldName,
+            issue: 'Invalid analytics resource',
+            suggestion: 'Analytics resource exists but has no name - possible initialization failure'
+          });
+        }
+
+        // Include statistics if requested
+        if (includeStats && handler.transactionResource) {
+          try {
+            const [okPending, errPending, pendingTxns] = await handler.transactionResource.query({ applied: false }).catch(() => [false, null, []]);
+            const [okApplied, errApplied, appliedTxns] = await handler.transactionResource.query({ applied: true }).catch(() => [false, null, []]);
+
+            fieldDiag.stats = {
+              pendingTransactions: okPending ? (pendingTxns?.length || 0) : 'error',
+              appliedTransactions: okApplied ? (appliedTxns?.length || 0) : 'error',
+              totalTransactions: (okPending && okApplied) ? ((pendingTxns?.length || 0) + (appliedTxns?.length || 0)) : 'error'
+            };
+
+            if (handler.analyticsResource) {
+              const [okAnalytics, errAnalytics, analyticsRecords] = await handler.analyticsResource.list().catch(() => [false, null, []]);
+              fieldDiag.stats.analyticsRecords = okAnalytics ? (analyticsRecords?.length || 0) : 'error';
+            }
+          } catch (error) {
+            diagnostics.warnings.push({
+              resource: resName,
+              field: fieldName,
+              issue: 'Failed to fetch statistics',
+              error: error.message
+            });
+          }
+        }
+
+        resourceDiag.fields.push(fieldDiag);
+      }
+
+      if (resourceDiag.fields.length > 0) {
+        diagnostics.resources.push(resourceDiag);
+      }
+    }
+
+    // Overall health check
+    diagnostics.health = {
+      status: diagnostics.errors.length === 0 ? (diagnostics.warnings.length === 0 ? 'healthy' : 'warning') : 'error',
+      totalResources: diagnostics.resources.length,
+      totalFields: diagnostics.resources.reduce((sum, r) => sum + r.fields.length, 0),
+      errorCount: diagnostics.errors.length,
+      warningCount: diagnostics.warnings.length
+    };
+
+    return diagnostics;
   }
 }
 
