@@ -4,7 +4,7 @@
  */
 
 import tryFn from "../../concerns/try-fn.js";
-import { groupByCohort } from "./utils.js";
+import { groupByCohort, ensureCohortHours } from "./utils.js";
 
 /**
  * Update analytics with consolidated transactions
@@ -459,8 +459,14 @@ export async function getAnalytics(resourceName, field, options, fieldHandlers) 
     throw new Error('Analytics not enabled for this plugin');
   }
 
-  const { period = 'day', date, startDate, endDate, month, year, breakdown = false } = options;
+  const { period = 'day', date, startDate, endDate, month, year, breakdown = false, recordId } = options;
 
+  // ✅ FIX BUG #1: If recordId is specified, fetch from transactions directly
+  if (recordId) {
+    return await getAnalyticsForRecord(resourceName, field, recordId, options, handler);
+  }
+
+  // Original behavior: global analytics from pre-aggregated data
   const [ok, err, allAnalytics] = await tryFn(() =>
     handler.analyticsResource.list()
   );
@@ -509,6 +515,156 @@ export async function getAnalytics(resourceName, field, options, fieldHandlers) 
     operations: a.operations,
     recordCount: a.recordCount
   }));
+}
+
+/**
+ * Get analytics for a specific record from transactions
+ * ✅ FIX BUG #1: Filter by recordId
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {string} recordId - Record ID to filter by
+ * @param {Object} options - Query options
+ * @param {Object} handler - Field handler
+ * @returns {Promise<Array>} Analytics data for specific record
+ * @private
+ */
+async function getAnalyticsForRecord(resourceName, field, recordId, options, handler) {
+  const { period = 'day', date, startDate, endDate, month, year } = options;
+
+  // Fetch transactions for this specific record
+  // Note: We need both applied: true and applied: false transactions for analytics
+  //  Same format as used in consolidation.js - the query() method auto-selects the partition
+  const [okTrue, errTrue, appliedTransactions] = await tryFn(() =>
+    handler.transactionResource.query({
+      originalId: recordId,
+      applied: true
+    })
+  );
+
+  const [okFalse, errFalse, pendingTransactions] = await tryFn(() =>
+    handler.transactionResource.query({
+      originalId: recordId,
+      applied: false
+    })
+  );
+
+  // Combine both applied and pending transactions
+  let allTransactions = [
+    ...(okTrue && appliedTransactions ? appliedTransactions : []),
+    ...(okFalse && pendingTransactions ? pendingTransactions : [])
+  ];
+
+  if (allTransactions.length === 0) {
+    return [];
+  }
+
+  // ✅ FIX BUG #2: Ensure all transactions have cohortHour calculated
+  // This handles legacy data that may be missing cohortHour
+  allTransactions = ensureCohortHours(allTransactions, handler.config?.cohort?.timezone || 'UTC', false);
+
+  // Filter transactions by temporal range
+  let filtered = allTransactions;
+
+  if (date) {
+    if (period === 'hour') {
+      // Match all hours of the date
+      filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(date));
+    } else if (period === 'day') {
+      filtered = filtered.filter(t => t.cohortDate === date);
+    } else if (period === 'month') {
+      filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth.startsWith(date));
+    }
+  } else if (startDate && endDate) {
+    if (period === 'hour') {
+      filtered = filtered.filter(t => t.cohortHour && t.cohortHour >= startDate && t.cohortHour <= endDate);
+    } else if (period === 'day') {
+      filtered = filtered.filter(t => t.cohortDate && t.cohortDate >= startDate && t.cohortDate <= endDate);
+    } else if (period === 'month') {
+      filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth >= startDate && t.cohortMonth <= endDate);
+    }
+  } else if (month) {
+    if (period === 'hour') {
+      filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(month));
+    } else if (period === 'day') {
+      filtered = filtered.filter(t => t.cohortDate && t.cohortDate.startsWith(month));
+    }
+  } else if (year) {
+    if (period === 'hour') {
+      filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(String(year)));
+    } else if (period === 'day') {
+      filtered = filtered.filter(t => t.cohortDate && t.cohortDate.startsWith(String(year)));
+    } else if (period === 'month') {
+      filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth.startsWith(String(year)));
+    }
+  }
+
+  // Aggregate transactions by cohort
+  const cohortField = period === 'hour' ? 'cohortHour' : period === 'day' ? 'cohortDate' : 'cohortMonth';
+  const aggregated = aggregateTransactionsByCohort(filtered, cohortField);
+
+  return aggregated;
+}
+
+/**
+ * Aggregate transactions by cohort field
+ * ✅ Helper for BUG #1 fix
+ *
+ * @param {Array} transactions - Transactions to aggregate
+ * @param {string} cohortField - Cohort field name ('cohortHour', 'cohortDate', 'cohortMonth')
+ * @returns {Array} Aggregated analytics
+ * @private
+ */
+function aggregateTransactionsByCohort(transactions, cohortField) {
+  const groups = {};
+
+  for (const txn of transactions) {
+    const cohort = txn[cohortField];
+    if (!cohort) continue;
+
+    if (!groups[cohort]) {
+      groups[cohort] = {
+        cohort,
+        count: 0,
+        sum: 0,
+        min: Infinity,
+        max: -Infinity,
+        recordCount: new Set(),
+        operations: {}
+      };
+    }
+
+    const group = groups[cohort];
+    const signedValue = txn.operation === 'sub' ? -txn.value : txn.value;
+
+    group.count++;
+    group.sum += signedValue;
+    group.min = Math.min(group.min, signedValue);
+    group.max = Math.max(group.max, signedValue);
+    group.recordCount.add(txn.originalId);
+
+    // Track operation breakdown
+    const op = txn.operation;
+    if (!group.operations[op]) {
+      group.operations[op] = { count: 0, sum: 0 };
+    }
+    group.operations[op].count++;
+    group.operations[op].sum += signedValue;
+  }
+
+  // Convert to array and finalize
+  return Object.values(groups)
+    .map(g => ({
+      cohort: g.cohort,
+      count: g.count,
+      sum: g.sum,
+      avg: g.sum / g.count,
+      min: g.min === Infinity ? 0 : g.min,
+      max: g.max === -Infinity ? 0 : g.max,
+      recordCount: g.recordCount.size,
+      operations: g.operations
+    }))
+    .sort((a, b) => a.cohort.localeCompare(b.cohort));
 }
 
 /**
@@ -587,7 +743,9 @@ export async function getLastNDays(resourceName, field, days, options, fieldHand
     return date.toISOString().substring(0, 10);
   }).reverse();
 
+  // ✅ FIX BUG #1: Pass through recordId and other options
   const data = await getAnalytics(resourceName, field, {
+    ...options,  // ✅ Include all options (recordId, etc.)
     period: 'day',
     startDate: dates[0],
     endDate: dates[dates.length - 1]
@@ -942,7 +1100,9 @@ export async function getLastNHours(resourceName, field, hours = 24, options, fi
   const startHour = hoursAgo.toISOString().substring(0, 13); // YYYY-MM-DDTHH
   const endHour = now.toISOString().substring(0, 13);
 
+  // ✅ FIX BUG #1: Pass through recordId and other options
   const data = await getAnalytics(resourceName, field, {
+    ...options,  // ✅ Include all options (recordId, etc.)
     period: 'hour',
     startDate: startHour,
     endDate: endHour
@@ -1023,7 +1183,9 @@ export async function getLastNMonths(resourceName, field, months = 12, options, 
   const startDate = monthsAgo.toISOString().substring(0, 7); // YYYY-MM
   const endDate = now.toISOString().substring(0, 7);
 
+  // ✅ FIX BUG #1: Pass through recordId and other options
   const data = await getAnalytics(resourceName, field, {
+    ...options,  // ✅ Include all options (recordId, etc.)
     period: 'month',
     startDate,
     endDate

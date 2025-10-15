@@ -355,3 +355,67 @@ export function groupByCohort(transactions, cohortField) {
   }
   return groups;
 }
+
+/**
+ * Ensure transaction has cohortHour field
+ * ✅ FIX BUG #2: Calculate cohortHour from timestamp if missing
+ *
+ * @param {Object} transaction - Transaction to check/fix
+ * @param {string} timezone - Timezone to use for cohort calculation
+ * @param {boolean} verbose - Whether to log warnings
+ * @returns {Object} Transaction with cohortHour populated
+ */
+export function ensureCohortHour(transaction, timezone = 'UTC', verbose = false) {
+  // If cohortHour already exists, return as-is
+  if (transaction.cohortHour) {
+    return transaction;
+  }
+
+  // Calculate cohortHour from timestamp
+  if (transaction.timestamp) {
+    const date = new Date(transaction.timestamp);
+    const cohortInfo = getCohortInfo(date, timezone, verbose);
+
+    if (verbose) {
+      console.log(
+        `[EventualConsistency] Transaction ${transaction.id} missing cohortHour, ` +
+        `calculated from timestamp: ${cohortInfo.hour}`
+      );
+    }
+
+    // Add cohortHour (and other cohort fields if missing)
+    transaction.cohortHour = cohortInfo.hour;
+
+    if (!transaction.cohortWeek) {
+      transaction.cohortWeek = cohortInfo.week;
+    }
+
+    if (!transaction.cohortMonth) {
+      transaction.cohortMonth = cohortInfo.month;
+    }
+  } else if (verbose) {
+    console.warn(
+      `[EventualConsistency] Transaction ${transaction.id} missing both cohortHour and timestamp, ` +
+      `cannot calculate cohort`
+    );
+  }
+
+  return transaction;
+}
+
+/**
+ * Ensure all transactions in array have cohortHour
+ * ✅ FIX BUG #2: Batch version of ensureCohortHour
+ *
+ * @param {Array} transactions - Transactions to check/fix
+ * @param {string} timezone - Timezone to use for cohort calculation
+ * @param {boolean} verbose - Whether to log warnings
+ * @returns {Array} Transactions with cohortHour populated
+ */
+export function ensureCohortHours(transactions, timezone = 'UTC', verbose = false) {
+  if (!transactions || !Array.isArray(transactions)) {
+    return transactions;
+  }
+
+  return transactions.map(txn => ensureCohortHour(txn, timezone, verbose));
+}

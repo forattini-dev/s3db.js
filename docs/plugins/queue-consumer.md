@@ -799,3 +799,148 @@ const getQueueConfig = () => {
 - [Replicator Plugin](./replicator.md) - Send messages to queues
 - [Audit Plugin](./audit.md) - Track queue message processing
 - [Metrics Plugin](./metrics.md) - Monitor queue processing performance
+## ❓ FAQ
+
+### Básico
+
+**P: O que o QueueConsumerPlugin faz?**
+R: Consome mensagens de filas externas (SQS, RabbitMQ) e executa operações no S3DB automaticamente (insert, update, delete).
+
+**P: Quais drivers estão disponíveis?**
+R: `sqs` (AWS SQS) e `rabbitmq` (RabbitMQ/AMQP).
+
+**P: Qual o formato das mensagens?**
+R: JSON com `resource`, `action` e `data`:
+```json
+{
+  "resource": "users",
+  "action": "insert",
+  "data": { "id": "123", "name": "John" }
+}
+```
+
+### Configuração
+
+**P: Como configurar múltiplas filas?**
+R: Use o formato de array:
+```javascript
+new QueueConsumerPlugin({
+  consumers: [
+    {
+      driver: 'sqs',
+      config: { region: 'us-east-1', credentials: {...} },
+      consumers: [
+        { resources: 'users', queueUrl: 'https://sqs...users' },
+        { resources: 'orders', queueUrl: 'https://sqs...orders' }
+      ]
+    }
+  ]
+})
+```
+
+**P: Como configurar RabbitMQ?**
+R: Use o driver `rabbitmq`:
+```javascript
+new QueueConsumerPlugin({
+  consumers: [{
+    driver: 'rabbitmq',
+    config: {
+      amqpUrl: 'amqp://user:pass@localhost:5672',
+      prefetch: 10,
+      reconnectInterval: 2000
+    },
+    consumers: [
+      { resources: 'users', queue: 'users-queue' }
+    ]
+  }]
+})
+```
+
+**P: Como configurar concurrency?**
+R: Use a opção `concurrency`:
+```javascript
+new QueueConsumerPlugin({
+  consumers: [{
+    driver: 'sqs',
+    config: { region: 'us-east-1' },
+    consumers: [
+      { resources: 'emails', queueUrl: '...', concurrency: 10 }
+    ]
+  }]
+})
+```
+
+### Operações
+
+**P: Quais actions são suportadas?**
+R: `insert`, `update`, `delete`, `upsert` (dependendo do driver).
+
+**P: Como transformar mensagens antes de processar?**
+R: Use middleware ou Lambda/function antes da fila. O plugin processa mensagens diretamente no formato esperado.
+
+**P: Como lidar com erros?**
+R: Configure callbacks globais:
+```javascript
+new QueueConsumerPlugin({
+  consumers: [...],
+  onSuccess: (resource, action, data, result) => {
+    console.log(`✅ ${action} on ${resource} succeeded`);
+  },
+  onError: (error, rawMessage) => {
+    console.error('Queue error:', error);
+    // Enviar para DLQ, notificar, etc.
+  }
+})
+```
+
+### Performance
+
+**P: Como aumentar throughput?**
+R: Aumente `concurrency` e `prefetch` (RabbitMQ):
+```javascript
+config: {
+  prefetch: 20  // RabbitMQ: fetch 20 messages at a time
+},
+consumers: [{
+  resources: 'orders',
+  queueUrl: '...',
+  concurrency: 10  // Process 10 messages in parallel
+}]
+```
+
+**P: Como reduzir latência?**
+R: Use `pollInterval` menor (SQS):
+```javascript
+config: {
+  pollInterval: 1000  // Poll every 1 second
+}
+```
+
+### Troubleshooting
+
+**P: Mensagens não estão sendo processadas?**
+R: Verifique:
+1. Formato da mensagem (resource/action/data)
+2. Recurso existe no database
+3. Credenciais e região corretas
+4. Fila tem mensagens disponíveis
+
+**P: Como debugar o consumidor?**
+R: Ative logs detalhados:
+```javascript
+new QueueConsumerPlugin({
+  verbose: true,
+  consumers: [...]
+})
+```
+
+**P: Mensagens estão falhando silenciosamente?**
+R: Configure `onError` e verifique logs:
+```javascript
+onError: (error, message) => {
+  console.error('Processing failed:', error);
+  console.log('Message:', message);
+}
+```
+
+---

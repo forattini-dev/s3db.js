@@ -1174,3 +1174,135 @@ const gracefulScheduler = new GracefulScheduler(s3db.plugins.scheduler);
 - [State Machine Plugin](./state-machine.md) - Schedule state machine operations
 - [Backup Plugin](./backup.md) - Schedule automated backups
 - [Metrics Plugin](./metrics.md) - Monitor scheduler performance
+## ❓ FAQ
+
+### Básico
+
+**P: O que o SchedulerPlugin faz?**
+R: Executa tarefas agendadas com expressões cron, com suporte a retries, timeouts, histórico e locking distribuído.
+
+**P: Quais formatos de schedule são suportados?**
+R: Expressões cron padrão (5 campos) e atalhos (`@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`).
+
+**P: Como funciona o distributed locking?**
+R: Usa `PluginStorage` com TTL para garantir que apenas uma instância execute o job por vez em ambientes distribuídos.
+
+### Configuração
+
+**P: Como configurar um job básico?**
+R:
+```javascript
+new SchedulerPlugin({
+  jobs: {
+    cleanup: {
+      schedule: '0 3 * * *',  // Todo dia às 3 AM
+      description: 'Clean expired records',
+      action: async (database, context) => {
+        // Sua lógica aqui
+        return { deleted: 10 };
+      },
+      enabled: true,
+      retries: 3,
+      timeout: 300000  // 5 minutos
+    }
+  }
+})
+```
+
+**P: Como configurar timezone?**
+R: Use a opção `timezone`:
+```javascript
+new SchedulerPlugin({
+  timezone: 'America/Sao_Paulo',
+  jobs: {...}
+})
+```
+
+**P: Como configurar hooks globais?**
+R:
+```javascript
+new SchedulerPlugin({
+  onJobStart: (jobName, context) => console.log(`Starting ${jobName}`),
+  onJobComplete: (jobName, result, duration) => console.log(`Done in ${duration}ms`),
+  onJobError: (jobName, error) => console.error(`Failed: ${error.message}`),
+  jobs: {...}
+})
+```
+
+### Operações
+
+**P: Como executar um job manualmente?**
+R: Use `runJob`:
+```javascript
+await schedulerPlugin.runJob('cleanup');
+```
+
+**P: Como pausar/resumir um job?**
+R: Use `disableJob` e `enableJob`:
+```javascript
+schedulerPlugin.disableJob('cleanup');
+schedulerPlugin.enableJob('cleanup');
+```
+
+**P: Como adicionar um job em runtime?**
+R: Use `addJob`:
+```javascript
+schedulerPlugin.addJob('new-job', {
+  schedule: '*/5 * * * *',  // A cada 5 minutos
+  action: async (db) => { /* ... */ }
+});
+```
+
+**P: Como remover um job?**
+R: Use `removeJob`:
+```javascript
+schedulerPlugin.removeJob('cleanup');
+```
+
+### Monitoramento
+
+**P: Como obter status de um job?**
+R: Use `getJobStatus`:
+```javascript
+const status = schedulerPlugin.getJobStatus('cleanup');
+// Retorna: name, enabled, schedule, lastRun, nextRun, isRunning, statistics
+```
+
+**P: Como consultar histórico de execuções?**
+R: Use `getJobHistory`:
+```javascript
+const history = await schedulerPlugin.getJobHistory('cleanup', {
+  limit: 50,
+  status: 'error'  // null, 'success', 'error', 'timeout'
+});
+```
+
+**P: Como obter status de todos os jobs?**
+R: Use `getAllJobsStatus`:
+```javascript
+const allStatus = schedulerPlugin.getAllJobsStatus();
+```
+
+### Troubleshooting
+
+**P: Job não está executando?**
+R: Verifique:
+1. `enabled: true`
+2. Expressão cron válida
+3. `nextRun` está no futuro
+4. Não há erros no último run
+
+**P: Job está travando?**
+R: Configure um `timeout` adequado:
+```javascript
+{
+  schedule: '...',
+  action: async (db) => { /* ... */ },
+  timeout: 60000  // 1 minuto
+}
+```
+
+**P: Como evitar execução duplicada em cluster?**
+R: O plugin usa distributed locking automaticamente via `PluginStorage`.
+
+---
