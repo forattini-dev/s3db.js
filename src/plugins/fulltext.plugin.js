@@ -1,5 +1,6 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { FulltextError } from "./fulltext.errors.js";
 
 export class FullTextPlugin extends Plugin {
   constructor(options = {}) {
@@ -399,14 +400,20 @@ export class FullTextPlugin extends Plugin {
   // Search and return full records
   async searchRecords(resourceName, query, options = {}) {
     const searchResults = await this.search(resourceName, query, options);
-    
+
     if (searchResults.length === 0) {
       return [];
     }
 
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new FulltextError(`Resource '${resourceName}' not found`, {
+        operation: 'searchRecords',
+        resourceName,
+        query,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: 'Check resource name or ensure resource is created before searching'
+      });
     }
 
     const recordIds = searchResults.map(result => result.recordId);
@@ -430,7 +437,12 @@ export class FullTextPlugin extends Plugin {
   async rebuildIndex(resourceName) {
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new FulltextError(`Resource '${resourceName}' not found`, {
+        operation: 'rebuildIndex',
+        resourceName,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: 'Check resource name or ensure resource is created before rebuilding index'
+      });
     }
 
     // Clear existing indexes for this resource

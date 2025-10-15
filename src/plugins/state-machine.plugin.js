@@ -1,5 +1,6 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { StateMachineError } from "./state-machine.errors.js";
 
 /**
  * StateMachinePlugin - Finite State Machine Management
@@ -120,20 +121,39 @@ export class StateMachinePlugin extends Plugin {
 
   _validateConfiguration() {
     if (!this.config.stateMachines || Object.keys(this.config.stateMachines).length === 0) {
-      throw new Error('StateMachinePlugin: At least one state machine must be defined');
+      throw new StateMachineError('At least one state machine must be defined', {
+        operation: 'validateConfiguration',
+        machineCount: 0,
+        suggestion: 'Provide at least one state machine in the stateMachines configuration'
+      });
     }
     
     for (const [machineName, machine] of Object.entries(this.config.stateMachines)) {
       if (!machine.states || Object.keys(machine.states).length === 0) {
-        throw new Error(`StateMachinePlugin: Machine '${machineName}' must have states defined`);
+        throw new StateMachineError(`Machine '${machineName}' must have states defined`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          suggestion: 'Define at least one state in the states configuration'
+        });
       }
-      
+
       if (!machine.initialState) {
-        throw new Error(`StateMachinePlugin: Machine '${machineName}' must have an initialState`);
+        throw new StateMachineError(`Machine '${machineName}' must have an initialState`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          availableStates: Object.keys(machine.states),
+          suggestion: 'Specify an initialState property matching one of the defined states'
+        });
       }
-      
+
       if (!machine.states[machine.initialState]) {
-        throw new Error(`StateMachinePlugin: Initial state '${machine.initialState}' not found in machine '${machineName}'`);
+        throw new StateMachineError(`Initial state '${machine.initialState}' not found in machine '${machineName}'`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          initialState: machine.initialState,
+          availableStates: Object.keys(machine.states),
+          suggestion: 'Set initialState to one of the defined states'
+        });
       }
     }
   }
@@ -200,14 +220,27 @@ export class StateMachinePlugin extends Plugin {
   async send(machineId, entityId, event, context = {}) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'send',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
     }
     
     const currentState = await this.getState(machineId, entityId);
     const stateConfig = machine.config.states[currentState];
-    
+
     if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
-      throw new Error(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`);
+      throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
+        operation: 'send',
+        machineId,
+        entityId,
+        event,
+        currentState,
+        validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
+        suggestion: 'Use getValidEvents() to check which events are valid for the current state'
+      });
     }
     
     const targetState = stateConfig.on[event];
@@ -218,12 +251,21 @@ export class StateMachinePlugin extends Plugin {
       const guard = this.config.guards[guardName];
       
       if (guard) {
-        const [guardOk, guardErr, guardResult] = await tryFn(() => 
+        const [guardOk, guardErr, guardResult] = await tryFn(() =>
           guard(context, event, { database: this.database, machineId, entityId })
         );
-        
+
         if (!guardOk || !guardResult) {
-          throw new Error(`Transition blocked by guard '${guardName}': ${guardErr?.message || 'Guard returned false'}`);
+          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
+            operation: 'send',
+            machineId,
+            entityId,
+            event,
+            currentState,
+            guardName,
+            guardError: guardErr?.message || 'Guard returned false',
+            suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
+          });
         }
       }
     }
@@ -363,7 +405,12 @@ export class StateMachinePlugin extends Plugin {
   async getState(machineId, entityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'getState',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
     }
     
     // Check in-memory cache first
@@ -397,7 +444,12 @@ export class StateMachinePlugin extends Plugin {
   async getValidEvents(machineId, stateOrEntityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'getValidEvents',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
     }
 
     let state;
@@ -458,7 +510,12 @@ export class StateMachinePlugin extends Plugin {
   async initializeEntity(machineId, entityId, context = {}) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'initializeEntity',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
     }
 
     const initialState = machine.config.initialState;
@@ -483,7 +540,14 @@ export class StateMachinePlugin extends Plugin {
 
       // Only throw if error is NOT "already exists"
       if (!ok && err && !err.message?.includes('already exists')) {
-        throw new Error(`Failed to initialize entity state: ${err.message}`);
+        throw new StateMachineError('Failed to initialize entity state', {
+          operation: 'initializeEntity',
+          machineId,
+          entityId,
+          initialState,
+          original: err,
+          suggestion: 'Check state resource configuration and database permissions'
+        });
       }
     }
 
@@ -519,7 +583,12 @@ export class StateMachinePlugin extends Plugin {
   visualize(machineId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'visualize',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
     }
     
     let dot = `digraph ${machineId} {\n`;

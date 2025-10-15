@@ -544,7 +544,17 @@ export class Client extends EventEmitter {
       });
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
-      throw new Error("Some objects could not be moved");
+      throw new UnknownError("Some objects could not be moved", {
+        bucket: this.config.bucket,
+        operation: 'moveAllObjects',
+        prefixFrom,
+        prefixTo,
+        totalKeys: keys.length,
+        failedCount: errors.length,
+        successCount: results.length,
+        errors: errors.map(e => ({ message: e.message, raw: e.raw })),
+        suggestion: 'Check S3 permissions and retry failed objects individually'
+      });
     }
     return results;
   }
