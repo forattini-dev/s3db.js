@@ -2,25 +2,25 @@
 
 ## ⚡ TLDR
 
-Motor de busca **full-text** com indexação automática, relevance scoring e highlighting.
+**Full-text** search engine with automatic indexing, relevance scoring, and highlighting.
 
-**2 linhas para começar:**
+**2 lines to get started:**
 ```javascript
 await db.usePlugin(new FullTextPlugin({ fields: ['title', 'description', 'content'] }));
 const results = await db.plugins.fulltext.searchRecords('articles', 'machine learning');
 ```
 
-**Principais features:**
-- ✅ Indexação automática em insert/update
-- ✅ Relevance scoring com field weights
-- ✅ Highlighting de termos encontrados
+**Key features:**
+- ✅ Automatic indexing on insert/update
+- ✅ Relevance scoring with field weights
+- ✅ Highlighting of matched terms
 - ✅ Fuzzy search + stemming
 - ✅ Multi-field + multi-resource search
 
-**Quando usar:**
-- 🔍 Busca em artigos/documentos
-- 📦 Catálogos de produtos
-- 💬 Fóruns e comentários
+**When to use:**
+- 🔍 Searching articles/documents
+- 📦 Product catalogs
+- 💬 Forums and comments
 - 📚 Knowledge bases
 
 ---
@@ -81,9 +81,9 @@ import { S3db, FullTextPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [new FullTextPlugin({ 
+  plugins: [new FullTextPlugin({
     enabled: true,
-    fields: ['title', 'description', 'content'] 
+    fields: ['title', 'description', 'content']
   })]
 });
 
@@ -207,10 +207,10 @@ const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
   plugins: [new FullTextPlugin({
     enabled: true,
-    
+
     // Comprehensive field indexing
     fields: ['title', 'description', 'content', 'tags', 'category', 'author'],
-    
+
     // Advanced text processing
     minWordLength: 2,
     maxResults: 200,
@@ -218,7 +218,7 @@ const s3db = new S3db({
     stemming: true,          // Enable word stemming (run/running/ran)
     caseSensitive: false,
     fuzzySearch: true,       // Enable typo tolerance
-    
+
     // Custom stop words (words to ignore)
     stopWords: [
       'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
@@ -226,13 +226,13 @@ const s3db = new S3db({
       'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
       'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those'
     ],
-    
+
     // Advanced search options
     highlightTags: {
       start: '<mark class="highlight">',
       end: '</mark>'
     },
-    
+
     // Custom scoring weights per field
     fieldWeights: {
       title: 3.0,        // Title matches score higher
@@ -242,7 +242,7 @@ const s3db = new S3db({
       category: 1.5,      // Category is moderately important
       author: 1.0         // Author has normal weight
     },
-    
+
     // Indexing behavior
     indexName: 'search_indexes',
     autoReindex: true,      // Automatically reindex on data changes
@@ -260,19 +260,19 @@ class AdvancedSearch {
   constructor(fulltextPlugin) {
     this.plugin = fulltextPlugin;
   }
-  
+
   async searchWithFilters(resourceName, query, filters = {}) {
     let results = await this.plugin.searchRecords(resourceName, query);
-    
+
     // Apply additional filters
     if (filters.category) {
       results = results.filter(item => item.category === filters.category);
     }
-    
+
     if (filters.minScore) {
       results = results.filter(item => item._searchScore >= filters.minScore);
     }
-    
+
     if (filters.dateRange) {
       const { start, end } = filters.dateRange;
       results = results.filter(item => {
@@ -280,13 +280,13 @@ class AdvancedSearch {
         return itemDate >= start && itemDate <= end;
       });
     }
-    
+
     return results;
   }
-  
+
   async searchMultipleResources(resourceNames, query) {
     const allResults = [];
-    
+
     for (const resourceName of resourceNames) {
       const results = await this.plugin.searchRecords(resourceName, query);
       allResults.push(...results.map(item => ({
@@ -294,31 +294,31 @@ class AdvancedSearch {
         _resourceType: resourceName
       })));
     }
-    
+
     // Sort by relevance across all resources
     return allResults.sort((a, b) => b._searchScore - a._searchScore);
   }
-  
+
   async suggestWords(resourceName, partial) {
     // Get all indexed words that start with partial
     const allIndexes = await this.plugin.indexResource.list();
-    
+
     const suggestions = allIndexes
-      .filter(index => 
+      .filter(index =>
         index.resourceName === resourceName &&
         index.word.toLowerCase().startsWith(partial.toLowerCase())
       )
       .sort((a, b) => b.count - a.count) // Sort by frequency
       .slice(0, 10)
       .map(index => index.word);
-    
+
     return [...new Set(suggestions)]; // Remove duplicates
   }
-  
+
   async getSearchAnalytics(resourceName) {
     const indexes = await this.plugin.indexResource.list();
     const resourceIndexes = indexes.filter(i => i.resourceName === resourceName);
-    
+
     const analytics = {
       totalWords: resourceIndexes.length,
       totalOccurrences: resourceIndexes.reduce((sum, i) => sum + i.count, 0),
@@ -330,14 +330,14 @@ class AdvancedSearch {
       wordDistribution: {},
       lastIndexed: Math.max(...resourceIndexes.map(i => new Date(i.lastUpdated)))
     };
-    
+
     // Calculate word distribution by frequency ranges
     resourceIndexes.forEach(index => {
-      const range = index.count < 5 ? 'rare' : 
+      const range = index.count < 5 ? 'rare' :
                    index.count < 20 ? 'common' : 'frequent';
       analytics.wordDistribution[range] = (analytics.wordDistribution[range] || 0) + 1;
     });
-    
+
     return analytics;
   }
 }
@@ -465,18 +465,18 @@ class RealTimeSearch {
     this.searchHistory = [];
     this.popularQueries = new Map();
   }
-  
+
   async search(resourceName, query, options = {}) {
     const startTime = Date.now();
-    
+
     // Record search query
     this.recordQuery(query);
-    
+
     // Perform search
     const results = await this.plugin.searchRecords(resourceName, query, options);
-    
+
     const searchTime = Date.now() - startTime;
-    
+
     // Add search metadata
     const searchResult = {
       query,
@@ -486,36 +486,36 @@ class RealTimeSearch {
       timestamp: new Date().toISOString(),
       data: results
     };
-    
+
     this.searchHistory.push(searchResult);
-    
+
     // Emit search event
     this.plugin.emit('searched', searchResult);
-    
+
     return searchResult;
   }
-  
+
   recordQuery(query) {
     const count = this.popularQueries.get(query) || 0;
     this.popularQueries.set(query, count + 1);
   }
-  
+
   getPopularQueries(limit = 10) {
     return Array.from(this.popularQueries.entries())
       .sort(([,a], [,b]) => b - a)
       .slice(0, limit)
       .map(([query, count]) => ({ query, count }));
   }
-  
+
   async searchWithAutocomplete(resourceName, query, maxSuggestions = 5) {
     const results = await this.search(resourceName, query);
-    
+
     // Get word suggestions based on partial matches
     const words = query.split(' ');
     const lastWord = words[words.length - 1];
-    
+
     const suggestions = await this.getSuggestions(resourceName, lastWord, maxSuggestions);
-    
+
     return {
       ...results,
       suggestions: suggestions.map(word => {
@@ -524,10 +524,10 @@ class RealTimeSearch {
       })
     };
   }
-  
+
   async getSuggestions(resourceName, partial, limit) {
     const indexedWords = await this.plugin.getIndexedWords(resourceName, 1000);
-    
+
     return indexedWords
       .filter(word => word.toLowerCase().startsWith(partial.toLowerCase()))
       .sort((a, b) => b.frequency - a.frequency)
@@ -559,30 +559,30 @@ class CachedSearch {
     this.cachePrefix = 'search:';
     this.cacheTTL = 300000; // 5 minutes
   }
-  
+
   async searchWithCache(resourceName, query, options = {}) {
     const cacheKey = this.generateCacheKey(resourceName, query, options);
-    
+
     // Try cache first
     const cached = await this.cache.get(cacheKey);
     if (cached) {
       return { ...cached, fromCache: true };
     }
-    
+
     // Perform search
     const results = await this.search.searchRecords(resourceName, query, options);
-    
+
     // Cache results
     await this.cache.set(cacheKey, { results, query, resourceName }, this.cacheTTL);
-    
+
     return { results, query, resourceName, fromCache: false };
   }
-  
+
   generateCacheKey(resourceName, query, options) {
     const optionsKey = JSON.stringify(options);
     return `${this.cachePrefix}${resourceName}:${query}:${optionsKey}`;
   }
-  
+
   async invalidateSearchCache(resourceName) {
     // Clear all cached searches for a resource
     const pattern = `${this.cachePrefix}${resourceName}:*`;
@@ -612,7 +612,7 @@ class SearchAnalytics {
     this.queries = [];
     this.results = [];
   }
-  
+
   async trackSearch(resourceName, query, results) {
     const searchEvent = {
       timestamp: new Date().toISOString(),
@@ -620,22 +620,22 @@ class SearchAnalytics {
       query: query.toLowerCase(),
       resultCount: results.length,
       hasResults: results.length > 0,
-      avgScore: results.length > 0 ? 
+      avgScore: results.length > 0 ?
         results.reduce((sum, r) => sum + r._searchScore, 0) / results.length : 0
     };
-    
+
     this.queries.push(searchEvent);
-    
+
     // Keep only recent data (last 1000 queries)
     if (this.queries.length > 1000) {
       this.queries = this.queries.slice(-1000);
     }
   }
-  
+
   getSearchTrends(timeRange = 24) { // hours
     const cutoff = new Date(Date.now() - timeRange * 60 * 60 * 1000);
     const recentQueries = this.queries.filter(q => new Date(q.timestamp) > cutoff);
-    
+
     const trends = {
       totalQueries: recentQueries.length,
       uniqueQueries: new Set(recentQueries.map(q => q.query)).size,
@@ -645,75 +645,75 @@ class SearchAnalytics {
       noResultQueries: recentQueries.filter(q => !q.hasResults).map(q => q.query),
       hourlyDistribution: this.getHourlyDistribution(recentQueries)
     };
-    
+
     return trends;
   }
-  
+
   getTopQueries(queries, limit = 10) {
     const queryCount = new Map();
-    
+
     queries.forEach(q => {
       const count = queryCount.get(q.query) || 0;
       queryCount.set(q.query, count + 1);
     });
-    
+
     return Array.from(queryCount.entries())
       .sort(([,a], [,b]) => b - a)
       .slice(0, limit)
       .map(([query, count]) => ({ query, count }));
   }
-  
+
   getHourlyDistribution(queries) {
     const hours = Array(24).fill(0);
-    
+
     queries.forEach(q => {
       const hour = new Date(q.timestamp).getHours();
       hours[hour]++;
     });
-    
+
     return hours;
   }
-  
+
   async generateInsights() {
     const trends = this.getSearchTrends();
     const indexStats = await this.plugin.getIndexStats();
-    
+
     const insights = {
       searchVolume: this.categorizeVolume(trends.totalQueries),
       searchEffectiveness: trends.noResultQueries / trends.totalQueries,
       popularTopics: this.extractTopics(trends.topQueries),
       recommendations: []
     };
-    
+
     // Generate recommendations
     if (insights.searchEffectiveness > 0.3) {
       insights.recommendations.push('High no-result rate detected. Consider expanding indexed content or improving search synonyms.');
     }
-    
+
     if (trends.uniqueQueries / trends.totalQueries < 0.3) {
       insights.recommendations.push('Users are repeating searches. Consider improving result relevance or adding search suggestions.');
     }
-    
+
     return insights;
   }
-  
+
   categorizeVolume(queryCount) {
     if (queryCount < 10) return 'low';
     if (queryCount < 100) return 'medium';
     return 'high';
   }
-  
+
   extractTopics(topQueries) {
     const words = topQueries
       .flatMap(q => q.query.split(' '))
       .filter(word => word.length > 3);
-    
+
     const wordCount = new Map();
     words.forEach(word => {
       const count = wordCount.get(word) || 0;
       wordCount.set(word, count + 1);
     });
-    
+
     return Array.from(wordCount.entries())
       .sort(([,a], [,b]) => b - a)
       .slice(0, 10)
@@ -795,20 +795,20 @@ class ProgressiveSearch {
       fuzzySearch: false,
       minScore: 0.8
     });
-    
+
     // If few results, try fuzzy search
     if (results.length < 5) {
       const fuzzyResults = await plugin.searchRecords(resourceName, query, {
         fuzzySearch: true,
         minScore: 0.5
       });
-      
+
       // Merge results, avoiding duplicates
       const existingIds = new Set(results.map(r => r.id));
       const newResults = fuzzyResults.filter(r => !existingIds.has(r.id));
       results = [...results, ...newResults];
     }
-    
+
     return results;
   }
 }
@@ -827,7 +827,7 @@ class ProgressiveSearch {
 // Implement search pagination
 const searchWithPagination = async (resourceName, query, page = 1, pageSize = 20) => {
   const offset = (page - 1) * pageSize;
-  
+
   return await plugin.searchRecords(resourceName, query, {
     limit: pageSize,
     offset: offset
@@ -841,16 +841,16 @@ const searchWithPagination = async (resourceName, query, page = 1, pageSize = 20
 // Track search performance
 const monitorSearch = async (resourceName, query) => {
   const startTime = Date.now();
-  
+
   const results = await plugin.searchRecords(resourceName, query);
-  
+
   const searchTime = Date.now() - startTime;
-  
+
   // Log slow searches
   if (searchTime > 1000) {
     console.warn(`Slow search detected: "${query}" took ${searchTime}ms`);
   }
-  
+
   return { results, searchTime };
 };
 ```
@@ -862,19 +862,19 @@ const monitorSearch = async (resourceName, query) => {
 const maintainIndexes = async () => {
   // Get index statistics
   const stats = await plugin.getIndexStats();
-  
+
   // Clean up if index is too large
   if (stats.totalWords > 100000) {
     console.log('Index size limit reached, performing cleanup...');
-    
+
     // Remove low-frequency words
     await plugin.cleanupIndex({ minWordFrequency: 2 });
   }
-  
+
   // Rebuild indexes periodically
   const lastRebuild = await getLastRebuildTime();
   const daysSinceRebuild = (Date.now() - lastRebuild) / (1000 * 60 * 60 * 24);
-  
+
   if (daysSinceRebuild > 7) {
     console.log('Rebuilding search indexes...');
     await plugin.reindexAllResources();
