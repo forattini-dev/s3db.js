@@ -35,6 +35,7 @@ export class Database extends EventEmitter {
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
+    this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
 
     // Initialize hooks system
     this._initHooks();
@@ -199,6 +200,7 @@ export class Database extends EventEmitter {
           asyncEvents: versionData.asyncEvents !== undefined ? versionData.asyncEvents : true,
           hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : (versionData.hooks || {}),
           versioningEnabled: this.versioningEnabled,
+          strictValidation: this.strictValidation,
           map: versionData.map,
           idGenerator: restoredIdGenerator,
           idSize: restoredIdSize
@@ -999,6 +1001,7 @@ export class Database extends EventEmitter {
       autoDecrypt: config.autoDecrypt !== undefined ? config.autoDecrypt : true,
       hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
+      strictValidation: this.strictValidation,
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,

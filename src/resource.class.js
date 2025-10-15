@@ -134,6 +134,7 @@ export class Resource extends AsyncEventEmitter {
       idGenerator: customIdGenerator,
       idSize = 22,
       versioningEnabled = false,
+      strictValidation = true,
       events = {},
       asyncEvents = true,
       asyncPartitions = true,
@@ -149,6 +150,7 @@ export class Resource extends AsyncEventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
     this.versioningEnabled = versioningEnabled;
+    this.strictValidation = strictValidation;
     
     // Configure async events mode
     this.setAsyncMode(asyncEvents);
@@ -476,9 +478,14 @@ export class Resource extends AsyncEventEmitter {
 
   /**
    * Validate that all partition fields exist in current resource attributes
-   * @throws {Error} If partition fields don't exist in current schema
+   * @throws {Error} If partition fields don't exist in current schema (only when strictValidation is true)
    */
   validatePartitions() {
+    // Skip validation if strictValidation is disabled
+    if (!this.strictValidation) {
+      return;
+    }
+
     if (!this.config.partitions) {
       return; // No partitions to validate
     }
