@@ -1,19 +1,13 @@
 import { CryptoError } from "../errors.js";
 import tryFn, { tryFnSync } from "./try-fn.js";
+import crypto from 'crypto';
 
 async function dynamicCrypto() {
   let lib;
 
   if (typeof process !== 'undefined') {
-    const [ok, err, result] = await tryFn(async () => {
-      const { webcrypto } = await import('crypto');
-      return webcrypto;
-    });
-    if (ok) {
-      lib = result;
-    } else {
-      throw new CryptoError('Crypto API not available', { original: err, context: 'dynamicCrypto' });
-    }
+    // Use the static import instead of dynamic import
+    lib = crypto.webcrypto;
   } else if (typeof window !== 'undefined') {
     lib = window.crypto;
   }
@@ -86,16 +80,15 @@ export async function md5(data) {
   if (typeof process === 'undefined') {
     throw new CryptoError('MD5 hashing is only available in Node.js environment', { context: 'md5' });
   }
-  
+
   const [ok, err, result] = await tryFn(async () => {
-    const { createHash } = await import('crypto');
-    return createHash('md5').update(data).digest('base64');
+    return crypto.createHash('md5').update(data).digest('base64');
   });
-  
+
   if (!ok) {
     throw new CryptoError('MD5 hashing failed', { original: err, data });
   }
-  
+
   return result;
 }
 
