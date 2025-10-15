@@ -178,7 +178,7 @@ resources: {
 ```
 
 ##### 3. Object with Transform Function
-**Use case**: Data transformation during replication ⭐ **RECOMMENDED**
+**Use case**: Data transformation during replication (RECOMMENDED)
 ```javascript
 resources: { 
   users: { 

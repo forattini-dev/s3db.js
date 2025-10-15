@@ -2,25 +2,25 @@
 
 ## ⚡ TLDR
 
-Rastreamento automático de **todas** operações do banco (insert/update/delete) com histórico completo para compliance, segurança e debug.
+Automatic tracking of **all** database operations (insert/update/delete) with complete history for compliance, security and debugging.
 
-**1 linha para começar:**
+**1 line to get started:**
 ```javascript
-await db.usePlugin(new AuditPlugin());  // Pronto! Todas operações agora são logadas
+await db.usePlugin(new AuditPlugin());  // Done! All operations are now logged
 ```
 
-**Principais features:**
-- ✅ Log automático de insert/update/delete/deleteMany
-- ✅ Armazena before/after data (opcional)
-- ✅ Tracking de usuário via `getCurrentUserId()`
-- ✅ Query por resource/operation/user/data
-- ✅ Controle de tamanho com `maxDataSize`
+**Key features:**
+- ✅ Automatic logging of insert/update/delete/deleteMany
+- ✅ Stores before/after data (optional)
+- ✅ User tracking via `getCurrentUserId()`
+- ✅ Query by resource/operation/user/data
+- ✅ Size control with `maxDataSize`
 
-**Quando usar:**
+**When to use:**
 - 🔐 Compliance (GDPR, SOC2, HIPAA)
 - 🕵️ Security auditing
-- 🐛 Debug de mudanças inesperadas
-- 📊 Analytics de atividade de usuários
+- 🐛 Debug unexpected changes
+- 📊 User activity analytics
 
 ---
 
