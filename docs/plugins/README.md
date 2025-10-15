@@ -2100,6 +2100,178 @@ resource.addBalance = async (...) => { ... };
 - Batch operations when appropriate
 - Profile plugin performance with metrics
 
+### Plugin Initialization Order
+
+**Problem**: "Analytics not enabled" or similar errors
+
+**Root Cause**: Resources must be created AFTER plugin installation for automatic setup
+
+**Correct Order**:
+```javascript
+// ✅ CORRECT: Plugin → Connect → Resources
+const db = new Database({
+  bucket: 'my-bucket',
+  plugins: [new EventualConsistencyPlugin({ /* config */ })]
+});
+
+await db.connect();  // Plugins installed here
+await db.createResource({ name: 'users', ... });  // Plugin sets up automatically
+```
+
+**Wrong Order**:
+```javascript
+// ❌ WRONG: Resources before plugin
+const db = new Database({ bucket: 'my-bucket' });
+await db.connect();
+await db.createResource({ name: 'users', ... });  // Resource created first
+await db.usePlugin(new EventualConsistencyPlugin({ /* config */ }));  // Too late!
+```
+
+**Error Diagnostics**: If you encounter initialization errors, check `error.description` for detailed diagnostics:
+
+```javascript
+try {
+  const analytics = await plugin.getAnalytics('users', 'balance');
+} catch (error) {
+  console.error(error.message);  // Short error message
+  if (error.description) {
+    console.log('\n' + error.description);  // Detailed diagnostics with solutions
+  }
+}
+```
+
+### Testing Plugins with Partial Schemas
+
+**Problem**: Partition validation fails when using simplified test schemas
+
+**Solution**: Use `strictValidation: false` to skip partition field validation during testing
+
+**Example**:
+```javascript
+describe('EventualConsistency Plugin', () => {
+  it('should handle counters', async () => {
+    // Create database with strict validation disabled
+    const db = new Database({
+      bucket: 'test-bucket',
+      strictValidation: false,  // ✅ Skip partition validation
+      plugins: [new EventualConsistencyPlugin({
+        resources: {
+          users: {
+            fields: {
+              balance: { type: 'counter', analytics: true }
+            }
+          }
+        }
+      })]
+    });
+
+    await db.connect();
+
+    // Create resource with PARTIAL schema (missing partition fields)
+    const users = await db.createResource({
+      name: 'users',
+      attributes: {
+        id: 'string|required',
+        balance: 'number|default:0'
+        // ✅ Missing 'region' field used by plugin's partition
+        // ✅ strictValidation: false allows this
+      }
+    });
+
+    // Plugin still works correctly
+    await users.add('user1', 100);
+    const user = await users.get('user1');
+    expect(user.balance).toBe(100);
+  });
+});
+```
+
+**When to use `strictValidation: false`**:
+- ✅ Unit testing plugins with minimal schemas
+- ✅ Integration testing with mock data
+- ✅ Testing single features without full schema
+- ❌ Production code (always use strict validation)
+
+### Common Error Messages
+
+#### "Analytics not enabled for {resource}.{field}"
+
+**Cause**: Plugin configuration issue or resource not created
+
+**Check**:
+1. Verify plugin is installed before resource creation
+2. Check field is configured in plugin's `resources` config
+3. Look at `error.description` for detailed diagnostics
+
+**Example Fix**:
+```javascript
+// Check plugin configuration
+const plugin = new EventualConsistencyPlugin({
+  resources: {
+    wallets: {  // Must match resource name
+      fields: {
+        balance: {  // Must match field name
+          type: 'counter',
+          analytics: true  // Required for analytics
+        }
+      }
+    }
+  }
+});
+```
+
+#### "Partition '{name}' uses field '{field}' which does not exist"
+
+**Cause**: Partition references field not in schema
+
+**Check `error.description`** for:
+- List of available fields in schema
+- Suggested solutions
+- Documentation link
+
+**Solutions**:
+1. Add missing field to schema
+2. Fix typo in partition field name
+3. Use `strictValidation: false` for testing only
+
+**Example Fix**:
+```javascript
+// Option 1: Add missing field
+await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    region: 'string|required',  // ✅ Add the field
+    balance: 'number|default:0'
+  },
+  partitions: {
+    byRegion: {
+      fields: { region: 'string' }
+    }
+  }
+});
+
+// Option 2: Fix partition definition
+await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    country: 'string|required'  // Field is 'country' not 'region'
+  },
+  partitions: {
+    byRegion: {
+      fields: { country: 'string' }  // ✅ Use correct field name
+    }
+  }
+});
+
+// Option 3: Use strictValidation: false for testing
+const db = new Database({
+  strictValidation: false,  // ✅ Skip validation in tests
+  /* ... */
+});
+```
+
 ---
 
 ## 📚 Additional Resources
