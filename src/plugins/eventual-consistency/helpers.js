@@ -18,8 +18,9 @@ import { getCohortInfo, resolveFieldAndPlugin } from "./utils.js";
 export function addHelperMethods(resource, plugin, config) {
   // Add method to set value (replaces current value)
   // Signature: set(id, field, value)
+  // Supports dot notation: set(id, 'utmResults.medium', 10)
   resource.set = async (id, field, value) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, value);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, value);
 
     // Create transaction inline
     const now = new Date();
@@ -29,6 +30,7 @@ export function addHelperMethods(resource, plugin, config) {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath: fieldPath,  // Store full path for nested access
       value: value,
       operation: 'set',
       timestamp: now.toISOString(),
@@ -43,7 +45,7 @@ export function addHelperMethods(resource, plugin, config) {
 
     // In sync mode, immediately consolidate
     if (config.mode === 'sync') {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
 
     return value;
@@ -51,8 +53,9 @@ export function addHelperMethods(resource, plugin, config) {
 
   // Add method to increment value
   // Signature: add(id, field, amount)
+  // Supports dot notation: add(id, 'utmResults.medium', 5)
   resource.add = async (id, field, amount) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
 
     // Create transaction inline
     const now = new Date();
@@ -62,6 +65,7 @@ export function addHelperMethods(resource, plugin, config) {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath: fieldPath,  // Store full path for nested access
       value: amount,
       operation: 'add',
       timestamp: now.toISOString(),
@@ -76,19 +80,25 @@ export function addHelperMethods(resource, plugin, config) {
 
     // In sync mode, immediately consolidate
     if (config.mode === 'sync') {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
 
     // Async mode - return current value (optimistic)
+    // Note: For nested paths, we need to use lodash get
     const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
-    const currentValue = (ok && record) ? (record[field] || 0) : 0;
+    if (!ok || !record) return amount;
+
+    // Get current value from nested path
+    const lodash = await import('lodash-es');
+    const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue + amount;
   };
 
   // Add method to decrement value
   // Signature: sub(id, field, amount)
+  // Supports dot notation: sub(id, 'utmResults.medium', 3)
   resource.sub = async (id, field, amount) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
 
     // Create transaction inline
     const now = new Date();
@@ -98,6 +108,7 @@ export function addHelperMethods(resource, plugin, config) {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath: fieldPath,  // Store full path for nested access
       value: amount,
       operation: 'sub',
       timestamp: now.toISOString(),
@@ -112,12 +123,17 @@ export function addHelperMethods(resource, plugin, config) {
 
     // In sync mode, immediately consolidate
     if (config.mode === 'sync') {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
 
     // Async mode - return current value (optimistic)
+    // Note: For nested paths, we need to use lodash get
     const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
-    const currentValue = (ok && record) ? (record[field] || 0) : 0;
+    if (!ok || !record) return -amount;
+
+    // Get current value from nested path
+    const lodash = await import('lodash-es');
+    const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue - amount;
   };
 

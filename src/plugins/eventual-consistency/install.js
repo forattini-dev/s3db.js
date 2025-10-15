@@ -95,6 +95,7 @@ export async function completeFieldSetup(handler, database, config, plugin) {
         id: 'string|required',
         originalId: 'string|required',
         field: 'string|required',
+        fieldPath: 'string|optional',  // Support for nested field paths (e.g., 'utmResults.medium')
         value: 'number|required',
         operation: 'string|required',
         timestamp: 'string|required',
