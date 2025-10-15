@@ -9,6 +9,88 @@ import { FilesystemCache } from "./cache/filesystem-cache.class.js";
 import { PartitionAwareFilesystemCache } from "./cache/partition-aware-filesystem-cache.class.js";
 import tryFn from "../concerns/try-fn.js";
 
+/**
+ * Cache Plugin Configuration
+ *
+ * Provides caching layer for S3DB resources with multiple backend options.
+ * Automatically caches read operations and invalidates on writes.
+ *
+ * @typedef {Object} CachePluginOptions
+ * @property {string} [driver='s3'] - Cache driver: 'memory', 'filesystem', 's3', or custom driver instance
+ * @property {number} [ttl] - Time to live in milliseconds for cached items (shortcut for config.ttl)
+ * @property {number} [maxSize] - Maximum number of items to cache (shortcut for config.maxSize)
+ * @property {number} [maxMemoryBytes] - (MemoryCache only) Maximum memory in bytes (shortcut for config.maxMemoryBytes). Cannot be used with maxMemoryPercent.
+ * @property {number} [maxMemoryPercent] - (MemoryCache only) Maximum memory as fraction 0...1 (shortcut for config.maxMemoryPercent). Cannot be used with maxMemoryBytes.
+ *
+ * @property {Array<string>} [include] - Only cache these resource names (null = cache all)
+ * @property {Array<string>} [exclude=[]] - Never cache these resource names
+ *
+ * @property {boolean} [includePartitions=true] - Whether to cache partition queries
+ * @property {string} [partitionStrategy='hierarchical'] - Partition caching strategy
+ * @property {boolean} [partitionAware=true] - Use partition-aware filesystem cache
+ * @property {boolean} [trackUsage=true] - Track cache usage statistics
+ * @property {boolean} [preloadRelated=true] - Preload related partitions
+ *
+ * @property {number} [retryAttempts=3] - Number of retry attempts for cache operations
+ * @property {number} [retryDelay=100] - Delay between retries in milliseconds
+ * @property {boolean} [verbose=false] - Enable verbose logging
+ *
+ * @property {Object} [config] - Driver-specific configuration (can override top-level ttl, maxSize, maxMemoryBytes, maxMemoryPercent)
+ * @property {number} [config.ttl] - Override TTL for this driver
+ * @property {number} [config.maxSize] - Override max number of items
+ * @property {number} [config.maxMemoryBytes] - (MemoryCache only) Maximum memory in bytes. Cannot be used with config.maxMemoryPercent.
+ * @property {number} [config.maxMemoryPercent] - (MemoryCache only) Maximum memory as fraction 0...1 (e.g., 0.1 = 10%). Cannot be used with config.maxMemoryBytes.
+ * @property {boolean} [config.enableCompression] - (MemoryCache only) Enable gzip compression
+ * @property {number} [config.compressionThreshold=1024] - (MemoryCache only) Minimum size in bytes to trigger compression
+ *
+ * @example
+ * // Memory cache with absolute byte limit
+ * new CachePlugin({
+ *   driver: 'memory',
+ *   maxMemoryBytes: 512 * 1024 * 1024, // 512MB
+ *   ttl: 600000 // 10 minutes
+ * })
+ *
+ * @example
+ * // Memory cache with percentage limit (cloud-native)
+ * new CachePlugin({
+ *   driver: 'memory',
+ *   maxMemoryPercent: 0.1, // 10% of system memory
+ *   ttl: 1800000 // 30 minutes
+ * })
+ *
+ * @example
+ * // Filesystem cache with partition awareness
+ * new CachePlugin({
+ *   driver: 'filesystem',
+ *   partitionAware: true,
+ *   includePartitions: true,
+ *   ttl: 3600000 // 1 hour
+ * })
+ *
+ * @example
+ * // S3 cache (default)
+ * new CachePlugin({
+ *   driver: 's3',
+ *   ttl: 7200000 // 2 hours
+ * })
+ *
+ * @example
+ * // Selective caching
+ * new CachePlugin({
+ *   driver: 'memory',
+ *   include: ['users', 'products'], // Only cache these
+ *   exclude: ['audit_logs'], // Never cache these
+ *   maxMemoryPercent: 0.15
+ * })
+ *
+ * @notes
+ * - maxMemoryBytes and maxMemoryPercent are mutually exclusive (throws error if both set)
+ * - maxMemoryPercent is recommended for containerized/cloud environments
+ * - Plugin-created resources (createdBy !== 'user') are skipped by default
+ * - Cache is automatically invalidated on insert/update/delete operations
+ * - Use skipCache: true option on queries to bypass cache for specific calls
+ */
 export class CachePlugin extends Plugin {
   constructor(options = {}) {
     super(options);
@@ -20,7 +102,9 @@ export class CachePlugin extends Plugin {
       config: {
         ttl: options.ttl,
         maxSize: options.maxSize,
-        ...options.config // Driver-specific config (can override ttl/maxSize)
+        maxMemoryBytes: options.maxMemoryBytes,
+        maxMemoryPercent: options.maxMemoryPercent,
+        ...options.config // Driver-specific config (can override ttl/maxSize/maxMemoryBytes/maxMemoryPercent)
       },
 
       // Resource filtering

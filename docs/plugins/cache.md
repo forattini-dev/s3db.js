@@ -71,6 +71,8 @@ console.log(`Count: ${count2}, Speed improvement: ${(180/2).toFixed(0)}x faster`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `maxMemoryBytes` | number | `0` | Maximum memory in bytes (0 = unlimited). **Cannot be used with maxMemoryPercent** |
+| `maxMemoryPercent` | number | `0` | Maximum memory as fraction 0...1 (e.g., 0.1 = 10%). **Cannot be used with maxMemoryBytes** |
 | `evictionPolicy` | string | `'lru'` | Eviction strategy: `'lru'` (least recently used) or `'fifo'` |
 | `enableStats` | boolean | `false` | Track cache hit/miss statistics |
 | `enableCompression` | boolean | `false` | Compress cached values with gzip |
@@ -122,6 +124,65 @@ if (users.cache.stats) {
   console.log(`Hits: ${stats.hits}, Misses: ${stats.misses}`);
 }
 // Output: Hit rate: 85.5%, Hits: 342, Misses: 58
+```
+
+### Example 1.1: Memory Cache with Absolute Limit
+
+Prevent memory exhaustion with hard byte limit:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  ttl: 600000,  // 10 minutes
+  config: {
+    maxMemoryBytes: 512 * 1024 * 1024,  // 512MB hard limit
+    enableCompression: true,
+    compressionThreshold: 1024
+  }
+})
+
+const users = s3db.resource('users');
+await users.list();  // Cached with memory protection
+
+// Monitor memory usage
+const memStats = users.cache.getMemoryStats();
+console.log(`Memory: ${memStats.memoryUsage.current} / ${memStats.memoryUsage.max}`);
+console.log(`Usage: ${memStats.memoryUsagePercent}%`);
+console.log(`Evicted: ${memStats.evictedDueToMemory} items`);
+// Output: Memory: 245.12 MB / 512.00 MB
+//         Usage: 47.87%
+//         Evicted: 15 items
+```
+
+### Example 1.2: Memory Cache with Percentage Limit (Cloud-Native)
+
+Perfect for containers/Kubernetes where memory varies:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  ttl: 1800000,  // 30 minutes
+  config: {
+    maxMemoryPercent: 0.1,  // Use max 10% of system memory (0.1 = 10%)
+    enableCompression: true
+  }
+})
+
+// On 16GB system = ~1.6GB cache limit
+// On 32GB system = ~3.2GB cache limit
+// Automatically adapts to container memory!
+
+const products = s3db.resource('products');
+await products.list();  // Cached
+
+// Check system memory stats
+const memStats = products.cache.getMemoryStats();
+console.log(`System Memory: ${memStats.systemMemory.total}`);
+console.log(`Cache using: ${memStats.systemMemory.cachePercent} of system`);
+console.log(`Cache limit: ${(memStats.maxMemoryPercent * 100).toFixed(1)}%`);
+// Output: System Memory: 16.00 GB
+//         Cache using: 0.8% of system
+//         Cache limit: 10.0%
 ```
 
 ### Example 2: Filesystem Cache (Persistent, Local)
@@ -383,16 +444,66 @@ const analysis = await database.plugins.cache.analyzeCacheUsage();
 ```
 
 **Q: Como configurar o tamanho máximo?**
-A: Use `maxSize`:
+A: Você tem 3 opções (escolha apenas UMA):
+
+1. **Por número de itens** (simples):
 ```javascript
 new CachePlugin({
   driver: 'memory',
   maxSize: 1000,  // Máximo 1000 itens
   config: {
-    evictionPolicy: 'lru'  // Least Recently Used
+    evictionPolicy: 'lru'
   }
 })
 ```
+
+2. **Por bytes absolutos** (ambientes fixos):
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryBytes: 512 * 1024 * 1024,  // 512MB
+    enableCompression: true
+  }
+})
+```
+
+3. **Por porcentagem** (containers/cloud - RECOMENDADO):
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1,  // 10% da memória do sistema
+    enableCompression: true
+  }
+})
+```
+
+⚠️ **IMPORTANTE**: Não use `maxMemoryBytes` e `maxMemoryPercent` juntos - o sistema lançará um erro!
+
+**Q: Como monitorar o uso de memória do cache?**
+A: Use o método `getMemoryStats()` do driver:
+```javascript
+const cache = database.plugins.cache.driver;
+const stats = cache.getMemoryStats();
+
+console.log('Memory Stats:', {
+  current: stats.memoryUsage.current,
+  max: stats.memoryUsage.max,
+  usage: `${stats.memoryUsagePercent.toFixed(1)}%`,
+  items: stats.totalItems,
+  avgSize: stats.averageItemSize,
+  evicted: stats.evictedDueToMemory
+});
+
+// Alerta se uso alto
+if (stats.memoryUsagePercent > 90) {
+  console.warn('⚠️ Cache memory usage above 90%!');
+}
+```
+
+**Q: O que acontece quando o limite de memória é atingido?**
+A: O cache automaticamente remove os itens mais antigos (eviction) até ter espaço suficiente. Você pode monitorar quantos itens foram removidos com `stats.evictedDueToMemory`.
 
 ### Troubleshooting
 
@@ -401,6 +512,18 @@ A: Verifique se o plugin foi instalado ANTES de criar os recursos. O plugin inst
 
 **Q: Estou vendo dados desatualizados?**
 A: Reduza o TTL ou use `skipCache: true` para operações que precisam dados em tempo real.
+
+**Q: Memory usage too high / OOM errors?**
+A: Configure `maxMemoryBytes` ou `maxMemoryPercent`:
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1,  // Limite a 10% da memória
+    enableCompression: true  // Reduz uso de memória
+  }
+})
+```
 
 **Q: Como debugar problemas de cache?**
 A: Ative o modo verbose e monitore estatísticas:
@@ -413,4 +536,8 @@ new CachePlugin({
 // Verifique estatísticas
 const stats = resource.cache.stats();
 console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
+
+// Verifique memória
+const memStats = resource.cache.getMemoryStats();
+console.log(`Memory: ${memStats.memoryUsagePercent.toFixed(1)}%`);
 ```
