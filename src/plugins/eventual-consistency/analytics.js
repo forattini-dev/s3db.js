@@ -1209,3 +1209,148 @@ export async function getLastNMonths(resourceName, field, months = 12, options, 
 
   return data;
 }
+
+/**
+ * Get raw transaction events for custom aggregation
+ *
+ * This method provides direct access to the underlying transaction events,
+ * allowing developers to perform custom aggregations beyond the pre-built analytics.
+ * Useful for complex queries, custom metrics, or when you need the raw event data.
+ *
+ * @param {string} resourceName - Resource name
+ * @param {string} field - Field name
+ * @param {Object} options - Query options
+ * @param {string} options.recordId - Filter by specific record ID
+ * @param {string} options.startDate - Start date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+ * @param {string} options.endDate - End date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+ * @param {string} options.cohortDate - Filter by cohort date (YYYY-MM-DD)
+ * @param {string} options.cohortHour - Filter by cohort hour (YYYY-MM-DDTHH)
+ * @param {string} options.cohortMonth - Filter by cohort month (YYYY-MM)
+ * @param {boolean} options.applied - Filter by applied status (true/false/undefined for both)
+ * @param {string} options.operation - Filter by operation type ('add', 'sub', 'set')
+ * @param {number} options.limit - Maximum number of events to return
+ * @param {Object} fieldHandlers - Field handlers map
+ * @returns {Promise<Array>} Raw transaction events
+ *
+ * @example
+ * // Get all events for a specific record
+ * const events = await plugin.getRawEvents('wallets', 'balance', {
+ *   recordId: 'wallet1'
+ * });
+ *
+ * @example
+ * // Get events for a specific time range
+ * const events = await plugin.getRawEvents('wallets', 'balance', {
+ *   startDate: '2025-10-01',
+ *   endDate: '2025-10-31'
+ * });
+ *
+ * @example
+ * // Get only pending (unapplied) transactions
+ * const pending = await plugin.getRawEvents('wallets', 'balance', {
+ *   applied: false
+ * });
+ */
+export async function getRawEvents(resourceName, field, options, fieldHandlers) {
+  // Get handler for this resource/field combination
+  const resourceHandlers = fieldHandlers.get(resourceName);
+  if (!resourceHandlers) {
+    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+  }
+
+  const handler = resourceHandlers.get(field);
+  if (!handler) {
+    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+  }
+
+  if (!handler.transactionResource) {
+    throw new Error('Transaction resource not initialized');
+  }
+
+  const {
+    recordId,
+    startDate,
+    endDate,
+    cohortDate,
+    cohortHour,
+    cohortMonth,
+    applied,
+    operation,
+    limit
+  } = options;
+
+  // Build query object for partition-based filtering
+  const query = {};
+
+  // Filter by recordId (uses partition if available)
+  if (recordId !== undefined) {
+    query.originalId = recordId;
+  }
+
+  // Filter by applied status (uses partition)
+  if (applied !== undefined) {
+    query.applied = applied;
+  }
+
+  // Fetch transactions using partition-aware query
+  const [ok, err, allTransactions] = await tryFn(() =>
+    handler.transactionResource.query(query)
+  );
+
+  if (!ok || !allTransactions) {
+    return [];
+  }
+
+  // Ensure all transactions have cohort fields
+  let filtered = allTransactions;
+
+  // Filter by operation type
+  if (operation !== undefined) {
+    filtered = filtered.filter(t => t.operation === operation);
+  }
+
+  // Filter by temporal fields (these are in-memory filters after partition query)
+  if (cohortDate) {
+    filtered = filtered.filter(t => t.cohortDate === cohortDate);
+  }
+
+  if (cohortHour) {
+    filtered = filtered.filter(t => t.cohortHour === cohortHour);
+  }
+
+  if (cohortMonth) {
+    filtered = filtered.filter(t => t.cohortMonth === cohortMonth);
+  }
+
+  if (startDate && endDate) {
+    // Determine which cohort field to use based on format
+    const isHourly = startDate.length > 10; // YYYY-MM-DDTHH vs YYYY-MM-DD
+    const cohortField = isHourly ? 'cohortHour' : 'cohortDate';
+
+    filtered = filtered.filter(t =>
+      t[cohortField] && t[cohortField] >= startDate && t[cohortField] <= endDate
+    );
+  } else if (startDate) {
+    const isHourly = startDate.length > 10;
+    const cohortField = isHourly ? 'cohortHour' : 'cohortDate';
+    filtered = filtered.filter(t => t[cohortField] && t[cohortField] >= startDate);
+  } else if (endDate) {
+    const isHourly = endDate.length > 10;
+    const cohortField = isHourly ? 'cohortHour' : 'cohortDate';
+    filtered = filtered.filter(t => t[cohortField] && t[cohortField] <= endDate);
+  }
+
+  // Sort by timestamp (newest first by default)
+  filtered.sort((a, b) => {
+    const aTime = new Date(a.timestamp || a.createdAt).getTime();
+    const bTime = new Date(b.timestamp || b.createdAt).getTime();
+    return bTime - aTime;
+  });
+
+  // Apply limit
+  if (limit && limit > 0) {
+    filtered = filtered.slice(0, limit);
+  }
+
+  return filtered;
+}
