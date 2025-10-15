@@ -230,9 +230,51 @@ node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests
 
 ### Caching Strategy
 - **S3Cache**: Compression + encryption, configurable storage class
-- **MemoryCache**: LRU/FIFO eviction, statistics tracking
+- **MemoryCache**: LRU/FIFO eviction, memory limits, compression, statistics tracking
 - **FilesystemCache**: Atomic writes, directory organization
 - **PartitionAwareFilesystemCache**: Hierarchical invalidation
+
+**MemoryCache Features**:
+- **Memory Limits**: `maxMemoryBytes` or `maxMemoryPercent` prevents exhaustion (enforces byte-level limits)
+- **Percentage-based Limits**: Use `maxMemoryPercent` for dynamic limits based on system memory (ideal for containers/cloud)
+- **Item Limits**: `maxSize` limits number of cached items
+- **Compression**: Optional gzip compression to reduce memory usage
+- **Statistics**: `getMemoryStats()` provides current/max/available memory, system memory info, eviction counts
+- **Auto-eviction**: Automatically removes oldest items when limits are exceeded
+
+**Example Configurations**:
+```javascript
+// Absolute memory limit (good for fixed environments)
+new CachePlugin({
+  driver: 'memory',
+  maxSize: 5000, // Max 5000 items
+  ttl: 1800000, // 30 minutes
+  config: {
+    maxMemoryBytes: 512 * 1024 * 1024, // 512MB hard limit
+    enableCompression: true,
+    compressionThreshold: 1024 // Compress items > 1KB
+  }
+})
+
+// Percentage-based limit (good for containers/cloud)
+new CachePlugin({
+  driver: 'memory',
+  ttl: 1800000, // 30 minutes
+  config: {
+    maxMemoryPercent: 0.1, // Use max 10% of system memory (0.1 = 10%)
+    enableCompression: true
+  }
+})
+// On 16GB system = ~1.6GB limit
+// On 32GB system = ~3.2GB limit
+
+// Monitor memory usage
+const stats = cachePlugin.driver.getMemoryStats();
+console.log(`Memory: ${stats.memoryUsage.current} / ${stats.memoryUsage.max}`);
+console.log(`Usage: ${stats.memoryUsagePercent}%`);
+console.log(`System: ${stats.systemMemory.total} (cache: ${stats.systemMemory.cachePercent})`);
+console.log(`Evicted: ${stats.evictedDueToMemory}`);
+```
 
 **Cache Keys**: Deterministic generation including resource/version/partition/params
 
