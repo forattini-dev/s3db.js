@@ -177,6 +177,7 @@ describe('Resource Pagination - Real Integration Tests', () => {
   test('Pagination with Partitions', async () => {
     const resource = await database.createResource({
       name: 'products',
+      asyncPartitions: false, // Use sync mode for tests
       attributes: {
         id: 'string|required',
         name: 'string|required',
@@ -201,6 +202,9 @@ describe('Resource Pagination - Real Integration Tests', () => {
     ];
 
     await resource.insertMany(products);
+
+    // Small delay to ensure partition indexes are ready
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // Test pagination within electronics partition
     const electronicsPage1 = await resource.page({ 
