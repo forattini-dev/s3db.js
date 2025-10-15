@@ -8,6 +8,7 @@ import MemoryCache from "./cache/memory-cache.class.js";
 import { FilesystemCache } from "./cache/filesystem-cache.class.js";
 import { PartitionAwareFilesystemCache } from "./cache/partition-aware-filesystem-cache.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { CacheError } from "./cache.errors.js";
 
 /**
  * Cache Plugin Configuration
@@ -555,7 +556,13 @@ export class CachePlugin extends Plugin {
   async warmCache(resourceName, options = {}) {
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new CacheError('Resource not found for cache warming', {
+        operation: 'warmCache',
+        driver: this.driver?.constructor.name,
+        resourceName,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: 'Check resource name spelling or ensure resource has been created'
+      });
     }
 
     const { includePartitions = true, sampleSize = 100 } = options;

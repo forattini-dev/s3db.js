@@ -6,7 +6,7 @@ import jsonStableStringify from "json-stable-stringify";
 import Client from "./client.class.js";
 import tryFn from "./concerns/try-fn.js";
 import Resource from "./resource.class.js";
-import { ResourceNotFound } from "./errors.js";
+import { ResourceNotFound, DatabaseError } from "./errors.js";
 import { idGenerator } from "./concerns/id.js";
 import { streamToString } from "./stream/index.js";
 
@@ -452,7 +452,12 @@ export class Database extends EventEmitter {
     const plugin = this.plugins[pluginName] || this.pluginRegistry[pluginName];
 
     if (!plugin) {
-      throw new Error(`Plugin '${name}' not found`);
+      throw new DatabaseError(`Plugin '${name}' not found`, {
+        operation: 'uninstallPlugin',
+        pluginName: name,
+        availablePlugins: Object.keys(this.pluginRegistry),
+        suggestion: 'Check plugin name or list available plugins using Object.keys(db.pluginRegistry)'
+      });
     }
 
     // Stop the plugin first
@@ -1218,10 +1223,20 @@ export class Database extends EventEmitter {
   addHook(event, fn) {
     if (!this._hooks) this._initHooks();
     if (!this._hooks.has(event)) {
-      throw new Error(`Unknown hook event: ${event}. Available events: ${this._hookEvents.join(', ')}`);
+      throw new DatabaseError(`Unknown hook event: ${event}`, {
+        operation: 'addHook',
+        invalidEvent: event,
+        availableEvents: this._hookEvents,
+        suggestion: `Use one of the available hook events: ${this._hookEvents.join(', ')}`
+      });
     }
     if (typeof fn !== 'function') {
-      throw new Error('Hook function must be a function');
+      throw new DatabaseError('Hook function must be a function', {
+        operation: 'addHook',
+        event,
+        receivedType: typeof fn,
+        suggestion: 'Provide a function that will be called when the hook event occurs'
+      });
     }
     this._hooks.get(event).push(fn);
   }

@@ -1,6 +1,7 @@
 import BaseBackupDriver from './base-backup-driver.class.js';
 import { createBackupDriver } from './index.js';
 import tryFn from '../../concerns/try-fn.js';
+import { BackupError } from '../backup.errors.js';
 
 /**
  * MultiBackupDriver - Manages multiple backup destinations
@@ -34,13 +35,24 @@ export default class MultiBackupDriver extends BaseBackupDriver {
 
   async onSetup() {
     if (!Array.isArray(this.config.destinations) || this.config.destinations.length === 0) {
-      throw new Error('MultiBackupDriver: destinations array is required and must not be empty');
+      throw new BackupError('MultiBackupDriver requires non-empty destinations array', {
+        operation: 'onSetup',
+        driver: 'multi',
+        destinationsProvided: this.config.destinations,
+        suggestion: 'Provide destinations array: { destinations: [{ driver: "s3", config: {...} }, { driver: "filesystem", config: {...} }] }'
+      });
     }
 
     // Create and setup all driver instances
     for (const [index, destConfig] of this.config.destinations.entries()) {
       if (!destConfig.driver) {
-        throw new Error(`MultiBackupDriver: destination[${index}] must have a driver type`);
+        throw new BackupError(`Destination ${index} missing driver type`, {
+          operation: 'onSetup',
+          driver: 'multi',
+          destinationIndex: index,
+          destination: destConfig,
+          suggestion: 'Each destination must have a driver property: { driver: "s3", config: {...} } or { driver: "filesystem", config: {...} }'
+        });
       }
 
       try {
@@ -51,10 +63,18 @@ export default class MultiBackupDriver extends BaseBackupDriver {
           config: destConfig,
           index
         });
-        
+
         this.log(`Setup destination ${index}: ${destConfig.driver}`);
       } catch (error) {
-        throw new Error(`Failed to setup destination ${index} (${destConfig.driver}): ${error.message}`);
+        throw new BackupError(`Failed to setup destination ${index}`, {
+          operation: 'onSetup',
+          driver: 'multi',
+          destinationIndex: index,
+          destinationDriver: destConfig.driver,
+          destinationConfig: destConfig.config,
+          original: error,
+          suggestion: 'Check destination driver configuration and ensure dependencies are available'
+        });
       }
     }
 
@@ -92,7 +112,15 @@ export default class MultiBackupDriver extends BaseBackupDriver {
         }
       }
 
-      throw new Error(`All priority destinations failed: ${errors.map(e => `${e.destination}: ${e.error}`).join('; ')}`);
+      throw new BackupError('All priority destinations failed', {
+        operation: 'upload',
+        driver: 'multi',
+        strategy: 'priority',
+        backupId,
+        totalDestinations: this.drivers.length,
+        failures: errors,
+        suggestion: 'Check destination configurations and ensure at least one destination is accessible'
+      });
     }
 
     // For 'all' and 'any' strategies, upload to all destinations
@@ -128,11 +156,29 @@ export default class MultiBackupDriver extends BaseBackupDriver {
     const failedResults = allResults.filter(r => r.status === 'failed');
 
     if (strategy === 'all' && failedResults.length > 0) {
-      throw new Error(`Some destinations failed: ${failedResults.map(r => `${r.destination}: ${r.error}`).join('; ')}`);
+      throw new BackupError('Some destinations failed with strategy "all"', {
+        operation: 'upload',
+        driver: 'multi',
+        strategy: 'all',
+        backupId,
+        totalDestinations: this.drivers.length,
+        successCount: successResults.length,
+        failedCount: failedResults.length,
+        failures: failedResults,
+        suggestion: 'All destinations must succeed with "all" strategy. Use "any" strategy to tolerate failures, or fix failing destinations.'
+      });
     }
 
     if (strategy === 'any' && successResults.length === 0) {
-      throw new Error(`All destinations failed: ${failedResults.map(r => `${r.destination}: ${r.error}`).join('; ')}`);
+      throw new BackupError('All destinations failed with strategy "any"', {
+        operation: 'upload',
+        driver: 'multi',
+        strategy: 'any',
+        backupId,
+        totalDestinations: this.drivers.length,
+        failures: failedResults,
+        suggestion: 'At least one destination must succeed with "any" strategy. Check all destination configurations.'
+      });
     }
 
     return allResults;
@@ -160,7 +206,14 @@ export default class MultiBackupDriver extends BaseBackupDriver {
       }
     }
 
-    throw new Error(`Failed to download backup from any destination`);
+    throw new BackupError('Failed to download backup from any destination', {
+      operation: 'download',
+      driver: 'multi',
+      backupId,
+      targetPath,
+      attemptedDestinations: destinations.length,
+      suggestion: 'Check if backup exists in at least one destination and destinations are accessible'
+    });
   }
 
   async delete(backupId, metadata) {
@@ -188,7 +241,14 @@ export default class MultiBackupDriver extends BaseBackupDriver {
     }
 
     if (successCount === 0 && errors.length > 0) {
-      throw new Error(`Failed to delete from any destination: ${errors.join('; ')}`);
+      throw new BackupError('Failed to delete from any destination', {
+        operation: 'delete',
+        driver: 'multi',
+        backupId,
+        attemptedDestinations: destinations.length,
+        failures: errors,
+        suggestion: 'Check if backup exists in destinations and destinations are accessible with delete permissions'
+      });
     }
 
     if (errors.length > 0) {

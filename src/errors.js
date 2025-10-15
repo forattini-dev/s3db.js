@@ -292,7 +292,7 @@ ${details.strictValidation === false
   • Update partition definition to use existing fields, OR
   • Use strictValidation: false to skip this check during testing`}
 
-Docs: https://docs.s3db.js.org/resources/partitions#validation
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitions
 `.trim();
     }
 
@@ -362,7 +362,7 @@ Example fix:
   await db.connect();  // Plugin initialized here
   await db.createResource({ name: '${resourceName}', ... });  // Analytics resource created here
 
-Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/eventual-consistency.md
 `.trim();
 
     super(message, {
@@ -375,6 +375,291 @@ Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
       pluginInitialized,
       description,
       suggestion: 'Ensure resources are created after plugin initialization. Check plugin configuration and resource creation order.'
+    });
+  }
+}
+
+// Plugin errors
+export class PluginError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      pluginName = 'Unknown',
+      operation = 'unknown',
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Plugin Error
+
+Plugin: ${pluginName}
+Operation: ${operation}
+
+Possible causes:
+1. Plugin not properly initialized
+2. Plugin configuration is invalid
+3. Plugin dependencies not met
+4. Plugin method called before installation
+
+Solution:
+Ensure plugin is added to database and connect() is called before usage.
+
+Example:
+  const db = new Database({
+    bucket: 'my-bucket',
+    plugins: [new ${pluginName}({ /* config */ })]
+  });
+
+  await db.connect();  // Plugin installed here
+  // Now plugin methods are available
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      pluginName,
+      operation,
+      description,
+      suggestion: details.suggestion || 'Check plugin initialization and configuration.'
+    });
+  }
+}
+
+// Plugin storage errors
+export class PluginStorageError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      pluginSlug = 'unknown',
+      key = '',
+      operation = 'unknown',
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Plugin Storage Error
+
+Plugin: ${pluginSlug}
+Key: ${key}
+Operation: ${operation}
+
+Possible causes:
+1. Storage not initialized (plugin not installed)
+2. Invalid key format
+3. S3 operation failed
+4. Permissions issue
+
+Solution:
+Ensure plugin has access to storage and key is valid.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#plugin-storage
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      pluginSlug,
+      key,
+      operation,
+      description,
+      suggestion: details.suggestion || 'Check plugin storage configuration and S3 permissions.'
+    });
+  }
+}
+
+// Partition driver errors
+export class PartitionDriverError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      driver = 'unknown',
+      operation = 'unknown',
+      queueSize,
+      maxQueueSize,
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description && queueSize !== undefined && maxQueueSize !== undefined) {
+      description = `
+Partition Driver Error
+
+Driver: ${driver}
+Operation: ${operation}
+Queue Status: ${queueSize}/${maxQueueSize}
+
+Possible causes:
+1. Queue is full (backpressure)
+2. Driver not properly configured
+3. SQS permissions issue (if using SQS driver)
+
+Solution:
+${queueSize >= maxQueueSize
+  ? 'Wait for queue to drain or increase maxQueueSize'
+  : 'Check driver configuration and permissions'}
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
+`.trim();
+    } else if (!description) {
+      description = `
+Partition Driver Error
+
+Driver: ${driver}
+Operation: ${operation}
+
+Check driver configuration and permissions.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      driver,
+      operation,
+      queueSize,
+      maxQueueSize,
+      description,
+      suggestion: details.suggestion || 'Check partition driver configuration.'
+    });
+  }
+}
+
+// Behavior errors
+export class BehaviorError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      behavior = 'unknown',
+      availableBehaviors = [],
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Behavior Error
+
+Requested: ${behavior}
+Available: ${availableBehaviors.join(', ') || 'body-overflow, body-only, truncate-data, enforce-limits, user-managed'}
+
+Possible causes:
+1. Behavior name misspelled
+2. Custom behavior not registered
+
+Solution:
+Use one of the available behaviors or register custom behavior.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behaviors
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      behavior,
+      availableBehaviors,
+      description,
+      suggestion: details.suggestion || 'Check behavior name and available behaviors.'
+    });
+  }
+}
+
+// Stream errors
+export class StreamError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      operation = 'unknown',
+      resource,
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Stream Error
+
+Operation: ${operation}
+${resource ? `Resource: ${resource}` : ''}
+
+Possible causes:
+1. Stream not properly initialized
+2. Resource not available
+3. Network error during streaming
+
+Solution:
+Check stream configuration and resource availability.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streaming
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      operation,
+      resource,
+      description,
+      suggestion: details.suggestion || 'Check stream configuration and resource availability.'
+    });
+  }
+}
+
+// Metadata limit errors (specific for 2KB S3 limit)
+export class MetadataLimitError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit = 2047,
+      excess,
+      resourceName,
+      operation,
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description && totalSize && effectiveLimit) {
+      description = `
+S3 Metadata Size Limit Exceeded
+
+Current Size: ${totalSize} bytes
+Effective Limit: ${effectiveLimit} bytes
+Absolute Limit: ${absoluteLimit} bytes
+${excess ? `Excess: ${excess} bytes` : ''}
+${resourceName ? `Resource: ${resourceName}` : ''}
+${operation ? `Operation: ${operation}` : ''}
+
+S3 has a hard limit of 2KB (2047 bytes) for object metadata.
+
+Solutions:
+1. Use 'body-overflow' behavior to store excess in body
+2. Use 'body-only' behavior to store everything in body
+3. Reduce number of fields
+4. Use shorter field values
+5. Enable advanced metadata encoding
+
+Example:
+  await db.createResource({
+    name: '${resourceName || 'myResource'}',
+    behavior: 'body-overflow',  // Automatically handles overflow
+    attributes: { ... }
+  });
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata-size-limits
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      totalSize,
+      effectiveLimit,
+      absoluteLimit,
+      excess,
+      resourceName,
+      operation,
+      description,
+      suggestion: details.suggestion || "Use 'body-overflow' or 'body-only' behavior to handle large metadata."
     });
   }
 }

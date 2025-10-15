@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { PartitionDriverError } from '../errors.js';
 
 /**
  * Robust partition operation queue with retry and persistence
@@ -107,7 +108,12 @@ export class PartitionQueue extends EventEmitter {
       case 'delete':
         return await resource.deletePartitionReferences(data);
       default:
-        throw new Error(`Unknown operation type: ${type}`);
+        throw new PartitionDriverError(`Unknown partition operation type: ${type}`, {
+          driver: 'PartitionQueue',
+          operation: type,
+          availableOperations: ['create', 'update', 'delete'],
+          suggestion: 'Use one of the supported partition operations: create, update, or delete'
+        });
     }
   }
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { PartitionDriverError } from '../errors.js';
 
 /**
  * Base class for all partition drivers
@@ -31,7 +32,11 @@ export class BasePartitionDriver extends EventEmitter {
    * @param {Object} operation.data - The data for the operation
    */
   async queue(operation) {
-    throw new Error('queue() must be implemented by subclass');
+    throw new PartitionDriverError('queue() must be implemented by subclass', {
+      driver: this.name || 'BasePartitionDriver',
+      operation: 'queue',
+      suggestion: 'Extend BasePartitionDriver and implement the queue() method'
+    });
   }
 
   /**
@@ -57,7 +62,12 @@ export class BasePartitionDriver extends EventEmitter {
           break;
           
         default:
-          throw new Error(`Unknown partition operation type: ${type}`);
+          throw new PartitionDriverError(`Unknown partition operation type: ${type}`, {
+            driver: this.name || 'BasePartitionDriver',
+            operation: type,
+            availableOperations: ['create', 'update', 'delete'],
+            suggestion: 'Use one of the supported partition operations: create, update, or delete'
+          });
       }
       
       this.stats.processed++;

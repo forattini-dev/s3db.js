@@ -1,6 +1,7 @@
 import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from "../concerns/try-fn.js";
+import { QueueError } from "./queue.errors.js";
 
 // Example configuration for SQS:
 // const plugin = new QueueConsumerPlugin({
@@ -101,13 +102,32 @@ export class QueueConsumerPlugin extends Plugin {
 
     
     if (!resource) {
-      throw new Error('QueueConsumerPlugin: resource not found in message');
+      throw new QueueError('Resource not found in message', {
+        operation: 'handleMessage',
+        queueName: configuredResource,
+        messageBody: body,
+        suggestion: 'Ensure message includes a "resource" field specifying the target resource name'
+      });
     }
     if (!action) {
-      throw new Error('QueueConsumerPlugin: action not found in message');
+      throw new QueueError('Action not found in message', {
+        operation: 'handleMessage',
+        queueName: configuredResource,
+        resource,
+        messageBody: body,
+        suggestion: 'Ensure message includes an "action" field (insert, update, or delete)'
+      });
     }
     const resourceObj = this.database.resources[resource];
-    if (!resourceObj) throw new Error(`QueueConsumerPlugin: resource '${resource}' not found`);
+    if (!resourceObj) {
+      throw new QueueError(`Resource '${resource}' not found`, {
+        operation: 'handleMessage',
+        queueName: configuredResource,
+        resource,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: 'Check resource name or ensure resource is created before consuming messages'
+      });
+    }
     
     let result;
     const [ok, err, res] = await tryFn(async () => {
@@ -119,7 +139,14 @@ export class QueueConsumerPlugin extends Plugin {
       } else if (action === 'delete') {
         result = await resourceObj.delete(data.id);
       } else {
-        throw new Error(`QueueConsumerPlugin: unsupported action '${action}'`);
+        throw new QueueError(`Unsupported action '${action}'`, {
+          operation: 'handleMessage',
+          queueName: configuredResource,
+          resource,
+          action,
+          supportedActions: ['insert', 'update', 'delete'],
+          suggestion: 'Use one of the supported actions: insert, update, or delete'
+        });
       }
       return result;
     });

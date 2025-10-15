@@ -1,5 +1,6 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
 import { calculateEffectiveLimit } from '../concerns/calculator.js';
+import { MetadataLimitError } from '../errors.js';
 
 export const S3_METADATA_LIMIT_BYTES = 2047;
 
@@ -146,9 +147,16 @@ export async function handleInsert({ resource, data, mappedData, originalData })
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on insert', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'insert'
+    });
   }
-  
+
   // If data fits in metadata, store only in metadata
   return { mappedData, body: "" };
 }
@@ -167,7 +175,15 @@ export async function handleUpdate({ resource, id, data, mappedData, originalDat
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on update', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'update',
+      id
+    });
   }
   return { mappedData, body: JSON.stringify(mappedData) };
 }
@@ -186,7 +202,15 @@ export async function handleUpsert({ resource, id, data, mappedData }) {
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on upsert', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'upsert',
+      id
+    });
   }
   return { mappedData, body: "" };
 }

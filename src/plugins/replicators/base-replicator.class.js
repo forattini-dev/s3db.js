@@ -1,4 +1,5 @@
 import EventEmitter from 'events';
+import { ReplicationError } from '../replicator.errors.js';
 
 /**
  * Base class for all replicator drivers
@@ -31,7 +32,12 @@ export class BaseReplicator extends EventEmitter {
    * @returns {Promise<Object>} replicator result
    */
   async replicate(resourceName, operation, data, id) {
-    throw new Error(`replicate() method must be implemented by ${this.name}`);
+    throw new ReplicationError('replicate() method must be implemented by subclass', {
+      operation: 'replicate',
+      replicatorClass: this.name,
+      resourceName,
+      suggestion: 'Extend BaseReplicator and implement the replicate() method'
+    });
   }
 
   /**
@@ -41,7 +47,13 @@ export class BaseReplicator extends EventEmitter {
    * @returns {Promise<Object>} Batch replicator result
    */
   async replicateBatch(resourceName, records) {
-    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
+    throw new ReplicationError('replicateBatch() method must be implemented by subclass', {
+      operation: 'replicateBatch',
+      replicatorClass: this.name,
+      resourceName,
+      batchSize: records?.length,
+      suggestion: 'Extend BaseReplicator and implement the replicateBatch() method'
+    });
   }
 
   /**
@@ -49,7 +61,11 @@ export class BaseReplicator extends EventEmitter {
    * @returns {Promise<boolean>} True if connection is successful
    */
   async testConnection() {
-    throw new Error(`testConnection() method must be implemented by ${this.name}`);
+    throw new ReplicationError('testConnection() method must be implemented by subclass', {
+      operation: 'testConnection',
+      replicatorClass: this.name,
+      suggestion: 'Extend BaseReplicator and implement the testConnection() method'
+    });
   }
 
   /**

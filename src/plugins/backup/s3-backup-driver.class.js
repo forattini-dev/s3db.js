@@ -4,6 +4,7 @@ import { stat } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import tryFn from '../../concerns/try-fn.js';
+import { BackupError } from '../backup.errors.js';
 
 /**
  * S3BackupDriver - Stores backups in S3-compatible storage
@@ -43,11 +44,19 @@ export default class S3BackupDriver extends BaseBackupDriver {
     }
 
     if (!this.config.client) {
-      throw new Error('S3BackupDriver: client is required (either via config or database)');
+      throw new BackupError('S3BackupDriver: client is required', {
+        operation: 'onSetup',
+        driver: 's3',
+        suggestion: 'Provide a client in config or ensure database has a client configured'
+      });
     }
 
     if (!this.config.bucket) {
-      throw new Error('S3BackupDriver: bucket is required (either via config or database)');
+      throw new BackupError('S3BackupDriver: bucket is required', {
+        operation: 'onSetup',
+        driver: 's3',
+        suggestion: 'Provide a bucket in config or ensure database has a bucket configured'
+      });
     }
 
     this.log(`Initialized with bucket: ${this.config.bucket}, path: ${this.config.path}`);
@@ -108,7 +117,15 @@ export default class S3BackupDriver extends BaseBackupDriver {
     });
 
     if (!uploadOk) {
-      throw new Error(`Failed to upload backup file: ${uploadErr.message}`);
+      throw new BackupError('Failed to upload backup file to S3', {
+        operation: 'upload',
+        driver: 's3',
+        backupId,
+        bucket: this.config.bucket,
+        key: backupKey,
+        original: uploadErr,
+        suggestion: 'Check S3 permissions and bucket configuration'
+      });
     }
 
     // Upload manifest
@@ -133,7 +150,15 @@ export default class S3BackupDriver extends BaseBackupDriver {
         bucket: this.config.bucket,
         key: backupKey
       }));
-      throw new Error(`Failed to upload manifest: ${manifestErr.message}`);
+      throw new BackupError('Failed to upload manifest to S3', {
+        operation: 'upload',
+        driver: 's3',
+        backupId,
+        bucket: this.config.bucket,
+        manifestKey,
+        original: manifestErr,
+        suggestion: 'Check S3 permissions and bucket configuration'
+      });
     }
 
     this.log(`Uploaded backup ${backupId} to s3://${this.config.bucket}/${backupKey} (${fileSize} bytes)`);
@@ -161,7 +186,16 @@ export default class S3BackupDriver extends BaseBackupDriver {
     );
 
     if (!downloadOk) {
-      throw new Error(`Failed to download backup: ${downloadErr.message}`);
+      throw new BackupError('Failed to download backup from S3', {
+        operation: 'download',
+        driver: 's3',
+        backupId,
+        bucket: this.config.bucket,
+        key: backupKey,
+        targetPath,
+        original: downloadErr,
+        suggestion: 'Check if backup exists and S3 permissions are correct'
+      });
     }
 
     this.log(`Downloaded backup ${backupId} from s3://${this.config.bucket}/${backupKey} to ${targetPath}`);
@@ -189,7 +223,15 @@ export default class S3BackupDriver extends BaseBackupDriver {
     );
 
     if (!deleteBackupOk && !deleteManifestOk) {
-      throw new Error(`Failed to delete backup objects for ${backupId}`);
+      throw new BackupError('Failed to delete backup from S3', {
+        operation: 'delete',
+        driver: 's3',
+        backupId,
+        bucket: this.config.bucket,
+        backupKey,
+        manifestKey,
+        suggestion: 'Check S3 delete permissions'
+      });
     }
 
     this.log(`Deleted backup ${backupId} from S3`);

@@ -1,3 +1,5 @@
+import { BackupError } from '../backup.errors.js';
+
 /**
  * BaseBackupDriver - Abstract base class for backup drivers
  *
@@ -38,7 +40,12 @@ export default class BaseBackupDriver {
    * @returns {Object} Upload result with destination info
    */
   async upload(filePath, backupId, manifest) {
-    throw new Error('upload() method must be implemented by subclass');
+    throw new BackupError('upload() method must be implemented by subclass', {
+      operation: 'upload',
+      driver: this.constructor.name,
+      backupId,
+      suggestion: 'Extend BaseBackupDriver and implement the upload() method'
+    });
   }
 
   /**
@@ -49,7 +56,12 @@ export default class BaseBackupDriver {
    * @returns {string} Path to downloaded file
    */
   async download(backupId, targetPath, metadata) {
-    throw new Error('download() method must be implemented by subclass');
+    throw new BackupError('download() method must be implemented by subclass', {
+      operation: 'download',
+      driver: this.constructor.name,
+      backupId,
+      suggestion: 'Extend BaseBackupDriver and implement the download() method'
+    });
   }
 
   /**
@@ -58,7 +70,12 @@ export default class BaseBackupDriver {
    * @param {Object} metadata - Backup metadata
    */
   async delete(backupId, metadata) {
-    throw new Error('delete() method must be implemented by subclass');
+    throw new BackupError('delete() method must be implemented by subclass', {
+      operation: 'delete',
+      driver: this.constructor.name,
+      backupId,
+      suggestion: 'Extend BaseBackupDriver and implement the delete() method'
+    });
   }
 
   /**
@@ -67,7 +84,11 @@ export default class BaseBackupDriver {
    * @returns {Array} List of backup metadata
    */
   async list(options = {}) {
-    throw new Error('list() method must be implemented by subclass');
+    throw new BackupError('list() method must be implemented by subclass', {
+      operation: 'list',
+      driver: this.constructor.name,
+      suggestion: 'Extend BaseBackupDriver and implement the list() method'
+    });
   }
 
   /**
@@ -78,7 +99,12 @@ export default class BaseBackupDriver {
    * @returns {boolean} True if backup is valid
    */
   async verify(backupId, expectedChecksum, metadata) {
-    throw new Error('verify() method must be implemented by subclass');
+    throw new BackupError('verify() method must be implemented by subclass', {
+      operation: 'verify',
+      driver: this.constructor.name,
+      backupId,
+      suggestion: 'Extend BaseBackupDriver and implement the verify() method'
+    });
   }
 
   /**
@@ -86,7 +112,11 @@ export default class BaseBackupDriver {
    * @returns {string} Driver type
    */
   getType() {
-    throw new Error('getType() method must be implemented by subclass');
+    throw new BackupError('getType() method must be implemented by subclass', {
+      operation: 'getType',
+      driver: this.constructor.name,
+      suggestion: 'Extend BaseBackupDriver and implement the getType() method'
+    });
   }
 
   /**

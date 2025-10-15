@@ -1,5 +1,6 @@
 import { BasePartitionDriver } from './base-partition-driver.js';
 import { SQSClient, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
+import { PartitionDriverError } from '../errors.js';
 
 /**
  * SQS-based partition driver for distributed processing
@@ -14,7 +15,11 @@ export class SQSPartitionDriver extends BasePartitionDriver {
     // SQS Configuration
     this.queueUrl = options.queueUrl;
     if (!this.queueUrl) {
-      throw new Error('SQS queue URL is required for SQSPartitionDriver');
+      throw new PartitionDriverError('SQS queue URL is required', {
+        driver: 'sqs',
+        operation: 'constructor',
+        suggestion: 'Provide queueUrl in options: new SQSPartitionDriver({ queueUrl: "https://sqs.region.amazonaws.com/account/queue" })'
+      });
     }
     
     this.region = options.region || 'us-east-1';

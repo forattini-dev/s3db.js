@@ -1,6 +1,7 @@
 import tryFn from "#src/concerns/try-fn.js";
 import { S3db } from '#src/database.class.js';
 import BaseReplicator from './base-replicator.class.js';
+import { ReplicationError } from '../replicator.errors.js';
 
 function normalizeResourceName(name) {
   return typeof name === 'string' ? name.trim().toLowerCase() : name;
@@ -118,7 +119,11 @@ class S3dbReplicator extends BaseReplicator {
         this.targetDatabase = new S3db(targetConfig);
         await this.targetDatabase.connect();
       } else {
-        throw new Error('S3dbReplicator: No client or connectionString provided');
+        throw new ReplicationError('S3dbReplicator requires client or connectionString', {
+          operation: 'initialize',
+          replicatorClass: 'S3dbReplicator',
+          suggestion: 'Provide either a client instance or connectionString in config: { client: db } or { connectionString: "s3://..." }'
+        });
       }
       
       this.emit('connected', { 
@@ -155,9 +160,15 @@ class S3dbReplicator extends BaseReplicator {
     
     const normResource = normalizeResourceName(resource);
     const entry = this.resourcesMap[normResource];
-    
+
     if (!entry) {
-      throw new Error(`[S3dbReplicator] Resource not configured: ${resource}`);
+      throw new ReplicationError('Resource not configured for replication', {
+        operation: 'replicate',
+        replicatorClass: 'S3dbReplicator',
+        resourceName: resource,
+        configuredResources: Object.keys(this.resourcesMap),
+        suggestion: 'Add resource to replicator resources map: { resources: { [resourceName]: "destination" } }'
+      });
     }
 
     // Handle multi-destination arrays
@@ -242,7 +253,14 @@ class S3dbReplicator extends BaseReplicator {
     } else if (operation === 'delete') {
       result = await destResourceObj.delete(recordId);
     } else {
-      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
+      throw new ReplicationError(`Invalid replication operation: ${operation}`, {
+        operation: 'replicate',
+        replicatorClass: 'S3dbReplicator',
+        invalidOperation: operation,
+        supportedOperations: ['insert', 'update', 'delete'],
+        resourceName: sourceResource,
+        suggestion: 'Use one of the supported operations: insert, update, delete'
+      });
     }
     
     return result;
@@ -333,7 +351,13 @@ class S3dbReplicator extends BaseReplicator {
     const norm = normalizeResourceName(resource);
     const found = available.find(r => normalizeResourceName(r) === norm);
     if (!found) {
-      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(', ')}`);
+      throw new ReplicationError('Destination resource not found in target database', {
+        operation: '_getDestResourceObj',
+        replicatorClass: 'S3dbReplicator',
+        destinationResource: resource,
+        availableResources: available,
+        suggestion: 'Create the resource in target database or check resource name spelling'
+      });
     }
     return db.resources[found];
   }
@@ -390,13 +414,19 @@ class S3dbReplicator extends BaseReplicator {
 
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
-      if (!this.targetDatabase) throw new Error('No target database configured');
-      
+      if (!this.targetDatabase) {
+        throw new ReplicationError('No target database configured for connection test', {
+          operation: 'testConnection',
+          replicatorClass: 'S3dbReplicator',
+          suggestion: 'Initialize replicator with client or connectionString before testing connection'
+        });
+      }
+
       // Try to list resources to test connection
       if (typeof this.targetDatabase.connect === 'function') {
         await this.targetDatabase.connect();
       }
-      
+
       return true;
     });
     

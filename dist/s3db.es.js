@@ -478,7 +478,7 @@ ${details.strictValidation === false ? "  \u2022 Update partition definition to 
   \u2022 Update partition definition to use existing fields, OR
   \u2022 Use strictValidation: false to skip this check during testing`}
 
-Docs: https://docs.s3db.js.org/resources/partitions#validation
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitions
 `.trim();
     }
     super(message, {
@@ -543,7 +543,7 @@ Example fix:
   await db.connect();  // Plugin initialized here
   await db.createResource({ name: '${resourceName}', ... });  // Analytics resource created here
 
-Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/eventual-consistency.md
 `.trim();
     super(message, {
       ...rest,
@@ -555,6 +555,265 @@ Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
       pluginInitialized,
       description,
       suggestion: "Ensure resources are created after plugin initialization. Check plugin configuration and resource creation order."
+    });
+  }
+}
+class PluginError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      pluginName = "Unknown",
+      operation = "unknown",
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Plugin Error
+
+Plugin: ${pluginName}
+Operation: ${operation}
+
+Possible causes:
+1. Plugin not properly initialized
+2. Plugin configuration is invalid
+3. Plugin dependencies not met
+4. Plugin method called before installation
+
+Solution:
+Ensure plugin is added to database and connect() is called before usage.
+
+Example:
+  const db = new Database({
+    bucket: 'my-bucket',
+    plugins: [new ${pluginName}({ /* config */ })]
+  });
+
+  await db.connect();  // Plugin installed here
+  // Now plugin methods are available
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      pluginName,
+      operation,
+      description,
+      suggestion: details.suggestion || "Check plugin initialization and configuration."
+    });
+  }
+}
+class PluginStorageError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      pluginSlug = "unknown",
+      key = "",
+      operation = "unknown",
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Plugin Storage Error
+
+Plugin: ${pluginSlug}
+Key: ${key}
+Operation: ${operation}
+
+Possible causes:
+1. Storage not initialized (plugin not installed)
+2. Invalid key format
+3. S3 operation failed
+4. Permissions issue
+
+Solution:
+Ensure plugin has access to storage and key is valid.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#plugin-storage
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      pluginSlug,
+      key,
+      operation,
+      description,
+      suggestion: details.suggestion || "Check plugin storage configuration and S3 permissions."
+    });
+  }
+}
+class PartitionDriverError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      driver = "unknown",
+      operation = "unknown",
+      queueSize,
+      maxQueueSize,
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description && queueSize !== void 0 && maxQueueSize !== void 0) {
+      description = `
+Partition Driver Error
+
+Driver: ${driver}
+Operation: ${operation}
+Queue Status: ${queueSize}/${maxQueueSize}
+
+Possible causes:
+1. Queue is full (backpressure)
+2. Driver not properly configured
+3. SQS permissions issue (if using SQS driver)
+
+Solution:
+${queueSize >= maxQueueSize ? "Wait for queue to drain or increase maxQueueSize" : "Check driver configuration and permissions"}
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
+`.trim();
+    } else if (!description) {
+      description = `
+Partition Driver Error
+
+Driver: ${driver}
+Operation: ${operation}
+
+Check driver configuration and permissions.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      driver,
+      operation,
+      queueSize,
+      maxQueueSize,
+      description,
+      suggestion: details.suggestion || "Check partition driver configuration."
+    });
+  }
+}
+class BehaviorError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      behavior = "unknown",
+      availableBehaviors = [],
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Behavior Error
+
+Requested: ${behavior}
+Available: ${availableBehaviors.join(", ") || "body-overflow, body-only, truncate-data, enforce-limits, user-managed"}
+
+Possible causes:
+1. Behavior name misspelled
+2. Custom behavior not registered
+
+Solution:
+Use one of the available behaviors or register custom behavior.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behaviors
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      behavior,
+      availableBehaviors,
+      description,
+      suggestion: details.suggestion || "Check behavior name and available behaviors."
+    });
+  }
+}
+class StreamError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      operation = "unknown",
+      resource,
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Stream Error
+
+Operation: ${operation}
+${resource ? `Resource: ${resource}` : ""}
+
+Possible causes:
+1. Stream not properly initialized
+2. Resource not available
+3. Network error during streaming
+
+Solution:
+Check stream configuration and resource availability.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streaming
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      operation,
+      resource,
+      description,
+      suggestion: details.suggestion || "Check stream configuration and resource availability."
+    });
+  }
+}
+class MetadataLimitError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit = 2047,
+      excess,
+      resourceName,
+      operation,
+      ...rest
+    } = details;
+    let description = details.description;
+    if (!description && totalSize && effectiveLimit) {
+      description = `
+S3 Metadata Size Limit Exceeded
+
+Current Size: ${totalSize} bytes
+Effective Limit: ${effectiveLimit} bytes
+Absolute Limit: ${absoluteLimit} bytes
+${excess ? `Excess: ${excess} bytes` : ""}
+${resourceName ? `Resource: ${resourceName}` : ""}
+${operation ? `Operation: ${operation}` : ""}
+
+S3 has a hard limit of 2KB (2047 bytes) for object metadata.
+
+Solutions:
+1. Use 'body-overflow' behavior to store excess in body
+2. Use 'body-only' behavior to store everything in body
+3. Reduce number of fields
+4. Use shorter field values
+5. Enable advanced metadata encoding
+
+Example:
+  await db.createResource({
+    name: '${resourceName || "myResource"}',
+    behavior: 'body-overflow',  // Automatically handles overflow
+    attributes: { ... }
+  });
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata-size-limits
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      totalSize,
+      effectiveLimit,
+      absoluteLimit,
+      excess,
+      resourceName,
+      operation,
+      description,
+      suggestion: details.suggestion || "Use 'body-overflow' or 'body-only' behavior to handle large metadata."
     });
   }
 }
@@ -898,10 +1157,17 @@ class PluginStorage {
    */
   constructor(client, pluginSlug) {
     if (!client) {
-      throw new Error("PluginStorage requires a client instance");
+      throw new PluginStorageError("PluginStorage requires a client instance", {
+        operation: "constructor",
+        pluginSlug,
+        suggestion: "Pass a valid S3db Client instance when creating PluginStorage"
+      });
     }
     if (!pluginSlug) {
-      throw new Error("PluginStorage requires a pluginSlug");
+      throw new PluginStorageError("PluginStorage requires a pluginSlug", {
+        operation: "constructor",
+        suggestion: 'Provide a plugin slug (e.g., "eventual-consistency", "cache", "audit")'
+      });
     }
     this.client = client;
     this.pluginSlug = pluginSlug;
@@ -954,7 +1220,15 @@ class PluginStorage {
     }
     const [ok, err] = await tryFn(() => this.client.putObject(putParams));
     if (!ok) {
-      throw new Error(`PluginStorage.set failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to save plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: "set",
+        behavior,
+        ttl,
+        original: err,
+        suggestion: "Check S3 permissions and key format"
+      });
     }
   }
   /**
@@ -976,7 +1250,13 @@ class PluginStorage {
       if (err.name === "NoSuchKey" || err.Code === "NoSuchKey") {
         return null;
       }
-      throw new Error(`PluginStorage.get failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to retrieve plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: "get",
+        original: err,
+        suggestion: "Check if the key exists and S3 permissions are correct"
+      });
     }
     const metadata = response.Metadata || {};
     const parsedMetadata = this._parseMetadataValues(metadata);
@@ -989,7 +1269,13 @@ class PluginStorage {
           data = { ...parsedMetadata, ...body };
         }
       } catch (parseErr) {
-        throw new Error(`PluginStorage.get failed to parse body for key ${key}: ${parseErr.message}`);
+        throw new PluginStorageError(`Failed to parse JSON body`, {
+          pluginSlug: this.pluginSlug,
+          key,
+          operation: "get",
+          original: parseErr,
+          suggestion: "Body content may be corrupted. Check S3 object integrity"
+        });
       }
     }
     const expiresAt = data._expiresat || data._expiresAt;
@@ -1050,7 +1336,15 @@ class PluginStorage {
       () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
     );
     if (!ok) {
-      throw new Error(`PluginStorage.list failed: ${err.message}`);
+      throw new PluginStorageError(`Failed to list plugin data`, {
+        pluginSlug: this.pluginSlug,
+        operation: "list",
+        prefix,
+        fullPrefix,
+        limit,
+        original: err,
+        suggestion: "Check S3 permissions and bucket configuration"
+      });
     }
     const keys = result.Contents?.map((item) => item.Key) || [];
     return this._removeKeyPrefix(keys);
@@ -1070,7 +1364,16 @@ class PluginStorage {
       () => this.client.listObjects({ prefix: fullPrefix, maxKeys: limit })
     );
     if (!ok) {
-      throw new Error(`PluginStorage.listForResource failed: ${err.message}`);
+      throw new PluginStorageError(`Failed to list resource data`, {
+        pluginSlug: this.pluginSlug,
+        operation: "listForResource",
+        resourceName,
+        subPrefix,
+        fullPrefix,
+        limit,
+        original: err,
+        suggestion: "Check resource name and S3 permissions"
+      });
     }
     const keys = result.Contents?.map((item) => item.Key) || [];
     return this._removeKeyPrefix(keys);
@@ -1210,7 +1513,13 @@ class PluginStorage {
   async delete(key) {
     const [ok, err] = await tryFn(() => this.client.deleteObject(key));
     if (!ok) {
-      throw new Error(`PluginStorage.delete failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to delete plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: "delete",
+        original: err,
+        suggestion: "Check S3 delete permissions"
+      });
     }
   }
   /**
@@ -1397,16 +1706,28 @@ class PluginStorage {
           const valueSize = calculateUTF8Bytes(encoded);
           currentSize += keySize + valueSize;
           if (currentSize > effectiveLimit) {
-            throw new Error(
-              `Data exceeds metadata limit (${currentSize} > ${effectiveLimit} bytes). Use 'body-overflow' or 'body-only' behavior.`
-            );
+            throw new MetadataLimitError(`Data exceeds metadata limit with enforce-limits behavior`, {
+              totalSize: currentSize,
+              effectiveLimit,
+              absoluteLimit: S3_METADATA_LIMIT,
+              excess: currentSize - effectiveLimit,
+              operation: "PluginStorage.set",
+              pluginSlug: this.pluginSlug,
+              suggestion: "Use 'body-overflow' or 'body-only' behavior to handle large data"
+            });
           }
           metadata[key] = jsonValue;
         }
         break;
       }
       default:
-        throw new Error(`Unknown behavior: ${behavior}. Use 'body-overflow', 'body-only', or 'enforce-limits'.`);
+        throw new BehaviorError(`Unknown behavior: ${behavior}`, {
+          behavior,
+          availableBehaviors: ["body-overflow", "body-only", "enforce-limits"],
+          operation: "PluginStorage._applyBehavior",
+          pluginSlug: this.pluginSlug,
+          suggestion: "Use 'body-overflow', 'body-only', or 'enforce-limits'"
+        });
     }
     return { metadata, body };
   }
@@ -1971,6 +2292,42 @@ class AuditPlugin extends Plugin {
   }
 }
 
+class BackupError extends S3dbError {
+  constructor(message, details = {}) {
+    const { driver = "unknown", operation = "unknown", backupId, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Backup Operation Error
+
+Driver: ${driver}
+Operation: ${operation}
+${backupId ? `Backup ID: ${backupId}` : ""}
+
+Common causes:
+1. Invalid backup driver configuration
+2. Destination storage not accessible
+3. Insufficient permissions
+4. Network connectivity issues
+5. Invalid backup file format
+
+Solution:
+Check driver configuration and ensure destination storage is accessible.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/backup.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      driver,
+      operation,
+      backupId,
+      description,
+      suggestion: details.suggestion || "Check backup driver configuration and destination accessibility."
+    });
+  }
+}
+
 class BaseBackupDriver {
   constructor(config = {}) {
     this.config = {
@@ -2001,7 +2358,12 @@ class BaseBackupDriver {
    * @returns {Object} Upload result with destination info
    */
   async upload(filePath, backupId, manifest) {
-    throw new Error("upload() method must be implemented by subclass");
+    throw new BackupError("upload() method must be implemented by subclass", {
+      operation: "upload",
+      driver: this.constructor.name,
+      backupId,
+      suggestion: "Extend BaseBackupDriver and implement the upload() method"
+    });
   }
   /**
    * Download a backup file from the destination
@@ -2011,7 +2373,12 @@ class BaseBackupDriver {
    * @returns {string} Path to downloaded file
    */
   async download(backupId, targetPath, metadata) {
-    throw new Error("download() method must be implemented by subclass");
+    throw new BackupError("download() method must be implemented by subclass", {
+      operation: "download",
+      driver: this.constructor.name,
+      backupId,
+      suggestion: "Extend BaseBackupDriver and implement the download() method"
+    });
   }
   /**
    * Delete a backup from the destination
@@ -2019,7 +2386,12 @@ class BaseBackupDriver {
    * @param {Object} metadata - Backup metadata
    */
   async delete(backupId, metadata) {
-    throw new Error("delete() method must be implemented by subclass");
+    throw new BackupError("delete() method must be implemented by subclass", {
+      operation: "delete",
+      driver: this.constructor.name,
+      backupId,
+      suggestion: "Extend BaseBackupDriver and implement the delete() method"
+    });
   }
   /**
    * List backups available in the destination
@@ -2027,7 +2399,11 @@ class BaseBackupDriver {
    * @returns {Array} List of backup metadata
    */
   async list(options = {}) {
-    throw new Error("list() method must be implemented by subclass");
+    throw new BackupError("list() method must be implemented by subclass", {
+      operation: "list",
+      driver: this.constructor.name,
+      suggestion: "Extend BaseBackupDriver and implement the list() method"
+    });
   }
   /**
    * Verify backup integrity
@@ -2037,14 +2413,23 @@ class BaseBackupDriver {
    * @returns {boolean} True if backup is valid
    */
   async verify(backupId, expectedChecksum, metadata) {
-    throw new Error("verify() method must be implemented by subclass");
+    throw new BackupError("verify() method must be implemented by subclass", {
+      operation: "verify",
+      driver: this.constructor.name,
+      backupId,
+      suggestion: "Extend BaseBackupDriver and implement the verify() method"
+    });
   }
   /**
    * Get driver type identifier
    * @returns {string} Driver type
    */
   getType() {
-    throw new Error("getType() method must be implemented by subclass");
+    throw new BackupError("getType() method must be implemented by subclass", {
+      operation: "getType",
+      driver: this.constructor.name,
+      suggestion: "Extend BaseBackupDriver and implement the getType() method"
+    });
   }
   /**
    * Get driver-specific storage info
@@ -2086,7 +2471,11 @@ class FilesystemBackupDriver extends BaseBackupDriver {
   }
   async onSetup() {
     if (!this.config.path) {
-      throw new Error("FilesystemBackupDriver: path configuration is required");
+      throw new BackupError("FilesystemBackupDriver: path configuration is required", {
+        operation: "onSetup",
+        driver: "filesystem",
+        suggestion: 'Provide a path in config: new FilesystemBackupDriver({ path: "/path/to/backups" })'
+      });
     }
     this.log(`Initialized with path: ${this.config.path}`);
   }
@@ -2110,11 +2499,26 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       () => mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
     );
     if (!createDirOk) {
-      throw new Error(`Failed to create backup directory: ${createDirErr.message}`);
+      throw new BackupError("Failed to create backup directory", {
+        operation: "upload",
+        driver: "filesystem",
+        backupId,
+        targetDir,
+        original: createDirErr,
+        suggestion: "Check directory permissions and disk space"
+      });
     }
     const [copyOk, copyErr] = await tryFn(() => copyFile(filePath, targetPath));
     if (!copyOk) {
-      throw new Error(`Failed to copy backup file: ${copyErr.message}`);
+      throw new BackupError("Failed to copy backup file", {
+        operation: "upload",
+        driver: "filesystem",
+        backupId,
+        filePath,
+        targetPath,
+        original: copyErr,
+        suggestion: "Check file permissions and disk space"
+      });
     }
     const [manifestOk, manifestErr] = await tryFn(
       () => import('fs/promises').then((fs) => fs.writeFile(
@@ -2125,7 +2529,14 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     );
     if (!manifestOk) {
       await tryFn(() => unlink(targetPath));
-      throw new Error(`Failed to write manifest: ${manifestErr.message}`);
+      throw new BackupError("Failed to write manifest file", {
+        operation: "upload",
+        driver: "filesystem",
+        backupId,
+        manifestPath,
+        original: manifestErr,
+        suggestion: "Check directory permissions and disk space"
+      });
     }
     const [statOk, , stats] = await tryFn(() => stat(targetPath));
     const size = statOk ? stats.size : 0;
@@ -2144,13 +2555,27 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     );
     const [existsOk] = await tryFn(() => access(sourcePath));
     if (!existsOk) {
-      throw new Error(`Backup file not found: ${sourcePath}`);
+      throw new BackupError("Backup file not found", {
+        operation: "download",
+        driver: "filesystem",
+        backupId,
+        sourcePath,
+        suggestion: "Check if backup exists using list() method"
+      });
     }
     const targetDir = path.dirname(targetPath);
     await tryFn(() => mkdir(targetDir, { recursive: true }));
     const [copyOk, copyErr] = await tryFn(() => copyFile(sourcePath, targetPath));
     if (!copyOk) {
-      throw new Error(`Failed to download backup: ${copyErr.message}`);
+      throw new BackupError("Failed to download backup", {
+        operation: "download",
+        driver: "filesystem",
+        backupId,
+        sourcePath,
+        targetPath,
+        original: copyErr,
+        suggestion: "Check file permissions and disk space"
+      });
     }
     this.log(`Downloaded backup ${backupId} from ${sourcePath} to ${targetPath}`);
     return targetPath;
@@ -2167,7 +2592,14 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     const [deleteBackupOk] = await tryFn(() => unlink(backupPath));
     const [deleteManifestOk] = await tryFn(() => unlink(manifestPath));
     if (!deleteBackupOk && !deleteManifestOk) {
-      throw new Error(`Failed to delete backup files for ${backupId}`);
+      throw new BackupError("Failed to delete backup files", {
+        operation: "delete",
+        driver: "filesystem",
+        backupId,
+        backupPath,
+        manifestPath,
+        suggestion: "Check file permissions"
+      });
     }
     this.log(`Deleted backup ${backupId}`);
   }
@@ -2272,10 +2704,18 @@ class S3BackupDriver extends BaseBackupDriver {
       this.config.bucket = this.database.bucket;
     }
     if (!this.config.client) {
-      throw new Error("S3BackupDriver: client is required (either via config or database)");
+      throw new BackupError("S3BackupDriver: client is required", {
+        operation: "onSetup",
+        driver: "s3",
+        suggestion: "Provide a client in config or ensure database has a client configured"
+      });
     }
     if (!this.config.bucket) {
-      throw new Error("S3BackupDriver: bucket is required (either via config or database)");
+      throw new BackupError("S3BackupDriver: bucket is required", {
+        operation: "onSetup",
+        driver: "s3",
+        suggestion: "Provide a bucket in config or ensure database has a bucket configured"
+      });
     }
     this.log(`Initialized with bucket: ${this.config.bucket}, path: ${this.config.path}`);
   }
@@ -2317,7 +2757,15 @@ class S3BackupDriver extends BaseBackupDriver {
       });
     });
     if (!uploadOk) {
-      throw new Error(`Failed to upload backup file: ${uploadErr.message}`);
+      throw new BackupError("Failed to upload backup file to S3", {
+        operation: "upload",
+        driver: "s3",
+        backupId,
+        bucket: this.config.bucket,
+        key: backupKey,
+        original: uploadErr,
+        suggestion: "Check S3 permissions and bucket configuration"
+      });
     }
     const [manifestOk, manifestErr] = await tryFn(
       () => this.config.client.uploadObject({
@@ -2338,7 +2786,15 @@ class S3BackupDriver extends BaseBackupDriver {
         bucket: this.config.bucket,
         key: backupKey
       }));
-      throw new Error(`Failed to upload manifest: ${manifestErr.message}`);
+      throw new BackupError("Failed to upload manifest to S3", {
+        operation: "upload",
+        driver: "s3",
+        backupId,
+        bucket: this.config.bucket,
+        manifestKey,
+        original: manifestErr,
+        suggestion: "Check S3 permissions and bucket configuration"
+      });
     }
     this.log(`Uploaded backup ${backupId} to s3://${this.config.bucket}/${backupKey} (${fileSize} bytes)`);
     return {
@@ -2361,7 +2817,16 @@ class S3BackupDriver extends BaseBackupDriver {
       })
     );
     if (!downloadOk) {
-      throw new Error(`Failed to download backup: ${downloadErr.message}`);
+      throw new BackupError("Failed to download backup from S3", {
+        operation: "download",
+        driver: "s3",
+        backupId,
+        bucket: this.config.bucket,
+        key: backupKey,
+        targetPath,
+        original: downloadErr,
+        suggestion: "Check if backup exists and S3 permissions are correct"
+      });
     }
     this.log(`Downloaded backup ${backupId} from s3://${this.config.bucket}/${backupKey} to ${targetPath}`);
     return targetPath;
@@ -2382,7 +2847,15 @@ class S3BackupDriver extends BaseBackupDriver {
       })
     );
     if (!deleteBackupOk && !deleteManifestOk) {
-      throw new Error(`Failed to delete backup objects for ${backupId}`);
+      throw new BackupError("Failed to delete backup from S3", {
+        operation: "delete",
+        driver: "s3",
+        backupId,
+        bucket: this.config.bucket,
+        backupKey,
+        manifestKey,
+        suggestion: "Check S3 delete permissions"
+      });
     }
     this.log(`Deleted backup ${backupId} from S3`);
   }
@@ -2495,11 +2968,22 @@ class MultiBackupDriver extends BaseBackupDriver {
   }
   async onSetup() {
     if (!Array.isArray(this.config.destinations) || this.config.destinations.length === 0) {
-      throw new Error("MultiBackupDriver: destinations array is required and must not be empty");
+      throw new BackupError("MultiBackupDriver requires non-empty destinations array", {
+        operation: "onSetup",
+        driver: "multi",
+        destinationsProvided: this.config.destinations,
+        suggestion: 'Provide destinations array: { destinations: [{ driver: "s3", config: {...} }, { driver: "filesystem", config: {...} }] }'
+      });
     }
     for (const [index, destConfig] of this.config.destinations.entries()) {
       if (!destConfig.driver) {
-        throw new Error(`MultiBackupDriver: destination[${index}] must have a driver type`);
+        throw new BackupError(`Destination ${index} missing driver type`, {
+          operation: "onSetup",
+          driver: "multi",
+          destinationIndex: index,
+          destination: destConfig,
+          suggestion: 'Each destination must have a driver property: { driver: "s3", config: {...} } or { driver: "filesystem", config: {...} }'
+        });
       }
       try {
         const driver = createBackupDriver(destConfig.driver, destConfig.config || {});
@@ -2511,7 +2995,15 @@ class MultiBackupDriver extends BaseBackupDriver {
         });
         this.log(`Setup destination ${index}: ${destConfig.driver}`);
       } catch (error) {
-        throw new Error(`Failed to setup destination ${index} (${destConfig.driver}): ${error.message}`);
+        throw new BackupError(`Failed to setup destination ${index}`, {
+          operation: "onSetup",
+          driver: "multi",
+          destinationIndex: index,
+          destinationDriver: destConfig.driver,
+          destinationConfig: destConfig.config,
+          original: error,
+          suggestion: "Check destination driver configuration and ensure dependencies are available"
+        });
       }
     }
     if (this.config.requireAll === false) {
@@ -2540,7 +3032,15 @@ class MultiBackupDriver extends BaseBackupDriver {
           this.log(`Priority upload failed to destination ${index}: ${err.message}`);
         }
       }
-      throw new Error(`All priority destinations failed: ${errors.map((e) => `${e.destination}: ${e.error}`).join("; ")}`);
+      throw new BackupError("All priority destinations failed", {
+        operation: "upload",
+        driver: "multi",
+        strategy: "priority",
+        backupId,
+        totalDestinations: this.drivers.length,
+        failures: errors,
+        suggestion: "Check destination configurations and ensure at least one destination is accessible"
+      });
     }
     const uploadPromises = this.drivers.map(async ({ driver, config, index }) => {
       const [ok, err, result] = await tryFn(
@@ -2570,10 +3070,28 @@ class MultiBackupDriver extends BaseBackupDriver {
     const successResults = allResults.filter((r) => r.status === "success");
     const failedResults = allResults.filter((r) => r.status === "failed");
     if (strategy === "all" && failedResults.length > 0) {
-      throw new Error(`Some destinations failed: ${failedResults.map((r) => `${r.destination}: ${r.error}`).join("; ")}`);
+      throw new BackupError('Some destinations failed with strategy "all"', {
+        operation: "upload",
+        driver: "multi",
+        strategy: "all",
+        backupId,
+        totalDestinations: this.drivers.length,
+        successCount: successResults.length,
+        failedCount: failedResults.length,
+        failures: failedResults,
+        suggestion: 'All destinations must succeed with "all" strategy. Use "any" strategy to tolerate failures, or fix failing destinations.'
+      });
     }
     if (strategy === "any" && successResults.length === 0) {
-      throw new Error(`All destinations failed: ${failedResults.map((r) => `${r.destination}: ${r.error}`).join("; ")}`);
+      throw new BackupError('All destinations failed with strategy "any"', {
+        operation: "upload",
+        driver: "multi",
+        strategy: "any",
+        backupId,
+        totalDestinations: this.drivers.length,
+        failures: failedResults,
+        suggestion: 'At least one destination must succeed with "any" strategy. Check all destination configurations.'
+      });
     }
     return allResults;
   }
@@ -2593,7 +3111,14 @@ class MultiBackupDriver extends BaseBackupDriver {
         this.log(`Download failed from destination ${destMetadata.destination}: ${err.message}`);
       }
     }
-    throw new Error(`Failed to download backup from any destination`);
+    throw new BackupError("Failed to download backup from any destination", {
+      operation: "download",
+      driver: "multi",
+      backupId,
+      targetPath,
+      attemptedDestinations: destinations.length,
+      suggestion: "Check if backup exists in at least one destination and destinations are accessible"
+    });
   }
   async delete(backupId, metadata) {
     const destinations = Array.isArray(metadata.destinations) ? metadata.destinations : [metadata];
@@ -2615,7 +3140,14 @@ class MultiBackupDriver extends BaseBackupDriver {
       }
     }
     if (successCount === 0 && errors.length > 0) {
-      throw new Error(`Failed to delete from any destination: ${errors.join("; ")}`);
+      throw new BackupError("Failed to delete from any destination", {
+        operation: "delete",
+        driver: "multi",
+        backupId,
+        attemptedDestinations: destinations.length,
+        failures: errors,
+        suggestion: "Check if backup exists in destinations and destinations are accessible with delete permissions"
+      });
     }
     if (errors.length > 0) {
       this.log(`Partial delete success, some errors: ${errors.join("; ")}`);
@@ -2715,32 +3247,62 @@ const BACKUP_DRIVERS = {
 function createBackupDriver(driver, config = {}) {
   const DriverClass = BACKUP_DRIVERS[driver];
   if (!DriverClass) {
-    throw new Error(`Unknown backup driver: ${driver}. Available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`);
+    throw new BackupError(`Unknown backup driver: ${driver}`, {
+      operation: "createBackupDriver",
+      driver,
+      availableDrivers: Object.keys(BACKUP_DRIVERS),
+      suggestion: `Use one of the available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`
+    });
   }
   return new DriverClass(config);
 }
 function validateBackupConfig(driver, config = {}) {
   if (!driver || typeof driver !== "string") {
-    throw new Error("Driver type must be a non-empty string");
+    throw new BackupError("Driver type must be a non-empty string", {
+      operation: "validateBackupConfig",
+      driver,
+      suggestion: "Provide a valid driver type string (filesystem, s3, or multi)"
+    });
   }
   if (!BACKUP_DRIVERS[driver]) {
-    throw new Error(`Unknown backup driver: ${driver}. Available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`);
+    throw new BackupError(`Unknown backup driver: ${driver}`, {
+      operation: "validateBackupConfig",
+      driver,
+      availableDrivers: Object.keys(BACKUP_DRIVERS),
+      suggestion: `Use one of the available drivers: ${Object.keys(BACKUP_DRIVERS).join(", ")}`
+    });
   }
   switch (driver) {
     case "filesystem":
       if (!config.path) {
-        throw new Error('FilesystemBackupDriver requires "path" configuration');
+        throw new BackupError('FilesystemBackupDriver requires "path" configuration', {
+          operation: "validateBackupConfig",
+          driver: "filesystem",
+          config,
+          suggestion: 'Provide a "path" property in config: { path: "/path/to/backups" }'
+        });
       }
       break;
     case "s3":
       break;
     case "multi":
       if (!Array.isArray(config.destinations) || config.destinations.length === 0) {
-        throw new Error('MultiBackupDriver requires non-empty "destinations" array');
+        throw new BackupError('MultiBackupDriver requires non-empty "destinations" array', {
+          operation: "validateBackupConfig",
+          driver: "multi",
+          config,
+          suggestion: 'Provide destinations array: { destinations: [{ driver: "s3", config: {...} }] }'
+        });
       }
       config.destinations.forEach((dest, index) => {
         if (!dest.driver) {
-          throw new Error(`Destination ${index} must have a "driver" property`);
+          throw new BackupError(`Destination ${index} must have a "driver" property`, {
+            operation: "validateBackupConfig",
+            driver: "multi",
+            destinationIndex: index,
+            destination: dest,
+            suggestion: 'Each destination must have a driver property: { driver: "s3", config: {...} }'
+          });
         }
         if (dest.driver !== "multi") {
           validateBackupConfig(dest.driver, dest.config || {});
@@ -3396,6 +3958,44 @@ class BackupPlugin extends Plugin {
   }
 }
 
+class CacheError extends S3dbError {
+  constructor(message, details = {}) {
+    const { driver = "unknown", operation = "unknown", resourceName, key, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Cache Operation Error
+
+Driver: ${driver}
+Operation: ${operation}
+${resourceName ? `Resource: ${resourceName}` : ""}
+${key ? `Key: ${key}` : ""}
+
+Common causes:
+1. Invalid cache key format
+2. Cache driver not properly initialized
+3. Resource not found or not cached
+4. Memory limits exceeded
+5. Filesystem permissions issues
+
+Solution:
+Check cache configuration and ensure the cache driver is properly initialized.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/cache.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      driver,
+      operation,
+      resourceName,
+      key,
+      description,
+      suggestion: details.suggestion || "Check cache configuration and driver settings."
+    });
+  }
+}
+
 class Cache extends EventEmitter {
   constructor(config = {}) {
     super();
@@ -3412,7 +4012,13 @@ class Cache extends EventEmitter {
   }
   validateKey(key) {
     if (key === null || key === void 0 || typeof key !== "string" || !key) {
-      throw new Error("Invalid key");
+      throw new CacheError("Invalid cache key", {
+        operation: "validateKey",
+        driver: this.constructor.name,
+        key,
+        keyType: typeof key,
+        suggestion: "Cache key must be a non-empty string"
+      });
     }
   }
   // generic class methods
@@ -3499,7 +4105,11 @@ class ResourceReader extends EventEmitter {
   constructor({ resource, batchSize = 10, concurrency = 5 }) {
     super();
     if (!resource) {
-      throw new Error("Resource is required for ResourceReader");
+      throw new StreamError("Resource is required for ResourceReader", {
+        operation: "constructor",
+        resource: resource?.name,
+        suggestion: "Pass a valid Resource instance when creating ResourceReader"
+      });
     }
     this.resource = resource;
     this.client = resource.client;
@@ -3623,7 +4233,10 @@ class ResourceWriter extends EventEmitter {
 function streamToString(stream) {
   return new Promise((resolve, reject) => {
     if (!stream) {
-      return reject(new Error("streamToString: stream is undefined"));
+      return reject(new StreamError("Stream is undefined", {
+        operation: "streamToString",
+        suggestion: "Ensure a valid stream is passed to streamToString()"
+      }));
     }
     const chunks = [];
     stream.on("data", (chunk) => chunks.push(chunk));
@@ -5117,7 +5730,13 @@ class CachePlugin extends Plugin {
   async warmCache(resourceName, options = {}) {
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new CacheError("Resource not found for cache warming", {
+        operation: "warmCache",
+        driver: this.driver?.constructor.name,
+        resourceName,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: "Check resource name spelling or ensure resource has been created"
+      });
     }
     const { includePartitions = true, sampleSize = 100 } = options;
     if (this.driver instanceof PartitionAwareFilesystemCache && resource.warmPartitionCache) {
@@ -8234,6 +8853,42 @@ class EventualConsistencyPlugin extends Plugin {
   }
 }
 
+class FulltextError extends S3dbError {
+  constructor(message, details = {}) {
+    const { resourceName, query, operation = "unknown", ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Fulltext Search Operation Error
+
+Operation: ${operation}
+${resourceName ? `Resource: ${resourceName}` : ""}
+${query ? `Query: ${query}` : ""}
+
+Common causes:
+1. Resource not indexed for fulltext search
+2. Invalid query syntax
+3. Index not built yet
+4. Search configuration missing
+5. Field not indexed
+
+Solution:
+Ensure resource is configured for fulltext search and index is built.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/fulltext.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      resourceName,
+      query,
+      operation,
+      description,
+      suggestion: details.suggestion || "Check fulltext configuration and ensure resource is indexed."
+    });
+  }
+}
+
 class FullTextPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -8540,7 +9195,13 @@ class FullTextPlugin extends Plugin {
     }
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new FulltextError(`Resource '${resourceName}' not found`, {
+        operation: "searchRecords",
+        resourceName,
+        query,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: "Check resource name or ensure resource is created before searching"
+      });
     }
     const recordIds = searchResults.map((result2) => result2.recordId);
     const records = await resource.getMany(recordIds);
@@ -8557,7 +9218,12 @@ class FullTextPlugin extends Plugin {
   async rebuildIndex(resourceName) {
     const resource = this.database.resources[resourceName];
     if (!resource) {
-      throw new Error(`Resource '${resourceName}' not found`);
+      throw new FulltextError(`Resource '${resourceName}' not found`, {
+        operation: "rebuildIndex",
+        resourceName,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: "Check resource name or ensure resource is created before rebuilding index"
+      });
     }
     for (const [key] of this.indexes.entries()) {
       if (key.startsWith(`${resourceName}:`)) {
@@ -9342,6 +10008,42 @@ function createConsumer(driver, config) {
   return new ConsumerClass(config);
 }
 
+class QueueError extends S3dbError {
+  constructor(message, details = {}) {
+    const { queueName, operation = "unknown", messageId, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Queue Operation Error
+
+Operation: ${operation}
+${queueName ? `Queue: ${queueName}` : ""}
+${messageId ? `Message ID: ${messageId}` : ""}
+
+Common causes:
+1. Queue not properly configured
+2. Message handler not registered
+3. Queue resource not found
+4. SQS/RabbitMQ connection failed
+5. Message processing timeout
+
+Solution:
+Check queue configuration and message handler registration.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      queueName,
+      operation,
+      messageId,
+      description,
+      suggestion: details.suggestion || "Check queue configuration and handler registration."
+    });
+  }
+}
+
 class QueueConsumerPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
@@ -9402,13 +10104,32 @@ class QueueConsumerPlugin extends Plugin {
     let action = body.action || msg.action;
     let data = body.data || msg.data;
     if (!resource) {
-      throw new Error("QueueConsumerPlugin: resource not found in message");
+      throw new QueueError("Resource not found in message", {
+        operation: "handleMessage",
+        queueName: configuredResource,
+        messageBody: body,
+        suggestion: 'Ensure message includes a "resource" field specifying the target resource name'
+      });
     }
     if (!action) {
-      throw new Error("QueueConsumerPlugin: action not found in message");
+      throw new QueueError("Action not found in message", {
+        operation: "handleMessage",
+        queueName: configuredResource,
+        resource,
+        messageBody: body,
+        suggestion: 'Ensure message includes an "action" field (insert, update, or delete)'
+      });
     }
     const resourceObj = this.database.resources[resource];
-    if (!resourceObj) throw new Error(`QueueConsumerPlugin: resource '${resource}' not found`);
+    if (!resourceObj) {
+      throw new QueueError(`Resource '${resource}' not found`, {
+        operation: "handleMessage",
+        queueName: configuredResource,
+        resource,
+        availableResources: Object.keys(this.database.resources),
+        suggestion: "Check resource name or ensure resource is created before consuming messages"
+      });
+    }
     let result;
     const [ok, err, res] = await tryFn(async () => {
       if (action === "insert") {
@@ -9419,7 +10140,14 @@ class QueueConsumerPlugin extends Plugin {
       } else if (action === "delete") {
         result = await resourceObj.delete(data.id);
       } else {
-        throw new Error(`QueueConsumerPlugin: unsupported action '${action}'`);
+        throw new QueueError(`Unsupported action '${action}'`, {
+          operation: "handleMessage",
+          queueName: configuredResource,
+          resource,
+          action,
+          supportedActions: ["insert", "update", "delete"],
+          suggestion: "Use one of the supported actions: insert, update, or delete"
+        });
       }
       return result;
     });
@@ -9429,6 +10157,42 @@ class QueueConsumerPlugin extends Plugin {
     return res;
   }
   _handleError(err, raw, resourceName) {
+  }
+}
+
+class ReplicationError extends S3dbError {
+  constructor(message, details = {}) {
+    const { replicatorClass = "unknown", operation = "unknown", resourceName, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Replication Operation Error
+
+Replicator: ${replicatorClass}
+Operation: ${operation}
+${resourceName ? `Resource: ${resourceName}` : ""}
+
+Common causes:
+1. Invalid replicator configuration
+2. Target system not accessible
+3. Resource not configured for replication
+4. Invalid operation type
+5. Transformation function errors
+
+Solution:
+Check replicator configuration and ensure target system is accessible.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      replicatorClass,
+      operation,
+      resourceName,
+      description,
+      suggestion: details.suggestion || "Check replicator configuration and target system connectivity."
+    });
   }
 }
 
@@ -9457,7 +10221,12 @@ class BaseReplicator extends EventEmitter {
    * @returns {Promise<Object>} replicator result
    */
   async replicate(resourceName, operation, data, id) {
-    throw new Error(`replicate() method must be implemented by ${this.name}`);
+    throw new ReplicationError("replicate() method must be implemented by subclass", {
+      operation: "replicate",
+      replicatorClass: this.name,
+      resourceName,
+      suggestion: "Extend BaseReplicator and implement the replicate() method"
+    });
   }
   /**
    * Replicate multiple records in batch
@@ -9466,14 +10235,24 @@ class BaseReplicator extends EventEmitter {
    * @returns {Promise<Object>} Batch replicator result
    */
   async replicateBatch(resourceName, records) {
-    throw new Error(`replicateBatch() method must be implemented by ${this.name}`);
+    throw new ReplicationError("replicateBatch() method must be implemented by subclass", {
+      operation: "replicateBatch",
+      replicatorClass: this.name,
+      resourceName,
+      batchSize: records?.length,
+      suggestion: "Extend BaseReplicator and implement the replicateBatch() method"
+    });
   }
   /**
    * Test the connection to the target
    * @returns {Promise<boolean>} True if connection is successful
    */
   async testConnection() {
-    throw new Error(`testConnection() method must be implemented by ${this.name}`);
+    throw new ReplicationError("testConnection() method must be implemented by subclass", {
+      operation: "testConnection",
+      replicatorClass: this.name,
+      suggestion: "Extend BaseReplicator and implement the testConnection() method"
+    });
   }
   /**
    * Get replicator status and statistics
@@ -10645,7 +11424,17 @@ class Client extends EventEmitter {
     });
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
-      throw new Error("Some objects could not be moved");
+      throw new UnknownError("Some objects could not be moved", {
+        bucket: this.config.bucket,
+        operation: "moveAllObjects",
+        prefixFrom,
+        prefixTo,
+        totalKeys: keys.length,
+        failedCount: errors.length,
+        successCount: results.length,
+        errors: errors.map((e) => ({ message: e.message, raw: e.raw })),
+        suggestion: "Check S3 permissions and retry failed objects individually"
+      });
     }
     return results;
   }
@@ -11359,7 +12148,14 @@ async function handleInsert$4({ resource, data, mappedData, originalData }) {
     }
   });
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError("Metadata size exceeds 2KB limit on insert", {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: "insert"
+    });
   }
   return { mappedData, body: "" };
 }
@@ -11374,7 +12170,15 @@ async function handleUpdate$4({ resource, id, data, mappedData, originalData }) 
     }
   });
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError("Metadata size exceeds 2KB limit on update", {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: "update",
+      id
+    });
   }
   return { mappedData, body: JSON.stringify(mappedData) };
 }
@@ -11389,7 +12193,15 @@ async function handleUpsert$4({ resource, id, data, mappedData }) {
     }
   });
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError("Metadata size exceeds 2KB limit on upsert", {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: "upsert",
+      id
+    });
   }
   return { mappedData, body: "" };
 }
@@ -11731,7 +12543,11 @@ const behaviors = {
 function getBehavior(behaviorName) {
   const behavior = behaviors[behaviorName];
   if (!behavior) {
-    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(", ")}`);
+    throw new BehaviorError(`Unknown behavior: ${behaviorName}`, {
+      behavior: behaviorName,
+      availableBehaviors: Object.keys(behaviors),
+      operation: "getBehavior"
+    });
   }
   return behavior;
 }
@@ -14600,7 +15416,12 @@ class Database extends EventEmitter {
     const pluginName = name.toLowerCase().replace("plugin", "");
     const plugin = this.plugins[pluginName] || this.pluginRegistry[pluginName];
     if (!plugin) {
-      throw new Error(`Plugin '${name}' not found`);
+      throw new DatabaseError(`Plugin '${name}' not found`, {
+        operation: "uninstallPlugin",
+        pluginName: name,
+        availablePlugins: Object.keys(this.pluginRegistry),
+        suggestion: "Check plugin name or list available plugins using Object.keys(db.pluginRegistry)"
+      });
     }
     if (plugin.stop) {
       await plugin.stop();
@@ -15233,10 +16054,20 @@ class Database extends EventEmitter {
   addHook(event, fn) {
     if (!this._hooks) this._initHooks();
     if (!this._hooks.has(event)) {
-      throw new Error(`Unknown hook event: ${event}. Available events: ${this._hookEvents.join(", ")}`);
+      throw new DatabaseError(`Unknown hook event: ${event}`, {
+        operation: "addHook",
+        invalidEvent: event,
+        availableEvents: this._hookEvents,
+        suggestion: `Use one of the available hook events: ${this._hookEvents.join(", ")}`
+      });
     }
     if (typeof fn !== "function") {
-      throw new Error("Hook function must be a function");
+      throw new DatabaseError("Hook function must be a function", {
+        operation: "addHook",
+        event,
+        receivedType: typeof fn,
+        suggestion: "Provide a function that will be called when the hook event occurs"
+      });
     }
     this._hooks.get(event).push(fn);
   }
@@ -15374,7 +16205,11 @@ class S3dbReplicator extends BaseReplicator {
         this.targetDatabase = new S3db(targetConfig);
         await this.targetDatabase.connect();
       } else {
-        throw new Error("S3dbReplicator: No client or connectionString provided");
+        throw new ReplicationError("S3dbReplicator requires client or connectionString", {
+          operation: "initialize",
+          replicatorClass: "S3dbReplicator",
+          suggestion: 'Provide either a client instance or connectionString in config: { client: db } or { connectionString: "s3://..." }'
+        });
       }
       this.emit("connected", {
         replicator: this.name,
@@ -15405,7 +16240,13 @@ class S3dbReplicator extends BaseReplicator {
     const normResource = normalizeResourceName$1(resource);
     const entry = this.resourcesMap[normResource];
     if (!entry) {
-      throw new Error(`[S3dbReplicator] Resource not configured: ${resource}`);
+      throw new ReplicationError("Resource not configured for replication", {
+        operation: "replicate",
+        replicatorClass: "S3dbReplicator",
+        resourceName: resource,
+        configuredResources: Object.keys(this.resourcesMap),
+        suggestion: 'Add resource to replicator resources map: { resources: { [resourceName]: "destination" } }'
+      });
     }
     if (Array.isArray(entry)) {
       const results = [];
@@ -15473,7 +16314,14 @@ class S3dbReplicator extends BaseReplicator {
     } else if (operation === "delete") {
       result = await destResourceObj.delete(recordId);
     } else {
-      throw new Error(`Invalid operation: ${operation}. Supported operations are: insert, update, delete`);
+      throw new ReplicationError(`Invalid replication operation: ${operation}`, {
+        operation: "replicate",
+        replicatorClass: "S3dbReplicator",
+        invalidOperation: operation,
+        supportedOperations: ["insert", "update", "delete"],
+        resourceName: sourceResource,
+        suggestion: "Use one of the supported operations: insert, update, delete"
+      });
     }
     return result;
   }
@@ -15541,7 +16389,13 @@ class S3dbReplicator extends BaseReplicator {
     const norm = normalizeResourceName$1(resource);
     const found = available.find((r) => normalizeResourceName$1(r) === norm);
     if (!found) {
-      throw new Error(`[S3dbReplicator] Destination resource not found: ${resource}. Available: ${available.join(", ")}`);
+      throw new ReplicationError("Destination resource not found in target database", {
+        operation: "_getDestResourceObj",
+        replicatorClass: "S3dbReplicator",
+        destinationResource: resource,
+        availableResources: available,
+        suggestion: "Create the resource in target database or check resource name spelling"
+      });
     }
     return db.resources[found];
   }
@@ -15590,7 +16444,13 @@ class S3dbReplicator extends BaseReplicator {
   }
   async testConnection() {
     const [ok, err] = await tryFn(async () => {
-      if (!this.targetDatabase) throw new Error("No target database configured");
+      if (!this.targetDatabase) {
+        throw new ReplicationError("No target database configured for connection test", {
+          operation: "testConnection",
+          replicatorClass: "S3dbReplicator",
+          suggestion: "Initialize replicator with client or connectionString before testing connection"
+        });
+      }
       if (typeof this.targetDatabase.connect === "function") {
         await this.targetDatabase.connect();
       }
@@ -15977,7 +16837,12 @@ const REPLICATOR_DRIVERS = {
 function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
   if (!ReplicatorClass) {
-    throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`);
+    throw new ReplicationError(`Unknown replicator driver: ${driver}`, {
+      operation: "createReplicator",
+      driver,
+      availableDrivers: Object.keys(REPLICATOR_DRIVERS),
+      suggestion: `Use one of the available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(", ")}`
+    });
   }
   return new ReplicatorClass(config, resources, client);
 }
@@ -15989,12 +16854,40 @@ class ReplicatorPlugin extends Plugin {
   constructor(options = {}) {
     super();
     if (!options.replicators || !Array.isArray(options.replicators)) {
-      throw new Error("ReplicatorPlugin: replicators array is required");
+      throw new ReplicationError("ReplicatorPlugin requires replicators array", {
+        operation: "constructor",
+        pluginName: "ReplicatorPlugin",
+        providedOptions: Object.keys(options),
+        suggestion: 'Provide replicators array: new ReplicatorPlugin({ replicators: [{ driver: "s3db", resources: [...] }] })'
+      });
     }
     for (const rep of options.replicators) {
-      if (!rep.driver) throw new Error("ReplicatorPlugin: each replicator must have a driver");
-      if (!rep.resources || typeof rep.resources !== "object") throw new Error("ReplicatorPlugin: each replicator must have resources config");
-      if (Object.keys(rep.resources).length === 0) throw new Error("ReplicatorPlugin: each replicator must have at least one resource configured");
+      if (!rep.driver) {
+        throw new ReplicationError("Each replicator must have a driver", {
+          operation: "constructor",
+          pluginName: "ReplicatorPlugin",
+          replicatorConfig: rep,
+          suggestion: 'Each replicator entry must specify a driver: { driver: "s3db", resources: {...} }'
+        });
+      }
+      if (!rep.resources || typeof rep.resources !== "object") {
+        throw new ReplicationError("Each replicator must have resources config", {
+          operation: "constructor",
+          pluginName: "ReplicatorPlugin",
+          driver: rep.driver,
+          replicatorConfig: rep,
+          suggestion: 'Provide resources as object or array: { driver: "s3db", resources: ["users"] } or { resources: { users: "people" } }'
+        });
+      }
+      if (Object.keys(rep.resources).length === 0) {
+        throw new ReplicationError("Each replicator must have at least one resource configured", {
+          operation: "constructor",
+          pluginName: "ReplicatorPlugin",
+          driver: rep.driver,
+          replicatorConfig: rep,
+          suggestion: 'Add at least one resource to replicate: { driver: "s3db", resources: ["users"] }'
+        });
+      }
     }
     this.config = {
       replicators: options.replicators || [],
@@ -16420,7 +17313,13 @@ class ReplicatorPlugin extends Plugin {
   async syncAllData(replicatorId) {
     const replicator = this.replicators.find((r) => r.id === replicatorId);
     if (!replicator) {
-      throw new Error(`Replicator not found: ${replicatorId}`);
+      throw new ReplicationError("Replicator not found", {
+        operation: "syncAllData",
+        pluginName: "ReplicatorPlugin",
+        replicatorId,
+        availableReplicators: this.replicators.map((r) => r.id),
+        suggestion: "Check replicator ID or use getReplicatorStats() to list available replicators"
+      });
     }
     this.stats.lastSync = (/* @__PURE__ */ new Date()).toISOString();
     for (const resourceName in this.database.resources) {
@@ -16950,6 +17849,42 @@ class S3QueuePlugin extends Plugin {
   }
 }
 
+class SchedulerError extends S3dbError {
+  constructor(message, details = {}) {
+    const { taskId, operation = "unknown", cronExpression, ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+Scheduler Operation Error
+
+Operation: ${operation}
+${taskId ? `Task ID: ${taskId}` : ""}
+${cronExpression ? `Cron: ${cronExpression}` : ""}
+
+Common causes:
+1. Invalid cron expression format
+2. Task not found or already exists
+3. Scheduler not properly initialized
+4. Job execution failure
+5. Resource conflicts
+
+Solution:
+Check task configuration and ensure scheduler is properly initialized.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/scheduler.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      taskId,
+      operation,
+      cronExpression,
+      description,
+      suggestion: details.suggestion || "Check scheduler configuration and task settings."
+    });
+  }
+}
+
 class SchedulerPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -16983,17 +17918,36 @@ class SchedulerPlugin extends Plugin {
   }
   _validateConfiguration() {
     if (Object.keys(this.config.jobs).length === 0) {
-      throw new Error("SchedulerPlugin: At least one job must be defined");
+      throw new SchedulerError("At least one job must be defined", {
+        operation: "validateConfiguration",
+        jobCount: 0,
+        suggestion: 'Provide at least one job in the jobs configuration: { jobs: { myJob: { schedule: "* * * * *", action: async () => {...} } } }'
+      });
     }
     for (const [jobName, job] of Object.entries(this.config.jobs)) {
       if (!job.schedule) {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' must have a schedule`);
+        throw new SchedulerError(`Job '${jobName}' must have a schedule`, {
+          operation: "validateConfiguration",
+          taskId: jobName,
+          providedConfig: Object.keys(job),
+          suggestion: 'Add a schedule property with a valid cron expression: { schedule: "0 * * * *", action: async () => {...} }'
+        });
       }
       if (!job.action || typeof job.action !== "function") {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' must have an action function`);
+        throw new SchedulerError(`Job '${jobName}' must have an action function`, {
+          operation: "validateConfiguration",
+          taskId: jobName,
+          actionType: typeof job.action,
+          suggestion: 'Provide an action function: { schedule: "...", action: async (db, ctx) => {...} }'
+        });
       }
       if (!this._isValidCronExpression(job.schedule)) {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' has invalid cron expression: ${job.schedule}`);
+        throw new SchedulerError(`Job '${jobName}' has invalid cron expression`, {
+          operation: "validateConfiguration",
+          taskId: jobName,
+          cronExpression: job.schedule,
+          suggestion: "Use valid cron format (5 fields: minute hour day month weekday) or shortcuts (@hourly, @daily, @weekly, @monthly, @yearly)"
+        });
       }
     }
   }
@@ -17291,10 +18245,20 @@ class SchedulerPlugin extends Plugin {
   async runJob(jobName, context = {}) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: "runJob",
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: "Check job name or use getAllJobsStatus() to list available jobs"
+      });
     }
     if (this.activeJobs.has(jobName)) {
-      throw new Error(`Job '${jobName}' is already running`);
+      throw new SchedulerError(`Job '${jobName}' is already running`, {
+        operation: "runJob",
+        taskId: jobName,
+        executionId: this.activeJobs.get(jobName),
+        suggestion: "Wait for current execution to complete or check job status with getJobStatus()"
+      });
     }
     await this._executeJob(jobName);
   }
@@ -17304,7 +18268,12 @@ class SchedulerPlugin extends Plugin {
   enableJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: "enableJob",
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: "Check job name or use getAllJobsStatus() to list available jobs"
+      });
     }
     job.enabled = true;
     this._scheduleNextExecution(jobName);
@@ -17316,7 +18285,12 @@ class SchedulerPlugin extends Plugin {
   disableJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: "disableJob",
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: "Check job name or use getAllJobsStatus() to list available jobs"
+      });
     }
     job.enabled = false;
     const timer = this.timers.get(jobName);
@@ -17415,13 +18389,28 @@ class SchedulerPlugin extends Plugin {
    */
   addJob(jobName, jobConfig) {
     if (this.jobs.has(jobName)) {
-      throw new Error(`Job '${jobName}' already exists`);
+      throw new SchedulerError(`Job '${jobName}' already exists`, {
+        operation: "addJob",
+        taskId: jobName,
+        existingJobs: Array.from(this.jobs.keys()),
+        suggestion: "Use a different job name or remove the existing job first with removeJob()"
+      });
     }
     if (!jobConfig.schedule || !jobConfig.action) {
-      throw new Error("Job must have schedule and action");
+      throw new SchedulerError("Job must have schedule and action", {
+        operation: "addJob",
+        taskId: jobName,
+        providedConfig: Object.keys(jobConfig),
+        suggestion: 'Provide both schedule and action: { schedule: "0 * * * *", action: async (db, ctx) => {...} }'
+      });
     }
     if (!this._isValidCronExpression(jobConfig.schedule)) {
-      throw new Error(`Invalid cron expression: ${jobConfig.schedule}`);
+      throw new SchedulerError("Invalid cron expression", {
+        operation: "addJob",
+        taskId: jobName,
+        cronExpression: jobConfig.schedule,
+        suggestion: "Use valid cron format (5 fields) or shortcuts (@hourly, @daily, @weekly, @monthly, @yearly)"
+      });
     }
     const job = {
       ...jobConfig,
@@ -17455,7 +18444,12 @@ class SchedulerPlugin extends Plugin {
   removeJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: "removeJob",
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: "Check job name or use getAllJobsStatus() to list available jobs"
+      });
     }
     const timer = this.timers.get(jobName);
     if (timer) {
@@ -17509,6 +18503,44 @@ class SchedulerPlugin extends Plugin {
   }
 }
 
+class StateMachineError extends S3dbError {
+  constructor(message, details = {}) {
+    const { currentState, targetState, resourceName, operation = "unknown", ...rest } = details;
+    let description = details.description;
+    if (!description) {
+      description = `
+State Machine Operation Error
+
+Operation: ${operation}
+${currentState ? `Current State: ${currentState}` : ""}
+${targetState ? `Target State: ${targetState}` : ""}
+${resourceName ? `Resource: ${resourceName}` : ""}
+
+Common causes:
+1. Invalid state transition
+2. State machine not configured
+3. Transition conditions not met
+4. State not defined in configuration
+5. Missing transition handler
+
+Solution:
+Check state machine configuration and valid transitions.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-machine.md
+`.trim();
+    }
+    super(message, {
+      ...rest,
+      currentState,
+      targetState,
+      resourceName,
+      operation,
+      description,
+      suggestion: details.suggestion || "Check state machine configuration and valid transitions."
+    });
+  }
+}
+
 class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -17529,17 +18561,36 @@ class StateMachinePlugin extends Plugin {
   }
   _validateConfiguration() {
     if (!this.config.stateMachines || Object.keys(this.config.stateMachines).length === 0) {
-      throw new Error("StateMachinePlugin: At least one state machine must be defined");
+      throw new StateMachineError("At least one state machine must be defined", {
+        operation: "validateConfiguration",
+        machineCount: 0,
+        suggestion: "Provide at least one state machine in the stateMachines configuration"
+      });
     }
     for (const [machineName, machine] of Object.entries(this.config.stateMachines)) {
       if (!machine.states || Object.keys(machine.states).length === 0) {
-        throw new Error(`StateMachinePlugin: Machine '${machineName}' must have states defined`);
+        throw new StateMachineError(`Machine '${machineName}' must have states defined`, {
+          operation: "validateConfiguration",
+          machineId: machineName,
+          suggestion: "Define at least one state in the states configuration"
+        });
       }
       if (!machine.initialState) {
-        throw new Error(`StateMachinePlugin: Machine '${machineName}' must have an initialState`);
+        throw new StateMachineError(`Machine '${machineName}' must have an initialState`, {
+          operation: "validateConfiguration",
+          machineId: machineName,
+          availableStates: Object.keys(machine.states),
+          suggestion: "Specify an initialState property matching one of the defined states"
+        });
       }
       if (!machine.states[machine.initialState]) {
-        throw new Error(`StateMachinePlugin: Initial state '${machine.initialState}' not found in machine '${machineName}'`);
+        throw new StateMachineError(`Initial state '${machine.initialState}' not found in machine '${machineName}'`, {
+          operation: "validateConfiguration",
+          machineId: machineName,
+          initialState: machine.initialState,
+          availableStates: Object.keys(machine.states),
+          suggestion: "Set initialState to one of the defined states"
+        });
       }
     }
   }
@@ -17596,12 +18647,25 @@ class StateMachinePlugin extends Plugin {
   async send(machineId, entityId, event, context = {}) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: "send",
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: "Check machine ID or use getMachines() to list available machines"
+      });
     }
     const currentState = await this.getState(machineId, entityId);
     const stateConfig = machine.config.states[currentState];
     if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
-      throw new Error(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`);
+      throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
+        operation: "send",
+        machineId,
+        entityId,
+        event,
+        currentState,
+        validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
+        suggestion: "Use getValidEvents() to check which events are valid for the current state"
+      });
     }
     const targetState = stateConfig.on[event];
     if (stateConfig.guards && stateConfig.guards[event]) {
@@ -17612,7 +18676,16 @@ class StateMachinePlugin extends Plugin {
           () => guard(context, event, { database: this.database, machineId, entityId })
         );
         if (!guardOk || !guardResult) {
-          throw new Error(`Transition blocked by guard '${guardName}': ${guardErr?.message || "Guard returned false"}`);
+          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
+            operation: "send",
+            machineId,
+            entityId,
+            event,
+            currentState,
+            guardName,
+            guardError: guardErr?.message || "Guard returned false",
+            suggestion: "Check guard conditions or modify the context to satisfy guard requirements"
+          });
         }
       }
     }
@@ -17722,7 +18795,12 @@ class StateMachinePlugin extends Plugin {
   async getState(machineId, entityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: "getState",
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: "Check machine ID or use getMachines() to list available machines"
+      });
     }
     if (machine.currentStates.has(entityId)) {
       return machine.currentStates.get(entityId);
@@ -17748,7 +18826,12 @@ class StateMachinePlugin extends Plugin {
   async getValidEvents(machineId, stateOrEntityId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: "getValidEvents",
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: "Check machine ID or use getMachines() to list available machines"
+      });
     }
     let state;
     if (machine.config.states[stateOrEntityId]) {
@@ -17797,7 +18880,12 @@ class StateMachinePlugin extends Plugin {
   async initializeEntity(machineId, entityId, context = {}) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: "initializeEntity",
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: "Check machine ID or use getMachines() to list available machines"
+      });
     }
     const initialState = machine.config.initialState;
     machine.currentStates.set(entityId, initialState);
@@ -17816,7 +18904,14 @@ class StateMachinePlugin extends Plugin {
         })
       );
       if (!ok && err && !err.message?.includes("already exists")) {
-        throw new Error(`Failed to initialize entity state: ${err.message}`);
+        throw new StateMachineError("Failed to initialize entity state", {
+          operation: "initializeEntity",
+          machineId,
+          entityId,
+          initialState,
+          original: err,
+          suggestion: "Check state resource configuration and database permissions"
+        });
       }
     }
     const initialStateConfig = machine.config.states[initialState];
@@ -17845,7 +18940,12 @@ class StateMachinePlugin extends Plugin {
   visualize(machineId) {
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new Error(`State machine '${machineId}' not found`);
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: "visualize",
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: "Check machine ID or use getMachines() to list available machines"
+      });
     }
     let dot = `digraph ${machineId} {
 `;
@@ -17889,5 +18989,5 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionError, PermissionError, Plugin, PluginObject, QueueConsumerPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, BehaviorError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetadataLimitError, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, QueueConsumerPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, StreamError, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
 //# sourceMappingURL=s3db.es.js.map

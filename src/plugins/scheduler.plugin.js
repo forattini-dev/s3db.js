@@ -1,6 +1,7 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
+import { SchedulerError } from "./scheduler.errors.js";
 
 /**
  * SchedulerPlugin - Cron-based Task Scheduling System
@@ -183,21 +184,40 @@ export class SchedulerPlugin extends Plugin {
 
   _validateConfiguration() {
     if (Object.keys(this.config.jobs).length === 0) {
-      throw new Error('SchedulerPlugin: At least one job must be defined');
+      throw new SchedulerError('At least one job must be defined', {
+        operation: 'validateConfiguration',
+        jobCount: 0,
+        suggestion: 'Provide at least one job in the jobs configuration: { jobs: { myJob: { schedule: "* * * * *", action: async () => {...} } } }'
+      });
     }
-    
+
     for (const [jobName, job] of Object.entries(this.config.jobs)) {
       if (!job.schedule) {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' must have a schedule`);
+        throw new SchedulerError(`Job '${jobName}' must have a schedule`, {
+          operation: 'validateConfiguration',
+          taskId: jobName,
+          providedConfig: Object.keys(job),
+          suggestion: 'Add a schedule property with a valid cron expression: { schedule: "0 * * * *", action: async () => {...} }'
+        });
       }
-      
+
       if (!job.action || typeof job.action !== 'function') {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' must have an action function`);
+        throw new SchedulerError(`Job '${jobName}' must have an action function`, {
+          operation: 'validateConfiguration',
+          taskId: jobName,
+          actionType: typeof job.action,
+          suggestion: 'Provide an action function: { schedule: "...", action: async (db, ctx) => {...} }'
+        });
       }
-      
+
       // Validate cron expression
       if (!this._isValidCronExpression(job.schedule)) {
-        throw new Error(`SchedulerPlugin: Job '${jobName}' has invalid cron expression: ${job.schedule}`);
+        throw new SchedulerError(`Job '${jobName}' has invalid cron expression`, {
+          operation: 'validateConfiguration',
+          taskId: jobName,
+          cronExpression: job.schedule,
+          suggestion: 'Use valid cron format (5 fields: minute hour day month weekday) or shortcuts (@hourly, @daily, @weekly, @monthly, @yearly)'
+        });
       }
     }
   }
@@ -592,11 +612,21 @@ export class SchedulerPlugin extends Plugin {
   async runJob(jobName, context = {}) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: 'runJob',
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: 'Check job name or use getAllJobsStatus() to list available jobs'
+      });
     }
 
     if (this.activeJobs.has(jobName)) {
-      throw new Error(`Job '${jobName}' is already running`);
+      throw new SchedulerError(`Job '${jobName}' is already running`, {
+        operation: 'runJob',
+        taskId: jobName,
+        executionId: this.activeJobs.get(jobName),
+        suggestion: 'Wait for current execution to complete or check job status with getJobStatus()'
+      });
     }
 
     await this._executeJob(jobName);
@@ -608,12 +638,17 @@ export class SchedulerPlugin extends Plugin {
   enableJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: 'enableJob',
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: 'Check job name or use getAllJobsStatus() to list available jobs'
+      });
     }
-    
+
     job.enabled = true;
     this._scheduleNextExecution(jobName);
-    
+
     this.emit('job_enabled', { jobName });
   }
 
@@ -623,7 +658,12 @@ export class SchedulerPlugin extends Plugin {
   disableJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: 'disableJob',
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: 'Check job name or use getAllJobsStatus() to list available jobs'
+      });
     }
     
     job.enabled = false;
@@ -743,16 +783,31 @@ export class SchedulerPlugin extends Plugin {
    */
   addJob(jobName, jobConfig) {
     if (this.jobs.has(jobName)) {
-      throw new Error(`Job '${jobName}' already exists`);
+      throw new SchedulerError(`Job '${jobName}' already exists`, {
+        operation: 'addJob',
+        taskId: jobName,
+        existingJobs: Array.from(this.jobs.keys()),
+        suggestion: 'Use a different job name or remove the existing job first with removeJob()'
+      });
     }
-    
+
     // Validate job configuration
     if (!jobConfig.schedule || !jobConfig.action) {
-      throw new Error('Job must have schedule and action');
+      throw new SchedulerError('Job must have schedule and action', {
+        operation: 'addJob',
+        taskId: jobName,
+        providedConfig: Object.keys(jobConfig),
+        suggestion: 'Provide both schedule and action: { schedule: "0 * * * *", action: async (db, ctx) => {...} }'
+      });
     }
-    
+
     if (!this._isValidCronExpression(jobConfig.schedule)) {
-      throw new Error(`Invalid cron expression: ${jobConfig.schedule}`);
+      throw new SchedulerError('Invalid cron expression', {
+        operation: 'addJob',
+        taskId: jobName,
+        cronExpression: jobConfig.schedule,
+        suggestion: 'Use valid cron format (5 fields) or shortcuts (@hourly, @daily, @weekly, @monthly, @yearly)'
+      });
     }
     
     const job = {
@@ -791,7 +846,12 @@ export class SchedulerPlugin extends Plugin {
   removeJob(jobName) {
     const job = this.jobs.get(jobName);
     if (!job) {
-      throw new Error(`Job '${jobName}' not found`);
+      throw new SchedulerError(`Job '${jobName}' not found`, {
+        operation: 'removeJob',
+        taskId: jobName,
+        availableJobs: Array.from(this.jobs.keys()),
+        suggestion: 'Check job name or use getAllJobsStatus() to list available jobs'
+      });
     }
     
     // Cancel scheduled execution

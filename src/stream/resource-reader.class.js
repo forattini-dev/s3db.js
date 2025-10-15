@@ -4,13 +4,18 @@ import { PromisePool } from "@supercharge/promise-pool";
 
 import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js"
 import tryFn from "../concerns/try-fn.js";
+import { StreamError } from '../errors.js';
 
 export class ResourceReader extends EventEmitter {
   constructor({ resource, batchSize = 10, concurrency = 5 }) {
     super()
 
     if (!resource) {
-      throw new Error("Resource is required for ResourceReader");
+      throw new StreamError('Resource is required for ResourceReader', {
+        operation: 'constructor',
+        resource: resource?.name,
+        suggestion: 'Pass a valid Resource instance when creating ResourceReader'
+      });
     }
 
     this.resource = resource;
