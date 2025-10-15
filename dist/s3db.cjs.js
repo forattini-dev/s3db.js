@@ -2,13 +2,13 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
+var crypto = require('crypto');
 var nanoid = require('nanoid');
 var EventEmitter = require('events');
 var promises = require('fs/promises');
 var fs = require('fs');
 var promises$1 = require('stream/promises');
 var path = require('path');
-var crypto = require('crypto');
 var zlib = require('node:zlib');
 var os = require('os');
 var jsonStableStringify = require('json-stable-stringify');
@@ -528,15 +528,7 @@ function tryFnSync(fn) {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    const [ok, err, result] = await tryFn(async () => {
-      const { webcrypto } = await import('crypto');
-      return webcrypto;
-    });
-    if (ok) {
-      lib = result;
-    } else {
-      throw new CryptoError("Crypto API not available", { original: err, context: "dynamicCrypto" });
-    }
+    lib = crypto.webcrypto;
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
@@ -590,8 +582,7 @@ async function md5(data) {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
   const [ok, err, result] = await tryFn(async () => {
-    const { createHash } = await import('crypto');
-    return createHash("md5").update(data).digest("base64");
+    return crypto.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
     throw new CryptoError("MD5 hashing failed", { original: err, data });
@@ -5276,9 +5267,120 @@ function createFieldHandler(resourceName, fieldName) {
     deferredSetup: false
   };
 }
+function validateNestedPath(resource, fieldPath) {
+  const parts = fieldPath.split(".");
+  const rootField = parts[0];
+  if (!resource.attributes || !resource.attributes[rootField]) {
+    return {
+      valid: false,
+      rootField,
+      fullPath: fieldPath,
+      error: `Root field "${rootField}" not found in resource attributes`
+    };
+  }
+  if (parts.length === 1) {
+    return { valid: true, rootField, fullPath: fieldPath };
+  }
+  let current = resource.attributes[rootField];
+  let foundJson = false;
+  let levelsAfterJson = 0;
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+    if (foundJson) {
+      levelsAfterJson++;
+      if (levelsAfterJson > 1) {
+        return {
+          valid: false,
+          rootField,
+          fullPath: fieldPath,
+          error: `Path "${fieldPath}" exceeds 1 level after 'json' field. Maximum nesting after 'json' is 1 level.`
+        };
+      }
+      continue;
+    }
+    if (typeof current === "string") {
+      if (current === "json" || current.startsWith("json|")) {
+        foundJson = true;
+        levelsAfterJson++;
+        if (levelsAfterJson > 1) {
+          return {
+            valid: false,
+            rootField,
+            fullPath: fieldPath,
+            error: `Path "${fieldPath}" exceeds 1 level after 'json' field`
+          };
+        }
+        continue;
+      }
+      return {
+        valid: false,
+        rootField,
+        fullPath: fieldPath,
+        error: `Field "${parts.slice(0, i).join(".")}" is type "${current}" and cannot be nested`
+      };
+    }
+    if (typeof current === "object") {
+      if (current.$$type) {
+        const type = current.$$type;
+        if (type === "json" || type.includes("json")) {
+          foundJson = true;
+          levelsAfterJson++;
+          continue;
+        }
+        if (type !== "object" && !type.includes("object")) {
+          return {
+            valid: false,
+            rootField,
+            fullPath: fieldPath,
+            error: `Field "${parts.slice(0, i).join(".")}" is type "${type}" and cannot be nested`
+          };
+        }
+      }
+      if (!current[part]) {
+        return {
+          valid: false,
+          rootField,
+          fullPath: fieldPath,
+          error: `Field "${part}" not found in "${parts.slice(0, i).join(".")}"`
+        };
+      }
+      current = current[part];
+    } else {
+      return {
+        valid: false,
+        rootField,
+        fullPath: fieldPath,
+        error: `Invalid structure at "${parts.slice(0, i).join(".")}"`
+      };
+    }
+  }
+  return { valid: true, rootField, fullPath: fieldPath };
+}
 function resolveFieldAndPlugin(resource, field, value) {
   if (!resource._eventualConsistencyPlugins) {
     throw new Error(`No eventual consistency plugins configured for this resource`);
+  }
+  if (field.includes(".")) {
+    const validation = validateNestedPath(resource, field);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+    const rootField = validation.rootField;
+    const fieldPlugin2 = resource._eventualConsistencyPlugins[rootField];
+    if (!fieldPlugin2) {
+      const availableFields = Object.keys(resource._eventualConsistencyPlugins).join(", ");
+      throw new Error(
+        `No eventual consistency plugin found for root field "${rootField}". Available fields: ${availableFields}`
+      );
+    }
+    return {
+      field: rootField,
+      // Root field for plugin lookup
+      fieldPath: field,
+      // Full path for nested access
+      value,
+      plugin: fieldPlugin2
+    };
   }
   const fieldPlugin = resource._eventualConsistencyPlugins[field];
   if (!fieldPlugin) {
@@ -5287,7 +5389,7 @@ function resolveFieldAndPlugin(resource, field, value) {
       `No eventual consistency plugin found for field "${field}". Available fields: ${availableFields}`
     );
   }
-  return { field, value, plugin: fieldPlugin };
+  return { field, fieldPath: field, value, plugin: fieldPlugin };
 }
 function groupByCohort(transactions, cohortField) {
   const groups = {};
@@ -5532,10 +5634,10 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       })
     );
     if (!ok || !transactions || transactions.length === 0) {
-      const [recordOk, recordErr, record] = await tryFn(
+      const [recordOk2, recordErr2, record2] = await tryFn(
         () => targetResource.get(originalId)
       );
-      const currentValue2 = recordOk && record ? record[config.field] || 0 : 0;
+      const currentValue2 = recordOk2 && record2 ? record2[config.field] || 0 : 0;
       if (config.verbose) {
         console.log(
           `[EventualConsistency] ${config.resource}.${config.field} - No pending transactions for ${originalId}, skipping`
@@ -5570,6 +5672,7 @@ async function consolidateRecord(originalId, transactionResource, targetResource
           );
         }
         currentValue = 0;
+        appliedTransactions.length = 0;
       } else {
         appliedTransactions.sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -5577,42 +5680,46 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         const hasSetInApplied = appliedTransactions.some((t) => t.operation === "set");
         if (!hasSetInApplied) {
           const recordValue = recordExists[config.field] || 0;
-          let appliedDelta = 0;
-          for (const t of appliedTransactions) {
-            if (t.operation === "add") appliedDelta += t.value;
-            else if (t.operation === "sub") appliedDelta -= t.value;
-          }
-          const baseValue = recordValue - appliedDelta;
-          const hasExistingAnchor = appliedTransactions.some((t) => t.source === "anchor");
-          if (baseValue !== 0 && !hasExistingAnchor) {
-            const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
-            const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.verbose);
-            const anchorTransaction = {
-              id: idGenerator(),
-              originalId,
-              field: config.field,
-              value: baseValue,
-              operation: "set",
-              timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(),
-              // 1ms before first txn to ensure it's first
-              cohortDate: cohortInfo.date,
-              cohortHour: cohortInfo.hour,
-              cohortMonth: cohortInfo.month,
-              source: "anchor",
-              applied: true
-            };
-            await transactionResource.insert(anchorTransaction);
-            appliedTransactions.unshift(anchorTransaction);
+          if (typeof recordValue === "number") {
+            let appliedDelta = 0;
+            for (const t of appliedTransactions) {
+              if (t.operation === "add") appliedDelta += t.value;
+              else if (t.operation === "sub") appliedDelta -= t.value;
+            }
+            const baseValue = recordValue - appliedDelta;
+            const hasExistingAnchor = appliedTransactions.some((t) => t.source === "anchor");
+            if (baseValue !== 0 && typeof baseValue === "number" && !hasExistingAnchor) {
+              const firstTransactionDate = new Date(appliedTransactions[0].timestamp);
+              const cohortInfo = getCohortInfo(firstTransactionDate, config.cohort.timezone, config.verbose);
+              const anchorTransaction = {
+                id: idGenerator(),
+                originalId,
+                field: config.field,
+                fieldPath: config.field,
+                // Add fieldPath for consistency
+                value: baseValue,
+                operation: "set",
+                timestamp: new Date(firstTransactionDate.getTime() - 1).toISOString(),
+                // 1ms before first txn to ensure it's first
+                cohortDate: cohortInfo.date,
+                cohortHour: cohortInfo.hour,
+                cohortMonth: cohortInfo.month,
+                source: "anchor",
+                applied: true
+              };
+              await transactionResource.insert(anchorTransaction);
+              appliedTransactions.unshift(anchorTransaction);
+            }
           }
         }
         currentValue = config.reducer(appliedTransactions);
       }
     } else {
-      const [recordOk, recordErr, record] = await tryFn(
+      const [recordOk2, recordErr2, record2] = await tryFn(
         () => targetResource.get(originalId)
       );
-      currentValue = recordOk && record ? record[config.field] || 0 : 0;
-      if (currentValue !== 0) {
+      currentValue = recordOk2 && record2 ? record2[config.field] || 0 : 0;
+      if (currentValue !== 0 && typeof currentValue === "number") {
         let anchorTimestamp;
         if (transactions && transactions.length > 0) {
           const firstPendingDate = new Date(transactions[0].timestamp);
@@ -5625,6 +5732,8 @@ async function consolidateRecord(originalId, transactionResource, targetResource
           id: idGenerator(),
           originalId,
           field: config.field,
+          fieldPath: config.field,
+          // Add fieldPath for consistency
           value: currentValue,
           operation: "set",
           timestamp: anchorTimestamp,
@@ -5650,38 +5759,101 @@ async function consolidateRecord(originalId, transactionResource, targetResource
     transactions.sort(
       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
-    const hasSetOperation = transactions.some((t) => t.operation === "set");
-    if (currentValue !== 0 && !hasSetOperation) {
-      transactions.unshift(createSyntheticSetTransaction(currentValue));
+    const transactionsByPath = {};
+    for (const txn of transactions) {
+      const path = txn.fieldPath || txn.field || config.field;
+      if (!transactionsByPath[path]) {
+        transactionsByPath[path] = [];
+      }
+      transactionsByPath[path].push(txn);
     }
-    const consolidatedValue = config.reducer(transactions);
-    if (config.verbose) {
-      console.log(
-        `[EventualConsistency] ${config.resource}.${config.field} - ${originalId}: ${currentValue} \u2192 ${consolidatedValue} (${consolidatedValue > currentValue ? "+" : ""}${consolidatedValue - currentValue})`
-      );
+    const appliedByPath = {};
+    if (appliedOk && appliedTransactions && appliedTransactions.length > 0) {
+      for (const txn of appliedTransactions) {
+        const path = txn.fieldPath || txn.field || config.field;
+        if (!appliedByPath[path]) {
+          appliedByPath[path] = [];
+        }
+        appliedByPath[path].push(txn);
+      }
+    }
+    const consolidatedValues = {};
+    const lodash = await import('lodash-es');
+    const [currentRecordOk, currentRecordErr, currentRecord] = await tryFn(
+      () => targetResource.get(originalId)
+    );
+    for (const [fieldPath, pathTransactions] of Object.entries(transactionsByPath)) {
+      let pathCurrentValue = 0;
+      if (appliedByPath[fieldPath] && appliedByPath[fieldPath].length > 0) {
+        appliedByPath[fieldPath].sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        pathCurrentValue = config.reducer(appliedByPath[fieldPath]);
+      } else {
+        if (currentRecordOk && currentRecord) {
+          const recordValue = lodash.get(currentRecord, fieldPath, 0);
+          if (typeof recordValue === "number") {
+            pathCurrentValue = recordValue;
+          }
+        }
+      }
+      if (pathCurrentValue !== 0) {
+        pathTransactions.unshift(createSyntheticSetTransaction(pathCurrentValue));
+      }
+      const pathConsolidatedValue = config.reducer(pathTransactions);
+      consolidatedValues[fieldPath] = pathConsolidatedValue;
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${fieldPath} - ${originalId}: ${pathCurrentValue} \u2192 ${pathConsolidatedValue} (${pathTransactions.length - (pathCurrentValue !== 0 ? 1 : 0)} pending txns)`
+        );
+      }
     }
     if (config.verbose) {
       console.log(
         `\u{1F525} [DEBUG] BEFORE targetResource.update() {
   originalId: '${originalId}',
-  field: '${config.field}',
-  consolidatedValue: ${consolidatedValue},
-  currentValue: ${currentValue}
+  consolidatedValues: ${JSON.stringify(consolidatedValues, null, 2)}
 }`
       );
     }
-    const [updateOk, updateErr, updateResult] = await tryFn(
-      () => targetResource.update(originalId, {
-        [config.field]: consolidatedValue
-      })
+    const [recordOk, recordErr, record] = await tryFn(
+      () => targetResource.get(originalId)
     );
+    let updateOk, updateErr, updateResult;
+    if (!recordOk || !record) {
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${config.field} - Record ${originalId} doesn't exist yet. Will attempt update anyway (expected to fail).`
+        );
+      }
+      const minimalRecord = { id: originalId };
+      for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
+        lodash.set(minimalRecord, fieldPath, value);
+      }
+      const result = await tryFn(
+        () => targetResource.update(originalId, minimalRecord)
+      );
+      updateOk = result[0];
+      updateErr = result[1];
+      updateResult = result[2];
+    } else {
+      for (const [fieldPath, value] of Object.entries(consolidatedValues)) {
+        lodash.set(record, fieldPath, value);
+      }
+      const result = await tryFn(
+        () => targetResource.update(originalId, record)
+      );
+      updateOk = result[0];
+      updateErr = result[1];
+      updateResult = result[2];
+    }
+    const consolidatedValue = consolidatedValues[config.field] || (record ? lodash.get(record, config.field, 0) : 0);
     if (config.verbose) {
       console.log(
         `\u{1F525} [DEBUG] AFTER targetResource.update() {
   updateOk: ${updateOk},
   updateErr: ${updateErr?.message || "undefined"},
-  updateResult: ${JSON.stringify(updateResult, null, 2)},
-  hasField: ${updateResult?.[config.field]}
+  consolidatedValue (main field): ${consolidatedValue}
 }`
       );
     }
@@ -5689,24 +5861,27 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       const [verifyOk, verifyErr, verifiedRecord] = await tryFn(
         () => targetResource.get(originalId, { skipCache: true })
       );
-      console.log(
-        `\u{1F525} [DEBUG] VERIFICATION (fresh from S3, no cache) {
-  verifyOk: ${verifyOk},
-  verifiedRecord[${config.field}]: ${verifiedRecord?.[config.field]},
-  expectedValue: ${consolidatedValue},
-  \u2705 MATCH: ${verifiedRecord?.[config.field] === consolidatedValue}
+      for (const [fieldPath, expectedValue] of Object.entries(consolidatedValues)) {
+        const actualValue = lodash.get(verifiedRecord, fieldPath);
+        const match = actualValue === expectedValue;
+        console.log(
+          `\u{1F525} [DEBUG] VERIFICATION ${fieldPath} {
+  expectedValue: ${expectedValue},
+  actualValue: ${actualValue},
+  ${match ? "\u2705 MATCH" : "\u274C MISMATCH"}
 }`
-      );
-      if (verifyOk && verifiedRecord?.[config.field] !== consolidatedValue) {
-        console.error(
-          `\u274C [CRITICAL BUG] Update reported success but value not persisted!
-  Resource: ${config.resource}
-  Field: ${config.field}
-  Record ID: ${originalId}
-  Expected: ${consolidatedValue}
-  Actually got: ${verifiedRecord?.[config.field]}
-  This indicates a bug in s3db.js resource.update()`
         );
+        if (!match) {
+          console.error(
+            `\u274C [CRITICAL BUG] Update reported success but value not persisted!
+  Resource: ${config.resource}
+  FieldPath: ${fieldPath}
+  Record ID: ${originalId}
+  Expected: ${expectedValue}
+  Actually got: ${actualValue}
+  This indicates a bug in s3db.js resource.update()`
+          );
+        }
       }
     }
     if (!updateOk) {
@@ -5890,6 +6065,38 @@ async function recalculateRecord(originalId, transactionResource, targetResource
       console.log(
         `[EventualConsistency] ${config.resource}.${config.field} - Found ${allTransactions.length} total transactions for ${originalId}, marking all as pending...`
       );
+    }
+    const hasAnchor = allTransactions.some((txn) => txn.source === "anchor");
+    if (!hasAnchor) {
+      const now = /* @__PURE__ */ new Date();
+      const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
+      const oldestTransaction = allTransactions.sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      )[0];
+      const anchorTimestamp = oldestTransaction ? new Date(new Date(oldestTransaction.timestamp).getTime() - 1).toISOString() : now.toISOString();
+      const anchorCohortInfo = getCohortInfo(new Date(anchorTimestamp), config.cohort.timezone, config.verbose);
+      const anchorTransaction = {
+        id: idGenerator(),
+        originalId,
+        field: config.field,
+        fieldPath: config.field,
+        value: 0,
+        // Always 0 for recalculate - we start from scratch
+        operation: "set",
+        timestamp: anchorTimestamp,
+        cohortDate: anchorCohortInfo.date,
+        cohortHour: anchorCohortInfo.hour,
+        cohortMonth: anchorCohortInfo.month,
+        source: "anchor",
+        applied: true
+        // Anchor is always applied
+      };
+      await transactionResource.insert(anchorTransaction);
+      if (config.verbose) {
+        console.log(
+          `[EventualConsistency] ${config.resource}.${config.field} - Created anchor transaction for ${originalId} with value 0`
+        );
+      }
     }
     const transactionsToReset = allTransactions.filter((txn) => txn.source !== "anchor");
     const { results, errors } = await promisePool.PromisePool.for(transactionsToReset).withConcurrency(10).process(async (txn) => {
@@ -6654,13 +6861,15 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
 
 function addHelperMethods(resource, plugin, config) {
   resource.set = async (id, field, value) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, value);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, value);
     const now = /* @__PURE__ */ new Date();
     const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
     const transaction = {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath,
+      // Store full path for nested access
       value,
       operation: "set",
       timestamp: now.toISOString(),
@@ -6672,18 +6881,20 @@ function addHelperMethods(resource, plugin, config) {
     };
     await handler.transactionResource.insert(transaction);
     if (config.mode === "sync") {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
     return value;
   };
   resource.add = async (id, field, amount) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
     const now = /* @__PURE__ */ new Date();
     const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
     const transaction = {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath,
+      // Store full path for nested access
       value: amount,
       operation: "add",
       timestamp: now.toISOString(),
@@ -6695,20 +6906,24 @@ function addHelperMethods(resource, plugin, config) {
     };
     await handler.transactionResource.insert(transaction);
     if (config.mode === "sync") {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
     const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
-    const currentValue = ok && record ? record[field] || 0 : 0;
+    if (!ok || !record) return amount;
+    const lodash = await import('lodash-es');
+    const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue + amount;
   };
   resource.sub = async (id, field, amount) => {
-    const { plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
+    const { field: rootField, fieldPath, plugin: handler } = resolveFieldAndPlugin(resource, field, amount);
     const now = /* @__PURE__ */ new Date();
     const cohortInfo = getCohortInfo(now, config.cohort.timezone, config.verbose);
     const transaction = {
       id: idGenerator(),
       originalId: id,
       field: handler.field,
+      fieldPath,
+      // Store full path for nested access
       value: amount,
       operation: "sub",
       timestamp: now.toISOString(),
@@ -6720,10 +6935,12 @@ function addHelperMethods(resource, plugin, config) {
     };
     await handler.transactionResource.insert(transaction);
     if (config.mode === "sync") {
-      return await plugin._syncModeConsolidate(handler, id, field);
+      return await plugin._syncModeConsolidate(handler, id, fieldPath);
     }
     const [ok, err, record] = await tryFn(() => handler.targetResource.get(id));
-    const currentValue = ok && record ? record[field] || 0 : 0;
+    if (!ok || !record) return -amount;
+    const lodash = await import('lodash-es');
+    const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue - amount;
   };
   resource.consolidate = async (id, field) => {
@@ -6809,6 +7026,8 @@ async function completeFieldSetup(handler, database, config, plugin) {
         id: "string|required",
         originalId: "string|required",
         field: "string|required",
+        fieldPath: "string|optional",
+        // Support for nested field paths (e.g., 'utmResults.medium')
         value: "number|required",
         operation: "string|required",
         timestamp: "string|required",
