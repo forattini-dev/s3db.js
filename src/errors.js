@@ -1,12 +1,12 @@
 export class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
+  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, description, ...rest }) {
     if (verbose) message = message + `\n\nVerbose:\n\n${JSON.stringify(rest, null, 2)}`;
     super(message);
 
     if (typeof Error.captureStackTrace === 'function') {
       Error.captureStackTrace(this, this.constructor);
-    } else { 
-      this.stack = (new Error(message)).stack; 
+    } else {
+      this.stack = (new Error(message)).stack;
     }
 
     super.name = this.constructor.name;
@@ -23,6 +23,7 @@ export class BaseError extends Error {
     this.commandInput = commandInput;
     this.metadata = metadata;
     this.suggestion = suggestion;
+    this.description = description;
     this.data = { bucket, key, ...rest, verbose, message };
   }
 
@@ -41,6 +42,7 @@ export class BaseError extends Error {
       commandInput: this.commandInput,
       metadata: this.metadata,
       suggestion: this.suggestion,
+      description: this.description,
       data: this.data,
       original: this.original,
       stack: this.stack,
@@ -264,6 +266,115 @@ export class ResourceError extends S3dbError {
 
 export class PartitionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: details.suggestion || 'Check partition definition, fields, and input values.' });
+    // Generate description if not provided
+    let description = details.description;
+    if (!description && details.resourceName && details.partitionName && details.fieldName) {
+      const { resourceName, partitionName, fieldName, availableFields = [] } = details;
+      description = `
+Partition Field Validation Error
+
+Resource: ${resourceName}
+Partition: ${partitionName}
+Missing Field: ${fieldName}
+
+Available fields in schema:
+${availableFields.map(f => `  • ${f}`).join('\n') || '  (no fields defined)'}
+
+Possible causes:
+1. Field was removed from schema but partition still references it
+2. Typo in partition field name
+3. Nested field path is incorrect (use dot notation like 'utm.source')
+
+Solution:
+${details.strictValidation === false
+  ? '  • Update partition definition to use existing fields'
+  : `  • Add missing field to schema, OR
+  • Update partition definition to use existing fields, OR
+  • Use strictValidation: false to skip this check during testing`}
+
+Docs: https://docs.s3db.js.org/resources/partitions#validation
+`.trim();
+    }
+
+    super(message, {
+      ...details,
+      description,
+      suggestion: details.suggestion || 'Check partition definition, fields, and input values.'
+    });
+  }
+}
+
+export class AnalyticsNotEnabledError extends S3dbError {
+  constructor(details = {}) {
+    const {
+      pluginName = 'EventualConsistency',
+      resourceName = 'unknown',
+      field = 'unknown',
+      configuredResources = [],
+      registeredResources = [],
+      pluginInitialized = false,
+      ...rest
+    } = details;
+
+    const message = `Analytics not enabled for ${resourceName}.${field}`;
+
+    // Generate diagnostic description
+    const description = `
+Analytics Not Enabled
+
+Plugin: ${pluginName}
+Resource: ${resourceName}
+Field: ${field}
+
+Diagnostics:
+  • Plugin initialized: ${pluginInitialized ? '✓ Yes' : '✗ No'}
+  • Analytics resources created: ${registeredResources.length}/${configuredResources.length}
+${configuredResources.map(r => {
+  const exists = registeredResources.includes(r);
+  return `    ${exists ? '✓' : '✗'} ${r}${!exists ? ' (missing)' : ''}`;
+}).join('\n')}
+
+Possible causes:
+1. Resource not created yet - Analytics resources are created when db.createResource() is called
+2. Resource created before plugin initialization - Plugin must be initialized before resources
+3. Field not configured in analytics.resources config
+
+Correct initialization order:
+  1. Create database: const db = new Database({ ... })
+  2. Install plugins: await db.connect() (triggers plugin.install())
+  3. Create resources: await db.createResource({ name: '${resourceName}', ... })
+  4. Analytics resources are auto-created by plugin
+
+Example fix:
+  const db = new Database({
+    bucket: 'my-bucket',
+    plugins: [new EventualConsistencyPlugin({
+      resources: {
+        '${resourceName}': {
+          fields: {
+            '${field}': { type: 'counter', analytics: true }
+          }
+        }
+      }
+    })]
+  });
+
+  await db.connect();  // Plugin initialized here
+  await db.createResource({ name: '${resourceName}', ... });  // Analytics resource created here
+
+Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
+`.trim();
+
+    super(message, {
+      ...rest,
+      pluginName,
+      resourceName,
+      field,
+      configuredResources,
+      registeredResources,
+      pluginInitialized,
+      description,
+      suggestion: 'Ensure resources are created after plugin initialization. Check plugin configuration and resource creation order.'
+    });
   }
 }
