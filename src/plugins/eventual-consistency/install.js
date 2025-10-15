@@ -173,6 +173,28 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
       },
       behavior: 'body-overflow',
       timestamps: false,
+      asyncPartitions: true,
+      // ✅ Multi-attribute partitions for optimal analytics query performance
+      partitions: {
+        // Query by period (hour/day/week/month)
+        byPeriod: {
+          fields: { period: 'string' }
+        },
+        // Query by period + cohort (e.g., all hour records for specific hours)
+        byPeriodCohort: {
+          fields: {
+            period: 'string',
+            cohort: 'string'
+          }
+        },
+        // Query by field + period (e.g., all daily analytics for clicks field)
+        byFieldPeriod: {
+          fields: {
+            field: 'string',
+            period: 'string'
+          }
+        }
+      },
       createdBy: 'EventualConsistencyPlugin'
     })
   );

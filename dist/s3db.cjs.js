@@ -5105,8 +5105,10 @@ function createConfig(options, detectedTimezone) {
     consolidationWindow: consolidation.window ?? 24,
     autoConsolidate: consolidation.auto !== false,
     mode: consolidation.mode || "async",
-    // ✅ NOVO: Performance tuning - Mark applied concurrency (default 50, antes era 10 hardcoded)
+    // ✅ Performance tuning - Mark applied concurrency (default 50, up from 10)
     markAppliedConcurrency: consolidation.markAppliedConcurrency ?? 50,
+    // ✅ Performance tuning - Recalculate concurrency (default 50, up from 10)
+    recalculateConcurrency: consolidation.recalculateConcurrency ?? 50,
     // Late arrivals
     lateArrivalStrategy: lateArrivals.strategy || "warn",
     // Batch transactions
@@ -5935,11 +5937,33 @@ async function consolidateRecord(originalId, transactionResource, targetResource
       const transactionsToUpdate = transactions.filter((txn) => txn.id !== "__synthetic__");
       const markAppliedConcurrency = config.markAppliedConcurrency || 50;
       const { results, errors } = await promisePool.PromisePool.for(transactionsToUpdate).withConcurrency(markAppliedConcurrency).process(async (txn) => {
+        const txnWithCohorts = ensureCohortHour(txn, config.cohort.timezone, false);
+        const updateData = { applied: true };
+        if (txnWithCohorts.cohortHour && !txn.cohortHour) {
+          updateData.cohortHour = txnWithCohorts.cohortHour;
+        }
+        if (txnWithCohorts.cohortDate && !txn.cohortDate) {
+          updateData.cohortDate = txnWithCohorts.cohortDate;
+        }
+        if (txnWithCohorts.cohortWeek && !txn.cohortWeek) {
+          updateData.cohortWeek = txnWithCohorts.cohortWeek;
+        }
+        if (txnWithCohorts.cohortMonth && !txn.cohortMonth) {
+          updateData.cohortMonth = txnWithCohorts.cohortMonth;
+        }
+        if (txn.value === null || txn.value === void 0) {
+          updateData.value = 1;
+        }
         const [ok2, err2] = await tryFn(
-          () => transactionResource.update(txn.id, { applied: true })
+          () => transactionResource.update(txn.id, updateData)
         );
         if (!ok2 && config.verbose) {
-          console.warn(`[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`, err2?.message);
+          console.warn(
+            `[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`,
+            err2?.message,
+            "Update data:",
+            updateData
+          );
         }
         return ok2;
       });
@@ -6131,7 +6155,8 @@ async function recalculateRecord(originalId, transactionResource, targetResource
       }
     }
     const transactionsToReset = allTransactions.filter((txn) => txn.source !== "anchor");
-    const { results, errors } = await promisePool.PromisePool.for(transactionsToReset).withConcurrency(10).process(async (txn) => {
+    const recalculateConcurrency = config.recalculateConcurrency || 50;
+    const { results, errors } = await promisePool.PromisePool.for(transactionsToReset).withConcurrency(recalculateConcurrency).process(async (txn) => {
       const [ok, err] = await tryFn(
         () => transactionResource.update(txn.id, { applied: false })
       );
@@ -7222,6 +7247,28 @@ async function createAnalyticsResource(handler, database, resourceName, fieldNam
       },
       behavior: "body-overflow",
       timestamps: false,
+      asyncPartitions: true,
+      // ✅ Multi-attribute partitions for optimal analytics query performance
+      partitions: {
+        // Query by period (hour/day/week/month)
+        byPeriod: {
+          fields: { period: "string" }
+        },
+        // Query by period + cohort (e.g., all hour records for specific hours)
+        byPeriodCohort: {
+          fields: {
+            period: "string",
+            cohort: "string"
+          }
+        },
+        // Query by field + period (e.g., all daily analytics for clicks field)
+        byFieldPeriod: {
+          fields: {
+            field: "string",
+            period: "string"
+          }
+        }
+      },
       createdBy: "EventualConsistencyPlugin"
     })
   );
