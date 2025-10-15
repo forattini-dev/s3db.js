@@ -755,3 +755,140 @@ const getReplicatorConfig = () => {
 - [Audit Plugin](./audit.md) - Track replication operations
 - [Metrics Plugin](./metrics.md) - Monitor replication performance
 - [Queue Consumer Plugin](./queue-consumer.md) - Process replicated events
+## ❓ FAQ
+
+### Básico
+
+**P: Para que serve o ReplicatorPlugin?**
+R: Replica dados automaticamente para outros bancos de dados (S3DB, PostgreSQL, BigQuery), filas (SQS) ou outro destino quando há insert/update/delete.
+
+**P: Quais drivers estão disponíveis?**
+R: `s3db` (outro bucket S3DB), `sqs` (AWS SQS), `postgresql`, `bigquery`, `s3` (S3 puro).
+
+**P: Como funciona o mapeamento de recursos?**
+R: Você pode mapear recursos 1:1, renomear ou transformar dados:
+```javascript
+resources: {
+  users: 'people',  // Renomeia
+  orders: { 
+    resource: 'pedidos', 
+    transform: (data) => ({ ...data, status: 'novo' }) 
+  }
+}
+```
+
+### Configuração
+
+**P: Como replicar para múltiplos destinos?**
+R: Use um array de replicadores:
+```javascript
+new ReplicatorPlugin({
+  replicators: [
+    { driver: 's3db', config: {...}, resources: ['users'] },
+    { driver: 'sqs', config: {...}, resources: ['events'] }
+  ]
+})
+```
+
+**P: Como configurar retries?**
+R: Use `maxRetries`:
+```javascript
+new ReplicatorPlugin({
+  maxRetries: 5,
+  timeout: 60000,
+  replicators: [...]
+})
+```
+
+**P: Como persistir logs de replicação?**
+R: Configure `persistReplicatorLog: true`:
+```javascript
+new ReplicatorPlugin({
+  persistReplicatorLog: true,
+  replicatorLogResource: 'replicator_logs',
+  replicators: [...]
+})
+```
+
+### Operações
+
+**P: Como forçar sync completo dos dados?**
+R: A replicação é automática e em tempo real via eventos. Para sincronização manual ou inicial, você pode iterar sobre os recursos e replicar manualmente.
+
+**P: Como obter estatísticas de replicação?**
+R: Monitore eventos:
+```javascript
+replicatorPlugin.on('replicated', (data) => {
+  console.log(`Replicated: ${data.operation} on ${data.resourceName}`);
+});
+
+replicatorPlugin.on('replicator_error', (data) => {
+  console.error(`Failed: ${data.error}`);
+});
+```
+
+**P: Como skip replicação para operações específicas?**
+R: Use a opção `actions`:
+```javascript
+resources: {
+  users: {
+    resource: 'users_backup',
+    actions: ['insert', 'update']  // Skip deletes
+  }
+}
+```
+
+### Transformação
+
+**P: Como transformar dados antes de replicar?**
+R: Use a função `transform`:
+```javascript
+resources: {
+  users: {
+    resource: 'customer_profiles',
+    transform: (data) => ({
+      id: data.id,
+      name: `${data.firstName} ${data.lastName}`,
+      email_domain: data.email?.split('@')[1],
+      created_timestamp: Date.now()
+    })
+  }
+}
+```
+
+**P: Como skip replicação para registros específicos?**
+R: Retorne `null` na função transform:
+```javascript
+transform: (data) => {
+  if (data.status === 'draft') return null;  // Skip drafts
+  return data;
+}
+```
+
+### Troubleshooting
+
+**P: Replicações estão falhando?**
+R: Verifique:
+1. Credenciais corretas para o destino
+2. Recurso de destino existe
+3. Função transform não tem erros
+4. Use `verbose: true` para logs detalhados
+
+**P: Como reprocessar replicações falhadas?**
+R: Se `persistReplicatorLog: true`, consulte os logs e republique manualmente:
+```javascript
+const failedLogs = await database.resource('replicator_logs').query({
+  where: { status: 'error' }
+});
+```
+
+**P: A replicação está muito lenta?**
+R: Aumente `batchSize` e verifique o `timeout`:
+```javascript
+new ReplicatorPlugin({
+  batchSize: 200,
+  timeout: 120000  // 2 minutos
+})
+```
+
+---

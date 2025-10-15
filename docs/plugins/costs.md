@@ -564,6 +564,101 @@ async function compareApproaches(s3db) {
 
 ---
 
+## ❓ FAQ
+
+### Básico
+
+**P: O plugin afeta a performance das operações?**
+R: O impacto é mínimo. O rastreamento de custos adiciona aproximadamente < 0.1ms por operação (overhead negligenciável).
+
+**P: Posso usar em ambiente local (MinIO/LocalStack)?**
+R: Sim! O plugin funciona com qualquer backend S3-compatível. Os custos serão $0 para LocalStack mas as métricas de requests serão rastreadas.
+
+**P: Preciso configurar credenciais AWS?**
+R: Não. O plugin usa os mesmos credentials já configurados no S3DB e não faz chamadas adicionais à AWS.
+
+### Configuração
+
+**P: Como acessar os custos?**
+R: Via `client.costs`:
+```javascript
+console.log(database.client.costs);
+// {
+//   total: 0.0042,
+//   requests: { total: 850, get: 500, put: 200, ... },
+//   events: { GetObjectCommand: 500, ... }
+// }
+```
+
+**P: Preciso configurar algo?**
+R: Não, basta instalar o plugin:
+```javascript
+database.use(CostsPlugin);
+```
+
+**P: Como personalizar os preços por região?**
+R: Modifique `CostsPlugin.costs.prices` após instalação:
+```javascript
+CostsPlugin.costs.prices.get = 0.0005 / 1000;  // Ajuste regional
+CostsPlugin.costs.prices.put = 0.006 / 1000;
+```
+
+### Operações
+
+**P: Como visualizo os custos acumulados?**
+R: Acesse o objeto `costs`:
+```javascript
+const costs = database.client.costs;
+console.log(`Total: $${costs.total.toFixed(6)}`);
+console.log(`Requests: ${costs.requests.total}`);
+```
+
+**P: Como reseto os contadores?**
+R: Não há método público para reset. Reinicie a aplicação ou recrie a instância do database.
+
+**P: Como exportar relatórios de custo?**
+R: Serialize o objeto `client.costs`:
+```javascript
+const report = JSON.stringify(database.client.costs, null, 2);
+await fs.writeFile('costs-report.json', report);
+```
+
+**P: Quais são os preços por operação?**
+R:
+- PUT/POST/COPY/LIST: $0.005 por 1,000 requests
+- GET/SELECT/HEAD/DELETE: $0.0004 por 1,000 requests
+
+### Performance
+
+**P: Como usar custos para otimizar operações?**
+R: Analise quais operações são mais caras:
+```javascript
+const costs = database.client.costs;
+const operationCosts = Object.entries(costs.requests)
+  .filter(([op]) => op !== 'total' && costs.requests[op] > 0)
+  .map(([op, count]) => ({
+    operation: op,
+    count,
+    totalCost: count * costs.prices[op]
+  }))
+  .sort((a, b) => b.totalCost - a.totalCost);
+
+console.log('Most expensive operations:', operationCosts);
+```
+
+**P: Como monitorar custos em tempo real?**
+R: Configure verificações periódicas:
+```javascript
+setInterval(() => {
+  const costs = database.client.costs;
+  if (costs.total > 0.10) {
+    console.warn(`⚠️ Budget alert: $${costs.total.toFixed(6)}`);
+  }
+}, 60000); // Every minute
+```
+
+---
+
 ## See Also
 
 - [Plugin Development Guide](./plugin-development.md)

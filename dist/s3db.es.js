@@ -5399,6 +5399,38 @@ function groupByCohort(transactions, cohortField) {
   }
   return groups;
 }
+function ensureCohortHour(transaction, timezone = "UTC", verbose = false) {
+  if (transaction.cohortHour) {
+    return transaction;
+  }
+  if (transaction.timestamp) {
+    const date = new Date(transaction.timestamp);
+    const cohortInfo = getCohortInfo(date, timezone, verbose);
+    if (verbose) {
+      console.log(
+        `[EventualConsistency] Transaction ${transaction.id} missing cohortHour, calculated from timestamp: ${cohortInfo.hour}`
+      );
+    }
+    transaction.cohortHour = cohortInfo.hour;
+    if (!transaction.cohortWeek) {
+      transaction.cohortWeek = cohortInfo.week;
+    }
+    if (!transaction.cohortMonth) {
+      transaction.cohortMonth = cohortInfo.month;
+    }
+  } else if (verbose) {
+    console.warn(
+      `[EventualConsistency] Transaction ${transaction.id} missing both cohortHour and timestamp, cannot calculate cohort`
+    );
+  }
+  return transaction;
+}
+function ensureCohortHours(transactions, timezone = "UTC", verbose = false) {
+  if (!transactions || !Array.isArray(transactions)) {
+    return transactions;
+  }
+  return transactions.map((txn) => ensureCohortHour(txn, timezone, verbose));
+}
 
 function createPartitionConfig() {
   const partitions = {
@@ -6523,7 +6555,10 @@ async function getAnalytics(resourceName, field, options, fieldHandlers) {
   if (!handler.analyticsResource) {
     throw new Error("Analytics not enabled for this plugin");
   }
-  const { period = "day", date, startDate, endDate, month, year, breakdown = false } = options;
+  const { period = "day", date, startDate, endDate, month, year, breakdown = false, recordId } = options;
+  if (recordId) {
+    return await getAnalyticsForRecord(resourceName, field, recordId, options, handler);
+  }
   const [ok, err, allAnalytics] = await tryFn(
     () => handler.analyticsResource.list()
   );
@@ -6562,6 +6597,105 @@ async function getAnalytics(resourceName, field, options, fieldHandlers) {
     recordCount: a.recordCount
   }));
 }
+async function getAnalyticsForRecord(resourceName, field, recordId, options, handler) {
+  const { period = "day", date, startDate, endDate, month, year } = options;
+  const [okTrue, errTrue, appliedTransactions] = await tryFn(
+    () => handler.transactionResource.query({
+      originalId: recordId,
+      applied: true
+    })
+  );
+  const [okFalse, errFalse, pendingTransactions] = await tryFn(
+    () => handler.transactionResource.query({
+      originalId: recordId,
+      applied: false
+    })
+  );
+  let allTransactions = [
+    ...okTrue && appliedTransactions ? appliedTransactions : [],
+    ...okFalse && pendingTransactions ? pendingTransactions : []
+  ];
+  if (allTransactions.length === 0) {
+    return [];
+  }
+  allTransactions = ensureCohortHours(allTransactions, handler.config?.cohort?.timezone || "UTC", false);
+  let filtered = allTransactions;
+  if (date) {
+    if (period === "hour") {
+      filtered = filtered.filter((t) => t.cohortHour && t.cohortHour.startsWith(date));
+    } else if (period === "day") {
+      filtered = filtered.filter((t) => t.cohortDate === date);
+    } else if (period === "month") {
+      filtered = filtered.filter((t) => t.cohortMonth && t.cohortMonth.startsWith(date));
+    }
+  } else if (startDate && endDate) {
+    if (period === "hour") {
+      filtered = filtered.filter((t) => t.cohortHour && t.cohortHour >= startDate && t.cohortHour <= endDate);
+    } else if (period === "day") {
+      filtered = filtered.filter((t) => t.cohortDate && t.cohortDate >= startDate && t.cohortDate <= endDate);
+    } else if (period === "month") {
+      filtered = filtered.filter((t) => t.cohortMonth && t.cohortMonth >= startDate && t.cohortMonth <= endDate);
+    }
+  } else if (month) {
+    if (period === "hour") {
+      filtered = filtered.filter((t) => t.cohortHour && t.cohortHour.startsWith(month));
+    } else if (period === "day") {
+      filtered = filtered.filter((t) => t.cohortDate && t.cohortDate.startsWith(month));
+    }
+  } else if (year) {
+    if (period === "hour") {
+      filtered = filtered.filter((t) => t.cohortHour && t.cohortHour.startsWith(String(year)));
+    } else if (period === "day") {
+      filtered = filtered.filter((t) => t.cohortDate && t.cohortDate.startsWith(String(year)));
+    } else if (period === "month") {
+      filtered = filtered.filter((t) => t.cohortMonth && t.cohortMonth.startsWith(String(year)));
+    }
+  }
+  const cohortField = period === "hour" ? "cohortHour" : period === "day" ? "cohortDate" : "cohortMonth";
+  const aggregated = aggregateTransactionsByCohort(filtered, cohortField);
+  return aggregated;
+}
+function aggregateTransactionsByCohort(transactions, cohortField) {
+  const groups = {};
+  for (const txn of transactions) {
+    const cohort = txn[cohortField];
+    if (!cohort) continue;
+    if (!groups[cohort]) {
+      groups[cohort] = {
+        cohort,
+        count: 0,
+        sum: 0,
+        min: Infinity,
+        max: -Infinity,
+        recordCount: /* @__PURE__ */ new Set(),
+        operations: {}
+      };
+    }
+    const group = groups[cohort];
+    const signedValue = txn.operation === "sub" ? -txn.value : txn.value;
+    group.count++;
+    group.sum += signedValue;
+    group.min = Math.min(group.min, signedValue);
+    group.max = Math.max(group.max, signedValue);
+    group.recordCount.add(txn.originalId);
+    const op = txn.operation;
+    if (!group.operations[op]) {
+      group.operations[op] = { count: 0, sum: 0 };
+    }
+    group.operations[op].count++;
+    group.operations[op].sum += signedValue;
+  }
+  return Object.values(groups).map((g) => ({
+    cohort: g.cohort,
+    count: g.count,
+    sum: g.sum,
+    avg: g.sum / g.count,
+    min: g.min === Infinity ? 0 : g.min,
+    max: g.max === -Infinity ? 0 : g.max,
+    recordCount: g.recordCount.size,
+    operations: g.operations
+  })).sort((a, b) => a.cohort.localeCompare(b.cohort));
+}
 async function getMonthByDay(resourceName, field, month, options, fieldHandlers) {
   const year = parseInt(month.substring(0, 4));
   const monthNum = parseInt(month.substring(5, 7));
@@ -6596,6 +6730,8 @@ async function getLastNDays(resourceName, field, days, options, fieldHandlers) {
     return date.toISOString().substring(0, 10);
   }).reverse();
   const data = await getAnalytics(resourceName, field, {
+    ...options,
+    // ✅ Include all options (recordId, etc.)
     period: "day",
     startDate: dates[0],
     endDate: dates[dates.length - 1]
@@ -6789,6 +6925,8 @@ async function getLastNHours(resourceName, field, hours = 24, options, fieldHand
   const startHour = hoursAgo.toISOString().substring(0, 13);
   const endHour = now.toISOString().substring(0, 13);
   const data = await getAnalytics(resourceName, field, {
+    ...options,
+    // ✅ Include all options (recordId, etc.)
     period: "hour",
     startDate: startHour,
     endDate: endHour
@@ -6836,6 +6974,8 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
   const startDate = monthsAgo.toISOString().substring(0, 7);
   const endDate = now.toISOString().substring(0, 7);
   const data = await getAnalytics(resourceName, field, {
+    ...options,
+    // ✅ Include all options (recordId, etc.)
     period: "month",
     startDate,
     endDate
@@ -7028,7 +7168,8 @@ async function completeFieldSetup(handler, database, config, plugin) {
         operation: "string|required",
         timestamp: "string|required",
         cohortDate: "string|required",
-        cohortHour: "string|required",
+        cohortHour: "string|optional",
+        // ✅ FIX BUG #2: Changed from required to optional for migration compatibility
         cohortWeek: "string|optional",
         cohortMonth: "string|optional",
         source: "string|optional",

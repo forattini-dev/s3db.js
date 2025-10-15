@@ -948,3 +948,130 @@ describe('Order Processing State Machine', () => {
 - [Audit Plugin](./audit.md) - Track state machine transitions
 - [Scheduler Plugin](./scheduler.md) - Schedule state machine operations
 - [Queue Consumer Plugin](./queue-consumer.md) - Trigger state changes from external events
+## ❓ FAQ
+
+### Básico
+
+**P: O que o StateMachinePlugin faz?**
+R: Implementa máquinas de estado finitas (FSM) com transições controladas, guards e ações de entrada/saída.
+
+**P: Para que serve?**
+R: Gerenciar workflows complexos (ex: pedidos, aprovações, processos), garantindo transições válidas e auditando mudanças de estado.
+
+**P: Como funciona?**
+R: Define estados, eventos que causam transições, guards (validações) e actions (efeitos colaterais).
+
+### Configuração
+
+**P: Como definir uma máquina de estados?**
+R:
+```javascript
+new StateMachinePlugin({
+  stateMachines: {
+    order_processing: {
+      initialState: 'pending',
+      states: {
+        pending: {
+          on: { CONFIRM: 'confirmed', CANCEL: 'cancelled' }
+        },
+        confirmed: {
+          on: { SHIP: 'shipped' },
+          entry: 'onConfirmed',     // Executa ao entrar
+          exit: 'onLeftConfirmed',  // Executa ao sair
+          guards: { SHIP: 'canShip' }  // Validação
+        },
+        shipped: { on: { DELIVER: 'delivered' } },
+        delivered: { type: 'final' },
+        cancelled: { type: 'final' }
+      }
+    }
+  },
+  actions: {
+    onConfirmed: async (context, event, machine) => {
+      // Decrementa estoque, envia email, etc.
+    }
+  },
+  guards: {
+    canShip: async (context, event, machine) => {
+      return inventory.quantity >= context.quantity;
+    }
+  }
+})
+```
+
+### Operações
+
+**P: Como enviar um evento (trigger transition)?**
+R: Use `send`:
+```javascript
+const result = await stateMachinePlugin.send(
+  'order_processing',  // machineId
+  'order-123',         // entityId
+  'CONFIRM',           // event
+  { paymentId: 'pay_123' }  // context
+);
+// Retorna: { from: 'pending', to: 'confirmed', event: 'CONFIRM', timestamp }
+```
+
+**P: Como obter o estado atual de uma entidade?**
+R: Use `getState`:
+```javascript
+const state = await stateMachinePlugin.getState('order_processing', 'order-123');
+// Retorna: 'confirmed'
+```
+
+**P: Como obter eventos válidos para o estado atual?**
+R: Use `getValidEvents`:
+```javascript
+const events = await stateMachinePlugin.getValidEvents('order_processing', 'confirmed');
+// Retorna: ['SHIP']
+```
+
+**P: Como consultar histórico de transições?**
+R: Use `getTransitionHistory`:
+```javascript
+const history = await stateMachinePlugin.getTransitionHistory(
+  'order_processing',
+  'order-123',
+  { limit: 50 }
+);
+// Retorna array: [{ from, to, event, context, timestamp }, ...]
+```
+
+### Inicialização
+
+**P: Como inicializar o estado de uma nova entidade?**
+R: Use `initializeEntity`:
+```javascript
+await stateMachinePlugin.initializeEntity(
+  'order_processing',
+  'order-456',
+  { customerId: 'user-123' }
+);
+// Estado inicial: 'pending'
+```
+
+### Visualização
+
+**P: Como visualizar a máquina de estados?**
+R: Use `visualize` para obter DOT format (GraphViz):
+```javascript
+const dot = stateMachinePlugin.visualize('order_processing');
+// Salve em arquivo .dot e converta para imagem
+```
+
+### Troubleshooting
+
+**P: Transição está sendo rejeitada?**
+R: Verifique:
+1. Evento válido para o estado atual
+2. Guard não está retornando false
+3. Estado atual correto (use `getState`)
+
+**P: Actions não estão executando?**
+R: Verifique se o nome da action está correto e registrado em `actions: {}`.
+
+**P: Como debugar guards?**
+R: Ative `verbose: true` e veja logs de erros de guards.
+
+---
