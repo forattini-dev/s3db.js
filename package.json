@@ -55,6 +55,7 @@
     "mcp/server.js",
     "README.md",
     "PLUGINS.md",
+    "SECURITY.md",
     "UNLICENSE"
   ],
   "scripts": {
