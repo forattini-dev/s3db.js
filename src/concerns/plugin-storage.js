@@ -31,6 +31,7 @@
 import { metadataEncode, metadataDecode } from './metadata-encoding.js';
 import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
+import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
 
 const S3_METADATA_LIMIT = 2047; // AWS S3 metadata limit in bytes
 
@@ -41,10 +42,17 @@ export class PluginStorage {
    */
   constructor(client, pluginSlug) {
     if (!client) {
-      throw new Error('PluginStorage requires a client instance');
+      throw new PluginStorageError('PluginStorage requires a client instance', {
+        operation: 'constructor',
+        pluginSlug,
+        suggestion: 'Pass a valid S3db Client instance when creating PluginStorage'
+      });
     }
     if (!pluginSlug) {
-      throw new Error('PluginStorage requires a pluginSlug');
+      throw new PluginStorageError('PluginStorage requires a pluginSlug', {
+        operation: 'constructor',
+        suggestion: 'Provide a plugin slug (e.g., "eventual-consistency", "cache", "audit")'
+      });
     }
 
     this.client = client;
@@ -113,7 +121,15 @@ export class PluginStorage {
     const [ok, err] = await tryFn(() => this.client.putObject(putParams));
 
     if (!ok) {
-      throw new Error(`PluginStorage.set failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to save plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'set',
+        behavior,
+        ttl,
+        original: err,
+        suggestion: 'Check S3 permissions and key format'
+      });
     }
   }
 
@@ -139,7 +155,13 @@ export class PluginStorage {
       if (err.name === 'NoSuchKey' || err.Code === 'NoSuchKey') {
         return null;
       }
-      throw new Error(`PluginStorage.get failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to retrieve plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'get',
+        original: err,
+        suggestion: 'Check if the key exists and S3 permissions are correct'
+      });
     }
 
     // Metadata is already decoded by Client, but values are strings
@@ -162,7 +184,13 @@ export class PluginStorage {
           data = { ...parsedMetadata, ...body };
         }
       } catch (parseErr) {
-        throw new Error(`PluginStorage.get failed to parse body for key ${key}: ${parseErr.message}`);
+        throw new PluginStorageError(`Failed to parse JSON body`, {
+          pluginSlug: this.pluginSlug,
+          key,
+          operation: 'get',
+          original: parseErr,
+          suggestion: 'Body content may be corrupted. Check S3 object integrity'
+        });
       }
     }
 
@@ -248,7 +276,15 @@ export class PluginStorage {
     );
 
     if (!ok) {
-      throw new Error(`PluginStorage.list failed: ${err.message}`);
+      throw new PluginStorageError(`Failed to list plugin data`, {
+        pluginSlug: this.pluginSlug,
+        operation: 'list',
+        prefix,
+        fullPrefix,
+        limit,
+        original: err,
+        suggestion: 'Check S3 permissions and bucket configuration'
+      });
     }
 
     // Remove keyPrefix from keys
@@ -277,7 +313,16 @@ export class PluginStorage {
     );
 
     if (!ok) {
-      throw new Error(`PluginStorage.listForResource failed: ${err.message}`);
+      throw new PluginStorageError(`Failed to list resource data`, {
+        pluginSlug: this.pluginSlug,
+        operation: 'listForResource',
+        resourceName,
+        subPrefix,
+        fullPrefix,
+        limit,
+        original: err,
+        suggestion: 'Check resource name and S3 permissions'
+      });
     }
 
     // Remove keyPrefix from keys
@@ -456,7 +501,13 @@ export class PluginStorage {
     const [ok, err] = await tryFn(() => this.client.deleteObject(key));
 
     if (!ok) {
-      throw new Error(`PluginStorage.delete failed for key ${key}: ${err.message}`);
+      throw new PluginStorageError(`Failed to delete plugin data`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'delete',
+        original: err,
+        suggestion: 'Check S3 delete permissions'
+      });
     }
   }
 
@@ -686,10 +737,15 @@ export class PluginStorage {
           currentSize += keySize + valueSize;
 
           if (currentSize > effectiveLimit) {
-            throw new Error(
-              `Data exceeds metadata limit (${currentSize} > ${effectiveLimit} bytes). ` +
-              `Use 'body-overflow' or 'body-only' behavior.`
-            );
+            throw new MetadataLimitError(`Data exceeds metadata limit with enforce-limits behavior`, {
+              totalSize: currentSize,
+              effectiveLimit,
+              absoluteLimit: S3_METADATA_LIMIT,
+              excess: currentSize - effectiveLimit,
+              operation: 'PluginStorage.set',
+              pluginSlug: this.pluginSlug,
+              suggestion: "Use 'body-overflow' or 'body-only' behavior to handle large data"
+            });
           }
 
           metadata[key] = jsonValue;
@@ -698,7 +754,13 @@ export class PluginStorage {
       }
 
       default:
-        throw new Error(`Unknown behavior: ${behavior}. Use 'body-overflow', 'body-only', or 'enforce-limits'.`);
+        throw new BehaviorError(`Unknown behavior: ${behavior}`, {
+          behavior,
+          availableBehaviors: ['body-overflow', 'body-only', 'enforce-limits'],
+          operation: 'PluginStorage._applyBehavior',
+          pluginSlug: this.pluginSlug,
+          suggestion: "Use 'body-overflow', 'body-only', or 'enforce-limits'"
+        });
     }
 
     return { metadata, body };

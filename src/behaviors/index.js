@@ -3,6 +3,7 @@ import * as enforceLimits from './enforce-limits.js';
 import * as dataTruncate from './truncate-data.js';
 import * as bodyOverflow from './body-overflow.js';
 import * as bodyOnly from './body-only.js';
+import { BehaviorError } from '../errors.js';
 
 /**
  * Available behaviors for Resource metadata handling
@@ -23,7 +24,11 @@ export const behaviors = {
 export function getBehavior(behaviorName) {
   const behavior = behaviors[behaviorName];
   if (!behavior) {
-    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(', ')}`);
+    throw new BehaviorError(`Unknown behavior: ${behaviorName}`, {
+      behavior: behaviorName,
+      availableBehaviors: Object.keys(behaviors),
+      operation: 'getBehavior'
+    });
   }
   return behavior;
 }

@@ -3,6 +3,7 @@ import BigqueryReplicator from './bigquery-replicator.class.js';
 import PostgresReplicator from './postgres-replicator.class.js';
 import S3dbReplicator from './s3db-replicator.class.js';
 import SqsReplicator from './sqs-replicator.class.js';
+import { ReplicationError } from '../replicator.errors.js';
 
 export { BaseReplicator, BigqueryReplicator, PostgresReplicator, S3dbReplicator, SqsReplicator };
 
@@ -24,11 +25,16 @@ export const REPLICATOR_DRIVERS = {
  */
 export function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
-  
+
   if (!ReplicatorClass) {
-    throw new Error(`Unknown replicator driver: ${driver}. Available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(', ')}`);
+    throw new ReplicationError(`Unknown replicator driver: ${driver}`, {
+      operation: 'createReplicator',
+      driver,
+      availableDrivers: Object.keys(REPLICATOR_DRIVERS),
+      suggestion: `Use one of the available drivers: ${Object.keys(REPLICATOR_DRIVERS).join(', ')}`
+    });
   }
-  
+
   return new ReplicatorClass(config, resources, client);
 }
 

@@ -1,4 +1,5 @@
 import EventEmitter from "events";
+import { CacheError } from "../cache.errors.js";
 
 export class Cache extends EventEmitter {
   constructor(config = {}) {
@@ -13,7 +14,13 @@ export class Cache extends EventEmitter {
 
   validateKey(key) {
     if (key === null || key === undefined || typeof key !== 'string' || !key) {
-      throw new Error('Invalid key');
+      throw new CacheError('Invalid cache key', {
+        operation: 'validateKey',
+        driver: this.constructor.name,
+        key,
+        keyType: typeof key,
+        suggestion: 'Cache key must be a non-empty string'
+      });
     }
   }
 
