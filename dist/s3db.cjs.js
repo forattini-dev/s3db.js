@@ -15,6 +15,7 @@ var jsonStableStringify = require('json-stable-stringify');
 var stream = require('stream');
 var promisePool = require('@supercharge/promise-pool');
 var web = require('node:stream/web');
+var os$1 = require('node:os');
 var lodashEs = require('lodash-es');
 var http = require('http');
 var https = require('https');
@@ -221,7 +222,7 @@ function calculateEffectiveLimit(config = {}) {
 }
 
 class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
+  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, description, ...rest }) {
     if (verbose) message = message + `
 
 Verbose:
@@ -247,6 +248,7 @@ ${JSON.stringify(rest, null, 2)}`;
     this.commandInput = commandInput;
     this.metadata = metadata;
     this.suggestion = suggestion;
+    this.description = description;
     this.data = { bucket, key, ...rest, verbose, message };
   }
   toJson() {
@@ -264,6 +266,7 @@ ${JSON.stringify(rest, null, 2)}`;
       commandInput: this.commandInput,
       metadata: this.metadata,
       suggestion: this.suggestion,
+      description: this.description,
       data: this.data,
       original: this.original,
       stack: this.stack
@@ -456,7 +459,107 @@ class ResourceError extends S3dbError {
 }
 class PartitionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: details.suggestion || "Check partition definition, fields, and input values." });
+    let description = details.description;
+    if (!description && details.resourceName && details.partitionName && details.fieldName) {
+      const { resourceName, partitionName, fieldName, availableFields = [] } = details;
+      description = `
+Partition Field Validation Error
+
+Resource: ${resourceName}
+Partition: ${partitionName}
+Missing Field: ${fieldName}
+
+Available fields in schema:
+${availableFields.map((f) => `  \u2022 ${f}`).join("\n") || "  (no fields defined)"}
+
+Possible causes:
+1. Field was removed from schema but partition still references it
+2. Typo in partition field name
+3. Nested field path is incorrect (use dot notation like 'utm.source')
+
+Solution:
+${details.strictValidation === false ? "  \u2022 Update partition definition to use existing fields" : `  \u2022 Add missing field to schema, OR
+  \u2022 Update partition definition to use existing fields, OR
+  \u2022 Use strictValidation: false to skip this check during testing`}
+
+Docs: https://docs.s3db.js.org/resources/partitions#validation
+`.trim();
+    }
+    super(message, {
+      ...details,
+      description,
+      suggestion: details.suggestion || "Check partition definition, fields, and input values."
+    });
+  }
+}
+class AnalyticsNotEnabledError extends S3dbError {
+  constructor(details = {}) {
+    const {
+      pluginName = "EventualConsistency",
+      resourceName = "unknown",
+      field = "unknown",
+      configuredResources = [],
+      registeredResources = [],
+      pluginInitialized = false,
+      ...rest
+    } = details;
+    const message = `Analytics not enabled for ${resourceName}.${field}`;
+    const description = `
+Analytics Not Enabled
+
+Plugin: ${pluginName}
+Resource: ${resourceName}
+Field: ${field}
+
+Diagnostics:
+  \u2022 Plugin initialized: ${pluginInitialized ? "\u2713 Yes" : "\u2717 No"}
+  \u2022 Analytics resources created: ${registeredResources.length}/${configuredResources.length}
+${configuredResources.map((r) => {
+      const exists = registeredResources.includes(r);
+      return `    ${exists ? "\u2713" : "\u2717"} ${r}${!exists ? " (missing)" : ""}`;
+    }).join("\n")}
+
+Possible causes:
+1. Resource not created yet - Analytics resources are created when db.createResource() is called
+2. Resource created before plugin initialization - Plugin must be initialized before resources
+3. Field not configured in analytics.resources config
+
+Correct initialization order:
+  1. Create database: const db = new Database({ ... })
+  2. Install plugins: await db.connect() (triggers plugin.install())
+  3. Create resources: await db.createResource({ name: '${resourceName}', ... })
+  4. Analytics resources are auto-created by plugin
+
+Example fix:
+  const db = new Database({
+    bucket: 'my-bucket',
+    plugins: [new EventualConsistencyPlugin({
+      resources: {
+        '${resourceName}': {
+          fields: {
+            '${field}': { type: 'counter', analytics: true }
+          }
+        }
+      }
+    })]
+  });
+
+  await db.connect();  // Plugin initialized here
+  await db.createResource({ name: '${resourceName}', ... });  // Analytics resource created here
+
+Docs: https://docs.s3db.js.org/plugins/eventual-consistency#troubleshooting
+`.trim();
+    super(message, {
+      ...rest,
+      pluginName,
+      resourceName,
+      field,
+      configuredResources,
+      registeredResources,
+      pluginInitialized,
+      description,
+      suggestion: "Ensure resources are created after plugin initialization. Check plugin configuration and resource creation order."
+    });
   }
 }
 
@@ -3605,6 +3708,24 @@ class MemoryCache extends Cache {
     this.cache = {};
     this.meta = {};
     this.maxSize = config.maxSize !== void 0 ? config.maxSize : 1e3;
+    if (config.maxMemoryBytes && config.maxMemoryBytes > 0 && config.maxMemoryPercent && config.maxMemoryPercent > 0) {
+      throw new Error(
+        "[MemoryCache] Cannot use both maxMemoryBytes and maxMemoryPercent. Choose one: maxMemoryBytes (absolute) or maxMemoryPercent (0...1 fraction)."
+      );
+    }
+    if (config.maxMemoryPercent && config.maxMemoryPercent > 0) {
+      if (config.maxMemoryPercent > 1) {
+        throw new Error(
+          `[MemoryCache] maxMemoryPercent must be between 0 and 1 (e.g., 0.1 for 10%). Received: ${config.maxMemoryPercent}`
+        );
+      }
+      const totalMemory = os$1.totalmem();
+      this.maxMemoryBytes = Math.floor(totalMemory * config.maxMemoryPercent);
+      this.maxMemoryPercent = config.maxMemoryPercent;
+    } else {
+      this.maxMemoryBytes = config.maxMemoryBytes !== void 0 ? config.maxMemoryBytes : 0;
+      this.maxMemoryPercent = 0;
+    }
     this.ttl = config.ttl !== void 0 ? config.ttl : 3e5;
     this.enableCompression = config.enableCompression !== void 0 ? config.enableCompression : false;
     this.compressionThreshold = config.compressionThreshold !== void 0 ? config.compressionThreshold : 1024;
@@ -3614,23 +3735,18 @@ class MemoryCache extends Cache {
       totalCompressedSize: 0,
       compressionRatio: 0
     };
+    this.currentMemoryBytes = 0;
+    this.evictedDueToMemory = 0;
   }
   async _set(key, data) {
-    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
-      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
-      if (oldestKey) {
-        delete this.cache[oldestKey];
-        delete this.meta[oldestKey];
-      }
-    }
     let finalData = data;
     let compressed = false;
     let originalSize = 0;
     let compressedSize = 0;
+    const serialized = JSON.stringify(data);
+    originalSize = Buffer.byteLength(serialized, "utf8");
     if (this.enableCompression) {
       try {
-        const serialized = JSON.stringify(data);
-        originalSize = Buffer.byteLength(serialized, "utf8");
         if (originalSize >= this.compressionThreshold) {
           const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, "utf8"));
           finalData = {
@@ -3649,13 +3765,42 @@ class MemoryCache extends Cache {
         console.warn(`[MemoryCache] Compression failed for key '${key}':`, error.message);
       }
     }
+    const itemSize = compressed ? compressedSize : originalSize;
+    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
+      const oldSize = this.meta[key]?.compressedSize || 0;
+      this.currentMemoryBytes -= oldSize;
+    }
+    if (this.maxMemoryBytes > 0) {
+      while (this.currentMemoryBytes + itemSize > this.maxMemoryBytes && Object.keys(this.cache).length > 0) {
+        const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+        if (oldestKey) {
+          const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
+          delete this.cache[oldestKey];
+          delete this.meta[oldestKey];
+          this.currentMemoryBytes -= evictedSize;
+          this.evictedDueToMemory++;
+        } else {
+          break;
+        }
+      }
+    }
+    if (this.maxSize > 0 && Object.keys(this.cache).length >= this.maxSize) {
+      const oldestKey = Object.entries(this.meta).sort((a, b) => a[1].ts - b[1].ts)[0]?.[0];
+      if (oldestKey) {
+        const evictedSize = this.meta[oldestKey]?.compressedSize || 0;
+        delete this.cache[oldestKey];
+        delete this.meta[oldestKey];
+        this.currentMemoryBytes -= evictedSize;
+      }
+    }
     this.cache[key] = finalData;
     this.meta[key] = {
       ts: Date.now(),
       compressed,
       originalSize,
-      compressedSize: compressed ? compressedSize : originalSize
+      compressedSize: itemSize
     };
+    this.currentMemoryBytes += itemSize;
     return data;
   }
   async _get(key) {
@@ -3663,7 +3808,9 @@ class MemoryCache extends Cache {
     if (this.ttl > 0) {
       const now = Date.now();
       const meta = this.meta[key];
-      if (meta && now - meta.ts > this.ttl * 1e3) {
+      if (meta && now - meta.ts > this.ttl) {
+        const itemSize = meta.compressedSize || 0;
+        this.currentMemoryBytes -= itemSize;
         delete this.cache[key];
         delete this.meta[key];
         return null;
@@ -3685,6 +3832,10 @@ class MemoryCache extends Cache {
     return rawData;
   }
   async _del(key) {
+    if (Object.prototype.hasOwnProperty.call(this.cache, key)) {
+      const itemSize = this.meta[key]?.compressedSize || 0;
+      this.currentMemoryBytes -= itemSize;
+    }
     delete this.cache[key];
     delete this.meta[key];
     return true;
@@ -3693,10 +3844,13 @@ class MemoryCache extends Cache {
     if (!prefix) {
       this.cache = {};
       this.meta = {};
+      this.currentMemoryBytes = 0;
       return true;
     }
     for (const key of Object.keys(this.cache)) {
       if (key.startsWith(prefix)) {
+        const itemSize = this.meta[key]?.compressedSize || 0;
+        this.currentMemoryBytes -= itemSize;
         delete this.cache[key];
         delete this.meta[key];
       }
@@ -3733,6 +3887,53 @@ class MemoryCache extends Cache {
         saved: `${((this.compressionStats.totalOriginalSize - this.compressionStats.totalCompressedSize) / 1024).toFixed(2)} KB`
       }
     };
+  }
+  /**
+   * Get memory usage statistics
+   * @returns {Object} Memory stats including current usage, limits, and eviction counts
+   */
+  getMemoryStats() {
+    const totalItems = Object.keys(this.cache).length;
+    const memoryUsagePercent = this.maxMemoryBytes > 0 ? (this.currentMemoryBytes / this.maxMemoryBytes * 100).toFixed(2) : 0;
+    const systemMemory = {
+      total: os$1.totalmem(),
+      free: os$1.freemem(),
+      used: os$1.totalmem() - os$1.freemem()
+    };
+    const cachePercentOfTotal = systemMemory.total > 0 ? (this.currentMemoryBytes / systemMemory.total * 100).toFixed(2) : 0;
+    return {
+      currentMemoryBytes: this.currentMemoryBytes,
+      maxMemoryBytes: this.maxMemoryBytes,
+      maxMemoryPercent: this.maxMemoryPercent,
+      memoryUsagePercent: parseFloat(memoryUsagePercent),
+      cachePercentOfSystemMemory: parseFloat(cachePercentOfTotal),
+      totalItems,
+      maxSize: this.maxSize,
+      evictedDueToMemory: this.evictedDueToMemory,
+      averageItemSize: totalItems > 0 ? Math.round(this.currentMemoryBytes / totalItems) : 0,
+      memoryUsage: {
+        current: this._formatBytes(this.currentMemoryBytes),
+        max: this.maxMemoryBytes > 0 ? this._formatBytes(this.maxMemoryBytes) : "unlimited",
+        available: this.maxMemoryBytes > 0 ? this._formatBytes(this.maxMemoryBytes - this.currentMemoryBytes) : "unlimited"
+      },
+      systemMemory: {
+        total: this._formatBytes(systemMemory.total),
+        free: this._formatBytes(systemMemory.free),
+        used: this._formatBytes(systemMemory.used),
+        cachePercent: `${cachePercentOfTotal}%`
+      }
+    };
+  }
+  /**
+   * Format bytes to human-readable format
+   * @private
+   */
+  _formatBytes(bytes) {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
   }
 }
 
@@ -4563,8 +4764,10 @@ class CachePlugin extends Plugin {
       config: {
         ttl: options.ttl,
         maxSize: options.maxSize,
+        maxMemoryBytes: options.maxMemoryBytes,
+        maxMemoryPercent: options.maxMemoryPercent,
         ...options.config
-        // Driver-specific config (can override ttl/maxSize)
+        // Driver-specific config (can override ttl/maxSize/maxMemoryBytes/maxMemoryPercent)
       },
       // Resource filtering
       include: options.include || null,
@@ -7023,6 +7226,80 @@ async function getLastNMonths(resourceName, field, months = 12, options, fieldHa
   }
   return data;
 }
+async function getRawEvents(resourceName, field, options, fieldHandlers) {
+  const resourceHandlers = fieldHandlers.get(resourceName);
+  if (!resourceHandlers) {
+    throw new Error(`No eventual consistency configured for resource: ${resourceName}`);
+  }
+  const handler = resourceHandlers.get(field);
+  if (!handler) {
+    throw new Error(`No eventual consistency configured for field: ${resourceName}.${field}`);
+  }
+  if (!handler.transactionResource) {
+    throw new Error("Transaction resource not initialized");
+  }
+  const {
+    recordId,
+    startDate,
+    endDate,
+    cohortDate,
+    cohortHour,
+    cohortMonth,
+    applied,
+    operation,
+    limit
+  } = options;
+  const query = {};
+  if (recordId !== void 0) {
+    query.originalId = recordId;
+  }
+  if (applied !== void 0) {
+    query.applied = applied;
+  }
+  const [ok, err, allTransactions] = await tryFn(
+    () => handler.transactionResource.query(query)
+  );
+  if (!ok || !allTransactions) {
+    return [];
+  }
+  let filtered = allTransactions;
+  if (operation !== void 0) {
+    filtered = filtered.filter((t) => t.operation === operation);
+  }
+  if (cohortDate) {
+    filtered = filtered.filter((t) => t.cohortDate === cohortDate);
+  }
+  if (cohortHour) {
+    filtered = filtered.filter((t) => t.cohortHour === cohortHour);
+  }
+  if (cohortMonth) {
+    filtered = filtered.filter((t) => t.cohortMonth === cohortMonth);
+  }
+  if (startDate && endDate) {
+    const isHourly = startDate.length > 10;
+    const cohortField = isHourly ? "cohortHour" : "cohortDate";
+    filtered = filtered.filter(
+      (t) => t[cohortField] && t[cohortField] >= startDate && t[cohortField] <= endDate
+    );
+  } else if (startDate) {
+    const isHourly = startDate.length > 10;
+    const cohortField = isHourly ? "cohortHour" : "cohortDate";
+    filtered = filtered.filter((t) => t[cohortField] && t[cohortField] >= startDate);
+  } else if (endDate) {
+    const isHourly = endDate.length > 10;
+    const cohortField = isHourly ? "cohortHour" : "cohortDate";
+    filtered = filtered.filter((t) => t[cohortField] && t[cohortField] <= endDate);
+  }
+  filtered.sort((a, b) => {
+    const aTime = new Date(a.timestamp || a.createdAt).getTime();
+    const bTime = new Date(b.timestamp || b.createdAt).getTime();
+    return bTime - aTime;
+  });
+  if (limit && limit > 0) {
+    filtered = filtered.slice(0, limit);
+  }
+  return filtered;
+}
 
 function addHelperMethods(resource, plugin, config) {
   resource.set = async (id, field, value) => {
@@ -7779,6 +8056,185 @@ class EventualConsistencyPlugin extends Plugin {
    */
   async getLastNMonths(resourceName, field, months = 12, options = {}) {
     return await getLastNMonths(resourceName, field, months, options, this.fieldHandlers);
+  }
+  /**
+   * Get raw transaction events for custom aggregation
+   *
+   * This method provides direct access to the underlying transaction events,
+   * allowing developers to perform custom aggregations beyond the pre-built analytics.
+   * Useful for complex queries, custom metrics, or when you need the raw event data.
+   *
+   * @param {string} resourceName - Resource name
+   * @param {string} field - Field name
+   * @param {Object} options - Query options
+   * @param {string} options.recordId - Filter by specific record ID
+   * @param {string} options.startDate - Start date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+   * @param {string} options.endDate - End date filter (YYYY-MM-DD or YYYY-MM-DDTHH)
+   * @param {string} options.cohortDate - Filter by cohort date (YYYY-MM-DD)
+   * @param {string} options.cohortHour - Filter by cohort hour (YYYY-MM-DDTHH)
+   * @param {string} options.cohortMonth - Filter by cohort month (YYYY-MM)
+   * @param {boolean} options.applied - Filter by applied status (true/false/undefined for both)
+   * @param {string} options.operation - Filter by operation type ('add', 'sub', 'set')
+   * @param {number} options.limit - Maximum number of events to return
+   * @returns {Promise<Array>} Raw transaction events
+   *
+   * @example
+   * // Get all events for a specific record
+   * const events = await plugin.getRawEvents('wallets', 'balance', {
+   *   recordId: 'wallet1'
+   * });
+   *
+   * @example
+   * // Get events for a specific time range
+   * const events = await plugin.getRawEvents('wallets', 'balance', {
+   *   startDate: '2025-10-01',
+   *   endDate: '2025-10-31'
+   * });
+   *
+   * @example
+   * // Get only pending (unapplied) transactions
+   * const pending = await plugin.getRawEvents('wallets', 'balance', {
+   *   applied: false
+   * });
+   */
+  async getRawEvents(resourceName, field, options = {}) {
+    return await getRawEvents(resourceName, field, options, this.fieldHandlers);
+  }
+  /**
+   * Get diagnostics information about the plugin state
+   *
+   * This method provides comprehensive diagnostic information about the EventualConsistencyPlugin,
+   * including configured resources, field handlers, timers, and overall health status.
+   * Useful for debugging initialization issues, configuration problems, or runtime errors.
+   *
+   * @param {Object} options - Diagnostic options
+   * @param {string} options.resourceName - Optional: limit diagnostics to specific resource
+   * @param {string} options.field - Optional: limit diagnostics to specific field
+   * @param {boolean} options.includeStats - Include transaction statistics (default: false)
+   * @returns {Promise<Object>} Diagnostic information
+   *
+   * @example
+   * // Get overall plugin diagnostics
+   * const diagnostics = await plugin.getDiagnostics();
+   * console.log(diagnostics);
+   *
+   * @example
+   * // Get diagnostics for specific resource/field with stats
+   * const diagnostics = await plugin.getDiagnostics({
+   *   resourceName: 'wallets',
+   *   field: 'balance',
+   *   includeStats: true
+   * });
+   */
+  async getDiagnostics(options = {}) {
+    const { resourceName, field, includeStats = false } = options;
+    const diagnostics = {
+      plugin: {
+        name: "EventualConsistencyPlugin",
+        initialized: this.database !== null && this.database !== void 0,
+        verbose: this.config.verbose || false,
+        timezone: this.config.cohort?.timezone || "UTC",
+        consolidation: {
+          mode: this.config.consolidation?.mode || "timer",
+          interval: this.config.consolidation?.interval || 6e4,
+          batchSize: this.config.consolidation?.batchSize || 100
+        },
+        garbageCollection: {
+          enabled: this.config.garbageCollection?.enabled !== false,
+          retentionDays: this.config.garbageCollection?.retentionDays || 30,
+          interval: this.config.garbageCollection?.interval || 36e5
+        }
+      },
+      resources: [],
+      errors: [],
+      warnings: []
+    };
+    for (const [resName, resourceHandlers] of this.fieldHandlers.entries()) {
+      if (resourceName && resName !== resourceName) {
+        continue;
+      }
+      const resourceDiag = {
+        name: resName,
+        fields: []
+      };
+      for (const [fieldName, handler] of resourceHandlers.entries()) {
+        if (field && fieldName !== field) {
+          continue;
+        }
+        const fieldDiag = {
+          name: fieldName,
+          type: handler.type || "counter",
+          analyticsEnabled: handler.analyticsResource !== null && handler.analyticsResource !== void 0,
+          resources: {
+            transaction: handler.transactionResource?.name || null,
+            target: handler.targetResource?.name || null,
+            analytics: handler.analyticsResource?.name || null
+          },
+          timers: {
+            consolidation: handler.consolidationTimer !== null && handler.consolidationTimer !== void 0,
+            garbageCollection: handler.garbageCollectionTimer !== null && handler.garbageCollectionTimer !== void 0
+          }
+        };
+        if (!handler.transactionResource) {
+          diagnostics.errors.push({
+            resource: resName,
+            field: fieldName,
+            issue: "Missing transaction resource",
+            suggestion: "Ensure plugin is installed and resources are created after plugin installation"
+          });
+        }
+        if (!handler.targetResource) {
+          diagnostics.warnings.push({
+            resource: resName,
+            field: fieldName,
+            issue: "Missing target resource",
+            suggestion: "Target resource may not have been created yet"
+          });
+        }
+        if (handler.analyticsResource && !handler.analyticsResource.name) {
+          diagnostics.errors.push({
+            resource: resName,
+            field: fieldName,
+            issue: "Invalid analytics resource",
+            suggestion: "Analytics resource exists but has no name - possible initialization failure"
+          });
+        }
+        if (includeStats && handler.transactionResource) {
+          try {
+            const [okPending, errPending, pendingTxns] = await handler.transactionResource.query({ applied: false }).catch(() => [false, null, []]);
+            const [okApplied, errApplied, appliedTxns] = await handler.transactionResource.query({ applied: true }).catch(() => [false, null, []]);
+            fieldDiag.stats = {
+              pendingTransactions: okPending ? pendingTxns?.length || 0 : "error",
+              appliedTransactions: okApplied ? appliedTxns?.length || 0 : "error",
+              totalTransactions: okPending && okApplied ? (pendingTxns?.length || 0) + (appliedTxns?.length || 0) : "error"
+            };
+            if (handler.analyticsResource) {
+              const [okAnalytics, errAnalytics, analyticsRecords] = await handler.analyticsResource.list().catch(() => [false, null, []]);
+              fieldDiag.stats.analyticsRecords = okAnalytics ? analyticsRecords?.length || 0 : "error";
+            }
+          } catch (error) {
+            diagnostics.warnings.push({
+              resource: resName,
+              field: fieldName,
+              issue: "Failed to fetch statistics",
+              error: error.message
+            });
+          }
+        }
+        resourceDiag.fields.push(fieldDiag);
+      }
+      if (resourceDiag.fields.length > 0) {
+        diagnostics.resources.push(resourceDiag);
+      }
+    }
+    diagnostics.health = {
+      status: diagnostics.errors.length === 0 ? diagnostics.warnings.length === 0 ? "healthy" : "warning" : "error",
+      totalResources: diagnostics.resources.length,
+      totalFields: diagnostics.resources.reduce((sum, r) => sum + r.fields.length, 0),
+      errorCount: diagnostics.errors.length,
+      warningCount: diagnostics.warnings.length
+    };
+    return diagnostics;
   }
 }
 
@@ -11401,6 +11857,7 @@ ${errorDetails}`,
       idGenerator: customIdGenerator,
       idSize = 22,
       versioningEnabled = false,
+      strictValidation = true,
       events = {},
       asyncEvents = true,
       asyncPartitions = true,
@@ -11414,6 +11871,7 @@ ${errorDetails}`,
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? "secret";
     this.versioningEnabled = versioningEnabled;
+    this.strictValidation = strictValidation;
     this.setAsyncMode(asyncEvents);
     this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
     if (typeof customIdGenerator === "number" && customIdGenerator > 0) {
@@ -11661,9 +12119,12 @@ ${errorDetails}`,
   }
   /**
    * Validate that all partition fields exist in current resource attributes
-   * @throws {Error} If partition fields don't exist in current schema
+   * @throws {Error} If partition fields don't exist in current schema (only when strictValidation is true)
    */
   validatePartitions() {
+    if (!this.strictValidation) {
+      return;
+    }
     if (!this.config.partitions) {
       return;
     }
@@ -13813,6 +14274,7 @@ class Database extends EventEmitter {
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false;
+    this.strictValidation = options.strictValidation !== false;
     this._initHooks();
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
@@ -13934,6 +14396,7 @@ class Database extends EventEmitter {
           asyncEvents: versionData.asyncEvents !== void 0 ? versionData.asyncEvents : true,
           hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : versionData.hooks || {},
           versioningEnabled: this.versioningEnabled,
+          strictValidation: this.strictValidation,
           map: versionData.map,
           idGenerator: restoredIdGenerator,
           idSize: restoredIdSize
@@ -14595,6 +15058,7 @@ class Database extends EventEmitter {
       autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
       hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
+      strictValidation: this.strictValidation,
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
@@ -17430,6 +17894,7 @@ class StateMachinePlugin extends Plugin {
 }
 
 exports.AVAILABLE_BEHAVIORS = AVAILABLE_BEHAVIORS;
+exports.AnalyticsNotEnabledError = AnalyticsNotEnabledError;
 exports.AuditPlugin = AuditPlugin;
 exports.AuthenticationError = AuthenticationError;
 exports.BackupPlugin = BackupPlugin;
