@@ -1,0 +1,47 @@
+import { S3dbError } from '../errors.js';
+
+/**
+ * AuditError - Errors related to audit logging operations
+ *
+ * Used for audit operations including:
+ * - Audit log creation
+ * - Change tracking
+ * - Audit query and retrieval
+ * - Compliance logging
+ * - Event recording
+ *
+ * @extends S3dbError
+ */
+export class AuditError extends S3dbError {
+  constructor(message, details = {}) {
+    const { resourceName, operation = 'unknown', auditId, ...rest } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Audit Operation Error
+
+Operation: ${operation}
+${resourceName ? `Resource: ${resourceName}` : ''}
+${auditId ? `Audit ID: ${auditId}` : ''}
+
+Common causes:
+1. Audit log storage not accessible
+2. Resource not configured for auditing
+3. Invalid audit log format
+4. Audit query failed
+5. Insufficient permissions
+
+Solution:
+Check audit plugin configuration and storage accessibility.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/audit.md
+`.trim();
+    }
+
+    super(message, { ...rest, resourceName, operation, auditId, description,
+      suggestion: details.suggestion || 'Check audit configuration and storage permissions.' });
+  }
+}
+
+export default AuditError;

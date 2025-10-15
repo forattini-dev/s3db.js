@@ -1,6 +1,7 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
+import { ReplicationError } from "./replicator.errors.js";
 
 function normalizeResourceName(name) {
   return typeof name === 'string' ? name.trim().toLowerCase() : name;
@@ -120,12 +121,40 @@ export class ReplicatorPlugin extends Plugin {
     super();
     // Validation for config tests
     if (!options.replicators || !Array.isArray(options.replicators)) {
-      throw new Error('ReplicatorPlugin: replicators array is required');
+      throw new ReplicationError('ReplicatorPlugin requires replicators array', {
+        operation: 'constructor',
+        pluginName: 'ReplicatorPlugin',
+        providedOptions: Object.keys(options),
+        suggestion: 'Provide replicators array: new ReplicatorPlugin({ replicators: [{ driver: "s3db", resources: [...] }] })'
+      });
     }
     for (const rep of options.replicators) {
-      if (!rep.driver) throw new Error('ReplicatorPlugin: each replicator must have a driver');
-      if (!rep.resources || typeof rep.resources !== 'object') throw new Error('ReplicatorPlugin: each replicator must have resources config');
-      if (Object.keys(rep.resources).length === 0) throw new Error('ReplicatorPlugin: each replicator must have at least one resource configured');
+      if (!rep.driver) {
+        throw new ReplicationError('Each replicator must have a driver', {
+          operation: 'constructor',
+          pluginName: 'ReplicatorPlugin',
+          replicatorConfig: rep,
+          suggestion: 'Each replicator entry must specify a driver: { driver: "s3db", resources: {...} }'
+        });
+      }
+      if (!rep.resources || typeof rep.resources !== 'object') {
+        throw new ReplicationError('Each replicator must have resources config', {
+          operation: 'constructor',
+          pluginName: 'ReplicatorPlugin',
+          driver: rep.driver,
+          replicatorConfig: rep,
+          suggestion: 'Provide resources as object or array: { driver: "s3db", resources: ["users"] } or { resources: { users: "people" } }'
+        });
+      }
+      if (Object.keys(rep.resources).length === 0) {
+        throw new ReplicationError('Each replicator must have at least one resource configured', {
+          operation: 'constructor',
+          pluginName: 'ReplicatorPlugin',
+          driver: rep.driver,
+          replicatorConfig: rep,
+          suggestion: 'Add at least one resource to replicate: { driver: "s3db", resources: ["users"] }'
+        });
+      }
     }
     
     this.config = {
@@ -657,7 +686,13 @@ export class ReplicatorPlugin extends Plugin {
   async syncAllData(replicatorId) {
     const replicator = this.replicators.find(r => r.id === replicatorId);
     if (!replicator) {
-      throw new Error(`Replicator not found: ${replicatorId}`);
+      throw new ReplicationError('Replicator not found', {
+        operation: 'syncAllData',
+        pluginName: 'ReplicatorPlugin',
+        replicatorId,
+        availableReplicators: this.replicators.map(r => r.id),
+        suggestion: 'Check replicator ID or use getReplicatorStats() to list available replicators'
+      });
     }
 
     this.stats.lastSync = new Date().toISOString();

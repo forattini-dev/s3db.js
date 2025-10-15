@@ -5,6 +5,7 @@ import { pipeline } from 'stream/promises';
 import path from 'path';
 import crypto from 'crypto';
 import tryFn from '../../concerns/try-fn.js';
+import { BackupError } from '../backup.errors.js';
 
 /**
  * FilesystemBackupDriver - Stores backups on local/network filesystem
@@ -31,7 +32,11 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
   async onSetup() {
     // Validate path configuration
     if (!this.config.path) {
-      throw new Error('FilesystemBackupDriver: path configuration is required');
+      throw new BackupError('FilesystemBackupDriver: path configuration is required', {
+        operation: 'onSetup',
+        driver: 'filesystem',
+        suggestion: 'Provide a path in config: new FilesystemBackupDriver({ path: "/path/to/backups" })'
+      });
     }
 
     this.log(`Initialized with path: ${this.config.path}`);
@@ -69,13 +74,28 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
     );
     
     if (!createDirOk) {
-      throw new Error(`Failed to create backup directory: ${createDirErr.message}`);
+      throw new BackupError('Failed to create backup directory', {
+        operation: 'upload',
+        driver: 'filesystem',
+        backupId,
+        targetDir,
+        original: createDirErr,
+        suggestion: 'Check directory permissions and disk space'
+      });
     }
 
     // Copy backup file
     const [copyOk, copyErr] = await tryFn(() => copyFile(filePath, targetPath));
     if (!copyOk) {
-      throw new Error(`Failed to copy backup file: ${copyErr.message}`);
+      throw new BackupError('Failed to copy backup file', {
+        operation: 'upload',
+        driver: 'filesystem',
+        backupId,
+        filePath,
+        targetPath,
+        original: copyErr,
+        suggestion: 'Check file permissions and disk space'
+      });
     }
 
     // Write manifest
@@ -90,7 +110,14 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
     if (!manifestOk) {
       // Clean up backup file if manifest fails
       await tryFn(() => unlink(targetPath));
-      throw new Error(`Failed to write manifest: ${manifestErr.message}`);
+      throw new BackupError('Failed to write manifest file', {
+        operation: 'upload',
+        driver: 'filesystem',
+        backupId,
+        manifestPath,
+        original: manifestErr,
+        suggestion: 'Check directory permissions and disk space'
+      });
     }
 
     // Get file stats
@@ -116,7 +143,13 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
     // Check if source exists
     const [existsOk] = await tryFn(() => access(sourcePath));
     if (!existsOk) {
-      throw new Error(`Backup file not found: ${sourcePath}`);
+      throw new BackupError('Backup file not found', {
+        operation: 'download',
+        driver: 'filesystem',
+        backupId,
+        sourcePath,
+        suggestion: 'Check if backup exists using list() method'
+      });
     }
 
     // Create target directory if needed
@@ -126,7 +159,15 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
     // Copy file
     const [copyOk, copyErr] = await tryFn(() => copyFile(sourcePath, targetPath));
     if (!copyOk) {
-      throw new Error(`Failed to download backup: ${copyErr.message}`);
+      throw new BackupError('Failed to download backup', {
+        operation: 'download',
+        driver: 'filesystem',
+        backupId,
+        sourcePath,
+        targetPath,
+        original: copyErr,
+        suggestion: 'Check file permissions and disk space'
+      });
     }
 
     this.log(`Downloaded backup ${backupId} from ${sourcePath} to ${targetPath}`);
@@ -150,7 +191,14 @@ export default class FilesystemBackupDriver extends BaseBackupDriver {
     const [deleteManifestOk] = await tryFn(() => unlink(manifestPath));
 
     if (!deleteBackupOk && !deleteManifestOk) {
-      throw new Error(`Failed to delete backup files for ${backupId}`);
+      throw new BackupError('Failed to delete backup files', {
+        operation: 'delete',
+        driver: 'filesystem',
+        backupId,
+        backupPath,
+        manifestPath,
+        suggestion: 'Check file permissions'
+      });
     }
 
     this.log(`Deleted backup ${backupId}`);

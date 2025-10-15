@@ -1,5 +1,6 @@
 import { BasePartitionDriver } from './base-partition-driver.js';
 import { PromisePool } from '@supercharge/promise-pool';
+import { PartitionDriverError } from '../errors.js';
 
 /**
  * In-memory partition driver with background processing
@@ -36,13 +37,19 @@ export class MemoryPartitionDriver extends BasePartitionDriver {
   async queue(operation) {
     // Check queue size limit
     if (this.queue.length >= this.maxQueueSize) {
-      const error = new Error(`Memory queue full (${this.maxQueueSize} items)`);
+      const error = new PartitionDriverError('Memory queue full - backpressure detected', {
+        driver: 'memory',
+        operation: 'queue',
+        queueSize: this.queue.length,
+        maxQueueSize: this.maxQueueSize,
+        suggestion: 'Increase maxQueueSize, enable rejectOnFull, or reduce operation rate'
+      });
       this.emit('queueFull', { operation, queueSize: this.queue.length });
-      
+
       if (this.options.rejectOnFull) {
         throw error;
       }
-      
+
       // Wait for some space
       await this.waitForSpace();
     }
@@ -193,9 +200,17 @@ export class MemoryPartitionDriver extends BasePartitionDriver {
     
     while (this.queue.length >= this.maxQueueSize) {
       if (Date.now() - startTime > maxWait) {
-        throw new Error('Timeout waiting for queue space');
+        throw new PartitionDriverError('Timeout waiting for queue space', {
+          driver: 'memory',
+          operation: 'waitForSpace',
+          queueSize: this.queue.length,
+          maxQueueSize: this.maxQueueSize,
+          waitedMs: Date.now() - startTime,
+          maxWaitMs: maxWait,
+          suggestion: 'Queue is full and not draining fast enough. Increase maxQueueSize or concurrency'
+        });
       }
-      
+
       await new Promise(resolve => setTimeout(resolve, checkInterval));
     }
   }

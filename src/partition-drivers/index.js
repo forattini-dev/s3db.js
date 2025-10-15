@@ -1,6 +1,7 @@
 import { SyncPartitionDriver } from './sync-partition-driver.js';
 import { MemoryPartitionDriver } from './memory-partition-driver.js';
 import { SQSPartitionDriver } from './sqs-partition-driver.js';
+import { PartitionDriverError } from '../errors.js';
 
 /**
  * Partition driver factory
@@ -29,7 +30,12 @@ export class PartitionDriverFactory {
     // Get driver class
     const DriverClass = this.drivers[driverName];
     if (!DriverClass) {
-      throw new Error(`Unknown partition driver: ${driverName}. Available: ${Object.keys(this.drivers).join(', ')}`);
+      throw new PartitionDriverError(`Unknown partition driver: ${driverName}`, {
+        driver: driverName,
+        operation: 'create',
+        availableDrivers: Object.keys(this.drivers),
+        suggestion: `Use one of the available drivers: ${Object.keys(this.drivers).join(', ')}, or register a custom driver`
+      });
     }
     
     // Create and initialize driver
