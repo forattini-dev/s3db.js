@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "11.2.0",
+  "version": "11.2.1",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
   "main": "dist/s3db.cjs.js",
   "module": "dist/s3db.es.js",
@@ -73,11 +73,7 @@
     "test:full": "pnpm run test:js && pnpm run test:ts",
     "benchmark": "node benchmark-compression.js",
     "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
-    "prepare": "pnpm run build && bash scripts/install-hooks.sh",
-    "version": "echo 'Use pnpm run release v<version> instead of npm version'",
     "release:check": "./scripts/pre-release-check.sh",
-    "release:prepare": "pnpm run build:binaries && echo 'Binaries ready for GitHub release'",
-    "release": "./scripts/release.sh",
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
     "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts"
   },
