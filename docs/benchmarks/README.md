@@ -21,10 +21,10 @@ docs/benchmarks/
 ├── eventual-consistency.md            # Results and analysis
 ├── base62.bench.js                    # Base62 encoding benchmark
 ├── base62.md                          # Results and analysis
-├── advanced-encoding.bench.js         # Metadata encoding benchmark
-├── advanced-encoding.md               # Results and analysis
 ├── smart-encoding.bench.js            # Smart encoding benchmark
 ├── smart-encoding.md                  # Results and analysis
+├── partitions-matrix.js               # Partitions performance benchmark
+├── partitions.md                      # Results and analysis
 └── [future benchmarks...]
 ```
 
@@ -52,11 +52,11 @@ node docs/benchmarks/eventual-consistency.bench.js
 # Base62 Encoding
 node docs/benchmarks/base62.bench.js
 
-# Advanced Metadata Encoding
-node docs/benchmarks/advanced-encoding.bench.js
-
 # Smart Metadata Encoding
 node docs/benchmarks/smart-encoding.bench.js
+
+# Partitions Performance
+node docs/benchmarks/partitions-matrix.js
 ```
 
 ## 📋 Available Benchmarks
@@ -65,8 +65,8 @@ node docs/benchmarks/smart-encoding.bench.js
 |-----------|------|-------------|--------|
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
-| **Advanced Metadata Encoding** | `advanced-encoding.bench.js` | Encoding optimizations (timestamps, UUIDs, etc) | ✅ Active |
 | **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ✅ Active |
+| **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
 
 ## 📊 Benchmark Format
 
