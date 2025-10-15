@@ -2,27 +2,27 @@
 
 ## ⚡ TLDR
 
-Tracking **em tempo real** de custos AWS S3 por operação (GET/PUT/LIST/DELETE/HEAD).
+**Real-time** AWS S3 cost tracking per operation (GET/PUT/LIST/DELETE/HEAD).
 
-**1 linha para começar:**
+**1 line to get started:**
 ```javascript
-plugins: [CostsPlugin]  // Pronto! Sem config necessária (static plugin)
+plugins: [CostsPlugin]  // Done! No configuration needed (static plugin)
 ```
 
-**Principais features:**
+**Key features:**
 - ✅ Zero configuration (static plugin)
 - ✅ Real-time cost tracking
-- ✅ AWS pricing preciso (PUT $0.005, GET $0.0004 per 1000)
-- ✅ Breakdown por operação + command
-- ✅ Projeções monthly/yearly
+- ✅ Accurate AWS pricing (PUT $0.005, GET $0.0004 per 1000)
+- ✅ Breakdown by operation + command
+- ✅ Monthly/yearly projections
 
-**Quando usar:**
+**When to use:**
 - 💰 Budget monitoring
 - 📊 Cost optimization
-- 🔍 Identificar operações caras
-- 📈 Projeção de custos futuros
+- 🔍 Identify expensive operations
+- 📈 Future cost projection
 
-**Acesso:**
+**Access:**
 ```javascript
 console.log('Cost:', s3db.client.costs.total);  // $0.000123
 console.log('Requests:', s3db.client.costs.requests);  // { put: 3, get: 8, ... }

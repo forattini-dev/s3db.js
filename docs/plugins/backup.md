@@ -2,26 +2,26 @@
 
 ## ⚡ TLDR
 
-Sistema de backup/restore com **múltiplos drivers** (filesystem/S3/multi) e políticas GFS de retenção.
+Backup/restore system with **multiple drivers** (filesystem/S3/multi) and GFS retention policies.
 
-**2 linhas para começar:**
+**2 lines to get started:**
 ```javascript
 const plugin = new BackupPlugin({ driver: 'filesystem', config: { path: './backups/' } });
-await plugin.backup('full');  // Backup completo criado!
+await plugin.backup('full');  // Full backup created!
 ```
 
-**Principais features:**
+**Key features:**
 - ✅ Drivers: filesystem, S3, multi-destination
-- ✅ Tipos: full, incremental, selective
-- ✅ Compressão: gzip, brotli, deflate
-- ✅ Retenção GFS: daily/weekly/monthly/yearly
+- ✅ Types: full, incremental, selective
+- ✅ Compression: gzip, brotli, deflate
+- ✅ GFS retention: daily/weekly/monthly/yearly
 - ✅ Path templates: `{date}`, `{time}`, `{year}`
 
-**Quando usar:**
+**When to use:**
 - 💾 Disaster recovery
-- 🔄 Migração entre ambientes
-- 📦 Arquivamento de longo prazo
-- 🌍 Backup multi-região
+- 🔄 Migration between environments
+- 📦 Long-term archiving
+- 🌍 Multi-region backup
 
 ---
 
