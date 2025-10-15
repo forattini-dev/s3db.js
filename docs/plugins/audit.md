@@ -307,3 +307,95 @@ console.log(`Cleaned up ${oldLogs.length} old audit logs`);
 **Issue: Missing user information**
 - Solution: Implement `getCurrentUserId()` to extract user from your auth context
 
+---
+
+## ❓ FAQ
+
+### Básico
+
+**Q: O que é auditado automaticamente?**
+A: Todas as operações: `insert`, `update`, `delete` e `deleteMany`.
+
+**Q: Onde os logs são armazenados?**
+A: Em um recurso chamado `plg_audits` (por padrão), com particionamento por data e por recurso.
+
+**Q: Qual o impacto de performance?**
+A: Mínimo. O plugin usa eventos assíncronos e não bloqueia operações principais.
+
+### Configuração
+
+**Q: Como desabilitar a captura de dados completos?**
+A: Configure `includeData: false`:
+```javascript
+new AuditPlugin({
+  includeData: false  // Apenas metadata, sem oldData/newData
+})
+```
+
+**Q: Como limitar o tamanho dos dados capturados?**
+A: Use `maxDataSize`:
+```javascript
+new AuditPlugin({
+  maxDataSize: 5000  // Trunca após 5KB
+})
+```
+
+**Q: Como rastrear o usuário que fez a operação?**
+A: Configure `getCurrentUserId`:
+```javascript
+const auditPlugin = new AuditPlugin();
+auditPlugin.getCurrentUserId = () => currentUser.id;
+```
+
+### Operações
+
+**Q: Como consultar o histórico de um registro?**
+A: Use `getRecordHistory`:
+```javascript
+const history = await auditPlugin.getRecordHistory('users', 'user-123');
+```
+
+**Q: Como obter logs de uma partição específica?**
+A: Use `getPartitionHistory`:
+```javascript
+const history = await auditPlugin.getPartitionHistory(
+  'orders',
+  'byRegion',
+  { region: 'US' }
+);
+```
+
+**Q: Como gerar estatísticas de auditoria?**
+A: Use `getAuditStats`:
+```javascript
+const stats = await auditPlugin.getAuditStats({
+  resourceName: 'users',
+  startDate: '2025-01-01',
+  endDate: '2025-01-31'
+});
+```
+
+### Manutenção
+
+**Q: Como fazer cleanup de logs antigos?**
+A: Use `cleanupOldAudits`:
+```javascript
+const deleted = await auditPlugin.cleanupOldAudits(90); // Remove logs com mais de 90 dias
+```
+
+**Q: Como recuperar dados deletados?**
+A: Consulte o audit log e use o campo `oldData`:
+```javascript
+const logs = await auditPlugin.getAuditLogs({
+  resourceName: 'users',
+  operation: 'delete',
+  recordId: 'user-123'
+});
+const deletedData = JSON.parse(logs[0].oldData);
+```
+
+### Troubleshooting
+
+**Q: Logs não estão sendo criados?**
+A: Verifique se o recurso `plg_audits` foi criado corretamente e se há erros no console (ative `verbose: true`).
+

@@ -881,3 +881,143 @@ s3db restore backup-id --overwrite --connection "s3://key:secret@bucket"
 - [Audit Plugin](./audit.md) - Track backup operations
 - [Metrics Plugin](./metrics.md) - Monitor backup performance
 - [Scheduler Plugin](./scheduler.md) - Automate backup scheduling
+## ❓ FAQ
+
+### Básico
+
+**P: O que o BackupPlugin faz?**
+R: Cria backups automatizados do banco de dados inteiro ou de recursos específicos, com suporte a compressão, encriptação e múltiplos destinos.
+
+**P: Quais drivers estão disponíveis?**
+R: `filesystem` (disco local), `s3` (S3 remoto), `multi` (múltiplos destinos simultâneos).
+
+**P: Suporta backups incrementais?**
+R: Sim, use `type: 'incremental'` para backup apenas de mudanças desde o último backup completo.
+
+### Configuração
+
+**P: Como configurar backup para filesystem?**
+R:
+```javascript
+new BackupPlugin({
+  driver: 'filesystem',
+  config: {
+    path: '/var/backups/s3db/{date}/',
+    compression: 'gzip'
+  },
+  retention: {
+    daily: 7,
+    weekly: 4,
+    monthly: 12
+  }
+})
+```
+
+**P: Como configurar backup para S3?**
+R:
+```javascript
+new BackupPlugin({
+  driver: 's3',
+  config: {
+    bucket: 'my-backups',
+    path: 'database/{date}/',
+    storageClass: 'GLACIER'
+  }
+})
+```
+
+**P: Como configurar múltiplos destinos?**
+R:
+```javascript
+new BackupPlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all',  // 'all', 'any', 'priority'
+    destinations: [
+      { driver: 'filesystem', config: { path: '/backup/' } },
+      { driver: 's3', config: { bucket: 'remote' } }
+    ]
+  }
+})
+```
+
+### Operações
+
+**P: Como criar um backup manual?**
+R: Use `backup`:
+```javascript
+const result = await backupPlugin.backup('full');
+// Retorna: { id, type, size, duration, checksum, driverInfo }
+```
+
+**P: Como restaurar um backup?**
+R: Use `restore`:
+```javascript
+const result = await backupPlugin.restore('full-2025-01-15-abc123', {
+  resources: ['users', 'orders'],  // null = todos
+  overwrite: true
+});
+```
+
+**P: Como listar backups disponíveis?**
+R: Use `listBackups`:
+```javascript
+const backups = await backupPlugin.listBackups({ limit: 20 });
+// Retorna array de backups com metadata
+```
+
+**P: Como obter status de um backup?**
+R: Use `getBackupStatus`:
+```javascript
+const status = await backupPlugin.getBackupStatus('full-2025-01-15-abc123');
+// Retorna: { id, type, status, size, checksum, error, ... }
+```
+
+### Retenção
+
+**P: Como funciona a política de retenção GFS?**
+R: Grandfather-Father-Son:
+- Daily: mantém X backups diários
+- Weekly: mantém X backups semanais
+- Monthly: mantém X backups mensais
+- Yearly: mantém X backups anuais
+
+**P: Como fazer cleanup de backups antigos?**
+R: Use `cleanupBackups`:
+```javascript
+const cleaned = await backupPlugin.cleanupBackups();
+console.log(`Cleaned up ${cleaned.count} old backups`);
+```
+
+### Segurança
+
+**P: Como encriptar backups?**
+R:
+```javascript
+new BackupPlugin({
+  encryption: {
+    algorithm: 'AES-256-GCM',
+    key: process.env.BACKUP_ENCRYPTION_KEY
+  }
+})
+```
+
+**P: Como verificar integridade?**
+R: A verificação por checksum é automática se `verification: true` (padrão).
+
+### Troubleshooting
+
+**P: Backup está falhando?**
+R: Verifique:
+1. Permissões de escrita no destino
+2. Espaço em disco suficiente
+3. Credenciais corretas (S3)
+4. Use `verbose: true` para logs
+
+**P: Restore está falhando?**
+R: Verifique:
+1. Backup existe e está completo
+2. Checksum válido
+3. Recursos existem no database de destino
+
+---

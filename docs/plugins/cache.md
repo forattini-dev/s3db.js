@@ -301,3 +301,116 @@ if (stats.hitRate < 0.7) {
 
 **Issue: Stale data in cache**
 - Solution: Reduce `ttl` or manually clear cache after updates
+
+---
+
+## ❓ FAQ
+
+### Básico
+
+**Q: Qual driver de cache devo usar?**
+A: Depende do seu caso de uso:
+- `memory`: Desenvolvimento e cache temporário (mais rápido)
+- `filesystem`: Produção single-server (persiste entre restarts)
+- `s3`: Multi-server/distributed (compartilhado entre instâncias)
+
+**Q: O cache funciona automaticamente?**
+A: Sim! Após instalar o plugin, todas as operações de leitura (`get`, `list`, `count`, `query`) são automaticamente cacheadas.
+
+**Q: Como pular o cache em uma operação específica?**
+A: Passe `skipCache: true` como opção:
+```javascript
+const user = await users.get('id123', { skipCache: true });
+```
+
+### Configuração
+
+**Q: Como configurar TTL (time-to-live)?**
+A: Use a opção `ttl` em milissegundos:
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  ttl: 60000  // 60 segundos
+})
+```
+
+**Q: Posso cachear apenas recursos específicos?**
+A: Sim! Use `include` ou `exclude`:
+```javascript
+new CachePlugin({
+  include: ['users', 'products'],  // Apenas estes recursos
+  exclude: ['logs']                // Todos exceto logs
+})
+```
+
+**Q: Como evitar cachear recursos criados por plugins?**
+A: Por padrão, recursos com `createdBy !== 'user'` já não são cacheados. Para incluí-los explicitamente, adicione ao array `include`.
+
+### Operações
+
+**Q: Como limpar o cache manualmente?**
+A: Use os métodos do plugin:
+```javascript
+// Limpar cache de um recurso
+await users.cache.clear();
+
+// Limpar todo o cache
+await database.plugins.cache.clearAllCache();
+
+// Partition-aware: limpar partição específica
+await resource.clearPartitionCache('byRegion', { region: 'US' });
+```
+
+**Q: Como preaquecer o cache?**
+A: Use o método `warmCache`:
+```javascript
+await database.plugins.cache.warmCache('users', {
+  includePartitions: true,
+  sampleSize: 1000
+});
+```
+
+### Performance
+
+**Q: Qual driver é mais rápido?**
+A: `memory` é o mais rápido (~2ms vs 180ms do S3). `filesystem` é intermediário. `s3` tem maior latência mas permite compartilhamento entre instâncias.
+
+**Q: Como analisar o uso do cache?**
+A: Use `analyzeCacheUsage()` com partition-aware cache:
+```javascript
+const analysis = await database.plugins.cache.analyzeCacheUsage();
+// Retorna: most used partitions, least used, recomendações
+```
+
+**Q: Como configurar o tamanho máximo?**
+A: Use `maxSize`:
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  maxSize: 1000,  // Máximo 1000 itens
+  config: {
+    evictionPolicy: 'lru'  // Least Recently Used
+  }
+})
+```
+
+### Troubleshooting
+
+**Q: O cache não está sendo invalidado após updates?**
+A: Verifique se o plugin foi instalado ANTES de criar os recursos. O plugin instala middlewares nos recursos durante `onInstall()`.
+
+**Q: Estou vendo dados desatualizados?**
+A: Reduza o TTL ou use `skipCache: true` para operações que precisam dados em tempo real.
+
+**Q: Como debugar problemas de cache?**
+A: Ative o modo verbose e monitore estatísticas:
+```javascript
+new CachePlugin({
+  verbose: true,
+  config: { enableStats: true }
+})
+
+// Verifique estatísticas
+const stats = resource.cache.stats();
+console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
+```
