@@ -6,7 +6,7 @@
 import tryFn from "../../concerns/try-fn.js";
 import { PromisePool } from "@supercharge/promise-pool";
 import { idGenerator } from "../../concerns/id.js";
-import { getCohortInfo, createSyntheticSetTransaction } from "./utils.js";
+import { getCohortInfo, createSyntheticSetTransaction, ensureCohortHour } from "./utils.js";
 
 /**
  * Start consolidation timer for a handler
@@ -612,12 +612,43 @@ export async function consolidateRecord(
         .for(transactionsToUpdate)
         .withConcurrency(markAppliedConcurrency) // ✅ Configurável e maior!
         .process(async (txn) => {
+          // ✅ FIX BUG #3: Ensure cohort fields exist before marking as applied
+          // This handles legacy transactions missing cohortHour, cohortDate, etc.
+          const txnWithCohorts = ensureCohortHour(txn, config.cohort.timezone, false);
+
+          // Build update data with applied flag
+          const updateData = { applied: true };
+
+          // Add missing cohort fields if they were calculated
+          if (txnWithCohorts.cohortHour && !txn.cohortHour) {
+            updateData.cohortHour = txnWithCohorts.cohortHour;
+          }
+          if (txnWithCohorts.cohortDate && !txn.cohortDate) {
+            updateData.cohortDate = txnWithCohorts.cohortDate;
+          }
+          if (txnWithCohorts.cohortWeek && !txn.cohortWeek) {
+            updateData.cohortWeek = txnWithCohorts.cohortWeek;
+          }
+          if (txnWithCohorts.cohortMonth && !txn.cohortMonth) {
+            updateData.cohortMonth = txnWithCohorts.cohortMonth;
+          }
+
+          // Handle null value field (legacy data might have null)
+          if (txn.value === null || txn.value === undefined) {
+            updateData.value = 1; // Default to 1 for backward compatibility
+          }
+
           const [ok, err] = await tryFn(() =>
-            transactionResource.update(txn.id, { applied: true })
+            transactionResource.update(txn.id, updateData)
           );
 
           if (!ok && config.verbose) {
-            console.warn(`[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`, err?.message);
+            console.warn(
+              `[EventualConsistency] Failed to mark transaction ${txn.id} as applied:`,
+              err?.message,
+              'Update data:',
+              updateData
+            );
           }
 
           return ok;
@@ -917,9 +948,12 @@ export async function recalculateRecord(
     // Exclude anchor transactions (they should always be applied)
     const transactionsToReset = allTransactions.filter(txn => txn.source !== 'anchor');
 
+    // ✅ OPTIMIZATION: Use higher concurrency for recalculate (default 50 vs 10)
+    const recalculateConcurrency = config.recalculateConcurrency || 50;
+
     const { results, errors } = await PromisePool
       .for(transactionsToReset)
-      .withConcurrency(10)
+      .withConcurrency(recalculateConcurrency)
       .process(async (txn) => {
         const [ok, err] = await tryFn(() =>
           transactionResource.update(txn.id, { applied: false })
