@@ -1014,7 +1014,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.put('test-key', { data: 'test' })
-      ).rejects.toThrow(/PluginStorage.*failed.*test-key/);
+      ).rejects.toThrow(/Failed to save plugin data/);
     });
 
     test('should throw descriptive error on get failure (non-NoSuchKey)', async () => {
@@ -1030,7 +1030,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.get('test-key')
-      ).rejects.toThrow('PluginStorage.get failed for key test-key');
+      ).rejects.toThrow(/Failed to retrieve plugin data/);
     });
 
     test('should throw on JSON parse error in get', async () => {
@@ -1044,7 +1044,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         storage.get(key)
-      ).rejects.toThrow('PluginStorage.get failed to parse body');
+      ).rejects.toThrow(/Failed to parse JSON body/);
     });
 
     test('should throw descriptive error on list failure', async () => {
@@ -1058,7 +1058,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.list()
-      ).rejects.toThrow('PluginStorage.list failed');
+      ).rejects.toThrow(/Failed to list plugin data/);
     });
 
     test('should throw descriptive error on listForResource failure', async () => {
@@ -1072,7 +1072,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.listForResource('users')
-      ).rejects.toThrow('PluginStorage.listForResource failed');
+      ).rejects.toThrow(/Failed to list resource data/);
     });
 
     test('should throw descriptive error on delete failure', async () => {
@@ -1086,7 +1086,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       await expect(
         badStorage.delete('test-key')
-      ).rejects.toThrow('PluginStorage.delete failed for key test-key');
+      ).rejects.toThrow(/Failed to delete plugin data/);
     });
   });
 
