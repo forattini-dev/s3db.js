@@ -25,6 +25,8 @@ docs/benchmarks/
 ├── smart-encoding.md                  # Results and analysis
 ├── partitions-matrix.js               # Partitions performance benchmark
 ├── partitions.md                      # Results and analysis
+├── vector-clustering.bench.js         # Vector clustering with open-source embeddings
+├── vector-clustering.md               # Results and analysis
 └── [future benchmarks...]
 ```
 
@@ -57,6 +59,12 @@ node docs/benchmarks/smart-encoding.bench.js
 
 # Partitions Performance
 node docs/benchmarks/partitions-matrix.js
+
+# Vector Clustering (requires @xenova/transformers)
+npm install @xenova/transformers
+node docs/benchmarks/vector-clustering.bench.js tiny    # 100 vectors
+node docs/benchmarks/vector-clustering.bench.js small   # 1,000 vectors
+node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 ```
 
 ## 📋 Available Benchmarks
@@ -67,6 +75,7 @@ node docs/benchmarks/partitions-matrix.js
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
 | **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ✅ Active |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
+| **Vector Clustering** | `vector-clustering.bench.js` | K-means clustering with open-source embeddings (100/1K/10K vectors) | ✅ Active |
 
 ## 📊 Benchmark Format
 

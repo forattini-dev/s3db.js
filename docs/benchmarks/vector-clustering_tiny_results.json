@@ -1,0 +1,88 @@
+{
+  "timestamp": "2025-10-16T13:09:52.660Z",
+  "nodeVersion": "v22.6.0",
+  "scale": "tiny",
+  "config": {
+    "vectorCount": 100,
+    "dimensions": 384,
+    "kValues": [
+      3,
+      5,
+      10
+    ],
+    "iterations": 10
+  },
+  "insertion": {
+    "duration": 2149.330229,
+    "avgMs": 21.493302290000003,
+    "throughput": 46.52612178935673
+  },
+  "clustering": [
+    {
+      "k": 3,
+      "duration": 2148.883414,
+      "iterations": 9,
+      "converged": true,
+      "silhouetteScore": 0.03780317881374619,
+      "inertia": 89.33687404744353,
+      "clusterSizes": [
+        40,
+        20,
+        40
+      ],
+      "avgClusterSize": 33.333333333333336,
+      "minClusterSize": 20,
+      "maxClusterSize": 40
+    },
+    {
+      "k": 5,
+      "duration": 1702.5236109999996,
+      "iterations": 7,
+      "converged": true,
+      "silhouetteScore": 0.039927277326831045,
+      "inertia": 84.62583609480569,
+      "clusterSizes": [
+        20,
+        20,
+        23,
+        20,
+        17
+      ],
+      "avgClusterSize": 20,
+      "minClusterSize": 17,
+      "maxClusterSize": 23
+    },
+    {
+      "k": 10,
+      "duration": 2285.2204359999996,
+      "iterations": 4,
+      "converged": true,
+      "silhouetteScore": 0.015930545273568273,
+      "inertia": 77.55021978687304,
+      "clusterSizes": [
+        14,
+        3,
+        7,
+        6,
+        10,
+        19,
+        11,
+        10,
+        10,
+        10
+      ],
+      "avgClusterSize": 10,
+      "minClusterSize": 3,
+      "maxClusterSize": 19
+    }
+  ],
+  "storage": {
+    "vectorSize": 3072,
+    "compressedSize": 707,
+    "totalUncompressed": 307200,
+    "totalCompressed": 70700,
+    "savings": 236500,
+    "savingsPercent": 77
+  },
+  "bestK": 5
+}
