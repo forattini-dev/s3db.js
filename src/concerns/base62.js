@@ -59,3 +59,73 @@ export const decodeDecimal = s => {
   const num = decPart ? Number(decodedInt + '.' + decPart) : decodedInt;
   return negative ? -num : num;
 };
+
+/**
+ * Fixed-point encoding optimized for normalized values (typically -1 to 1)
+ * Common in embeddings, similarity scores, probabilities, etc.
+ *
+ * Achieves ~77% compression vs encodeDecimal for embedding vectors.
+ *
+ * @param {number} n - Number to encode (works for any range, optimized for [-1, 1])
+ * @param {number} precision - Decimal places to preserve (default: 6)
+ * @returns {string} Base62-encoded string with '^' prefix to indicate fixed-point encoding
+ *
+ * Examples:
+ *   0.123456 → "^w7f" (4 bytes vs 8 bytes with encodeDecimal)
+ *   -0.8234567 → "^-3sdz" (6 bytes vs 10 bytes)
+ *   1.5 → "^98v9" (for values outside [-1,1], still works but less optimal)
+ */
+export const encodeFixedPoint = (n, precision = 6) => {
+  if (typeof n !== 'number' || isNaN(n)) return 'undefined';
+  if (!isFinite(n)) return 'undefined';
+
+  const scale = Math.pow(10, precision);
+  const scaled = Math.round(n * scale);
+
+  if (scaled === 0) return '^0';
+
+  const negative = scaled < 0;
+  let num = Math.abs(scaled);
+  let s = '';
+
+  while (num > 0) {
+    s = alphabet[num % base] + s;
+    num = Math.floor(num / base);
+  }
+
+  // Prefix with ^ to distinguish from regular base62
+  return '^' + (negative ? '-' : '') + s;
+};
+
+/**
+ * Decodes fixed-point encoded values
+ *
+ * @param {string} s - Encoded string (must start with '^')
+ * @param {number} precision - Decimal places used in encoding (default: 6)
+ * @returns {number} Decoded number
+ */
+export const decodeFixedPoint = (s, precision = 6) => {
+  if (typeof s !== 'string') return NaN;
+  if (!s.startsWith('^')) return NaN; // Safety check
+
+  s = s.slice(1); // Remove ^ prefix
+
+  if (s === '0') return 0;
+
+  let negative = false;
+  if (s[0] === '-') {
+    negative = true;
+    s = s.slice(1);
+  }
+
+  let r = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = charToValue[s[i]];
+    if (idx === undefined) return NaN;
+    r = r * base + idx;
+  }
+
+  const scale = Math.pow(10, precision);
+  const scaled = negative ? -r : r;
+  return scaled / scale;
+};

@@ -77,6 +77,41 @@ const decodeDecimal = (s) => {
   const num = decPart ? Number(decodedInt + "." + decPart) : decodedInt;
   return negative ? -num : num;
 };
+const encodeFixedPoint = (n, precision = 6) => {
+  if (typeof n !== "number" || isNaN(n)) return "undefined";
+  if (!isFinite(n)) return "undefined";
+  const scale = Math.pow(10, precision);
+  const scaled = Math.round(n * scale);
+  if (scaled === 0) return "^0";
+  const negative = scaled < 0;
+  let num = Math.abs(scaled);
+  let s = "";
+  while (num > 0) {
+    s = alphabet[num % base] + s;
+    num = Math.floor(num / base);
+  }
+  return "^" + (negative ? "-" : "") + s;
+};
+const decodeFixedPoint = (s, precision = 6) => {
+  if (typeof s !== "string") return NaN;
+  if (!s.startsWith("^")) return NaN;
+  s = s.slice(1);
+  if (s === "0") return 0;
+  let negative = false;
+  if (s[0] === "-") {
+    negative = true;
+    s = s.slice(1);
+  }
+  let r = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = charToValue[s[i]];
+    if (idx === void 0) return NaN;
+    r = r * base + idx;
+  }
+  const scale = Math.pow(10, precision);
+  const scaled = negative ? -r : r;
+  return scaled / scale;
+};
 
 const utf8BytesMemory = /* @__PURE__ */ new Map();
 const UTF8_MEMORY_MAX_SIZE = 1e4;
@@ -11501,6 +11536,11 @@ class Validator extends FastestValidator {
       type: "any",
       custom: this.autoEncrypt ? jsonHandler : void 0
     });
+    this.alias("embedding", {
+      type: "array",
+      items: "number",
+      empty: false
+    });
   }
 }
 const ValidatorManager = new Proxy(Validator, {
@@ -11749,6 +11789,59 @@ const SchemaActions = {
       }
       return NaN;
     });
+  },
+  fromArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (value === null || value === void 0 || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return "";
+    }
+    const encodedItems = value.map((item) => {
+      if (typeof item === "number" && !isNaN(item)) {
+        return encodeFixedPoint(item, precision);
+      }
+      const n = Number(item);
+      return isNaN(n) ? "" : encodeFixedPoint(n, precision);
+    });
+    return encodedItems.join(separator);
+  },
+  toArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (Array.isArray(value)) {
+      return value.map((v) => typeof v === "number" ? v : decodeFixedPoint(v, precision));
+    }
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (value === "") {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = "";
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === "\\" && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = "";
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map((v) => {
+      if (typeof v === "number") return v;
+      if (typeof v === "string" && v !== "") {
+        const n = decodeFixedPoint(v, precision);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
   }
 };
 class Schema {
@@ -11818,18 +11911,89 @@ class Schema {
     }
     return objectKeys;
   }
+  _generateHooksFromOriginalAttributes(attributes, prefix = "") {
+    for (const [key, value] of Object.entries(attributes)) {
+      if (key.startsWith("$$")) continue;
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      if (typeof value === "object" && value !== null && !Array.isArray(value) && value.type) {
+        if (value.type === "array" && value.items) {
+          const itemsType = value.items;
+          const arrayLength = typeof value.length === "number" ? value.length : null;
+          if (itemsType === "string" || typeof itemsType === "string" && itemsType.includes("string")) {
+            this.addHook("beforeMap", fullKey, "fromArray");
+            this.addHook("afterUnmap", fullKey, "toArray");
+          } else if (itemsType === "number" || typeof itemsType === "string" && itemsType.includes("number")) {
+            const isIntegerArray = typeof itemsType === "string" && itemsType.includes("integer");
+            const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
+            if (isIntegerArray) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfNumbers");
+              this.addHook("afterUnmap", fullKey, "toArrayOfNumbers");
+            } else if (isEmbedding) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfEmbeddings");
+              this.addHook("afterUnmap", fullKey, "toArrayOfEmbeddings");
+            } else {
+              this.addHook("beforeMap", fullKey, "fromArrayOfDecimals");
+              this.addHook("afterUnmap", fullKey, "toArrayOfDecimals");
+            }
+          }
+        }
+      } else if (typeof value === "object" && value !== null && !Array.isArray(value) && !value.type) {
+        this._generateHooksFromOriginalAttributes(value, fullKey);
+      }
+    }
+  }
   generateAutoHooks() {
+    this._generateHooksFromOriginalAttributes(this.attributes);
     const schema = flatten(cloneDeep(this.attributes), { safe: true });
     for (const [name, definition] of Object.entries(schema)) {
-      if (definition.includes("array")) {
-        if (definition.includes("items:string")) {
+      if (name.includes("$$")) continue;
+      if (this.options.hooks.beforeMap[name] || this.options.hooks.afterUnmap[name]) {
+        continue;
+      }
+      const defStr = typeof definition === "string" ? definition : "";
+      const defType = typeof definition === "object" && definition !== null ? definition.type : null;
+      const isEmbeddingType = defStr.includes("embedding") || defType === "embedding";
+      if (isEmbeddingType) {
+        const lengthMatch = defStr.match(/embedding:(\d+)/);
+        if (lengthMatch) {
+          parseInt(lengthMatch[1], 10);
+        } else if (defStr.includes("length:")) {
+          const match = defStr.match(/length:(\d+)/);
+          if (match) parseInt(match[1], 10);
+        }
+        this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+        this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
+        continue;
+      }
+      const isArray = defStr.includes("array") || defType === "array";
+      if (isArray) {
+        let itemsType = null;
+        if (typeof definition === "object" && definition !== null && definition.items) {
+          itemsType = definition.items;
+        } else if (defStr.includes("items:string")) {
+          itemsType = "string";
+        } else if (defStr.includes("items:number")) {
+          itemsType = "number";
+        }
+        if (itemsType === "string" || typeof itemsType === "string" && itemsType.includes("string")) {
           this.addHook("beforeMap", name, "fromArray");
           this.addHook("afterUnmap", name, "toArray");
-        } else if (definition.includes("items:number")) {
-          const isIntegerArray = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+        } else if (itemsType === "number" || typeof itemsType === "string" && itemsType.includes("number")) {
+          const isIntegerArray = defStr.includes("integer:true") || defStr.includes("|integer:") || defStr.includes("|integer") || typeof itemsType === "string" && itemsType.includes("integer");
+          let arrayLength = null;
+          if (typeof definition === "object" && definition !== null && typeof definition.length === "number") {
+            arrayLength = definition.length;
+          } else if (defStr.includes("length:")) {
+            const match = defStr.match(/length:(\d+)/);
+            if (match) arrayLength = parseInt(match[1], 10);
+          }
+          const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
           if (isIntegerArray) {
             this.addHook("beforeMap", name, "fromArrayOfNumbers");
             this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else if (isEmbedding) {
+            this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+            this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
           } else {
             this.addHook("beforeMap", name, "fromArrayOfDecimals");
             this.addHook("afterUnmap", name, "toArrayOfDecimals");
@@ -11837,7 +12001,7 @@ class Schema {
         }
         continue;
       }
-      if (definition.includes("secret")) {
+      if (defStr.includes("secret") || defType === "secret") {
         if (this.options.autoEncrypt) {
           this.addHook("beforeMap", name, "encrypt");
         }
@@ -11846,8 +12010,8 @@ class Schema {
         }
         continue;
       }
-      if (definition.includes("number")) {
-        const isInteger = definition.includes("integer:true") || definition.includes("|integer:") || definition.includes("|integer");
+      if (defStr.includes("number") || defType === "number") {
+        const isInteger = defStr.includes("integer:true") || defStr.includes("|integer:") || defStr.includes("|integer");
         if (isInteger) {
           this.addHook("beforeMap", name, "toBase62");
           this.addHook("afterUnmap", name, "fromBase62");
@@ -11857,17 +12021,17 @@ class Schema {
         }
         continue;
       }
-      if (definition.includes("boolean")) {
+      if (defStr.includes("boolean") || defType === "boolean") {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
         continue;
       }
-      if (definition.includes("json")) {
+      if (defStr.includes("json") || defType === "json") {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
       }
-      if (definition === "object" || definition.includes("object")) {
+      if (definition === "object" || defStr.includes("object") || defType === "object") {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
@@ -12009,7 +12173,8 @@ class Schema {
       const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
-      if (typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
+      const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
+      if (!hasAfterUnmapHook && typeof attrDef === "string" && attrDef.includes("number") && !attrDef.includes("array") && !attrDef.includes("decimal")) {
         if (typeof parsedValue === "string" && parsedValue !== "") {
           parsedValue = decode(parsedValue);
         } else if (typeof parsedValue === "number") ; else {
@@ -12074,18 +12239,38 @@ class Schema {
   preprocessAttributesForValidation(attributes) {
     const processed = {};
     for (const [key, value] of Object.entries(attributes)) {
-      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-        const isExplicitRequired = value.$$type && value.$$type.includes("required");
-        const isExplicitOptional = value.$$type && value.$$type.includes("optional");
-        const objectConfig = {
-          type: "object",
-          properties: this.preprocessAttributesForValidation(value),
-          strict: false
-        };
-        if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
-          objectConfig.optional = true;
+      if (typeof value === "string") {
+        if (value.startsWith("embedding:")) {
+          const lengthMatch = value.match(/embedding:(\d+)/);
+          if (lengthMatch) {
+            const length = lengthMatch[1];
+            const rest = value.substring(`embedding:${length}`.length);
+            processed[key] = `array|items:number|length:${length}|empty:false${rest}`;
+            continue;
+          }
         }
-        processed[key] = objectConfig;
+        if (value.startsWith("embedding|") || value === "embedding") {
+          processed[key] = value.replace(/^embedding/, "array|items:number|empty:false");
+          continue;
+        }
+        processed[key] = value;
+      } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const hasValidatorType = value.type !== void 0 && key !== "$$type";
+        if (hasValidatorType) {
+          processed[key] = value;
+        } else {
+          const isExplicitRequired = value.$$type && value.$$type.includes("required");
+          const isExplicitOptional = value.$$type && value.$$type.includes("optional");
+          const objectConfig = {
+            type: "object",
+            properties: this.preprocessAttributesForValidation(value),
+            strict: false
+          };
+          if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
+            objectConfig.optional = true;
+          }
+          processed[key] = objectConfig;
+        }
       } else {
         processed[key] = value;
       }
@@ -18932,5 +19117,1090 @@ class StateMachinePlugin extends Plugin {
   }
 }
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, BehaviorError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetadataLimitError, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, QueueConsumerPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, StreamError, UnknownError, ValidationError, Validator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decrypt, S3db as default, encode, encodeDecimal, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
+function cosineDistance(a, b) {
+  if (a.length !== b.length) {
+    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+  let dotProduct2 = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct2 += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+  if (denominator === 0) {
+    return a.every((v) => v === 0) && b.every((v) => v === 0) ? 0 : 1;
+  }
+  const similarity = dotProduct2 / denominator;
+  return 1 - similarity;
+}
+function euclideanDistance(a, b) {
+  if (a.length !== b.length) {
+    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
+function manhattanDistance(a, b) {
+  if (a.length !== b.length) {
+    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += Math.abs(a[i] - b[i]);
+  }
+  return sum;
+}
+function dotProduct(a, b) {
+  if (a.length !== b.length) {
+    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
+  }
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += a[i] * b[i];
+  }
+  return sum;
+}
+function normalize(vector) {
+  const magnitude2 = Math.sqrt(
+    vector.reduce((sum, val) => sum + val * val, 0)
+  );
+  if (magnitude2 === 0) {
+    return vector.slice();
+  }
+  return vector.map((val) => val / magnitude2);
+}
+
+function kmeans(vectors, k, options = {}) {
+  const {
+    maxIterations = 100,
+    tolerance = 1e-4,
+    distanceFn = euclideanDistance,
+    seed = null,
+    onIteration = null
+  } = options;
+  if (vectors.length === 0) {
+    throw new Error("Cannot cluster empty vector array");
+  }
+  if (k < 1) {
+    throw new Error(`k must be at least 1, got ${k}`);
+  }
+  if (k > vectors.length) {
+    throw new Error(`k (${k}) cannot be greater than number of vectors (${vectors.length})`);
+  }
+  const dimensions = vectors[0].length;
+  for (let i = 1; i < vectors.length; i++) {
+    if (vectors[i].length !== dimensions) {
+      throw new Error(`All vectors must have same dimensions. Expected ${dimensions}, got ${vectors[i].length} at index ${i}`);
+    }
+  }
+  const centroids = initializeCentroidsKMeansPlusPlus(vectors, k, distanceFn, seed);
+  let assignments = new Array(vectors.length);
+  let iterations = 0;
+  let converged = false;
+  let previousInertia = Infinity;
+  while (!converged && iterations < maxIterations) {
+    const newAssignments = vectors.map((vector) => {
+      let minDist = Infinity;
+      let nearestCluster = 0;
+      for (let i = 0; i < k; i++) {
+        const dist = distanceFn(vector, centroids[i]);
+        if (dist < minDist) {
+          minDist = dist;
+          nearestCluster = i;
+        }
+      }
+      return nearestCluster;
+    });
+    let inertia2 = 0;
+    vectors.forEach((vector, i) => {
+      const dist = distanceFn(vector, centroids[newAssignments[i]]);
+      inertia2 += dist * dist;
+    });
+    const inertiaChange = Math.abs(previousInertia - inertia2);
+    converged = inertiaChange < tolerance;
+    assignments = newAssignments;
+    previousInertia = inertia2;
+    if (onIteration) {
+      onIteration(iterations + 1, inertia2, converged);
+    }
+    if (!converged) {
+      const clusterSums = Array(k).fill(null).map(() => new Array(dimensions).fill(0));
+      const clusterCounts = new Array(k).fill(0);
+      vectors.forEach((vector, i) => {
+        const cluster = assignments[i];
+        clusterCounts[cluster]++;
+        vector.forEach((val, j) => {
+          clusterSums[cluster][j] += val;
+        });
+      });
+      for (let i = 0; i < k; i++) {
+        if (clusterCounts[i] > 0) {
+          centroids[i] = clusterSums[i].map((sum) => sum / clusterCounts[i]);
+        } else {
+          const randomIdx = Math.floor(Math.random() * vectors.length);
+          centroids[i] = [...vectors[randomIdx]];
+        }
+      }
+    }
+    iterations++;
+  }
+  let inertia = 0;
+  vectors.forEach((vector, i) => {
+    const dist = distanceFn(vector, centroids[assignments[i]]);
+    inertia += dist * dist;
+  });
+  return {
+    centroids,
+    assignments,
+    iterations,
+    converged,
+    inertia
+  };
+}
+function initializeCentroidsKMeansPlusPlus(vectors, k, distanceFn, seed) {
+  const centroids = [];
+  const n = vectors.length;
+  const firstIndex = seed !== null ? seed % n : Math.floor(Math.random() * n);
+  centroids.push([...vectors[firstIndex]]);
+  for (let i = 1; i < k; i++) {
+    const distances = vectors.map((vector) => {
+      return Math.min(...centroids.map((c) => distanceFn(vector, c)));
+    });
+    const squaredDistances = distances.map((d) => d * d);
+    const totalSquared = squaredDistances.reduce((a, b) => a + b, 0);
+    if (totalSquared === 0) {
+      const randomIdx = Math.floor(Math.random() * n);
+      centroids.push([...vectors[randomIdx]]);
+      continue;
+    }
+    let threshold = Math.random() * totalSquared;
+    let cumulativeSum = 0;
+    for (let j = 0; j < n; j++) {
+      cumulativeSum += squaredDistances[j];
+      if (cumulativeSum >= threshold) {
+        centroids.push([...vectors[j]]);
+        break;
+      }
+    }
+  }
+  return centroids;
+}
+async function findOptimalK(vectors, options = {}) {
+  const {
+    minK = 2,
+    maxK = Math.min(10, Math.floor(Math.sqrt(vectors.length / 2))),
+    distanceFn = euclideanDistance,
+    nReferences = 10,
+    stabilityRuns = 5,
+    ...kmeansOptions
+  } = options;
+  const metricsModule = await Promise.resolve().then(function () { return metrics; });
+  const {
+    silhouetteScore,
+    daviesBouldinIndex,
+    calinskiHarabaszIndex,
+    gapStatistic,
+    clusteringStability
+  } = metricsModule;
+  const results = [];
+  for (let k = minK; k <= maxK; k++) {
+    const kmeansResult = kmeans(vectors, k, { ...kmeansOptions, distanceFn });
+    const silhouette = silhouetteScore(
+      vectors,
+      kmeansResult.assignments,
+      kmeansResult.centroids,
+      distanceFn
+    );
+    const daviesBouldin = daviesBouldinIndex(
+      vectors,
+      kmeansResult.assignments,
+      kmeansResult.centroids,
+      distanceFn
+    );
+    const calinskiHarabasz = calinskiHarabaszIndex(
+      vectors,
+      kmeansResult.assignments,
+      kmeansResult.centroids,
+      distanceFn
+    );
+    const gap = await gapStatistic(
+      vectors,
+      kmeansResult.assignments,
+      kmeansResult.centroids,
+      distanceFn,
+      nReferences
+    );
+    const stability = clusteringStability(
+      vectors,
+      k,
+      { ...kmeansOptions, distanceFn, nRuns: stabilityRuns }
+    );
+    results.push({
+      k,
+      inertia: kmeansResult.inertia,
+      silhouette,
+      daviesBouldin,
+      calinskiHarabasz,
+      gap: gap.gap,
+      gapSk: gap.sk,
+      stability: stability.stability,
+      cvInertia: stability.cvInertia,
+      iterations: kmeansResult.iterations,
+      converged: kmeansResult.converged
+    });
+  }
+  const elbowK = findElbowPoint(results.map((r) => r.inertia));
+  const recommendations = {
+    elbow: minK + elbowK,
+    silhouette: results.reduce(
+      (best, curr) => curr.silhouette > best.silhouette ? curr : best
+    ).k,
+    daviesBouldin: results.reduce(
+      (best, curr) => curr.daviesBouldin < best.daviesBouldin ? curr : best
+    ).k,
+    calinskiHarabasz: results.reduce(
+      (best, curr) => curr.calinskiHarabasz > best.calinskiHarabasz ? curr : best
+    ).k,
+    gap: results.reduce(
+      (best, curr) => curr.gap > best.gap ? curr : best
+    ).k,
+    stability: results.reduce(
+      (best, curr) => curr.stability > best.stability ? curr : best
+    ).k
+  };
+  const votes = Object.values(recommendations);
+  const consensus = votes.reduce((acc, k) => {
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const consensusK = parseInt(
+    Object.entries(consensus).reduce((a, b) => b[1] > a[1] ? b : a)[0]
+  );
+  return {
+    results,
+    recommendations,
+    consensus: consensusK,
+    summary: {
+      analysisRange: `${minK}-${maxK}`,
+      totalVectors: vectors.length,
+      dimensions: vectors[0].length,
+      recommendation: consensusK,
+      confidence: consensus[consensusK] / votes.length
+    }
+  };
+}
+function findElbowPoint(inertias) {
+  const n = inertias.length;
+  if (n < 3) return 0;
+  let maxCurvature = -Infinity;
+  let elbowIndex = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const curvature = inertias[i - 1] - 2 * inertias[i] + inertias[i + 1];
+    if (curvature > maxCurvature) {
+      maxCurvature = curvature;
+      elbowIndex = i;
+    }
+  }
+  return elbowIndex;
+}
+
+class VectorError extends PluginError {
+  constructor(message, details = {}) {
+    super(message, {
+      pluginName: "VectorPlugin",
+      ...details,
+      description: details.description || `
+Vector Plugin Error
+
+Operation: ${details.operation || "unknown"}
+
+Common causes:
+1. Vector dimension mismatch between vectors
+2. Invalid distance metric specified (must be: cosine, euclidean, manhattan)
+3. Empty vector array provided for clustering
+4. k value larger than number of available vectors
+5. Vector field not found or invalid in resource
+6. Large vectors without proper behavior (use 'body-overflow' or 'body-only')
+
+Available distance metrics:
+- cosine: Best for normalized vectors, semantic similarity. Range: [0, 2]
+- euclidean: Standard L2 distance, geometric proximity. Range: [0, \u221E)
+- manhattan: L1 distance, faster computation. Range: [0, \u221E)
+
+Storage considerations:
+- Vectors > 250 dimensions may exceed S3 metadata limit (2KB)
+- Use behavior: 'body-overflow' or 'body-only' for large vectors
+- OpenAI ada-002 (1536 dims): ~10KB, requires body storage
+- Sentence Transformers (384 dims): ~2.7KB, requires body storage
+      `.trim()
+    });
+  }
+}
+
+class VectorPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      dimensions: 1536,
+      // Default to OpenAI ada-002
+      distanceMetric: "cosine",
+      // Default metric
+      storageThreshold: 1500,
+      // Bytes - warn if vectors exceed this
+      autoFixBehavior: false,
+      // Automatically set body-overflow
+      autoDetectVectorField: true,
+      // Auto-detect embedding:XXX fields
+      emitEvents: true,
+      // Emit events for monitoring
+      verboseEvents: false,
+      // Emit detailed progress events
+      eventThrottle: 100,
+      // Throttle progress events (ms)
+      ...options
+    };
+    this.distanceFunctions = {
+      cosine: cosineDistance,
+      euclidean: euclideanDistance,
+      manhattan: manhattanDistance
+    };
+    this._vectorFieldCache = /* @__PURE__ */ new Map();
+    this._throttleState = /* @__PURE__ */ new Map();
+  }
+  async onInstall() {
+    this.emit("installed", { plugin: "VectorPlugin" });
+    this.validateVectorStorage();
+    this.installResourceMethods();
+  }
+  async onStart() {
+    this.emit("started", { plugin: "VectorPlugin" });
+  }
+  async onStop() {
+    this.emit("stopped", { plugin: "VectorPlugin" });
+  }
+  async onUninstall(options) {
+    for (const resource of Object.values(this.database.resources)) {
+      delete resource.vectorSearch;
+      delete resource.cluster;
+      delete resource.vectorDistance;
+      delete resource.similarTo;
+      delete resource.findSimilar;
+      delete resource.distance;
+    }
+    this.emit("uninstalled", { plugin: "VectorPlugin" });
+  }
+  /**
+   * Validate vector storage configuration for all resources
+   *
+   * Detects large vector fields and warns if proper behavior is not set.
+   * Can optionally auto-fix by setting body-overflow behavior.
+   */
+  validateVectorStorage() {
+    for (const resource of Object.values(this.database.resources)) {
+      const vectorFields = this.findVectorFields(resource.schema.attributes);
+      if (vectorFields.length === 0) continue;
+      const totalVectorSize = vectorFields.reduce((sum, f) => sum + f.estimatedBytes, 0);
+      if (totalVectorSize > this.config.storageThreshold) {
+        const hasCorrectBehavior = ["body-overflow", "body-only"].includes(resource.behavior);
+        if (!hasCorrectBehavior) {
+          const warning = {
+            resource: resource.name,
+            vectorFields: vectorFields.map((f) => ({
+              field: f.name,
+              dimensions: f.length,
+              estimatedBytes: f.estimatedBytes
+            })),
+            totalEstimatedBytes: totalVectorSize,
+            metadataLimit: 2047,
+            currentBehavior: resource.behavior || "default",
+            recommendation: "body-overflow"
+          };
+          this.emit("vector:storage-warning", warning);
+          if (this.config.autoFixBehavior) {
+            resource.behavior = "body-overflow";
+            this.emit("vector:behavior-fixed", {
+              resource: resource.name,
+              newBehavior: "body-overflow"
+            });
+          } else {
+            console.warn(`\u26A0\uFE0F  VectorPlugin: Resource '${resource.name}' has large vector fields (${totalVectorSize} bytes estimated)`);
+            console.warn(`   Current behavior: '${resource.behavior || "default"}'`);
+            console.warn(`   Recommendation: Add behavior: 'body-overflow' or 'body-only' to resource configuration`);
+            console.warn(`   Large vectors will exceed S3 metadata limit (2047 bytes) and cause errors.`);
+          }
+        }
+      }
+    }
+  }
+  /**
+   * Auto-detect vector field from resource schema
+   *
+   * Looks for fields with type 'embedding:XXX' pattern.
+   * Caches result per resource for performance.
+   *
+   * @param {Resource} resource - Resource instance
+   * @returns {string|null} Detected vector field name or null
+   */
+  detectVectorField(resource) {
+    if (this._vectorFieldCache.has(resource.name)) {
+      return this._vectorFieldCache.get(resource.name);
+    }
+    const vectorField = this._findEmbeddingField(resource.schema.attributes);
+    this._vectorFieldCache.set(resource.name, vectorField);
+    if (vectorField && this.config.emitEvents) {
+      this.emit("vector:field-detected", {
+        resource: resource.name,
+        vectorField,
+        timestamp: Date.now()
+      });
+    }
+    return vectorField;
+  }
+  /**
+   * Recursively find embedding:XXX field in attributes
+   *
+   * @param {Object} attributes - Resource attributes
+   * @param {string} path - Current path (for nested objects)
+   * @returns {string|null} Field path or null
+   */
+  _findEmbeddingField(attributes, path = "") {
+    for (const [key, attr] of Object.entries(attributes)) {
+      const fullPath = path ? `${path}.${key}` : key;
+      if (typeof attr === "string" && attr.startsWith("embedding:")) {
+        return fullPath;
+      }
+      if (attr.type === "array" && attr.items === "number" && attr.length) {
+        return fullPath;
+      }
+      if (attr.type === "object" && attr.props) {
+        const nested = this._findEmbeddingField(attr.props, fullPath);
+        if (nested) return nested;
+      }
+    }
+    return null;
+  }
+  /**
+   * Emit event with throttling support
+   *
+   * @param {string} eventName - Event name
+   * @param {Object} data - Event data
+   * @param {string} throttleKey - Unique key for throttling (optional)
+   */
+  _emitEvent(eventName, data, throttleKey = null) {
+    if (!this.config.emitEvents) return;
+    if (throttleKey) {
+      const now = Date.now();
+      const lastEmit = this._throttleState.get(throttleKey);
+      if (lastEmit && now - lastEmit < this.config.eventThrottle) {
+        return;
+      }
+      this._throttleState.set(throttleKey, now);
+    }
+    this.emit(eventName, data);
+  }
+  /**
+   * Find vector fields in resource attributes
+   *
+   * @param {Object} attributes - Resource attributes
+   * @param {string} path - Current path (for nested objects)
+   * @returns {Array} Array of vector field info
+   */
+  findVectorFields(attributes, path = "") {
+    const vectors = [];
+    for (const [key, attr] of Object.entries(attributes)) {
+      const fullPath = path ? `${path}.${key}` : key;
+      if (attr.type === "array" && attr.items === "number" && attr.length) {
+        vectors.push({
+          name: fullPath,
+          length: attr.length,
+          estimatedBytes: this.estimateVectorBytes(attr.length)
+        });
+      }
+      if (attr.type === "object" && attr.props) {
+        vectors.push(...this.findVectorFields(attr.props, fullPath));
+      }
+    }
+    return vectors;
+  }
+  /**
+   * Estimate bytes required to store a vector in JSON format
+   *
+   * Conservative estimate: ~7 bytes per number + array overhead
+   *
+   * @param {number} dimensions - Number of dimensions
+   * @returns {number} Estimated bytes
+   */
+  estimateVectorBytes(dimensions) {
+    return dimensions * 7 + 50;
+  }
+  /**
+   * Install vector methods on all resources
+   */
+  installResourceMethods() {
+    for (const resource of Object.values(this.database.resources)) {
+      const searchMethod = this.createVectorSearchMethod(resource);
+      const clusterMethod = this.createClusteringMethod(resource);
+      const distanceMethod = this.createDistanceMethod();
+      resource.vectorSearch = searchMethod;
+      resource.cluster = clusterMethod;
+      resource.vectorDistance = distanceMethod;
+      resource.similarTo = searchMethod;
+      resource.findSimilar = searchMethod;
+      resource.distance = distanceMethod;
+    }
+  }
+  /**
+   * Create vector search method for a resource
+   *
+   * Performs K-nearest neighbors search to find similar vectors.
+   *
+   * @param {Resource} resource - Resource instance
+   * @returns {Function} Vector search method
+   */
+  createVectorSearchMethod(resource) {
+    return async (queryVector, options = {}) => {
+      const startTime = Date.now();
+      let vectorField = options.vectorField;
+      if (!vectorField && this.config.autoDetectVectorField) {
+        vectorField = this.detectVectorField(resource);
+        if (!vectorField) {
+          vectorField = "vector";
+        }
+      } else if (!vectorField) {
+        vectorField = "vector";
+      }
+      const {
+        limit = 10,
+        distanceMetric = this.config.distanceMetric,
+        threshold = null,
+        partition = null
+      } = options;
+      const distanceFn = this.distanceFunctions[distanceMetric];
+      if (!distanceFn) {
+        const error = new VectorError(`Invalid distance metric: ${distanceMetric}`, {
+          operation: "vectorSearch",
+          availableMetrics: Object.keys(this.distanceFunctions),
+          providedMetric: distanceMetric
+        });
+        this._emitEvent("vector:search-error", {
+          resource: resource.name,
+          error: error.message,
+          timestamp: Date.now()
+        });
+        throw error;
+      }
+      this._emitEvent("vector:search-start", {
+        resource: resource.name,
+        vectorField,
+        limit,
+        distanceMetric,
+        partition,
+        threshold,
+        queryDimensions: queryVector.length,
+        timestamp: startTime
+      });
+      try {
+        let allRecords;
+        if (partition) {
+          this._emitEvent("vector:partition-filter", {
+            resource: resource.name,
+            partition,
+            timestamp: Date.now()
+          });
+          allRecords = await resource.list({ partition, partitionValues: partition });
+        } else {
+          allRecords = await resource.getAll();
+        }
+        const totalRecords = allRecords.length;
+        let processedRecords = 0;
+        let dimensionMismatches = 0;
+        const results = allRecords.filter((record) => record[vectorField] && Array.isArray(record[vectorField])).map((record, index) => {
+          try {
+            const distance = distanceFn(queryVector, record[vectorField]);
+            processedRecords++;
+            if (this.config.verboseEvents && processedRecords % 100 === 0) {
+              this._emitEvent("vector:search-progress", {
+                resource: resource.name,
+                processed: processedRecords,
+                total: totalRecords,
+                progress: processedRecords / totalRecords * 100,
+                timestamp: Date.now()
+              }, `search-${resource.name}`);
+            }
+            return { record, distance };
+          } catch (err) {
+            dimensionMismatches++;
+            if (this.config.verboseEvents) {
+              this._emitEvent("vector:dimension-mismatch", {
+                resource: resource.name,
+                recordIndex: index,
+                expected: queryVector.length,
+                got: record[vectorField]?.length,
+                timestamp: Date.now()
+              });
+            }
+            return null;
+          }
+        }).filter((result) => result !== null).filter((result) => threshold === null || result.distance <= threshold).sort((a, b) => a.distance - b.distance).slice(0, limit);
+        const duration = Date.now() - startTime;
+        const throughput = totalRecords / (duration / 1e3);
+        this._emitEvent("vector:search-complete", {
+          resource: resource.name,
+          vectorField,
+          resultsCount: results.length,
+          totalRecords,
+          processedRecords,
+          dimensionMismatches,
+          duration,
+          throughput: throughput.toFixed(2),
+          timestamp: Date.now()
+        });
+        if (this.config.verboseEvents) {
+          this._emitEvent("vector:performance", {
+            operation: "search",
+            resource: resource.name,
+            duration,
+            throughput: throughput.toFixed(2),
+            recordsPerSecond: (processedRecords / (duration / 1e3)).toFixed(2),
+            timestamp: Date.now()
+          });
+        }
+        return results;
+      } catch (error) {
+        this._emitEvent("vector:search-error", {
+          resource: resource.name,
+          error: error.message,
+          stack: error.stack,
+          timestamp: Date.now()
+        });
+        throw error;
+      }
+    };
+  }
+  /**
+   * Create clustering method for a resource
+   *
+   * Performs k-means clustering on resource vectors.
+   *
+   * @param {Resource} resource - Resource instance
+   * @returns {Function} Clustering method
+   */
+  createClusteringMethod(resource) {
+    return async (options = {}) => {
+      const startTime = Date.now();
+      let vectorField = options.vectorField;
+      if (!vectorField && this.config.autoDetectVectorField) {
+        vectorField = this.detectVectorField(resource);
+        if (!vectorField) {
+          vectorField = "vector";
+        }
+      } else if (!vectorField) {
+        vectorField = "vector";
+      }
+      const {
+        k = 5,
+        distanceMetric = this.config.distanceMetric,
+        partition = null,
+        ...kmeansOptions
+      } = options;
+      const distanceFn = this.distanceFunctions[distanceMetric];
+      if (!distanceFn) {
+        const error = new VectorError(`Invalid distance metric: ${distanceMetric}`, {
+          operation: "cluster",
+          availableMetrics: Object.keys(this.distanceFunctions),
+          providedMetric: distanceMetric
+        });
+        this._emitEvent("vector:cluster-error", {
+          resource: resource.name,
+          error: error.message,
+          timestamp: Date.now()
+        });
+        throw error;
+      }
+      this._emitEvent("vector:cluster-start", {
+        resource: resource.name,
+        vectorField,
+        k,
+        distanceMetric,
+        partition,
+        maxIterations: kmeansOptions.maxIterations || 100,
+        timestamp: startTime
+      });
+      try {
+        let allRecords;
+        if (partition) {
+          this._emitEvent("vector:partition-filter", {
+            resource: resource.name,
+            partition,
+            timestamp: Date.now()
+          });
+          allRecords = await resource.list({ partition, partitionValues: partition });
+        } else {
+          allRecords = await resource.getAll();
+        }
+        const recordsWithVectors = allRecords.filter(
+          (record) => record[vectorField] && Array.isArray(record[vectorField])
+        );
+        if (recordsWithVectors.length === 0) {
+          const error = new VectorError("No vectors found in resource", {
+            operation: "cluster",
+            resourceName: resource.name,
+            vectorField
+          });
+          this._emitEvent("vector:empty-dataset", {
+            resource: resource.name,
+            vectorField,
+            totalRecords: allRecords.length,
+            timestamp: Date.now()
+          });
+          throw error;
+        }
+        const vectors = recordsWithVectors.map((record) => record[vectorField]);
+        const result = kmeans(vectors, k, {
+          ...kmeansOptions,
+          distanceFn,
+          onIteration: this.config.verboseEvents ? (iteration, inertia, converged) => {
+            this._emitEvent("vector:cluster-iteration", {
+              resource: resource.name,
+              k,
+              iteration,
+              inertia,
+              converged,
+              timestamp: Date.now()
+            }, `cluster-${resource.name}`);
+          } : void 0
+        });
+        if (result.converged) {
+          this._emitEvent("vector:cluster-converged", {
+            resource: resource.name,
+            k,
+            iterations: result.iterations,
+            inertia: result.inertia,
+            timestamp: Date.now()
+          });
+        }
+        const clusters = Array(k).fill(null).map(() => []);
+        recordsWithVectors.forEach((record, i) => {
+          const clusterIndex = result.assignments[i];
+          clusters[clusterIndex].push(record);
+        });
+        const duration = Date.now() - startTime;
+        const clusterSizes = clusters.map((c) => c.length);
+        this._emitEvent("vector:cluster-complete", {
+          resource: resource.name,
+          vectorField,
+          k,
+          vectorCount: vectors.length,
+          iterations: result.iterations,
+          converged: result.converged,
+          inertia: result.inertia,
+          clusterSizes,
+          duration,
+          timestamp: Date.now()
+        });
+        if (this.config.verboseEvents) {
+          this._emitEvent("vector:performance", {
+            operation: "clustering",
+            resource: resource.name,
+            k,
+            duration,
+            iterationsPerSecond: (result.iterations / (duration / 1e3)).toFixed(2),
+            vectorsPerSecond: (vectors.length / (duration / 1e3)).toFixed(2),
+            timestamp: Date.now()
+          });
+        }
+        return {
+          clusters,
+          centroids: result.centroids,
+          inertia: result.inertia,
+          iterations: result.iterations,
+          converged: result.converged
+        };
+      } catch (error) {
+        this._emitEvent("vector:cluster-error", {
+          resource: resource.name,
+          error: error.message,
+          stack: error.stack,
+          timestamp: Date.now()
+        });
+        throw error;
+      }
+    };
+  }
+  /**
+   * Create distance calculation method
+   *
+   * @returns {Function} Distance method
+   */
+  createDistanceMethod() {
+    return (vector1, vector2, metric = this.config.distanceMetric) => {
+      const distanceFn = this.distanceFunctions[metric];
+      if (!distanceFn) {
+        throw new VectorError(`Invalid distance metric: ${metric}`, {
+          operation: "vectorDistance",
+          availableMetrics: Object.keys(this.distanceFunctions),
+          providedMetric: metric
+        });
+      }
+      return distanceFn(vector1, vector2);
+    };
+  }
+  /**
+   * Static utility: Normalize vector
+   *
+   * @param {number[]} vector - Input vector
+   * @returns {number[]} Normalized vector
+   */
+  static normalize(vector) {
+    return normalize(vector);
+  }
+  /**
+   * Static utility: Calculate dot product
+   *
+   * @param {number[]} vector1 - First vector
+   * @param {number[]} vector2 - Second vector
+   * @returns {number} Dot product
+   */
+  static dotProduct(vector1, vector2) {
+    return dotProduct(vector1, vector2);
+  }
+  /**
+   * Static utility: Find optimal K for clustering
+   *
+   * Analyzes clustering quality across a range of K values using
+   * multiple evaluation metrics.
+   *
+   * @param {number[][]} vectors - Vectors to analyze
+   * @param {Object} options - Configuration options
+   * @returns {Promise<Object>} Analysis results with recommendations
+   */
+  static async findOptimalK(vectors, options) {
+    return findOptimalK(vectors, options);
+  }
+}
+
+function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
+  const k = centroids.length;
+  const n = vectors.length;
+  const clusters = Array(k).fill(null).map(() => []);
+  vectors.forEach((vector, i) => {
+    clusters[assignments[i]].push(i);
+  });
+  let totalScore = 0;
+  let validPoints = 0;
+  if (clusters.every((c) => c.length <= 1)) {
+    return 0;
+  }
+  for (let i = 0; i < n; i++) {
+    const clusterIdx = assignments[i];
+    const cluster = clusters[clusterIdx];
+    if (cluster.length === 1) continue;
+    let a = 0;
+    for (const j of cluster) {
+      if (i !== j) {
+        a += distanceFn(vectors[i], vectors[j]);
+      }
+    }
+    a /= cluster.length - 1;
+    let b = Infinity;
+    for (let otherCluster = 0; otherCluster < k; otherCluster++) {
+      if (otherCluster === clusterIdx) continue;
+      const otherPoints = clusters[otherCluster];
+      if (otherPoints.length === 0) continue;
+      let avgDist = 0;
+      for (const j of otherPoints) {
+        avgDist += distanceFn(vectors[i], vectors[j]);
+      }
+      avgDist /= otherPoints.length;
+      b = Math.min(b, avgDist);
+    }
+    if (b === Infinity) continue;
+    const maxAB = Math.max(a, b);
+    const s = maxAB === 0 ? 0 : (b - a) / maxAB;
+    totalScore += s;
+    validPoints++;
+  }
+  return validPoints > 0 ? totalScore / validPoints : 0;
+}
+function daviesBouldinIndex(vectors, assignments, centroids, distanceFn = euclideanDistance) {
+  const k = centroids.length;
+  const scatters = new Array(k).fill(0);
+  const clusterCounts = new Array(k).fill(0);
+  vectors.forEach((vector, i) => {
+    const cluster = assignments[i];
+    scatters[cluster] += distanceFn(vector, centroids[cluster]);
+    clusterCounts[cluster]++;
+  });
+  for (let i = 0; i < k; i++) {
+    if (clusterCounts[i] > 0) {
+      scatters[i] /= clusterCounts[i];
+    }
+  }
+  let dbIndex = 0;
+  let validClusters = 0;
+  for (let i = 0; i < k; i++) {
+    if (clusterCounts[i] === 0) continue;
+    let maxRatio = 0;
+    for (let j = 0; j < k; j++) {
+      if (i === j || clusterCounts[j] === 0) continue;
+      const centroidDist = distanceFn(centroids[i], centroids[j]);
+      if (centroidDist === 0) continue;
+      const ratio = (scatters[i] + scatters[j]) / centroidDist;
+      maxRatio = Math.max(maxRatio, ratio);
+    }
+    dbIndex += maxRatio;
+    validClusters++;
+  }
+  return validClusters > 0 ? dbIndex / validClusters : 0;
+}
+function calinskiHarabaszIndex(vectors, assignments, centroids, distanceFn = euclideanDistance) {
+  const n = vectors.length;
+  const k = centroids.length;
+  if (k === 1 || k === n) return 0;
+  const dimensions = vectors[0].length;
+  const overallCentroid = new Array(dimensions).fill(0);
+  vectors.forEach((vector) => {
+    vector.forEach((val, dim) => {
+      overallCentroid[dim] += val;
+    });
+  });
+  overallCentroid.forEach((val, dim, arr) => {
+    arr[dim] = val / n;
+  });
+  const clusterCounts = new Array(k).fill(0);
+  vectors.forEach((vector, i) => {
+    clusterCounts[assignments[i]]++;
+  });
+  let bgss = 0;
+  for (let i = 0; i < k; i++) {
+    if (clusterCounts[i] === 0) continue;
+    const dist = distanceFn(centroids[i], overallCentroid);
+    bgss += clusterCounts[i] * dist * dist;
+  }
+  let wcss = 0;
+  vectors.forEach((vector, i) => {
+    const cluster = assignments[i];
+    const dist = distanceFn(vector, centroids[cluster]);
+    wcss += dist * dist;
+  });
+  if (wcss === 0) return 0;
+  return bgss / (k - 1) / (wcss / (n - k));
+}
+async function gapStatistic(vectors, assignments, centroids, distanceFn = euclideanDistance, nReferences = 10) {
+  const n = vectors.length;
+  const k = centroids.length;
+  const dimensions = vectors[0].length;
+  let wk = 0;
+  vectors.forEach((vector, i) => {
+    const dist = distanceFn(vector, centroids[assignments[i]]);
+    wk += dist * dist;
+  });
+  wk = Math.log(wk + 1e-10);
+  const referenceWks = [];
+  const mins = new Array(dimensions).fill(Infinity);
+  const maxs = new Array(dimensions).fill(-Infinity);
+  vectors.forEach((vector) => {
+    vector.forEach((val, dim) => {
+      mins[dim] = Math.min(mins[dim], val);
+      maxs[dim] = Math.max(maxs[dim], val);
+    });
+  });
+  for (let ref = 0; ref < nReferences; ref++) {
+    const refVectors = [];
+    for (let i = 0; i < n; i++) {
+      const refVector = new Array(dimensions);
+      for (let dim = 0; dim < dimensions; dim++) {
+        refVector[dim] = mins[dim] + Math.random() * (maxs[dim] - mins[dim]);
+      }
+      refVectors.push(refVector);
+    }
+    const refResult = kmeans(refVectors, k, { maxIterations: 50, distanceFn });
+    let refWk = 0;
+    refVectors.forEach((vector, i) => {
+      const dist = distanceFn(vector, refResult.centroids[refResult.assignments[i]]);
+      refWk += dist * dist;
+    });
+    referenceWks.push(Math.log(refWk + 1e-10));
+  }
+  const expectedWk = referenceWks.reduce((a, b) => a + b, 0) / nReferences;
+  const gap = expectedWk - wk;
+  const sdk = Math.sqrt(
+    referenceWks.reduce((sum, wk2) => sum + Math.pow(wk2 - expectedWk, 2), 0) / nReferences
+  );
+  const sk = sdk * Math.sqrt(1 + 1 / nReferences);
+  return { gap, sk, expectedWk, actualWk: wk };
+}
+function clusteringStability(vectors, k, options = {}) {
+  const {
+    nRuns = 10,
+    distanceFn = euclideanDistance,
+    ...kmeansOptions
+  } = options;
+  const inertias = [];
+  const allAssignments = [];
+  for (let run = 0; run < nRuns; run++) {
+    const result = kmeans(vectors, k, {
+      ...kmeansOptions,
+      distanceFn,
+      seed: run
+      // Different seed for each run
+    });
+    inertias.push(result.inertia);
+    allAssignments.push(result.assignments);
+  }
+  const assignmentSimilarities = [];
+  for (let i = 0; i < nRuns - 1; i++) {
+    for (let j = i + 1; j < nRuns; j++) {
+      const similarity = calculateAssignmentSimilarity(allAssignments[i], allAssignments[j]);
+      assignmentSimilarities.push(similarity);
+    }
+  }
+  const avgInertia = inertias.reduce((a, b) => a + b, 0) / nRuns;
+  const stdInertia = Math.sqrt(
+    inertias.reduce((sum, val) => sum + Math.pow(val - avgInertia, 2), 0) / nRuns
+  );
+  const avgSimilarity = assignmentSimilarities.length > 0 ? assignmentSimilarities.reduce((a, b) => a + b, 0) / assignmentSimilarities.length : 1;
+  return {
+    avgInertia,
+    stdInertia,
+    cvInertia: avgInertia !== 0 ? stdInertia / avgInertia : 0,
+    // Coefficient of variation
+    avgSimilarity,
+    stability: avgSimilarity
+    // Higher is more stable
+  };
+}
+function calculateAssignmentSimilarity(assignments1, assignments2) {
+  const n = assignments1.length;
+  let matches = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const sameCluster1 = assignments1[i] === assignments1[j];
+      const sameCluster2 = assignments2[i] === assignments2[j];
+      if (sameCluster1 === sameCluster2) {
+        matches++;
+      }
+    }
+  }
+  const totalPairs = n * (n - 1) / 2;
+  return totalPairs > 0 ? matches / totalPairs : 1;
+}
+
+var metrics = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  calinskiHarabaszIndex: calinskiHarabaszIndex,
+  clusteringStability: clusteringStability,
+  daviesBouldinIndex: daviesBouldinIndex,
+  gapStatistic: gapStatistic,
+  silhouetteScore: silhouetteScore
+});
+
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BackupPlugin, BaseError, BehaviorError, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FullTextPlugin, InvalidResourceItem, MetadataLimitError, MetricsPlugin, MissingMetadata, NoSuchBucket, NoSuchKey, NotFound, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, QueueConsumerPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3QueuePlugin, Database as S3db, S3dbError, SchedulerPlugin, Schema, SchemaError, StateMachinePlugin, StreamError, UnknownError, ValidationError, Validator, VectorPlugin, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, decode, decodeDecimal, decodeFixedPoint, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync };
 //# sourceMappingURL=s3db.es.js.map
