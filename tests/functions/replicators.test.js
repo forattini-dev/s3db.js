@@ -57,9 +57,9 @@ describe('Replicators Coverage Tests', () => {
 
     test('should throw error for unimplemented replicateBatch method', async () => {
       const replicator = new BaseReplicator({ enabled: true });
-      
+
       await expect(replicator.replicateBatch('users', [{ id: '1' }]))
-        .rejects.toThrow('replicateBatch() method must be implemented by BaseReplicator');
+        .rejects.toThrow(/replicateBatch\(\) method must be implemented/);
     });
 
     test('should throw error for unimplemented testConnection method', async () => {
