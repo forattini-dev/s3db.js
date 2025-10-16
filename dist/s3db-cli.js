@@ -44419,14 +44419,14 @@ function tryFnSync(fn) {
 }
 
 class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, ...rest }) {
+  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, description, ...rest }) {
     if (verbose) message = message + `\n\nVerbose:\n\n${JSON.stringify(rest, null, 2)}`;
     super(message);
 
     if (typeof Error.captureStackTrace === 'function') {
       Error.captureStackTrace(this, this.constructor);
-    } else { 
-      this.stack = (new Error(message)).stack; 
+    } else {
+      this.stack = (new Error(message)).stack;
     }
 
     super.name = this.constructor.name;
@@ -44442,7 +44442,7 @@ class BaseError extends Error {
     this.commandName = commandName;
     this.commandInput = commandInput;
     this.metadata = metadata;
-    this.suggestion = suggestion;
+    this.description = description;
     this.data = { bucket, key, ...rest, verbose, message };
   }
 
@@ -44460,7 +44460,7 @@ class BaseError extends Error {
       commandName: this.commandName,
       commandInput: this.commandInput,
       metadata: this.metadata,
-      suggestion: this.suggestion,
+      description: this.description,
       data: this.data,
       original: this.original,
       stack: this.stack,
@@ -44486,6 +44486,14 @@ class S3dbError extends BaseError {
       metadata = original.$metadata ? { ...original.$metadata } : undefined;
     }
     super({ message, ...details, code, statusCode, requestId, awsMessage, original, metadata });
+  }
+}
+
+// Database operation errors
+class DatabaseError extends S3dbError {
+  constructor(message, details = {}) {
+    super(message, details);
+    Object.assign(this, details);
   }
 }
 
@@ -44580,26 +44588,26 @@ function mapAwsError(err, context = {}) {
   const metadata = err.$metadata ? { ...err.$metadata } : undefined;
   const commandName = context.commandName;
   const commandInput = context.commandInput;
-  let suggestion;
+  let description;
   if (code === 'NoSuchKey' || code === 'NotFound') {
-    suggestion = 'Check if the key exists in the specified bucket and if your credentials have permission.';
-    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'The specified key does not exist in the bucket. Check if the key exists and if your credentials have permission to access it.';
+    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'NoSuchBucket') {
-    suggestion = 'Check if the bucket exists and if your credentials have permission.';
-    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'The specified bucket does not exist. Check if the bucket name is correct and if your credentials have permission to access it.';
+    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'AccessDenied' || (err.statusCode === 403) || code === 'Forbidden') {
-    suggestion = 'Check your credentials and bucket policy.';
-    return new PermissionError('Access denied', { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Access denied. Check your AWS credentials, IAM permissions, and bucket policy.';
+    return new PermissionError('Access denied', { ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'ValidationError' || (err.statusCode === 400)) {
-    suggestion = 'Check the request parameters and payload.';
-    return new ValidationError('Validation error', { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Validation error. Check the request parameters and payload format.';
+    return new ValidationError('Validation error', { ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'MissingMetadata') {
-    suggestion = 'Check if the object metadata is present and valid.';
-    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Object metadata is missing or invalid. Check if the object was uploaded correctly.';
+    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   // Outros mapeamentos podem ser adicionados aqui
   // Incluir detalhes do erro original para facilitar debug
@@ -44609,39 +44617,209 @@ function mapAwsError(err, context = {}) {
     err.statusCode && `Status: ${err.statusCode}`,
     err.stack && `Stack: ${err.stack.split('\n')[0]}`,
   ].filter(Boolean).join(' | ');
-  
-  suggestion = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
-  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, suggestion });
+
+  description = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
+  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, description });
 }
 
 class ConnectionStringError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check the connection string format and credentials.' });
+    const description = details.description || 'Invalid connection string format. Check the connection string syntax and credentials.';
+    super(message, { ...details, description });
   }
 }
 
 class CryptoError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check if the crypto library is available and input is valid.' });
+    const description = details.description || 'Cryptography operation failed. Check if the crypto library is available and input is valid.';
+    super(message, { ...details, description });
   }
 }
 
 class SchemaError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check schema definition and input data.' });
+    const description = details.description || 'Schema validation failed. Check schema definition and input data format.';
+    super(message, { ...details, description });
   }
 }
 
 class ResourceError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: details.suggestion || 'Check resource configuration, attributes, and operation context.' });
+    const description = details.description || 'Resource operation failed. Check resource configuration, attributes, and operation context.';
+    super(message, { ...details, description });
     Object.assign(this, details);
   }
 }
 
 class PartitionError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: details.suggestion || 'Check partition definition, fields, and input values.' });
+    // Generate description if not provided
+    let description = details.description;
+    if (!description && details.resourceName && details.partitionName && details.fieldName) {
+      const { resourceName, partitionName, fieldName, availableFields = [] } = details;
+      description = `
+Partition Field Validation Error
+
+Resource: ${resourceName}
+Partition: ${partitionName}
+Missing Field: ${fieldName}
+
+Available fields in schema:
+${availableFields.map(f => `  • ${f}`).join('\n') || '  (no fields defined)'}
+
+Possible causes:
+1. Field was removed from schema but partition still references it
+2. Typo in partition field name
+3. Nested field path is incorrect (use dot notation like 'utm.source')
+
+Solution:
+${details.strictValidation === false
+  ? '  • Update partition definition to use existing fields'
+  : `  • Add missing field to schema, OR
+  • Update partition definition to use existing fields, OR
+  • Use strictValidation: false to skip this check during testing`}
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitions
+`.trim();
+    }
+
+    super(message, {
+      ...details,
+      description
+    });
+  }
+}
+
+// Behavior errors
+class BehaviorError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      behavior = 'unknown',
+      availableBehaviors = [],
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Behavior Error
+
+Requested: ${behavior}
+Available: ${availableBehaviors.join(', ') || 'body-overflow, body-only, truncate-data, enforce-limits, user-managed'}
+
+Possible causes:
+1. Behavior name misspelled
+2. Custom behavior not registered
+
+Solution:
+Use one of the available behaviors or register custom behavior.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behaviors
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      behavior,
+      availableBehaviors,
+      description
+    });
+  }
+}
+
+// Stream errors
+class StreamError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      operation = 'unknown',
+      resource,
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description) {
+      description = `
+Stream Error
+
+Operation: ${operation}
+${resource ? `Resource: ${resource}` : ''}
+
+Possible causes:
+1. Stream not properly initialized
+2. Resource not available
+3. Network error during streaming
+
+Solution:
+Check stream configuration and resource availability.
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streaming
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      operation,
+      resource,
+      description
+    });
+  }
+}
+
+// Metadata limit errors (specific for 2KB S3 limit)
+class MetadataLimitError extends S3dbError {
+  constructor(message, details = {}) {
+    const {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit = 2047,
+      excess,
+      resourceName,
+      operation,
+      ...rest
+    } = details;
+
+    let description = details.description;
+    if (!description && totalSize && effectiveLimit) {
+      description = `
+S3 Metadata Size Limit Exceeded
+
+Current Size: ${totalSize} bytes
+Effective Limit: ${effectiveLimit} bytes
+Absolute Limit: ${absoluteLimit} bytes
+${excess ? `Excess: ${excess} bytes` : ''}
+${resourceName ? `Resource: ${resourceName}` : ''}
+${operation ? `Operation: ${operation}` : ''}
+
+S3 has a hard limit of 2KB (2047 bytes) for object metadata.
+
+Solutions:
+1. Use 'body-overflow' behavior to store excess in body
+2. Use 'body-only' behavior to store everything in body
+3. Reduce number of fields
+4. Use shorter field values
+5. Enable advanced metadata encoding
+
+Example:
+  await db.createResource({
+    name: '${resourceName || 'myResource'}',
+    behavior: 'body-overflow',  // Automatically handles overflow
+    attributes: { ... }
+  });
+
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata-size-limits
+`.trim();
+    }
+
+    super(message, {
+      ...rest,
+      totalSize,
+      effectiveLimit,
+      absoluteLimit,
+      excess,
+      resourceName,
+      operation,
+      description
+    });
   }
 }
 
@@ -45621,7 +45799,17 @@ class Client extends EventEmitter {
       });
     this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
-      throw new Error("Some objects could not be moved");
+      throw new UnknownError("Some objects could not be moved", {
+        bucket: this.config.bucket,
+        operation: 'moveAllObjects',
+        prefixFrom,
+        prefixTo,
+        totalKeys: keys.length,
+        failedCount: errors.length,
+        successCount: results.length,
+        errors: errors.map(e => ({ message: e.message, raw: e.raw })),
+        suggestion: 'Check S3 permissions and retry failed objects individually'
+      });
     }
     return results;
   }
@@ -48287,6 +48475,14 @@ class Validator extends FastestValidator {
       type: "any",
       custom: this.autoEncrypt ? jsonHandler : undefined,
     });
+
+    // Embedding type - shorthand for arrays of numbers optimized for embeddings
+    // Usage: 'embedding:1536' or 'embedding|length:768'
+    this.alias('embedding', {
+      type: "array",
+      items: "number",
+      empty: false,
+    });
   }
 }
 
@@ -48359,6 +48555,76 @@ const decodeDecimal = s => {
   if (isNaN(decodedInt)) return NaN;
   const num = decPart ? Number(decodedInt + '.' + decPart) : decodedInt;
   return negative ? -num : num;
+};
+
+/**
+ * Fixed-point encoding optimized for normalized values (typically -1 to 1)
+ * Common in embeddings, similarity scores, probabilities, etc.
+ *
+ * Achieves ~77% compression vs encodeDecimal for embedding vectors.
+ *
+ * @param {number} n - Number to encode (works for any range, optimized for [-1, 1])
+ * @param {number} precision - Decimal places to preserve (default: 6)
+ * @returns {string} Base62-encoded string with '^' prefix to indicate fixed-point encoding
+ *
+ * Examples:
+ *   0.123456 → "^w7f" (4 bytes vs 8 bytes with encodeDecimal)
+ *   -0.8234567 → "^-3sdz" (6 bytes vs 10 bytes)
+ *   1.5 → "^98v9" (for values outside [-1,1], still works but less optimal)
+ */
+const encodeFixedPoint = (n, precision = 6) => {
+  if (typeof n !== 'number' || isNaN(n)) return 'undefined';
+  if (!isFinite(n)) return 'undefined';
+
+  const scale = Math.pow(10, precision);
+  const scaled = Math.round(n * scale);
+
+  if (scaled === 0) return '^0';
+
+  const negative = scaled < 0;
+  let num = Math.abs(scaled);
+  let s = '';
+
+  while (num > 0) {
+    s = alphabet[num % base] + s;
+    num = Math.floor(num / base);
+  }
+
+  // Prefix with ^ to distinguish from regular base62
+  return '^' + (negative ? '-' : '') + s;
+};
+
+/**
+ * Decodes fixed-point encoded values
+ *
+ * @param {string} s - Encoded string (must start with '^')
+ * @param {number} precision - Decimal places used in encoding (default: 6)
+ * @returns {number} Decoded number
+ */
+const decodeFixedPoint = (s, precision = 6) => {
+  if (typeof s !== 'string') return NaN;
+  if (!s.startsWith('^')) return NaN; // Safety check
+
+  s = s.slice(1); // Remove ^ prefix
+
+  if (s === '0') return 0;
+
+  let negative = false;
+  if (s[0] === '-') {
+    negative = true;
+    s = s.slice(1);
+  }
+
+  let r = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = charToValue[s[i]];
+    if (idx === undefined) return NaN;
+    r = r * base + idx;
+  }
+
+  const scale = Math.pow(10, precision);
+  const scaled = negative ? -r : r;
+  return scaled / scale;
 };
 
 /**
@@ -48618,6 +48884,60 @@ const SchemaActions = {
       return NaN;
     });
   },
+  fromArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return '';
+    }
+    const encodedItems = value.map(item => {
+      if (typeof item === 'number' && !isNaN(item)) {
+        return encodeFixedPoint(item, precision);
+      }
+      // fallback: try to parse as number, else keep as is
+      const n = Number(item);
+      return isNaN(n) ? '' : encodeFixedPoint(n, precision);
+    });
+    return encodedItems.join(separator);
+  },
+  toArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (Array.isArray(value)) {
+      return value.map(v => (typeof v === 'number' ? v : decodeFixedPoint(v, precision)));
+    }
+    if (value === null || value === undefined) {
+      return value;
+    }
+    if (value === '') {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = '';
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map(v => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string' && v !== '') {
+        const n = decodeFixedPoint(v, precision);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
 
 };
 
@@ -48695,16 +49015,16 @@ class Schema {
 
   extractObjectKeys(obj, prefix = '') {
     const objectKeys = [];
-    
+
     for (const [key, value] of Object.entries(obj)) {
       if (key.startsWith('$$')) continue; // Skip schema metadata
-      
+
       const fullKey = prefix ? `${prefix}.${key}` : key;
-      
+
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         // This is an object, add its key
         objectKeys.push(fullKey);
-        
+
         // Check if it has nested objects
         if (value.$$type === 'object') {
           // Recursively extract nested object keys
@@ -48712,31 +49032,135 @@ class Schema {
         }
       }
     }
-    
+
     return objectKeys;
   }
 
+  _generateHooksFromOriginalAttributes(attributes, prefix = '') {
+    for (const [key, value] of Object.entries(attributes)) {
+      if (key.startsWith('$$')) continue;
+
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+
+      // Check if this is an object notation type definition (has 'type' property)
+      if (typeof value === 'object' && value !== null && !Array.isArray(value) && value.type) {
+        if (value.type === 'array' && value.items) {
+          // Handle array with object notation
+          const itemsType = value.items;
+          const arrayLength = typeof value.length === 'number' ? value.length : null;
+
+          if (itemsType === 'string' || (typeof itemsType === 'string' && itemsType.includes('string'))) {
+            this.addHook("beforeMap", fullKey, "fromArray");
+            this.addHook("afterUnmap", fullKey, "toArray");
+          } else if (itemsType === 'number' || (typeof itemsType === 'string' && itemsType.includes('number'))) {
+            const isIntegerArray = typeof itemsType === 'string' && itemsType.includes('integer');
+            const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
+
+            if (isIntegerArray) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfNumbers");
+              this.addHook("afterUnmap", fullKey, "toArrayOfNumbers");
+            } else if (isEmbedding) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfEmbeddings");
+              this.addHook("afterUnmap", fullKey, "toArrayOfEmbeddings");
+            } else {
+              this.addHook("beforeMap", fullKey, "fromArrayOfDecimals");
+              this.addHook("afterUnmap", fullKey, "toArrayOfDecimals");
+            }
+          }
+        }
+        // For other types with object notation, they'll be handled by the flattened processing
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value) && !value.type) {
+        // This is a nested object, recurse
+        this._generateHooksFromOriginalAttributes(value, fullKey);
+      }
+    }
+  }
+
   generateAutoHooks() {
+    // First, process the original attributes to find arrays with object notation
+    // This handles cases like: { type: 'array', items: 'number', length: 768 }
+    this._generateHooksFromOriginalAttributes(this.attributes);
+
+    // Then process the flattened schema for other types
     const schema = flatten(cloneDeep(this.attributes), { safe: true });
 
     for (const [name, definition] of Object.entries(schema)) {
-      // Handle arrays first to avoid conflicts
-      if (definition.includes("array")) {
-        if (definition.includes('items:string')) {
+      // Skip metadata fields
+      if (name.includes('$$')) continue;
+
+      // Skip if hooks already exist (from object notation processing)
+      if (this.options.hooks.beforeMap[name] || this.options.hooks.afterUnmap[name]) {
+        continue;
+      }
+
+      // Normalize definition - can be a string or value from flattened object
+      const defStr = typeof definition === 'string' ? definition : '';
+      const defType = typeof definition === 'object' && definition !== null ? definition.type : null;
+
+      // Check if this is an embedding type (custom shorthand)
+      const isEmbeddingType = defStr.includes("embedding") || defType === 'embedding';
+
+      if (isEmbeddingType) {
+        const lengthMatch = defStr.match(/embedding:(\d+)/);
+        if (lengthMatch) {
+          parseInt(lengthMatch[1], 10);
+        } else if (defStr.includes('length:')) {
+          const match = defStr.match(/length:(\d+)/);
+          if (match) parseInt(match[1], 10);
+        }
+
+        // Embeddings always use fixed-point encoding
+        this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+        this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
+        continue;
+      }
+
+      // Check if this is an array type
+      const isArray = defStr.includes("array") || defType === 'array';
+
+      if (isArray) {
+        // Determine item type for arrays
+        let itemsType = null;
+        if (typeof definition === 'object' && definition !== null && definition.items) {
+          itemsType = definition.items;
+        } else if (defStr.includes('items:string')) {
+          itemsType = 'string';
+        } else if (defStr.includes('items:number')) {
+          itemsType = 'number';
+        }
+
+        if (itemsType === 'string' || (typeof itemsType === 'string' && itemsType.includes('string'))) {
           this.addHook("beforeMap", name, "fromArray");
           this.addHook("afterUnmap", name, "toArray");
-        } else if (definition.includes('items:number')) {
+        } else if (itemsType === 'number' || (typeof itemsType === 'string' && itemsType.includes('number'))) {
           // Check if the array items should be treated as integers
-          const isIntegerArray = definition.includes("integer:true") || 
-                                definition.includes("|integer:") ||
-                                definition.includes("|integer");
-          
+          const isIntegerArray = defStr.includes("integer:true") ||
+                                defStr.includes("|integer:") ||
+                                defStr.includes("|integer") ||
+                                (typeof itemsType === 'string' && itemsType.includes('integer'));
+
+          // Check if this is an embedding array (large arrays of decimals)
+          // Common embedding dimensions: 256, 384, 512, 768, 1024, 1536, 2048, 3072
+          let arrayLength = null;
+          if (typeof definition === 'object' && definition !== null && typeof definition.length === 'number') {
+            arrayLength = definition.length;
+          } else if (defStr.includes('length:')) {
+            const match = defStr.match(/length:(\d+)/);
+            if (match) arrayLength = parseInt(match[1], 10);
+          }
+
+          const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
+
           if (isIntegerArray) {
             // Use standard base62 for arrays of integers
             this.addHook("beforeMap", name, "fromArrayOfNumbers");
             this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else if (isEmbedding) {
+            // Use fixed-point encoding for embedding vectors (77% compression)
+            this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+            this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
           } else {
-            // Use decimal-aware base62 for arrays of decimals
+            // Use decimal-aware base62 for regular arrays of decimals
             this.addHook("beforeMap", name, "fromArrayOfDecimals");
             this.addHook("afterUnmap", name, "toArrayOfDecimals");
           }
@@ -48746,7 +49170,7 @@ class Schema {
       }
 
       // Handle secrets
-      if (definition.includes("secret")) {
+      if (defStr.includes("secret") || defType === 'secret') {
         if (this.options.autoEncrypt) {
           this.addHook("beforeMap", name, "encrypt");
         }
@@ -48758,12 +49182,12 @@ class Schema {
       }
 
       // Handle numbers (only for non-array fields)
-      if (definition.includes("number")) {
+      if (defStr.includes("number") || defType === 'number') {
         // Check if it's specifically an integer field
-        const isInteger = definition.includes("integer:true") || 
-                         definition.includes("|integer:") ||
-                         definition.includes("|integer");
-        
+        const isInteger = defStr.includes("integer:true") ||
+                         defStr.includes("|integer:") ||
+                         defStr.includes("|integer");
+
         if (isInteger) {
           // Use standard base62 for integers
           this.addHook("beforeMap", name, "toBase62");
@@ -48777,21 +49201,21 @@ class Schema {
       }
 
       // Handle booleans
-      if (definition.includes("boolean")) {
+      if (defStr.includes("boolean") || defType === 'boolean') {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
         continue;
       }
 
       // Handle JSON fields
-      if (definition.includes("json")) {
+      if (defStr.includes("json") || defType === 'json') {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
       }
 
       // Handle object fields - add JSON serialization hooks
-      if (definition === "object" || definition.includes("object")) {
+      if (definition === "object" || defStr.includes("object") || defType === 'object') {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
@@ -48948,8 +49372,11 @@ class Schema {
       const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
+      const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
+
       // Always unmap base62 strings to numbers for number fields (but not array fields or decimal fields)
-      if (typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
+      // Skip if there are afterUnmap hooks that will handle the conversion
+      if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
         if (typeof parsedValue === 'string' && parsedValue !== '') {
           parsedValue = decode(parsedValue);
         } else if (typeof parsedValue === 'number') ; else {
@@ -49017,26 +49444,54 @@ class Schema {
    */
   preprocessAttributesForValidation(attributes) {
     const processed = {};
-    
+
     for (const [key, value] of Object.entries(attributes)) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const isExplicitRequired = value.$$type && value.$$type.includes('required');
-        const isExplicitOptional = value.$$type && value.$$type.includes('optional');
-        const objectConfig = {
-          type: 'object',
-          properties: this.preprocessAttributesForValidation(value),
-          strict: false
-        };
-        // If explicitly required, don't mark as optional
-        if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
-          objectConfig.optional = true;
+      if (typeof value === 'string') {
+        // Expand embedding:XXX shorthand to array|items:number|length:XXX
+        if (value.startsWith('embedding:')) {
+          const lengthMatch = value.match(/embedding:(\d+)/);
+          if (lengthMatch) {
+            const length = lengthMatch[1];
+            // Extract any additional modifiers after the length
+            const rest = value.substring(`embedding:${length}`.length);
+            processed[key] = `array|items:number|length:${length}|empty:false${rest}`;
+            continue;
+          }
         }
-        processed[key] = objectConfig;
+        // Expand embedding|... to array|items:number|...
+        if (value.startsWith('embedding|') || value === 'embedding') {
+          processed[key] = value.replace(/^embedding/, 'array|items:number|empty:false');
+          continue;
+        }
+        processed[key] = value;
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Check if this is a validator type definition (has 'type' property that is NOT '$$type')
+        // vs a nested object structure
+        const hasValidatorType = value.type !== undefined && key !== '$$type';
+
+        if (hasValidatorType) {
+          // This is a validator type definition (e.g., { type: 'array', items: 'number' }), pass it through
+          processed[key] = value;
+        } else {
+          // This is a nested object structure, wrap it for validation
+          const isExplicitRequired = value.$$type && value.$$type.includes('required');
+          const isExplicitOptional = value.$$type && value.$$type.includes('optional');
+          const objectConfig = {
+            type: 'object',
+            properties: this.preprocessAttributesForValidation(value),
+            strict: false
+          };
+          // If explicitly required, don't mark as optional
+          if (isExplicitRequired) ; else if (isExplicitOptional || this.allNestedObjectsOptional) {
+            objectConfig.optional = true;
+          }
+          processed[key] = objectConfig;
+        }
       } else {
         processed[key] = value;
       }
     }
-    
+
     return processed;
   }
 }
@@ -49112,7 +49567,11 @@ class ResourceReader extends EventEmitter {
     super();
 
     if (!resource) {
-      throw new Error("Resource is required for ResourceReader");
+      throw new StreamError('Resource is required for ResourceReader', {
+        operation: 'constructor',
+        resource: resource?.name,
+        suggestion: 'Pass a valid Resource instance when creating ResourceReader'
+      });
     }
 
     this.resource = resource;
@@ -49269,7 +49728,10 @@ class ResourceWriter extends EventEmitter {
 function streamToString(stream) {
   return new Promise((resolve, reject) => {
     if (!stream) {
-      return reject(new Error('streamToString: stream is undefined'));
+      return reject(new StreamError('Stream is undefined', {
+        operation: 'streamToString',
+        suggestion: 'Ensure a valid stream is passed to streamToString()'
+      }));
     }
     const chunks = [];
     stream.on('data', (chunk) => chunks.push(chunk));
@@ -49617,9 +50079,16 @@ async function handleInsert$4({ resource, data, mappedData, originalData }) {
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on insert', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'insert'
+    });
   }
-  
+
   // If data fits in metadata, store only in metadata
   return { mappedData, body: "" };
 }
@@ -49638,7 +50107,15 @@ async function handleUpdate$4({ resource, id, data, mappedData, originalData }) 
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on update', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'update',
+      id
+    });
   }
   return { mappedData, body: JSON.stringify(mappedData) };
 }
@@ -49657,7 +50134,15 @@ async function handleUpsert$4({ resource, id, data, mappedData }) {
   });
   
   if (totalSize > effectiveLimit) {
-    throw new Error(`S3 metadata size exceeds 2KB limit. Current size: ${totalSize} bytes, effective limit: ${effectiveLimit} bytes, absolute limit: ${S3_METADATA_LIMIT_BYTES} bytes`);
+    throw new MetadataLimitError('Metadata size exceeds 2KB limit on upsert', {
+      totalSize,
+      effectiveLimit,
+      absoluteLimit: S3_METADATA_LIMIT_BYTES,
+      excess: totalSize - effectiveLimit,
+      resourceName: resource.name,
+      operation: 'upsert',
+      id
+    });
   }
   return { mappedData, body: "" };
 }
@@ -50350,7 +50835,11 @@ const behaviors = {
 function getBehavior(behaviorName) {
   const behavior = behaviors[behaviorName];
   if (!behavior) {
-    throw new Error(`Unknown behavior: ${behaviorName}. Available behaviors: ${Object.keys(behaviors).join(', ')}`);
+    throw new BehaviorError(`Unknown behavior: ${behaviorName}`, {
+      behavior: behaviorName,
+      availableBehaviors: Object.keys(behaviors),
+      operation: 'getBehavior'
+    });
   }
   return behavior;
 }
@@ -50478,6 +50967,7 @@ class Resource extends AsyncEventEmitter {
       idGenerator: customIdGenerator,
       idSize = 22,
       versioningEnabled = false,
+      strictValidation = true,
       events = {},
       asyncEvents = true,
       asyncPartitions = true,
@@ -50493,6 +50983,7 @@ class Resource extends AsyncEventEmitter {
     this.parallelism = parallelism;
     this.passphrase = passphrase ?? 'secret';
     this.versioningEnabled = versioningEnabled;
+    this.strictValidation = strictValidation;
     
     // Configure async events mode
     this.setAsyncMode(asyncEvents);
@@ -50816,9 +51307,14 @@ class Resource extends AsyncEventEmitter {
 
   /**
    * Validate that all partition fields exist in current resource attributes
-   * @throws {Error} If partition fields don't exist in current schema
+   * @throws {Error} If partition fields don't exist in current schema (only when strictValidation is true)
    */
   validatePartitions() {
+    // Skip validation if strictValidation is disabled
+    if (!this.strictValidation) {
+      return;
+    }
+
     if (!this.config.partitions) {
       return; // No partitions to validate
     }
@@ -53368,6 +53864,7 @@ class Database extends EventEmitter {
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
+    this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
 
     // Initialize hooks system
     this._initHooks();
@@ -53532,6 +54029,7 @@ class Database extends EventEmitter {
           asyncEvents: versionData.asyncEvents !== undefined ? versionData.asyncEvents : true,
           hooks: this.persistHooks ? this._deserializeHooks(versionData.hooks || {}) : (versionData.hooks || {}),
           versioningEnabled: this.versioningEnabled,
+          strictValidation: this.strictValidation,
           map: versionData.map,
           idGenerator: restoredIdGenerator,
           idSize: restoredIdSize
@@ -53783,7 +54281,12 @@ class Database extends EventEmitter {
     const plugin = this.plugins[pluginName] || this.pluginRegistry[pluginName];
 
     if (!plugin) {
-      throw new Error(`Plugin '${name}' not found`);
+      throw new DatabaseError(`Plugin '${name}' not found`, {
+        operation: 'uninstallPlugin',
+        pluginName: name,
+        availablePlugins: Object.keys(this.pluginRegistry),
+        suggestion: 'Check plugin name or list available plugins using Object.keys(db.pluginRegistry)'
+      });
     }
 
     // Stop the plugin first
@@ -54332,6 +54835,7 @@ class Database extends EventEmitter {
       autoDecrypt: config.autoDecrypt !== undefined ? config.autoDecrypt : true,
       hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
+      strictValidation: this.strictValidation,
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
@@ -54548,10 +55052,20 @@ class Database extends EventEmitter {
   addHook(event, fn) {
     if (!this._hooks) this._initHooks();
     if (!this._hooks.has(event)) {
-      throw new Error(`Unknown hook event: ${event}. Available events: ${this._hookEvents.join(', ')}`);
+      throw new DatabaseError(`Unknown hook event: ${event}`, {
+        operation: 'addHook',
+        invalidEvent: event,
+        availableEvents: this._hookEvents,
+        suggestion: `Use one of the available hook events: ${this._hookEvents.join(', ')}`
+      });
     }
     if (typeof fn !== 'function') {
-      throw new Error('Hook function must be a function');
+      throw new DatabaseError('Hook function must be a function', {
+        operation: 'addHook',
+        event,
+        receivedType: typeof fn,
+        suggestion: 'Provide a function that will be called when the hook event occurs'
+      });
     }
     this._hooks.get(event).push(fn);
   }

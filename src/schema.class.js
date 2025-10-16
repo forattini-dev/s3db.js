@@ -15,7 +15,7 @@ import { encrypt, decrypt } from "./concerns/crypto.js";
 import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
-import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal } from "./concerns/base62.js";
+import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint } from "./concerns/base62.js";
 
 /**
  * Generate base62 mapping for attributes
@@ -274,6 +274,60 @@ export const SchemaActions = {
       return NaN;
     });
   },
+  fromArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (value === null || value === undefined || !Array.isArray(value)) {
+      return value;
+    }
+    if (value.length === 0) {
+      return '';
+    }
+    const encodedItems = value.map(item => {
+      if (typeof item === 'number' && !isNaN(item)) {
+        return encodeFixedPoint(item, precision);
+      }
+      // fallback: try to parse as number, else keep as is
+      const n = Number(item);
+      return isNaN(n) ? '' : encodeFixedPoint(n, precision);
+    });
+    return encodedItems.join(separator);
+  },
+  toArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
+    if (Array.isArray(value)) {
+      return value.map(v => (typeof v === 'number' ? v : decodeFixedPoint(v, precision)));
+    }
+    if (value === null || value === undefined) {
+      return value;
+    }
+    if (value === '') {
+      return [];
+    }
+    const str = String(value);
+    const items = [];
+    let current = '';
+    let i = 0;
+    while (i < str.length) {
+      if (str[i] === '\\' && i + 1 < str.length) {
+        current += str[i + 1];
+        i += 2;
+      } else if (str[i] === separator) {
+        items.push(current);
+        current = '';
+        i++;
+      } else {
+        current += str[i];
+        i++;
+      }
+    }
+    items.push(current);
+    return items.map(v => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string' && v !== '') {
+        const n = decodeFixedPoint(v, precision);
+        return isNaN(n) ? NaN : n;
+      }
+      return NaN;
+    });
+  },
 
 }
 
@@ -351,16 +405,16 @@ export class Schema {
 
   extractObjectKeys(obj, prefix = '') {
     const objectKeys = [];
-    
+
     for (const [key, value] of Object.entries(obj)) {
       if (key.startsWith('$$')) continue; // Skip schema metadata
-      
+
       const fullKey = prefix ? `${prefix}.${key}` : key;
-      
+
       if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         // This is an object, add its key
         objectKeys.push(fullKey);
-        
+
         // Check if it has nested objects
         if (value.$$type === 'object') {
           // Recursively extract nested object keys
@@ -368,31 +422,137 @@ export class Schema {
         }
       }
     }
-    
+
     return objectKeys;
   }
 
+  _generateHooksFromOriginalAttributes(attributes, prefix = '') {
+    for (const [key, value] of Object.entries(attributes)) {
+      if (key.startsWith('$$')) continue;
+
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+
+      // Check if this is an object notation type definition (has 'type' property)
+      if (typeof value === 'object' && value !== null && !Array.isArray(value) && value.type) {
+        if (value.type === 'array' && value.items) {
+          // Handle array with object notation
+          const itemsType = value.items;
+          const arrayLength = typeof value.length === 'number' ? value.length : null;
+
+          if (itemsType === 'string' || (typeof itemsType === 'string' && itemsType.includes('string'))) {
+            this.addHook("beforeMap", fullKey, "fromArray");
+            this.addHook("afterUnmap", fullKey, "toArray");
+          } else if (itemsType === 'number' || (typeof itemsType === 'string' && itemsType.includes('number'))) {
+            const isIntegerArray = typeof itemsType === 'string' && itemsType.includes('integer');
+            const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
+
+            if (isIntegerArray) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfNumbers");
+              this.addHook("afterUnmap", fullKey, "toArrayOfNumbers");
+            } else if (isEmbedding) {
+              this.addHook("beforeMap", fullKey, "fromArrayOfEmbeddings");
+              this.addHook("afterUnmap", fullKey, "toArrayOfEmbeddings");
+            } else {
+              this.addHook("beforeMap", fullKey, "fromArrayOfDecimals");
+              this.addHook("afterUnmap", fullKey, "toArrayOfDecimals");
+            }
+          }
+        }
+        // For other types with object notation, they'll be handled by the flattened processing
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value) && !value.type) {
+        // This is a nested object, recurse
+        this._generateHooksFromOriginalAttributes(value, fullKey);
+      }
+    }
+  }
+
   generateAutoHooks() {
+    // First, process the original attributes to find arrays with object notation
+    // This handles cases like: { type: 'array', items: 'number', length: 768 }
+    this._generateHooksFromOriginalAttributes(this.attributes);
+
+    // Then process the flattened schema for other types
     const schema = flatten(cloneDeep(this.attributes), { safe: true });
 
     for (const [name, definition] of Object.entries(schema)) {
-      // Handle arrays first to avoid conflicts
-      if (definition.includes("array")) {
-        if (definition.includes('items:string')) {
+      // Skip metadata fields
+      if (name.includes('$$')) continue;
+
+      // Skip if hooks already exist (from object notation processing)
+      if (this.options.hooks.beforeMap[name] || this.options.hooks.afterUnmap[name]) {
+        continue;
+      }
+
+      // Normalize definition - can be a string or value from flattened object
+      const defStr = typeof definition === 'string' ? definition : '';
+      const defType = typeof definition === 'object' && definition !== null ? definition.type : null;
+
+      // Check if this is an embedding type (custom shorthand)
+      const isEmbeddingType = defStr.includes("embedding") || defType === 'embedding';
+
+      if (isEmbeddingType) {
+        // Extract length from embedding:1536 or embedding|length:1536
+        let embeddingLength = null;
+        const lengthMatch = defStr.match(/embedding:(\d+)/);
+        if (lengthMatch) {
+          embeddingLength = parseInt(lengthMatch[1], 10);
+        } else if (defStr.includes('length:')) {
+          const match = defStr.match(/length:(\d+)/);
+          if (match) embeddingLength = parseInt(match[1], 10);
+        }
+
+        // Embeddings always use fixed-point encoding
+        this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+        this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
+        continue;
+      }
+
+      // Check if this is an array type
+      const isArray = defStr.includes("array") || defType === 'array';
+
+      if (isArray) {
+        // Determine item type for arrays
+        let itemsType = null;
+        if (typeof definition === 'object' && definition !== null && definition.items) {
+          itemsType = definition.items;
+        } else if (defStr.includes('items:string')) {
+          itemsType = 'string';
+        } else if (defStr.includes('items:number')) {
+          itemsType = 'number';
+        }
+
+        if (itemsType === 'string' || (typeof itemsType === 'string' && itemsType.includes('string'))) {
           this.addHook("beforeMap", name, "fromArray");
           this.addHook("afterUnmap", name, "toArray");
-        } else if (definition.includes('items:number')) {
+        } else if (itemsType === 'number' || (typeof itemsType === 'string' && itemsType.includes('number'))) {
           // Check if the array items should be treated as integers
-          const isIntegerArray = definition.includes("integer:true") || 
-                                definition.includes("|integer:") ||
-                                definition.includes("|integer");
-          
+          const isIntegerArray = defStr.includes("integer:true") ||
+                                defStr.includes("|integer:") ||
+                                defStr.includes("|integer") ||
+                                (typeof itemsType === 'string' && itemsType.includes('integer'));
+
+          // Check if this is an embedding array (large arrays of decimals)
+          // Common embedding dimensions: 256, 384, 512, 768, 1024, 1536, 2048, 3072
+          let arrayLength = null;
+          if (typeof definition === 'object' && definition !== null && typeof definition.length === 'number') {
+            arrayLength = definition.length;
+          } else if (defStr.includes('length:')) {
+            const match = defStr.match(/length:(\d+)/);
+            if (match) arrayLength = parseInt(match[1], 10);
+          }
+
+          const isEmbedding = !isIntegerArray && arrayLength !== null && arrayLength >= 256;
+
           if (isIntegerArray) {
             // Use standard base62 for arrays of integers
             this.addHook("beforeMap", name, "fromArrayOfNumbers");
             this.addHook("afterUnmap", name, "toArrayOfNumbers");
+          } else if (isEmbedding) {
+            // Use fixed-point encoding for embedding vectors (77% compression)
+            this.addHook("beforeMap", name, "fromArrayOfEmbeddings");
+            this.addHook("afterUnmap", name, "toArrayOfEmbeddings");
           } else {
-            // Use decimal-aware base62 for arrays of decimals
+            // Use decimal-aware base62 for regular arrays of decimals
             this.addHook("beforeMap", name, "fromArrayOfDecimals");
             this.addHook("afterUnmap", name, "toArrayOfDecimals");
           }
@@ -402,7 +562,7 @@ export class Schema {
       }
 
       // Handle secrets
-      if (definition.includes("secret")) {
+      if (defStr.includes("secret") || defType === 'secret') {
         if (this.options.autoEncrypt) {
           this.addHook("beforeMap", name, "encrypt");
         }
@@ -414,12 +574,12 @@ export class Schema {
       }
 
       // Handle numbers (only for non-array fields)
-      if (definition.includes("number")) {
+      if (defStr.includes("number") || defType === 'number') {
         // Check if it's specifically an integer field
-        const isInteger = definition.includes("integer:true") || 
-                         definition.includes("|integer:") ||
-                         definition.includes("|integer");
-        
+        const isInteger = defStr.includes("integer:true") ||
+                         defStr.includes("|integer:") ||
+                         defStr.includes("|integer");
+
         if (isInteger) {
           // Use standard base62 for integers
           this.addHook("beforeMap", name, "toBase62");
@@ -433,21 +593,21 @@ export class Schema {
       }
 
       // Handle booleans
-      if (definition.includes("boolean")) {
+      if (defStr.includes("boolean") || defType === 'boolean') {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
         continue;
       }
 
       // Handle JSON fields
-      if (definition.includes("json")) {
+      if (defStr.includes("json") || defType === 'json') {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
       }
 
       // Handle object fields - add JSON serialization hooks
-      if (definition === "object" || definition.includes("object")) {
+      if (definition === "object" || defStr.includes("object") || defType === 'object') {
         this.addHook("beforeMap", name, "toJSON");
         this.addHook("afterUnmap", name, "fromJSON");
         continue;
@@ -604,8 +764,11 @@ export class Schema {
       const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
+      const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
+
       // Always unmap base62 strings to numbers for number fields (but not array fields or decimal fields)
-      if (typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
+      // Skip if there are afterUnmap hooks that will handle the conversion
+      if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
         if (typeof parsedValue === 'string' && parsedValue !== '') {
           parsedValue = fromBase62(parsedValue);
         } else if (typeof parsedValue === 'number') {
@@ -677,28 +840,56 @@ export class Schema {
    */
   preprocessAttributesForValidation(attributes) {
     const processed = {};
-    
+
     for (const [key, value] of Object.entries(attributes)) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const isExplicitRequired = value.$$type && value.$$type.includes('required');
-        const isExplicitOptional = value.$$type && value.$$type.includes('optional');
-        const objectConfig = {
-          type: 'object',
-          properties: this.preprocessAttributesForValidation(value),
-          strict: false
-        };
-        // If explicitly required, don't mark as optional
-        if (isExplicitRequired) {
-          // nothing
-        } else if (isExplicitOptional || this.allNestedObjectsOptional) {
-          objectConfig.optional = true;
+      if (typeof value === 'string') {
+        // Expand embedding:XXX shorthand to array|items:number|length:XXX
+        if (value.startsWith('embedding:')) {
+          const lengthMatch = value.match(/embedding:(\d+)/);
+          if (lengthMatch) {
+            const length = lengthMatch[1];
+            // Extract any additional modifiers after the length
+            const rest = value.substring(`embedding:${length}`.length);
+            processed[key] = `array|items:number|length:${length}|empty:false${rest}`;
+            continue;
+          }
         }
-        processed[key] = objectConfig;
+        // Expand embedding|... to array|items:number|...
+        if (value.startsWith('embedding|') || value === 'embedding') {
+          processed[key] = value.replace(/^embedding/, 'array|items:number|empty:false');
+          continue;
+        }
+        processed[key] = value;
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Check if this is a validator type definition (has 'type' property that is NOT '$$type')
+        // vs a nested object structure
+        const hasValidatorType = value.type !== undefined && key !== '$$type';
+
+        if (hasValidatorType) {
+          // This is a validator type definition (e.g., { type: 'array', items: 'number' }), pass it through
+          processed[key] = value;
+        } else {
+          // This is a nested object structure, wrap it for validation
+          const isExplicitRequired = value.$$type && value.$$type.includes('required');
+          const isExplicitOptional = value.$$type && value.$$type.includes('optional');
+          const objectConfig = {
+            type: 'object',
+            properties: this.preprocessAttributesForValidation(value),
+            strict: false
+          };
+          // If explicitly required, don't mark as optional
+          if (isExplicitRequired) {
+            // nothing
+          } else if (isExplicitOptional || this.allNestedObjectsOptional) {
+            objectConfig.optional = true;
+          }
+          processed[key] = objectConfig;
+        }
       } else {
         processed[key] = value;
       }
     }
-    
+
     return processed;
   }
 }
