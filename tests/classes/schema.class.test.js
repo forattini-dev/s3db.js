@@ -1,13 +1,10 @@
 import { cloneDeep, merge } from 'lodash-es';
 import { describe, expect, test, beforeEach } from '@jest/globals';
-import { join } from 'path';
 
-import Client from '#src/client.class.js';
 import Resource from '#src/resource.class.js';
 import Schema, { SchemaActions } from '#src/schema.class.js';
 import { encode as toBase62, decode as fromBase62 } from '../../src/concerns/base62.js';
-
-const testPrefix = join('s3db', 'tests', new Date().toISOString().substring(0, 10), 'schema-' + Date.now());
+import { createClientForTest } from '#tests/config.js';
 
 describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
   let schema;
@@ -634,12 +631,8 @@ describe('Schema Class - Complete Journey', () => {
   let schema;
 
   beforeEach(async () => {
-    client = new Client({
-      verbose: true,
-      connectionString: process.env.BUCKET_CONNECTION_STRING
-        .replace('USER', process.env.MINIO_USER)
-        .replace('PASSWORD', process.env.MINIO_PASSWORD)
-        + `/${testPrefix}`
+    client = createClientForTest('suite=classes/schema', {
+      verbose: true
     });
     schema = new Schema({
       name: 'test-schema',
