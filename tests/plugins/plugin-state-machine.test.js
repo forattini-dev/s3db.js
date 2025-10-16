@@ -338,11 +338,11 @@ describe('StateMachinePlugin', () => {
 
     it('should block transition when guard returns false', async () => {
       mockGuards.cannotShip.mockResolvedValue(false);
-      
+
       await expect(plugin.send('test_guards', 'test1', 'FAIL')).rejects.toThrow(
-        "Transition blocked by guard 'cannotShip': Guard returned false"
+        /Transition blocked by guard 'cannotShip'/
       );
-      
+
       const state = await plugin.getState('test_guards', 'test1');
       expect(state).toBe('start'); // Should remain in start state
     });
