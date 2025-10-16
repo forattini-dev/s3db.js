@@ -1149,6 +1149,284 @@ const gracefulScheduler = new GracefulScheduler(s3db.plugins.scheduler);
 
 ---
 
+## 🚨 Error Handling
+
+The Scheduler Plugin uses standardized error classes with comprehensive context and recovery guidance:
+
+### SchedulerError
+
+All scheduler operations throw `SchedulerError` instances with detailed context:
+
+```javascript
+try {
+  await schedulerPlugin.addJob('test_job', {
+    schedule: 'invalid cron',
+    action: async () => {}
+  });
+} catch (error) {
+  console.error(error.name);        // 'SchedulerError'
+  console.error(error.message);     // Brief error summary
+  console.error(error.description); // Detailed explanation with guidance
+  console.error(error.context);     // Job name, schedule, etc.
+}
+```
+
+### Common Errors
+
+#### Invalid Cron Expression
+
+**When**: Job configured with invalid cron expression
+**Error**: `Job '{jobName}' has invalid cron expression: {schedule}`
+**Recovery**:
+```javascript
+// Bad
+new SchedulerPlugin({
+  jobs: {
+    test: {
+      schedule: 'invalid cron',  // Throws SchedulerError
+      action: async () => {}
+    }
+  }
+})
+
+// Good - Use valid cron expressions
+new SchedulerPlugin({
+  jobs: {
+    test: {
+      schedule: '0 3 * * *',     // Daily at 3 AM
+      action: async () => {}
+    }
+  }
+})
+
+// Good - Use preset expressions
+new SchedulerPlugin({
+  jobs: {
+    test: {
+      schedule: '@daily',        // Preset
+      action: async () => {}
+    }
+  }
+})
+```
+
+#### Job Not Found
+
+**When**: Operating on non-existent job
+**Error**: `Job not found: {jobName}`
+**Recovery**:
+```javascript
+// Bad
+await schedulerPlugin.runJob('nonexistent-job');  // Throws SchedulerError
+
+// Good - Check job exists first
+const jobs = schedulerPlugin.getAllJobsStatus();
+if (jobs['my-job']) {
+  await schedulerPlugin.runJob('my-job');
+}
+
+// Good - List available jobs
+const allJobs = await schedulerPlugin.listJobs();
+console.log('Available jobs:', allJobs.map(j => j.name));
+```
+
+#### Job Already Exists
+
+**When**: Adding job with duplicate name
+**Error**: `Job already exists: {jobName}`
+**Recovery**:
+```javascript
+// Bad
+await schedulerPlugin.addJob('cleanup', { schedule: '0 2 * * *', action: async () => {} });
+await schedulerPlugin.addJob('cleanup', { schedule: '0 3 * * *', action: async () => {} }); // Throws
+
+// Good - Update existing job
+await schedulerPlugin.updateJob('cleanup', { schedule: '0 3 * * *' });
+
+// Good - Remove first, then add
+await schedulerPlugin.removeJob('cleanup');
+await schedulerPlugin.addJob('cleanup', { schedule: '0 3 * * *', action: async () => {} });
+```
+
+#### Job Execution Errors
+
+**When**: Job action throws error
+**Error**: Job errors are caught and logged, retried according to retry policy
+**Recovery**:
+```javascript
+// Job with error handling
+new SchedulerPlugin({
+  jobs: {
+    risky_job: {
+      schedule: '@hourly',
+      retries: 3,  // Retry 3 times after initial failure (4 total attempts)
+      timeout: 30000,
+      action: async (database, context) => {
+        try {
+          // Risky operation
+          const result = await performRiskyOperation();
+          return { success: true, result };
+        } catch (error) {
+          // Log error context
+          console.error(`Job ${context.jobName} failed:`, error);
+
+          // Determine if retryable
+          if (error.code === 'TEMPORARY_ERROR') {
+            throw error;  // Will trigger retry
+          } else {
+            // Permanent error - don't retry
+            return { success: false, error: error.message };
+          }
+        }
+      }
+    }
+  }
+})
+
+// Monitor job failures
+schedulerPlugin.on('job_failed', (data) => {
+  console.error(`Job failed: ${data.jobName}`, data.error);
+
+  // Alert on repeated failures
+  if (data.attempt >= 3) {
+    sendAlert(`Job ${data.jobName} failed ${data.attempt} times`);
+  }
+});
+```
+
+#### Job Timeout
+
+**When**: Job exceeds configured timeout
+**Error**: Job is terminated, logged as timeout
+**Recovery**:
+```javascript
+// Configure appropriate timeouts
+new SchedulerPlugin({
+  jobs: {
+    quick_job: {
+      schedule: '@hourly',
+      timeout: 30000,  // 30 seconds for quick jobs
+      action: async () => { /* fast operation */ }
+    },
+
+    slow_job: {
+      schedule: '@daily',
+      timeout: 600000,  // 10 minutes for slow jobs
+      action: async () => { /* long operation */ }
+    }
+  }
+})
+
+// Monitor timeouts
+schedulerPlugin.on('job_timeout', (data) => {
+  console.warn(`Job ${data.jobName} timed out after ${data.timeout}ms`);
+
+  // Increase timeout for this job
+  await schedulerPlugin.updateJob(data.jobName, {
+    timeout: data.timeout * 2  // Double the timeout
+  });
+});
+```
+
+### Error Recovery Patterns
+
+#### Graceful Degradation
+
+Handle job errors without stopping scheduler:
+```javascript
+new SchedulerPlugin({
+  jobs: {
+    optional_task: {
+      schedule: '@daily',
+      action: async (database) => {
+        try {
+          await performTask();
+          return { success: true };
+        } catch (error) {
+          // Log error but don't throw (prevents retry)
+          console.error('Optional task failed, will retry tomorrow:', error);
+          return { success: false, error: error.message };
+        }
+      }
+    }
+  }
+})
+```
+
+#### Retry with Exponential Backoff
+
+Automatic retries with increasing delays:
+```javascript
+new SchedulerPlugin({
+  jobs: {
+    external_api_sync: {
+      schedule: '@hourly',
+      retries: 5,  // Will try 6 times total (1 + 5 retries)
+      action: async () => {
+        // External API call
+        const response = await fetch('https://api.example.com/data');
+        if (!response.ok) throw new Error('API request failed');
+        return await response.json();
+      }
+    }
+  }
+})
+
+// Monitor retries
+schedulerPlugin.on('job_retry', (data) => {
+  console.log(`Retrying ${data.jobName} (attempt ${data.attempt})`);
+});
+```
+
+#### Circuit Breaker Pattern
+
+Disable failing jobs automatically:
+```javascript
+const failureCounts = new Map();
+const MAX_FAILURES = 5;
+
+schedulerPlugin.on('job_failed', async (data) => {
+  const count = (failureCounts.get(data.jobName) || 0) + 1;
+  failureCounts.set(data.jobName, count);
+
+  if (count >= MAX_FAILURES) {
+    console.error(`Disabling ${data.jobName} after ${count} failures`);
+    schedulerPlugin.disableJob(data.jobName);
+
+    // Alert operations team
+    await sendAlert({
+      subject: `Job ${data.jobName} disabled due to failures`,
+      body: `Job has failed ${count} times and has been disabled.`
+    });
+  }
+});
+
+// Reset counter on success
+schedulerPlugin.on('job_completed', (data) => {
+  failureCounts.delete(data.jobName);
+});
+```
+
+#### Job Lock Errors
+
+**When**: Distributed lock errors in multi-instance deployments
+**Error**: Job skipped if lock cannot be acquired
+**Recovery**:
+```javascript
+// Monitor lock failures
+schedulerPlugin.on('job_lock_failed', (data) => {
+  console.log(`Could not acquire lock for ${data.jobName} - already running on another instance`);
+});
+
+// Ensure lock cleanup on shutdown
+process.on('SIGTERM', async () => {
+  await schedulerPlugin.stop();  // Automatically releases all locks
+  process.exit(0);
+});
+```
+
+---
+
 ## Troubleshooting
 
 ### Issue: Jobs not executing at scheduled times
