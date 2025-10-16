@@ -162,10 +162,10 @@ describe('FilesystemCache - Basic Tests', () => {
   describe('Error Handling', () => {
     test('should handle invalid keys', () => {
       cache = new FilesystemCache({ directory: testDir });
-      
-      expect(() => cache.validateKey('')).toThrow('Invalid key');
-      expect(() => cache.validateKey(null)).toThrow('Invalid key');
-      expect(() => cache.validateKey(undefined)).toThrow('Invalid key');
+
+      expect(() => cache.validateKey('')).toThrow(/Invalid cache key/);
+      expect(() => cache.validateKey(null)).toThrow(/Invalid cache key/);
+      expect(() => cache.validateKey(undefined)).toThrow(/Invalid cache key/);
       expect(() => cache.validateKey('valid-key')).not.toThrow();
     });
 

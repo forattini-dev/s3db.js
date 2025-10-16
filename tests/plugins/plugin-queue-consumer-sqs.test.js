@@ -177,14 +177,14 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
     await expect(plugin._handleMessage({
       $body: { resource: 'notfound', action: 'insert', data: { id: 'x' } },
       $attributes: {}, $raw: {}
-    }, 'notfound')).rejects.toThrow(/resource 'notfound' not found/);
+    }, 'notfound')).rejects.toThrow(/Resource 'notfound' not found/);
   });
 
   test('should throw on unsupported action', async () => {
     await expect(plugin._handleMessage({
       $body: { resource: 'users', action: 'unknown', data: { id: 'x' } },
       $attributes: {}, $raw: {}
-    }, 'users')).rejects.toThrow(/unsupported action/);
+    }, 'users')).rejects.toThrow(/Unsupported action/);
   });
 });
 

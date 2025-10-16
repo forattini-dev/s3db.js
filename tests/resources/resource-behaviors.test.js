@@ -309,7 +309,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
       };
 
       // This should throw an error due to enforce-limits behavior
-      await expect(products.insert(oversizedData)).rejects.toThrow('S3 metadata size exceeds 2KB limit');
+      await expect(products.insert(oversizedData)).rejects.toThrow(/Metadata size exceeds 2KB limit/);
     });
 
     test('should throw error when data exceeds 2KB limit', async () => {
@@ -327,7 +327,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
         content: 'X'.repeat(3000) // Exceeds 2KB limit
       };
 
-      await expect(enforceLimitsResource.insert(largeData)).rejects.toThrow(/S3 metadata size exceeds 2KB limit/);
+      await expect(enforceLimitsResource.insert(largeData)).rejects.toThrow(/Metadata size exceeds 2KB limit/);
     });
 
     test('should allow data within 2KB limit', async () => {
@@ -372,7 +372,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
 
       // Try to update with large data that exceeds limit
       const largeUpdate = { content: 'Y'.repeat(3000) };
-      await expect(enforceLimitsResource.update('update-test', largeUpdate)).rejects.toThrow(/S3 metadata size exceeds 2KB limit/);
+      await expect(enforceLimitsResource.update('update-test', largeUpdate)).rejects.toThrow(/Metadata size exceeds 2KB limit/);
     });
 
     test('should handle upsert operations with size limits', async () => {
@@ -390,7 +390,7 @@ describe('Resource Behaviors - Fast Integration Tests', () => {
         content: 'Z'.repeat(3000) // Exceeds 2KB limit
       };
 
-      await expect(enforceLimitsResource.upsert(largeData)).rejects.toThrow(/S3 metadata size exceeds 2KB limit/);
+      await expect(enforceLimitsResource.upsert(largeData)).rejects.toThrow(/Metadata size exceeds 2KB limit/);
     });
 
     test('should handle get operations without modification', async () => {

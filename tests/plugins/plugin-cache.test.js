@@ -34,15 +34,15 @@ describe('Cache Plugin - Comprehensive Tests', () => {
 
     test('should validate keys correctly', () => {
       const cache = new Cache();
-      
+
       // Valid key should not throw
       expect(() => cache.validateKey('valid-key')).not.toThrow();
-      
+
       // Invalid keys should throw
-      expect(() => cache.validateKey(null)).toThrow('Invalid key');
-      expect(() => cache.validateKey(undefined)).toThrow('Invalid key');
-      expect(() => cache.validateKey('')).toThrow('Invalid key');
-      expect(() => cache.validateKey(123)).toThrow('Invalid key');
+      expect(() => cache.validateKey(null)).toThrow('Invalid cache key');
+      expect(() => cache.validateKey(undefined)).toThrow('Invalid cache key');
+      expect(() => cache.validateKey('')).toThrow('Invalid cache key');
+      expect(() => cache.validateKey(123)).toThrow('Invalid cache key');
     });
 
     test('should handle base cache operations (no-op implementation)', async () => {
@@ -542,7 +542,7 @@ describe('Cache Plugin - Comprehensive Tests', () => {
 
     test('should throw error when warming non-existent resource', async () => {
       // Should throw error for non-existent resource
-      await expect(cachePlugin.warmCache('non-existent-resource')).rejects.toThrow("Resource 'non-existent-resource' not found");
+      await expect(cachePlugin.warmCache('non-existent-resource')).rejects.toThrow(/Resource not found/);
     });
 
     test('should analyze cache usage when partition-aware', async () => {

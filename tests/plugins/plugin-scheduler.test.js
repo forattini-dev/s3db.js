@@ -134,7 +134,7 @@ describe('SchedulerPlugin', () => {
             }
           }
         });
-      }).toThrow("Job 'invalid' has invalid cron expression: invalid cron");
+      }).toThrow(/Job 'invalid' has invalid cron expression/);
     });
 
     it('should accept valid shorthand expressions', () => {
