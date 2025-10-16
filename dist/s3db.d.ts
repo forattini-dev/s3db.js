@@ -763,7 +763,9 @@ declare module 's3db.js' {
       data: any; 
     }>;
     validatePartitions(): void;
-    
+    findOrphanedPartitions(): Record<string, { missingFields: string[]; definition: PartitionConfig; allFields: string[] }>;
+    removeOrphanedPartitions(options?: { dryRun?: boolean }): Record<string, { missingFields: string[]; definition: PartitionConfig; allFields: string[] }>;
+
     // Partition operations
     getPartitionKey(options: { partitionName: string; id: string; data: any }): string;
     getFromPartition(options: { id: string; partitionName: string; partitionValues?: Record<string, any> }): Promise<any>;
