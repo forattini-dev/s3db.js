@@ -19449,7 +19449,7 @@ class VectorPlugin extends Plugin {
     super(options);
     this.config = {
       dimensions: 1536,
-      // Default to OpenAI ada-002
+      // Default to OpenAI text-embedding-3-small/3-large
       distanceMetric: "cosine",
       // Default metric
       storageThreshold: 1500,
