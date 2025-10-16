@@ -4,10 +4,29 @@
 # This ensures dist/ files are always in sync with source code
 echo "🔨 Running build before commit..."
 
-pnpm run build
+# Check if we're in the right directory
+if [ ! -f "package.json" ]; then
+  echo "⚠️  Warning: package.json not found, skipping build"
+  exit 0
+fi
 
-if [ $? -ne 0 ]; then
-  echo "❌ Build failed! Commit aborted."
+# Run rollup directly to avoid pnpm workspace issues during git hooks
+if [ -f "node_modules/.bin/rollup" ]; then
+  echo "📦 Running rollup directly (bypassing package manager)"
+  node_modules/.bin/rollup -c 2>&1
+elif [ -x "$(command -v npx)" ]; then
+  echo "📦 Using npx rollup"
+  npx rollup -c 2>&1
+else
+  echo "❌ Rollup not found in node_modules or npx not available"
+  exit 1
+fi
+
+BUILD_EXIT_CODE=$?
+
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
+  echo "❌ Build failed with exit code $BUILD_EXIT_CODE"
+  echo "💡 To commit without running build, use: git commit --no-verify"
   exit 1
 fi
 
