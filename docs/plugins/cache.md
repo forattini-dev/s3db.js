@@ -352,6 +352,164 @@ if (stats.hitRate < 0.7) {
 
 ---
 
+## 🚨 Error Handling
+
+The Cache Plugin uses standardized error classes with comprehensive context and recovery guidance:
+
+### CacheError
+
+All cache operations throw `CacheError` instances with detailed context:
+
+```javascript
+try {
+  await resource.cache.get('invalid-key');
+} catch (error) {
+  console.error(error.name);        // 'CacheError'
+  console.error(error.message);     // Brief error summary
+  console.error(error.description); // Detailed explanation with guidance
+  console.error(error.context);     // Operation context
+}
+```
+
+### Common Errors
+
+#### Invalid Cache Key
+
+**When**: Cache key is null, undefined, or invalid type
+**Error**: `Invalid cache key: must be a non-empty string`
+**Recovery**:
+```javascript
+// Bad
+await resource.cache.get(null);           // Throws CacheError
+await resource.cache.get('');             // Throws CacheError
+await resource.cache.get(undefined);      // Throws CacheError
+
+// Good
+await resource.cache.get('valid-key');    // Works
+```
+
+#### Resource Not Found
+
+**When**: Warming cache for non-existent resource
+**Error**: `Resource not found for cache warming: {resourceName}`
+**Recovery**:
+```javascript
+// Bad
+await cachePlugin.warmCache('nonexistent-resource');  // Throws CacheError
+
+// Good
+const resourceNames = Object.keys(database.resources);
+for (const name of resourceNames) {
+  await cachePlugin.warmCache(name);
+}
+```
+
+#### Driver-Specific Errors
+
+**Filesystem Driver**:
+```javascript
+try {
+  await resource.cache.get('key');
+} catch (error) {
+  if (error.name === 'CacheError') {
+    console.error('Filesystem cache error:', error.description);
+    // Check directory permissions, disk space
+  }
+}
+```
+
+**S3 Driver**:
+```javascript
+try {
+  await resource.cache.set('key', data);
+} catch (error) {
+  if (error.name === 'CacheError') {
+    console.error('S3 cache error:', error.description);
+    // Check S3 credentials, permissions, bucket access
+  }
+}
+```
+
+#### Memory Limit Errors
+
+**When**: Conflicting memory configuration
+**Error**: `Cannot use both maxMemoryBytes and maxMemoryPercent`
+**Recovery**:
+```javascript
+// Bad
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryBytes: 512 * 1024 * 1024,
+    maxMemoryPercent: 0.1  // Conflict!
+  }
+})
+
+// Good - Choose one
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1  // OR maxMemoryBytes, not both
+  }
+})
+```
+
+### Error Recovery Patterns
+
+#### Graceful Degradation
+
+Skip cache on errors and fetch from S3:
+```javascript
+async function getWithCacheFallback(resource, id) {
+  try {
+    // Try cache first
+    return await resource.cache.get(id);
+  } catch (cacheError) {
+    console.warn('Cache unavailable, fetching from S3:', cacheError.message);
+    // Fall back to direct S3 read
+    return await resource.get(id, { skipCache: true });
+  }
+}
+```
+
+#### Cache Health Monitoring
+
+Monitor cache errors and disable if unhealthy:
+```javascript
+let cacheErrorCount = 0;
+const MAX_ERRORS = 10;
+
+resource.on('cache-error', (error) => {
+  cacheErrorCount++;
+
+  if (cacheErrorCount > MAX_ERRORS) {
+    console.error('Cache unhealthy, disabling');
+    cachePlugin.enabled = false;
+  }
+});
+```
+
+#### Retry with Backoff
+
+Retry transient cache errors:
+```javascript
+async function cacheSetWithRetry(cache, key, value, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await cache.set(key, value);
+    } catch (error) {
+      if (error.name === 'CacheError' && i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, i)));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+```
+
+---
+
 ## 🐛 Troubleshooting
 
 **Issue: Cache not improving performance**

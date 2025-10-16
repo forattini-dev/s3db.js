@@ -923,6 +923,344 @@ describe('Order Processing State Machine', () => {
 
 ---
 
+## 🚨 Error Handling
+
+The State Machine Plugin uses standardized error classes with comprehensive context and recovery guidance:
+
+### StateMachineError
+
+All state machine operations throw `StateMachineError` instances with detailed context:
+
+```javascript
+try {
+  await stateMachine.send('order-123', 'INVALID_EVENT');
+} catch (error) {
+  console.error(error.name);        // 'StateMachineError'
+  console.error(error.message);     // Brief error summary
+  console.error(error.description); // Detailed explanation with guidance
+  console.error(error.context);     // Machine name, event, state, etc.
+}
+```
+
+### Common Errors
+
+#### Invalid Transition
+
+**When**: Sending event not allowed in current state
+**Error**: `Invalid transition '{event}' from state '{currentState}'`
+**Recovery**:
+```javascript
+// Bad
+const order = await orders.get('order-123'); // state: 'delivered'
+await stateMachine.send('order-123', 'SHIP');  // Throws - can't ship delivered order
+
+// Good - Check valid transitions first
+const validEvents = await stateMachine.canTransition('order-123', 'SHIP');
+if (validEvents) {
+  await stateMachine.send('order-123', 'SHIP');
+} else {
+  console.log('Cannot ship order in current state');
+}
+
+// Good - Check current state
+const currentState = await stateMachine.getState('order-123');
+if (currentState === 'confirmed') {
+  await stateMachine.send('order-123', 'SHIP');
+}
+```
+
+#### Guard Condition Failed
+
+**When**: Guard function returns false or throws error
+**Error**: `Transition blocked by guard '{guardName}': {reason}`
+**Recovery**:
+```javascript
+// Define guard with clear error messages
+guards: {
+  canShip: async (context, event, machine) => {
+    const inventory = await machine.database.resource('inventory').get(context.productId);
+
+    if (!inventory) {
+      throw new Error('Product not found in inventory');
+    }
+
+    if (inventory.quantity < context.quantity) {
+      throw new Error(`Insufficient inventory: need ${context.quantity}, have ${inventory.quantity}`);
+    }
+
+    return true;
+  }
+}
+
+// Handle guard failures gracefully
+try {
+  await stateMachine.send('order-123', 'SHIP');
+} catch (error) {
+  if (error.name === 'StateMachineError' && error.message.includes('guard')) {
+    // Extract guard error reason
+    console.error('Cannot ship order:', error.description);
+
+    // Take corrective action
+    if (error.description.includes('Insufficient inventory')) {
+      await notifyInventoryTeam(orderId);
+      await stateMachine.send('order-123', 'BACKORDER');
+    }
+  }
+}
+```
+
+#### State Machine Not Found
+
+**When**: Referencing non-existent state machine
+**Error**: `State machine not found: {machineName}`
+**Recovery**:
+```javascript
+// Bad
+const machine = s3db.stateMachine('nonexistent');  // Throws
+
+// Good - Check machine exists
+const availableMachines = Object.keys(stateMachinePlugin.stateMachines);
+if (availableMachines.includes('order_processing')) {
+  const machine = s3db.stateMachine('order_processing');
+}
+
+// Good - List all machines
+console.log('Available state machines:', availableMachines);
+```
+
+#### Action Function Error
+
+**When**: Action function throws error during execution
+**Error**: `Action '{actionName}' failed: {errorMessage}`
+**Recovery**:
+```javascript
+// Implement robust action functions
+actions: {
+  processPayment: async (context, event, machine) => {
+    try {
+      // Attempt payment processing
+      const result = await paymentService.charge(context.amount);
+      return { payment_id: result.id };
+    } catch (paymentError) {
+      // Log detailed error
+      console.error(`Payment failed for order ${context.id}:`, paymentError);
+
+      // Record failure in database
+      await machine.database.resource('payment_failures').insert({
+        order_id: context.id,
+        error: paymentError.message,
+        timestamp: new Date().toISOString()
+      });
+
+      // Don't throw - allow transition to error state instead
+      await machine.send(context.id, 'PAYMENT_FAILED', {
+        error: paymentError.message
+      });
+
+      return { payment_failed: true };
+    }
+  }
+}
+
+// Monitor action failures
+stateMachinePlugin.on('action_error', (data) => {
+  console.error(`Action ${data.actionName} failed:`, data.error);
+  sendAlert({
+    title: `State Machine Action Failed`,
+    message: `Action ${data.actionName} failed for ${data.entityId}`,
+    error: data.error
+  });
+});
+```
+
+#### Invalid State Configuration
+
+**When**: State machine configuration is invalid
+**Error**: `Invalid state machine configuration: {reason}`
+**Recovery**:
+```javascript
+// Bad - Missing required fields
+new StateMachinePlugin({
+  stateMachines: {
+    broken: {
+      states: {  // Missing initialState!
+        pending: { on: { CONFIRM: 'confirmed' } }
+      }
+    }
+  }
+})
+
+// Good - Complete configuration
+new StateMachinePlugin({
+  stateMachines: {
+    working: {
+      initialState: 'pending',  // Required
+      states: {
+        pending: { on: { CONFIRM: 'confirmed' } },
+        confirmed: { type: 'final' }
+      }
+    }
+  }
+})
+```
+
+### Error Recovery Patterns
+
+#### Graceful State Recovery
+
+Handle errors without corrupting state:
+```javascript
+async function safeStateTransition(machineId, entityId, event, eventData) {
+  // Record current state before transition
+  const beforeState = await stateMachine.getState(entityId);
+
+  try {
+    const result = await stateMachine.send(entityId, event, eventData);
+    return { success: true, result };
+  } catch (error) {
+    console.error(`Transition failed from ${beforeState}:`, error);
+
+    // Log failed transition
+    await database.resource('failed_transitions').insert({
+      machine_id: machineId,
+      entity_id: entityId,
+      from_state: beforeState,
+      attempted_event: event,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+
+    // Verify state is still valid
+    const currentState = await stateMachine.getState(entityId);
+    if (currentState !== beforeState) {
+      console.warn(`State changed unexpectedly: ${beforeState} → ${currentState}`);
+    }
+
+    return { success: false, error: error.message };
+  }
+}
+```
+
+#### Compensating Transactions
+
+Rollback on failure:
+```javascript
+actions: {
+  processOrder: async (context, event, machine) => {
+    const rollbackActions = [];
+
+    try {
+      // Step 1: Reserve inventory
+      await reserveInventory(context.items);
+      rollbackActions.push(() => releaseInventory(context.items));
+
+      // Step 2: Charge payment
+      const paymentId = await chargePayment(context.amount);
+      rollbackActions.push(() => refundPayment(paymentId));
+
+      // Step 3: Create shipment
+      const shipmentId = await createShipment(context);
+      rollbackActions.push(() => cancelShipment(shipmentId));
+
+      return { success: true, shipmentId };
+    } catch (error) {
+      // Execute rollback actions in reverse order
+      console.error('Order processing failed, rolling back:', error);
+
+      for (const rollback of rollbackActions.reverse()) {
+        try {
+          await rollback();
+        } catch (rollbackError) {
+          console.error('Rollback action failed:', rollbackError);
+        }
+      }
+
+      throw error;
+    }
+  }
+}
+```
+
+#### Circuit Breaker for Guards
+
+Prevent cascading failures:
+```javascript
+class GuardCircuitBreaker {
+  constructor(maxFailures = 5, resetTimeout = 60000) {
+    this.failures = new Map();
+    this.maxFailures = maxFailures;
+    this.resetTimeout = resetTimeout;
+  }
+
+  async execute(guardName, guardFn, ...args) {
+    const failureCount = this.failures.get(guardName) || 0;
+
+    if (failureCount >= this.maxFailures) {
+      throw new Error(`Guard ${guardName} circuit breaker open (${failureCount} failures)`);
+    }
+
+    try {
+      const result = await guardFn(...args);
+      // Reset on success
+      this.failures.delete(guardName);
+      return result;
+    } catch (error) {
+      // Increment failure count
+      this.failures.set(guardName, failureCount + 1);
+
+      // Schedule reset
+      setTimeout(() => {
+        this.failures.delete(guardName);
+      }, this.resetTimeout);
+
+      throw error;
+    }
+  }
+}
+
+// Usage in guards
+const circuitBreaker = new GuardCircuitBreaker();
+
+guards: {
+  checkInventory: async (context, event, machine) => {
+    return circuitBreaker.execute('checkInventory', async () => {
+      const inventory = await machine.database.resource('inventory').get(context.productId);
+      return inventory && inventory.quantity >= context.quantity;
+    });
+  }
+}
+```
+
+#### Retry Strategy
+
+Retry transient failures:
+```javascript
+async function sendEventWithRetry(machineId, entityId, event, eventData, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await stateMachine.send(entityId, event, eventData);
+    } catch (error) {
+      // Don't retry invalid transitions or guard failures
+      if (error.message.includes('Invalid transition') ||
+          error.message.includes('Guard')) {
+        throw error;
+      }
+
+      // Retry transient errors
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.log(`Retry attempt ${attempt} after ${delay}ms`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+```
+
+---
+
 ## Troubleshooting
 
 ### Issue: State transitions not persisting
