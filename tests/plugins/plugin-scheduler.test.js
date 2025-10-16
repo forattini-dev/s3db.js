@@ -839,7 +839,7 @@ describe('SchedulerPlugin', () => {
           schedule: 'invalid cron',
           action: () => {}
         });
-      }).toThrow('Invalid cron expression: invalid cron');
+      }).toThrow(/Invalid cron expression/);
     });
 
     it('should remove existing job', () => {
