@@ -8,6 +8,13 @@ Store, search, and cluster vector embeddings with advanced similarity algorithms
 - [Installation](#installation)
 - [Core Concepts](#core-concepts)
 - [Quick Start](#quick-start)
+- [Embedding Providers](#embedding-providers)
+  - [OpenAI](#openai-recommended)
+  - [Google Vertex AI](#google-vertex-ai)
+  - [Cohere](#cohere)
+  - [Voyage AI (Anthropic)](#voyage-ai-anthropic-recommended)
+  - [Model Comparison](#model-comparison-table)
+  - [Choosing the Right Model](#choosing-the-right-model)
 - [Use Cases](#use-cases)
   - [1. Similarity Search (KNN)](#1-similarity-search-knn)
   - [2. Automatic Clustering with Optimal K](#2-automatic-clustering-with-optimal-k)
@@ -41,7 +48,7 @@ Instead of verbose array definitions, use the clean `embedding:XXX` notation:
 ```javascript
 // ✅ NEW: Clean shorthand with auto-compression (77% space savings)
 attributes: {
-  vector: 'embedding:1536'  // OpenAI ada-002/3
+  vector: 'embedding:1536'  // OpenAI text-embedding-3-small/3-large
 }
 
 // ✅ Alternative: Pipe notation
@@ -90,7 +97,7 @@ const db = new Database('s3://key:secret@bucket');
 
 // Install plugin with full configuration
 const vectorPlugin = new VectorPlugin({
-  dimensions: 1536,            // Default embedding size (OpenAI ada-002)
+  dimensions: 1536,            // Default embedding size (OpenAI text-embedding-3-small/3-large)
   distanceMetric: 'cosine',    // Default distance metric
   storageThreshold: 1500,      // Warn if vectors exceed 1.5KB
   autoFixBehavior: false,      // Auto-set body-overflow if needed
@@ -124,7 +131,7 @@ Large vectors will exceed this limit:
 
 | Model | Dimensions | Size (uncompressed) | Size (with `embedding:XXX`) | body-overflow? |
 |-------|-----------|---------------------|----------------------------|----------------|
-| OpenAI ada-002/3 | 1536 | ~10KB | **~2.3KB** (77% saved) | ✅ YES |
+| OpenAI text-embedding-3-small/3-large | 1536 | ~10KB | **~2.3KB** (77% saved) | ✅ YES |
 | Sentence Transformers | 384 | ~2.7KB | **~620 bytes** (77% saved) | ❌ NO |
 | Small models | 128 | ~900 bytes | **~207 bytes** (77% saved) | ❌ NO |
 
@@ -139,7 +146,7 @@ const products = await db.createResource({
     id: 'string|required',
     name: 'string|required',
     description: 'string',
-    vector: 'embedding:1536'  // OpenAI ada-002/3 (auto-compressed)
+    vector: 'embedding:1536'  // OpenAI text-embedding-3-small/3-large (auto-compressed)
   },
   behavior: 'body-overflow'  // ← Still recommended for large vectors
 });
@@ -244,9 +251,334 @@ await products.insert({
   description: 'High-performance laptop for gaming',
   category: 'Electronics',
   price: 1299.99,
-  vector: [0.123, -0.456, 0.789, ...]  // 1536 dimensions from OpenAI
+  vector: [0.123, -0.456, 0.789, ...]  // 1536 dimensions from OpenAI text-embedding-3-small
 });
 ```
+
+## Embedding Providers
+
+VectorPlugin works with embeddings from any provider. Below are examples for the most popular embedding models in 2025.
+
+### OpenAI (Recommended)
+
+**Models**:
+- `text-embedding-3-small` - 1536 dims, best cost/performance ($0.00002/1k tokens)
+- `text-embedding-3-large` - 1536 or 3072 dims, highest quality ($0.00013/1k tokens)
+
+**Features**: Adjustable dimensions, multilingual, best-in-class performance
+
+```javascript
+import OpenAI from 'openai';
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+async function getEmbedding(text, options = {}) {
+  const response = await openai.embeddings.create({
+    model: options.model || 'text-embedding-3-small',  // or 'text-embedding-3-large'
+    input: text,
+    dimensions: options.dimensions  // Optional: 256, 512, 1024, 1536 (default), or 3072
+  });
+
+  return response.data[0].embedding;
+}
+
+// Usage with S3DB
+const products = await db.createResource({
+  name: 'products',
+  attributes: {
+    id: 'string|required',
+    name: 'string|required',
+    description: 'string',
+    vector: 'embedding:1536'  // OpenAI default dimension
+  },
+  behavior: 'body-overflow'
+});
+
+// Generate and store embeddings
+const embedding = await getEmbedding('Gaming laptop with RGB keyboard');
+await products.insert({
+  id: 'prod-1',
+  name: 'Gaming Laptop',
+  description: 'High-performance laptop',
+  vector: embedding,
+  vectorModel: 'text-embedding-3-small',
+  vectorDimensions: 1536
+});
+```
+
+**Pro tip**: Use `text-embedding-3-large` with `dimensions: 1536` for 3072-quality embeddings in 1536 dimensions (best compression).
+
+### Google Vertex AI
+
+**Models**:
+- `text-embedding-005` - 768 dims, optimized for English
+- `text-multilingual-embedding-002` - 768 dims, 100+ languages
+- `text-embedding-004` - 768 dims, previous generation
+- `textembedding-gecko@003` - 768 dims, legacy
+- **`gemini-embedding-001`** - 768/1536/3072 dims (recommended, adjustable)
+
+**Features**: Matryoshka Representation Learning (MRL), flexible dimensions, multilingual
+
+```javascript
+import { VertexAI } from '@google-cloud/vertexai';
+
+const vertexAI = new VertexAI({
+  project: process.env.GOOGLE_CLOUD_PROJECT,
+  location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1'
+});
+
+const model = vertexAI.preview.getGenerativeModel({
+  model: 'gemini-embedding-001'  // Latest model
+});
+
+async function getEmbedding(text, dimensions = 768) {
+  const result = await model.embedContent({
+    content: [{ role: 'user', parts: [{ text }] }],
+    outputDimensionality: dimensions  // 768, 1536, or 3072
+  });
+
+  return result.embedding.values;
+}
+
+// Usage with S3DB
+const documents = await db.createResource({
+  name: 'documents',
+  attributes: {
+    id: 'string|required',
+    content: 'string|required',
+    vector: 'embedding:768'  // Google default dimension
+  },
+  behavior: 'body-overflow'
+});
+
+// Generate and store embeddings
+const embedding = await getEmbedding('Machine learning tutorial', 768);
+await documents.insert({
+  id: 'doc-1',
+  content: 'Introduction to ML',
+  vector: embedding,
+  vectorModel: 'gemini-embedding-001',
+  vectorDimensions: 768
+});
+```
+
+**Dimension recommendations**:
+- 768 dims: Best balance (default)
+- 1536 dims: Higher quality, more storage
+- 3072 dims: Maximum quality for critical applications
+
+### Cohere
+
+**Models**:
+- `embed-english-v3.0` - 1024 dims, English only, best performance
+- `embed-multilingual-v3.0` - 1024 dims, 100+ languages
+- `embed-english-light-v3.0` - 384 dims, faster/smaller
+- `embed-multilingual-light-v3.0` - 384 dims, 100+ languages
+- `embed-english-image-v3.0` - 1024 dims, multimodal (text + images)
+- `embed-multilingual-image-v3.0` - 1024 dims, multimodal + multilingual
+
+**Features**: Multimodal support, compression-aware training, semantic search optimized
+
+```javascript
+import { CohereClient } from 'cohere-ai';
+
+const cohere = new CohereClient({
+  token: process.env.COHERE_API_KEY
+});
+
+async function getEmbedding(text, options = {}) {
+  const response = await cohere.embed({
+    texts: [text],
+    model: options.model || 'embed-english-v3.0',
+    inputType: options.inputType || 'search_document',  // or 'search_query', 'classification', 'clustering'
+    embeddingTypes: ['float']
+  });
+
+  return response.embeddings.float[0];
+}
+
+// Usage with S3DB
+const articles = await db.createResource({
+  name: 'articles',
+  attributes: {
+    id: 'string|required',
+    title: 'string|required',
+    content: 'string',
+    vector: 'embedding:1024'  // Cohere standard dimension
+  },
+  behavior: 'body-overflow'
+});
+
+// Generate embeddings with task-specific optimization
+const embedding = await getEmbedding('AI research paper', {
+  model: 'embed-english-v3.0',
+  inputType: 'search_document'  // Optimized for document storage
+});
+
+await articles.insert({
+  id: 'article-1',
+  title: 'Deep Learning Advances',
+  content: 'Latest AI research',
+  vector: embedding,
+  vectorModel: 'embed-english-v3.0',
+  vectorDimensions: 1024
+});
+
+// For queries, use search_query input type
+const queryEmbedding = await getEmbedding('machine learning tutorial', {
+  inputType: 'search_query'  // Optimized for search queries
+});
+```
+
+**Input Types**:
+- `search_document`: For indexing documents (asymmetric search)
+- `search_query`: For search queries (asymmetric search)
+- `classification`: For classification tasks
+- `clustering`: For clustering tasks
+
+### Voyage AI (Anthropic Recommended)
+
+**Models**:
+- `voyage-3` - 1024 dims, best general-purpose
+- `voyage-3-large` - 1024 dims, highest quality
+- `voyage-code-3` - 1536 dims, code-specific
+- `voyage-finance-2` - 1024 dims, finance domain
+- `voyage-law-2` - 1024 dims, legal domain
+- `voyage-multilingual-2` - 1024 dims, 100+ languages
+
+**Features**: Domain-specific models, recommended by Anthropic for Claude RAG applications
+
+**Note**: Anthropic does NOT offer native embedding models - they recommend Voyage AI
+
+```javascript
+import { VoyageAIClient } from 'voyageai';
+
+const voyage = new VoyageAIClient({
+  apiKey: process.env.VOYAGE_API_KEY
+});
+
+async function getEmbedding(text, model = 'voyage-3') {
+  const response = await voyage.embed({
+    input: [text],
+    model: model,
+    inputType: 'document'  // or 'query'
+  });
+
+  return response.data[0].embedding;
+}
+
+// Usage with S3DB
+const knowledge = await db.createResource({
+  name: 'knowledge_base',
+  attributes: {
+    id: 'string|required',
+    content: 'string|required',
+    vector: 'embedding:1024'  // Voyage standard dimension
+  },
+  behavior: 'body-overflow'
+});
+
+// Generate embeddings (optimized for Claude RAG)
+const embedding = await getEmbedding(
+  'Cloud computing infrastructure guide',
+  'voyage-3'
+);
+
+await knowledge.insert({
+  id: 'kb-1',
+  content: 'Cloud computing guide',
+  vector: embedding,
+  vectorModel: 'voyage-3',
+  vectorDimensions: 1024
+});
+
+// Domain-specific example (Finance)
+const financeEmbedding = await getEmbedding(
+  'Q4 earnings report analysis',
+  'voyage-finance-2'  // Specialized for finance
+});
+```
+
+**Use with Claude**:
+```javascript
+// Typical RAG pattern with Anthropic Claude
+const query = 'What is cloud computing?';
+const queryEmbedding = await getEmbedding(query, 'voyage-3');
+
+// Search knowledge base
+const results = await knowledge.vectorSearch(queryEmbedding, {
+  limit: 5,
+  distanceMetric: 'cosine'
+});
+
+// Use results as context for Claude
+const context = results.map(r => r.record.content).join('\n\n');
+
+const message = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  messages: [{
+    role: 'user',
+    content: `Context:\n${context}\n\nQuestion: ${query}`
+  }]
+});
+```
+
+### Model Comparison Table
+
+| Provider | Model | Dimensions | Use Case | Cost (per 1M tokens) | Notes |
+|----------|-------|-----------|----------|---------------------|-------|
+| **OpenAI** | text-embedding-3-small | 1536 | General purpose | $0.02 | Best cost/performance |
+| **OpenAI** | text-embedding-3-large | 1536/3072 | High quality | $0.13 | Adjustable dimensions |
+| **Google** | gemini-embedding-001 | 768-3072 | General purpose | Free* | Flexible dimensions (MRL) |
+| **Google** | text-embedding-005 | 768 | English | Free* | Optimized for English |
+| **Cohere** | embed-english-v3.0 | 1024 | English | $0.10 | Semantic search optimized |
+| **Cohere** | embed-multilingual-v3.0 | 1024 | Multilingual | $0.10 | 100+ languages |
+| **Cohere** | embed-english-light-v3.0 | 384 | Fast/small | $0.10 | Lower cost storage |
+| **Voyage** | voyage-3 | 1024 | General purpose | $0.12 | Anthropic recommended |
+| **Voyage** | voyage-3-large | 1024 | High quality | $0.12 | Best quality |
+| **Voyage** | voyage-code-3 | 1536 | Code | $0.12 | Code-specific |
+| **Voyage** | voyage-finance-2 | 1024 | Finance | $0.12 | Domain-specific |
+
+*Google Vertex AI pricing varies by region and usage
+
+### Storage Size Comparison
+
+With S3DB's automatic compression (`embedding:XXX` notation):
+
+| Dimensions | Uncompressed | With Compression (77% savings) | body-overflow Required? |
+|-----------|--------------|-------------------------------|------------------------|
+| 384 | ~2.7KB | **~620 bytes** | ❌ NO |
+| 768 | ~5.4KB | **~1.2KB** | ❌ NO |
+| 1024 | ~7.2KB | **~1.7KB** | ❌ NO |
+| 1536 | ~10.8KB | **~2.5KB** | ✅ YES |
+| 3072 | ~21.6KB | **~5.0KB** | ✅ YES |
+
+### Choosing the Right Model
+
+**For RAG Applications**:
+- **Claude + Voyage AI**: Best quality, Anthropic-recommended
+- **GPT + OpenAI**: Integrated ecosystem, adjustable dimensions
+- **Gemini + Google**: Free tier, flexible dimensions
+
+**For Semantic Search**:
+- **Cohere**: Optimized input types (document vs query)
+- **OpenAI 3-small**: Best cost/performance
+- **Voyage-3**: High quality, domain-specific options
+
+**For Multilingual**:
+- **Cohere multilingual-v3.0**: 100+ languages
+- **Google text-multilingual-embedding-002**: 100+ languages
+- **Voyage multilingual-2**: 100+ languages
+
+**For Code Search**:
+- **Voyage code-3**: Code-specific (1536 dims)
+- **OpenAI 3-small**: Good general-purpose code
+- **Google gemini-embedding-001**: Multi-modal (code + text)
+
+**For Cost Optimization**:
+- **OpenAI 3-small**: $0.02 per 1M tokens (cheapest)
+- **Cohere light models**: 384 dims, less storage
+- **Google Vertex AI**: Free tier available
 
 ## Use Cases
 
@@ -262,7 +594,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function getEmbedding(text) {
   const response = await openai.embeddings.create({
-    model: 'text-embedding-ada-002',
+    model: 'text-embedding-3-small',  // or 'text-embedding-3-large' for better quality
     input: text
   });
   return response.data[0].embedding;
@@ -1526,7 +1858,8 @@ await products.insertMany(items);
 3. **Limit vector dimensions** if possible:
 - 128-256 dims: Fast, good for most use cases
 - 512-768 dims: Sentence Transformers, balanced
-- 1536 dims: OpenAI ada-002, best quality but slower
+- 1536 dims: OpenAI text-embedding-3-small/3-large, best quality but slower
+- 3072 dims: OpenAI text-embedding-3-large (maximum quality, requires more storage)
 
 ### Clustering Performance
 
@@ -1688,7 +2021,7 @@ async function getEmbedding(text) {
     .replace(/\s+/g, ' ');
 
   const response = await openai.embeddings.create({
-    model: 'text-embedding-3-large',  // Latest model
+    model: 'text-embedding-3-large',  // Best quality (1536 dims) - or use 3-small for lower cost
     input: cleaned
   });
 
