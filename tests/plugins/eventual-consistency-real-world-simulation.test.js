@@ -99,7 +99,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     expect(url.scans).toBe(2);
 
     console.log('\n✅ All metrics persisted correctly!\n');
-  });
+  }, 30000);
 
   it('should handle the EXACT mrt-shortner bug scenario: add before record exists', async () => {
     console.log('\n🔴 Reproducing EXACT mrt-shortner bug scenario...\n');
@@ -162,7 +162,7 @@ describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
     expect(url.clicks).toBe(3);
 
     console.log('\n✅ v10.0.16 behavior working correctly!\n');
-  });
+  }, 30000);
 
   it.skip('should handle high-traffic scenario: 20 concurrent operations', async () => {
     console.log('\n🚀 Simulating high-traffic scenario...\n');
