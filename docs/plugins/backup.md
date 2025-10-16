@@ -856,6 +856,140 @@ s3db restore backup-id --overwrite --connection "s3://key:secret@bucket"
 
 ---
 
+## Error Handling
+
+The Backup Plugin uses `BackupError` for all backup-related errors. All errors include comprehensive diagnostic information.
+
+### Error Structure
+
+```javascript
+try {
+  await backupPlugin.backup('full');
+} catch (error) {
+  console.log(error.name);         // 'BackupError'
+  console.log(error.message);      // Brief error message
+  console.log(error.description);  // Detailed diagnostic information
+  console.log(error.driver);       // 'filesystem', 's3', 'multi'
+  console.log(error.operation);    // 'backup', 'restore', 'list', etc.
+}
+```
+
+### Common Errors
+
+#### Driver Configuration Error
+```javascript
+// ❌ Invalid driver configuration
+new BackupPlugin({
+  driver: 'filesystem',
+  config: { path: null } // Missing required path
+});
+
+// Error: BackupError
+// Operation: validateConfig
+// Description: Invalid backup driver configuration
+```
+
+#### Backup Upload Failed
+```javascript
+// ❌ Cannot write to destination
+await backupPlugin.backup('full');
+
+// Error: BackupError
+// Operation: upload
+// Driver: filesystem
+// Description: Failed to upload backup file
+// Common causes:
+// 1. Insufficient disk space
+// 2. Permission denied
+// 3. Path does not exist
+// 4. Network connectivity (S3)
+```
+
+#### Restore Failed
+```javascript
+// ❌ Backup not found or corrupted
+await backupPlugin.restore('invalid-backup-id');
+
+// Error: BackupError
+// Operation: restore
+// Description: Failed to restore from backup
+// Common causes:
+// 1. Backup ID does not exist
+// 2. Backup file corrupted
+// 3. Checksum mismatch
+// 4. Incompatible backup format
+```
+
+#### Multi-Destination Strategy Failed
+```javascript
+// ❌ All destinations must succeed but one failed
+new BackupPlugin({
+  driver: 'multi',
+  config: {
+    strategy: 'all',
+    destinations: [
+      { driver: 'filesystem', config: { path: '/valid/' } },
+      { driver: 's3', config: { bucket: 'invalid' } } // This fails
+    ]
+  }
+});
+
+// Error: BackupError
+// Operation: backup
+// Driver: multi
+// Description: Multi-destination backup failed
+// Strategy: all (requires all destinations to succeed)
+```
+
+### Error Prevention
+
+```javascript
+// ✅ Validate configuration before creating backups
+const backupPlugin = new BackupPlugin({
+  driver: 'filesystem',
+  config: {
+    path: '/backups/{date}/',
+    permissions: 0o644
+  },
+  verification: true,  // Always verify backups
+  verbose: true        // Enable detailed logging
+});
+
+// ✅ Check backup status before restore
+const status = await backupPlugin.getBackupStatus(backupId);
+if (status.status === 'completed' && status.checksum) {
+  await backupPlugin.restore(backupId);
+}
+
+// ✅ Handle errors gracefully
+try {
+  await backupPlugin.backup('full');
+} catch (error) {
+  if (error.name === 'BackupError') {
+    console.error('Backup failed:', error.description);
+
+    // Retry with different strategy or notify ops
+    if (error.operation === 'upload') {
+      await notifyOps('Backup upload failed', error);
+    }
+  }
+}
+```
+
+### Error Reference
+
+| Operation | Common Causes | Solutions |
+|-----------|---------------|-----------|
+| `backup` | Disk space, permissions, network | Check storage space, verify credentials |
+| `restore` | Missing backup, corruption | Verify backup exists and is valid |
+| `list` | Storage access denied | Check S3/filesystem permissions |
+| `delete` | Backup in use, permissions | Ensure backup is not being accessed |
+| `cleanup` | Retention policy error | Verify retention configuration |
+
+For complete error details, see [Error Classes Reference](../errors.md#backuperror).
+
+---
+
 ## Troubleshooting
 
 ### Issue: Backup fails with permission errors
