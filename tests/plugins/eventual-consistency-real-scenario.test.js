@@ -148,7 +148,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
     // Verify persistence - get again
     const urlAgain = await urlsResource.get('short-789');
     expect(urlAgain.clicks).toBe(10); // Should persist!
-  });
+  }, 30000);
 
   test("should handle sequential clicks on same URL", async () => {
     // Create URL

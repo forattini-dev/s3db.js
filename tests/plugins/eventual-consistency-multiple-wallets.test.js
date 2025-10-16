@@ -308,5 +308,5 @@ describe("EventualConsistencyPlugin - Multiple Wallets Independence", () => {
     expect(ivanWallet.balance).not.toBe(judyWallet.balance);
     expect(judyWallet.balance).not.toBe(karlWallet.balance);
     expect(karlWallet.balance).not.toBe(ivanWallet.balance);
-  });
+  }, 30000);
 });

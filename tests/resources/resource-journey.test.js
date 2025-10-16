@@ -608,4 +608,154 @@ describe('Resource Journey - Real Integration Tests', () => {
       expect(error.message).not.toContain('[object');
     }
   });
+
+  test('Resource with Vector Embeddings Journey', async () => {
+    // 1. Create resource with embedding field using custom shorthand notation
+    const resource = await database.createResource({
+      name: 'documents',
+      attributes: {
+        id: 'string|required',
+        title: 'string|required',
+        content: 'string|required',
+        embedding: 'embedding:1536',  // OpenAI text-embedding-ada-002 dimension
+        category: 'string|optional'
+      },
+      behavior: 'body-overflow', // Large embeddings will overflow to body
+      timestamps: true,
+      partitions: {
+        byCategory: {
+          fields: { category: 'string' }
+        }
+      }
+    });
+
+    // 2. Verify schema recognizes embedding type
+    expect(resource.schema).toBeDefined();
+    expect(resource.schema.attributes.embedding).toBeDefined();
+
+    // 3. Generate realistic embedding vector (normalized values between -1 and 1)
+    const embedding1 = Array.from({ length: 1536 }, () => (Math.random() * 2 - 1) * 0.8);
+
+    // 4. Insert document with embedding
+    const doc1 = await resource.insert({
+      id: 'doc1',
+      title: 'AI and Machine Learning',
+      content: 'Introduction to neural networks and deep learning',
+      embedding: embedding1,
+      category: 'ai'
+    });
+
+    expect(doc1.id).toBe('doc1');
+    expect(doc1.title).toBe('AI and Machine Learning');
+    expect(doc1.embedding).toBeDefined();
+    expect(doc1.embedding).toHaveLength(1536);
+    expect(doc1.createdAt).toBeDefined();
+
+    // 5. Verify embedding values are preserved with precision
+    doc1.embedding.forEach((val, i) => {
+      expect(val).toBeCloseTo(embedding1[i], 5); // 6 decimal places precision
+    });
+
+    // 6. Retrieve document and verify embedding integrity
+    const retrieved = await resource.get('doc1');
+    expect(retrieved.title).toBe('AI and Machine Learning');
+    expect(retrieved.embedding).toHaveLength(1536);
+
+    // Verify some random positions for precision
+    expect(retrieved.embedding[0]).toBeCloseTo(embedding1[0], 5);
+    expect(retrieved.embedding[100]).toBeCloseTo(embedding1[100], 5);
+    expect(retrieved.embedding[768]).toBeCloseTo(embedding1[768], 5);
+    expect(retrieved.embedding[1535]).toBeCloseTo(embedding1[1535], 5);
+
+    // 7. Insert more documents for testing
+    const embedding2 = Array.from({ length: 1536 }, () => (Math.random() * 2 - 1) * 0.8);
+    const doc2 = await resource.insert({
+      id: 'doc2',
+      title: 'Natural Language Processing',
+      content: 'Text processing and sentiment analysis',
+      embedding: embedding2,
+      category: 'nlp'
+    });
+
+    expect(doc2.embedding).toHaveLength(1536);
+
+    // 8. Update document with new embedding
+    const newEmbedding = Array.from({ length: 1536 }, () => (Math.random() * 2 - 1) * 0.8);
+    const updated = await resource.update('doc1', {
+      title: 'Updated: AI and ML',
+      embedding: newEmbedding
+    });
+
+    expect(updated.title).toBe('Updated: AI and ML');
+    expect(updated.embedding).toHaveLength(1536);
+    expect(updated.embedding[0]).toBeCloseTo(newEmbedding[0], 5);
+    expect(updated.embedding[0]).not.toBeCloseTo(embedding1[0], 5); // Should be different from original
+
+    // 9. Query by partition (category)
+    const aiDocs = await resource.listIds({
+      partition: 'byCategory',
+      partitionValues: { category: 'ai' }
+    });
+    expect(aiDocs).toContain('doc1');
+    expect(aiDocs).not.toContain('doc2');
+
+    const nlpDocs = await resource.listIds({
+      partition: 'byCategory',
+      partitionValues: { category: 'nlp' }
+    });
+    expect(nlpDocs).toContain('doc2');
+
+    // 10. Get all documents
+    const allDocs = await resource.getAll();
+    expect(allDocs).toHaveLength(2);
+    expect(allDocs[0].embedding).toHaveLength(1536);
+    expect(allDocs[1].embedding).toHaveLength(1536);
+
+    // 11. Validate that embedding values are within expected range
+    allDocs.forEach(doc => {
+      doc.embedding.forEach(val => {
+        expect(val).toBeGreaterThanOrEqual(-1);
+        expect(val).toBeLessThanOrEqual(1);
+      });
+    });
+
+    // 12. Test validation - should reject wrong length
+    const validationResult = await resource.validate({
+      id: 'doc3',
+      title: 'Test',
+      content: 'Test content',
+      embedding: Array.from({ length: 768 }, () => Math.random()), // Wrong length
+      category: 'test'
+    });
+
+    expect(validationResult.isValid).toBe(false);
+    expect(validationResult.errors).toBeDefined();
+    expect(validationResult.errors.some(err => err.field === 'embedding')).toBe(true);
+
+    // 13. Test validation - should reject non-numeric values
+    const validationResult2 = await resource.validate({
+      id: 'doc4',
+      title: 'Test',
+      content: 'Test content',
+      embedding: Array.from({ length: 1536 }, (_, i) => i < 10 ? 'invalid' : Math.random()),
+      category: 'test'
+    });
+
+    expect(validationResult2.isValid).toBe(false);
+    expect(validationResult2.errors).toBeDefined();
+
+    // 14. Count documents
+    const count = await resource.count();
+    expect(count).toBe(2);
+
+    // 15. Delete a document
+    await resource.delete('doc1');
+    const countAfterDelete = await resource.count();
+    expect(countAfterDelete).toBe(1);
+
+    // 16. Verify remaining document still has intact embedding
+    const remainingDoc = await resource.get('doc2');
+    expect(remainingDoc.embedding).toHaveLength(1536);
+    expect(remainingDoc.embedding[0]).toBeCloseTo(embedding2[0], 5);
+  });
 }); 
