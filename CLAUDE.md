@@ -298,8 +298,9 @@ database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required|email',
-    password: 'secret|required',  // Auto-encrypted
-    profile: {                    // Nested object
+    password: 'secret|required',      // Auto-encrypted
+    embedding: 'embedding:1536',      // Vector embedding (77% compression)
+    profile: {                        // Nested object
       type: 'object',
       props: { name: 'string' }
     }
@@ -315,6 +316,44 @@ database.createResource({
     beforeInsert: [async (data) => data]
   }
 })
+```
+
+#### Custom Type Notations
+
+**Embedding Type** - Shorthand for vector embeddings with automatic fixed-point encoding:
+```javascript
+// Shorthand notation (recommended)
+attributes: {
+  vector: 'embedding:1536'        // Common OpenAI dimension
+}
+
+// Alternative pipe notation
+attributes: {
+  vector: 'embedding|length:768'  // Common BERT dimension
+}
+
+// Object notation (for additional options)
+attributes: {
+  vector: {
+    type: 'array',
+    items: 'number',
+    length: 1536,
+    empty: false
+  }
+}
+
+// All forms automatically apply fixed-point encoding (77% compression)
+// Common dimensions: 256, 384, 512, 768, 1024, 1536, 2048, 3072
+```
+
+**Secret Type** - Auto-encrypted fields:
+```javascript
+attributes: {
+  password: 'secret|required',           // AES-256-GCM encryption
+  apiKey: 'secret|min:32',              // Encrypted with validation
+  token: 'secretAny',                   // Any type, encrypted
+  pin: 'secretNumber'                   // Number type, encrypted
+}
 ```
 
 ### Error Recovery Pattern
@@ -443,3 +482,24 @@ node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests
 - `tests/s3db.json/` - Self-healing JSON tests
 - `tests/plugins/` - All plugin functionality
 - `tests/resources/` - Resource CRUD operations
+
+## Examples Directory
+
+**Location**: `docs/examples/` (NOT `examples/`)
+**Naming Convention**: `eXX-description.js` (e.g., `e41-vector-rag-chatbot.js`)
+**Purpose**: Production-ready examples for documentation and developer reference
+
+**Categories**:
+- Basic CRUD: `e01-e07` (bulk insert, streams, CSV/ZIP export, JWT, resource creation)
+- Advanced Features: `e08-e17` (behaviors, partitioning, schema validation, versioning, hooks, pagination, error handling)
+- Plugins: `e18-e33` (costs, replicators, queue consumers, middleware, caching)
+- HTTP & Optimization: `e34-e37` (HTTP client benchmarks, cache drivers, self-healing)
+- Testing: `e38-e40` (isolated plugins, partial schemas, mock database)
+- Vectors: `e41-e43` (RAG chatbot, provider integrations, benchmarks)
+
+**When Adding Examples**:
+1. Always save to `docs/examples/` directory
+2. Use next available `eXX` number
+3. Include comprehensive comments and error handling
+4. Demonstrate production-ready patterns
+5. Show both basic and advanced usage
