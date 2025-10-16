@@ -13122,6 +13122,71 @@ ${errorDetails}`,
     return true;
   }
   /**
+   * Find orphaned partitions (partitions that reference non-existent fields)
+   * @returns {Object} Object with orphaned partition names as keys and details as values
+   * @example
+   * const orphaned = resource.findOrphanedPartitions();
+   * // Returns: { byRegion: { missingFields: ['region'], definition: {...} } }
+   */
+  findOrphanedPartitions() {
+    const orphaned = {};
+    if (!this.config.partitions) {
+      return orphaned;
+    }
+    for (const [partitionName, partitionDef] of Object.entries(this.config.partitions)) {
+      if (!partitionDef.fields) {
+        continue;
+      }
+      const missingFields = [];
+      for (const fieldName of Object.keys(partitionDef.fields)) {
+        if (!this.fieldExistsInAttributes(fieldName)) {
+          missingFields.push(fieldName);
+        }
+      }
+      if (missingFields.length > 0) {
+        orphaned[partitionName] = {
+          missingFields,
+          definition: partitionDef,
+          allFields: Object.keys(partitionDef.fields)
+        };
+      }
+    }
+    return orphaned;
+  }
+  /**
+   * Remove orphaned partitions (partitions that reference non-existent fields)
+   * WARNING: This will modify the resource configuration and should be followed by uploadMetadataFile()
+   * @param {Object} options - Options
+   * @param {boolean} options.dryRun - If true, only returns what would be removed without modifying (default: false)
+   * @returns {Object} Object with removed partition names and details
+   * @example
+   * // Dry run to see what would be removed
+   * const toRemove = resource.removeOrphanedPartitions({ dryRun: true });
+   * console.log('Would remove:', toRemove);
+   *
+   * // Actually remove orphaned partitions
+   * const removed = resource.removeOrphanedPartitions();
+   * await database.uploadMetadataFile(); // Save changes to S3
+   */
+  removeOrphanedPartitions({ dryRun = false } = {}) {
+    const orphaned = this.findOrphanedPartitions();
+    if (Object.keys(orphaned).length === 0) {
+      return {};
+    }
+    if (dryRun) {
+      return orphaned;
+    }
+    for (const partitionName of Object.keys(orphaned)) {
+      delete this.config.partitions[partitionName];
+    }
+    this.emit("orphanedPartitionsRemoved", {
+      resourceName: this.name,
+      removed: Object.keys(orphaned),
+      details: orphaned
+    });
+    return orphaned;
+  }
+  /**
    * Apply a single partition rule to a field value
    * @param {*} value - The field value
    * @param {string} rule - The partition rule
