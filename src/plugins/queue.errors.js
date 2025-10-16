@@ -39,8 +39,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue.md
 `.trim();
     }
 
-    super(message, { ...rest, queueName, operation, messageId, description,
-      suggestion: details.suggestion || 'Check queue configuration and handler registration.' });
+    super(message, { ...rest, queueName, operation, messageId, description });
   }
 }
 
