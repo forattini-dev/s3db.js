@@ -1337,4 +1337,141 @@ describe('fastest-validator v1.19.1 - Comprehensive Shorthand Notation Tests', (
       expect(endTime - startTime).toBeLessThan(100); // Should be very fast
     });
   });
+
+  describe('Long Arrays - Vector Embedding Dimensions', () => {
+    it('validates OpenAI text-embedding-ada-002 (1536 dimensions)', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 1536, empty: false }
+      });
+
+      const vector1536 = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
+      expect(check({ vector: vector1536 })).toBe(true);
+
+      // Wrong length should fail
+      const wrongLength = Array.from({ length: 1535 }, () => Math.random());
+      const result = check({ vector: wrongLength });
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector' && err.type === 'arrayLength')).toBeDefined();
+    });
+
+    it('validates Google Gemini Gecko (768 dimensions)', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 768, empty: false }
+      });
+
+      const vector768 = Array.from({ length: 768 }, () => Math.random() * 2 - 1);
+      expect(check({ vector: vector768 })).toBe(true);
+    });
+
+    it('validates Voyage AI voyage-3-large (2048 dimensions)', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 2048, empty: false }
+      });
+
+      const vector2048 = Array.from({ length: 2048 }, () => Math.random() * 2 - 1);
+      expect(check({ vector: vector2048 })).toBe(true);
+    });
+
+    it('validates OpenAI text-embedding-3-large (3072 dimensions)', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 3072, empty: false }
+      });
+
+      const vector3072 = Array.from({ length: 3072 }, () => Math.random() * 2 - 1);
+      expect(check({ vector: vector3072 })).toBe(true);
+    });
+
+    it('validates long arrays with negative values', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 1536 }
+      });
+
+      const vectorWithNegatives = Array.from({ length: 1536 }, () =>
+        (Math.random() - 0.5) * 2
+      );
+      expect(check({ vector: vectorWithNegatives })).toBe(true);
+
+      // Verify negative values are allowed
+      const hasNegative = vectorWithNegatives.some(v => v < 0);
+      expect(hasNegative).toBe(true);
+    });
+
+    it('validates long arrays with all zeros', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 1024 }
+      });
+
+      const zeroVector = Array.from({ length: 1024 }, () => 0);
+      expect(check({ vector: zeroVector })).toBe(true);
+    });
+
+    it('validates long arrays item type constraints', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 512 }
+      });
+
+      // String in numeric array should fail
+      const invalidVector = Array.from({ length: 512 }, () => Math.random());
+      invalidVector[0] = 'invalid';
+
+      const result = check({ vector: invalidVector });
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector[0]' && err.type === 'number')).toBeDefined();
+    });
+
+    it('validates performance with very long arrays (3072 dimensions)', () => {
+      const check = v.compile({
+        vector: { type: 'array', items: 'number', length: 3072 }
+      });
+
+      const vector3072 = Array.from({ length: 3072 }, () => Math.random());
+
+      const startTime = Date.now();
+      const result = check({ vector: vector3072 });
+      const endTime = Date.now();
+
+      expect(result).toBe(true);
+      expect(endTime - startTime).toBeLessThan(20); // Should be reasonably fast
+    });
+
+    it('validates multiple long arrays simultaneously', () => {
+      const check = v.compile({
+        embedding1: { type: 'array', items: 'number', length: 1536 },
+        embedding2: { type: 'array', items: 'number', length: 768 },
+        embedding3: { type: 'array', items: 'number', length: 256 }
+      });
+
+      const data = {
+        embedding1: Array.from({ length: 1536 }, () => Math.random()),
+        embedding2: Array.from({ length: 768 }, () => Math.random()),
+        embedding3: Array.from({ length: 256 }, () => Math.random())
+      };
+
+      expect(check(data)).toBe(true);
+    });
+
+    it('validates long arrays with range constraints', () => {
+      const check = v.compile({
+        // Normalized embedding values typically -1 to 1
+        vector: {
+          type: 'array',
+          items: 'number|min:-1|max:1',
+          length: 1024
+        }
+      });
+
+      const normalized = Array.from({ length: 1024 }, () =>
+        (Math.random() * 2 - 1) * 0.9 // -0.9 to 0.9
+      );
+      expect(check({ vector: normalized })).toBe(true);
+
+      // Value out of range should fail
+      const outOfRange = Array.from({ length: 1024 }, () => Math.random());
+      outOfRange[500] = 2.0; // Exceeds max:1
+
+      const result = check({ vector: outOfRange });
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector[500]' && err.type === 'numberMax')).toBeDefined();
+    });
+  });
 }); 

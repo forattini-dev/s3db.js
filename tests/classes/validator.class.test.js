@@ -774,5 +774,383 @@ describe('Validator Class - Legacy Tests (Enhanced)', () => {
     expect(result1).toBe(true);
     expect(result2).toBe(true);
   });
+
+  describe('Long Arrays - ValidatorManager with S3DB schemas', () => {
+    test('should validate OpenAI ada-002 embeddings (1536 dims) with pipe notation', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: 'string|empty:false',
+        vector: 'array|items:number|length:1536|empty:false'
+      };
+
+      const vector1536 = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
+
+      const result = await validator.validate({
+        id: 'doc1',
+        vector: vector1536
+      }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate Gemini Gecko embeddings (768 dims) with pipe notation', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: 'string|empty:false',
+        vector: 'array|items:number|length:768|empty:false'
+      };
+
+      const vector768 = Array.from({ length: 768 }, () => Math.random() * 2 - 1);
+
+      const result = await validator.validate({
+        id: 'doc1',
+        vector: vector768
+      }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate voyage-3-large embeddings (2048 dims) with object notation', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: { type: 'string', empty: false },
+        vector: {
+          type: 'array',
+          items: 'number',
+          length: 2048,
+          empty: false
+        }
+      };
+
+      const vector2048 = Array.from({ length: 2048 }, () => Math.random() * 2 - 1);
+
+      const result = await validator.validate({
+        id: 'doc1',
+        vector: vector2048
+      }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should fail validation for wrong vector length', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: 'array|items:number|length:1536|empty:false'
+      };
+
+      const wrongLength = Array.from({ length: 1535 }, () => Math.random());
+
+      const result = await validator.validate({ vector: wrongLength }, schema);
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector' && err.type === 'arrayLength')).toBeDefined();
+    });
+
+    test('should fail validation for non-numeric items in vector', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: 'array|items:number|length:512|empty:false'
+      };
+
+      const invalidVector = Array.from({ length: 512 }, () => Math.random());
+      invalidVector[100] = 'invalid';
+
+      const result = await validator.validate({ vector: invalidVector }, schema);
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector[100]' && err.type === 'number')).toBeDefined();
+    });
+
+    test('should validate multiple embedding vectors simultaneously', async () => {
+      const validator = new Validator();
+      const schema = {
+        openai: 'array|items:number|length:1536',
+        gemini: 'array|items:number|length:768',
+        voyage: 'array|items:number|length:1024'
+      };
+
+      const data = {
+        openai: Array.from({ length: 1536 }, () => Math.random()),
+        gemini: Array.from({ length: 768 }, () => Math.random()),
+        voyage: Array.from({ length: 1024 }, () => Math.random())
+      };
+
+      const result = await validator.validate(data, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate long arrays with range constraints', async () => {
+      const validator = new Validator();
+      const schema = {
+        // Normalized embedding values typically -1 to 1
+        vector: {
+          type: 'array',
+          items: 'number|min:-1|max:1',
+          length: 1024
+        }
+      };
+
+      const normalized = Array.from({ length: 1024 }, () =>
+        (Math.random() * 2 - 1) * 0.9
+      );
+
+      const result = await validator.validate({ vector: normalized }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate very long arrays efficiently (3072 dims)', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: 'array|items:number|length:3072'
+      };
+
+      const vector3072 = Array.from({ length: 3072 }, () => Math.random());
+
+      const startTime = Date.now();
+      const result = await validator.validate({ vector: vector3072 }, schema);
+      const endTime = Date.now();
+
+      expect(result).toBe(true);
+      expect(endTime - startTime).toBeLessThan(50); // Should be fast
+    });
+  });
+
+  describe('Embedding Type - Basic Alias (without length parameter)', () => {
+    test('should validate embedding alias for numeric arrays', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: 'string|empty:false',
+        vector: { type: 'embedding', length: 1536 } // Using object notation for length
+      };
+
+      const vector1536 = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
+
+      const result = await validator.validate({
+        id: 'doc1',
+        vector: vector1536
+      }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate embedding|length:768 with object notation', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 768 }
+      };
+
+      const vector768 = Array.from({ length: 768 }, () => Math.random() * 2 - 1);
+
+      const result = await validator.validate({ vector: vector768 }, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should reject wrong length for embedding arrays', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 1536 }
+      };
+
+      const wrongVector = Array.from({ length: 768 }, () => Math.random());
+
+      const result = await validator.validate({ vector: wrongVector }, schema);
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector' && err.type === 'arrayLength')).toBeDefined();
+    });
+
+    test('should reject non-numeric items in embedding arrays', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 512 }
+      };
+
+      const invalidVector = Array.from({ length: 512 }, () => Math.random());
+      invalidVector[100] = 'invalid';
+
+      const result = await validator.validate({ vector: invalidVector }, schema);
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector[100]' && err.type === 'number')).toBeDefined();
+    });
+
+    test('should validate common embedding dimensions', async () => {
+      const validator = new Validator();
+      const dimensions = [256, 384, 512, 768, 1024, 1536, 2048, 3072];
+
+      for (const dim of dimensions) {
+        const schema = {
+          vector: { type: 'embedding', length: dim }
+        };
+
+        const vector = Array.from({ length: dim }, () => Math.random() * 2 - 1);
+        const result = await validator.validate({ vector }, schema);
+
+        expect(result).toBe(true);
+      }
+    });
+
+    test('should validate embedding with optional modifier', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: 'string',
+        vector: { type: 'embedding', length: 768, optional: true }
+      };
+
+      // Without embedding
+      const result1 = await validator.validate({ id: 'doc1' }, schema);
+      expect(result1).toBe(true);
+
+      // With embedding
+      const vector = Array.from({ length: 768 }, () => Math.random());
+      const result2 = await validator.validate({ id: 'doc2', vector }, schema);
+      expect(result2).toBe(true);
+
+      // With wrong length - should fail
+      const wrongVector = Array.from({ length: 1536 }, () => Math.random());
+      const result3 = await validator.validate({ id: 'doc3', vector: wrongVector }, schema);
+      expect(Array.isArray(result3)).toBe(true);
+    });
+
+    test('should mix embedding with other field types', async () => {
+      const validator = new Validator();
+      const schema = {
+        id: 'string|empty:false',
+        title: 'string|min:1|max:200',
+        embedding: { type: 'embedding', length: 1536 },
+        score: 'number|min:0|max:1',
+        tags: { type: 'array', items: 'string' }
+      };
+
+      const data = {
+        id: 'doc1',
+        title: 'Test Document',
+        embedding: Array.from({ length: 1536 }, () => Math.random()),
+        score: 0.95,
+        tags: ['ai', 'ml', 'embedding']
+      };
+
+      const result = await validator.validate(data, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should validate multiple embeddings with different dimensions', async () => {
+      const validator = new Validator();
+      const schema = {
+        openai: { type: 'embedding', length: 1536 },
+        gemini: { type: 'embedding', length: 768 },
+        voyage: { type: 'embedding', length: 2048 }
+      };
+
+      const data = {
+        openai: Array.from({ length: 1536 }, () => Math.random()),
+        gemini: Array.from({ length: 768 }, () => Math.random()),
+        voyage: Array.from({ length: 2048 }, () => Math.random())
+      };
+
+      const result = await validator.validate(data, schema);
+
+      expect(result).toBe(true);
+    });
+
+    test('should handle normalized embedding values (-1 to 1)', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 1024 }
+      };
+
+      // Test with normalized values
+      const normalized = Array.from({ length: 1024 }, () => (Math.random() * 2 - 1) * 0.9);
+
+      const result = await validator.validate({ vector: normalized }, schema);
+
+      expect(result).toBe(true);
+
+      // Verify values are in expected range
+      const hasNegative = normalized.some(v => v < 0);
+      const hasPositive = normalized.some(v => v > 0);
+      expect(hasNegative).toBe(true);
+      expect(hasPositive).toBe(true);
+    });
+
+    test('should reject empty embedding arrays (default behavior)', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 512 }
+      };
+
+      // Empty array should fail (embedding alias has empty:false by default)
+      const result = await validator.validate({ vector: [] }, schema);
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'vector' && err.type === 'arrayEmpty')).toBeDefined();
+    });
+
+    test('should validate embedding type performance', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 3072 }
+      };
+
+      const vector = Array.from({ length: 3072 }, () => Math.random());
+
+      const startTime = Date.now();
+      const result = await validator.validate({ vector }, schema);
+      const endTime = Date.now();
+
+      expect(result).toBe(true);
+      expect(endTime - startTime).toBeLessThan(100); // Should be fast
+    });
+
+    test('should provide clear error for invalid embedding data types', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: { type: 'embedding', length: 1536 }
+      };
+
+      // Test with string instead of array
+      const result1 = await validator.validate({ vector: 'not-an-array' }, schema);
+      expect(Array.isArray(result1)).toBe(true);
+      expect(result1.find(err => err.field === 'vector' && err.type === 'array')).toBeDefined();
+
+      // Test with wrong type items
+      const result2 = await validator.validate({
+        vector: Array.from({ length: 1536 }, () => 'string')
+      }, schema);
+      expect(Array.isArray(result2)).toBe(true);
+      expect(result2.some(err => err.field.startsWith('vector[') && err.type === 'number')).toBe(true);
+    });
+
+    test('should validate basic embedding alias without length constraint', async () => {
+      const validator = new Validator();
+      const schema = {
+        vector: 'embedding' // No length constraint, just array of numbers with empty:false
+      };
+
+      // Should accept any length array of numbers
+      const result1 = await validator.validate({
+        vector: Array.from({ length: 10 }, () => Math.random())
+      }, schema);
+      expect(result1).toBe(true);
+
+      const result2 = await validator.validate({
+        vector: Array.from({ length: 1536 }, () => Math.random())
+      }, schema);
+      expect(result2).toBe(true);
+
+      // Should reject non-numeric items
+      const invalidVector = [1, 2, 'invalid', 4];
+      const result3 = await validator.validate({ vector: invalidVector }, schema);
+      expect(Array.isArray(result3)).toBe(true);
+      expect(result3.find(err => err.field === 'vector[2]' && err.type === 'number')).toBeDefined();
+
+      // Should reject empty arrays
+      const result4 = await validator.validate({ vector: [] }, schema);
+      expect(Array.isArray(result4)).toBe(true);
+      expect(result4.find(err => err.field === 'vector' && err.type === 'arrayEmpty')).toBeDefined();
+    });
+  });
 });
-  

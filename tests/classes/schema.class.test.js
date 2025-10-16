@@ -2000,5 +2000,563 @@ describe('Schema Auto-Hook Logic for Numbers', () => {
       }
     });
   });
+
+  describe('Long Arrays - Schema mapping/unmapping', () => {
+    test('should map and unmap OpenAI ada-002 embeddings (1536 dims)', async () => {
+      const schema = new Schema({
+        name: 'embeddings',
+        attributes: {
+          id: 'string',
+          vector: 'array|items:number|length:1536'
+        }
+      });
+
+      const vector1536 = Array.from({ length: 1536 }, (_, i) => i * 0.001);
+      const data = { id: 'doc1', vector: vector1536 };
+
+      // Map
+      const mapped = await schema.mapper(data);
+      expect(mapped).toBeDefined();
+      expect(mapped._v).toBe('1');
+
+      // Unmap
+      const unmapped = await schema.unmapper(mapped);
+      expect(unmapped.id).toBe('doc1');
+      expect(unmapped.vector).toHaveLength(1536);
+
+      // Verify values are preserved (with some tolerance for encoding)
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(i * 0.001, 5);
+      });
+    });
+
+    test('should map and unmap Gemini Gecko embeddings (768 dims)', async () => {
+      const schema = new Schema({
+        name: 'embeddings',
+        attributes: {
+          id: 'string',
+          vector: 'array|items:number|length:768'
+        }
+      });
+
+      const vector768 = Array.from({ length: 768 }, () => Math.random() * 2 - 1);
+      const data = { id: 'doc1', vector: vector768 };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.vector).toHaveLength(768);
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(vector768[i], 5);
+      });
+    });
+
+    test('should handle negative values in long arrays', async () => {
+      const schema = new Schema({
+        name: 'embeddings',
+        attributes: {
+          vector: 'array|items:number|length:1024'
+        }
+      });
+
+      const vectorWithNegatives = Array.from({ length: 1024 }, () =>
+        (Math.random() - 0.5) * 2
+      );
+      const data = { vector: vectorWithNegatives };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.vector).toHaveLength(1024);
+
+      // Verify negative values are preserved
+      const hasNegative = unmapped.vector.some(v => v < 0);
+      expect(hasNegative).toBe(true);
+    });
+
+    test('should handle very long arrays (3072 dims) efficiently', async () => {
+      const schema = new Schema({
+        name: 'large-embeddings',
+        attributes: {
+          vector: 'array|items:number|length:3072'
+        }
+      });
+
+      const vector3072 = Array.from({ length: 3072 }, () => Math.random());
+      const data = { vector: vector3072 };
+
+      const startMap = Date.now();
+      const mapped = await schema.mapper(data);
+      const mapTime = Date.now() - startMap;
+
+      const startUnmap = Date.now();
+      const unmapped = await schema.unmapper(mapped);
+      const unmapTime = Date.now() - startUnmap;
+
+      expect(unmapped.vector).toHaveLength(3072);
+      expect(mapTime).toBeLessThan(200); // Should be reasonably fast
+      expect(unmapTime).toBeLessThan(200);
+    });
+
+    test('should use correct hooks for long decimal arrays', () => {
+      const schema = new Schema({
+        name: 'test',
+        attributes: {
+          embeddings: 'array|items:number|length:1536'
+        }
+      });
+
+      // Should use fixed-point encoding for embeddings (length >= 256)
+      expect(schema.options.hooks.beforeMap.embeddings).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.embeddings).toContain('toArrayOfEmbeddings');
+    });
+
+    test('should use integer hooks for integer arrays', () => {
+      const schema = new Schema({
+        name: 'test',
+        attributes: {
+          counts: 'array|items:number|integer:true|length:100'
+        }
+      });
+
+      // Should use integer array hooks
+      expect(schema.options.hooks.beforeMap.counts).toContain('fromArrayOfNumbers');
+      expect(schema.options.hooks.afterUnmap.counts).toContain('toArrayOfNumbers');
+    });
+
+    test('should handle multiple long arrays in same schema', async () => {
+      const schema = new Schema({
+        name: 'multi-embeddings',
+        attributes: {
+          id: 'string',
+          openai: 'array|items:number|length:1536',
+          gemini: 'array|items:number|length:768',
+          voyage: 'array|items:number|length:1024'
+        }
+      });
+
+      const data = {
+        id: 'doc1',
+        openai: Array.from({ length: 1536 }, () => Math.random()),
+        gemini: Array.from({ length: 768 }, () => Math.random()),
+        voyage: Array.from({ length: 1024 }, () => Math.random())
+      };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.id).toBe('doc1');
+      expect(unmapped.openai).toHaveLength(1536);
+      expect(unmapped.gemini).toHaveLength(768);
+      expect(unmapped.voyage).toHaveLength(1024);
+    });
+
+    test('should preserve precision in long arrays during map/unmap', async () => {
+      const schema = new Schema({
+        name: 'precision-test',
+        attributes: {
+          vector: 'array|items:number|length:512'
+        }
+      });
+
+      // Use specific values to test precision
+      const preciseVector = Array.from({ length: 512 }, (_, i) =>
+        i * 0.123456789
+      );
+      const data = { vector: preciseVector };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      // Check precision at various positions
+      expect(unmapped.vector[0]).toBeCloseTo(0, 5);
+      expect(unmapped.vector[100]).toBeCloseTo(100 * 0.123456789, 5);
+      expect(unmapped.vector[511]).toBeCloseTo(511 * 0.123456789, 5);
+    });
+
+    test('should handle long arrays with object notation', async () => {
+      const schema = new Schema({
+        name: 'object-notation',
+        attributes: {
+          id: { type: 'string' },
+          vector: {
+            type: 'array',
+            items: 'number',
+            length: 1024
+          }
+        }
+      });
+
+      const vector1024 = Array.from({ length: 1024 }, () => Math.random());
+      const data = { id: 'doc1', vector: vector1024 };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.vector).toHaveLength(1024);
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(vector1024[i], 5);
+      });
+    });
+  });
+
+  describe('Long Arrays - Fixed-Point Encoding (Embeddings)', () => {
+    test('should automatically use fixed-point encoding for 256+ dim arrays', () => {
+      const schema = new Schema({
+        name: 'embedding-schema',
+        attributes: {
+          small: 'array|items:number|length:100',      // Should use decimal
+          embedding256: 'array|items:number|length:256',  // Should use fixed-point
+          embedding768: 'array|items:number|length:768',  // Should use fixed-point
+          embedding1536: 'array|items:number|length:1536' // Should use fixed-point
+        }
+      });
+
+      // Small array should use decimal encoding
+      expect(schema.options.hooks.beforeMap.small).toContain('fromArrayOfDecimals');
+      expect(schema.options.hooks.afterUnmap.small).toContain('toArrayOfDecimals');
+
+      // Large arrays should use fixed-point encoding (embeddings)
+      expect(schema.options.hooks.beforeMap.embedding256).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.embedding256).toContain('toArrayOfEmbeddings');
+
+      expect(schema.options.hooks.beforeMap.embedding768).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.embedding768).toContain('toArrayOfEmbeddings');
+
+      expect(schema.options.hooks.beforeMap.embedding1536).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.embedding1536).toContain('toArrayOfEmbeddings');
+    });
+
+    test('should compress 1536-dim embeddings using fixed-point encoding', async () => {
+      const schema = new Schema({
+        name: 'compression-test',
+        attributes: {
+          id: 'string',
+          embedding: 'array|items:number|length:1536'
+        }
+      });
+
+      // Create a typical embedding with values in [-1, 1]
+      const embedding = Array.from({ length: 1536 }, () => (Math.random() * 2 - 1) * 0.9);
+      const data = { id: 'doc1', embedding };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      // Verify the data round-trips correctly
+      expect(unmapped.embedding).toHaveLength(1536);
+      unmapped.embedding.forEach((val, i) => {
+        expect(val).toBeCloseTo(embedding[i], 5); // 6 decimal precision
+      });
+
+      // Check that the encoding is actually using fixed-point (^ prefix)
+      const embeddingKey = schema.map['embedding'] || 'embedding';
+      const encodedValue = mapped[embeddingKey];
+      expect(typeof encodedValue).toBe('string');
+      // Fixed-point encoded values should contain ^ characters
+      expect(encodedValue).toContain('^');
+    });
+
+    test('should handle 768-dim Gemini embeddings with fixed-point encoding', async () => {
+      const schema = new Schema({
+        name: 'gemini-test',
+        attributes: {
+          vector: 'array|items:number|length:768'
+        }
+      });
+
+      const vector = Array.from({ length: 768 }, () => (Math.random() * 2 - 1) * 0.8);
+      const data = { vector };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.vector).toHaveLength(768);
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(vector[i], 5);
+      });
+    });
+
+    test('should handle 3072-dim OpenAI embeddings with fixed-point encoding', async () => {
+      const schema = new Schema({
+        name: 'openai-3-large',
+        attributes: {
+          vector: 'array|items:number|length:3072'
+        }
+      });
+
+      const vector = Array.from({ length: 3072 }, () => (Math.random() * 2 - 1));
+      const data = { vector };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.vector).toHaveLength(3072);
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(vector[i], 5);
+      });
+    });
+
+    test('should preserve precision for typical embedding values', async () => {
+      const schema = new Schema({
+        name: 'precision-test',
+        attributes: {
+          embedding: 'array|items:number|length:512'
+        }
+      });
+
+      // Test common embedding values
+      const testValues = [
+        0, 0.5, -0.5, 0.123456, -0.987654,
+        0.0001, -0.0001, 0.999999, -0.999999,
+        0.314159, -0.271828
+      ];
+
+      const embedding = Array.from({ length: 512 }, (_, i) =>
+        testValues[i % testValues.length]
+      );
+      const data = { embedding };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      testValues.forEach((expectedValue, idx) => {
+        expect(unmapped.embedding[idx]).toBeCloseTo(expectedValue, 5);
+      });
+    });
+
+    test('should handle edge cases: zeros, near-ones, negatives', async () => {
+      const schema = new Schema({
+        name: 'edge-cases',
+        attributes: {
+          embedding: 'array|items:number|length:256'
+        }
+      });
+
+      const embedding = Array.from({ length: 256 }, (_, i) => {
+        if (i < 64) return 0;                    // zeros
+        if (i < 128) return 1;                   // ones
+        if (i < 192) return -1;                  // negative ones
+        return (i % 2 === 0) ? 0.999999 : -0.999999; // near boundaries
+      });
+      const data = { embedding };
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.embedding[0]).toBeCloseTo(0, 5);
+      expect(unmapped.embedding[64]).toBeCloseTo(1, 5);
+      expect(unmapped.embedding[128]).toBeCloseTo(-1, 5);
+      expect(unmapped.embedding[192]).toBeCloseTo(0.999999, 5);
+      expect(unmapped.embedding[193]).toBeCloseTo(-0.999999, 5);
+    });
+
+    test('should NOT use fixed-point encoding for integer arrays', () => {
+      const schema = new Schema({
+        name: 'integer-test',
+        attributes: {
+          counts: 'array|items:number|integer:true|length:500'
+        }
+      });
+
+      // Even though length >= 256, integer arrays should use fromArrayOfNumbers
+      expect(schema.options.hooks.beforeMap.counts).toContain('fromArrayOfNumbers');
+      expect(schema.options.hooks.afterUnmap.counts).toContain('toArrayOfNumbers');
+
+      // Should NOT use fixed-point encoding
+      expect(schema.options.hooks.beforeMap.counts).not.toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.counts).not.toContain('toArrayOfEmbeddings');
+    });
+
+    test('should handle mixed schemas with different array types', () => {
+      const schema = new Schema({
+        name: 'mixed-arrays',
+        attributes: {
+          tags: 'array|items:string|length:10',
+          counts: 'array|items:number|integer:true|length:50',
+          smallDecimals: 'array|items:number|length:100',
+          embedding: 'array|items:number|length:1536'
+        }
+      });
+
+      // String array
+      expect(schema.options.hooks.beforeMap.tags).toContain('fromArray');
+
+      // Integer array (small)
+      expect(schema.options.hooks.beforeMap.counts).toContain('fromArrayOfNumbers');
+
+      // Decimal array (small)
+      expect(schema.options.hooks.beforeMap.smallDecimals).toContain('fromArrayOfDecimals');
+
+      // Embedding array (large, fixed-point)
+      expect(schema.options.hooks.beforeMap.embedding).toContain('fromArrayOfEmbeddings');
+    });
+
+    test('should work with object notation for embedding arrays', () => {
+      const schema = new Schema({
+        name: 'object-notation',
+        attributes: {
+          embedding: {
+            type: 'array',
+            items: 'number',
+            length: 768
+          }
+        }
+      });
+
+      // Should detect length from object notation
+      expect(schema.options.hooks.beforeMap.embedding).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.embedding).toContain('toArrayOfEmbeddings');
+    });
+  });
+
+  describe('Embedding Type - Custom Shorthand Notation', () => {
+    test('should recognize embedding:1536 notation', () => {
+      const schema = new Schema({
+        name: 'embedding-shorthand',
+        attributes: {
+          vector: 'embedding:1536'
+        }
+      });
+
+      expect(schema.options.hooks.beforeMap.vector).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.vector).toContain('toArrayOfEmbeddings');
+    });
+
+    test('should recognize embedding|length:768 notation', () => {
+      const schema = new Schema({
+        name: 'embedding-pipe',
+        attributes: {
+          vector: 'embedding|length:768'
+        }
+      });
+
+      expect(schema.options.hooks.beforeMap.vector).toContain('fromArrayOfEmbeddings');
+      expect(schema.options.hooks.afterUnmap.vector).toContain('toArrayOfEmbeddings');
+    });
+
+    test('should validate embedding:1536 with correct data', async () => {
+      const schema = new Schema({
+        name: 'embedding-validation',
+        attributes: {
+          id: 'string|required',
+          vector: 'embedding:1536'
+        }
+      });
+
+      const vector = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
+      const result = await schema.validate({ id: 'doc1', vector });
+
+      expect(result).toBe(true);
+    });
+
+    test('should reject wrong length for embedding:1536', async () => {
+      const schema = new Schema({
+        name: 'embedding-wrong-length',
+        attributes: {
+          vector: 'embedding:1536'
+        }
+      });
+
+      const wrongVector = Array.from({ length: 768 }, () => Math.random());
+      const result = await schema.validate({ vector: wrongVector });
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    test('should map and unmap embedding:1536 correctly', async () => {
+      const schema = new Schema({
+        name: 'embedding-map-unmap',
+        attributes: {
+          id: 'string',
+          vector: 'embedding:1536'
+        }
+      });
+
+      const vector = Array.from({ length: 1536 }, (_, i) => (Math.random() * 2 - 1) * 0.9);
+      const data = { id: 'test', vector };
+
+      const mapped = await schema.mapper(data);
+      expect(mapped).toBeDefined();
+      expect(typeof mapped[schema.map.vector]).toBe('string');
+      expect(mapped[schema.map.vector]).toContain('^'); // Fixed-point encoding marker
+
+      const unmapped = await schema.unmapper(mapped);
+      expect(unmapped.id).toBe('test');
+      expect(unmapped.vector).toHaveLength(1536);
+      unmapped.vector.forEach((val, i) => {
+        expect(val).toBeCloseTo(vector[i], 5);
+      });
+    });
+
+    test('should work with common embedding dimensions', () => {
+      const dimensions = [256, 384, 512, 768, 1024, 1536, 2048, 3072];
+
+      dimensions.forEach(dim => {
+        const schema = new Schema({
+          name: `embedding-${dim}`,
+          attributes: {
+            vector: `embedding:${dim}`
+          }
+        });
+
+        expect(schema.options.hooks.beforeMap.vector).toContain('fromArrayOfEmbeddings');
+        expect(schema.options.hooks.afterUnmap.vector).toContain('toArrayOfEmbeddings');
+      });
+    });
+
+    test('should mix embedding with other field types', async () => {
+      const schema = new Schema({
+        name: 'mixed-embedding',
+        attributes: {
+          id: 'string|required',
+          title: 'string',
+          embedding: 'embedding:1536',
+          score: 'number',
+          tags: 'array|items:string'
+        }
+      });
+
+      const data = {
+        id: 'doc1',
+        title: 'Test Document',
+        embedding: Array.from({ length: 1536 }, () => Math.random()),
+        score: 0.95,
+        tags: ['ai', 'ml', 'embedding']
+      };
+
+      const result = await schema.validate(data);
+      expect(result).toBe(true);
+
+      const mapped = await schema.mapper(data);
+      const unmapped = await schema.unmapper(mapped);
+
+      expect(unmapped.id).toBe('doc1');
+      expect(unmapped.title).toBe('Test Document');
+      expect(unmapped.embedding).toHaveLength(1536);
+      expect(unmapped.score).toBeCloseTo(0.95, 5);
+      expect(unmapped.tags).toEqual(['ai', 'ml', 'embedding']);
+    });
+
+    test('should handle optional embedding fields', async () => {
+      const schema = new Schema({
+        name: 'optional-embedding',
+        attributes: {
+          id: 'string|required',
+          vector: 'embedding:768|optional:true'
+        }
+      });
+
+      // Without embedding
+      const result1 = await schema.validate({ id: 'doc1' });
+      expect(result1).toBe(true);
+
+      // With embedding
+      const vector = Array.from({ length: 768 }, () => Math.random());
+      const result2 = await schema.validate({ id: 'doc2', vector });
+      expect(result2).toBe(true);
+    });
+  });
 });
 
