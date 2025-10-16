@@ -324,7 +324,7 @@ database.createResource({
 ```javascript
 // Shorthand notation (recommended)
 attributes: {
-  vector: 'embedding:1536'        // Common OpenAI dimension
+  vector: 'embedding:1536'        // OpenAI text-embedding-3-small/3-large
 }
 
 // Alternative pipe notation
