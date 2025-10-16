@@ -39,8 +39,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/fulltext.m
 `.trim();
     }
 
-    super(message, { ...rest, resourceName, query, operation, description,
-      suggestion: details.suggestion || 'Check fulltext configuration and ensure resource is indexed.' });
+    super(message, { ...rest, resourceName, query, operation, description });
   }
 }
 

@@ -1,5 +1,5 @@
 export class BaseError extends Error {
-  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, suggestion, description, ...rest }) {
+  constructor({ verbose, bucket, key, message, code, statusCode, requestId, awsMessage, original, commandName, commandInput, metadata, description, ...rest }) {
     if (verbose) message = message + `\n\nVerbose:\n\n${JSON.stringify(rest, null, 2)}`;
     super(message);
 
@@ -22,7 +22,6 @@ export class BaseError extends Error {
     this.commandName = commandName;
     this.commandInput = commandInput;
     this.metadata = metadata;
-    this.suggestion = suggestion;
     this.description = description;
     this.data = { bucket, key, ...rest, verbose, message };
   }
@@ -41,7 +40,6 @@ export class BaseError extends Error {
       commandName: this.commandName,
       commandInput: this.commandInput,
       metadata: this.metadata,
-      suggestion: this.suggestion,
       description: this.description,
       data: this.data,
       original: this.original,
@@ -205,26 +203,26 @@ export function mapAwsError(err, context = {}) {
   const metadata = err.$metadata ? { ...err.$metadata } : undefined;
   const commandName = context.commandName;
   const commandInput = context.commandInput;
-  let suggestion;
+  let description;
   if (code === 'NoSuchKey' || code === 'NotFound') {
-    suggestion = 'Check if the key exists in the specified bucket and if your credentials have permission.';
-    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'The specified key does not exist in the bucket. Check if the key exists and if your credentials have permission to access it.';
+    return new NoSuchKey({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'NoSuchBucket') {
-    suggestion = 'Check if the bucket exists and if your credentials have permission.';
-    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'The specified bucket does not exist. Check if the bucket name is correct and if your credentials have permission to access it.';
+    return new NoSuchBucket({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'AccessDenied' || (err.statusCode === 403) || code === 'Forbidden') {
-    suggestion = 'Check your credentials and bucket policy.';
-    return new PermissionError('Access denied', { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Access denied. Check your AWS credentials, IAM permissions, and bucket policy.';
+    return new PermissionError('Access denied', { ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'ValidationError' || (err.statusCode === 400)) {
-    suggestion = 'Check the request parameters and payload.';
-    return new ValidationError('Validation error', { ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Validation error. Check the request parameters and payload format.';
+    return new ValidationError('Validation error', { ...context, original: err, metadata, commandName, commandInput, description });
   }
   if (code === 'MissingMetadata') {
-    suggestion = 'Check if the object metadata is present and valid.';
-    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, suggestion });
+    description = 'Object metadata is missing or invalid. Check if the object was uploaded correctly.';
+    return new MissingMetadata({ ...context, original: err, metadata, commandName, commandInput, description });
   }
   // Outros mapeamentos podem ser adicionados aqui
   // Incluir detalhes do erro original para facilitar debug
@@ -234,32 +232,36 @@ export function mapAwsError(err, context = {}) {
     err.statusCode && `Status: ${err.statusCode}`,
     err.stack && `Stack: ${err.stack.split('\n')[0]}`,
   ].filter(Boolean).join(' | ');
-  
-  suggestion = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
-  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, suggestion });
+
+  description = `Check the error details and AWS documentation. Original error: ${err.message || err.toString()}`;
+  return new UnknownError(errorDetails, { ...context, original: err, metadata, commandName, commandInput, description });
 }
 
 export class ConnectionStringError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check the connection string format and credentials.' });
+    const description = details.description || 'Invalid connection string format. Check the connection string syntax and credentials.';
+    super(message, { ...details, description });
   }
 }
 
 export class CryptoError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check if the crypto library is available and input is valid.' });
+    const description = details.description || 'Cryptography operation failed. Check if the crypto library is available and input is valid.';
+    super(message, { ...details, description });
   }
 }
 
 export class SchemaError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: 'Check schema definition and input data.' });
+    const description = details.description || 'Schema validation failed. Check schema definition and input data format.';
+    super(message, { ...details, description });
   }
 }
 
 export class ResourceError extends S3dbError {
   constructor(message, details = {}) {
-    super(message, { ...details, suggestion: details.suggestion || 'Check resource configuration, attributes, and operation context.' });
+    const description = details.description || 'Resource operation failed. Check resource configuration, attributes, and operation context.';
+    super(message, { ...details, description });
     Object.assign(this, details);
   }
 }
@@ -298,8 +300,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitio
 
     super(message, {
       ...details,
-      description,
-      suggestion: details.suggestion || 'Check partition definition, fields, and input values.'
+      description
     });
   }
 }
@@ -373,8 +374,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/eventual-c
       configuredResources,
       registeredResources,
       pluginInitialized,
-      description,
-      suggestion: 'Ensure resources are created after plugin initialization. Check plugin configuration and resource creation order.'
+      description
     });
   }
 }
@@ -422,8 +422,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md
       ...rest,
       pluginName,
       operation,
-      description,
-      suggestion: details.suggestion || 'Check plugin initialization and configuration.'
+      description
     });
   }
 }
@@ -465,8 +464,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#
       pluginSlug,
       key,
       operation,
-      description,
-      suggestion: details.suggestion || 'Check plugin storage configuration and S3 permissions.'
+      description
     });
   }
 }
@@ -522,8 +520,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partitio
       operation,
       queueSize,
       maxQueueSize,
-      description,
-      suggestion: details.suggestion || 'Check partition driver configuration.'
+      description
     });
   }
 }
@@ -560,8 +557,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#behavior
       ...rest,
       behavior,
       availableBehaviors,
-      description,
-      suggestion: details.suggestion || 'Check behavior name and available behaviors.'
+      description
     });
   }
 }
@@ -599,8 +595,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#streamin
       ...rest,
       operation,
       resource,
-      description,
-      suggestion: details.suggestion || 'Check stream configuration and resource availability.'
+      description
     });
   }
 }
@@ -658,8 +653,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#metadata
       excess,
       resourceName,
       operation,
-      description,
-      suggestion: details.suggestion || "Use 'body-overflow' or 'body-only' behavior to handle large metadata."
+      description
     });
   }
 }
