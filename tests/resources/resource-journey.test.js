@@ -617,7 +617,7 @@ describe('Resource Journey - Real Integration Tests', () => {
         id: 'string|required',
         title: 'string|required',
         content: 'string|required',
-        embedding: 'embedding:1536',  // OpenAI text-embedding-ada-002 dimension
+        embedding: 'embedding:1536',  // OpenAI text-embedding-3-small/3-large dimension
         category: 'string|optional'
       },
       behavior: 'body-overflow', // Large embeddings will overflow to body

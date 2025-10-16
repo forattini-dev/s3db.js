@@ -1339,7 +1339,7 @@ describe('fastest-validator v1.19.1 - Comprehensive Shorthand Notation Tests', (
   });
 
   describe('Long Arrays - Vector Embedding Dimensions', () => {
-    it('validates OpenAI text-embedding-ada-002 (1536 dimensions)', () => {
+    it('validates OpenAI text-embedding-3-small/3-large (1536 dimensions)', () => {
       const check = v.compile({
         vector: { type: 'array', items: 'number', length: 1536, empty: false }
       });
