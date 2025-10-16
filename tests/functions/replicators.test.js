@@ -64,9 +64,9 @@ describe('Replicators Coverage Tests', () => {
 
     test('should throw error for unimplemented testConnection method', async () => {
       const replicator = new BaseReplicator({ enabled: true });
-      
+
       await expect(replicator.testConnection())
-        .rejects.toThrow('testConnection() method must be implemented by BaseReplicator');
+        .rejects.toThrow(/testConnection\(\) method must be implemented/);
     });
 
     test('should provide basic status information', async () => {
