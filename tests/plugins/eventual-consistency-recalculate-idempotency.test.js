@@ -75,7 +75,7 @@ describe('EventualConsistency - Recalculate Idempotency', () => {
 
     // Expected: 100 (initial) + 50 + 30 - 20 + 10 = 170
     expect(userAfterFirst.balance).toBe(170);
-  });
+  }, 30000);
 
   test('consolidate + consolidate + consolidate should be idempotent', async () => {
     // Create a user

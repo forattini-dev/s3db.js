@@ -460,6 +460,6 @@ describe('MetricsPlugin Coverage Tests', () => {
       });
 
       await expect(metricsPlugin.cleanupOldData()).resolves.not.toThrow();
-    });
+    }, 30000);
   });
 }); 

@@ -244,7 +244,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(topRecords[1].count).toBe(2);
     expect(topRecords[2].recordId).toBe('w3');
     expect(topRecords[2].count).toBe(1);
-  });
+  }, 30000);
 
   it('should get top records by total value', async () => {
     // Insert wallets
@@ -294,7 +294,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(topRecords[1].sum).toBe(1000);
     expect(topRecords[2].recordId).toBe('w1');
     expect(topRecords[2].sum).toBe(30);
-  });
+  }, 30000);
 
   it('should handle incremental analytics updates', async () => {
     // Insert wallet

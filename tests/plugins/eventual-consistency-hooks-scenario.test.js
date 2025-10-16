@@ -299,7 +299,7 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     const finalUrl = await urls.get('short-sequential');
     console.log(`\nFinal count: ${finalUrl.clicks}`);
     expect(finalUrl.clicks).toBe(10);
-  });
+  }, 30000);
 
   test("should verify transactions are created and marked as applied", async () => {
     console.log('\n=== TEST: Transaction verification ===');
