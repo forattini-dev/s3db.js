@@ -82,6 +82,14 @@ export class Validator extends FastestValidator {
       type: "any",
       custom: this.autoEncrypt ? jsonHandler : undefined,
     })
+
+    // Embedding type - shorthand for arrays of numbers optimized for embeddings
+    // Usage: 'embedding:1536' or 'embedding|length:768'
+    this.alias('embedding', {
+      type: "array",
+      items: "number",
+      empty: false,
+    })
   }
 }
 
