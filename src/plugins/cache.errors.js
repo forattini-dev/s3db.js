@@ -40,8 +40,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/cache.md
 `.trim();
     }
 
-    super(message, { ...rest, driver, operation, resourceName, key, description,
-      suggestion: details.suggestion || 'Check cache configuration and driver settings.' });
+    super(message, { ...rest, driver, operation, resourceName, key, description });
   }
 }
 

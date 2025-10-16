@@ -38,8 +38,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/backup.md
 `.trim();
     }
 
-    super(message, { ...rest, driver, operation, backupId, description,
-      suggestion: details.suggestion || 'Check backup driver configuration and destination accessibility.' });
+    super(message, { ...rest, driver, operation, backupId, description });
   }
 }
 

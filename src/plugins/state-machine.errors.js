@@ -40,8 +40,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-mach
 `.trim();
     }
 
-    super(message, { ...rest, currentState, targetState, resourceName, operation, description,
-      suggestion: details.suggestion || 'Check state machine configuration and valid transitions.' });
+    super(message, { ...rest, currentState, targetState, resourceName, operation, description });
   }
 }
 

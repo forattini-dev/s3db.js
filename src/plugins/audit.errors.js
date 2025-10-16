@@ -39,8 +39,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/audit.md
 `.trim();
     }
 
-    super(message, { ...rest, resourceName, operation, auditId, description,
-      suggestion: details.suggestion || 'Check audit configuration and storage permissions.' });
+    super(message, { ...rest, resourceName, operation, auditId, description });
   }
 }
 

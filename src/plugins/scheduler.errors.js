@@ -39,8 +39,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/scheduler.
 `.trim();
     }
 
-    super(message, { ...rest, taskId, operation, cronExpression, description,
-      suggestion: details.suggestion || 'Check scheduler configuration and task settings.' });
+    super(message, { ...rest, taskId, operation, cronExpression, description });
   }
 }
 

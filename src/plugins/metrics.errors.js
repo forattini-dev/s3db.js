@@ -39,8 +39,7 @@ Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/metrics.md
 `.trim();
     }
 
-    super(message, { ...rest, metricName, operation, resourceName, description,
-      suggestion: details.suggestion || 'Check metrics configuration and metric definitions.' });
+    super(message, { ...rest, metricName, operation, resourceName, description });
   }
 }
 
