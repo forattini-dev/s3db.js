@@ -181,8 +181,8 @@ describe('S3QueuePlugin', () => {
         return { sent: true };
       }, { concurrency: 1 });
 
-      // Wait for processing
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for processing (increased to ensure all 3 messages are processed)
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       await resource.stopProcessing();
 
