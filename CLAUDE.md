@@ -47,6 +47,109 @@ if (!versions[currentVersion]) {
 - **Parallel operations**: All partition operations use `Promise.all()` for concurrent execution
 - **Automatic partition migration on update (v9.2.2+)**: When updating a partitioned field, records automatically move between partitions to maintain consistency
 
+#### Orphaned Partitions Problem & Recovery
+**Problem**: Partitions can reference fields that no longer exist in the schema, causing validation errors and blocking all operations.
+
+**When it happens**:
+1. A partition is created for a specific field (e.g., `region`)
+2. The field is later removed from the schema via `updateAttributes()`
+3. With `strictValidation: true` (default), the partition validation throws:
+   ```
+   PartitionError: Partition 'byRegion' uses field 'region' which does not
+   exist in resource attributes. Available fields: name, email, status.
+   ```
+4. **ALL resource operations become blocked** (insert, update, query, etc.)
+
+**Detection** (`src/resource.class.js:550`):
+```javascript
+// Find all partitions with missing field references
+const orphaned = resource.findOrphanedPartitions();
+// Returns: {
+//   byRegion: {
+//     missingFields: ['region'],
+//     definition: { fields: { region: 'string' } },
+//     allFields: ['region']
+//   }
+// }
+```
+
+**Recovery Workflow** (`src/resource.class.js:596`, see `docs/examples/e44-orphaned-partitions-recovery.js`):
+```javascript
+// Step 1: Load resource with validation disabled (bypass blocking)
+const resource = await database.getResource('users', {
+  strictValidation: false
+});
+
+// Step 2: Detect orphaned partitions
+const orphaned = resource.findOrphanedPartitions();
+console.log('Orphaned:', Object.keys(orphaned)); // ['byRegion']
+
+// Step 3: Preview removal (dry run)
+const toRemove = resource.removeOrphanedPartitions({ dryRun: true });
+console.log('Would remove:', Object.keys(toRemove));
+
+// Step 4: Actually remove orphaned partitions
+resource.removeOrphanedPartitions();
+// Emits: 'orphanedPartitionsRemoved' event with details
+
+// Step 5: Persist changes to S3
+await database.uploadMetadataFile();
+
+// Step 6: Re-enable strict validation
+resource.strictValidation = true;
+```
+
+**Prevention** (enforced by default):
+```javascript
+// strictValidation: true (default) prevents orphaned partitions at creation time
+await database.createResource({
+  name: 'products',
+  attributes: {
+    name: 'string'
+    // category field missing!
+  },
+  options: {
+    strictValidation: true, // Default - validation happens in constructor
+    partitions: {
+      byCategory: { fields: { category: 'string' } } // ❌ Will throw immediately
+    }
+  }
+});
+// Error: Partition 'byCategory' uses field 'category' which does not exist
+```
+
+**Best Practice - Check Before Removing Fields**:
+```javascript
+// Before removing a field, check if any partitions depend on it
+const fieldToRemove = 'status';
+const partitionsUsingField = Object.entries(resource.config.partitions || {})
+  .filter(([name, def]) => def.fields && fieldToRemove in def.fields)
+  .map(([name]) => name);
+
+if (partitionsUsingField.length > 0) {
+  console.warn(`Warning: These partitions use '${fieldToRemove}':`, partitionsUsingField);
+  // Option 1: Remove partitions first
+  partitionsUsingField.forEach(name => delete resource.config.partitions[name]);
+  await database.uploadMetadataFile();
+
+  // Option 2: Keep the field in schema
+  // Option 3: Re-design partitions
+}
+```
+
+**Location**:
+- Core logic: `src/resource.class.js:483-620`
+- TypeScript definitions: `src/s3db.d.ts:766-767`
+- Tests: `tests/resources/orphaned-partitions.test.js`
+- Complete example: `docs/examples/e44-orphaned-partitions-recovery.js`
+
+**Key Points**:
+- Orphaned partitions **completely block resource operations** with strict validation
+- `findOrphanedPartitions()` detects the issue
+- `removeOrphanedPartitions()` fixes it (with optional `dryRun` preview)
+- Always `uploadMetadataFile()` after removal to persist changes
+- Prevention is automatic with `strictValidation: true` (default)
+
 ### Plugin System
 **Base**: `src/plugins/plugin.class.js`
 **Interception Methods**:
@@ -496,6 +599,7 @@ node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests
 - HTTP & Optimization: `e34-e37` (HTTP client benchmarks, cache drivers, self-healing)
 - Testing: `e38-e40` (isolated plugins, partial schemas, mock database)
 - Vectors: `e41-e43` (RAG chatbot, provider integrations, benchmarks)
+- Maintenance: `e44` (orphaned partitions recovery)
 
 **When Adding Examples**:
 1. Always save to `docs/examples/` directory
