@@ -80,11 +80,12 @@ describe('Behaviors Index', () => {
       try {
         getBehavior('invalid');
       } catch (error) {
-        expect(error.message).toContain('user-managed');
-        expect(error.message).toContain('enforce-limits');
-        expect(error.message).toContain('truncate-data');
-        expect(error.message).toContain('body-overflow');
-        expect(error.message).toContain('body-only');
+        const errorText = error.description || error.message;
+        expect(errorText).toContain('user-managed');
+        expect(errorText).toContain('enforce-limits');
+        expect(errorText).toContain('truncate-data');
+        expect(errorText).toContain('body-overflow');
+        expect(errorText).toContain('body-only');
       }
     });
     

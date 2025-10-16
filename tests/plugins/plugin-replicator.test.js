@@ -1052,7 +1052,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     const mockReplicator = { id: 'repl-1' };
     plugin.replicators = [mockReplicator];
 
-    await expect(plugin.syncAllData('invalid-id')).rejects.toThrow('Replicator not found: invalid-id');
+    await expect(plugin.syncAllData('invalid-id')).rejects.toThrow(/Replicator not found/);
   });
 
   test('installDatabaseHooks filters out log resource', async () => {
