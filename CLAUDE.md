@@ -2,6 +2,123 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference Tables
+
+### Core Classes & Methods
+
+| Term | Location | Usage Example | Notes |
+|------|----------|---------------|-------|
+| `Database` | `src/database.class.js` | `new Database({ bucketName, region, credentials })` | Main entry point |
+| `Resource` | `src/resource.class.js` | `await db.createResource({ name, attributes })` | Represents a data collection |
+| `Client` | `src/client.class.js` | `new Client({ connectionString })` | Low-level S3 operations |
+| `Schema` | `src/schema.class.js` | `new Schema({ attributes })` | Field validation & mapping |
+| `insert()` | `resource.class.js:717` | `await resource.insert({ name: 'John' })` | Create new record |
+| `update()` | `resource.class.js:884` | `await resource.update(id, { name: 'Jane' })` | Update existing record |
+| `get()` | `resource.class.js:1144` | `await resource.get(id)` | Fetch single record |
+| `list()` | `resource.class.js:1384` | `await resource.list({ limit: 100 })` | Fetch multiple records |
+| `query()` | `resource.class.js:1616` | `await resource.query({ status: 'active' })` | Filter records |
+| `count()` | `resource.class.js:1507` | `await resource.count({ partition: 'byRegion' })` | Count records |
+
+### Behaviors (2KB Metadata Handling)
+
+| Behavior | File | When to Use | Example |
+|----------|------|-------------|---------|
+| `body-overflow` | `src/behaviors/body-overflow.js` | Default, automatic overflow | `behavior: 'body-overflow'` |
+| `body-only` | `src/behaviors/body-only.js` | Large data (>2KB), max 5TB | `behavior: 'body-only'` |
+| `truncate-data` | `src/behaviors/truncate-data.js` | Accept data loss for speed | `behavior: 'truncate-data'` |
+| `enforce-limits` | `src/behaviors/enforce-limits.js` | Production, strict validation | `behavior: 'enforce-limits'` |
+| `user-managed` | `src/behaviors/user-managed.js` | Custom handling via events | `behavior: 'user-managed'` |
+
+### Partitioning
+
+| Term | Location | Usage Example | Notes |
+|------|----------|---------------|-------|
+| Partition config | Resource options | `partitions: { byRegion: { fields: { region: 'string' } } }` | Define partitions |
+| `getFromPartition()` | `resource.class.js:2297` | `await resource.getFromPartition({ id, partitionName, partitionValues })` | Get from specific partition |
+| `listPartition()` | `resource.class.js:1419` | `await resource.listPartition({ partition: 'byRegion', partitionValues: { region: 'US' } })` | List partition records |
+| Async partitions | Resource options | `asyncPartitions: true` | 70-100% faster writes (default) |
+| `findOrphanedPartitions()` | `resource.class.js:550` | `const orphaned = resource.findOrphanedPartitions()` | Detect missing field refs |
+| `removeOrphanedPartitions()` | `resource.class.js:596` | `resource.removeOrphanedPartitions({ dryRun: true })` | Clean up broken partitions |
+
+### Plugins
+
+| Plugin | File | Usage Example | Purpose |
+|--------|------|---------------|---------|
+| `CachePlugin` | `src/plugins/cache.plugin.js` | `db.usePlugin(new CachePlugin({ driver: 'memory', ttl: 3600 }))` | Cache reads (memory/S3/filesystem) |
+| `AuditPlugin` | `src/plugins/audit.plugin.js` | `db.usePlugin(new AuditPlugin({ trackOperations: ['insert', 'update'] }))` | Track all changes |
+| `ReplicatorPlugin` | `src/plugins/replicator.plugin.js` | `db.usePlugin(new ReplicatorPlugin({ replicators: [...] }))` | Sync to PostgreSQL/BigQuery/SQS |
+| `MetricsPlugin` | `src/plugins/metrics.plugin.js` | `db.usePlugin(new MetricsPlugin({ trackLatency: true }))` | Performance monitoring |
+| `CostsPlugin` | `src/plugins/costs.plugin.js` | `db.usePlugin(new CostsPlugin())` | AWS cost tracking |
+| `EventualConsistencyPlugin` | `src/plugins/eventual-consistency/` | `db.usePlugin(new EventualConsistencyPlugin({ resources: { users: ['balance'] } }))` | Eventually consistent counters |
+
+### Field Types & Validation
+
+| Type | Notation | Example | Notes |
+|------|----------|---------|-------|
+| String | `string` | `name: 'string\|required'` | Basic string |
+| Number | `number` | `age: 'number\|min:0\|max:120'` | Integer or float |
+| Boolean | `boolean` | `active: 'boolean'` | true/false |
+| Secret | `secret` | `password: 'secret\|required'` | Auto-encrypted (AES-256-GCM) |
+| Embedding | `embedding:N` | `vector: 'embedding:1536'` | Vector embeddings, 77% compression |
+| Array | `array` | `tags: 'array\|items:string'` | Arrays of any type |
+| Object | `object` | `profile: { type: 'object', props: {...} }` | Nested objects |
+| JSON | `json` | `metadata: 'json'` | Free-form JSON |
+
+### Utilities & Helpers
+
+| Function | Location | Usage Example | Purpose |
+|----------|----------|---------------|---------|
+| `tryFn()` | `src/concerns/try-fn.js` | `const [ok, err, data] = await tryFn(() => ...)` | Safe async error handling |
+| `calculateTotalSize()` | `src/concerns/calculator.js:125` | `const bytes = calculateTotalSize(mappedObject)` | UTF-8 byte calculation |
+| `encrypt()` / `decrypt()` | `src/concerns/crypto.js` | `const encrypted = await encrypt(data, passphrase)` | AES-256-GCM encryption |
+| `mapAwsError()` | `src/errors.js:190` | `const mapped = mapAwsError(err, { bucket, key })` | AWS error translator |
+| `idGenerator()` | `src/concerns/id.js` | `const id = idGenerator()` | Generate nanoid (22 chars) |
+| Base62 encode/decode | `src/concerns/base62.js` | `const encoded = encode(12345)` | Number compression |
+
+### Streams
+
+| Class | File | Usage Example | Purpose |
+|-------|------|---------------|---------|
+| `ResourceReader` | `src/stream/resource-reader.class.js` | `new ResourceReader({ resource, batchSize: 100 })` | Read records as stream |
+| `ResourceWriter` | `src/stream/resource-writer.class.js` | `new ResourceWriter({ resource })` | Write records via stream |
+| `ResourceIdsReader` | `src/stream/resource-ids-reader.class.js` | `new ResourceIdsReader({ resource })` | Stream record IDs only |
+
+### Testing & Examples
+
+| Category | Location | Examples | Notes |
+|----------|----------|----------|-------|
+| Unit tests | `tests/` | `pnpm test:js` | Jest with ESM modules |
+| TypeScript tests | `tests/typescript/` | `pnpm test:ts` | Type validation |
+| Plugin tests | `tests/plugins/` | `pnpm test:plugins` | All plugin tests |
+| Basic examples | `docs/examples/e01-e07` | Bulk insert, streams, CSV export | CRUD operations |
+| Advanced examples | `docs/examples/e08-e17` | Partitions, versioning, hooks | Complex features |
+| Plugin examples | `docs/examples/e18-e33` | Replicators, caching, queue consumers | Plugin usage |
+| Vector examples | `docs/examples/e41-e43` | RAG chatbot, embeddings | AI/ML integration |
+
+### Error Classes
+
+| Error | File | When Thrown | Recovery |
+|-------|------|-------------|----------|
+| `PartitionError` | `src/errors.js:93` | Partition field missing | Use `findOrphanedPartitions()` |
+| `ValidationError` | `src/errors.js:71` | Schema validation fails | Check attribute rules |
+| `ResourceNotFound` | `src/errors.js:102` | Resource doesn't exist | Create resource first |
+| `NoSuchKey` | `src/errors.js:128` | S3 object not found | Check ID exists |
+| `NoSuchBucket` | `src/errors.js:137` | S3 bucket missing | Create bucket or check name |
+| `CryptoError` | `src/errors.js:154` | Encryption/decryption fails | Check passphrase |
+
+### Configuration Options
+
+| Option | Level | Example | Default | Notes |
+|--------|-------|---------|---------|-------|
+| `behavior` | Resource | `behavior: 'body-overflow'` | `'body-overflow'` | Metadata handling strategy |
+| `timestamps` | Resource | `timestamps: true` | `false` | Add createdAt/updatedAt |
+| `paranoid` | Resource | `paranoid: true` | `true` | Prevent destructive deletes |
+| `strictValidation` | Resource | `strictValidation: false` | `true` | Partition field validation |
+| `asyncPartitions` | Resource | `asyncPartitions: true` | `true` | Async partition indexing |
+| `parallelism` | Database/Resource | `parallelism: 20` | `10` | Concurrent operations |
+| `versioningEnabled` | Database/Resource | `versioningEnabled: true` | `false` | Schema versioning |
+| `autoDecrypt` | Resource | `autoDecrypt: true` | `true` | Auto-decrypt secret fields |
+
 ## Critical S3 Limitations & Solutions
 
 ### 2KB Metadata Limit
