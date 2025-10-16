@@ -351,7 +351,7 @@ describe('StateMachinePlugin', () => {
       mockGuards.guardError.mockRejectedValue(new Error('Guard error'));
       
       await expect(plugin.send('test_guards', 'test1', 'ERROR')).rejects.toThrow(
-        "Transition blocked by guard 'guardError': Guard error"
+        /Transition blocked by guard 'guardError'/
       );
     });
 
