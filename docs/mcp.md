@@ -192,7 +192,7 @@ pm2 restart s3db-mcp
       "command": "npx",
       "args": ["s3db-mcp", "--transport=sse"],
       "env": {
-        "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true",
+        "S3DB_CONNECTION_STRING": "http://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true",
         "S3DB_VERBOSE": "true",
         "S3DB_CACHE_ENABLED": "true",
         "S3DB_COSTS_ENABLED": "false",
@@ -237,7 +237,7 @@ pm2 restart s3db-mcp
       "command": "npx",
       "args": ["s3db-mcp", "--transport=sse"],
       "env": {
-        "S3DB_CONNECTION_STRING": "s3://DO_ACCESS_KEY:DO_SECRET_KEY@nyc3.digitaloceanspaces.com/space-name/databases/app",
+        "S3DB_CONNECTION_STRING": "https://DO_ACCESS_KEY:DO_SECRET_KEY@nyc3.digitaloceanspaces.com/space-name/databases/app",
         "S3_ENDPOINT": "https://nyc3.digitaloceanspaces.com",
         "S3DB_CACHE_ENABLED": "true"
       }
@@ -255,7 +255,7 @@ pm2 restart s3db-mcp
       "command": "npx",
       "args": ["s3db-mcp", "--transport=sse", "--port=17500"],
       "env": {
-        "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true"
+        "S3DB_CONNECTION_STRING": "http://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true"
       }
     },
     "s3db-staging": {
@@ -407,41 +407,76 @@ Cost tracking provides:
 
 ### 🔗 Connection String Formats
 
-#### **Anatomy of a Connection String**
+#### **Understanding Connection String Protocols**
 
+S3DB supports **two connection string formats** depending on your storage provider:
+
+| Format | Use For | Authentication |
+|--------|---------|----------------|
+| `s3://` | **AWS S3 only** | IAM roles, AWS credentials, or inline keys |
+| `http://` or `https://` | **Non-AWS S3-compatible services** (MinIO, DigitalOcean, Backblaze, Wasabi) | Inline credentials required |
+
+**⚠️ Important**: While `s3://` works for AWS S3, non-AWS services should use `http://` or `https://` for clarity and to specify the endpoint directly.
+
+#### **Connection String Anatomy**
+
+**AWS S3 Format:**
 ```
 s3://[ACCESS_KEY:SECRET_KEY@]BUCKET[/PATH][?PARAMS]
 ```
 
+**Non-AWS Format:**
+```
+http(s)://[ACCESS_KEY:SECRET_KEY@]ENDPOINT/BUCKET[/PATH][?PARAMS]
+```
+
 Components:
-- `ACCESS_KEY:SECRET_KEY` - Optional inline credentials
-- `BUCKET` - S3 bucket name
+- `ACCESS_KEY:SECRET_KEY` - Optional inline credentials (required for non-AWS)
+- `BUCKET` - S3 bucket name or Space name
+- `ENDPOINT` - Full hostname for non-AWS services
 - `PATH` - Optional path prefix for organization
-- `PARAMS` - Query parameters for advanced config
+- `PARAMS` - Query parameters (e.g., `forcePathStyle=true` for MinIO)
 
 #### **Real-World Examples**
 
+**AWS S3 (use `s3://` protocol):**
 ```bash
-# AWS S3 - Production with IAM role (recommended)
+# Production with IAM role (recommended - no inline credentials)
 S3DB_CONNECTION_STRING="s3://my-prod-bucket/databases/main"
+# Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
 
-# AWS S3 - Development with credentials
+# Development with inline credentials
 S3DB_CONNECTION_STRING="s3://AKIA...:wJal...@my-dev-bucket/databases/dev"
+```
 
-# MinIO - Local development
-S3DB_CONNECTION_STRING="s3://minioadmin:minioadmin123@localhost:17998/s3db?forcePathStyle=true"
+**MinIO (use `http://` or `https://`):**
+```bash
+# Local development
+S3DB_CONNECTION_STRING="http://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true"
 
-# DigitalOcean Spaces
-S3DB_CONNECTION_STRING="s3://DO_KEY:DO_SECRET@nyc3.digitaloceanspaces.com/space-name/databases/prod"
+# Production MinIO with HTTPS
+S3DB_CONNECTION_STRING="https://ACCESS_KEY:SECRET_KEY@minio.example.com/bucket-name/databases/app?forcePathStyle=true"
+```
 
-# Backblaze B2
-S3DB_CONNECTION_STRING="s3://KEY_ID:APP_KEY@s3.us-west-002.backblazeb2.com/bucket-name/db"
+**DigitalOcean Spaces (use `https://`):**
+```bash
+S3DB_CONNECTION_STRING="https://DO_ACCESS_KEY:DO_SECRET_KEY@nyc3.digitaloceanspaces.com/space-name/databases/prod"
+# Also set: S3_ENDPOINT=https://nyc3.digitaloceanspaces.com
+```
 
-# Wasabi
-S3DB_CONNECTION_STRING="s3://ACCESS_KEY:SECRET_KEY@s3.wasabisys.com/bucket-name/databases/app"
+**Backblaze B2 (use `https://`):**
+```bash
+S3DB_CONNECTION_STRING="https://KEY_ID:APP_KEY@s3.us-west-002.backblazeb2.com/bucket-name/db"
+```
 
-# LocalStack (testing)
-S3DB_CONNECTION_STRING="s3://test:test@localhost:4566/test-bucket/db?forcePathStyle=true"
+**Wasabi (use `https://`):**
+```bash
+S3DB_CONNECTION_STRING="https://ACCESS_KEY:SECRET_KEY@s3.wasabisys.com/bucket-name/databases/app"
+```
+
+**LocalStack (use `http://` for testing):**
+```bash
+S3DB_CONNECTION_STRING="http://test:test@localhost:4566/test-bucket/db?forcePathStyle=true"
 ```
 
 ### 📁 Complete Configuration Examples
@@ -454,8 +489,8 @@ NODE_ENV=development
 MCP_SERVER_PORT=17500
 MCP_TRANSPORT=sse
 
-# S3DB
-S3DB_CONNECTION_STRING=s3://minioadmin:minioadmin123@localhost:9000/dev-bucket/db
+# S3DB - MinIO local development
+S3DB_CONNECTION_STRING=http://minioadmin:minioadmin123@localhost:9000/dev-bucket/db?forcePathStyle=true
 S3DB_VERBOSE=true
 S3DB_PARALLELISM=5
 
