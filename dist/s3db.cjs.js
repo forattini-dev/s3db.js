@@ -15283,7 +15283,7 @@ class Database extends EventEmitter {
     this.id = idGenerator(7);
     this.version = "1";
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => true ? "11.3.1" : "latest");
+      const [ok, err, version] = tryFn(() => true ? "11.3.2" : "latest");
       return ok ? version : "latest";
     })();
     this.resources = {};
