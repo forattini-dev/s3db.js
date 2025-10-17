@@ -110,6 +110,7 @@
 - [🎣 Advanced Hooks System](#-advanced-hooks-system)
 - [🧩 Resource Middlewares](#-resource-middlewares)
 - [🎧 Event Listeners Configuration](#-event-listeners-configuration)
+- [🤖 MCP Server](#-mcp-server)
 - [🔧 Troubleshooting](#-troubleshooting)
 - [📖 API Reference](#-api-reference)
 
@@ -1863,6 +1864,143 @@ await users.insert({ name: 'John' });
 - **Debugging**: Event listeners are excellent for debugging and monitoring
 - Middlewares are powerful and ideal for controlling or transforming operations.
 - You can safely combine both for maximum flexibility.
+
+---
+
+## 🤖 MCP Server
+
+S3DB includes a powerful **Model Context Protocol (MCP) server** that enables AI assistants like Claude to interact with your S3DB databases. The MCP server provides **28 specialized tools** for database operations, debugging, monitoring, and data management.
+
+### ⚡ Quick Start with npx
+
+**For Claude CLI** (one command setup):
+```bash
+claude mcp add s3db \
+  --transport stdio \
+  -- npx -y s3db.js s3db-mcp --transport=stdio
+```
+
+**For Claude Desktop** - Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": ["-y", "s3db.js", "s3db-mcp", "--transport=sse"],
+      "env": {
+        "S3DB_CONNECTION_STRING": "s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp",
+        "S3DB_CACHE_ENABLED": "true",
+        "S3DB_COSTS_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+**Standalone Server:**
+```bash
+# Start HTTP server
+npx s3db.js s3db-mcp --transport=sse
+```
+
+📖 **Complete setup guides:**
+- [NPX Setup Guide](./mcp/NPX_SETUP.md) - Use with `npx` (recommended)
+- [Claude CLI Setup](./mcp/CLAUDE_CLI_SETUP.md) - Detailed configuration
+
+### Available Tools
+
+The MCP server provides 28 tools organized into 7 categories:
+
+#### 🔌 **Connection Management** (3 tools)
+- `dbConnect` - Connect with cache and costs tracking
+- `dbDisconnect` - Graceful disconnection
+- `dbStatus` - Check connection status
+
+#### 🔍 **Debugging Tools** (5 tools)
+- `dbInspectResource` - Deep resource inspection
+- `dbGetMetadata` - View raw metadata.json
+- `resourceValidate` - Validate data against schema
+- `dbHealthCheck` - Comprehensive health check
+- `resourceGetRaw` - View raw S3 object data
+
+#### 📊 **Query & Filtering** (2 tools)
+- `resourceQuery` - Complex queries with filters
+- `resourceSearch` - Full-text search
+
+#### 🔧 **Partition Management** (4 tools)
+- `resourceListPartitions` - List all partitions
+- `resourceListPartitionValues` - Get partition values
+- `dbFindOrphanedPartitions` - Detect orphaned partitions
+- `dbRemoveOrphanedPartitions` - Clean up orphaned partitions
+
+#### 🚀 **Bulk Operations** (3 tools)
+- `resourceUpdateMany` - Update with filters
+- `resourceBulkUpsert` - Bulk upsert operations
+- `resourceDeleteAll` - Delete all documents
+
+#### 💾 **Export/Import** (3 tools)
+- `resourceExport` - Export to JSON/CSV/NDJSON
+- `resourceImport` - Import from JSON/NDJSON
+- `dbBackupMetadata` - Create metadata backups
+
+#### 📈 **Monitoring** (4 tools)
+- `dbGetStats` - Database statistics
+- `resourceGetStats` - Resource-specific stats
+- `cacheGetStats` - Cache performance metrics
+- `dbClearCache` - Clear cache
+
+Plus **standard CRUD operations**: insert, get, update, delete, list, count, and more.
+
+### Features
+
+- ✅ **Automatic Performance**: Cache and cost tracking enabled by default
+- ✅ **Multiple Transports**: SSE for web clients, stdio for CLI
+- ✅ **Partition-Aware**: Intelligent caching with partition support
+- ✅ **Debugging**: Comprehensive tools for troubleshooting
+- ✅ **Bulk Operations**: Efficient batch processing
+- ✅ **Export/Import**: Data migration and backup
+
+### Full Documentation
+
+**Complete MCP documentation**: [**docs/mcp.md**](./docs/mcp.md)
+
+Includes:
+- Tool reference with all 28 tools
+- Configuration examples (AWS, MinIO, DigitalOcean)
+- Docker deployment guides
+- Performance optimization
+- Troubleshooting
+- Security best practices
+
+### Example Usage
+
+```javascript
+// Connect to database
+await dbConnect({
+  connectionString: "s3://bucket/databases/app",
+  enableCache: true,
+  enableCosts: true
+})
+
+// Inspect resource
+await dbInspectResource({ resourceName: "users" })
+
+// Query with filters
+await resourceQuery({
+  resourceName: "users",
+  filters: { status: "active", age: { $gt: 18 } }
+})
+
+// Export data
+await resourceExport({
+  resourceName: "users",
+  format: "csv",
+  filters: { status: "active" }
+})
+
+// Check health
+await dbHealthCheck({ includeOrphanedPartitions: true })
+```
 
 ---
 

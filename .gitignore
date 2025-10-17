@@ -17,3 +17,4 @@ test-partition-cache/
 # Temporary directories
 tmp/
 .tmp/
+.claude.json
