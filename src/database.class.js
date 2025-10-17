@@ -1006,7 +1006,7 @@ export class Database extends EventEmitter {
       autoDecrypt: config.autoDecrypt !== undefined ? config.autoDecrypt : true,
       hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
-      strictValidation: this.strictValidation,
+      strictValidation: config.strictValidation !== undefined ? config.strictValidation : this.strictValidation,
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
