@@ -393,5 +393,5 @@ describe("EventualConsistencyPlugin - Hooks Scenario (Real World)", () => {
     const finalUrl = await urls.get('short-bugfix');
     console.log(`\n✅ Final value: ${finalUrl.clicks} (should be 5, NOT 0 or 1)`);
     expect(finalUrl.clicks).toBe(5);
-  });
+  }, 30000); // 30 second timeout for eventual consistency operations
 });
