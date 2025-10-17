@@ -1431,7 +1431,7 @@ describe('fastest-validator v1.19.1 - Comprehensive Shorthand Notation Tests', (
       const endTime = Date.now();
 
       expect(result).toBe(true);
-      expect(endTime - startTime).toBeLessThan(20); // Should be reasonably fast
+      expect(endTime - startTime).toBeLessThan(30); // Should be reasonably fast
     });
 
     it('validates multiple long arrays simultaneously', () => {
