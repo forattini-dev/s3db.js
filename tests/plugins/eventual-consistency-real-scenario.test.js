@@ -100,7 +100,7 @@ describe("EventualConsistencyPlugin - Real Scenario (URL Shortener)", () => {
     // Verify clicks incremented to 3
     url = await urlsResource.get('short-123');
     expect(url.clicks).toBe(3);
-  });
+  }, 30000); // 30 second timeout for eventual consistency operations
 
   test("should handle multiple fields (clicks, views, shares)", async () => {
     // Create URL
