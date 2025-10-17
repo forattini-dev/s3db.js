@@ -26,16 +26,15 @@ describe('Orphaned Partitions', () => {
         region: 'string|required',
         department: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegion: {
-            fields: { region: 'string' }
-          },
-          byDepartment: {
-            fields: { department: 'string' }
-          }
+      partitions: {
+        byRegion: {
+          fields: { region: 'string' }
+        },
+        byDepartment: {
+          fields: { department: 'string' }
         }
-      }
+      },
+      strictValidation: false // Allow orphaned partitions for testing
     });
 
     // No orphaned partitions yet
@@ -69,19 +68,18 @@ describe('Orphaned Partitions', () => {
         region: 'string|required',
         status: 'string|required'
       },
-      options: {
-        partitions: {
-          byCategory: {
-            fields: { category: 'string' }
-          },
-          byRegion: {
-            fields: { region: 'string' }
-          },
-          byStatus: {
-            fields: { status: 'string' }
-          }
+      partitions: {
+        byCategory: {
+          fields: { category: 'string' }
+        },
+        byRegion: {
+          fields: { region: 'string' }
+        },
+        byStatus: {
+          fields: { status: 'string' }
         }
-      }
+      },
+      strictValidation: false // Allow orphaned partitions for testing
     });
 
     // Remove multiple fields
@@ -108,13 +106,12 @@ describe('Orphaned Partitions', () => {
         amount: 'number|required',
         region: 'string|required'
       },
-      options: {
-        partitions: {
-          byRegion: {
-            fields: { region: 'string' }
-          }
+      partitions: {
+        byRegion: {
+          fields: { region: 'string' }
         }
-      }
+      },
+      strictValidation: false // Allow orphaned partitions for testing
     });
 
     // Remove field
@@ -141,14 +138,12 @@ describe('Orphaned Partitions', () => {
         quantity: 'number|required',
         warehouse: 'string|required'
       },
-      options: {
-        partitions: {
-          byWarehouse: {
-            fields: { warehouse: 'string' }
-          }
-        },
-        strictValidation: false // Disable for test
-      }
+      partitions: {
+        byWarehouse: {
+          fields: { warehouse: 'string' }
+        }
+      },
+      strictValidation: false // Disable for test
     });
 
     // Remove field
@@ -159,10 +154,10 @@ describe('Orphaned Partitions', () => {
 
     // Track event
     let eventFired = false;
+    let eventData = null;
     res.on('orphanedPartitionsRemoved', (data) => {
       eventFired = true;
-      expect(data.resourceName).toBe('inventory_orphaned');
-      expect(data.removed).toEqual(['byWarehouse']);
+      eventData = data;
     });
 
     // Actually remove
@@ -172,7 +167,12 @@ describe('Orphaned Partitions', () => {
 
     // Partition should be gone
     expect(res.config.partitions.byWarehouse).toBeUndefined();
+
+    // Wait for async event
+    await new Promise(resolve => setImmediate(resolve));
     expect(eventFired).toBe(true);
+    expect(eventData.resourceName).toBe('inventory_orphaned');
+    expect(eventData.removed).toEqual(['byWarehouse']);
   });
 
   test('removeOrphanedPartitions - should return empty when no orphaned partitions', async () => {
@@ -183,11 +183,9 @@ describe('Orphaned Partitions', () => {
         name: 'string|required',
         status: 'string|required'
       },
-      options: {
-        partitions: {
-          byStatus: {
-            fields: { status: 'string' }
-          }
+      partitions: {
+        byStatus: {
+          fields: { status: 'string' }
         }
       }
     });

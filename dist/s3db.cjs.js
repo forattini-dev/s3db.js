@@ -16087,7 +16087,7 @@ class Database extends EventEmitter {
       autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
       hooks: hooks || {},
       versioningEnabled: this.versioningEnabled,
-      strictValidation: this.strictValidation,
+      strictValidation: config.strictValidation !== void 0 ? config.strictValidation : this.strictValidation,
       map: config.map,
       idGenerator: config.idGenerator,
       idSize: config.idSize,
