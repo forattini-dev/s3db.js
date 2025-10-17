@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/s3db-mcp-server"><img src="https://img.shields.io/npm/v/s3db-mcp-server.svg?style=flat&color=brightgreen" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/s3db-mcp"><img src="https://img.shields.io/npm/v/s3db-mcp.svg?style=flat&color=brightgreen" alt="npm version"></a>
   &nbsp;
   <a href="https://github.com/forattini-dev/s3db.js"><img src="https://img.shields.io/github/stars/forattini-dev/s3db.js?style=flat&color=yellow" alt="GitHub stars"></a>
   &nbsp;
@@ -52,7 +52,7 @@ Open the configuration file and add the S3DB MCP server:
   "mcpServers": {
     "s3db": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp",
         "S3DB_CACHE_ENABLED": "true",
@@ -120,27 +120,27 @@ In Claude Desktop, test with these commands:
 ### Option 1: NPX (Recommended)
 ```bash
 # SSE transport (web clients) - Default port: 17500
-npx s3db-mcp-server --transport=sse
+npx s3db-mcp --transport=sse
 
 # STDIO transport (desktop clients)
-npx s3db-mcp-server --transport=stdio
+npx s3db-mcp --transport=stdio
 ```
 
 ### Option 2: Global Installation
 ```bash
-npm install -g s3db-mcp-server
+npm install -g s3db-mcp
 s3db-mcp --transport=sse
 ```
 
 ### Option 3: Docker
 ```bash
-docker run -p 17500:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp-server
+docker run -p 17500:8000 -e S3DB_CONNECTION_STRING="s3://key:secret@bucket/db" s3db-mcp
 ```
 
 ### Option 4: Standalone Server
 ```bash
 # Start the server (it will run in the foreground)
-npx s3db-mcp-server --transport=sse
+npx s3db-mcp --transport=sse
 
 # With environment variables
 cat > s3db-mcp.env << EOF
@@ -150,13 +150,13 @@ S3DB_CACHE_DRIVER=memory
 S3DB_CACHE_MAX_SIZE=1000
 EOF
 
-env $(cat s3db-mcp.env | xargs) npx s3db-mcp-server --transport=sse
+env $(cat s3db-mcp.env | xargs) npx s3db-mcp --transport=sse
 ```
 
 ### Option 5: Background Process
 ```bash
 # Using nohup (Linux/macOS)
-nohup npx s3db-mcp-server --transport=sse > s3db-mcp.log 2>&1 &
+nohup npx s3db-mcp --transport=sse > s3db-mcp.log 2>&1 &
 echo $! > s3db-mcp.pid
 
 # To stop later
@@ -169,7 +169,7 @@ kill $(cat s3db-mcp.pid)
 npm install -g pm2
 
 # Start with PM2
-pm2 start npx --name "s3db-mcp" -- s3db-mcp-server --transport=sse
+pm2 start npx --name "s3db-mcp" -- s3db-mcp --transport=sse
 
 # View logs
 pm2 logs s3db-mcp
@@ -190,7 +190,7 @@ pm2 restart s3db-mcp
   "mcpServers": {
     "s3db-local": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true",
         "S3DB_VERBOSE": "true",
@@ -210,7 +210,7 @@ pm2 restart s3db-mcp
   "mcpServers": {
     "s3db-prod": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://prod-data-bucket/databases/main",
         "AWS_REGION": "us-east-1",
@@ -235,7 +235,7 @@ pm2 restart s3db-mcp
   "mcpServers": {
     "s3db-do": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://DO_ACCESS_KEY:DO_SECRET_KEY@nyc3.digitaloceanspaces.com/space-name/databases/app",
         "S3_ENDPOINT": "https://nyc3.digitaloceanspaces.com",
@@ -253,14 +253,14 @@ pm2 restart s3db-mcp
   "mcpServers": {
     "s3db-dev": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse", "--port=17500"],
+      "args": ["s3db-mcp", "--transport=sse", "--port=17500"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://minioadmin:minioadmin123@localhost:9000/dev-bucket?forcePathStyle=true"
       }
     },
     "s3db-staging": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse", "--port=17501"],
+      "args": ["s3db-mcp", "--transport=sse", "--port=17501"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://staging-bucket/databases/staging",
         "AWS_REGION": "us-east-1"
@@ -268,7 +268,7 @@ pm2 restart s3db-mcp
     },
     "s3db-prod": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse", "--port=17502"],
+      "args": ["s3db-mcp", "--transport=sse", "--port=17502"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://prod-bucket/databases/production",
         "AWS_REGION": "us-east-1",
@@ -502,29 +502,29 @@ AWS_REGION=us-east-1
 
 ```bash
 # Basic usage
-npx s3db-mcp-server [OPTIONS]
+npx s3db-mcp [OPTIONS]
 
 # Transport selection
-npx s3db-mcp-server --transport=sse      # Web clients (default)
-npx s3db-mcp-server --transport=stdio    # CLI/pipe communication
+npx s3db-mcp --transport=sse      # Web clients (default)
+npx s3db-mcp --transport=stdio    # CLI/pipe communication
 
 # Network configuration
-npx s3db-mcp-server --host=0.0.0.0 --port=17500
+npx s3db-mcp --host=0.0.0.0 --port=17500
 
 # Override environment variables
-npx s3db-mcp-server --transport=sse \
+npx s3db-mcp --transport=sse \
   --host=127.0.0.1 \
   --port=18000
 
 # Combined with environment variables
 S3DB_CONNECTION_STRING="s3://..." \
 S3DB_CACHE_DRIVER=filesystem \
-npx s3db-mcp-server --transport=sse
+npx s3db-mcp --transport=sse
 
 # Debug mode with verbose output
 S3DB_VERBOSE=true \
 NODE_ENV=development \
-npx s3db-mcp-server --transport=stdio
+npx s3db-mcp --transport=stdio
 ```
 
 ### 🔍 Configuration Validation
@@ -1102,8 +1102,8 @@ docker compose up
 
 ```yaml
 services:
-  s3db-mcp-server:
-    image: s3db-mcp-server:latest
+  s3db-mcp:
+    image: s3db-mcp:latest
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -1146,7 +1146,7 @@ docker run -p 17500:8000 \
   -e S3DB_VERBOSE=true \
   -e S3DB_PARALLELISM=20 \
   -e MCP_TRANSPORT=sse \
-  s3db-mcp-server
+  s3db-mcp
 ```
 
 ---
@@ -1178,7 +1178,7 @@ docker run -p 17500:8000 \
     "s3db": {
       "transport": "stdio",
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=stdio"],
+      "args": ["s3db-mcp", "--transport=stdio"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://bucket/databases/myapp"
       }
@@ -1248,7 +1248,7 @@ After=network.target
 Type=simple
 User=youruser
 WorkingDirectory=/home/youruser
-ExecStart=/usr/bin/npx s3db-mcp-server --transport=sse
+ExecStart=/usr/bin/npx s3db-mcp --transport=sse
 Restart=always
 RestartSec=10
 Environment="S3DB_CONNECTION_STRING=s3://..."
@@ -1273,7 +1273,7 @@ Instead of hardcoding credentials:
   "mcpServers": {
     "s3db": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_CONNECTION_STRING": "s3://bucket/databases/app",
         "AWS_PROFILE": "production"
@@ -1296,7 +1296,7 @@ export AWS_SECRET_ACCESS_KEY="..."
   "mcpServers": {
     "s3db": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"]
+      "args": ["s3db-mcp", "--transport=sse"]
       // No env section - uses system environment
     }
   }
@@ -1311,7 +1311,7 @@ For production workloads:
   "mcpServers": {
     "s3db-optimized": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_PARALLELISM": "20",
         "S3DB_CACHE_DRIVER": "filesystem",
@@ -1401,7 +1401,7 @@ netstat -an | findstr :17500  # Windows
   "mcpServers": {
     "s3db": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse", "--port=18000"],
+      "args": ["s3db-mcp", "--transport=sse", "--port=18000"],
       "env": {
         "MCP_SERVER_PORT": "18000"
       }
@@ -1418,7 +1418,7 @@ netstat -an | findstr :17500  # Windows
 ```bash
 # Test connection string directly
 export S3DB_CONNECTION_STRING="s3://..."
-npx s3db-mcp-server --transport=sse
+npx s3db-mcp --transport=sse
 
 # Common fixes:
 # 1. URL-encode special characters in credentials
@@ -1466,7 +1466,7 @@ Enable verbose logging:
   "mcpServers": {
     "s3db": {
       "command": "npx",
-      "args": ["s3db-mcp-server", "--transport=sse"],
+      "args": ["s3db-mcp", "--transport=sse"],
       "env": {
         "S3DB_VERBOSE": "true",
         "NODE_ENV": "development",
@@ -1528,7 +1528,7 @@ export S3DB_VERBOSE=true
 s3db-mcp --transport=sse
 
 # Docker
-docker run -e S3DB_VERBOSE=true s3db-mcp-server
+docker run -e S3DB_VERBOSE=true s3db-mcp
 ```
 
 ### Health Monitoring
@@ -1710,7 +1710,7 @@ environment:
 - [MCP Protocol Specification](https://modelcontextprotocol.io)
 - [Claude Desktop Downloads](https://claude.ai/download)
 - [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)
-- [NPM Package](https://www.npmjs.com/package/s3db-mcp-server)
+- [NPM Package](https://www.npmjs.com/package/s3db-mcp)
 
 Need help? Check the [Troubleshooting](#troubleshooting) section or file an issue on [GitHub](https://github.com/forattini-dev/s3db.js/issues).
 
