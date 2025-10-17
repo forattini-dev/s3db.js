@@ -85,7 +85,6 @@
     "release:check": "./scripts/pre-release-check.sh",
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
     "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts",
-    "prepublishOnly": "pnpm run build:all && pnpm run test:quick && echo '✅ Package ready for publish'",
     "test:mcp": "node mcp/entrypoint.js --help"
   },
   "dependencies": {
