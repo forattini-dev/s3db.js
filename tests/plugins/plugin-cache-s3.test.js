@@ -230,7 +230,7 @@ describe('Cache Plugin - S3Cache Driver - Basic Tests', () => {
       // Cache should be populated
       const stats = await cachePlugin.getCacheStats();
       expect(stats.size).toBeGreaterThan(0);
-    });
+    }, 30000); // 30 second timeout for S3 operations
 
     test('should verify cache keys are actually stored in S3', async () => {
       // Clear any existing cache
