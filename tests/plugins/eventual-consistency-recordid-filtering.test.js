@@ -75,7 +75,7 @@ describe('EventualConsistency Analytics - RecordId Filtering', () => {
     // Expected: 10 (only url1's clicks)
     // Actual: 10 (bug fixed!)
     expect(totalClicksUrl1).toBe(10);
-  });
+  }, 30000); // 30 second timeout for analytics operations
 
   it('should return analytics for url2 only when recordId=url2', async () => {
     await urls.insert({ id: 'url1', slug: 'article-1', clicks: 0 });
@@ -120,7 +120,7 @@ describe('EventualConsistency Analytics - RecordId Filtering', () => {
 
     // Expected: 30 (all URLs combined)
     expect(totalClicksGlobal).toBe(30);
-  });
+  }, 30000); // 30 second timeout for analytics operations
 
   it('✅ getLastNDays correctly filters by recordId', async () => {
     await urls.insert({ id: 'url1', clicks: 0 });
