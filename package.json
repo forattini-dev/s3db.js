@@ -10,7 +10,7 @@
   "bin": {
     "s3db.js": "./bin/cli.js",
     "s3db": "./bin/cli.js",
-    "s3db-mcp": "./mcp/server.js"
+    "s3db-mcp": "./mcp/entrypoint.js"
   },
   "repository": {
     "type": "git",
@@ -30,7 +30,13 @@
     "cloud-database",
     "metadata-encoding",
     "s3-database",
-    "serverless"
+    "serverless",
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "claude",
+    "ai-tools",
+    "llm"
   ],
   "type": "module",
   "sideEffects": false,
@@ -52,15 +58,18 @@
     "dist/",
     "src/",
     "bin/cli.js",
-    "mcp/server.js",
+    "mcp/",
     "README.md",
     "PLUGINS.md",
     "SECURITY.md",
     "UNLICENSE"
   ],
   "scripts": {
-    "build": "rollup -c",
-    "build:cli": "rollup -c rollup.cli.config.mjs",
+    "build": "npm run build:core",
+    "build:core": "rollup -c",
+    "build:cli": "echo '✅ CLI uses ES modules directly from bin/cli.js (no build needed)'",
+    "build:mcp": "echo '✅ MCP uses ES modules directly from mcp/entrypoint.js (no build needed)'",
+    "build:all": "npm run build:core && npm run build:cli && npm run build:mcp",
     "build:binaries": "./scripts/scripts/build-binaries.sh",
     "dev": "rollup -c -w",
     "test": "pnpm run test:js && pnpm run test:ts",
@@ -75,7 +84,9 @@
     "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
     "release:check": "./scripts/pre-release-check.sh",
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
-    "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts"
+    "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts",
+    "prepublishOnly": "pnpm run build:all && pnpm run test:quick && echo '✅ Package ready for publish'",
+    "test:mcp": "node mcp/entrypoint.js --help"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.906.0",

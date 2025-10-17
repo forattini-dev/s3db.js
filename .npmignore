@@ -6,12 +6,13 @@
 .github/
 .shrimp/
 coverage/
-examples/
 tests/
 scripts/
 build-standalone/
 build-binaries/
 releases/
+# Keep mcp/examples for reference
+mcp/examples/
 
 # Development tools and configs
 .cursorignore
@@ -43,13 +44,17 @@ releases/*
 *.map
 *.map.js
 
-# Documentation (keep only essential README.md)
+# Documentation (keep only essential files)
 ROADMAP.md
 OPTIMIZATION_SUMMARY.md
 CLAUDE.md
 CONTRIBUTING.md
 CHANGELOG.md
-docs/
+docs/benchmarks/
+docs/examples/
+docs/plugins/
+# Keep docs/mcp.md for MCP documentation
+!docs/mcp.md
 
 # Test artifacts
 test-cache/
@@ -71,12 +76,20 @@ Thumbs.db
 .coveralls.yml
 
 # ✅ WHAT GETS PUBLISHED TO NPM:
-# ├── src/           - Source code for debugging/transparency
-# ├── dist/          - Compiled JavaScript (CJS + ESM)
-# ├── bin/cli.js     - Node.js CLI script (lightweight)
-# ├── mcp/server.js  - MCP server (lightweight) 
-# ├── package.json   - Package metadata
-# ├── README.md      - Main documentation
-# └── LICENSE        - License file
+# ├── src/                  - Source code for debugging/transparency
+# ├── dist/                 - Compiled JavaScript (CJS + ESM)
+# ├── bin/cli.js            - Node.js CLI script (lightweight)
+# ├── mcp/                  - MCP server directory
+# │   ├── entrypoint.js     - MCP server entry point (for npx)
+# │   ├── tools/            - MCP tools implementation
+# │   ├── README.md         - MCP quick reference
+# │   ├── NPX_SETUP.md      - NPX setup guide
+# │   └── CLAUDE_CLI_SETUP.md - Claude CLI setup guide
+# ├── docs/mcp.md           - Complete MCP documentation
+# ├── package.json          - Package metadata
+# ├── README.md             - Main documentation
+# ├── PLUGINS.md            - Plugin documentation
+# ├── SECURITY.md           - Security documentation
+# └── UNLICENSE             - License file
 #
 # 📦 Standalone binaries available via GitHub Releases
