@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
@@ -10,19 +10,10 @@ describe('Cache Plugin - Partition Integration - Basic Tests', () => {
   let users;
   let testDir;
 
-  beforeAll(async () => {
-    testDir = await createTemporaryPathForTest('cache-partitions-simple');
-  });
-
-  afterAll(async () => {
-    try {
-      await rmdir(testDir, { recursive: true });
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-  });
-
   beforeEach(async () => {
+    // Create unique directory for each test to avoid pollution
+    testDir = await createTemporaryPathForTest(`cache-partitions-${Date.now()}-${Math.random()}`);
+
     db = createDatabaseForTest('suite=plugins/cache-partitions');
     await db.connect();
 
@@ -68,6 +59,14 @@ describe('Cache Plugin - Partition Integration - Basic Tests', () => {
     }
     if (db) {
       await db.disconnect();
+    }
+    // Clean up test directory
+    if (testDir) {
+      try {
+        await rmdir(testDir, { recursive: true });
+      } catch (e) {
+        // Ignore cleanup errors
+      }
     }
   });
 

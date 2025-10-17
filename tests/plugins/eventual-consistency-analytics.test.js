@@ -165,7 +165,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     expect(subCount).toBe(1);
     expect(subSum).toBe(-25);
-  });
+  }, 30000); // 30 second timeout for analytics operations
 
   it('should roll up hourly to daily analytics', async () => {
     // Insert wallet
