@@ -3,9 +3,10 @@ import BigqueryReplicator from './bigquery-replicator.class.js';
 import PostgresReplicator from './postgres-replicator.class.js';
 import S3dbReplicator from './s3db-replicator.class.js';
 import SqsReplicator from './sqs-replicator.class.js';
+import WebhookReplicator from './webhook-replicator.class.js';
 import { ReplicationError } from '../replicator.errors.js';
 
-export { BaseReplicator, BigqueryReplicator, PostgresReplicator, S3dbReplicator, SqsReplicator };
+export { BaseReplicator, BigqueryReplicator, PostgresReplicator, S3dbReplicator, SqsReplicator, WebhookReplicator };
 
 /**
  * Available replicator drivers
@@ -14,12 +15,13 @@ export const REPLICATOR_DRIVERS = {
   s3db: S3dbReplicator,
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
-  postgres: PostgresReplicator
+  postgres: PostgresReplicator,
+  webhook: WebhookReplicator
 };
 
 /**
  * Create a replicator instance based on driver type
- * @param {string} driver - Driver type (s3db, sqs, bigquery, postgres)
+ * @param {string} driver - Driver type (s3db, sqs, bigquery, postgres, webhook)
  * @param {Object} config - Replicator configuration
  * @returns {BaseReplicator} Replicator instance
  */
