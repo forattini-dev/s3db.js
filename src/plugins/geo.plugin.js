@@ -24,16 +24,26 @@ import tryFn from "../concerns/try-fn.js";
  *       latField: 'latitude',      // Latitude field name
  *       lonField: 'longitude',     // Longitude field name
  *       precision: 5,              // Geohash precision (~5km cells)
- *       addGeohash: true          // Add 'geohash' field automatically
+ *       addGeohash: true,         // Add 'geohash' field automatically
+ *       usePartitions: true,      // Create geohash partitions for efficient queries
+ *       zoomLevels: [4, 5, 6, 7]  // Multi-zoom partitions (4=~20km, 5=~5km, 6=~1.2km, 7=~150m)
  *     },
  *
  *     restaurants: {
  *       latField: 'lat',
  *       lonField: 'lng',
- *       precision: 6              // Higher precision (~1.2km cells)
+ *       precision: 6,             // Higher precision (~1.2km cells)
+ *       usePartitions: true,      // Enables O(1) geohash lookups
+ *       zoomLevels: [5, 6, 7, 8]  // Fine-grained zooms for dense urban areas
  *     }
  *   }
  * })
+ *
+ * // With zoomLevels, queries auto-select optimal partition based on search radius:
+ * // - Large radius (>10km): uses zoom4 (~20km cells)
+ * // - Medium radius (2-10km): uses zoom5 (~5km cells)
+ * // - Small radius (0.5-2km): uses zoom6 (~1.2km cells)
+ * // - Precise radius (<0.5km): uses zoom7 (~150m cells)
  *
  * === Geohash Precision ===
  *
@@ -85,6 +95,16 @@ class GeoPlugin extends Plugin {
       await this._setupResource(resourceName, config);
     }
 
+    // Watch for resources created after plugin installation
+    this.database.addHook('afterCreateResource', async (context) => {
+      const { resource, config: resourceConfig } = context;
+      const geoConfig = this.resources[resource.name];
+
+      if (geoConfig) {
+        await this._setupResource(resource.name, geoConfig);
+      }
+    });
+
     if (this.verbose) {
       console.log(`[GeoPlugin] Installed with ${Object.keys(this.resources).length} resources`);
     }
@@ -129,14 +149,28 @@ class GeoPlugin extends Plugin {
     // Store config on resource
     resource._geoConfig = config;
 
-    // Add geohash field to resource schema if not already present
-    if (config.addGeohash && !resource.schema.attributes.geohash) {
-      resource.schema.attributes.geohash = { type: 'string' };
+    // Add geohash fields to resource schema if not already present
+    const currentAttributes = { ...resource.attributes };
+    let attributesModified = false;
+
+    if (config.addGeohash && !currentAttributes.geohash) {
+      currentAttributes.geohash = { type: 'string' };
+      attributesModified = true;
     }
 
-    // Add internal _geohash field if not present
-    if (!resource.schema.attributes._geohash) {
-      resource.schema.attributes._geohash = { type: 'string' };
+    if (!currentAttributes._geohash) {
+      currentAttributes._geohash = { type: 'string' };
+      attributesModified = true;
+    }
+
+    // Update attributes if we added new fields
+    if (attributesModified) {
+      resource.updateAttributes(currentAttributes);
+    }
+
+    // Setup geohash partitions if enabled
+    if (config.usePartitions) {
+      await this._setupPartitions(resource, config);
     }
 
     // Add hooks for automatic geohash calculation
@@ -148,13 +182,87 @@ class GeoPlugin extends Plugin {
     if (this.verbose) {
       console.log(
         `[GeoPlugin] Setup resource "${resourceName}" with precision ${config.precision} ` +
-        `(~${this._getPrecisionDistance(config.precision)}km cells)`
+        `(~${this._getPrecisionDistance(config.precision)}km cells)` +
+        (config.usePartitions ? ' [Partitions enabled]' : '')
       );
     }
   }
 
   /**
-   * Add hooks to automatically calculate geohash
+   * Setup geohash partitions for efficient spatial queries
+   * Creates multiple zoom-level partitions if zoomLevels configured
+   */
+  async _setupPartitions(resource, config) {
+    const updatedConfig = { ...resource.config };
+    updatedConfig.partitions = updatedConfig.partitions || {};
+
+    let partitionsCreated = 0;
+
+    // If zoomLevels configured, create partition for each zoom level
+    if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+      for (const zoom of config.zoomLevels) {
+        const partitionName = `byGeohashZoom${zoom}`;
+        const fieldName = `_geohash_zoom${zoom}`;
+
+        if (!updatedConfig.partitions[partitionName]) {
+          // Add zoom-specific geohash field to attributes if not present
+          if (!resource.attributes[fieldName]) {
+            resource.attributes[fieldName] = { type: 'string' };
+          }
+
+          updatedConfig.partitions[partitionName] = {
+            fields: {
+              [fieldName]: 'string'
+            }
+          };
+
+          partitionsCreated++;
+
+          if (this.verbose) {
+            console.log(
+              `[GeoPlugin] Created ${partitionName} partition for "${resource.name}" ` +
+              `(precision ${zoom}, ~${this._getPrecisionDistance(zoom)}km cells)`
+            );
+          }
+        }
+      }
+    } else {
+      // Legacy: single partition with default precision
+      const hasGeohashPartition = resource.config.partitions &&
+                                  resource.config.partitions.byGeohash;
+
+      if (!hasGeohashPartition) {
+        if (!resource.attributes._geohash) {
+          resource.attributes._geohash = { type: 'string' };
+        }
+
+        updatedConfig.partitions.byGeohash = {
+          fields: {
+            _geohash: 'string'
+          }
+        };
+
+        partitionsCreated++;
+
+        if (this.verbose) {
+          console.log(`[GeoPlugin] Created byGeohash partition for "${resource.name}"`);
+        }
+      }
+    }
+
+    // Update resource config
+    if (partitionsCreated > 0) {
+      resource.config = updatedConfig;
+
+      // Persist to metadata
+      if (this.database.uploadMetadataFile) {
+        await this.database.uploadMetadataFile();
+      }
+    }
+  }
+
+  /**
+   * Add hooks to automatically calculate geohash at all zoom levels
    */
   _addHooks(resource, config) {
     const calculateGeohash = async (data) => {
@@ -162,14 +270,23 @@ class GeoPlugin extends Plugin {
       const lon = data[config.lonField];
 
       if (lat !== undefined && lon !== undefined) {
+        // Calculate geohash at default precision
         const geohash = this.encodeGeohash(lat, lon, config.precision);
 
         if (config.addGeohash) {
           data.geohash = geohash;
         }
 
-        // Store for partition queries
-        data._geohash = geohash;
+        // If zoomLevels configured, calculate geohash for each zoom
+        if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+          for (const zoom of config.zoomLevels) {
+            const zoomGeohash = this.encodeGeohash(lat, lon, zoom);
+            data[`_geohash_zoom${zoom}`] = zoomGeohash;
+          }
+        } else {
+          // Legacy: single geohash
+          data._geohash = geohash;
+        }
       }
 
       return data;
@@ -187,14 +304,80 @@ class GeoPlugin extends Plugin {
 
     /**
      * Find nearby locations within radius
+     * Automatically selects optimal zoom level if multi-zoom enabled
      */
     resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
       if (lat === undefined || lon === undefined) {
         throw new Error('lat and lon are required for findNearby');
       }
 
-      // Get all records (or use partition if available)
-      const allRecords = await this.list({ limit: limit * 2 }); // Get more for filtering
+      let allRecords = [];
+
+      // Use partitions if enabled for efficient queries
+      if (config.usePartitions) {
+        let partitionName, fieldName, precision;
+
+        // Select optimal zoom if multi-zoom configured
+        if (config.zoomLevels && config.zoomLevels.length > 0) {
+          const optimalZoom = plugin._selectOptimalZoom(config.zoomLevels, radius);
+          partitionName = `byGeohashZoom${optimalZoom}`;
+          fieldName = `_geohash_zoom${optimalZoom}`;
+          precision = optimalZoom;
+
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
+              `for ${radius}km radius query`
+            );
+          }
+        } else {
+          // Legacy single partition
+          partitionName = 'byGeohash';
+          fieldName = '_geohash';
+          precision = config.precision;
+        }
+
+        // Check if partition exists
+        if (this.config.partitions?.[partitionName]) {
+          // Calculate center geohash at selected precision
+          const centerGeohash = plugin.encodeGeohash(lat, lon, precision);
+
+          // Get neighboring geohashes to cover the search area
+          const neighbors = plugin.getNeighbors(centerGeohash);
+          const geohashesToSearch = [centerGeohash, ...neighbors];
+
+          // Query each geohash partition in parallel
+          const partitionResults = await Promise.all(
+            geohashesToSearch.map(async (geohash) => {
+              const [ok, err, records] = await tryFn(async () => {
+                return await this.listPartition({
+                  partition: partitionName,
+                  partitionValues: { [fieldName]: geohash },
+                  limit: limit * 2
+                });
+              });
+
+              return ok ? records : [];
+            })
+          );
+
+          // Flatten results
+          allRecords = partitionResults.flat();
+
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
+              `found ${allRecords.length} candidates`
+            );
+          }
+        } else {
+          // Fallback to full scan if partition doesn't exist
+          allRecords = await this.list({ limit: limit * 10 });
+        }
+      } else {
+        // Fallback to full scan if partitions not enabled
+        allRecords = await this.list({ limit: limit * 10 });
+      }
 
       // Calculate distances and filter
       const withDistances = allRecords
@@ -222,16 +405,87 @@ class GeoPlugin extends Plugin {
 
     /**
      * Find locations within bounding box
+     * Automatically selects optimal zoom level if multi-zoom enabled
      */
     resource.findInBounds = async function({ north, south, east, west, limit = 100 }) {
       if (north === undefined || south === undefined || east === undefined || west === undefined) {
         throw new Error('north, south, east, west are required for findInBounds');
       }
 
-      // Get all records
-      const allRecords = await this.list({ limit: limit * 2 });
+      let allRecords = [];
 
-      // Filter by bounding box
+      // Use partitions if enabled for efficient queries
+      if (config.usePartitions) {
+        let partitionName, precision;
+
+        // Select optimal zoom if multi-zoom configured
+        if (config.zoomLevels && config.zoomLevels.length > 0) {
+          // Calculate approximate diameter of bounding box for zoom selection
+          const centerLat = (north + south) / 2;
+          const centerLon = (east + west) / 2;
+          const latRadius = plugin.calculateDistance(centerLat, centerLon, north, centerLon);
+          const lonRadius = plugin.calculateDistance(centerLat, centerLon, centerLat, east);
+          const approximateRadius = Math.max(latRadius, lonRadius);
+
+          const optimalZoom = plugin._selectOptimalZoom(config.zoomLevels, approximateRadius);
+          partitionName = `byGeohashZoom${optimalZoom}`;
+          precision = optimalZoom;
+
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
+              `for ${approximateRadius.toFixed(1)}km bounding box`
+            );
+          }
+        } else {
+          // Legacy single partition
+          partitionName = 'byGeohash';
+          precision = config.precision;
+        }
+
+        // Check if partition exists
+        if (this.config.partitions?.[partitionName]) {
+          // Calculate all geohashes that cover the bounding box
+          const geohashesToSearch = plugin._getGeohashesInBounds({
+            north, south, east, west,
+            precision
+          });
+
+          // Query each geohash partition in parallel
+          const partitionResults = await Promise.all(
+            geohashesToSearch.map(async (geohash) => {
+              const [ok, err, records] = await tryFn(async () => {
+                const fieldName = config.zoomLevels ? `_geohash_zoom${precision}` : '_geohash';
+                return await this.listPartition({
+                  partition: partitionName,
+                  partitionValues: { [fieldName]: geohash },
+                  limit: limit * 2
+                });
+              });
+
+              return ok ? records : [];
+            })
+          );
+
+          // Flatten results
+          allRecords = partitionResults.flat();
+
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
+              `found ${allRecords.length} candidates`
+            );
+          }
+        } else {
+          // Fallback to full scan if partition doesn't exist
+          allRecords = await this.list({ limit: limit * 10 });
+        }
+      } else {
+        // Fallback to full scan if partitions not enabled
+        allRecords = await this.list({ limit: limit * 10 });
+      }
+
+      // Filter by exact bounding box (geohash cells may extend beyond bounds)
       const inBounds = allRecords
         .filter(record => {
           const lat = record[config.latField];
@@ -465,6 +719,44 @@ class GeoPlugin extends Plugin {
   }
 
   /**
+   * Get all geohashes that cover a bounding box
+   * @param {Object} bounds - Bounding box { north, south, east, west, precision }
+   * @returns {Array<string>} Array of unique geohashes covering the area
+   */
+  _getGeohashesInBounds({ north, south, east, west, precision }) {
+    const geohashes = new Set();
+
+    // Calculate step size based on precision
+    const cellSize = this._getPrecisionDistance(precision);
+    // Convert km to degrees (rough approximation: 1 degree ≈ 111 km)
+    const latStep = cellSize / 111;
+    const lonStep = cellSize / (111 * Math.cos(this._toRadians((north + south) / 2)));
+
+    // Generate grid of points and calculate their geohashes
+    for (let lat = south; lat <= north; lat += latStep) {
+      for (let lon = west; lon <= east; lon += lonStep) {
+        const geohash = this.encodeGeohash(lat, lon, precision);
+        geohashes.add(geohash);
+      }
+    }
+
+    // Also add geohashes for the corners and edges to ensure full coverage
+    const corners = [
+      [north, west], [north, east],
+      [south, west], [south, east],
+      [(north + south) / 2, west], [(north + south) / 2, east],
+      [north, (east + west) / 2], [south, (east + west) / 2]
+    ];
+
+    for (const [lat, lon] of corners) {
+      const geohash = this.encodeGeohash(lat, lon, precision);
+      geohashes.add(geohash);
+    }
+
+    return Array.from(geohashes);
+  }
+
+  /**
    * Convert degrees to radians
    */
   _toRadians(degrees) {
@@ -491,6 +783,37 @@ class GeoPlugin extends Plugin {
     };
 
     return distances[precision] || 5;
+  }
+
+  /**
+   * Select optimal zoom level based on search radius
+   * @param {Array<number>} zoomLevels - Available zoom levels
+   * @param {number} radiusKm - Search radius in kilometers
+   * @returns {number} Optimal zoom precision
+   */
+  _selectOptimalZoom(zoomLevels, radiusKm) {
+    if (!zoomLevels || zoomLevels.length === 0) {
+      return null;
+    }
+
+    // Select zoom where cell size is approximately 2-3x smaller than radius
+    // This gives good coverage without too many partitions to query
+    const targetCellSize = radiusKm / 2.5;
+
+    let bestZoom = zoomLevels[0];
+    let bestDiff = Math.abs(this._getPrecisionDistance(bestZoom) - targetCellSize);
+
+    for (const zoom of zoomLevels) {
+      const cellSize = this._getPrecisionDistance(zoom);
+      const diff = Math.abs(cellSize - targetCellSize);
+
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestZoom = zoom;
+      }
+    }
+
+    return bestZoom;
   }
 
   /**
