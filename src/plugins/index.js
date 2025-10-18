@@ -15,6 +15,7 @@ export * from './replicator.plugin.js'
 export * from './s3-queue.plugin.js'
 export * from './scheduler.plugin.js'
 export * from './state-machine.plugin.js'
+export * from './ttl.plugin.js'
 export * from './vector.plugin.js'
 
 // plugin drivers & utilities:
