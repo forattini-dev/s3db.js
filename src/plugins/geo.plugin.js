@@ -284,7 +284,7 @@ class GeoPlugin extends Plugin {
             data[`_geohash_zoom${zoom}`] = zoomGeohash;
           }
         } else {
-          // Legacy: single geohash
+          // Legacy: single geohash (always set _geohash for partition support)
           data._geohash = geohash;
         }
       }
