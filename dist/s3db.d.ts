@@ -1264,6 +1264,12 @@ declare module 's3db.js' {
     /** Decrement field value */
     sub(id: string, field: string, amount: number): Promise<number>;
 
+    /** Increment field value by 1 (shorthand for add(id, field, 1)) */
+    increment(id: string, field: string): Promise<number>;
+
+    /** Decrement field value by 1 (shorthand for sub(id, field, 1)) */
+    decrement(id: string, field: string): Promise<number>;
+
     /** Manually trigger consolidation */
     consolidate(id: string, field: string): Promise<number>;
 
