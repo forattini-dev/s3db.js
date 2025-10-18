@@ -418,8 +418,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: 'number',  // Optional - no |required
-          longitude: 'number'   // Optional - no |required
+          latitude: { type: 'number', required: false },  // Explicitly optional
+          longitude: { type: 'number', required: false }   // Explicitly optional
         }
       });
 
@@ -748,8 +748,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: 'number',  // Optional
-          longitude: 'number'   // Optional
+          latitude: { type: 'number', required: false },
+          longitude: { type: 'number', required: false }
         }
       });
 
@@ -945,8 +945,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: 'number',  // Optional
-          longitude: 'number'   // Optional
+          latitude: { type: 'number', required: false },
+          longitude: { type: 'number', required: false }
         }
       });
 
@@ -1107,8 +1107,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: 'number',  // Optional
-          longitude: 'number'   // Optional
+          latitude: { type: 'number', required: false },
+          longitude: { type: 'number', required: false }
         }
       });
 

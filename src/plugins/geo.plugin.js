@@ -205,9 +205,9 @@ class GeoPlugin extends Plugin {
         const fieldName = `_geohash_zoom${zoom}`;
 
         if (!updatedConfig.partitions[partitionName]) {
-          // Add zoom-specific geohash field to attributes if not present
+          // Add zoom-specific geohash field to attributes if not present (optional field)
           if (!resource.attributes[fieldName]) {
-            resource.attributes[fieldName] = { type: 'string' };
+            resource.attributes[fieldName] = { type: 'string', required: false };
           }
 
           updatedConfig.partitions[partitionName] = {
@@ -233,7 +233,7 @@ class GeoPlugin extends Plugin {
 
       if (!hasGeohashPartition) {
         if (!resource.attributes._geohash) {
-          resource.attributes._geohash = { type: 'string' };
+          resource.attributes._geohash = { type: 'string', required: false };
         }
 
         updatedConfig.partitions.byGeohash = {
