@@ -392,6 +392,8 @@ describe("EventualConsistencyPlugin Methods", () => {
       expect(typeof walletsResource.set).toBe('function');
       expect(typeof walletsResource.add).toBe('function');
       expect(typeof walletsResource.sub).toBe('function');
+      expect(typeof walletsResource.increment).toBe('function');
+      expect(typeof walletsResource.decrement).toBe('function');
       expect(typeof walletsResource.consolidate).toBe('function');
     });
 
@@ -418,7 +420,108 @@ describe("EventualConsistencyPlugin Methods", () => {
       expect(typeof pointsResource.set).toBe('function');
       expect(typeof pointsResource.add).toBe('function');
       expect(typeof pointsResource.sub).toBe('function');
+      expect(typeof pointsResource.increment).toBe('function');
+      expect(typeof pointsResource.decrement).toBe('function');
       expect(typeof pointsResource.consolidate).toBe('function');
+    });
+  });
+
+  describe("Increment and Decrement", () => {
+    it("should increment field by 1", async () => {
+      // Create wallet
+      await walletsResource.insert({
+        id: 'wallet-increment',
+        userId: 'user-increment',
+        balance: 100
+      });
+
+      // Increment balance
+      await walletsResource.increment('wallet-increment', 'balance');
+
+      // Wait for async processing
+      await sleep(200);
+
+      // Consolidate and verify
+      const balance = await walletsResource.consolidate('wallet-increment', 'balance');
+      expect(balance).toBe(101);
+    });
+
+    it("should decrement field by 1", async () => {
+      // Create wallet
+      await walletsResource.insert({
+        id: 'wallet-decrement',
+        userId: 'user-decrement',
+        balance: 100
+      });
+
+      // Decrement balance
+      await walletsResource.decrement('wallet-decrement', 'balance');
+
+      // Wait for async processing
+      await sleep(200);
+
+      // Consolidate and verify
+      const balance = await walletsResource.consolidate('wallet-decrement', 'balance');
+      expect(balance).toBe(99);
+    });
+
+    it("should handle multiple increments and decrements", async () => {
+      // Create wallet
+      await walletsResource.insert({
+        id: 'wallet-mixed',
+        userId: 'user-mixed',
+        balance: 50
+      });
+
+      // Multiple operations
+      await walletsResource.increment('wallet-mixed', 'balance'); // +1 = 51
+      await walletsResource.increment('wallet-mixed', 'balance'); // +1 = 52
+      await walletsResource.increment('wallet-mixed', 'balance'); // +1 = 53
+      await walletsResource.decrement('wallet-mixed', 'balance'); // -1 = 52
+      await walletsResource.decrement('wallet-mixed', 'balance'); // -1 = 51
+
+      // Wait for async processing
+      await sleep(200);
+
+      // Consolidate and verify: 50 + 3 - 2 = 51
+      const balance = await walletsResource.consolidate('wallet-mixed', 'balance');
+      expect(balance).toBe(51);
+    });
+
+    it("should work in sync mode", async () => {
+      // Create new plugin in sync mode
+      const syncPlugin = new EventualConsistencyPlugin({
+        resources: {
+          counters: ['count']
+        },
+        consolidation: { mode: 'sync' }
+      });
+
+      const countersResource = await database.createResource({
+        name: 'counters',
+        attributes: {
+          id: 'string|required',
+          count: 'number|default:0'
+        }
+      });
+
+      await database.usePlugin(syncPlugin);
+
+      // Create counter
+      await countersResource.insert({
+        id: 'counter-sync',
+        count: 10
+      });
+
+      // Increment should be immediate in sync mode
+      await countersResource.increment('counter-sync', 'count');
+      const counter1 = await countersResource.get('counter-sync');
+      expect(counter1.count).toBe(11);
+
+      // Decrement should be immediate too
+      await countersResource.decrement('counter-sync', 'count');
+      const counter2 = await countersResource.get('counter-sync');
+      expect(counter2.count).toBe(10);
     });
   });
 });

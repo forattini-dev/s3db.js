@@ -61,6 +61,10 @@ await wallets.insert({ id: 'wallet-1', balance: 0 });
 await wallets.add('wallet-1', 'balance', 100);
 await wallets.sub('wallet-1', 'balance', 50);
 
+// Or use shorthand methods for +1/-1
+await wallets.increment('wallet-1', 'balance'); // +1
+await wallets.decrement('wallet-1', 'balance'); // -1
+
 const wallet = await wallets.get('wallet-1');
 console.log(wallet.balance); // 50 ✅
 ```
@@ -149,6 +153,12 @@ await resource.add(id, field, amount)
 // Subtract
 await resource.sub(id, field, amount)
 
+// Increment by 1 (shorthand for add(id, field, 1))
+await resource.increment(id, field)
+
+// Decrement by 1 (shorthand for sub(id, field, 1))
+await resource.decrement(id, field)
+
 // Consolidate
 await resource.consolidate(id, field)
 
@@ -185,6 +195,38 @@ await wallets.sub('w1', 'balance', 250);
 
 const wallet = await wallets.get('w1');
 console.log(wallet.balance); // 750
+```
+
+### Counters with Increment/Decrement
+
+```javascript
+// Perfect for login counts, page views, attempts, etc.
+await db.usePlugin(new EventualConsistencyPlugin({
+  resources: { users: ['loginCount', 'remainingAttempts'] },
+  consolidation: { mode: 'sync' }
+}));
+
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|required',
+    loginCount: 'number|default:0',
+    remainingAttempts: 'number|default:3'
+  }
+});
+
+await users.insert({ id: 'user-1', loginCount: 0, remainingAttempts: 3 });
+
+// Track logins
+await users.increment('user-1', 'loginCount');
+
+// Track failed attempts
+await users.decrement('user-1', 'remainingAttempts');
+await users.decrement('user-1', 'remainingAttempts');
+
+const user = await users.get('user-1');
+console.log(user.loginCount);          // 1
+console.log(user.remainingAttempts);   // 1
 ```
 
 ### URL Shortener (Async Mode + Analytics)

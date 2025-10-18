@@ -9,7 +9,7 @@ import { getCohortInfo, resolveFieldAndPlugin } from "./utils.js";
 
 /**
  * Add helper methods to resources
- * This adds: set(), add(), sub(), consolidate(), getConsolidatedValue(), recalculate()
+ * This adds: set(), add(), sub(), increment(), decrement(), consolidate(), getConsolidatedValue(), recalculate()
  *
  * @param {Object} resource - Resource to add methods to
  * @param {Object} plugin - Plugin instance
@@ -135,6 +135,20 @@ export function addHelperMethods(resource, plugin, config) {
     const lodash = await import('lodash-es');
     const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue - amount;
+  };
+
+  // Add method to increment value by 1 (shorthand for add(id, field, 1))
+  // Signature: increment(id, field)
+  // Supports dot notation: increment(id, 'loginCount')
+  resource.increment = async (id, field) => {
+    return await resource.add(id, field, 1);
+  };
+
+  // Add method to decrement value by 1 (shorthand for sub(id, field, 1))
+  // Signature: decrement(id, field)
+  // Supports dot notation: decrement(id, 'remainingAttempts')
+  resource.decrement = async (id, field) => {
+    return await resource.sub(id, field, 1);
   };
 
   // Add method to manually trigger consolidation

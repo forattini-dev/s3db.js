@@ -8018,6 +8018,12 @@ function addHelperMethods(resource, plugin, config) {
     const currentValue = lodash.get(record, fieldPath, 0);
     return currentValue - amount;
   };
+  resource.increment = async (id, field) => {
+    return await resource.add(id, field, 1);
+  };
+  resource.decrement = async (id, field) => {
+    return await resource.sub(id, field, 1);
+  };
   resource.consolidate = async (id, field) => {
     if (!field) {
       throw new Error(`Field parameter is required: consolidate(id, field)`);
