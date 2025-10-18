@@ -17046,11 +17046,425 @@ class SqsReplicator extends BaseReplicator {
   }
 }
 
+class WebhookReplicator extends BaseReplicator {
+  constructor(config = {}, resources = [], client = null) {
+    super(config);
+    this.url = config.url;
+    if (!this.url) {
+      throw new Error('WebhookReplicator requires a "url" configuration');
+    }
+    this.method = (config.method || "POST").toUpperCase();
+    this.headers = config.headers || {};
+    this.timeout = config.timeout || 5e3;
+    this.retries = config.retries ?? 3;
+    this.retryDelay = config.retryDelay || 1e3;
+    this.retryStrategy = config.retryStrategy || "exponential";
+    this.retryOnStatus = config.retryOnStatus || [429, 500, 502, 503, 504];
+    this.batch = config.batch || false;
+    this.batchSize = config.batchSize || 100;
+    this.auth = config.auth || null;
+    if (Array.isArray(resources)) {
+      this.resources = {};
+      for (const resource of resources) {
+        if (typeof resource === "string") {
+          this.resources[resource] = true;
+        } else if (typeof resource === "object" && resource.name) {
+          this.resources[resource.name] = resource;
+        }
+      }
+    } else if (typeof resources === "object") {
+      this.resources = resources;
+    } else {
+      this.resources = {};
+    }
+    this.stats = {
+      totalRequests: 0,
+      successfulRequests: 0,
+      failedRequests: 0,
+      retriedRequests: 0,
+      totalRetries: 0
+    };
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.url) {
+      errors.push("URL is required");
+    }
+    try {
+      new URL(this.url);
+    } catch (err) {
+      errors.push(`Invalid URL format: ${this.url}`);
+    }
+    if (this.auth) {
+      if (!this.auth.type) {
+        errors.push("auth.type is required when auth is configured");
+      } else if (!["bearer", "basic", "apikey"].includes(this.auth.type)) {
+        errors.push("auth.type must be one of: bearer, basic, apikey");
+      }
+      if (this.auth.type === "bearer" && !this.auth.token) {
+        errors.push("auth.token is required for bearer authentication");
+      }
+      if (this.auth.type === "basic" && (!this.auth.username || !this.auth.password)) {
+        errors.push("auth.username and auth.password are required for basic authentication");
+      }
+      if (this.auth.type === "apikey" && (!this.auth.header || !this.auth.value)) {
+        errors.push("auth.header and auth.value are required for API key authentication");
+      }
+    }
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  }
+  /**
+   * Build headers with authentication
+   * @returns {Object} Headers object
+   */
+  _buildHeaders() {
+    const headers = {
+      "Content-Type": "application/json",
+      "User-Agent": "s3db-webhook-replicator",
+      ...this.headers
+    };
+    if (this.auth) {
+      switch (this.auth.type) {
+        case "bearer":
+          headers["Authorization"] = `Bearer ${this.auth.token}`;
+          break;
+        case "basic":
+          const credentials = Buffer.from(`${this.auth.username}:${this.auth.password}`).toString("base64");
+          headers["Authorization"] = `Basic ${credentials}`;
+          break;
+        case "apikey":
+          headers[this.auth.header] = this.auth.value;
+          break;
+      }
+    }
+    return headers;
+  }
+  /**
+   * Apply resource transformer if configured
+   * @param {string} resource - Resource name
+   * @param {Object} data - Data to transform
+   * @returns {Object} Transformed data
+   */
+  _applyTransformer(resource, data) {
+    let cleanData = this._cleanInternalFields(data);
+    const entry = this.resources[resource];
+    let result = cleanData;
+    if (!entry) return cleanData;
+    if (typeof entry.transform === "function") {
+      result = entry.transform(cleanData);
+    } else if (typeof entry.transformer === "function") {
+      result = entry.transformer(cleanData);
+    }
+    return result || cleanData;
+  }
+  /**
+   * Remove internal fields from data
+   * @param {Object} data - Data object
+   * @returns {Object} Cleaned data
+   */
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  /**
+   * Create standardized webhook payload
+   * @param {string} resource - Resource name
+   * @param {string} operation - Operation type
+   * @param {Object} data - Record data
+   * @param {string} id - Record ID
+   * @param {Object} beforeData - Before data (for updates)
+   * @returns {Object} Webhook payload
+   */
+  createPayload(resource, operation, data, id, beforeData = null) {
+    const basePayload = {
+      resource,
+      action: operation,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      source: "s3db-webhook-replicator"
+    };
+    switch (operation) {
+      case "insert":
+        return {
+          ...basePayload,
+          data
+        };
+      case "update":
+        return {
+          ...basePayload,
+          before: beforeData,
+          data
+        };
+      case "delete":
+        return {
+          ...basePayload,
+          data
+        };
+      default:
+        return {
+          ...basePayload,
+          data
+        };
+    }
+  }
+  /**
+   * Make HTTP request with retries
+   * @param {Object} payload - Request payload
+   * @param {number} attempt - Current attempt number
+   * @returns {Promise<Object>} Response
+   */
+  async _makeRequest(payload, attempt = 0) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    try {
+      const response = await fetch(this.url, {
+        method: this.method,
+        headers: this._buildHeaders(),
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      this.stats.totalRequests++;
+      if (response.ok) {
+        this.stats.successfulRequests++;
+        return {
+          success: true,
+          status: response.status,
+          statusText: response.statusText
+        };
+      }
+      if (this.retryOnStatus.includes(response.status) && attempt < this.retries) {
+        this.stats.retriedRequests++;
+        this.stats.totalRetries++;
+        const delay = this.retryStrategy === "exponential" ? this.retryDelay * Math.pow(2, attempt) : this.retryDelay;
+        if (this.config.verbose) {
+          console.log(`[WebhookReplicator] Retrying request (attempt ${attempt + 1}/${this.retries}) after ${delay}ms - Status: ${response.status}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this._makeRequest(payload, attempt + 1);
+      }
+      this.stats.failedRequests++;
+      const errorText = await response.text().catch(() => "");
+      return {
+        success: false,
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText || `HTTP ${response.status}: ${response.statusText}`
+      };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (attempt < this.retries) {
+        this.stats.retriedRequests++;
+        this.stats.totalRetries++;
+        const delay = this.retryStrategy === "exponential" ? this.retryDelay * Math.pow(2, attempt) : this.retryDelay;
+        if (this.config.verbose) {
+          console.log(`[WebhookReplicator] Retrying request (attempt ${attempt + 1}/${this.retries}) after ${delay}ms - Error: ${error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return this._makeRequest(payload, attempt + 1);
+      }
+      this.stats.failedRequests++;
+      this.stats.totalRequests++;
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const validation = this.validateConfig();
+    if (!validation.isValid) {
+      const error = new Error(`WebhookReplicator configuration is invalid: ${validation.errors.join(", ")}`);
+      if (this.config.verbose) {
+        console.error(`[WebhookReplicator] ${error.message}`);
+      }
+      this.emit("initialization_error", {
+        replicator: this.name,
+        error: error.message,
+        errors: validation.errors
+      });
+      throw error;
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      url: this.url,
+      method: this.method,
+      authType: this.auth?.type || "none",
+      resources: Object.keys(this.resources || {})
+    });
+  }
+  async replicate(resource, operation, data, id, beforeData = null) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: "replicator_disabled" };
+    }
+    if (!this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await tryFn(async () => {
+      const transformedData = this._applyTransformer(resource, data);
+      const payload = this.createPayload(resource, operation, transformedData, id, beforeData);
+      const response = await this._makeRequest(payload);
+      if (response.success) {
+        this.emit("replicated", {
+          replicator: this.name,
+          resource,
+          operation,
+          id,
+          url: this.url,
+          status: response.status,
+          success: true
+        });
+        return { success: true, status: response.status };
+      }
+      throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+    });
+    if (ok) return result;
+    if (this.config.verbose) {
+      console.warn(`[WebhookReplicator] Replication failed for ${resource}: ${err.message}`);
+    }
+    this.emit("replicator_error", {
+      replicator: this.name,
+      resource,
+      operation,
+      id,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async replicateBatch(resource, records) {
+    if (this.enabled === false) {
+      return { skipped: true, reason: "replicator_disabled" };
+    }
+    if (!this.shouldReplicateResource(resource)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    const [ok, err, result] = await tryFn(async () => {
+      if (this.batch) {
+        const payloads = records.map(
+          (record) => this.createPayload(
+            resource,
+            record.operation,
+            this._applyTransformer(resource, record.data),
+            record.id,
+            record.beforeData
+          )
+        );
+        const response = await this._makeRequest({ batch: payloads });
+        if (response.success) {
+          this.emit("batch_replicated", {
+            replicator: this.name,
+            resource,
+            url: this.url,
+            total: records.length,
+            successful: records.length,
+            errors: 0,
+            status: response.status
+          });
+          return {
+            success: true,
+            total: records.length,
+            successful: records.length,
+            errors: 0,
+            status: response.status
+          };
+        }
+        throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+      const results = await Promise.allSettled(
+        records.map(
+          (record) => this.replicate(resource, record.operation, record.data, record.id, record.beforeData)
+        )
+      );
+      const successful = results.filter((r) => r.status === "fulfilled" && r.value.success).length;
+      const failed = results.length - successful;
+      this.emit("batch_replicated", {
+        replicator: this.name,
+        resource,
+        url: this.url,
+        total: records.length,
+        successful,
+        errors: failed
+      });
+      return {
+        success: failed === 0,
+        total: records.length,
+        successful,
+        errors: failed,
+        results
+      };
+    });
+    if (ok) return result;
+    if (this.config.verbose) {
+      console.warn(`[WebhookReplicator] Batch replication failed for ${resource}: ${err.message}`);
+    }
+    this.emit("batch_replicator_error", {
+      replicator: this.name,
+      resource,
+      error: err.message
+    });
+    return { success: false, error: err.message };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      const testPayload = {
+        test: true,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        source: "s3db-webhook-replicator"
+      };
+      const response = await this._makeRequest(testPayload);
+      if (!response.success) {
+        throw new Error(response.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+      return true;
+    });
+    if (ok) return true;
+    if (this.config.verbose) {
+      console.warn(`[WebhookReplicator] Connection test failed: ${err.message}`);
+    }
+    this.emit("connection_error", {
+      replicator: this.name,
+      error: err.message
+    });
+    return false;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      url: this.url,
+      method: this.method,
+      authType: this.auth?.type || "none",
+      timeout: this.timeout,
+      retries: this.retries,
+      retryStrategy: this.retryStrategy,
+      batchMode: this.batch,
+      resources: Object.keys(this.resources || {}),
+      stats: { ...this.stats }
+    };
+  }
+  shouldReplicateResource(resource) {
+    if (!this.resources || Object.keys(this.resources).length === 0) {
+      return true;
+    }
+    return Object.keys(this.resources).includes(resource);
+  }
+}
+
 const REPLICATOR_DRIVERS = {
   s3db: S3dbReplicator,
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
-  postgres: PostgresReplicator
+  postgres: PostgresReplicator,
+  webhook: WebhookReplicator
 };
 function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
@@ -20355,6 +20769,7 @@ exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;
 exports.VectorPlugin = VectorPlugin;
+exports.WebhookReplicator = WebhookReplicator;
 exports.behaviors = behaviors;
 exports.calculateAttributeNamesSize = calculateAttributeNamesSize;
 exports.calculateAttributeSizes = calculateAttributeSizes;
