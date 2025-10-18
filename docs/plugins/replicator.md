@@ -2,7 +2,7 @@
 
 ## ⚡ TLDR
 
-Replicação **real-time** para múltiplos destinos (S3DB, BigQuery, PostgreSQL, SQS) com transformação de dados.
+Replicação **real-time** para múltiplos destinos (S3DB, BigQuery, PostgreSQL, SQS, Webhooks) com transformação de dados.
 
 **1 linha para começar:**
 ```javascript
@@ -10,7 +10,7 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 ```
 
 **Principais features:**
-- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, SQS
+- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, SQS, Webhooks
 - ✅ Transformação de dados com funções customizadas
 - ✅ Retry automático com backoff exponencial
 - ✅ Dead letter queue para falhas
@@ -20,6 +20,7 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 - 🔄 Backup para outra instância S3DB
 - 📊 Data warehouse (BigQuery/PostgreSQL)
 - 📡 Event streaming (SQS)
+- 🌐 Integração com APIs externas (Webhooks)
 - 🌍 Multi-region sync
 
 ---
@@ -310,6 +311,247 @@ pnpm add @aws-sdk/client-sqs
       })
     }
   }
+}
+```
+
+### 📡 Webhook Replicator
+
+**HTTP webhook integration** for sending database changes to external APIs and services with comprehensive authentication support.
+
+#### Basic Configuration
+
+```javascript
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://api.example.com/webhook',
+    method: 'POST',  // Default: POST
+    timeout: 5000,    // Request timeout in ms (default: 5000)
+    retries: 3,       // Number of retry attempts (default: 3)
+  },
+  resources: ['users', 'orders']
+}
+```
+
+#### Authentication Methods
+
+##### 1. Bearer Token Authentication
+```javascript
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://api.example.com/webhook',
+    auth: {
+      type: 'bearer',
+      token: process.env.WEBHOOK_TOKEN
+    }
+  }
+}
+```
+
+##### 2. Basic Authentication
+```javascript
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://api.example.com/webhook',
+    auth: {
+      type: 'basic',
+      username: 'api_user',
+      password: process.env.API_PASSWORD
+    }
+  }
+}
+```
+
+##### 3. API Key Authentication
+```javascript
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://api.example.com/webhook',
+    auth: {
+      type: 'apikey',
+      header: 'X-API-Key',  // Custom header name
+      value: process.env.API_KEY
+    }
+  }
+}
+```
+
+#### Advanced Configuration
+
+```javascript
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://api.example.com/webhook',
+    method: 'POST',
+
+    // Custom headers
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Custom-Header': 'value',
+      'X-Environment': process.env.NODE_ENV
+    },
+
+    // Authentication
+    auth: {
+      type: 'bearer',
+      token: process.env.WEBHOOK_TOKEN
+    },
+
+    // Timeout and retry configuration
+    timeout: 10000,         // 10 seconds
+    retries: 3,             // Retry up to 3 times
+    retryDelay: 1000,       // Initial delay between retries (ms)
+    retryStrategy: 'exponential',  // 'exponential' or 'fixed'
+    retryOnStatus: [429, 500, 502, 503, 504],  // HTTP status codes to retry
+
+    // Batch mode (optional)
+    batch: true,            // Send multiple records in one request
+    batchSize: 100         // Max records per batch
+  },
+  resources: {
+    users: true,
+    orders: {
+      transform: (data) => ({
+        order_id: data.id,
+        customer: data.userId,
+        total: data.total,
+        items: data.items,
+        timestamp: new Date().toISOString(),
+        // Add custom fields
+        webhook_version: '1.0',
+        environment: process.env.NODE_ENV
+      })
+    }
+  }
+}
+```
+
+#### Webhook Payload Format
+
+The webhook receives a standardized payload:
+
+```json
+{
+  "resource": "users",
+  "action": "insert",
+  "timestamp": "2025-10-18T10:30:00.000Z",
+  "source": "s3db-webhook-replicator",
+  "data": {
+    "id": "user_123",
+    "name": "John Doe",
+    "email": "john@example.com"
+  }
+}
+```
+
+For update operations:
+```json
+{
+  "resource": "users",
+  "action": "update",
+  "timestamp": "2025-10-18T10:30:00.000Z",
+  "source": "s3db-webhook-replicator",
+  "before": {
+    "id": "user_123",
+    "name": "John Doe",
+    "email": "john@example.com"
+  },
+  "data": {
+    "id": "user_123",
+    "name": "John Doe",
+    "email": "john.doe@example.com"
+  }
+}
+```
+
+#### Batch Mode Payload
+
+When `batch: true` is enabled:
+```json
+{
+  "batch": [
+    {
+      "resource": "users",
+      "action": "insert",
+      "timestamp": "2025-10-18T10:30:00.000Z",
+      "source": "s3db-webhook-replicator",
+      "data": { "id": "user_123", "name": "John Doe" }
+    },
+    {
+      "resource": "users",
+      "action": "update",
+      "timestamp": "2025-10-18T10:30:01.000Z",
+      "source": "s3db-webhook-replicator",
+      "before": { "id": "user_124", "name": "Jane" },
+      "data": { "id": "user_124", "name": "Jane Doe" }
+    }
+  ]
+}
+```
+
+#### Retry Strategy
+
+**Exponential Backoff** (default):
+- Attempt 1: Immediate
+- Attempt 2: 1s delay
+- Attempt 3: 2s delay
+- Attempt 4: 4s delay
+
+**Fixed Delay**:
+- All retries use the same `retryDelay` value
+
+#### Use Cases
+
+**1. Third-party Integrations**
+```javascript
+// Notify external CRM when users are created/updated
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://crm.example.com/api/users/sync',
+    auth: { type: 'apikey', header: 'X-API-Key', value: process.env.CRM_API_KEY }
+  },
+  resources: ['users']
+}
+```
+
+**2. Slack/Discord Notifications**
+```javascript
+// Send notifications to Slack
+{
+  driver: 'webhook',
+  config: {
+    url: process.env.SLACK_WEBHOOK_URL,
+    headers: { 'Content-Type': 'application/json' }
+  },
+  resources: {
+    orders: {
+      transform: (data) => ({
+        text: `New order #${data.id} - Total: $${data.total}`,
+        channel: '#orders',
+        username: 's3db-bot'
+      })
+    }
+  }
+}
+```
+
+**3. Analytics/Monitoring**
+```javascript
+// Send events to analytics platform
+{
+  driver: 'webhook',
+  config: {
+    url: 'https://analytics.example.com/events',
+    auth: { type: 'bearer', token: process.env.ANALYTICS_TOKEN },
+    batch: true,
+    batchSize: 100
+  },
+  resources: ['users', 'orders', 'events']
 }
 ```
 
