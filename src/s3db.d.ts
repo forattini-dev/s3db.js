@@ -319,6 +319,20 @@ declare module 's3db.js' {
     maxResults?: number;
   }
 
+  /** Geo Plugin resource config */
+  export interface GeoResourceConfig {
+    latField: string;
+    lonField: string;
+    precision?: number;
+    addGeohash?: boolean;
+  }
+
+  /** Geo Plugin config */
+  export interface GeoPluginConfig extends PluginConfig {
+    resources?: Record<string, GeoResourceConfig>;
+    verbose?: boolean;
+  }
+
   /** Metrics Plugin config */
   export interface MetricsPluginConfig extends PluginConfig {
     trackLatency?: boolean;
@@ -1016,6 +1030,16 @@ declare module 's3db.js' {
     getIndexStats(): any;
   }
 
+  /** Geo Plugin */
+  export class GeoPlugin extends Plugin {
+    constructor(config?: GeoPluginConfig);
+    encodeGeohash(latitude: number, longitude: number, precision?: number): string;
+    decodeGeohash(geohash: string): { latitude: number; longitude: number; error: { latitude: number; longitude: number } };
+    calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number;
+    getNeighbors(geohash: string): string[];
+    getStats(): any;
+  }
+
   /** Metrics Plugin */
   export class MetricsPlugin extends Plugin {
     constructor(config?: MetricsPluginConfig);
@@ -1254,6 +1278,33 @@ declare module 's3db.js' {
   }
 
   /** Resource extensions added by EventualConsistencyPlugin */
+  export interface GeoResourceExtensions {
+    /** Find locations within radius of a point */
+    findNearby(options: {
+      lat: number;
+      lon: number;
+      radius?: number;
+      limit?: number;
+    }): Promise<Array<any & { _distance: number }>>;
+
+    /** Find locations within bounding box */
+    findInBounds(options: {
+      north: number;
+      south: number;
+      east: number;
+      west: number;
+      limit?: number;
+    }): Promise<any[]>;
+
+    /** Get distance between two records */
+    getDistance(id1: string, id2: string): Promise<{
+      distance: number;
+      unit: string;
+      from: string;
+      to: string;
+    }>;
+  }
+
   export interface EventualConsistencyResourceExtensions {
     /** Set field value (replaces current value) */
     set(id: string, field: string, value: number): Promise<number>;
