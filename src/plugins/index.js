@@ -16,3 +16,9 @@ export * from './s3-queue.plugin.js'
 export * from './scheduler.plugin.js'
 export * from './state-machine.plugin.js'
 export * from './vector.plugin.js'
+
+// plugin drivers & utilities:
+export * from './backup/index.js'
+export * from './cache/index.js'
+export * from './replicators/index.js'
+export * from './consumers/index.js'
