@@ -1,26 +1,26 @@
 {
-  "timestamp": "2025-10-19T06:17:56.510Z",
+  "timestamp": "2025-10-19T14:10:22.965Z",
   "nodeVersion": "v22.6.0",
   "benchmark": "all-types-encoding",
   "summary": {
     "String ASCII": {
-      "encodeUs": 0.04,
-      "decodeUs": 0.38,
+      "encodeUs": 0.08,
+      "decodeUs": 0.34,
       "savings": 0
     },
     "String Latin": {
-      "encodeUs": 0.18,
-      "decodeUs": 0.59,
+      "encodeUs": 0.24,
+      "decodeUs": 0.72,
       "savings": -33
     },
     "IPv4": {
-      "encodeUs": 0.94,
-      "decodeUs": 2.46,
+      "encodeUs": 1.02,
+      "decodeUs": 2.61,
       "savings": 27.3
     },
     "IPv6": {
-      "encodeUs": 1.02,
-      "decodeUs": 1.95,
+      "encodeUs": 0.79,
+      "decodeUs": 1.77,
       "savings": 0
     },
     "Money (USD)": {
@@ -30,11 +30,11 @@
     },
     "Money (BTC)": {
       "encodeUs": 0.32,
-      "decodeUs": 0.67,
+      "decodeUs": 0.68,
       "savings": 67
     },
     "Decimal:1": {
-      "encodeUs": 0.03,
+      "encodeUs": 0.04,
       "decodeUs": 0.09,
       "savings": 33
     },
@@ -49,171 +49,171 @@
       "savings": 47
     },
     "Embedding 256D": {
-      "encodeUs": 40.02,
-      "decodeUs": 119.61,
+      "encodeUs": 39.69,
+      "decodeUs": 119.3,
       "savings": 77
     },
     "Embedding 1536D": {
-      "encodeUs": 261.95,
-      "decodeUs": 953.57,
+      "encodeUs": 251.75,
+      "decodeUs": 965.45,
       "savings": 77
     }
   },
   "strings": [
     {
       "name": "String ascii Encode",
-      "avgOpsPerSec": 23177809,
-      "avgUs": "0.04"
+      "avgOpsPerSec": 12765311,
+      "avgUs": "0.08"
     },
     {
       "name": "String ascii Decode",
-      "avgOpsPerSec": 2599631,
-      "avgUs": "0.38"
+      "avgOpsPerSec": 2946082,
+      "avgUs": "0.34"
     },
     {
       "name": "String latin Encode",
-      "avgOpsPerSec": 5612969,
-      "avgUs": "0.18"
+      "avgOpsPerSec": 4216453,
+      "avgUs": "0.24"
     },
     {
       "name": "String latin Decode",
-      "avgOpsPerSec": 1704061,
-      "avgUs": "0.59"
+      "avgOpsPerSec": 1394426,
+      "avgUs": "0.72"
     },
     {
       "name": "String emoji Encode",
-      "avgOpsPerSec": 3299499,
-      "avgUs": "0.30"
+      "avgOpsPerSec": 3149014,
+      "avgUs": "0.32"
     },
     {
       "name": "String emoji Decode",
-      "avgOpsPerSec": 1161767,
-      "avgUs": "0.86"
+      "avgOpsPerSec": 1087057,
+      "avgUs": "0.92"
     },
     {
       "name": "String cjk Encode",
-      "avgOpsPerSec": 1864106,
-      "avgUs": "0.54"
+      "avgOpsPerSec": 1773001,
+      "avgUs": "0.56"
     },
     {
       "name": "String cjk Decode",
-      "avgOpsPerSec": 799702,
-      "avgUs": "1.25"
+      "avgOpsPerSec": 781079,
+      "avgUs": "1.28"
     }
   ],
   "ip": [
     {
       "name": "IPv4 Encode",
-      "avgOpsPerSec": 1058451,
-      "avgUs": "0.94"
-    },
-    {
-      "name": "IPv4 Decode",
-      "avgOpsPerSec": 406127,
-      "avgUs": "2.46"
-    },
-    {
-      "name": "IPv6 Encode",
-      "avgOpsPerSec": 983035,
+      "avgOpsPerSec": 983721,
       "avgUs": "1.02"
     },
     {
+      "name": "IPv4 Decode",
+      "avgOpsPerSec": 383575,
+      "avgUs": "2.61"
+    },
+    {
+      "name": "IPv6 Encode",
+      "avgOpsPerSec": 1261395,
+      "avgUs": "0.79"
+    },
+    {
       "name": "IPv6 Decode",
-      "avgOpsPerSec": 513097,
-      "avgUs": "1.95"
+      "avgOpsPerSec": 563690,
+      "avgUs": "1.77"
     }
   ],
   "money": [
     {
       "name": "Money USD Encode",
-      "avgOpsPerSec": 10145277,
+      "avgOpsPerSec": 9930505,
       "avgUs": "0.10"
     },
     {
       "name": "Money USD Decode",
-      "avgOpsPerSec": 4341006,
+      "avgOpsPerSec": 4349602,
       "avgUs": "0.23"
     },
     {
       "name": "Money BTC Encode",
-      "avgOpsPerSec": 3136789,
+      "avgOpsPerSec": 3113708,
       "avgUs": "0.32"
     },
     {
       "name": "Money BTC Decode",
-      "avgOpsPerSec": 1487191,
-      "avgUs": "0.67"
+      "avgOpsPerSec": 1478654,
+      "avgUs": "0.68"
     }
   ],
   "decimal": [
     {
       "name": "Decimal:1 Encode",
-      "avgOpsPerSec": 29070376,
-      "avgUs": "0.03"
+      "avgOpsPerSec": 24939666,
+      "avgUs": "0.04"
     },
     {
       "name": "Decimal:1 Decode",
-      "avgOpsPerSec": 11479888,
+      "avgOpsPerSec": 10893835,
       "avgUs": "0.09"
     },
     {
       "name": "Decimal:4 Encode",
-      "avgOpsPerSec": 14968964,
+      "avgOpsPerSec": 14741730,
       "avgUs": "0.07"
     },
     {
       "name": "Decimal:4 Decode",
-      "avgOpsPerSec": 6411771,
+      "avgOpsPerSec": 6373851,
       "avgUs": "0.16"
     }
   ],
   "geo": [
     {
       "name": "Geo Lat Encode",
-      "avgOpsPerSec": 7711003,
+      "avgOpsPerSec": 7642528,
       "avgUs": "0.13"
     },
     {
       "name": "Geo Lat Decode",
-      "avgOpsPerSec": 3550140,
+      "avgOpsPerSec": 3515703,
       "avgUs": "0.28"
     },
     {
       "name": "Geo Lon Encode",
-      "avgOpsPerSec": 7608981,
+      "avgOpsPerSec": 7584424,
       "avgUs": "0.13"
     },
     {
       "name": "Geo Lon Decode",
-      "avgOpsPerSec": 3414157,
+      "avgOpsPerSec": 3465251,
       "avgUs": "0.29"
     }
   ],
   "embedding": [
     {
       "name": "Embedding 256D Encode",
-      "avgOpsPerSec": 24988,
-      "avgUs": "40.02"
+      "avgOpsPerSec": 25194,
+      "avgUs": "39.69"
     },
     {
       "name": "Embedding 256D Decode",
-      "avgOpsPerSec": 8360,
-      "avgUs": "119.61"
+      "avgOpsPerSec": 8382,
+      "avgUs": "119.30"
     },
     {
       "name": "Embedding 1536D Encode",
-      "avgOpsPerSec": 3817,
-      "avgUs": "261.95"
+      "avgOpsPerSec": 3972,
+      "avgUs": "251.75"
     },
     {
       "name": "Embedding 1536D Decode",
-      "avgOpsPerSec": 1049,
-      "avgUs": "953.57"
+      "avgOpsPerSec": 1036,
+      "avgUs": "965.45"
     }
   ],
   "ecommerce": {
-    "originalBytes": 2002,
-    "encodedBytes": 642,
-    "savingsPercent": 67.9
+    "originalBytes": 2011,
+    "encodedBytes": 656,
+    "savingsPercent": 67.4
   }
 }

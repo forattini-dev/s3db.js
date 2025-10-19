@@ -1042,12 +1042,27 @@ var id = /*#__PURE__*/Object.freeze({
   passwordGenerator: passwordGenerator
 });
 
+const analysisCache = /* @__PURE__ */ new Map();
+const MAX_CACHE_SIZE = 500;
+function isAsciiOnly(str) {
+  return /^[\x20-\x7E]*$/.test(str);
+}
 function analyzeString(str) {
   if (!str || typeof str !== "string") {
     return { type: "none", safe: true };
   }
-  let hasLatin1 = false;
-  let hasMultibyte = false;
+  if (analysisCache.has(str)) {
+    return analysisCache.get(str);
+  }
+  if (isAsciiOnly(str)) {
+    const result2 = {
+      type: "ascii",
+      safe: true,
+      stats: { ascii: str.length, latin1: 0, multibyte: 0 }
+    };
+    cacheAnalysisResult(str, result2);
+    return result2;
+  }
   let asciiCount = 0;
   let latin1Count = 0;
   let multibyteCount = 0;
@@ -1056,56 +1071,96 @@ function analyzeString(str) {
     if (code >= 32 && code <= 126) {
       asciiCount++;
     } else if (code < 32 || code === 127) {
-      hasMultibyte = true;
       multibyteCount++;
     } else if (code >= 128 && code <= 255) {
-      hasLatin1 = true;
       latin1Count++;
     } else {
-      hasMultibyte = true;
       multibyteCount++;
     }
   }
+  const hasMultibyte = multibyteCount > 0;
+  const hasLatin1 = latin1Count > 0;
+  let result;
   if (!hasLatin1 && !hasMultibyte) {
-    return {
+    result = {
       type: "ascii",
       safe: true,
       stats: { ascii: asciiCount, latin1: 0, multibyte: 0 }
     };
-  }
-  if (hasMultibyte) {
+  } else if (hasMultibyte) {
     const multibyteRatio = multibyteCount / str.length;
     if (multibyteRatio > 0.3) {
-      return {
+      result = {
         type: "base64",
         safe: false,
         reason: "high multibyte content",
         stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
       };
+    } else {
+      result = {
+        type: "url",
+        safe: false,
+        reason: "contains multibyte characters",
+        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
+      };
     }
-    return {
-      type: "url",
-      safe: false,
-      reason: "contains multibyte characters",
-      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: multibyteCount }
-    };
+  } else {
+    const latin1Ratio = latin1Count / str.length;
+    if (latin1Ratio > 0.5) {
+      result = {
+        type: "base64",
+        safe: false,
+        reason: "high Latin-1 content",
+        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+      };
+    } else {
+      result = {
+        type: "url",
+        safe: false,
+        reason: "contains Latin-1 extended characters",
+        stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
+      };
+    }
   }
-  const latin1Ratio = latin1Count / str.length;
-  if (latin1Ratio > 0.5) {
-    return {
-      type: "base64",
-      safe: false,
-      reason: "high Latin-1 content",
-      stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
-    };
-  }
-  return {
-    type: "url",
-    safe: false,
-    reason: "contains Latin-1 extended characters",
-    stats: { ascii: asciiCount, latin1: latin1Count, multibyte: 0 }
-  };
+  cacheAnalysisResult(str, result);
+  return result;
 }
+function cacheAnalysisResult(str, result) {
+  if (analysisCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = analysisCache.keys().next().value;
+    analysisCache.delete(firstKey);
+  }
+  analysisCache.set(str, result);
+}
+const COMMON_VALUES = {
+  // Status values
+  "active": { encoded: "active", encoding: "none" },
+  "inactive": { encoded: "inactive", encoding: "none" },
+  "pending": { encoded: "pending", encoding: "none" },
+  "completed": { encoded: "completed", encoding: "none" },
+  "failed": { encoded: "failed", encoding: "none" },
+  "success": { encoded: "success", encoding: "none" },
+  "error": { encoded: "error", encoding: "none" },
+  "processing": { encoded: "processing", encoding: "none" },
+  "queued": { encoded: "queued", encoding: "none" },
+  "cancelled": { encoded: "cancelled", encoding: "none" },
+  // HTTP methods
+  "GET": { encoded: "GET", encoding: "none" },
+  "POST": { encoded: "POST", encoding: "none" },
+  "PUT": { encoded: "PUT", encoding: "none" },
+  "DELETE": { encoded: "DELETE", encoding: "none" },
+  "PATCH": { encoded: "PATCH", encoding: "none" },
+  // Boolean strings
+  "true": { encoded: "true", encoding: "none" },
+  "false": { encoded: "false", encoding: "none" },
+  "yes": { encoded: "yes", encoding: "none" },
+  "no": { encoded: "no", encoding: "none" },
+  // Common null-like values
+  "null": { encoded: "null", encoding: "special" },
+  "undefined": { encoded: "undefined", encoding: "special" },
+  "none": { encoded: "none", encoding: "none" },
+  "N/A": { encoded: "N/A", encoding: "none" }
+};
 function metadataEncode(value) {
   if (value === null) {
     return { encoded: "null", encoding: "special" };
@@ -1114,6 +1169,9 @@ function metadataEncode(value) {
     return { encoded: "undefined", encoding: "special" };
   }
   const stringValue = String(value);
+  if (COMMON_VALUES[stringValue]) {
+    return COMMON_VALUES[stringValue];
+  }
   const analysis = analyzeString(stringValue);
   switch (analysis.type) {
     case "none":
@@ -1153,30 +1211,39 @@ function metadataDecode(value) {
   if (value === null || value === void 0 || typeof value !== "string") {
     return value;
   }
-  if (value.startsWith("u:")) {
-    if (value.length === 2) return value;
-    try {
-      return decodeURIComponent(value.substring(2));
-    } catch (err) {
-      return value;
-    }
-  }
-  if (value.startsWith("b:")) {
-    if (value.length === 2) return value;
-    try {
-      const decoded = Buffer.from(value.substring(2), "base64").toString("utf8");
-      return decoded;
-    } catch (err) {
-      return value;
-    }
-  }
-  if (value.length > 0 && /^[A-Za-z0-9+/]+=*$/.test(value)) {
-    try {
-      const decoded = Buffer.from(value, "base64").toString("utf8");
-      if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
-        return decoded;
+  if (value.length >= 2) {
+    const firstChar = value.charCodeAt(0);
+    const secondChar = value.charCodeAt(1);
+    if (secondChar === 58) {
+      if (firstChar === 117) {
+        if (value.length === 2) return value;
+        try {
+          return decodeURIComponent(value.substring(2));
+        } catch (err) {
+          return value;
+        }
       }
-    } catch {
+      if (firstChar === 98) {
+        if (value.length === 2) return value;
+        try {
+          const decoded = Buffer.from(value.substring(2), "base64").toString("utf8");
+          return decoded;
+        } catch (err) {
+          return value;
+        }
+      }
+    }
+  }
+  const len = value.length;
+  if (len > 0 && len % 4 === 0) {
+    if (/^[A-Za-z0-9+/]+=*$/.test(value)) {
+      try {
+        const decoded = Buffer.from(value, "base64").toString("utf8");
+        if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
+          return decoded;
+        }
+      } catch {
+      }
     }
   }
   return value;
