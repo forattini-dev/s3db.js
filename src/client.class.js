@@ -145,21 +145,19 @@ export class Client extends EventEmitter {
     if (contentLength !== undefined) options.ContentLength = contentLength
     if (ifMatch !== undefined) options.IfMatch = ifMatch
 
-    let response, error;
-    try {
-      response = await this.sendCommand(new PutObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
+    this.emit('putObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+
+    if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
         key,
         commandName: 'PutObjectCommand',
         commandInput: options,
       });
-    } finally {
-      this.emit('putObject', error || response, { key, metadata, contentType, body, contentEncoding, contentLength });
     }
+
+    return response;
   }
 
   async getObject(key) {
@@ -168,32 +166,34 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
- 
-    let response, error;
-    try {
-      response = await this.sendCommand(new GetObjectCommand(options));
-      
+
+    const [ok, err, response] = await tryFn(async () => {
+      const res = await this.sendCommand(new GetObjectCommand(options));
+
       // Smart decode metadata values
-      if (response.Metadata) {
+      if (res.Metadata) {
         const decodedMetadata = {};
-        for (const [key, value] of Object.entries(response.Metadata)) {
+        for (const [key, value] of Object.entries(res.Metadata)) {
           decodedMetadata[key] = metadataDecode(value);
         }
-        response.Metadata = decodedMetadata;
+        res.Metadata = decodedMetadata;
       }
-      
-      return response;
-    } catch (err) {
-      error = err;
+
+      return res;
+    });
+
+    this.emit('getObject', err || response, { key });
+
+    if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
         key,
         commandName: 'GetObjectCommand',
         commandInput: options,
       });
-    } finally {
-      this.emit('getObject', error || response, { key });
     }
+
+    return response;
   }
 
   async headObject(key) {
@@ -202,21 +202,20 @@ export class Client extends EventEmitter {
       Bucket: this.config.bucket,
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
-    let response, error;
-    try {
-      response = await this.sendCommand(new HeadObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
+
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new HeadObjectCommand(options)));
+    this.emit('headObject', err || response, { key });
+
+    if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
         key,
         commandName: 'HeadObjectCommand',
         commandInput: options,
       });
-    } finally {
-      this.emit('headObject', error || response, { key });
     }
+
+    return response;
   }
 
   async copyObject({ from, to }) {
@@ -226,21 +225,19 @@ export class Client extends EventEmitter {
       CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from),
     };
 
-    let response, error;
-    try {
-      response = await this.sendCommand(new CopyObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
+    this.emit('copyObject', err || response, { from, to });
+
+    if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
         key: to,
         commandName: 'CopyObjectCommand',
         commandInput: options,
       });
-    } finally {
-      this.emit('copyObject', error || response, { from, to });
     }
+
+    return response;
   }
 
   async exists(key) {
@@ -258,21 +255,19 @@ export class Client extends EventEmitter {
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
-    let response, error;
-    try {
-      response = await this.sendCommand(new DeleteObjectCommand(options));
-      return response;
-    } catch (err) {
-      error = err;
+    const [ok, err, response] = await tryFn(() => this.sendCommand(new DeleteObjectCommand(options)));
+    this.emit('deleteObject', err || response, { key });
+
+    if (!ok) {
       throw mapAwsError(err, {
         bucket: this.config.bucket,
         key,
         commandName: 'DeleteObjectCommand',
         commandInput: options,
       });
-    } finally {
-      this.emit('deleteObject', error || response, { key });
     }
+
+    return response;
   }
 
   async deleteObjects(keys) {
