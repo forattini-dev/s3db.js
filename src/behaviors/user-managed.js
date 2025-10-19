@@ -1,6 +1,7 @@
 import { calculateTotalSize } from '../concerns/calculator.js';
 import { calculateEffectiveLimit } from '../concerns/calculator.js';
 import { S3_METADATA_LIMIT_BYTES } from './enforce-limits.js';
+import tryFn from '../concerns/try-fn.js';
 
 /**
  * User Managed Behavior Configuration Documentation
@@ -149,15 +150,21 @@ export async function handleUpsert({ resource, id, data, mappedData, originalDat
 export async function handleGet({ resource, metadata, body }) {
   // If body contains data, parse it and merge with metadata
   if (body && body.trim() !== '') {
-    try {
+    const [ok, error, result] = tryFn(() => {
       const bodyData = JSON.parse(body);
       // Merge body data with metadata, with metadata taking precedence
-      const mergedData = {
-        ...bodyData,
-        ...metadata
+      return {
+        metadata: {
+          ...bodyData,
+          ...metadata
+        },
+        body
       };
-      return { metadata: mergedData, body };
-    } catch (error) {
+    });
+
+    if (ok) {
+      return result;
+    } else {
       // If parsing fails, return original metadata and body
       return { metadata, body };
     }
