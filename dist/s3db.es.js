@@ -11657,6 +11657,9 @@ function encodeIPv6(ip) {
   if (!isValidIPv6(ip)) {
     throw new Error(`Invalid IPv6 address: ${ip}`);
   }
+  if (ip.length <= 24) {
+    return ip;
+  }
   const expanded = expandIPv6(ip);
   const groups = expanded.split(":");
   const bytes = [];
@@ -11671,6 +11674,9 @@ function encodeIPv6(ip) {
 function decodeIPv6(encoded, compress = true) {
   if (typeof encoded !== "string") {
     throw new Error("Encoded IPv6 must be a string");
+  }
+  if (encoded.length !== 24) {
+    return encoded;
   }
   const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
