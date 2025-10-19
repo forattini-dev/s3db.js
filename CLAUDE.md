@@ -60,6 +60,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Boolean | `boolean` | `active: 'boolean'` | true/false |
 | Secret | `secret` | `password: 'secret\|required'` | Auto-encrypted (AES-256-GCM) |
 | Embedding | `embedding:N` | `vector: 'embedding:1536'` | Vector embeddings, 77% compression |
+| IPv4 Address | `ip4` | `ipAddress: 'ip4'` | IPv4 addresses, 47% compression |
+| IPv6 Address | `ip6` | `ipAddress: 'ip6'` | IPv6 addresses, 44% compression |
 | Array | `array` | `tags: 'array\|items:string'` | Arrays of any type |
 | Object | `object` | `profile: { type: 'object', props: {...} }` | Nested objects |
 | JSON | `json` | `metadata: 'json'` | Free-form JSON |
@@ -74,6 +76,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `mapAwsError()` | `src/errors.js:190` | `const mapped = mapAwsError(err, { bucket, key })` | AWS error translator |
 | `idGenerator()` | `src/concerns/id.js` | `const id = idGenerator()` | Generate nanoid (22 chars) |
 | Base62 encode/decode | `src/concerns/base62.js` | `const encoded = encode(12345)` | Number compression |
+| `encodeIPv4()` / `decodeIPv4()` | `src/concerns/ip.js` | `const encoded = encodeIPv4('192.168.1.1')` | IPv4 binary encoding (47% savings) |
+| `encodeIPv6()` / `decodeIPv6()` | `src/concerns/ip.js` | `const encoded = encodeIPv6('2001:db8::1')` | IPv6 binary encoding (44% savings) |
+| `isValidIPv4()` / `isValidIPv6()` | `src/concerns/ip.js` | `const valid = isValidIPv4('192.168.1.1')` | IP address validation |
 
 ### Streams
 
@@ -342,13 +347,16 @@ if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== 'user' && !thi
 - Forward-compatible for future plugin ecosystem features
 
 ### Advanced Metadata Encoding
-**Implementation**: `src/concerns/advanced-metadata-encoding.js`
+**Implementation**: Schema hooks system (`src/schema.class.js`, `src/concerns/`)
 **Optimizations**:
 - ISO timestamps → Unix Base62 (67% savings)
 - UUIDs → Binary Base64 (33% savings)
 - Dictionary encoding for common values (95% savings)
 - Hex strings → Base64 (33% savings)
 - Large numbers → Base62 (40-46% savings)
+- IPv4 addresses → Binary Base64 (47% savings) - `src/concerns/ip.js`
+- IPv6 addresses → Binary Base64 (44% savings) - `src/concerns/ip.js`
+- Vector embeddings → Fixed-point Base62 (77% savings) - `src/concerns/base62.js`
 - UTF-8 byte calculation memory cache (2-3x faster)
 
 **Dictionary**: 34 common values mapped to single bytes
@@ -574,6 +582,46 @@ attributes: {
   token: 'secretAny',                   // Any type, encrypted
   pin: 'secretNumber'                   // Number type, encrypted
 }
+```
+
+**IP Address Types** - Compact binary encoding for IPv4 and IPv6:
+```javascript
+// IPv4 addresses (11-15 chars → 8 chars Base64, ~47% savings)
+attributes: {
+  ipv4: 'ip4',                          // Basic IPv4
+  requiredIP: 'ip4|required',           // Required IPv4
+  clientIP: { type: 'ip4', required: true }  // Object notation
+}
+
+// IPv6 addresses (up to 39 chars → 24 chars Base64, ~44% savings)
+attributes: {
+  ipv6: 'ip6',                          // Basic IPv6
+  serverIP: 'ip6|optional',             // Optional IPv6
+  gatewayIP: { type: 'ip6' }            // Object notation
+}
+
+// Mixed IP types
+attributes: {
+  clientIPv4: 'ip4',
+  clientIPv6: 'ip6',
+  timestamp: 'number',
+  userAgent: 'string'
+}
+
+// Automatic encoding/decoding
+const data = { ipv4: '192.168.1.1', ipv6: '2001:db8::1' };
+await resource.insert(data);
+// Stored as: { ipv4: 'wKgBAQ==', ipv6: 'IAENuAAAAAAAAAAAAAAAAQ==' }
+
+const record = await resource.get(id);
+// Retrieved as: { ipv4: '192.168.1.1', ipv6: '2001:db8::1' }
+
+// Encoding details:
+// - IPv4: 4 bytes → Base64 (8 characters with padding)
+// - IPv6: 16 bytes → Base64 (24 characters with padding)
+// - Invalid IPs are preserved as-is (no encoding)
+// - Null/undefined values are preserved
+// - IPv6 addresses are automatically compressed on decode
 ```
 
 ### Error Recovery Pattern

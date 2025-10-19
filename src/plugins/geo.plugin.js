@@ -150,22 +150,32 @@ class GeoPlugin extends Plugin {
     resource._geoConfig = config;
 
     // Add geohash fields to resource schema if not already present
-    const currentAttributes = { ...resource.attributes };
-    let attributesModified = false;
+    let needsUpdate = false;
 
-    if (config.addGeohash && !currentAttributes.geohash) {
-      currentAttributes.geohash = { type: 'string' };
-      attributesModified = true;
+    if (config.addGeohash && !resource.attributes.geohash) {
+      resource.attributes.geohash = 'string';
+      needsUpdate = true;
     }
 
-    if (!currentAttributes._geohash) {
-      currentAttributes._geohash = { type: 'string' };
-      attributesModified = true;
+    if (!resource.attributes._geohash) {
+      resource.attributes._geohash = 'string';
+      needsUpdate = true;
     }
 
-    // Update attributes if we added new fields
-    if (attributesModified) {
-      resource.updateAttributes(currentAttributes);
+    // Add zoom-specific fields if using zoomLevels
+    if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+      for (const zoom of config.zoomLevels) {
+        const fieldName = `_geohash_zoom${zoom}`;
+        if (!resource.attributes[fieldName]) {
+          resource.attributes[fieldName] = 'string';
+          needsUpdate = true;
+        }
+      }
+    }
+
+    // Persist schema changes to metadata if we added new fields
+    if (needsUpdate && this.database.uploadMetadataFile) {
+      await this.database.uploadMetadataFile();
     }
 
     // Setup geohash partitions if enabled
@@ -205,11 +215,6 @@ class GeoPlugin extends Plugin {
         const fieldName = `_geohash_zoom${zoom}`;
 
         if (!updatedConfig.partitions[partitionName]) {
-          // Add zoom-specific geohash field to attributes if not present (optional field)
-          if (!resource.attributes[fieldName]) {
-            resource.attributes[fieldName] = { type: 'string', required: false };
-          }
-
           updatedConfig.partitions[partitionName] = {
             fields: {
               [fieldName]: 'string'
@@ -232,10 +237,6 @@ class GeoPlugin extends Plugin {
                                   resource.config.partitions.byGeohash;
 
       if (!hasGeohashPartition) {
-        if (!resource.attributes._geohash) {
-          resource.attributes._geohash = { type: 'string', required: false };
-        }
-
         updatedConfig.partitions.byGeohash = {
           fields: {
             _geohash: 'string'
@@ -277,15 +278,15 @@ class GeoPlugin extends Plugin {
           data.geohash = geohash;
         }
 
-        // If zoomLevels configured, calculate geohash for each zoom
+        // Always set _geohash for partition support
+        data._geohash = geohash;
+
+        // If zoomLevels configured, calculate geohash for each zoom level
         if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
           for (const zoom of config.zoomLevels) {
             const zoomGeohash = this.encodeGeohash(lat, lon, zoom);
             data[`_geohash_zoom${zoom}`] = zoomGeohash;
           }
-        } else {
-          // Legacy: single geohash (always set _geohash for partition support)
-          data._geohash = geohash;
         }
       }
 
@@ -306,8 +307,11 @@ class GeoPlugin extends Plugin {
      * Find nearby locations within radius
      * Automatically selects optimal zoom level if multi-zoom enabled
      */
-    resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
-      if (lat === undefined || lon === undefined) {
+    resource.findNearby = async function({ lat, lon, lng, radius = 10, limit = 100 }) {
+      // Support both 'lon' and 'lng' for backward compatibility
+      const longitude = lon !== undefined ? lon : lng;
+
+      if (lat === undefined || longitude === undefined) {
         throw new Error('lat and lon are required for findNearby');
       }
 
@@ -340,7 +344,7 @@ class GeoPlugin extends Plugin {
         // Check if partition exists
         if (this.config.partitions?.[partitionName]) {
           // Calculate center geohash at selected precision
-          const centerGeohash = plugin.encodeGeohash(lat, lon, precision);
+          const centerGeohash = plugin.encodeGeohash(lat, longitude, precision);
 
           // Get neighboring geohashes to cover the search area
           const neighbors = plugin.getNeighbors(centerGeohash);
@@ -389,7 +393,7 @@ class GeoPlugin extends Plugin {
             return null;
           }
 
-          const distance = plugin.calculateDistance(lat, lon, recordLat, recordLon);
+          const distance = plugin.calculateDistance(lat, longitude, recordLat, recordLon);
 
           return {
             ...record,

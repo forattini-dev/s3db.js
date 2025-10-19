@@ -23,6 +23,8 @@ docs/benchmarks/
 ├── base62.md                          # Results and analysis
 ├── smart-encoding.bench.js            # Smart encoding benchmark
 ├── smart-encoding.md                  # Results and analysis
+├── ip-encoding.bench.js               # IP address binary encoding benchmark
+├── ip-encoding.md                     # Results and analysis
 ├── partitions-matrix.js               # Partitions performance benchmark
 ├── partitions.md                      # Results and analysis
 ├── vector-clustering.bench.js         # Vector clustering with open-source embeddings
@@ -57,6 +59,9 @@ node docs/benchmarks/base62.bench.js
 # Smart Metadata Encoding
 node docs/benchmarks/smart-encoding.bench.js
 
+# IP Address Encoding
+node docs/benchmarks/ip-encoding.bench.js
+
 # Partitions Performance
 node docs/benchmarks/partitions-matrix.js
 
@@ -74,6 +79,7 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
 | **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ✅ Active |
+| **IP Address Encoding** | `ip-encoding.bench.js` | IPv4/IPv6 binary encoding compression & performance | ✅ Active |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
 | **Vector Clustering** | `vector-clustering.bench.js` | K-means clustering with open-source embeddings (100/1K/10K vectors) | ✅ Active |
 

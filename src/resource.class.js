@@ -2786,11 +2786,12 @@ export class Resource extends AsyncEventEmitter {
     const [ok, err, unmapped] = await tryFn(() => this.schema.unmapper(metadata));
     unmappedMetadata = ok ? unmapped : metadata;
     // Helper function to filter out internal S3DB fields
+    // Preserve geo-related fields (_geohash, _geohash_zoom*) for GeoPlugin
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== 'object') return obj;
       const filtered = {};
       for (const [key, value] of Object.entries(obj)) {
-        if (!key.startsWith('_')) {
+        if (!key.startsWith('_') || key === '_geohash' || key.startsWith('_geohash_zoom')) {
           filtered[key] = value;
         }
       }

@@ -15175,7 +15175,7 @@ ${errorDetails}`,
       if (!obj || typeof obj !== "object") return obj;
       const filtered2 = {};
       for (const [key, value] of Object.entries(obj)) {
-        if (!key.startsWith("_")) {
+        if (!key.startsWith("_") || key === "_geohash" || key.startsWith("_geohash_zoom")) {
           filtered2[key] = value;
         }
       }
