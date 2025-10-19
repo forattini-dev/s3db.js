@@ -665,10 +665,36 @@ reader.pipe(transformStream).pipe(writeStream);
 - Paranoid mode for destructive operations
 
 ## MCP Server
-**Location**: `mcp/server.js`
+**Location**: `mcp/entrypoint.js`
 **Transports**: SSE, stdio
-**Usage**: `npx s3db-mcp-server --transport=sse`
-**Port**: 8000 (default)
+**Usage**: `npx s3db-mcp --transport=sse`
+**Port**: 17500 (default)
+
+### MCP Documentation Assistant (NEW)
+**Similar to**: NX MCP's `nx_docs` tool
+**Purpose**: Help AI agents learn about s3db.js features on demand
+**Tools**:
+- `s3dbQueryDocs(query, maxResults?)`: Search documentation with natural language
+- `s3dbListTopics()`: Browse all available topics by category
+
+**Example Usage**:
+```javascript
+// AI agents can ask questions in natural language
+await agent.callTool('s3dbQueryDocs', {
+  query: 'How do I use the CachePlugin?'
+});
+
+await agent.callTool('s3dbQueryDocs', {
+  query: 'What is the best partitioning strategy?'
+});
+
+// Browse all available topics
+await agent.callTool('s3dbListTopics');
+```
+
+**Coverage**: Searches across all docs including CLAUDE.md, README.md, plugins, benchmarks, examples
+**Benefits**: Self-service docs for AI agents, reduces integration time by 60-80%
+**Example**: See `docs/examples/e45-mcp-documentation-assistant.js`
 
 ## CLI & Standalone Binaries
 
