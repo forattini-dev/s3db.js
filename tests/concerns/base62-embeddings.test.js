@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { encodeDecimal, decodeDecimal } from '../../src/concerns/base62.js';
+import { encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from '../../src/concerns/base62.js';
 
 /**
  * Tests and analysis for embedding value encoding
@@ -229,6 +229,144 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
 
         console.log(`${dim.toString().padStart(9)} | ${currentBytes.toString().padStart(15)} | ${fixedBytes.toString().padStart(19)} | ${savings.toString().padStart(15)} | ${savingsPercent.padStart(10)}%`);
       });
+    });
+  });
+
+  describe('Batch Encoding (NEW - 17% additional compression)', () => {
+    test('should encode/decode arrays with batch format', () => {
+      const values = [0.123456, -0.456789, 0.789012, 0, -0.999999];
+      const encoded = encodeFixedPointBatch(values, 6);
+      const decoded = decodeFixedPointBatch(encoded, 6);
+
+      console.log(`\n=== Batch Encoding Test ===`);
+      console.log(`Original: [${values.join(', ')}]`);
+      console.log(`Encoded: ${encoded}`);
+      console.log(`Decoded: [${decoded.join(', ')}]`);
+
+      expect(encoded).toMatch(/^\^\[.*\]$/); // Format: ^[...]
+      expect(decoded.length).toBe(values.length);
+
+      values.forEach((orig, i) => {
+        expect(decoded[i]).toBeCloseTo(orig, 5);
+      });
+    });
+
+    test('should handle empty arrays', () => {
+      const encoded = encodeFixedPointBatch([], 6);
+      const decoded = decodeFixedPointBatch(encoded, 6);
+
+      expect(encoded).toBe('^[]');
+      expect(decoded).toEqual([]);
+    });
+
+    test('should compare batch vs individual encoding size', () => {
+      const embedding = Array.from({ length: 1536 }, () =>
+        (Math.random() * 2 - 1) * 0.9
+      );
+
+      // Individual encoding (old way)
+      const individualEncoded = embedding.map(v => encodeFixedPoint(v, 6));
+      const individualSize = individualEncoded.join(',').length;
+
+      // Batch encoding (new way)
+      const batchEncoded = encodeFixedPointBatch(embedding, 6);
+      const batchSize = batchEncoded.length;
+
+      const savings = individualSize - batchSize;
+      const savingsPercent = ((savings / individualSize) * 100).toFixed(1);
+
+      console.log(`\n=== Batch vs Individual (1536-dim) ===`);
+      console.log(`Individual encoding: ${individualSize} bytes`);
+      console.log(`Batch encoding:      ${batchSize} bytes`);
+      console.log(`Savings:             ${savings} bytes (${savingsPercent}%)`);
+
+      expect(batchSize).toBeLessThan(individualSize);
+      expect(parseFloat(savingsPercent)).toBeGreaterThan(15); // At least 15% savings
+    });
+
+    test('should verify batch encoding round-trip accuracy', () => {
+      const values = Array.from({ length: 100 }, () =>
+        (Math.random() * 2 - 1)
+      );
+
+      const encoded = encodeFixedPointBatch(values, 6);
+      const decoded = decodeFixedPointBatch(encoded, 6);
+
+      expect(decoded.length).toBe(values.length);
+
+      values.forEach((orig, i) => {
+        expect(decoded[i]).toBeCloseTo(orig, 5);
+      });
+    });
+
+    test('should measure compression across different dimensions', () => {
+      const dimensions = [256, 512, 768, 1024, 1536, 2048, 3072];
+
+      console.log(`\n=== Batch Encoding Savings by Dimension ===`);
+      console.log('Dimension | Individual (bytes) | Batch (bytes) | Savings (bytes) | Savings (%)');
+      console.log('----------|-------------------|---------------|-----------------|------------');
+
+      dimensions.forEach(dim => {
+        const embedding = Array.from({ length: dim }, () =>
+          (Math.random() * 2 - 1) * 0.9
+        );
+
+        const individualSize = embedding.map(v => encodeFixedPoint(v, 6)).join(',').length;
+        const batchSize = encodeFixedPointBatch(embedding, 6).length;
+        const savings = individualSize - batchSize;
+        const savingsPercent = ((savings / individualSize) * 100).toFixed(1);
+
+        console.log(`${dim.toString().padStart(9)} | ${individualSize.toString().padStart(17)} | ${batchSize.toString().padStart(13)} | ${savings.toString().padStart(15)} | ${savingsPercent.padStart(10)}%`);
+
+        expect(batchSize).toBeLessThan(individualSize);
+      });
+    });
+
+    test('should handle edge cases', () => {
+      // All zeros
+      const zeros = Array(100).fill(0);
+      const zerosEncoded = encodeFixedPointBatch(zeros, 6);
+      const zerosDecoded = decodeFixedPointBatch(zerosEncoded, 6);
+      expect(zerosDecoded.every(v => v === 0)).toBe(true);
+
+      // All ones
+      const ones = Array(100).fill(1);
+      const onesEncoded = encodeFixedPointBatch(ones, 6);
+      const onesDecoded = decodeFixedPointBatch(onesEncoded, 6);
+      expect(onesDecoded.every(v => Math.abs(v - 1) < 0.000001)).toBe(true);
+
+      // Mixed positive and negative
+      const mixed = [-1, -0.5, 0, 0.5, 1];
+      const mixedEncoded = encodeFixedPointBatch(mixed, 6);
+      const mixedDecoded = decodeFixedPointBatch(mixedEncoded, 6);
+      mixed.forEach((orig, i) => {
+        expect(mixedDecoded[i]).toBeCloseTo(orig, 5);
+      });
+    });
+
+    test('should handle invalid inputs gracefully', () => {
+      expect(encodeFixedPointBatch(null, 6)).toBe('');
+      expect(encodeFixedPointBatch(undefined, 6)).toBe('');
+      expect(encodeFixedPointBatch('not an array', 6)).toBe('');
+
+      expect(decodeFixedPointBatch('', 6)).toEqual([]);
+      expect(decodeFixedPointBatch('invalid', 6)).toEqual([]);
+      expect(decodeFixedPointBatch(null, 6)).toEqual([]);
+    });
+
+    test('should verify format structure', () => {
+      const values = [0.1, 0.2, 0.3];
+      const encoded = encodeFixedPointBatch(values, 6);
+
+      // Should start with ^[
+      expect(encoded.startsWith('^[')).toBe(true);
+      // Should end with ]
+      expect(encoded.endsWith(']')).toBe(true);
+      // Should contain commas
+      expect(encoded.includes(',')).toBe(true);
+      // Should not contain individual ^ prefixes inside
+      const inner = encoded.slice(2, -1); // Remove ^[ and ]
+      expect(inner.includes('^')).toBe(false);
     });
   });
 });
