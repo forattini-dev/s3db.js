@@ -17,7 +17,7 @@ Measure and document the performance of critical s3db.js components to:
 ```
 docs/benchmarks/
 ├── README.md                           # This file
-├── all-types-encoding.bench.js        # Complete type encoding benchmark (IP, Money, Decimal, Geo, Embeddings)
+├── all-types-encoding.bench.js        # Complete type encoding benchmark (Strings, IP, Money, Decimal, Geo, Embeddings)
 ├── all-types-encoding.md              # Results and analysis
 ├── eventual-consistency.bench.js      # EventualConsistency plugin benchmark
 ├── eventual-consistency.md            # Results and analysis
@@ -52,7 +52,8 @@ pnpm run benchmarks
 ### Run Specific Benchmark
 
 ```bash
-# Complete Type Encoding (IP, Money, Decimal, Geo, Embeddings)
+# Complete Type Encoding (Strings, IP, Money, Decimal, Geo, Embeddings)
+# NOTE: This benchmark consolidates smart-encoding and ip-encoding benchmarks
 node docs/benchmarks/all-types-encoding.bench.js
 
 # EventualConsistency Plugin
@@ -81,11 +82,11 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 
 | Benchmark | File | Description | Status |
 |-----------|------|-------------|--------|
-| **Complete Type Encoding** | `all-types-encoding.bench.js` | ALL optimized types: IP, Money, Decimal, Geo, Embeddings (27-77% compression) | ✅ Active |
+| **Complete Type Encoding** | `all-types-encoding.bench.js` | ALL optimized types: Strings, IP, Money, Decimal, Geo, Embeddings (0-77% compression) | ✅ Active |
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
-| **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ✅ Active |
-| **IP Address Encoding** | `ip-encoding.bench.js` | IPv4/IPv6 binary encoding compression & performance | ✅ Active |
+| **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ⚠️ Deprecated - Now part of `all-types-encoding` |
+| **IP Address Encoding** | `ip-encoding.bench.js` | IPv4/IPv6 binary encoding compression & performance | ⚠️ Deprecated - Now part of `all-types-encoding` |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
 | **Vector Clustering** | `vector-clustering.bench.js` | K-means clustering with open-source embeddings (100/1K/10K vectors) | ✅ Active |
 
