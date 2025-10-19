@@ -11580,15 +11580,17 @@ function decodeIPv4(encoded) {
   if (typeof encoded !== "string") {
     throw new Error("Encoded IPv4 must be a string");
   }
-  try {
+  const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 4) {
       throw new Error(`Invalid encoded IPv4 length: ${buffer.length} (expected 4)`);
     }
     return Array.from(buffer).join(".");
-  } catch (err) {
+  });
+  if (!ok) {
     throw new Error(`Failed to decode IPv4: ${err.message}`);
   }
+  return result;
 }
 function expandIPv6(ip) {
   if (!isValidIPv6(ip)) {
@@ -11670,7 +11672,7 @@ function decodeIPv6(encoded, compress = true) {
   if (typeof encoded !== "string") {
     throw new Error("Encoded IPv6 must be a string");
   }
-  try {
+  const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
     if (buffer.length !== 16) {
       throw new Error(`Invalid encoded IPv6 length: ${buffer.length} (expected 16)`);
@@ -11682,9 +11684,11 @@ function decodeIPv6(encoded, compress = true) {
     }
     const fullAddress = groups.join(":");
     return compress ? compressIPv6(fullAddress) : fullAddress;
-  } catch (err) {
+  });
+  if (!ok) {
     throw new Error(`Failed to decode IPv6: ${err.message}`);
   }
+  return result;
 }
 
 function generateBase62Mapping(keys) {
