@@ -327,6 +327,18 @@ export function metadataEncode(value) {
 
   const stringValue = String(value);
 
+  // AMBIGUITY PREVENTION: If string looks like it's already encoded (starts with known prefixes),
+  // force-encode it to prevent double-decode issues
+  // Example: encoding "d:@h" should not be kept as-is, otherwise decoding it would
+  // interpret it as a dictionary-encoded value instead of the literal string "d:@h"
+  if (stringValue.startsWith('d:') || stringValue.startsWith('u:') || stringValue.startsWith('b:')) {
+    return {
+      encoded: 'b:' + Buffer.from(stringValue, 'utf8').toString('base64'),
+      encoding: 'base64',
+      reason: 'force-encoded to prevent decoding ambiguity'
+    };
+  }
+
   // COMPRESSION OPTIMIZATION: Dictionary encoding (HIGHEST PRIORITY for compression!)
   // Checks for long common values (content-types, URLs, status messages)
   // Example: application/json (16B) → d:j (3B) = -81% savings!

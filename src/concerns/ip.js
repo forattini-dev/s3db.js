@@ -188,28 +188,19 @@ export function compressIPv6(ip) {
 /**
  * Encode IPv6 address to Base64 binary representation
  *
- * SMART ENCODING: Only encodes if it saves space!
- * - Compressed IPv6 (::1, fe80::1) = 3-20 chars → kept as-is (encoding would expand to 24 chars)
- * - Full notation IPv6 (39+ chars) → encoded to 24 chars (~40% savings)
+ * Always encodes to ensure consistent format in storage.
+ * IPv6 addresses are normalized to 16 bytes and Base64-encoded to 24 characters.
  *
  * @param {string} ip - IPv6 address (e.g., "2001:db8::1")
- * @returns {string} Base64-encoded binary (24 chars) OR original IP if encoding doesn't help
+ * @returns {string} Base64-encoded binary (24 chars)
  */
 export function encodeIPv6(ip) {
   if (!isValidIPv6(ip)) {
     throw new Error(`Invalid IPv6 address: ${ip}`);
   }
 
-  // SMART DECISION: Only encode if it saves space
-  // Binary encoding always produces 24 chars (16 bytes → Base64)
-  // Only worth encoding if original > 24 chars
-  if (ip.length <= 24) {
-    // Compressed form - encoding would EXPAND the data (bad!)
-    // Return original to save space
-    return ip;
-  }
-
-  // Full notation - encoding will COMPRESS the data (good!)
+  // Always encode for consistency (like IPv4)
+  // Expand to full notation first
   const expanded = expandIPv6(ip);
   const groups = expanded.split(':');
 
@@ -228,11 +219,11 @@ export function encodeIPv6(ip) {
 /**
  * Decode Base64 binary to IPv6 address
  *
- * SMART DECODING: Detects if input is encoded or original
- * - If exactly 24 chars & valid Base64 → decode binary
- * - Otherwise → return as-is (was kept unencoded to save space)
+ * Handles both encoded and unencoded IPv6 addresses for backwards compatibility.
+ * - If input is a valid unencoded IPv6 address → return it (optionally expanded)
+ * - Otherwise → decode from Base64 binary (24 chars)
  *
- * @param {string} encoded - Base64-encoded binary OR original IPv6 (if compressed)
+ * @param {string} encoded - Base64-encoded binary (24 chars) or unencoded IPv6
  * @param {boolean} compress - Whether to compress the output (default: true)
  * @returns {string} IPv6 address
  */
@@ -241,14 +232,15 @@ export function decodeIPv6(encoded, compress = true) {
     throw new Error('Encoded IPv6 must be a string');
   }
 
-  // SMART DETECTION: Check if this is actually encoded
-  // Encoded IPv6 is always exactly 24 chars (Base64 of 16 bytes)
-  if (encoded.length !== 24) {
+  // SMART DETECTION: Check if this is unencoded IPv6
+  // If it's not 24 chars AND it's a valid IPv6, treat as unencoded
+  if (encoded.length !== 24 && isValidIPv6(encoded)) {
     // Not encoded - was kept as original compressed form
-    return encoded;
+    // Respect the compress parameter
+    return compress ? encoded : expandIPv6(encoded);
   }
 
-  // Try to decode - if it fails, it's probably an unencoded IPv6
+  // Try to decode as Base64 - works for both 24-char encoded AND invalid inputs
   const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, 'base64');
 

@@ -1510,6 +1510,13 @@ function metadataEncode(value) {
     return { encoded: "undefined", encoding: "special" };
   }
   const stringValue = String(value);
+  if (stringValue.startsWith("d:") || stringValue.startsWith("u:") || stringValue.startsWith("b:")) {
+    return {
+      encoded: "b:" + Buffer.from(stringValue, "utf8").toString("base64"),
+      encoding: "base64",
+      reason: "force-encoded to prevent decoding ambiguity"
+    };
+  }
   const dictResult = dictionaryEncode(stringValue);
   if (dictResult && dictResult.savings > 0) {
     return {
@@ -12087,9 +12094,6 @@ function encodeIPv6(ip) {
   if (!isValidIPv6(ip)) {
     throw new Error(`Invalid IPv6 address: ${ip}`);
   }
-  if (ip.length <= 24) {
-    return ip;
-  }
   const expanded = expandIPv6(ip);
   const groups = expanded.split(":");
   const bytes = [];
@@ -12105,8 +12109,8 @@ function decodeIPv6(encoded, compress = true) {
   if (typeof encoded !== "string") {
     throw new Error("Encoded IPv6 must be a string");
   }
-  if (encoded.length !== 24) {
-    return encoded;
+  if (encoded.length !== 24 && isValidIPv6(encoded)) {
+    return compress ? encoded : expandIPv6(encoded);
   }
   const [ok, err, result] = tryFn(() => {
     const buffer = Buffer.from(encoded, "base64");
