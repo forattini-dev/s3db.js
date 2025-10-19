@@ -246,13 +246,12 @@ const COMMON_VALUES = {
   'guest': { encoded: 'guest', encoding: 'none' },
   'member': { encoded: 'member', encoding: 'none' },
 
-  // Log levels (7 entries)
+  // Log levels (6 entries)
   'trace': { encoded: 'trace', encoding: 'none' },
   'debug': { encoded: 'debug', encoding: 'none' },
   'info': { encoded: 'info', encoding: 'none' },
   'warn': { encoded: 'warn', encoding: 'none' },
   'fatal': { encoded: 'fatal', encoding: 'none' },
-  'critical': { encoded: 'critical', encoding: 'none' },
   'emergency': { encoded: 'emergency', encoding: 'none' },
 
   // Environments (7 entries)
