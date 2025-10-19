@@ -392,7 +392,8 @@ export class Resource extends AsyncEventEmitter {
     this.attributes = newAttributes;
 
     // Apply configuration to ensure timestamps and hooks are set up
-    this.applyConfiguration({ map: this.schema?.map });
+    // Don't pass old map - let it regenerate with new attributes
+    this.applyConfiguration();
 
     return { oldAttributes, newAttributes };
   }
@@ -2884,16 +2885,18 @@ export class Resource extends AsyncEventEmitter {
     }
     if (waited >= maxWait) {
     }
-    try {
-      const result = await this.insert({ ...attributes, id });
-      return result;
-    } catch (err) {
+
+    const [ok, err, result] = await tryFn(() => this.insert({ ...attributes, id }));
+
+    if (!ok) {
       if (err && err.message && err.message.includes('already exists')) {
-        const result = await this.update(id, attributes);
-        return result;
+        const updateResult = await this.update(id, attributes);
+        return updateResult;
       }
       throw err;
     }
+
+    return result;
   }
 
   // --- MIDDLEWARE SYSTEM ---
