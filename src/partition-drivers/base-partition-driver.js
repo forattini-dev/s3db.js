@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { PartitionDriverError } from '../errors.js';
+import tryFn from '../concerns/try-fn.js';
 
 /**
  * Base class for all partition drivers
@@ -45,22 +46,22 @@ export class BasePartitionDriver extends EventEmitter {
   async processOperation(operation) {
     const { type, resource, data } = operation;
     
-    try {
-      this.stats.processing++;
-      
+    this.stats.processing++;
+
+    const [ok, error] = await tryFn(async () => {
       switch (type) {
         case 'create':
           await resource.createPartitionReferences(data.object);
           break;
-          
+
         case 'update':
           await resource.handlePartitionReferenceUpdates(data.original, data.updated);
           break;
-          
+
         case 'delete':
           await resource.deletePartitionReferences(data.object);
           break;
-          
+
         default:
           throw new PartitionDriverError(`Unknown partition operation type: ${type}`, {
             driver: this.name || 'BasePartitionDriver',
@@ -69,16 +70,18 @@ export class BasePartitionDriver extends EventEmitter {
             suggestion: 'Use one of the supported partition operations: create, update, or delete'
           });
       }
-      
+
       this.stats.processed++;
       this.emit('processed', operation);
-      
-    } catch (error) {
+    });
+
+    // Always execute (finally equivalent)
+    this.stats.processing--;
+
+    if (!ok) {
       this.stats.failed++;
       this.emit('error', { operation, error });
       throw error;
-    } finally {
-      this.stats.processing--;
     }
   }
 
