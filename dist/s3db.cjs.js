@@ -1295,13 +1295,15 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      try {
+      const [ok2, parseErr, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch (parseErr) {
+        return parsedMetadata;
+      });
+      if (!ok2) {
         throw new PluginStorageError(`Failed to parse JSON body`, {
           pluginSlug: this.pluginSlug,
           key,
@@ -1310,6 +1312,7 @@ class PluginStorage {
           suggestion: "Body content may be corrupted. Check S3 object integrity"
         });
       }
+      data = result;
     }
     const expiresAt = data._expiresat || data._expiresAt;
     if (expiresAt) {
@@ -1331,10 +1334,10 @@ class PluginStorage {
     for (const [key, value] of Object.entries(metadata)) {
       if (typeof value === "string") {
         if (value.startsWith("{") && value.endsWith("}") || value.startsWith("[") && value.endsWith("]")) {
-          try {
-            parsed[key] = JSON.parse(value);
+          const [ok, err, result] = tryFn(() => JSON.parse(value));
+          if (ok) {
+            parsed[key] = result;
             continue;
-          } catch {
           }
         }
         if (!isNaN(value) && value.trim() !== "") {
@@ -1445,15 +1448,18 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      try {
+      const [ok2, err2, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
+        return parsedMetadata;
+      });
+      if (!ok2) {
         return true;
       }
+      data = result;
     }
     const expiresAt = data._expiresat || data._expiresAt;
     if (!expiresAt) {
@@ -1476,15 +1482,18 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      try {
+      const [ok2, err2, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
+        return parsedMetadata;
+      });
+      if (!ok2) {
         return null;
       }
+      data = result;
     }
     const expiresAt = data._expiresat || data._expiresAt;
     if (!expiresAt) {
@@ -1509,15 +1518,18 @@ class PluginStorage {
     const parsedMetadata = this._parseMetadataValues(metadata);
     let data = parsedMetadata;
     if (response.Body) {
-      try {
+      const [ok2, err2, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
+        return parsedMetadata;
+      });
+      if (!ok2) {
         return false;
       }
+      data = result;
     }
     const expiresAt = data._expiresat || data._expiresAt;
     if (!expiresAt) {

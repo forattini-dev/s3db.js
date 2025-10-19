@@ -174,16 +174,19 @@ export class PluginStorage {
 
     // If has body, merge with metadata
     if (response.Body) {
-      try {
+      const [ok, parseErr, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
 
         // Only parse if body has content
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
           // Body takes precedence over metadata for same keys
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch (parseErr) {
+        return parsedMetadata;
+      });
+
+      if (!ok) {
         throw new PluginStorageError(`Failed to parse JSON body`, {
           pluginSlug: this.pluginSlug,
           key,
@@ -192,6 +195,8 @@ export class PluginStorage {
           suggestion: 'Body content may be corrupted. Check S3 object integrity'
         });
       }
+
+      data = result;
     }
 
     // Check TTL expiration (S3 lowercases metadata keys)
@@ -224,12 +229,12 @@ export class PluginStorage {
           (value.startsWith('{') && value.endsWith('}')) ||
           (value.startsWith('[') && value.endsWith(']'))
         ) {
-          try {
-            parsed[key] = JSON.parse(value);
+          const [ok, err, result] = tryFn(() => JSON.parse(value));
+          if (ok) {
+            parsed[key] = result;
             continue;
-          } catch {
-            // Not JSON, keep as string
           }
+          // Not JSON, keep as string
         }
 
         // Try to parse as number
@@ -373,15 +378,20 @@ export class PluginStorage {
     let data = parsedMetadata;
 
     if (response.Body) {
-      try {
+      const [ok, err, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
-        return true;
+        return parsedMetadata;
+      });
+
+      if (!ok) {
+        return true; // Parse error = expired
       }
+
+      data = result;
     }
 
     // S3 lowercases metadata keys
@@ -412,15 +422,20 @@ export class PluginStorage {
     let data = parsedMetadata;
 
     if (response.Body) {
-      try {
+      const [ok, err, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
-        return null;
+        return parsedMetadata;
+      });
+
+      if (!ok) {
+        return null; // Parse error
       }
+
+      data = result;
     }
 
     // S3 lowercases metadata keys
@@ -453,15 +468,20 @@ export class PluginStorage {
     let data = parsedMetadata;
 
     if (response.Body) {
-      try {
+      const [ok, err, result] = await tryFn(async () => {
         const bodyContent = await response.Body.transformToString();
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
-          data = { ...parsedMetadata, ...body };
+          return { ...parsedMetadata, ...body };
         }
-      } catch {
-        return false;
+        return parsedMetadata;
+      });
+
+      if (!ok) {
+        return false; // Parse error
       }
+
+      data = result;
     }
 
     // S3 lowercases metadata keys
