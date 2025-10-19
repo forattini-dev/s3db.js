@@ -1042,6 +1042,209 @@ var id = /*#__PURE__*/Object.freeze({
   passwordGenerator: passwordGenerator
 });
 
+const CONTENT_TYPE_DICT = {
+  // JSON/XML (most common, highest savings)
+  "application/json": "j",
+  // 16B → 1B = -93.75%
+  "application/xml": "X",
+  // 15B → 1B = -93.3% (changed from 'x' to avoid conflict)
+  "application/ld+json": "J",
+  // 20B → 1B = -95%
+  // Text types
+  "text/html": "H",
+  // 9B → 1B = -88.9% (changed from 'h' to avoid conflict)
+  "text/plain": "T",
+  // 10B → 1B = -90% (changed from 'p' to avoid conflict)
+  "text/css": "C",
+  // 8B → 1B = -87.5% (changed from 'c' to avoid conflict)
+  "text/javascript": "V",
+  // 15B → 1B = -93.3% (changed from 's' to avoid conflict)
+  "text/csv": "v",
+  // 8B → 1B = -87.5%
+  // Images
+  "image/png": "P",
+  // 9B → 1B = -88.9%
+  "image/jpeg": "I",
+  // 10B → 1B = -90%
+  "image/gif": "G",
+  // 9B → 1B = -88.9%
+  "image/svg+xml": "S",
+  // 13B → 1B = -92.3%
+  "image/webp": "W",
+  // 10B → 1B = -90%
+  // Application types
+  "application/pdf": "Q",
+  // 15B → 1B = -93.3% (changed from 'd' to avoid conflict)
+  "application/zip": "z",
+  // 15B → 1B = -93.3%
+  "application/octet-stream": "o",
+  // 24B → 1B = -95.8%
+  "application/x-www-form-urlencoded": "u",
+  // 33B → 1B = -97%
+  "multipart/form-data": "F",
+  // 19B → 1B = -94.7% (changed from 'f' to avoid conflict)
+  // Font types
+  "font/woff": "w",
+  // 9B → 1B = -88.9%
+  "font/woff2": "f"
+  // 10B → 1B = -90% (changed from 'F')
+};
+const URL_PREFIX_DICT = {
+  // API endpoints (very common)
+  "/api/v1/": "@1",
+  // 8B → 2B = -75%
+  "/api/v2/": "@2",
+  // 8B → 2B = -75%
+  "/api/v3/": "@3",
+  // 8B → 2B = -75%
+  "/api/": "@a",
+  // 5B → 2B = -60%
+  // HTTPS prefixes
+  "https://api.example.com/": "@A",
+  // 24B → 2B = -91.7%
+  "https://api.": "@H",
+  // 11B → 2B = -81.8%
+  "https://www.": "@W",
+  // 12B → 2B = -83.3%
+  "https://": "@h",
+  // 8B → 2B = -75%
+  "http://": "@t",
+  // 7B → 2B = -71.4%
+  // AWS/S3 (common in s3db.js context)
+  "https://s3.amazonaws.com/": "@s",
+  // 26B → 2B = -92.3%
+  "https://s3-": "@S",
+  // 10B → 2B = -80%
+  // Localhost (development)
+  "http://localhost:": "@L",
+  // 17B → 2B = -88.2%
+  "http://localhost": "@l",
+  // 16B → 2B = -87.5%
+  // Common paths
+  "/v1/": "@v",
+  // 4B → 2B = -50%
+  "/users/": "@u",
+  // 7B → 2B = -71.4%
+  "/products/": "@p"
+  // 10B → 2B = -80%
+};
+const STATUS_MESSAGE_DICT = {
+  // Processing states (very common, good savings)
+  "processing": "p",
+  // 10B → 1B = -90%
+  "completed": "c",
+  // 9B → 1B = -88.9%
+  "succeeded": "s",
+  // 9B → 1B = -88.9%
+  "failed": "f",
+  // 6B → 1B = -83.3%
+  "cancelled": "x",
+  // 9B → 1B = -88.9%
+  "timeout": "t",
+  // 7B → 1B = -85.7%
+  "retrying": "r",
+  // 8B → 1B = -87.5%
+  // Payment states
+  "authorized": "a",
+  // 10B → 1B = -90%
+  "captured": "K",
+  // 8B → 1B = -87.5% (changed from C to avoid conflict)
+  "refunded": "R",
+  // 8B → 1B = -87.5%
+  "declined": "d",
+  // 8B → 1B = -87.5%
+  // Order/delivery states
+  "shipped": "h",
+  // 7B → 1B = -85.7% (changed from S to avoid conflict)
+  "delivered": "D",
+  // 9B → 1B = -88.9%
+  "returned": "e",
+  // 8B → 1B = -87.5% (changed from T to avoid conflict)
+  "in_transit": "i",
+  // 10B → 1B = -90%
+  // Generic states
+  "initialized": "n",
+  // 11B → 1B = -90.9% (changed from I to avoid conflict)
+  "terminated": "m"
+  // 10B → 1B = -90% (changed from X to avoid conflict)
+};
+const CONTENT_TYPE_REVERSE = Object.fromEntries(
+  Object.entries(CONTENT_TYPE_DICT).map(([k, v]) => [v, k])
+);
+const URL_PREFIX_REVERSE = Object.fromEntries(
+  Object.entries(URL_PREFIX_DICT).map(([k, v]) => [v, k])
+);
+const STATUS_MESSAGE_REVERSE = Object.fromEntries(
+  Object.entries(STATUS_MESSAGE_DICT).map(([k, v]) => [v, k])
+);
+const COMBINED_DICT = {
+  ...CONTENT_TYPE_DICT,
+  ...STATUS_MESSAGE_DICT
+  // URL prefixes handled separately (prefix matching)
+};
+const COMBINED_REVERSE = {
+  ...CONTENT_TYPE_REVERSE,
+  ...STATUS_MESSAGE_REVERSE
+  // URL prefixes handled separately
+};
+function dictionaryEncode(value) {
+  if (typeof value !== "string" || !value) {
+    return null;
+  }
+  if (COMBINED_DICT[value]) {
+    return {
+      encoded: "d:" + COMBINED_DICT[value],
+      encoding: "dictionary",
+      originalLength: value.length,
+      encodedLength: 2 + COMBINED_DICT[value].length,
+      dictionaryType: "exact",
+      savings: value.length - (2 + COMBINED_DICT[value].length)
+    };
+  }
+  const sortedPrefixes = Object.entries(URL_PREFIX_DICT).sort(([a], [b]) => b.length - a.length);
+  for (const [prefix, code] of sortedPrefixes) {
+    if (value.startsWith(prefix)) {
+      const remainder = value.substring(prefix.length);
+      const encoded = "d:" + code + remainder;
+      return {
+        encoded,
+        encoding: "dictionary",
+        originalLength: value.length,
+        encodedLength: encoded.length,
+        dictionaryType: "prefix",
+        prefix,
+        remainder,
+        savings: value.length - encoded.length
+      };
+    }
+  }
+  return null;
+}
+function dictionaryDecode(encoded) {
+  if (typeof encoded !== "string" || !encoded.startsWith("d:")) {
+    return null;
+  }
+  const payload = encoded.substring(2);
+  if (payload.length === 0) {
+    return null;
+  }
+  if (payload.length === 1) {
+    const decoded = COMBINED_REVERSE[payload];
+    if (decoded) {
+      return decoded;
+    }
+  }
+  if (payload.startsWith("@")) {
+    const prefixCode = payload.substring(0, 2);
+    const remainder = payload.substring(2);
+    const prefix = URL_PREFIX_REVERSE[prefixCode];
+    if (prefix) {
+      return prefix + remainder;
+    }
+  }
+  return null;
+}
+
 const analysisCache = /* @__PURE__ */ new Map();
 const MAX_CACHE_SIZE = 500;
 function isAsciiOnly(str) {
@@ -1133,7 +1336,7 @@ function cacheAnalysisResult(str, result) {
   analysisCache.set(str, result);
 }
 const COMMON_VALUES = {
-  // Status values
+  // Status values (10 entries)
   "active": { encoded: "active", encoding: "none" },
   "inactive": { encoded: "inactive", encoding: "none" },
   "pending": { encoded: "pending", encoding: "none" },
@@ -1144,18 +1347,117 @@ const COMMON_VALUES = {
   "processing": { encoded: "processing", encoding: "none" },
   "queued": { encoded: "queued", encoding: "none" },
   "cancelled": { encoded: "cancelled", encoding: "none" },
-  // HTTP methods
+  // HTTP methods (7 entries)
   "GET": { encoded: "GET", encoding: "none" },
   "POST": { encoded: "POST", encoding: "none" },
   "PUT": { encoded: "PUT", encoding: "none" },
   "DELETE": { encoded: "DELETE", encoding: "none" },
   "PATCH": { encoded: "PATCH", encoding: "none" },
-  // Boolean strings
+  "HEAD": { encoded: "HEAD", encoding: "none" },
+  "OPTIONS": { encoded: "OPTIONS", encoding: "none" },
+  // HTTP status codes (20 entries - most common)
+  "200": { encoded: "200", encoding: "none" },
+  "201": { encoded: "201", encoding: "none" },
+  "204": { encoded: "204", encoding: "none" },
+  "301": { encoded: "301", encoding: "none" },
+  "302": { encoded: "302", encoding: "none" },
+  "304": { encoded: "304", encoding: "none" },
+  "400": { encoded: "400", encoding: "none" },
+  "401": { encoded: "401", encoding: "none" },
+  "403": { encoded: "403", encoding: "none" },
+  "404": { encoded: "404", encoding: "none" },
+  "405": { encoded: "405", encoding: "none" },
+  "409": { encoded: "409", encoding: "none" },
+  "422": { encoded: "422", encoding: "none" },
+  "429": { encoded: "429", encoding: "none" },
+  "500": { encoded: "500", encoding: "none" },
+  "502": { encoded: "502", encoding: "none" },
+  "503": { encoded: "503", encoding: "none" },
+  "504": { encoded: "504", encoding: "none" },
+  "OK": { encoded: "OK", encoding: "none" },
+  "Created": { encoded: "Created", encoding: "none" },
+  // Payment/transaction status (12 entries)
+  "paid": { encoded: "paid", encoding: "none" },
+  "unpaid": { encoded: "unpaid", encoding: "none" },
+  "refunded": { encoded: "refunded", encoding: "none" },
+  "pending_payment": { encoded: "pending_payment", encoding: "none" },
+  "authorized": { encoded: "authorized", encoding: "none" },
+  "captured": { encoded: "captured", encoding: "none" },
+  "declined": { encoded: "declined", encoding: "none" },
+  "voided": { encoded: "voided", encoding: "none" },
+  "chargeback": { encoded: "chargeback", encoding: "none" },
+  "disputed": { encoded: "disputed", encoding: "none" },
+  "settled": { encoded: "settled", encoding: "none" },
+  "reversed": { encoded: "reversed", encoding: "none" },
+  // Order/delivery status (10 entries)
+  "shipped": { encoded: "shipped", encoding: "none" },
+  "delivered": { encoded: "delivered", encoding: "none" },
+  "returned": { encoded: "returned", encoding: "none" },
+  "in_transit": { encoded: "in_transit", encoding: "none" },
+  "out_for_delivery": { encoded: "out_for_delivery", encoding: "none" },
+  "ready_to_ship": { encoded: "ready_to_ship", encoding: "none" },
+  "backordered": { encoded: "backordered", encoding: "none" },
+  "pre_order": { encoded: "pre_order", encoding: "none" },
+  "on_hold": { encoded: "on_hold", encoding: "none" },
+  "awaiting_pickup": { encoded: "awaiting_pickup", encoding: "none" },
+  // User roles (8 entries)
+  "admin": { encoded: "admin", encoding: "none" },
+  "moderator": { encoded: "moderator", encoding: "none" },
+  "owner": { encoded: "owner", encoding: "none" },
+  "editor": { encoded: "editor", encoding: "none" },
+  "viewer": { encoded: "viewer", encoding: "none" },
+  "contributor": { encoded: "contributor", encoding: "none" },
+  "guest": { encoded: "guest", encoding: "none" },
+  "member": { encoded: "member", encoding: "none" },
+  // Log levels (7 entries)
+  "trace": { encoded: "trace", encoding: "none" },
+  "debug": { encoded: "debug", encoding: "none" },
+  "info": { encoded: "info", encoding: "none" },
+  "warn": { encoded: "warn", encoding: "none" },
+  "fatal": { encoded: "fatal", encoding: "none" },
+  "critical": { encoded: "critical", encoding: "none" },
+  "emergency": { encoded: "emergency", encoding: "none" },
+  // Environments (7 entries)
+  "dev": { encoded: "dev", encoding: "none" },
+  "development": { encoded: "development", encoding: "none" },
+  "staging": { encoded: "staging", encoding: "none" },
+  "production": { encoded: "production", encoding: "none" },
+  "test": { encoded: "test", encoding: "none" },
+  "qa": { encoded: "qa", encoding: "none" },
+  "uat": { encoded: "uat", encoding: "none" },
+  // CRUD operations (7 entries)
+  "create": { encoded: "create", encoding: "none" },
+  "read": { encoded: "read", encoding: "none" },
+  "update": { encoded: "update", encoding: "none" },
+  "delete": { encoded: "delete", encoding: "none" },
+  "list": { encoded: "list", encoding: "none" },
+  "search": { encoded: "search", encoding: "none" },
+  "count": { encoded: "count", encoding: "none" },
+  // States (8 entries)
+  "enabled": { encoded: "enabled", encoding: "none" },
+  "disabled": { encoded: "disabled", encoding: "none" },
+  "archived": { encoded: "archived", encoding: "none" },
+  "draft": { encoded: "draft", encoding: "none" },
+  "published": { encoded: "published", encoding: "none" },
+  "scheduled": { encoded: "scheduled", encoding: "none" },
+  "expired": { encoded: "expired", encoding: "none" },
+  "locked": { encoded: "locked", encoding: "none" },
+  // Priorities (5 entries)
+  "low": { encoded: "low", encoding: "none" },
+  "medium": { encoded: "medium", encoding: "none" },
+  "high": { encoded: "high", encoding: "none" },
+  "urgent": { encoded: "urgent", encoding: "none" },
+  "critical": { encoded: "critical", encoding: "none" },
+  // Boolean variants (8 entries)
   "true": { encoded: "true", encoding: "none" },
   "false": { encoded: "false", encoding: "none" },
   "yes": { encoded: "yes", encoding: "none" },
   "no": { encoded: "no", encoding: "none" },
-  // Common null-like values
+  "on": { encoded: "on", encoding: "none" },
+  "off": { encoded: "off", encoding: "none" },
+  "1": { encoded: "1", encoding: "none" },
+  "0": { encoded: "0", encoding: "none" },
+  // Common null-like values (4 entries)
   "null": { encoded: "null", encoding: "special" },
   "undefined": { encoded: "undefined", encoding: "special" },
   "none": { encoded: "none", encoding: "none" },
@@ -1169,6 +1471,16 @@ function metadataEncode(value) {
     return { encoded: "undefined", encoding: "special" };
   }
   const stringValue = String(value);
+  const dictResult = dictionaryEncode(stringValue);
+  if (dictResult && dictResult.savings > 0) {
+    return {
+      encoded: dictResult.encoded,
+      encoding: "dictionary",
+      dictionaryType: dictResult.dictionaryType,
+      savings: dictResult.savings,
+      compressionRatio: (dictResult.encodedLength / dictResult.originalLength).toFixed(3)
+    };
+  }
   if (COMMON_VALUES[stringValue]) {
     return COMMON_VALUES[stringValue];
   }
@@ -1210,6 +1522,12 @@ function metadataDecode(value) {
   }
   if (value === null || value === void 0 || typeof value !== "string") {
     return value;
+  }
+  if (value.startsWith("d:")) {
+    const decoded = dictionaryDecode(value);
+    if (decoded !== null) {
+      return decoded;
+    }
   }
   if (value.length >= 2) {
     const firstChar = value.charCodeAt(0);
