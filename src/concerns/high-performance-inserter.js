@@ -79,8 +79,8 @@ export class HighPerformanceInserter {
     // Take current buffer and reset
     const batch = this.insertBuffer.splice(0, this.batchSize);
     const startTime = Date.now();
-    
-    try {
+
+    const [ok, err] = await tryFn(async () => {
       // Process inserts in parallel with connection pooling
       const { results, errors } = await PromisePool
         .for(batch)
@@ -88,25 +88,25 @@ export class HighPerformanceInserter {
         .process(async (item) => {
           return await this.performInsert(item);
         });
-      
+
       // Update stats
       const duration = Date.now() - startTime;
       this.stats.inserted += results.filter(r => r.success).length;
       this.stats.failed += errors.length;
       this.stats.avgInsertTime = duration / batch.length;
-      
+
       // Process partition queue separately (non-blocking)
       if (!this.disablePartitions && this.partitionQueue.length > 0) {
         this.processPartitionsAsync();
       }
-      
-    } finally {
-      this.isProcessing = false;
-      
-      // Continue processing if more items
-      if (this.insertBuffer.length > 0) {
-        setImmediate(() => this.flush());
-      }
+    });
+
+    // Always execute (finally equivalent)
+    this.isProcessing = false;
+
+    // Continue processing if more items
+    if (this.insertBuffer.length > 0) {
+      setImmediate(() => this.flush());
     }
   }
 
@@ -115,43 +115,46 @@ export class HighPerformanceInserter {
    */
   async performInsert(item) {
     const { data } = item;
-    
-    try {
+
+    const [ok, error, result] = await tryFn(async () => {
       // Temporarily disable partitions for the insert
       const originalAsyncPartitions = this.resource.config.asyncPartitions;
       const originalPartitions = this.resource.config.partitions;
-      
+
       if (this.disablePartitions) {
         // Completely bypass partitions during insert
         this.resource.config.partitions = {};
       }
-      
+
       // Perform insert
-      const [ok, err, result] = await tryFn(() => this.resource.insert(data));
-      
-      if (!ok) {
-        return { success: false, error: err };
+      const [insertOk, insertErr, insertResult] = await tryFn(() => this.resource.insert(data));
+
+      if (!insertOk) {
+        throw insertErr; // Re-throw to be caught by outer tryFn
       }
-      
+
       // Queue partition creation for later (if not disabled)
       if (!this.disablePartitions && originalPartitions && Object.keys(originalPartitions).length > 0) {
         this.partitionQueue.push({
           operation: 'create',
-          data: result,
+          data: insertResult,
           partitions: originalPartitions
         });
         this.stats.partitionsPending++;
       }
-      
+
       // Restore original config
       this.resource.config.partitions = originalPartitions;
       this.resource.config.asyncPartitions = originalAsyncPartitions;
-      
-      return { success: true, data: result };
-      
-    } catch (error) {
+
+      return { success: true, data: insertResult };
+    });
+
+    if (!ok) {
       return { success: false, error };
     }
+
+    return result;
   }
 
   /**
@@ -173,10 +176,11 @@ export class HighPerformanceInserter {
         .for(batch)
         .withConcurrency(10) // Lower concurrency for partitions
         .process(async (item) => {
-          try {
-            await this.resource.createPartitionReferences(item.data);
+          const [ok, err] = await tryFn(() => this.resource.createPartitionReferences(item.data));
+
+          if (ok) {
             this.stats.partitionsPending--;
-          } catch (err) {
+          } else {
             // Silently handle partition errors
             this.resource.emit('partitionIndexError', {
               operation: 'bulk-insert',
