@@ -15267,16 +15267,15 @@ ${errorDetails}`,
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    try {
-      const result = await this.insert({ ...attributes, id });
-      return result;
-    } catch (err) {
+    const [ok, err, result] = await tryFn(() => this.insert({ ...attributes, id }));
+    if (!ok) {
       if (err && err.message && err.message.includes("already exists")) {
-        const result = await this.update(id, attributes);
-        return result;
+        const updateResult = await this.update(id, attributes);
+        return updateResult;
       }
       throw err;
     }
+    return result;
   }
   // --- MIDDLEWARE SYSTEM ---
   _initMiddleware() {
