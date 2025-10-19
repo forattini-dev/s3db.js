@@ -3,6 +3,7 @@
  * Complete Type Encoding Benchmark
  *
  * Comprehensive performance and compression analysis for ALL s3db.js optimized types:
+ * - Strings (user names, status, IDs) - Smart ASCII/Latin/UTF8 encoding
  * - IP addresses (IPv4, IPv6) - Binary encoding
  * - Money (USD, BRL, BTC) - Integer-based encoding
  * - Decimal (ratings, scores) - Fixed-point encoding
@@ -10,6 +11,7 @@
  * - Embeddings (vectors) - Fixed-point array encoding
  */
 
+import { metadataEncode, metadataDecode, analyzeString } from '../../src/concerns/metadata-encoding.js';
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6 } from '../../src/concerns/ip.js';
 import { encodeMoney, decodeMoney } from '../../src/concerns/money.js';
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon } from '../../src/concerns/geo-encoding.js';
@@ -27,13 +29,63 @@ const colors = {
 };
 
 console.log(`\n${colors.blue}${colors.bold}🚀 Complete Type Encoding Benchmark${colors.reset}\n`);
-console.log(`${colors.dim}Testing ALL optimized types: IP, Money, Decimal, Geo, Embeddings${colors.reset}\n`);
+console.log(`${colors.dim}Testing ALL optimized types: Strings, IP, Money, Decimal, Geo, Embeddings${colors.reset}\n`);
 
 // ============================================================================
 // Test Data Sets
 // ============================================================================
 
 const testData = {
+  strings: {
+    ascii: [
+      'user_123456',
+      'session_abc123xyz',
+      'txn-2024-01-15-001',
+      'v2.5.1',
+      '2024-01-15T10:30:00Z',
+      'status_ok',
+      'GET',
+      'POST',
+      '/api/v1/users',
+      'application/json'
+    ],
+    latin: [
+      'José Silva',
+      'Maria José',
+      'São Paulo',
+      'Ação Completa',
+      'François Müller',
+      'Señor García',
+      'Città italiana',
+      'Zürich',
+      'København',
+      'Málaga'
+    ],
+    emoji: [
+      'Approved ✅',
+      'Rating: ⭐⭐⭐⭐⭐',
+      'Status: 🚀 Launched',
+      'Mood: 😊',
+      'Weather: ☀️',
+      '🎉 Celebration',
+      'Priority: 🔥',
+      'Done ✓',
+      'Warning ⚠️',
+      'Error ❌'
+    ],
+    cjk: [
+      '李明',
+      '東京',
+      '北京市',
+      '株式会社',
+      '안녕하세요',
+      'こんにちは',
+      '你好世界',
+      '서울특별시',
+      'ありがとう',
+      '謝謝'
+    ]
+  },
   ipv4: [
     '192.168.1.1',
     '10.0.0.1',
@@ -101,7 +153,88 @@ function bench(name, fn, iterations = 100000) {
 }
 
 // ============================================================================
-// 1. IPv4 & IPv6 Performance
+// 1. String Encoding Performance (Smart ASCII/Latin/UTF8)
+// ============================================================================
+
+console.log(`${colors.cyan}📝 String Encoding Performance (Smart ASCII/Latin/UTF8)${colors.reset}\n`);
+
+// Combine all string types for comprehensive testing
+const allStrings = [
+  ...testData.strings.ascii,
+  ...testData.strings.latin,
+  ...testData.strings.emoji,
+  ...testData.strings.cjk
+];
+
+const stringResults = [];
+
+// Test encoding for each string type
+for (const [dataType, data] of Object.entries(testData.strings)) {
+  stringResults.push(
+    bench(`String ${dataType} Encode`, (i) => {
+      const str = data[i % data.length];
+      metadataEncode(str);
+    })
+  );
+
+  stringResults.push(
+    bench(`String ${dataType} Decode`, (i) => {
+      const str = data[i % data.length];
+      const encoded = metadataEncode(str);
+      metadataDecode(encoded.encoded);
+    })
+  );
+}
+
+console.table(stringResults.map(r => ({
+  'Operation': r.name,
+  'Avg ops/s': Math.round(r.avg).toLocaleString(),
+  'µs/op': r.avgUs
+})));
+
+// Compression analysis - show encoding method chosen
+console.log(`\n${colors.green}Encoding Method Analysis:${colors.reset}`);
+const encodingExamples = [
+  { type: 'ASCII', sample: 'user_123456' },
+  { type: 'Latin', sample: 'José Silva' },
+  { type: 'Emoji', sample: '🚀 Launched' },
+  { type: 'CJK', sample: '中文测试' }
+];
+
+encodingExamples.forEach(({ type, sample }) => {
+  const result = metadataEncode(sample);
+  const original = Buffer.byteLength(sample, 'utf8');
+  const encoded = Buffer.byteLength(result.encoded, 'utf8');
+  const overhead = ((encoded / original - 1) * 100).toFixed(0);
+  const overheadColor = overhead === '0' ? colors.green : overhead < 50 ? colors.yellow : colors.red;
+  console.log(`  ${type.padEnd(10)} "${sample.substring(0, 20)}" → ${result.encoding.padEnd(10)} (${overheadColor}${overhead}% overhead${colors.reset})`);
+});
+
+// Compare with always-Base64 approach
+console.log(`\n${colors.green}Comparison: Smart vs Always-Base64${colors.reset}`);
+
+function alwaysBase64Encode(str) {
+  return Buffer.from(String(str), 'utf8').toString('base64');
+}
+
+const smartEncodeResult = bench('Smart Encode (all types)', (i) => {
+  const str = allStrings[i % allStrings.length];
+  metadataEncode(str);
+});
+
+const base64EncodeResult = bench('Base64 Encode (baseline)', (i) => {
+  const str = allStrings[i % allStrings.length];
+  alwaysBase64Encode(str);
+});
+
+const perfDiff = ((smartEncodeResult.avgUs / base64EncodeResult.avgUs - 1) * 100).toFixed(0);
+console.log(`  Smart encoding: ${smartEncodeResult.avgUs} µs/op`);
+console.log(`  Base64 always:  ${base64EncodeResult.avgUs} µs/op`);
+console.log(`  Performance:    ${colors.yellow}${perfDiff}% slower${colors.reset} (due to analysis overhead, but saves storage)`);
+console.log();
+
+// ============================================================================
+// 2. IPv4 & IPv6 Performance
 // ============================================================================
 
 console.log(`${colors.cyan}📍 IP Address Encoding Performance${colors.reset}\n`);
@@ -151,7 +284,7 @@ console.log(`  IPv4: ${ipv4Original}B → ${ipv4Size}B (${colors.green}${ipv4Sav
 console.log(`  IPv6: ${ipv6Original}B → ${ipv6Size}B (${colors.green}${ipv6Savings}% savings${colors.reset})\n`);
 
 // ============================================================================
-// 2. Money Type Performance (Integer-Based)
+// 3. Money Type Performance (Integer-Based)
 // ============================================================================
 
 console.log(`${colors.cyan}💰 Money Encoding Performance (Integer-Based)${colors.reset}\n`);
@@ -200,7 +333,7 @@ moneySamples.forEach(({ value, currency, label }) => {
 console.log();
 
 // ============================================================================
-// 3. Decimal Type Performance (Fixed-Point)
+// 4. Decimal Type Performance (Fixed-Point)
 // ============================================================================
 
 console.log(`${colors.cyan}📊 Decimal Encoding Performance (Fixed-Point)${colors.reset}\n`);
@@ -249,7 +382,7 @@ decimalSamples.forEach(({ value, precision, label }) => {
 console.log();
 
 // ============================================================================
-// 4. Geo Coordinate Performance (Normalized)
+// 5. Geo Coordinate Performance (Normalized)
 // ============================================================================
 
 console.log(`${colors.cyan}🌍 Geographic Encoding Performance (Normalized)${colors.reset}\n`);
@@ -297,7 +430,7 @@ geoSamples.forEach(({ value, type, label }) => {
 console.log();
 
 // ============================================================================
-// 5. Embedding Performance (Fixed-Point Arrays)
+// 6. Embedding Performance (Fixed-Point Arrays)
 // ============================================================================
 
 console.log(`${colors.cyan}🤖 Vector Embedding Performance${colors.reset}\n`);
@@ -342,7 +475,7 @@ embeddingSamples.forEach(({ vector, label }) => {
 console.log();
 
 // ============================================================================
-// 6. E-commerce Real-World Example
+// 7. E-commerce Real-World Example
 // ============================================================================
 
 console.log(`${colors.cyan}🛒 Real-World Example: E-commerce Product${colors.reset}\n`);
@@ -393,10 +526,43 @@ console.log(`\n${colors.bold}Total:${colors.reset}      ${totalOriginal.toString
 console.log(`${colors.green}Extra capacity in 2KB metadata: +${((totalOriginal - totalEncoded) / 2047 * 100).toFixed(1)}%${colors.reset}\n`);
 
 // ============================================================================
-// 7. Compression Deep Dive: Best/Worst/Average Cases
+// 8. Compression Deep Dive: Best/Worst/Average Cases
 // ============================================================================
 
 console.log(`${colors.cyan}📦 Compression Showcase: Best, Worst & Average Cases${colors.reset}\n`);
+
+// String Type - Best/Worst/Average
+console.log(`${colors.yellow}📝 String Type (Smart Encoding)${colors.reset}\n`);
+
+const stringShowcase = [
+  { label: 'ASCII BEST', value: 'GET', reason: 'Short ASCII (no encoding needed)' },
+  { label: 'ASCII AVG', value: 'user_123456', reason: 'Typical API identifier' },
+  { label: 'ASCII WORST', value: 'a'.repeat(100), reason: 'Long ASCII string' },
+  { label: 'LATIN BEST', value: 'José', reason: 'Short name with accents' },
+  { label: 'LATIN AVG', value: 'São Paulo', reason: 'Typical Latin text' },
+  { label: 'EMOJI/CJK', value: '🚀 Launch!', reason: 'Emoji (Base64 needed)' }
+];
+
+stringShowcase.forEach(({ label, value, reason }) => {
+  const displayValue = value.length > 30 ? value.substring(0, 27) + '...' : value;
+  const original = value;
+  const result = metadataEncode(value);
+  const encoded = result.encoded;
+  const base64 = Buffer.from(original).toString('base64');
+  const overhead = ((encoded.length / original.length - 1) * 100).toFixed(1);
+  const vsBase64 = ((base64.length - encoded.length) / base64.length * 100).toFixed(1);
+
+  console.log(`${label.padEnd(15)} ${reason}`);
+  console.log(`  Value:        "${displayValue}"`);
+  console.log(`  Method:       ${result.encoding}`);
+  console.log(`  Original:     ${original.length}B`);
+  console.log(`  Base64:       ${base64.length}B`);
+  console.log(`  Encoded:      ${encoded.length}B`);
+  const overheadColor = overhead === '0.0' ? colors.green : overhead < 50 ? colors.yellow : colors.red;
+  console.log(`  Overhead:     ${overheadColor}${overhead}%${colors.reset} (vs original)`);
+  console.log(`  vs Base64:    ${vsBase64 > 0 ? colors.green : colors.red}${vsBase64}% ${vsBase64 > 0 ? 'smaller' : 'larger'}${colors.reset}`);
+  console.log();
+});
 
 // Money Type - Best/Worst/Average
 console.log(`${colors.yellow}💰 Money Type (Integer-Based)${colors.reset}\n`);
@@ -634,12 +800,22 @@ console.log(`  vs JSON: ${colors.green}${((logJSON.length - logEncoded.length) /
 console.log(`  vs Base64: ${colors.green}${((logBase64.length - logEncoded.length) / logBase64.length * 100).toFixed(1)}% smaller${colors.reset}\n`);
 
 // ============================================================================
-// 9. Summary
+// 10. Summary
 // ============================================================================
 
 console.log(`${colors.green}${colors.bold}✅ Performance Summary${colors.reset}\n`);
 
 const summary = {
+  'String ASCII': {
+    encodeUs: parseFloat(stringResults[0].avgUs),
+    decodeUs: parseFloat(stringResults[1].avgUs),
+    savings: 0 // No overhead for ASCII
+  },
+  'String Latin': {
+    encodeUs: parseFloat(stringResults[2].avgUs),
+    decodeUs: parseFloat(stringResults[3].avgUs),
+    savings: -33 // ~33% overhead (Base64 encoding)
+  },
   'IPv4': {
     encodeUs: parseFloat(ipResults[0].avgUs),
     decodeUs: parseFloat(ipResults[1].avgUs),
@@ -696,6 +872,7 @@ console.table(Object.entries(summary).map(([type, stats]) => ({
 })));
 
 console.log(`\n${colors.bold}Key Insights:${colors.reset}`);
+console.log(`  ${colors.green}•${colors.reset} Strings: Smart ASCII/Latin/UTF8 encoding, zero overhead for ASCII`);
 console.log(`  ${colors.green}•${colors.reset} IP addresses: Sub-microsecond performance, 26-47% compression`);
 console.log(`  ${colors.green}•${colors.reset} Money types: Integer-based = zero precision loss, 40-67% compression`);
 console.log(`  ${colors.green}•${colors.reset} Decimal types: Configurable precision, 33-42% compression`);
@@ -703,6 +880,7 @@ console.log(`  ${colors.green}•${colors.reset} Geo coordinates: GPS-accurate (
 console.log(`  ${colors.green}•${colors.reset} Embeddings: Massive 77% compression, essential for vector storage`);
 
 console.log(`\n${colors.bold}Use Cases:${colors.reset}`);
+console.log(`  ${colors.yellow}string${colors.reset}    - User names, status values, API identifiers`);
 console.log(`  ${colors.yellow}money${colors.reset}     - E-commerce prices, financial transactions`);
 console.log(`  ${colors.yellow}decimal${colors.reset}   - Ratings, percentages, scores`);
 console.log(`  ${colors.yellow}geo${colors.reset}       - Location data, GPS coordinates`);
@@ -719,6 +897,7 @@ try {
     nodeVersion: process.version,
     benchmark: 'all-types-encoding',
     summary,
+    strings: stringResults.map(r => ({ name: r.name, avgOpsPerSec: Math.round(r.avg), avgUs: r.avgUs })),
     ip: ipResults.map(r => ({ name: r.name, avgOpsPerSec: Math.round(r.avg), avgUs: r.avgUs })),
     money: moneyResults.map(r => ({ name: r.name, avgOpsPerSec: Math.round(r.avg), avgUs: r.avgUs })),
     decimal: decimalResults.map(r => ({ name: r.name, avgOpsPerSec: Math.round(r.avg), avgUs: r.avgUs })),
