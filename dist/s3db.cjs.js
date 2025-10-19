@@ -12628,14 +12628,19 @@ async function handleUpsert$3({ resource, id, data, mappedData, originalData }) 
 }
 async function handleGet$3({ resource, metadata, body }) {
   if (body && body.trim() !== "") {
-    try {
+    const [ok, error, result] = tryFn(() => {
       const bodyData = JSON.parse(body);
-      const mergedData = {
-        ...bodyData,
-        ...metadata
+      return {
+        metadata: {
+          ...bodyData,
+          ...metadata
+        },
+        body
       };
-      return { metadata: mergedData, body };
-    } catch (error) {
+    });
+    if (ok) {
+      return result;
+    } else {
       return { metadata, body };
     }
   }
