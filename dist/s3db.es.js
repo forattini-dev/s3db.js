@@ -11557,6 +11557,141 @@ const ValidatorManager = new Proxy(Validator, {
   }
 });
 
+function isValidIPv4(ip) {
+  if (typeof ip !== "string") return false;
+  const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const match = ip.match(ipv4Regex);
+  if (!match) return false;
+  for (let i = 1; i <= 4; i++) {
+    const octet = parseInt(match[i], 10);
+    if (octet < 0 || octet > 255) return false;
+  }
+  return true;
+}
+function isValidIPv6(ip) {
+  if (typeof ip !== "string") return false;
+  const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/;
+  return ipv6Regex.test(ip);
+}
+function encodeIPv4(ip) {
+  if (!isValidIPv4(ip)) {
+    throw new Error(`Invalid IPv4 address: ${ip}`);
+  }
+  const octets = ip.split(".").map((octet) => parseInt(octet, 10));
+  const buffer = Buffer.from(octets);
+  return buffer.toString("base64");
+}
+function decodeIPv4(encoded) {
+  if (typeof encoded !== "string") {
+    throw new Error("Encoded IPv4 must be a string");
+  }
+  try {
+    const buffer = Buffer.from(encoded, "base64");
+    if (buffer.length !== 4) {
+      throw new Error(`Invalid encoded IPv4 length: ${buffer.length} (expected 4)`);
+    }
+    return Array.from(buffer).join(".");
+  } catch (err) {
+    throw new Error(`Failed to decode IPv4: ${err.message}`);
+  }
+}
+function expandIPv6(ip) {
+  if (!isValidIPv6(ip)) {
+    throw new Error(`Invalid IPv6 address: ${ip}`);
+  }
+  let expanded = ip;
+  if (expanded === "::") {
+    return "0000:0000:0000:0000:0000:0000:0000:0000";
+  }
+  if (expanded.includes("::")) {
+    const parts = expanded.split("::");
+    const leftParts = parts[0] ? parts[0].split(":") : [];
+    const rightParts = parts[1] ? parts[1].split(":") : [];
+    const missingGroups = 8 - leftParts.length - rightParts.length;
+    const middleParts = Array(missingGroups).fill("0");
+    expanded = [...leftParts, ...middleParts, ...rightParts].join(":");
+  }
+  const groups = expanded.split(":");
+  const paddedGroups = groups.map((group) => group.padStart(4, "0"));
+  return paddedGroups.join(":");
+}
+function compressIPv6(ip) {
+  let compressed = ip.split(":").map((group) => {
+    return parseInt(group, 16).toString(16);
+  }).join(":");
+  const zeroSequences = [];
+  let currentSequence = { start: -1, length: 0 };
+  compressed.split(":").forEach((group, index) => {
+    if (group === "0") {
+      if (currentSequence.start === -1) {
+        currentSequence.start = index;
+        currentSequence.length = 1;
+      } else {
+        currentSequence.length++;
+      }
+    } else {
+      if (currentSequence.length > 0) {
+        zeroSequences.push({ ...currentSequence });
+        currentSequence = { start: -1, length: 0 };
+      }
+    }
+  });
+  if (currentSequence.length > 0) {
+    zeroSequences.push(currentSequence);
+  }
+  const longestSequence = zeroSequences.filter((seq) => seq.length >= 2).sort((a, b) => b.length - a.length)[0];
+  if (longestSequence) {
+    const parts = compressed.split(":");
+    const before = parts.slice(0, longestSequence.start).join(":");
+    const after = parts.slice(longestSequence.start + longestSequence.length).join(":");
+    if (before && after) {
+      compressed = `${before}::${after}`;
+    } else if (before) {
+      compressed = `${before}::`;
+    } else if (after) {
+      compressed = `::${after}`;
+    } else {
+      compressed = "::";
+    }
+  }
+  return compressed;
+}
+function encodeIPv6(ip) {
+  if (!isValidIPv6(ip)) {
+    throw new Error(`Invalid IPv6 address: ${ip}`);
+  }
+  const expanded = expandIPv6(ip);
+  const groups = expanded.split(":");
+  const bytes = [];
+  for (const group of groups) {
+    const value = parseInt(group, 16);
+    bytes.push(value >> 8 & 255);
+    bytes.push(value & 255);
+  }
+  const buffer = Buffer.from(bytes);
+  return buffer.toString("base64");
+}
+function decodeIPv6(encoded, compress = true) {
+  if (typeof encoded !== "string") {
+    throw new Error("Encoded IPv6 must be a string");
+  }
+  try {
+    const buffer = Buffer.from(encoded, "base64");
+    if (buffer.length !== 16) {
+      throw new Error(`Invalid encoded IPv6 length: ${buffer.length} (expected 16)`);
+    }
+    const groups = [];
+    for (let i = 0; i < 16; i += 2) {
+      const value = buffer[i] << 8 | buffer[i + 1];
+      groups.push(value.toString(16).padStart(4, "0"));
+    }
+    const fullAddress = groups.join(":");
+    return compress ? compressIPv6(fullAddress) : fullAddress;
+  } catch (err) {
+    throw new Error(`Failed to decode IPv6: ${err.message}`);
+  }
+}
+
 function generateBase62Mapping(keys) {
   const mapping = {};
   const reversedMapping = {};
@@ -11848,6 +11983,32 @@ const SchemaActions = {
       }
       return NaN;
     });
+  },
+  encodeIPv4: (value) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    if (!isValidIPv4(value)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeIPv4(value));
+    return ok ? encoded : value;
+  },
+  decodeIPv4: (value) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeIPv4(value));
+    return ok ? decoded : value;
+  },
+  encodeIPv6: (value) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    if (!isValidIPv6(value)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeIPv6(value));
+    return ok ? encoded : value;
+  },
+  decodeIPv6: (value) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeIPv6(value));
+    return ok ? decoded : value;
   }
 };
 class Schema {
@@ -11868,7 +12029,7 @@ class Schema {
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
-      { $$async: true },
+      { $$async: true, $$strict: false },
       processedAttributes
     ));
     if (this.options.generateAutoHooks) this.generateAutoHooks();
@@ -12014,6 +12175,16 @@ class Schema {
         if (this.options.autoDecrypt) {
           this.addHook("afterUnmap", name, "decrypt");
         }
+        continue;
+      }
+      if (defStr.includes("ip4") || defType === "ip4") {
+        this.addHook("beforeMap", name, "encodeIPv4");
+        this.addHook("afterUnmap", name, "decodeIPv4");
+        continue;
+      }
+      if (defStr.includes("ip6") || defType === "ip6") {
+        this.addHook("beforeMap", name, "encodeIPv6");
+        this.addHook("afterUnmap", name, "decodeIPv6");
         continue;
       }
       if (defStr.includes("number") || defType === "number") {
@@ -12246,6 +12417,14 @@ class Schema {
     const processed = {};
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === "string") {
+        if (value === "ip4" || value.startsWith("ip4|")) {
+          processed[key] = value.replace(/^ip4/, "string");
+          continue;
+        }
+        if (value === "ip6" || value.startsWith("ip6|")) {
+          processed[key] = value.replace(/^ip6/, "string");
+          continue;
+        }
         if (value.startsWith("embedding:")) {
           const lengthMatch = value.match(/embedding:(\d+)/);
           if (lengthMatch) {
@@ -12263,7 +12442,18 @@ class Schema {
       } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         const hasValidatorType = value.type !== void 0 && key !== "$$type";
         if (hasValidatorType) {
-          processed[key] = value;
+          if (value.type === "ip4") {
+            processed[key] = { ...value, type: "string" };
+          } else if (value.type === "ip6") {
+            processed[key] = { ...value, type: "string" };
+          } else if (value.type === "object" && value.properties) {
+            processed[key] = {
+              ...value,
+              properties: this.preprocessAttributesForValidation(value.properties)
+            };
+          } else {
+            processed[key] = value;
+          }
         } else {
           const isExplicitRequired = value.$$type && value.$$type.includes("required");
           const isExplicitOptional = value.$$type && value.$$type.includes("optional");
@@ -13010,7 +13200,7 @@ ${errorDetails}`,
   updateAttributes(newAttributes) {
     const oldAttributes = this.attributes;
     this.attributes = newAttributes;
-    this.applyConfiguration({ map: this.schema?.map });
+    this.applyConfiguration();
     return { oldAttributes, newAttributes };
   }
   /**
@@ -15336,10 +15526,7 @@ class Database extends EventEmitter {
       if (typeof process !== "undefined") {
         process.on("exit", async () => {
           if (this.isConnected()) {
-            try {
-              await this.disconnect();
-            } catch (err) {
-            }
+            await tryFn(() => this.disconnect());
           }
         });
       }
@@ -15351,12 +15538,11 @@ class Database extends EventEmitter {
     let needsHealing = false;
     let healingLog = [];
     if (await this.client.exists(`s3db.json`)) {
-      try {
+      const [ok, error] = await tryFn(async () => {
         const request = await this.client.getObject(`s3db.json`);
         const rawContent = await streamToString(request?.Body);
-        try {
-          metadata = JSON.parse(rawContent);
-        } catch (parseError) {
+        const [parseOk, parseError, parsedData] = tryFn(() => JSON.parse(rawContent));
+        if (!parseOk) {
           healingLog.push("JSON parsing failed - attempting recovery");
           needsHealing = true;
           metadata = await this._attemptJsonRecovery(rawContent, healingLog);
@@ -15365,13 +15551,16 @@ class Database extends EventEmitter {
             healingLog.push("Created backup of corrupted file - starting with blank metadata");
             metadata = this.blankMetadataStructure();
           }
+        } else {
+          metadata = parsedData;
         }
         const healedMetadata = await this._validateAndHealMetadata(metadata, healingLog);
         if (healedMetadata !== metadata) {
           metadata = healedMetadata;
           needsHealing = true;
         }
-      } catch (error) {
+      });
+      if (!ok) {
         healingLog.push(`Critical error reading s3db.json: ${error.message}`);
         await this._createCorruptedBackup();
         metadata = this.blankMetadataStructure();
@@ -15529,18 +15718,18 @@ class Database extends EventEmitter {
       if (Array.isArray(hookArray)) {
         serialized[event] = hookArray.map((hook) => {
           if (typeof hook === "function") {
-            try {
-              return {
-                __s3db_serialized_function: true,
-                code: hook.toString(),
-                name: hook.name || "anonymous"
-              };
-            } catch (err) {
+            const [ok, err, data] = tryFn(() => ({
+              __s3db_serialized_function: true,
+              code: hook.toString(),
+              name: hook.name || "anonymous"
+            }));
+            if (!ok) {
               if (this.verbose) {
                 console.warn(`Failed to serialize hook for event '${event}':`, err.message);
               }
               return null;
             }
+            return data;
           }
           return hook;
         });
@@ -15563,17 +15752,17 @@ class Database extends EventEmitter {
       if (Array.isArray(hookArray)) {
         deserialized[event] = hookArray.map((hook) => {
           if (hook && typeof hook === "object" && hook.__s3db_serialized_function) {
-            try {
-              const fn = new Function("return " + hook.code)();
-              if (typeof fn === "function") {
-                return fn;
-              }
-            } catch (err) {
+            const [ok, err, fn] = tryFn(() => {
+              const func = new Function("return " + hook.code)();
+              return typeof func === "function" ? func : null;
+            });
+            if (!ok || fn === null) {
               if (this.verbose) {
-                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err.message);
+                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err?.message || "Invalid function");
               }
+              return null;
             }
-            return null;
+            return fn;
           }
           return hook;
         }).filter((hook) => hook !== null);
@@ -15771,12 +15960,13 @@ class Database extends EventEmitter {
       }
     ];
     for (const [index, fix] of fixes.entries()) {
-      try {
+      const [ok, err, parsed] = tryFn(() => {
         const fixedContent = fix();
-        const parsed = JSON.parse(fixedContent);
+        return JSON.parse(fixedContent);
+      });
+      if (ok) {
         healingLog.push(`JSON recovery successful using fix #${index + 1}`);
         return parsed;
-      } catch (error) {
       }
     }
     healingLog.push("All JSON recovery attempts failed");
@@ -15926,16 +16116,15 @@ class Database extends EventEmitter {
    * Create backup of corrupted file
    */
   async _createCorruptedBackup(content = null) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
       const backupKey = `s3db.json.corrupted.${timestamp}.backup`;
       if (!content) {
-        try {
+        const [readOk, readErr, readData] = await tryFn(async () => {
           const request = await this.client.getObject(`s3db.json`);
-          content = await streamToString(request?.Body);
-        } catch (error) {
-          content = "Unable to read corrupted file content";
-        }
+          return await streamToString(request?.Body);
+        });
+        content = readOk ? readData : "Unable to read corrupted file content";
       }
       await this.client.putObject({
         key: backupKey,
@@ -15945,17 +16134,16 @@ class Database extends EventEmitter {
       if (this.verbose) {
         console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
       }
-    } catch (error) {
-      if (this.verbose) {
-        console.warn(`S3DB: Failed to create backup: ${error.message}`);
-      }
+    });
+    if (!ok && this.verbose) {
+      console.warn(`S3DB: Failed to create backup: ${err.message}`);
     }
   }
   /**
    * Upload healed metadata with logging
    */
   async _uploadHealedMetadata(metadata, healingLog) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (this.verbose && healingLog.length > 0) {
         console.warn("S3DB Self-Healing Operations:");
         healingLog.forEach((log) => console.warn(`  - ${log}`));
@@ -15970,11 +16158,12 @@ class Database extends EventEmitter {
       if (this.verbose) {
         console.warn("S3DB: Successfully uploaded healed metadata");
       }
-    } catch (error) {
+    });
+    if (!ok) {
       if (this.verbose) {
-        console.error(`S3DB: Failed to upload healed metadata: ${error.message}`);
+        console.error(`S3DB: Failed to upload healed metadata: ${err.message}`);
       }
-      throw error;
+      throw err;
     }
   }
   /**
@@ -16149,7 +16338,7 @@ class Database extends EventEmitter {
     return !!this.savedMetadata;
   }
   async disconnect() {
-    try {
+    await tryFn(async () => {
       if (this.pluginList && this.pluginList.length > 0) {
         for (const plugin of this.pluginList) {
           if (plugin && typeof plugin.removeAllListeners === "function") {
@@ -16157,18 +16346,17 @@ class Database extends EventEmitter {
           }
         }
         const stopProms = this.pluginList.map(async (plugin) => {
-          try {
+          await tryFn(async () => {
             if (plugin && typeof plugin.stop === "function") {
               await plugin.stop();
             }
-          } catch (err) {
-          }
+          });
         });
         await Promise.all(stopProms);
       }
       if (this.resources && Object.keys(this.resources).length > 0) {
         for (const [name, resource] of Object.entries(this.resources)) {
-          try {
+          await tryFn(() => {
             if (resource && typeof resource.removeAllListeners === "function") {
               resource.removeAllListeners();
             }
@@ -16181,8 +16369,7 @@ class Database extends EventEmitter {
             if (resource.observers && Array.isArray(resource.observers)) {
               resource.observers = [];
             }
-          } catch (err) {
-          }
+          });
         }
         Object.keys(this.resources).forEach((k) => delete this.resources[k]);
       }
@@ -16194,8 +16381,7 @@ class Database extends EventEmitter {
       this.plugins = {};
       this.pluginList = [];
       this.emit("disconnected", /* @__PURE__ */ new Date());
-    } catch (err) {
-    }
+    });
   }
   /**
    * Initialize hooks system for database operations
@@ -16295,9 +16481,8 @@ class Database extends EventEmitter {
     if (!this._hooks || !this._hooks.has(event)) return;
     const hooks = this._hooks.get(event);
     for (const hook of hooks) {
-      try {
-        await hook({ database: this, ...context });
-      } catch (error) {
+      const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
+      if (!ok) {
         this.emit("hookError", { event, error, context });
       }
     }

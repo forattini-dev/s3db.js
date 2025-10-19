@@ -88,11 +88,8 @@ export class Database extends EventEmitter {
       if (typeof process !== 'undefined') {
         process.on('exit', async () => {
           if (this.isConnected()) {
-            try {
-              await this.disconnect();
-            } catch (err) {
-              // Silently ignore errors on exit
-            }
+            // Silently ignore errors on exit
+            await tryFn(() => this.disconnect());
           }
         });
       }
@@ -107,26 +104,28 @@ export class Database extends EventEmitter {
     let healingLog = [];
 
     if (await this.client.exists(`s3db.json`)) {
-      try {
+      const [ok, error] = await tryFn(async () => {
         const request = await this.client.getObject(`s3db.json`);
         const rawContent = await streamToString(request?.Body);
-        
+
         // Try to parse JSON
-        try {
-          metadata = JSON.parse(rawContent);
-        } catch (parseError) {
+        const [parseOk, parseError, parsedData] = tryFn(() => JSON.parse(rawContent));
+
+        if (!parseOk) {
           healingLog.push('JSON parsing failed - attempting recovery');
           needsHealing = true;
-          
+
           // Attempt to fix common JSON issues
           metadata = await this._attemptJsonRecovery(rawContent, healingLog);
-          
+
           if (!metadata) {
             // Create backup and start fresh
             await this._createCorruptedBackup(rawContent);
             healingLog.push('Created backup of corrupted file - starting with blank metadata');
             metadata = this.blankMetadataStructure();
           }
+        } else {
+          metadata = parsedData;
         }
 
         // Validate and heal metadata structure
@@ -135,8 +134,9 @@ export class Database extends EventEmitter {
           metadata = healedMetadata;
           needsHealing = true;
         }
+      });
 
-      } catch (error) {
+      if (!ok) {
         healingLog.push(`Critical error reading s3db.json: ${error.message}`);
         await this._createCorruptedBackup();
         metadata = this.blankMetadataStructure();
@@ -325,24 +325,25 @@ export class Database extends EventEmitter {
    */
   _serializeHooks(hooks) {
     if (!hooks || typeof hooks !== 'object') return hooks;
-    
+
     const serialized = {};
     for (const [event, hookArray] of Object.entries(hooks)) {
       if (Array.isArray(hookArray)) {
         serialized[event] = hookArray.map(hook => {
           if (typeof hook === 'function') {
-            try {
-              return {
-                __s3db_serialized_function: true,
-                code: hook.toString(),
-                name: hook.name || 'anonymous'
-              };
-            } catch (err) {
+            const [ok, err, data] = tryFn(() => ({
+              __s3db_serialized_function: true,
+              code: hook.toString(),
+              name: hook.name || 'anonymous'
+            }));
+
+            if (!ok) {
               if (this.verbose) {
                 console.warn(`Failed to serialize hook for event '${event}':`, err.message);
               }
               return null;
             }
+            return data;
           }
           return hook;
         });
@@ -361,24 +362,25 @@ export class Database extends EventEmitter {
    */
   _deserializeHooks(serializedHooks) {
     if (!serializedHooks || typeof serializedHooks !== 'object') return serializedHooks;
-    
+
     const deserialized = {};
     for (const [event, hookArray] of Object.entries(serializedHooks)) {
       if (Array.isArray(hookArray)) {
         deserialized[event] = hookArray.map(hook => {
           if (hook && typeof hook === 'object' && hook.__s3db_serialized_function) {
-            try {
+            const [ok, err, fn] = tryFn(() => {
               // Use Function constructor instead of eval for better security
-              const fn = new Function('return ' + hook.code)();
-              if (typeof fn === 'function') {
-                return fn;
-              }
-            } catch (err) {
+              const func = new Function('return ' + hook.code)();
+              return typeof func === 'function' ? func : null;
+            });
+
+            if (!ok || fn === null) {
               if (this.verbose) {
-                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err.message);
+                console.warn(`Failed to deserialize hook '${hook.name}' for event '${event}':`, err?.message || 'Invalid function');
               }
+              return null;
             }
-            return null;
+            return fn;
           }
           return hook;
         }).filter(hook => hook !== null); // Remove failed deserializations
@@ -626,14 +628,16 @@ export class Database extends EventEmitter {
     ];
 
     for (const [index, fix] of fixes.entries()) {
-      try {
+      const [ok, err, parsed] = tryFn(() => {
         const fixedContent = fix();
-        const parsed = JSON.parse(fixedContent);
+        return JSON.parse(fixedContent);
+      });
+
+      if (ok) {
         healingLog.push(`JSON recovery successful using fix #${index + 1}`);
         return parsed;
-      } catch (error) {
-        // Try next fix
       }
+      // Try next fix
     }
 
     healingLog.push('All JSON recovery attempts failed');
@@ -822,17 +826,16 @@ export class Database extends EventEmitter {
    * Create backup of corrupted file
    */
   async _createCorruptedBackup(content = null) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupKey = `s3db.json.corrupted.${timestamp}.backup`;
-      
+
       if (!content) {
-        try {
+        const [readOk, readErr, readData] = await tryFn(async () => {
           const request = await this.client.getObject(`s3db.json`);
-          content = await streamToString(request?.Body);
-        } catch (error) {
-          content = 'Unable to read corrupted file content';
-        }
+          return await streamToString(request?.Body);
+        });
+        content = readOk ? readData : 'Unable to read corrupted file content';
       }
 
       await this.client.putObject({
@@ -844,10 +847,10 @@ export class Database extends EventEmitter {
       if (this.verbose) {
         console.warn(`S3DB: Created backup of corrupted s3db.json as ${backupKey}`);
       }
-    } catch (error) {
-      if (this.verbose) {
-        console.warn(`S3DB: Failed to create backup: ${error.message}`);
-      }
+    });
+
+    if (!ok && this.verbose) {
+      console.warn(`S3DB: Failed to create backup: ${err.message}`);
     }
   }
 
@@ -855,7 +858,7 @@ export class Database extends EventEmitter {
    * Upload healed metadata with logging
    */
   async _uploadHealedMetadata(metadata, healingLog) {
-    try {
+    const [ok, err] = await tryFn(async () => {
       if (this.verbose && healingLog.length > 0) {
         console.warn('S3DB Self-Healing Operations:');
         healingLog.forEach(log => console.warn(`  - ${log}`));
@@ -875,11 +878,13 @@ export class Database extends EventEmitter {
       if (this.verbose) {
         console.warn('S3DB: Successfully uploaded healed metadata');
       }
-    } catch (error) {
+    });
+
+    if (!ok) {
       if (this.verbose) {
-        console.error(`S3DB: Failed to upload healed metadata: ${error.message}`);
+        console.error(`S3DB: Failed to upload healed metadata: ${err.message}`);
       }
-      throw error;
+      throw err;
     }
   }
 
@@ -1073,7 +1078,8 @@ export class Database extends EventEmitter {
   }
 
   async disconnect() {
-    try {
+    // Silently ignore all errors during disconnect
+    await tryFn(async () => {
       // 1. Remove all listeners from all plugins
       if (this.pluginList && this.pluginList.length > 0) {
         for (const plugin of this.pluginList) {
@@ -1083,13 +1089,12 @@ export class Database extends EventEmitter {
         }
         // Also stop plugins if they have a stop method
         const stopProms = this.pluginList.map(async (plugin) => {
-          try {
+          // Silently ignore errors on exit
+          await tryFn(async () => {
             if (plugin && typeof plugin.stop === 'function') {
               await plugin.stop();
             }
-          } catch (err) {
-            // Silently ignore errors on exit
-          }
+          });
         });
         await Promise.all(stopProms);
       }
@@ -1097,7 +1102,8 @@ export class Database extends EventEmitter {
       // 2. Remove all listeners from all resources
       if (this.resources && Object.keys(this.resources).length > 0) {
         for (const [name, resource] of Object.entries(this.resources)) {
-          try {
+          // Silently ignore errors on exit
+          await tryFn(() => {
             if (resource && typeof resource.removeAllListeners === 'function') {
               resource.removeAllListeners();
             }
@@ -1110,9 +1116,7 @@ export class Database extends EventEmitter {
             if (resource.observers && Array.isArray(resource.observers)) {
               resource.observers = [];
             }
-          } catch (err) {
-            // Silently ignore errors on exit
-          }
+          });
         }
         // Instead of reassigning, clear in place
         Object.keys(this.resources).forEach(k => delete this.resources[k]);
@@ -1132,9 +1136,7 @@ export class Database extends EventEmitter {
       this.pluginList = [];
 
       this.emit('disconnected', new Date());
-    } catch (err) {
-      // Silently ignore errors on exit
-    }
+    });
   }
 
   /**
@@ -1249,12 +1251,11 @@ export class Database extends EventEmitter {
    */
   async _executeHooks(event, context = {}) {
     if (!this._hooks || !this._hooks.has(event)) return;
-    
+
     const hooks = this._hooks.get(event);
     for (const hook of hooks) {
-      try {
-        await hook({ database: this, ...context });
-      } catch (error) {
+      const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
+      if (!ok) {
         // Emit error but don't stop hook execution
         this.emit('hookError', { event, error, context });
       }
