@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { PartitionDriverError } from '../errors.js';
+import tryFn from './try-fn.js';
 
 /**
  * Robust partition operation queue with retry and persistence
@@ -52,17 +53,19 @@ export class PartitionQueue extends EventEmitter {
     
     while (this.queue.length > 0) {
       const item = this.queue.shift();
-      
-      try {
+
+      const [ok, error] = await tryFn(async () => {
         await this.executeOperation(item);
         item.status = 'completed';
         this.emit('success', item);
-        
+
         // Remove from persistence
         if (this.persistence) {
           await this.persistence.remove(item.id);
         }
-      } catch (error) {
+      });
+
+      if (!ok) {
         item.retries++;
         item.lastError = error;
         
