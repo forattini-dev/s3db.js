@@ -418,8 +418,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: { type: 'number', required: false },  // Explicitly optional
-          longitude: { type: 'number', required: false }   // Explicitly optional
+          latitude: { type: 'number', optional: true },  // Explicitly optional
+          longitude: { type: 'number', optional: true }   // Explicitly optional
         }
       });
 
@@ -748,8 +748,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: { type: 'number', required: false },
-          longitude: { type: 'number', required: false }
+          latitude: { type: 'number', optional: true },
+          longitude: { type: 'number', optional: true }
         }
       });
 
@@ -945,8 +945,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: { type: 'number', required: false },
-          longitude: { type: 'number', required: false }
+          latitude: { type: 'number', optional: true },
+          longitude: { type: 'number', optional: true }
         }
       });
 
@@ -1107,8 +1107,8 @@ describe('GeoPlugin', () => {
         name: 'stores',
         attributes: {
           name: 'string',
-          latitude: { type: 'number', required: false },
-          longitude: { type: 'number', required: false }
+          latitude: { type: 'number', optional: true },
+          longitude: { type: 'number', optional: true }
         }
       });
 
@@ -1461,7 +1461,7 @@ describe('GeoPlugin', () => {
 
       const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
 
-      // Query with 1km radius should select zoom6
+      // Query with 1km radius should select zoom7 (closest to target cell size of 0.4km)
       const nearby = await resource.findNearby({
         lat: -23.5505,
         lon: -46.6333,
@@ -1474,7 +1474,7 @@ describe('GeoPlugin', () => {
         call[0].includes('Auto-selected zoom')
       );
       expect(zoomSelectionLog).toBeDefined();
-      expect(zoomSelectionLog[0]).toContain('zoom6');
+      expect(zoomSelectionLog[0]).toContain('zoom7');
 
       consoleLogSpy.mockRestore();
     });
