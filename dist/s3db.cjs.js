@@ -116,6 +116,50 @@ const decodeFixedPoint = (s, precision = 6) => {
   const scaled = negative ? -r : r;
   return scaled / scale;
 };
+const encodeFixedPointBatch = (values, precision = 6) => {
+  if (!Array.isArray(values)) return "";
+  if (values.length === 0) return "^[]";
+  const scale = Math.pow(10, precision);
+  const encoded = values.map((n) => {
+    if (typeof n !== "number" || isNaN(n) || !isFinite(n)) return "";
+    const scaled = Math.round(n * scale);
+    if (scaled === 0) return "0";
+    const negative = scaled < 0;
+    let num = Math.abs(scaled);
+    let s = "";
+    while (num > 0) {
+      s = alphabet[num % base] + s;
+      num = Math.floor(num / base);
+    }
+    return (negative ? "-" : "") + s;
+  });
+  return "^[" + encoded.join(",") + "]";
+};
+const decodeFixedPointBatch = (s, precision = 6) => {
+  if (typeof s !== "string") return [];
+  if (!s.startsWith("^[")) return [];
+  s = s.slice(2, -1);
+  if (s === "") return [];
+  const parts = s.split(",");
+  const scale = Math.pow(10, precision);
+  return parts.map((part) => {
+    if (part === "0") return 0;
+    if (part === "") return NaN;
+    let negative = false;
+    if (part[0] === "-") {
+      negative = true;
+      part = part.slice(1);
+    }
+    let r = 0;
+    for (let i = 0; i < part.length; i++) {
+      const idx = charToValue[part[i]];
+      if (idx === void 0) return NaN;
+      r = r * base + idx;
+    }
+    const scaled = negative ? -r : r;
+    return scaled / scale;
+  });
+};
 
 const utf8BytesMemory = /* @__PURE__ */ new Map();
 const UTF8_MEMORY_MAX_SIZE = 1e4;
@@ -6258,8 +6302,8 @@ const CostsPlugin = {
         delete: 4e-4 / 1e3,
         head: 4e-4 / 1e3
       },
+      totalRequests: 0,
       requests: {
-        total: 0,
         put: 0,
         post: 0,
         copy: 0,
@@ -6269,8 +6313,8 @@ const CostsPlugin = {
         delete: 0,
         head: 0
       },
+      totalEvents: 0,
       events: {
-        total: 0,
         PutObjectCommand: 0,
         GetObjectCommand: 0,
         HeadObjectCommand: 0,
@@ -6289,15 +6333,15 @@ const CostsPlugin = {
   },
   addRequest(name, method) {
     if (!method) return;
+    this.costs.totalEvents++;
+    this.costs.totalRequests++;
     this.costs.events[name]++;
-    this.costs.events.total++;
-    this.costs.requests.total++;
     this.costs.requests[method]++;
     this.costs.total += this.costs.prices[method];
     if (this.client && this.client.costs) {
+      this.client.costs.totalEvents++;
+      this.client.costs.totalRequests++;
       this.client.costs.events[name]++;
-      this.client.costs.events.total++;
-      this.client.costs.requests.total++;
       this.client.costs.requests[method]++;
       this.client.costs.total += this.client.costs.prices[method];
     }
@@ -12513,28 +12557,24 @@ const SchemaActions = {
       return value;
     }
     if (value.length === 0) {
-      return "";
+      return "^[]";
     }
-    const encodedItems = value.map((item) => {
-      if (typeof item === "number" && !isNaN(item)) {
-        return encodeFixedPoint(item, precision);
-      }
-      const n = Number(item);
-      return isNaN(n) ? "" : encodeFixedPoint(n, precision);
-    });
-    return encodedItems.join(separator);
+    return encodeFixedPointBatch(value, precision);
   },
   toArrayOfEmbeddings: (value, { separator, precision = 6 }) => {
     if (Array.isArray(value)) {
-      return value.map((v) => typeof v === "number" ? v : decodeFixedPoint(v, precision));
+      return value;
     }
     if (value === null || value === void 0) {
       return value;
     }
-    if (value === "") {
+    if (value === "" || value === "^[]") {
       return [];
     }
     const str = String(value);
+    if (str.startsWith("^[")) {
+      return decodeFixedPointBatch(str, precision);
+    }
     const items = [];
     let current = "";
     let i = 0;
@@ -21728,11 +21768,13 @@ exports.createReplicator = createReplicator;
 exports.decode = decode;
 exports.decodeDecimal = decodeDecimal;
 exports.decodeFixedPoint = decodeFixedPoint;
+exports.decodeFixedPointBatch = decodeFixedPointBatch;
 exports.decrypt = decrypt;
 exports.default = S3db;
 exports.encode = encode;
 exports.encodeDecimal = encodeDecimal;
 exports.encodeFixedPoint = encodeFixedPoint;
+exports.encodeFixedPointBatch = encodeFixedPointBatch;
 exports.encrypt = encrypt;
 exports.getBehavior = getBehavior;
 exports.getSizeBreakdown = getSizeBreakdown;
