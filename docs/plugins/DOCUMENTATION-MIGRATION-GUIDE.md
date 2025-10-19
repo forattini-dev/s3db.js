@@ -437,7 +437,7 @@ Track progress here:
 - [ ] MetricsPlugin
 - [ ] EventualConsistencyPlugin
 - [ ] QueueConsumerPlugin
-- [ ] BackupPlugin
+- [x] BackupPlugin ✅
 
 ### Phase 3 (Lower Priority)
 - [ ] FulltextPlugin
