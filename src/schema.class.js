@@ -16,6 +16,7 @@ import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
 import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint } from "./concerns/base62.js";
+import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
 
 /**
  * Generate base62 mapping for attributes
@@ -329,6 +330,34 @@ export const SchemaActions = {
     });
   },
 
+  encodeIPv4: (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    if (!isValidIPv4(value)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeIPv4(value));
+    return ok ? encoded : value;
+  },
+  decodeIPv4: (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeIPv4(value));
+    return ok ? decoded : value;
+  },
+
+  encodeIPv6: (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    if (!isValidIPv6(value)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeIPv6(value));
+    return ok ? encoded : value;
+  },
+  decodeIPv6: (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeIPv6(value));
+    return ok ? decoded : value;
+  },
+
 }
 
 export class Schema {
@@ -353,7 +382,7 @@ export class Schema {
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
 
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
-      { $$async: true },
+      { $$async: true, $$strict: false },
       processedAttributes,
     ))
 
@@ -570,6 +599,20 @@ export class Schema {
           this.addHook("afterUnmap", name, "decrypt");
         }
         // Skip other processing for secrets
+        continue;
+      }
+
+      // Handle ip4 type
+      if (defStr.includes("ip4") || defType === 'ip4') {
+        this.addHook("beforeMap", name, "encodeIPv4");
+        this.addHook("afterUnmap", name, "decodeIPv4");
+        continue;
+      }
+
+      // Handle ip6 type
+      if (defStr.includes("ip6") || defType === 'ip6') {
+        this.addHook("beforeMap", name, "encodeIPv6");
+        this.addHook("afterUnmap", name, "decodeIPv6");
         continue;
       }
 
@@ -843,6 +886,16 @@ export class Schema {
 
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === 'string') {
+        // Expand ip4 shorthand to string type with custom validation
+        if (value === 'ip4' || value.startsWith('ip4|')) {
+          processed[key] = value.replace(/^ip4/, 'string');
+          continue;
+        }
+        // Expand ip6 shorthand to string type with custom validation
+        if (value === 'ip6' || value.startsWith('ip6|')) {
+          processed[key] = value.replace(/^ip6/, 'string');
+          continue;
+        }
         // Expand embedding:XXX shorthand to array|items:number|length:XXX
         if (value.startsWith('embedding:')) {
           const lengthMatch = value.match(/embedding:(\d+)/);
@@ -866,8 +919,21 @@ export class Schema {
         const hasValidatorType = value.type !== undefined && key !== '$$type';
 
         if (hasValidatorType) {
-          // This is a validator type definition (e.g., { type: 'array', items: 'number' }), pass it through
-          processed[key] = value;
+          // Handle ip4 and ip6 object notation
+          if (value.type === 'ip4') {
+            processed[key] = { ...value, type: 'string' };
+          } else if (value.type === 'ip6') {
+            processed[key] = { ...value, type: 'string' };
+          } else if (value.type === 'object' && value.properties) {
+            // Recursively process nested object properties
+            processed[key] = {
+              ...value,
+              properties: this.preprocessAttributesForValidation(value.properties)
+            };
+          } else {
+            // This is a validator type definition (e.g., { type: 'array', items: 'number' }), pass it through
+            processed[key] = value;
+          }
         } else {
           // This is a nested object structure, wrap it for validation
           const isExplicitRequired = value.$$type && value.$$type.includes('required');
