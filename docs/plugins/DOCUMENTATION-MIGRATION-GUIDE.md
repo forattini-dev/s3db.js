@@ -430,7 +430,7 @@ Track progress here:
 ### Phase 1 (High Priority)
 - [x] CachePlugin ✅
 - [x] GeoPlugin ✅
-- [ ] ReplicatorPlugin
+- [x] ReplicatorPlugin ✅
 - [ ] AuditPlugin
 
 ### Phase 2 (Medium Priority)
