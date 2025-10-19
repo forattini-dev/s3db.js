@@ -11691,6 +11691,190 @@ function decodeIPv6(encoded, compress = true) {
   return result;
 }
 
+const CURRENCY_DECIMALS = {
+  // Fiat with cents (2 decimals)
+  "USD": 2,
+  "BRL": 2,
+  "EUR": 2,
+  "GBP": 2,
+  "CAD": 2,
+  "AUD": 2,
+  "MXN": 2,
+  "ARS": 2,
+  "CLP": 2,
+  "COP": 2,
+  "PEN": 2,
+  "UYU": 2,
+  "CHF": 2,
+  "SEK": 2,
+  "NOK": 2,
+  "DKK": 2,
+  "PLN": 2,
+  "CZK": 2,
+  "HUF": 2,
+  "RON": 2,
+  "BGN": 2,
+  "HRK": 2,
+  "RSD": 2,
+  "TRY": 2,
+  "ZAR": 2,
+  "EGP": 2,
+  "NGN": 2,
+  "KES": 2,
+  "GHS": 2,
+  "INR": 2,
+  "PKR": 2,
+  "BDT": 2,
+  "LKR": 2,
+  "NPR": 2,
+  "THB": 2,
+  "MYR": 2,
+  "SGD": 2,
+  "PHP": 2,
+  "IDR": 2,
+  "CNY": 2,
+  "HKD": 2,
+  "TWD": 2,
+  "KRW": 2,
+  "ILS": 2,
+  "SAR": 2,
+  "AED": 2,
+  "QAR": 2,
+  "KWD": 3,
+  "RUB": 2,
+  "UAH": 2,
+  "KZT": 2,
+  // Fiat without decimals
+  "JPY": 0,
+  // Japanese Yen
+  "KRW": 0,
+  // Korean Won
+  "VND": 0,
+  // Vietnamese Dong
+  "CLP": 0,
+  // Chilean Peso
+  "ISK": 0,
+  // Icelandic Króna
+  "PYG": 0,
+  // Paraguayan Guaraní
+  // Cryptocurrencies
+  "BTC": 8,
+  // Bitcoin (satoshis)
+  "ETH": 18,
+  // Ethereum (wei) - often use 9 for gwei
+  "GWEI": 9,
+  // Ethereum gwei (common unit)
+  "USDT": 6,
+  // Tether
+  "USDC": 6,
+  // USD Coin
+  "BUSD": 18,
+  // Binance USD
+  "DAI": 18,
+  // Dai
+  "BNB": 18,
+  // Binance Coin
+  "XRP": 6,
+  // Ripple
+  "ADA": 6,
+  // Cardano
+  "SOL": 9,
+  // Solana
+  "MATIC": 18,
+  // Polygon
+  "AVAX": 18,
+  // Avalanche
+  "DOT": 10,
+  // Polkadot
+  "LINK": 18,
+  // Chainlink
+  "UNI": 18
+  // Uniswap
+};
+function getCurrencyDecimals(currency) {
+  const normalized = currency.toUpperCase();
+  return CURRENCY_DECIMALS[normalized] ?? 2;
+}
+function encodeMoney(value, currency = "USD") {
+  if (value === null || value === void 0) return value;
+  if (typeof value !== "number" || isNaN(value)) return value;
+  if (!isFinite(value)) return value;
+  if (value < 0) {
+    throw new Error(`Money value cannot be negative: ${value}`);
+  }
+  const decimals = getCurrencyDecimals(currency);
+  const multiplier = Math.pow(10, decimals);
+  const integerValue = Math.round(value * multiplier);
+  return "$" + encode(integerValue);
+}
+function decodeMoney(encoded, currency = "USD") {
+  if (typeof encoded !== "string") return encoded;
+  if (!encoded.startsWith("$")) return encoded;
+  const integerValue = decode(encoded.slice(1));
+  if (isNaN(integerValue)) return NaN;
+  const decimals = getCurrencyDecimals(currency);
+  const divisor = Math.pow(10, decimals);
+  return integerValue / divisor;
+}
+
+function encodeGeoLat(lat, precision = 6) {
+  if (lat === null || lat === void 0) return lat;
+  if (typeof lat !== "number" || isNaN(lat)) return lat;
+  if (!isFinite(lat)) return lat;
+  if (lat < -90 || lat > 90) {
+    throw new Error(`Latitude out of range [-90, 90]: ${lat}`);
+  }
+  const normalized = lat + 90;
+  const scale = Math.pow(10, precision);
+  const scaled = Math.round(normalized * scale);
+  return "~" + encode(scaled);
+}
+function decodeGeoLat(encoded, precision = 6) {
+  if (typeof encoded !== "string") return encoded;
+  if (!encoded.startsWith("~")) return encoded;
+  const scaled = decode(encoded.slice(1));
+  if (isNaN(scaled)) return NaN;
+  const scale = Math.pow(10, precision);
+  const normalized = scaled / scale;
+  return normalized - 90;
+}
+function encodeGeoLon(lon, precision = 6) {
+  if (lon === null || lon === void 0) return lon;
+  if (typeof lon !== "number" || isNaN(lon)) return lon;
+  if (!isFinite(lon)) return lon;
+  if (lon < -180 || lon > 180) {
+    throw new Error(`Longitude out of range [-180, 180]: ${lon}`);
+  }
+  const normalized = lon + 180;
+  const scale = Math.pow(10, precision);
+  const scaled = Math.round(normalized * scale);
+  return "~" + encode(scaled);
+}
+function decodeGeoLon(encoded, precision = 6) {
+  if (typeof encoded !== "string") return encoded;
+  if (!encoded.startsWith("~")) return encoded;
+  const scaled = decode(encoded.slice(1));
+  if (isNaN(scaled)) return NaN;
+  const scale = Math.pow(10, precision);
+  const normalized = scaled / scale;
+  return normalized - 180;
+}
+function encodeGeoPoint(lat, lon, precision = 6) {
+  const latEncoded = encodeGeoLat(lat, precision);
+  const lonEncoded = encodeGeoLon(lon, precision);
+  return latEncoded + lonEncoded;
+}
+function decodeGeoPoint(encoded, precision = 6) {
+  if (typeof encoded !== "string") return { latitude: NaN, longitude: NaN };
+  const parts = encoded.split("~").filter((p) => p.length > 0);
+  if (parts.length !== 2) {
+    return { latitude: NaN, longitude: NaN };
+  }
+  const latitude = decodeGeoLat("~" + parts[0], precision);
+  const longitude = decodeGeoLon("~" + parts[1], precision);
+  return { latitude, longitude };
+}
+
 function generateBase62Mapping(keys) {
   const mapping = {};
   const reversedMapping = {};
@@ -12008,6 +12192,81 @@ const SchemaActions = {
     if (typeof value !== "string") return value;
     const [ok, err, decoded] = tryFnSync(() => decodeIPv6(value));
     return ok ? decoded : value;
+  },
+  // Money type - Integer-based (banking standard)
+  encodeMoney: (value, { currency = "USD" } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "number") return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeMoney(value, currency));
+    return ok ? encoded : value;
+  },
+  decodeMoney: (value, { currency = "USD" } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeMoney(value, currency));
+    return ok ? decoded : value;
+  },
+  // Decimal type - Fixed-point for non-monetary decimals
+  encodeDecimalFixed: (value, { precision = 2 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "number") return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeFixedPoint(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeDecimalFixed: (value, { precision = 2 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeFixedPoint(value, precision));
+    return ok ? decoded : value;
+  },
+  // Geo types - Latitude
+  encodeGeoLatitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "number") return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeGeoLat(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeGeoLatitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoLat(value, precision));
+    return ok ? decoded : value;
+  },
+  // Geo types - Longitude
+  encodeGeoLongitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "number") return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeGeoLon(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeGeoLongitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoLon(value, precision));
+    return ok ? decoded : value;
+  },
+  // Geo types - Point (lat+lon pair)
+  encodeGeoPointPair: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (Array.isArray(value) && value.length === 2) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value[0], value[1], precision));
+      return ok ? encoded : value;
+    }
+    if (typeof value === "object" && value.lat !== void 0 && value.lon !== void 0) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value.lat, value.lon, precision));
+      return ok ? encoded : value;
+    }
+    if (typeof value === "object" && value.latitude !== void 0 && value.longitude !== void 0) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value.latitude, value.longitude, precision));
+      return ok ? encoded : value;
+    }
+    return value;
+  },
+  decodeGeoPointPair: (value, { precision = 6 } = {}) => {
+    if (value === null || value === void 0) return value;
+    if (typeof value !== "string") return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoPoint(value, precision));
+    return ok ? decoded : value;
   }
 };
 class Schema {
@@ -12184,6 +12443,56 @@ class Schema {
       if (defStr.includes("ip6") || defType === "ip6") {
         this.addHook("beforeMap", name, "encodeIPv6");
         this.addHook("afterUnmap", name, "decodeIPv6");
+        continue;
+      }
+      if (defStr.includes("money") || defType === "money") {
+        let currency = "USD";
+        const currencyMatch = defStr.match(/money:([A-Z]{3,4})/i);
+        if (currencyMatch) {
+          currency = currencyMatch[1].toUpperCase();
+        }
+        this.addHook("beforeMap", name, "encodeMoney", { currency });
+        this.addHook("afterUnmap", name, "decodeMoney", { currency });
+        continue;
+      }
+      if (defStr.includes("decimal") || defType === "decimal") {
+        let precision = 2;
+        const precisionMatch = defStr.match(/decimal:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+        this.addHook("beforeMap", name, "encodeDecimalFixed", { precision });
+        this.addHook("afterUnmap", name, "decodeDecimalFixed", { precision });
+        continue;
+      }
+      if (defStr.includes("geo:lat") || defType === "geo" && defStr.includes("lat")) {
+        let precision = 6;
+        const precisionMatch = defStr.match(/geo:lat:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+        this.addHook("beforeMap", name, "encodeGeoLatitude", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoLatitude", { precision });
+        continue;
+      }
+      if (defStr.includes("geo:lon") || defType === "geo" && defStr.includes("lon")) {
+        let precision = 6;
+        const precisionMatch = defStr.match(/geo:lon:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+        this.addHook("beforeMap", name, "encodeGeoLongitude", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoLongitude", { precision });
+        continue;
+      }
+      if (defStr.includes("geo:point") || defType === "geo:point") {
+        let precision = 6;
+        const precisionMatch = defStr.match(/geo:point:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+        this.addHook("beforeMap", name, "encodeGeoPointPair", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoPointPair", { precision });
         continue;
       }
       if (defStr.includes("number") || defType === "number") {
@@ -12424,6 +12733,41 @@ class Schema {
           processed[key] = value.replace(/^ip6/, "string");
           continue;
         }
+        if (value === "money" || value.startsWith("money:") || value.startsWith("money|")) {
+          const rest = value.replace(/^money(:[A-Z]{3,4})?/, "");
+          const hasMin = rest.includes("min:");
+          processed[key] = hasMin ? `number${rest}` : `number|min:0${rest}`;
+          continue;
+        }
+        if (value === "decimal" || value.startsWith("decimal:") || value.startsWith("decimal|")) {
+          const rest = value.replace(/^decimal(:\d+)?/, "");
+          processed[key] = `number${rest}`;
+          continue;
+        }
+        if (value.startsWith("geo:lat")) {
+          const rest = value.replace(/^geo:lat(:\d+)?/, "");
+          const hasMin = rest.includes("min:");
+          const hasMax = rest.includes("max:");
+          let validation = "number";
+          if (!hasMin) validation += "|min:-90";
+          if (!hasMax) validation += "|max:90";
+          processed[key] = validation + rest;
+          continue;
+        }
+        if (value.startsWith("geo:lon")) {
+          const rest = value.replace(/^geo:lon(:\d+)?/, "");
+          const hasMin = rest.includes("min:");
+          const hasMax = rest.includes("max:");
+          let validation = "number";
+          if (!hasMin) validation += "|min:-180";
+          if (!hasMax) validation += "|max:180";
+          processed[key] = validation + rest;
+          continue;
+        }
+        if (value.startsWith("geo:point")) {
+          processed[key] = "any";
+          continue;
+        }
         if (value.startsWith("embedding:")) {
           const lengthMatch = value.match(/embedding:(\d+)/);
           if (lengthMatch) {
@@ -12445,6 +12789,26 @@ class Schema {
             processed[key] = { ...value, type: "string" };
           } else if (value.type === "ip6") {
             processed[key] = { ...value, type: "string" };
+          } else if (value.type === "money") {
+            processed[key] = { ...value, type: "number", min: value.min !== void 0 ? value.min : 0 };
+          } else if (value.type === "decimal") {
+            processed[key] = { ...value, type: "number" };
+          } else if (value.type === "geo:lat" || value.type === "geo-lat") {
+            processed[key] = {
+              ...value,
+              type: "number",
+              min: value.min !== void 0 ? value.min : -90,
+              max: value.max !== void 0 ? value.max : 90
+            };
+          } else if (value.type === "geo:lon" || value.type === "geo-lon") {
+            processed[key] = {
+              ...value,
+              type: "number",
+              min: value.min !== void 0 ? value.min : -180,
+              max: value.max !== void 0 ? value.max : 180
+            };
+          } else if (value.type === "geo:point" || value.type === "geo-point") {
+            processed[key] = { ...value, type: "any" };
           } else if (value.type === "object" && value.properties) {
             processed[key] = {
               ...value,

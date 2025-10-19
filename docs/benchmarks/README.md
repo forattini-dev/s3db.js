@@ -17,6 +17,8 @@ Measure and document the performance of critical s3db.js components to:
 ```
 docs/benchmarks/
 ├── README.md                           # This file
+├── all-types-encoding.bench.js        # Complete type encoding benchmark (IP, Money, Decimal, Geo, Embeddings)
+├── all-types-encoding.md              # Results and analysis
 ├── eventual-consistency.bench.js      # EventualConsistency plugin benchmark
 ├── eventual-consistency.md            # Results and analysis
 ├── base62.bench.js                    # Base62 encoding benchmark
@@ -50,6 +52,9 @@ pnpm run benchmarks
 ### Run Specific Benchmark
 
 ```bash
+# Complete Type Encoding (IP, Money, Decimal, Geo, Embeddings)
+node docs/benchmarks/all-types-encoding.bench.js
+
 # EventualConsistency Plugin
 node docs/benchmarks/eventual-consistency.bench.js
 
@@ -76,6 +81,7 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 
 | Benchmark | File | Description | Status |
 |-----------|------|-------------|--------|
+| **Complete Type Encoding** | `all-types-encoding.bench.js` | ALL optimized types: IP, Money, Decimal, Geo, Embeddings (27-77% compression) | ✅ Active |
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
 | **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ✅ Active |
