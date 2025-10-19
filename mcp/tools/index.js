@@ -12,12 +12,14 @@ import { partitionTools, createPartitionHandlers } from './partitions.js';
 import { bulkTools, createBulkHandlers } from './bulk.js';
 import { exportImportTools, createExportImportHandlers } from './export-import.js';
 import { statsTools, createStatsHandlers } from './stats.js';
+import { documentationTools, createDocumentationHandlers } from './documentation.js';
 
 /**
  * Get all tool definitions
  */
 export function getAllTools() {
   return [
+    ...documentationTools,
     ...connectionTools,
     ...resourceManagementTools,
     ...crudTools,
@@ -37,6 +39,7 @@ export function getAllTools() {
  */
 export function createAllHandlers(server) {
   return {
+    ...createDocumentationHandlers(server),
     ...createConnectionHandlers(server),
     ...createResourceManagementHandlers(server),
     ...createCrudHandlers(server),
@@ -54,6 +57,7 @@ export function createAllHandlers(server) {
  */
 export function getToolsByCategory() {
   return {
+    documentation: documentationTools,
     connection: connectionTools,
     resources: resourceManagementTools,
     crud: crudTools,

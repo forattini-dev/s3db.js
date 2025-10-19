@@ -47,6 +47,35 @@ class S3dbMCPServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
+          // 📖 DOCUMENTATION TOOLS (for AI agents)
+          {
+            name: 's3dbQueryDocs',
+            description: 'Search s3db.js documentation to answer questions about features, plugins, best practices, and usage. Use this tool to help AI agents understand how to use s3db.js effectively.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Natural language question about s3db.js (e.g., "How do I use GeoPlugin?", "What is the best caching strategy?", "How do partitions work?")'
+                },
+                maxResults: {
+                  type: 'number',
+                  description: 'Maximum number of documentation files to return',
+                  default: 5
+                }
+              },
+              required: ['query']
+            }
+          },
+          {
+            name: 's3dbListTopics',
+            description: 'List all available documentation topics and their categories',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          },
           {
             name: 'dbConnect',
             description: 'Connect to an S3DB database with automatic costs tracking and configurable cache (memory or filesystem)',
@@ -877,6 +906,15 @@ class S3dbMCPServer {
         let result;
 
         switch (name) {
+          // Documentation tools
+          case 's3dbQueryDocs':
+            result = await this.handleS3dbQueryDocs(args);
+            break;
+
+          case 's3dbListTopics':
+            result = await this.handleS3dbListTopics(args);
+            break;
+
           case 'dbConnect':
             result = await this.handleDbConnect(args);
             break;
@@ -1133,6 +1171,26 @@ class S3dbMCPServer {
     }).catch(err => {
       console.warn('Could not setup health check endpoint:', err.message);
     });
+  }
+
+  // 📖 DOCUMENTATION TOOLS HANDLERS
+
+  async handleS3dbQueryDocs(args) {
+    const { query, maxResults = 5 } = args;
+
+    // Import the documentation handler dynamically
+    const { createDocumentationHandlers } = await import('./tools/documentation.js');
+    const handlers = createDocumentationHandlers(this);
+
+    return await handlers.s3dbQueryDocs(args);
+  }
+
+  async handleS3dbListTopics(args) {
+    // Import the documentation handler dynamically
+    const { createDocumentationHandlers } = await import('./tools/documentation.js');
+    const handlers = createDocumentationHandlers(this);
+
+    return await handlers.s3dbListTopics(args);
   }
 
   // Database connection handlers

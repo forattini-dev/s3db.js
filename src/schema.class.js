@@ -17,6 +17,8 @@ import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
 import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint } from "./concerns/base62.js";
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
+import { encodeMoney, decodeMoney, getCurrencyDecimals } from "./concerns/money.js";
+import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
 
 /**
  * Generate base62 mapping for attributes
@@ -358,6 +360,88 @@ export const SchemaActions = {
     return ok ? decoded : value;
   },
 
+  // Money type - Integer-based (banking standard)
+  encodeMoney: (value, { currency = 'USD' } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'number') return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeMoney(value, currency));
+    return ok ? encoded : value;
+  },
+  decodeMoney: (value, { currency = 'USD' } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeMoney(value, currency));
+    return ok ? decoded : value;
+  },
+
+  // Decimal type - Fixed-point for non-monetary decimals
+  encodeDecimalFixed: (value, { precision = 2 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'number') return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeFixedPoint(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeDecimalFixed: (value, { precision = 2 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeFixedPoint(value, precision));
+    return ok ? decoded : value;
+  },
+
+  // Geo types - Latitude
+  encodeGeoLatitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'number') return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeGeoLat(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeGeoLatitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoLat(value, precision));
+    return ok ? decoded : value;
+  },
+
+  // Geo types - Longitude
+  encodeGeoLongitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'number') return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeGeoLon(value, precision));
+    return ok ? encoded : value;
+  },
+  decodeGeoLongitude: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoLon(value, precision));
+    return ok ? decoded : value;
+  },
+
+  // Geo types - Point (lat+lon pair)
+  encodeGeoPointPair: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    // Accept object with lat/lon or array [lat, lon]
+    if (Array.isArray(value) && value.length === 2) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value[0], value[1], precision));
+      return ok ? encoded : value;
+    }
+    if (typeof value === 'object' && value.lat !== undefined && value.lon !== undefined) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value.lat, value.lon, precision));
+      return ok ? encoded : value;
+    }
+    if (typeof value === 'object' && value.latitude !== undefined && value.longitude !== undefined) {
+      const [ok, err, encoded] = tryFnSync(() => encodeGeoPoint(value.latitude, value.longitude, precision));
+      return ok ? encoded : value;
+    }
+    return value;
+  },
+  decodeGeoPointPair: (value, { precision = 6 } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeGeoPoint(value, precision));
+    // Return as object { latitude, longitude }
+    return ok ? decoded : value;
+  },
+
 }
 
 export class Schema {
@@ -613,6 +697,76 @@ export class Schema {
       if (defStr.includes("ip6") || defType === 'ip6') {
         this.addHook("beforeMap", name, "encodeIPv6");
         this.addHook("afterUnmap", name, "decodeIPv6");
+        continue;
+      }
+
+      // Handle money type (integer-based, currency-aware)
+      if (defStr.includes("money") || defType === 'money') {
+        // Extract currency from money:BRL or money|currency:BRL notation
+        let currency = 'USD';
+        const currencyMatch = defStr.match(/money:([A-Z]{3,4})/i);
+        if (currencyMatch) {
+          currency = currencyMatch[1].toUpperCase();
+        }
+
+        this.addHook("beforeMap", name, "encodeMoney", { currency });
+        this.addHook("afterUnmap", name, "decodeMoney", { currency });
+        continue;
+      }
+
+      // Handle decimal type (fixed-point for non-monetary decimals)
+      if (defStr.includes("decimal") || defType === 'decimal') {
+        // Extract precision from decimal:4 notation
+        let precision = 2; // Default precision
+        const precisionMatch = defStr.match(/decimal:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeDecimalFixed", { precision });
+        this.addHook("afterUnmap", name, "decodeDecimalFixed", { precision });
+        continue;
+      }
+
+      // Handle geo:lat type (latitude)
+      if (defStr.includes("geo:lat") || (defType === 'geo' && defStr.includes('lat'))) {
+        // Extract precision from geo:lat:6 notation
+        let precision = 6; // Default precision (GPS standard)
+        const precisionMatch = defStr.match(/geo:lat:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeGeoLatitude", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoLatitude", { precision });
+        continue;
+      }
+
+      // Handle geo:lon type (longitude)
+      if (defStr.includes("geo:lon") || (defType === 'geo' && defStr.includes('lon'))) {
+        // Extract precision from geo:lon:6 notation
+        let precision = 6; // Default precision
+        const precisionMatch = defStr.match(/geo:lon:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeGeoLongitude", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoLongitude", { precision });
+        continue;
+      }
+
+      // Handle geo:point type (lat+lon pair)
+      if (defStr.includes("geo:point") || defType === 'geo:point') {
+        // Extract precision from geo:point:6 notation
+        let precision = 6; // Default precision
+        const precisionMatch = defStr.match(/geo:point:(\d+)/);
+        if (precisionMatch) {
+          precision = parseInt(precisionMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeGeoPointPair", { precision });
+        this.addHook("afterUnmap", name, "decodeGeoPointPair", { precision });
         continue;
       }
 
@@ -896,6 +1050,55 @@ export class Schema {
           processed[key] = value.replace(/^ip6/, 'string');
           continue;
         }
+        // Expand money shorthand to number type with min validation
+        if (value === 'money' || value.startsWith('money:') || value.startsWith('money|')) {
+          // Extract any modifiers after money:CURRENCY
+          const rest = value.replace(/^money(:[A-Z]{3,4})?/, '');
+          // Money must be non-negative
+          const hasMin = rest.includes('min:');
+          processed[key] = hasMin ? `number${rest}` : `number|min:0${rest}`;
+          continue;
+        }
+        // Expand decimal shorthand to number type
+        if (value === 'decimal' || value.startsWith('decimal:') || value.startsWith('decimal|')) {
+          // Extract any modifiers after decimal:PRECISION
+          const rest = value.replace(/^decimal(:\d+)?/, '');
+          processed[key] = `number${rest}`;
+          continue;
+        }
+        // Expand geo:lat shorthand to number type with range validation
+        if (value.startsWith('geo:lat')) {
+          // Extract any modifiers after geo:lat:PRECISION
+          const rest = value.replace(/^geo:lat(:\d+)?/, '');
+          // Latitude range: -90 to 90
+          const hasMin = rest.includes('min:');
+          const hasMax = rest.includes('max:');
+          let validation = 'number';
+          if (!hasMin) validation += '|min:-90';
+          if (!hasMax) validation += '|max:90';
+          processed[key] = validation + rest;
+          continue;
+        }
+        // Expand geo:lon shorthand to number type with range validation
+        if (value.startsWith('geo:lon')) {
+          // Extract any modifiers after geo:lon:PRECISION
+          const rest = value.replace(/^geo:lon(:\d+)?/, '');
+          // Longitude range: -180 to 180
+          const hasMin = rest.includes('min:');
+          const hasMax = rest.includes('max:');
+          let validation = 'number';
+          if (!hasMin) validation += '|min:-180';
+          if (!hasMax) validation += '|max:180';
+          processed[key] = validation + rest;
+          continue;
+        }
+        // Expand geo:point shorthand to object with lat/lon
+        if (value.startsWith('geo:point')) {
+          // geo:point is an object or array with lat/lon
+          // For simplicity, allow it as any type (will be validated in hooks)
+          processed[key] = 'any';
+          continue;
+        }
         // Expand embedding:XXX shorthand to array|items:number|length:XXX
         if (value.startsWith('embedding:')) {
           const lengthMatch = value.match(/embedding:(\d+)/);
@@ -924,6 +1127,31 @@ export class Schema {
             processed[key] = { ...value, type: 'string' };
           } else if (value.type === 'ip6') {
             processed[key] = { ...value, type: 'string' };
+          } else if (value.type === 'money') {
+            // Money type → number with min:0
+            processed[key] = { ...value, type: 'number', min: value.min !== undefined ? value.min : 0 };
+          } else if (value.type === 'decimal') {
+            // Decimal type → number
+            processed[key] = { ...value, type: 'number' };
+          } else if (value.type === 'geo:lat' || value.type === 'geo-lat') {
+            // Geo latitude → number with range [-90, 90]
+            processed[key] = {
+              ...value,
+              type: 'number',
+              min: value.min !== undefined ? value.min : -90,
+              max: value.max !== undefined ? value.max : 90
+            };
+          } else if (value.type === 'geo:lon' || value.type === 'geo-lon') {
+            // Geo longitude → number with range [-180, 180]
+            processed[key] = {
+              ...value,
+              type: 'number',
+              min: value.min !== undefined ? value.min : -180,
+              max: value.max !== undefined ? value.max : 180
+            };
+          } else if (value.type === 'geo:point' || value.type === 'geo-point') {
+            // Geo point → any (will be validated in hooks)
+            processed[key] = { ...value, type: 'any' };
           } else if (value.type === 'object' && value.properties) {
             // Recursively process nested object properties
             processed[key] = {
