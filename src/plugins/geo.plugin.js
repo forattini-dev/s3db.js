@@ -150,15 +150,25 @@ class GeoPlugin extends Plugin {
     resource._geoConfig = config;
 
     // Add geohash fields to resource schema if not already present
-    let needsUpdate = false;
+    // Check if lat/lon fields are optional to determine if geohash fields should also be optional
+    const latField = resource.attributes[config.latField];
+    const lonField = resource.attributes[config.lonField];
+    const isLatOptional = typeof latField === 'object' && latField.optional === true;
+    const isLonOptional = typeof lonField === 'object' && lonField.optional === true;
+    const areCoordinatesOptional = isLatOptional || isLonOptional;
 
-    if (config.addGeohash && !resource.attributes.geohash) {
-      resource.attributes.geohash = 'string';
+    const geohashType = areCoordinatesOptional ? 'string|optional' : 'string';
+
+    let needsUpdate = false;
+    const newAttributes = { ...resource.attributes };
+
+    if (config.addGeohash && !newAttributes.geohash) {
+      newAttributes.geohash = geohashType;
       needsUpdate = true;
     }
 
-    if (!resource.attributes._geohash) {
-      resource.attributes._geohash = 'string';
+    if (!newAttributes._geohash) {
+      newAttributes._geohash = geohashType;
       needsUpdate = true;
     }
 
@@ -166,16 +176,21 @@ class GeoPlugin extends Plugin {
     if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
       for (const zoom of config.zoomLevels) {
         const fieldName = `_geohash_zoom${zoom}`;
-        if (!resource.attributes[fieldName]) {
-          resource.attributes[fieldName] = 'string';
+        if (!newAttributes[fieldName]) {
+          newAttributes[fieldName] = geohashType;
           needsUpdate = true;
         }
       }
     }
 
-    // Persist schema changes to metadata if we added new fields
-    if (needsUpdate && this.database.uploadMetadataFile) {
-      await this.database.uploadMetadataFile();
+    // Update schema if we added new fields (this regenerates field maps)
+    if (needsUpdate) {
+      resource.updateAttributes(newAttributes);
+
+      // Persist schema changes to metadata
+      if (this.database.uploadMetadataFile) {
+        await this.database.uploadMetadataFile();
+      }
     }
 
     // Setup geohash partitions if enabled
