@@ -23,10 +23,6 @@ docs/benchmarks/
 ├── eventual-consistency.md            # Results and analysis
 ├── base62.bench.js                    # Base62 encoding benchmark
 ├── base62.md                          # Results and analysis
-├── smart-encoding.bench.js            # Smart encoding benchmark
-├── smart-encoding.md                  # Results and analysis
-├── ip-encoding.bench.js               # IP address binary encoding benchmark
-├── ip-encoding.md                     # Results and analysis
 ├── partitions-matrix.js               # Partitions performance benchmark
 ├── partitions.md                      # Results and analysis
 ├── vector-clustering.bench.js         # Vector clustering with open-source embeddings
@@ -62,12 +58,6 @@ node docs/benchmarks/eventual-consistency.bench.js
 # Base62 Encoding
 node docs/benchmarks/base62.bench.js
 
-# Smart Metadata Encoding
-node docs/benchmarks/smart-encoding.bench.js
-
-# IP Address Encoding
-node docs/benchmarks/ip-encoding.bench.js
-
 # Partitions Performance
 node docs/benchmarks/partitions-matrix.js
 
@@ -85,8 +75,6 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 | **Complete Type Encoding** | `all-types-encoding.bench.js` | ALL optimized types: Strings, IP, Money, Decimal, Geo, Embeddings (0-77% compression) | ✅ Active |
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
-| **Smart Metadata Encoding** | `smart-encoding.bench.js` | Smart ASCII/Latin/UTF8 encoding performance | ⚠️ Deprecated - Now part of `all-types-encoding` |
-| **IP Address Encoding** | `ip-encoding.bench.js` | IPv4/IPv6 binary encoding compression & performance | ⚠️ Deprecated - Now part of `all-types-encoding` |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
 | **Vector Clustering** | `vector-clustering.bench.js` | K-means clustering with open-source embeddings (100/1K/10K vectors) | ✅ Active |
 
