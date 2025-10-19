@@ -16,23 +16,31 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 - ✅ Dead letter queue para falhas
 - ✅ Event monitoring completo
 
-**Quando usar:**
-- 🔄 Backup para outra instância S3DB
-- 📊 Data warehouse (BigQuery/PostgreSQL)
-- 📡 Event streaming (SQS)
-- 🌐 Integração com APIs externas (Webhooks)
-- 🌍 Multi-region sync
+**Performance & Manutenção:**
+```javascript
+// ❌ Sem replicator: Cron job manual exportando para PostgreSQL
+// - Roda 1x/dia à meia-noite
+// - Dados sempre com 24h de atraso
+// - Quebra quando schema muda
+// - 4 horas/semana de manutenção
+
+// ✅ Com replicator: Sync automático em tempo real
+await users.insert({ name: 'John' }); // Replica automaticamente
+// - Dados disponíveis em ~2 segundos
+// - Zero manutenção
+// - Não quebra com mudanças de schema (com transform)
+// - Múltiplos destinos simultâneos
+```
 
 ---
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
-- [Key Features](#key-features)
+- [Usage Journey](#usage-journey) - **Comece aqui para aprender passo-a-passo**
 - [Installation & Setup](#installation--setup)
 - [Configuration Options](#configuration-options)
 - [Replicator Drivers](#replicator-drivers)
-- [Usage Examples](#usage-examples)
 - [API Reference](#api-reference)
 - [Best Practices](#best-practices)
 
@@ -54,21 +62,266 @@ The Replicator Plugin provides **enterprise-grade data replication** that synchr
 
 ---
 
-## Key Features
+## Usage Journey
 
-### 🎯 Core Features
-- **Real-time Replication**: Automatic data synchronization on insert, update, and delete operations
-- **Multi-Target Support**: Replicate to S3DB, BigQuery, PostgreSQL, SQS, and custom targets
-- **Advanced Transformations**: Transform data with custom functions before replication
-- **Error Resilience**: Automatic retries, detailed error reporting, and dead letter queue support
-- **Performance Monitoring**: Built-in metrics, performance tracking, and health monitoring
+### Level 1: Simple Backup (S3DB → S3DB)
 
-### 🔧 Technical Features
-- **Flexible Configuration**: Multiple resource mapping syntaxes for complex scenarios
-- **Selective Replication**: Choose which operations and resources to replicate
-- **Batch Processing**: Efficient bulk replication operations
-- **Event System**: Comprehensive event monitoring and debugging capabilities
-- **Conditional Logic**: Skip replication based on custom conditions
+Comece aqui para backup básico entre buckets:
+
+```javascript
+// Step 1: Configure backup para outro bucket
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 's3db',
+    resources: ['users'],  // Replica apenas users
+    config: {
+      connectionString: 's3://KEY:SECRET@backup-bucket/database'
+    }
+  }]
+})
+
+// Step 2: Use normalmente - backup é automático
+await users.insert({ name: 'John', email: 'john@example.com' });
+// Replicado automaticamente para backup-bucket em ~2s
+```
+
+**O que você ganha:** Backup automático em tempo real, zero código adicional.
+
+### Level 2: Add Data Transformation
+
+Quando precisar transformar dados antes de replicar:
+
+```javascript
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 's3db',
+    resources: {
+      users: {
+        resource: 'users_backup',  // Nome diferente no destino
+        transform: (data) => ({
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          // Remove campos sensíveis
+          // password: OMITIDO
+          created_at: new Date().toISOString()
+        }),
+        actions: ['insert', 'update']  // Não replica deletes
+      }
+    },
+    config: { connectionString: 's3://...' }
+  }]
+})
+```
+
+**O que você ganha:** Controle total sobre o que e como é replicado.
+
+### Level 3: Multi-Destination Replication
+
+Para analytics, webhooks e múltiplos sistemas:
+
+```javascript
+new ReplicatorPlugin({
+  replicators: [
+    // 1. Backup para S3
+    {
+      driver: 's3db',
+      resources: ['users', 'orders'],
+      config: { connectionString: 's3://backup-bucket/...' }
+    },
+
+    // 2. Analytics no PostgreSQL
+    {
+      driver: 'postgresql',
+      resources: {
+        orders: {
+          resource: 'analytics_orders',
+          transform: (data) => ({
+            order_id: data.id,
+            total: data.total,
+            created_at: data.createdAt,
+            // Campos otimizados para analytics
+          })
+        }
+      },
+      config: {
+        connectionString: process.env.POSTGRES_URL
+      }
+    },
+
+    // 3. Event stream para SQS
+    {
+      driver: 'sqs',
+      resources: ['orders'],
+      config: {
+        queueUrl: process.env.SQS_QUEUE_URL,
+        region: 'us-east-1'
+      }
+    },
+
+    // 4. Webhook para CRM externo
+    {
+      driver: 'webhook',
+      resources: {
+        users: {
+          actions: ['insert'],  // Só novos usuários
+          transform: (data) => ({
+            user_id: data.id,
+            email: data.email,
+            name: data.name
+          })
+        }
+      },
+      config: {
+        url: 'https://crm.example.com/api/users',
+        headers: { 'Authorization': `Bearer ${process.env.CRM_TOKEN}` }
+      }
+    }
+  ]
+})
+```
+
+**O que você ganha:** Um write, quatro destinos. Zero manutenção de scripts ETL.
+
+### Level 4: Error Handling & Monitoring
+
+Adicionar resiliência e observabilidade:
+
+```javascript
+new ReplicatorPlugin({
+  verbose: true,  // Logs detalhados
+  persistReplicatorLog: true,  // Armazena logs no banco
+  maxRetries: 3,  // 3 tentativas antes de falhar
+
+  replicators: [{
+    driver: 'postgresql',
+    resources: ['orders'],
+    config: { connectionString: process.env.POSTGRES_URL }
+  }]
+})
+
+// Monitorar erros
+db.on('replicator:error', ({ error, resource, data }) => {
+  console.error(`Falha ao replicar ${resource}:`, error.message);
+  // Enviar para Sentry/DataDog
+  Sentry.captureException(error, { extra: { resource, data } });
+});
+
+// Monitorar sucesso
+db.on('replicator:success', ({ resource, destination }) => {
+  console.log(`✓ ${resource} replicado para ${destination}`);
+});
+
+// Ver logs persistidos
+const logs = await db.resource('replicator_log');
+const errors = await logs.query({ status: 'error' });
+console.log(`${errors.length} erros de replicação`);
+```
+
+**O que você ganha:** Visibilidade completa, debugging fácil.
+
+### Level 5: Selective Replication with Filters
+
+Controle fino sobre o que replica:
+
+```javascript
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 'postgresql',
+    resources: {
+      orders: {
+        // Só replica orders completos
+        shouldReplicate: (data, action) => {
+          if (action === 'delete') return false;  // Nunca replica deletes
+          if (data.status !== 'completed') return false;  // Só completos
+          if (data.total < 100) return false;  // Só pedidos > $100
+          return true;
+        },
+
+        transform: (data) => ({
+          id: data.id,
+          total: data.total,
+          status: data.status,
+          completed_at: new Date().toISOString()
+        })
+      }
+    },
+    config: { connectionString: process.env.ANALYTICS_DB }
+  }]
+})
+```
+
+**O que você ganha:** Replica apenas o necessário, economiza storage e processamento.
+
+### Level 6: Production - Multi-Region Sync
+
+Para alta disponibilidade e disaster recovery:
+
+```javascript
+new ReplicatorPlugin({
+  replicators: [
+    // Primary backup (mesma região)
+    {
+      driver: 's3db',
+      resources: ['users', 'orders', 'products'],
+      config: {
+        connectionString: 's3://us-east-1-backup/...'
+      }
+    },
+
+    // Secondary backup (região diferente)
+    {
+      driver: 's3db',
+      resources: ['users', 'orders', 'products'],
+      config: {
+        connectionString: 's3://eu-west-1-backup/...'
+      }
+    },
+
+    // Analytics (BigQuery)
+    {
+      driver: 'bigquery',
+      resources: {
+        orders: {
+          resource: 'analytics.orders',
+          transform: (data) => ({
+            // Schema otimizado para BigQuery
+            order_id: data.id,
+            total_usd: parseFloat(data.total),
+            created_timestamp: new Date(data.createdAt).getTime(),
+            customer_id: data.customerId
+          })
+        }
+      },
+      config: {
+        projectId: process.env.GCP_PROJECT,
+        credentials: JSON.parse(process.env.GCP_CREDENTIALS)
+      }
+    }
+  ],
+
+  // Monitor health
+  verbose: true,
+  persistReplicatorLog: true
+})
+
+// Health check endpoint
+app.get('/health/replication', async (req, res) => {
+  const logs = await db.resource('replicator_log');
+  const recentErrors = await logs.query({
+    status: 'error',
+    timestamp: { $gte: Date.now() - 3600000 }  // Última hora
+  });
+
+  if (recentErrors.length > 10) {
+    return res.status(500).json({ status: 'unhealthy', errors: recentErrors.length });
+  }
+
+  res.json({ status: 'healthy', errors: recentErrors.length });
+});
+```
+
+**O que você ganha:** Multi-region, multi-destination, production-ready com monitoring.
 
 ---
 
