@@ -16,11 +16,16 @@ await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 - ✅ Hit/miss rate statistics
 - ✅ Partition-aware caching
 
-**When to use:**
-- 💰 Reduce S3 API costs
-- ⚡ Improve performance (2ms vs 180ms)
-- 📊 Cache heavy queries
-- 🌍 Multi-server with S3 driver
+**Performance & Cost:**
+```javascript
+// ❌ Without cache: Every call hits S3
+await users.count(); // 180ms, $0.0004 per call
+// 1000 calls = 180 seconds, $0.40
+
+// ✅ With cache: First call S3, rest from memory
+await users.count(); // First: 180ms, Next: 2ms
+// 1000 calls = 2.18 seconds (82x faster), $0.0004 total (1000x cheaper)
+```
 
 ---
 
@@ -53,6 +58,156 @@ console.timeEnd('Cached call');
 console.log(`Count: ${count2}, Speed improvement: ${(180/2).toFixed(0)}x faster`);
 // Output: Count: 150, Speed improvement: 90x faster
 ```
+
+---
+
+## Usage Journey
+
+### Level 1: Basic Memory Caching
+
+Start here for immediate performance gains:
+
+```javascript
+// Step 1: Add cache plugin
+plugins: [new CachePlugin({ driver: 'memory' })]
+
+// Step 2: Use normally - caching is automatic
+await users.count();  // First: 180ms (S3)
+await users.count();  // Next: 2ms (cache) - 90x faster!
+```
+
+**What you get:** Instant 90x speedup on repeat calls, zero config.
+
+### Level 2: Add Memory Limits
+
+Once caching more data, prevent memory exhaustion:
+
+```javascript
+// Option A: Fixed limit (known environment)
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryBytes: 512 * 1024 * 1024,  // 512MB max
+    evictionPolicy: 'lru'  // Remove oldest when full
+  }
+})
+
+// Option B: Percentage limit (containers/cloud)
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1,  // Use 10% of system memory
+    // 16GB system = 1.6GB cache
+    // 32GB system = 3.2GB cache
+  }
+})
+```
+
+**What you get:** Protection against OOM, automatic eviction.
+
+### Level 3: Enable Compression
+
+For larger cached objects, save memory:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    maxMemoryPercent: 0.1,
+    enableCompression: true,  // Compress with gzip
+    compressionThreshold: 1024  // Only compress if >1KB
+  }
+})
+```
+
+**What you get:** 2-3x more data cached in same memory.
+
+### Level 4: Add Statistics & Monitoring
+
+Track cache effectiveness:
+
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  config: {
+    enableStats: true  // Track hits/misses
+  }
+})
+
+// Check performance
+const stats = cachePlugin.driver.getStats();
+console.log(`Hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
+console.log(`Saved: ${stats.hits} S3 calls`);
+// Hit rate: 85.5%
+// Saved: 3,420 S3 calls ($1.37)
+```
+
+**What you get:** Data-driven cache tuning.
+
+### Level 5: Production - Persistent Cache
+
+For production, survive restarts with filesystem cache:
+
+```javascript
+new CachePlugin({
+  driver: 'filesystem',
+  ttl: 1800000,  // 30 minutes
+  config: {
+    directory: './cache',
+    enableCompression: true,
+    enableCleanup: true  // Auto-delete expired files
+  }
+})
+```
+
+**What you get:** Cache survives deployments/restarts.
+
+### Level 6: Multi-Server - Shared S3 Cache
+
+For distributed systems, share cache across servers:
+
+```javascript
+new CachePlugin({
+  driver: 's3',
+  ttl: 3600000,  // 1 hour
+  config: {
+    keyPrefix: 'app-cache/',
+    // Uses same S3 bucket as database
+  }
+})
+```
+
+**What you get:** All servers share cache, no cold starts.
+
+### Level 7: Production Optimization
+
+Combine techniques for maximum efficiency:
+
+```javascript
+// 1. Use filesystem for speed + persistence
+new CachePlugin({
+  driver: 'filesystem',
+  ttl: 1800000,  // 30 min
+  config: {
+    directory: '/mnt/cache',  // Fast SSD
+    enableCompression: true,
+    enableCleanup: true
+  }
+})
+
+// 2. Monitor cache health
+setInterval(() => {
+  const stats = cachePlugin.driver.getStats();
+  if (stats.hitRate < 0.7) {
+    console.warn('Low hit rate, consider increasing TTL');
+  }
+}, 60000);
+
+// 3. Selective resource caching
+// (Cache plugin auto-skips plugin-created resources)
+```
+
+**What you get:** Production-ready caching with monitoring.
 
 ---
 
