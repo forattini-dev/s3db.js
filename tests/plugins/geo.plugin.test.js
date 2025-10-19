@@ -758,7 +758,8 @@ describe('GeoPlugin', () => {
           stores: {
             latField: 'latitude',
             lonField: 'longitude',
-            precision: 5
+            precision: 5,
+            usePartitions: true
           }
         }
       });
@@ -955,7 +956,8 @@ describe('GeoPlugin', () => {
           stores: {
             latField: 'latitude',
             lonField: 'longitude',
-            precision: 5
+            precision: 5,
+            usePartitions: true
           }
         }
       });
