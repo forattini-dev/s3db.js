@@ -1,6 +1,7 @@
 import { BasePartitionDriver } from './base-partition-driver.js';
 import { PromisePool } from '@supercharge/promise-pool';
 import { PartitionDriverError } from '../errors.js';
+import tryFn from '../concerns/try-fn.js';
 
 /**
  * In-memory partition driver with background processing
@@ -108,24 +109,25 @@ export class MemoryPartitionDriver extends BasePartitionDriver {
     if (this.isProcessing || this.queue.length === 0) return;
     
     this.isProcessing = true;
-    
-    try {
+
+    const [ok, err] = await tryFn(async () => {
       // Take a batch from the queue
       const batch = this.queue.splice(0, this.batchSize);
-      
+
       // Process in parallel with concurrency control
       const { results, errors } = await PromisePool
         .for(batch)
         .withConcurrency(this.concurrency)
         .process(async (item) => {
-          try {
-            await this.processOperation(item);
+          const [itemOk, itemErr, itemResult] = await tryFn(() => this.processOperation(item));
+
+          if (itemOk) {
             return { success: true, item };
-          } catch (error) {
-            return this.handleError(item, error);
+          } else {
+            return this.handleError(item, itemErr);
           }
         });
-      
+
       // Handle successful results
       const successful = results.filter(r => r.success);
       this.emit('batchProcessed', {
@@ -133,19 +135,19 @@ export class MemoryPartitionDriver extends BasePartitionDriver {
         failed: errors.length,
         retried: results.filter(r => r.retried).length
       });
-      
-    } finally {
-      this.isProcessing = false;
-      
-      // Continue processing if more items
-      if (this.queue.length > 0) {
-        setImmediate(() => this.processQueue());
-      }
-      
-      // Process retry queue if needed
-      if (this.retryQueue.length > 0) {
-        this.processRetryQueue();
-      }
+    });
+
+    // Always execute (finally equivalent)
+    this.isProcessing = false;
+
+    // Continue processing if more items
+    if (this.queue.length > 0) {
+      setImmediate(() => this.processQueue());
+    }
+
+    // Process retry queue if needed
+    if (this.retryQueue.length > 0) {
+      this.processRetryQueue();
     }
   }
 
