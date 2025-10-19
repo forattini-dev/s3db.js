@@ -111,11 +111,11 @@ Monday, 9:42 AM. Your production database is empty.
 
 ### ✅ Phase 1: Complete Examples
 - [x] **GeoPlugin** - Full storytelling rewrite (see `geo-STORYTELLING.md`)
+- [x] **CachePlugin** - Cost/performance story (see `cache-STORYTELLING.md`)
 - [x] **Template** - Complete template created
 - [x] **Migration Guide** - Step-by-step process documented
 
 ### 📋 Phase 2: High-Priority Rewrites
-- [ ] CachePlugin - Cost/performance story
 - [ ] ReplicatorPlugin - Integration story
 - [ ] AuditPlugin - Compliance/disaster story
 - [ ] BackupPlugin - Data loss story
