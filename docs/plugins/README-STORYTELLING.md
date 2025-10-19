@@ -118,7 +118,7 @@ Monday, 9:42 AM. Your production database is empty.
 - [x] **Migration Guide** - Step-by-step process documented
 
 ### 📋 Phase 2: High-Priority Rewrites
-- [ ] BackupPlugin - Data loss story
+- [x] **BackupPlugin** - Data loss story (see `backup-STORYTELLING.md`)
 - [ ] MetricsPlugin - Performance monitoring story
 
 ### 📋 Phase 3: Medium-Priority Rewrites
