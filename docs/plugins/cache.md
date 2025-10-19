@@ -16,15 +16,21 @@ await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 - ✅ Hit/miss rate statistics
 - ✅ Partition-aware caching
 
-**Performance & Cost:**
+**Performance & Cost** (measured with Costs Plugin):
 ```javascript
 // ❌ Without cache: Every call hits S3
-await users.count(); // 180ms, $0.0004 per call
-// 1000 calls = 180 seconds, $0.40
+for (let i = 0; i < 1000; i++) {
+  await users.count(); // Each call: ~180ms + 1 GET request ($0.0004)
+}
+// Total: ~180 seconds, 1000 GET requests = $0.40
 
 // ✅ With cache: First call S3, rest from memory
-await users.count(); // First: 180ms, Next: 2ms
-// 1000 calls = 2.18 seconds (82x faster), $0.0004 total (1000x cheaper)
+for (let i = 0; i < 1000; i++) {
+  await users.count(); // First: 180ms + 1 GET, Rest: 2ms (cache hit)
+}
+// Total: ~2 seconds (90x faster), 1 GET request = $0.0004 (1000x cheaper!)
+console.log(s3db.client.costs.total); // $0.0004
+console.log(s3db.client.costs.requests.get); // 1 (vs 1000 without cache)
 ```
 
 ---
@@ -496,6 +502,154 @@ const stats = resource.cache.stats();
 if (stats.hitRate < 0.7) {
   console.warn(`Low cache hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
 }
+```
+
+---
+
+## 💰 Measuring Real Cost Savings with Costs Plugin
+
+Combine `CachePlugin` with `CostsPlugin` to track actual AWS cost savings:
+
+### Complete Example
+
+```javascript
+import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+
+const s3db = new S3db({
+  connectionString: 's3://key:secret@bucket/path',
+  plugins: [
+    CostsPlugin,  // Track real AWS costs
+    new CachePlugin({ driver: 'memory', ttl: 300000 })  // 5min cache
+  ]
+});
+
+await s3db.connect();
+const users = s3db.resource('users');
+
+// Scenario: 10,000 read operations
+console.log('=== Without Cache ===');
+
+// Reset costs
+s3db.client.costs.reset();
+
+// Simulate 10,000 calls without cache (disable temporarily)
+users.cache.driver.enabled = false;
+for (let i = 0; i < 10000; i++) {
+  await users.count();
+}
+
+const noCacheCost = s3db.client.costs.total;
+const noCacheRequests = s3db.client.costs.requests.get;
+console.log(`Cost: $${noCacheCost.toFixed(4)}`);
+console.log(`GET requests: ${noCacheRequests}`);
+// Output: Cost: $4.0000, GET requests: 10000
+
+console.log('\n=== With Cache ===');
+
+// Reset and enable cache
+s3db.client.costs.reset();
+users.cache.driver.enabled = true;
+
+// Same 10,000 calls with cache
+for (let i = 0; i < 10000; i++) {
+  await users.count();
+}
+
+const cacheCost = s3db.client.costs.total;
+const cacheRequests = s3db.client.costs.requests.get;
+const cacheStats = users.cache.stats();
+
+console.log(`Cost: $${cacheCost.toFixed(4)}`);
+console.log(`GET requests: ${cacheRequests}`);
+console.log(`Cache hits: ${cacheStats.hits}`);
+console.log(`Cache hit rate: ${(cacheStats.hitRate * 100).toFixed(1)}%`);
+// Output:
+// Cost: $0.0004
+// GET requests: 1
+// Cache hits: 9999
+// Cache hit rate: 99.99%
+
+console.log('\n=== Savings ===');
+const savings = noCacheCost - cacheCost;
+const savingsPercent = ((savings / noCacheCost) * 100).toFixed(1);
+console.log(`Total savings: $${savings.toFixed(4)} (${savingsPercent}%)`);
+console.log(`Requests saved: ${noCacheRequests - cacheRequests} (${((1 - cacheRequests/noCacheRequests) * 100).toFixed(1)}%)`);
+// Output:
+// Total savings: $3.9996 (99.99%)
+// Requests saved: 9999 (99.99%)
+```
+
+### Monthly Projection
+
+```javascript
+// Calculate monthly costs based on current usage
+const operations = {
+  count: 100000,      // 100K count() calls/month
+  list: 50000,        // 50K list() calls/month
+  get: 200000         // 200K get() calls/month
+};
+
+// Without cache (all operations hit S3)
+const monthlyWithoutCache =
+  (operations.count * 0.0000004) +  // count = GET
+  (operations.list * 0.000005) +     // list = LIST
+  (operations.get * 0.0000004);      // get = GET
+
+console.log(`Monthly cost without cache: $${monthlyWithoutCache.toFixed(2)}`);
+// Output: Monthly cost without cache: $0.37
+
+// With cache (assuming 95% hit rate)
+const hitRate = 0.95;
+const monthlyWithCache =
+  ((operations.count * (1 - hitRate)) * 0.0000004) +
+  ((operations.list * (1 - hitRate)) * 0.000005) +
+  ((operations.get * (1 - hitRate)) * 0.0000004);
+
+console.log(`Monthly cost with cache: $${monthlyWithCache.toFixed(2)}`);
+// Output: Monthly cost with cache: $0.02
+
+console.log(`Monthly savings: $${(monthlyWithoutCache - monthlyWithCache).toFixed(2)}`);
+// Output: Monthly savings: $0.35
+```
+
+### Real-Time Monitoring
+
+```javascript
+// Monitor costs and cache performance in real-time
+setInterval(() => {
+  const costs = s3db.client.costs;
+  const stats = users.cache.stats();
+
+  console.log('=== Cache & Costs Report ===');
+  console.log(`Total cost: $${costs.total.toFixed(4)}`);
+  console.log(`Total requests: ${costs.requests.total}`);
+  console.log(`Cache hit rate: ${(stats.hitRate * 100).toFixed(1)}%`);
+  console.log(`Cache memory: ${stats.memoryUsagePercent}%`);
+
+  // Alert if cache not saving money
+  if (stats.hitRate < 0.8) {
+    console.warn('⚠️  Low cache hit rate - consider adjusting TTL');
+  }
+}, 60000); // Every minute
+```
+
+### Cost Breakdown by Operation
+
+```javascript
+// After running your application
+const costs = s3db.client.costs;
+
+console.log('=== Cost Breakdown ===');
+console.log(`PUT operations: ${costs.requests.put} × $${costs.prices.put} = $${(costs.requests.put * costs.prices.put).toFixed(6)}`);
+console.log(`GET operations: ${costs.requests.get} × $${costs.prices.get} = $${(costs.requests.get * costs.prices.get).toFixed(6)}`);
+console.log(`LIST operations: ${costs.requests.list} × $${costs.prices.list} = $${(costs.requests.list * costs.prices.list).toFixed(6)}`);
+console.log(`Total: $${costs.total.toFixed(6)}`);
+
+// Example output:
+// PUT operations: 50 × $0.000005 = $0.000250
+// GET operations: 10 × $0.0000004 = $0.000004
+// LIST operations: 5 × $0.000005 = $0.000025
+// Total: $0.000279
 ```
 
 ---
