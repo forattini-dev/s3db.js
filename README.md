@@ -2141,7 +2141,12 @@ s3db.js includes comprehensive benchmarks demonstrating real-world performance o
 **[Smart Encoding](./docs/benchmarks/smart-encoding.md)** - Intelligent encoding selection
 - **Automatic type detection** and optimal encoding selection
 - **2-3x faster** UTF-8 byte calculations with caching
-- **Lazy evaluation** for performance-critical paths
+
+**[IP Address Encoding](./docs/benchmarks/ip-encoding.md)** - IPv4/IPv6 binary compression
+- **13.5% average savings** for IPv4 addresses (up to 47% for longer IPs)
+- **38.5% savings** for full-length IPv6 addresses
+- **2.7M+ ops/s** for IPv4 encoding, **595K+ ops/s** for IPv6
+- **Ideal for metadata-constrained storage** (S3 2KB limit)
 
 ### 🔌 Plugin Performance
 
