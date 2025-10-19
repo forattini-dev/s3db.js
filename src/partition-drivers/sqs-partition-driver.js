@@ -1,6 +1,7 @@
 import { BasePartitionDriver } from './base-partition-driver.js';
-import { SQSClient, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
+import { SQSClient, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand, GetQueueAttributesCommand } from '@aws-sdk/client-sqs';
 import { PartitionDriverError } from '../errors.js';
+import tryFn from '../concerns/try-fn.js';
 
 /**
  * SQS-based partition driver for distributed processing
@@ -55,7 +56,7 @@ export class SQSPartitionDriver extends BasePartitionDriver {
    * Send partition operation to SQS
    */
   async queue(operation) {
-    try {
+    const [ok, error, result] = await tryFn(async () => {
       // Prepare message
       const message = {
         id: `${Date.now()}-${Math.random()}`,
@@ -66,11 +67,11 @@ export class SQSPartitionDriver extends BasePartitionDriver {
           data: this.serializeData(operation.data)
         }
       };
-      
+
       // Buffer messages for batch sending
       this.messageBuffer.push(message);
       this.stats.queued++;
-      
+
       // Send batch when buffer is full
       if (this.messageBuffer.length >= this.batchSize) {
         await this.flushMessages();
@@ -80,18 +81,21 @@ export class SQSPartitionDriver extends BasePartitionDriver {
           this.flushTimeout = setTimeout(() => this.flushMessages(), 100);
         }
       }
-      
+
       return {
         success: true,
         driver: 'sqs',
         messageId: message.id,
         queueUrl: this.queueUrl
       };
-      
-    } catch (error) {
+    });
+
+    if (!ok) {
       this.emit('error', { operation, error });
       throw error;
     }
+
+    return result;
   }
 
   /**
@@ -99,16 +103,16 @@ export class SQSPartitionDriver extends BasePartitionDriver {
    */
   async flushMessages() {
     if (this.messageBuffer.length === 0) return;
-    
+
     clearTimeout(this.flushTimeout);
     this.flushTimeout = null;
-    
+
     const messages = this.messageBuffer.splice(0, this.batchSize);
-    
-    try {
+
+    const [ok, error] = await tryFn(async () => {
       // For FIFO queues, add deduplication ID
       const isFifo = this.queueUrl.includes('.fifo');
-      
+
       for (const message of messages) {
         const params = {
           QueueUrl: this.queueUrl,
@@ -124,18 +128,19 @@ export class SQSPartitionDriver extends BasePartitionDriver {
             }
           }
         };
-        
+
         if (isFifo) {
           params.MessageGroupId = this.messageGroupId;
           params.MessageDeduplicationId = message.id;
         }
-        
+
         await this.sqsClient.send(new SendMessageCommand(params));
       }
-      
+
       this.emit('messagesSent', { count: messages.length });
-      
-    } catch (error) {
+    });
+
+    if (!ok) {
       // Return messages to buffer for retry
       this.messageBuffer.unshift(...messages);
       this.emit('sendError', { error, messages: messages.length });
@@ -163,7 +168,7 @@ export class SQSPartitionDriver extends BasePartitionDriver {
    */
   async pollMessages(workerId) {
     while (this.workerRunning) {
-      try {
+      const [ok, error] = await tryFn(async () => {
         // Receive messages from SQS
         const params = {
           QueueUrl: this.queueUrl,
@@ -172,17 +177,18 @@ export class SQSPartitionDriver extends BasePartitionDriver {
           VisibilityTimeout: this.visibilityTimeout,
           MessageAttributeNames: ['All']
         };
-        
+
         const response = await this.sqsClient.send(new ReceiveMessageCommand(params));
-        
+
         if (response.Messages && response.Messages.length > 0) {
           // Process messages
           for (const message of response.Messages) {
             await this.processMessage(message, workerId);
           }
         }
-        
-      } catch (error) {
+      });
+
+      if (!ok) {
         this.emit('pollError', { workerId, error });
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, this.pollInterval));
@@ -194,35 +200,36 @@ export class SQSPartitionDriver extends BasePartitionDriver {
    * Process a single SQS message
    */
   async processMessage(message, workerId) {
-    try {
+    const [ok, error] = await tryFn(async () => {
       // Parse message body
       const data = JSON.parse(message.Body);
       const operation = {
         type: data.operation.type,
         data: this.deserializeData(data.operation.data)
       };
-      
+
       // Process the partition operation
       // Note: We need the actual resource instance to process
       // This would typically be handled by a separate worker service
       this.emit('processingMessage', { workerId, messageId: message.MessageId });
-      
+
       // In a real implementation, you'd look up the resource and process:
       // await this.processOperation(operation);
-      
+
       // Delete message from queue after successful processing
       await this.sqsClient.send(new DeleteMessageCommand({
         QueueUrl: this.queueUrl,
         ReceiptHandle: message.ReceiptHandle
       }));
-      
+
       this.stats.processed++;
       this.emit('messageProcessed', { workerId, messageId: message.MessageId });
-      
-    } catch (error) {
+    });
+
+    if (!ok) {
       this.stats.failed++;
       this.emit('processError', { workerId, error, messageId: message.MessageId });
-      
+
       // Message will become visible again after VisibilityTimeout
       // and eventually move to DLQ if configured
     }
@@ -266,7 +273,7 @@ export class SQSPartitionDriver extends BasePartitionDriver {
    * Get queue metrics from SQS
    */
   async getQueueMetrics() {
-    try {
+    const [ok, error, result] = await tryFn(async () => {
       const { Attributes } = await this.sqsClient.send(new GetQueueAttributesCommand({
         QueueUrl: this.queueUrl,
         AttributeNames: [
@@ -275,15 +282,19 @@ export class SQSPartitionDriver extends BasePartitionDriver {
           'ApproximateNumberOfMessagesDelayed'
         ]
       }));
-      
+
       return {
         messagesAvailable: parseInt(Attributes.ApproximateNumberOfMessages || 0),
         messagesInFlight: parseInt(Attributes.ApproximateNumberOfMessagesNotVisible || 0),
         messagesDelayed: parseInt(Attributes.ApproximateNumberOfMessagesDelayed || 0)
       };
-    } catch (error) {
+    });
+
+    if (!ok) {
       return null;
     }
+
+    return result;
   }
 
   /**
