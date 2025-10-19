@@ -9,6 +9,7 @@ export const CostsPlugin = {
     this.map = {
       PutObjectCommand: 'put',
       GetObjectCommand: 'get',
+      CopyObjectCommand: 'copy',
       HeadObjectCommand: 'head',
       DeleteObjectCommand: 'delete',
       DeleteObjectsCommand: 'delete',
@@ -29,7 +30,6 @@ export const CostsPlugin = {
       },
       totalRequests: 0,
       requests: {
-        total: 0,  // Added for consistency with tests
         put: 0,
         post: 0,
         copy: 0,
@@ -41,9 +41,9 @@ export const CostsPlugin = {
       },
       totalEvents: 0,
       events: {
-        total: 0,  // Added for consistency
         PutObjectCommand: 0,
         GetObjectCommand: 0,
+        CopyObjectCommand: 0,
         HeadObjectCommand: 0,
         DeleteObjectCommand: 0,
         DeleteObjectsCommand: 0,
@@ -66,18 +66,14 @@ export const CostsPlugin = {
 
     this.costs.totalEvents++;
     this.costs.totalRequests++;
-    this.costs.events.total++;
     this.costs.events[name]++;
-    this.costs.requests.total++;
     this.costs.requests[method]++;
     this.costs.total += this.costs.prices[method];
 
     if (this.client && this.client.costs) {
       this.client.costs.totalEvents++;
       this.client.costs.totalRequests++;
-      this.client.costs.events.total++;
       this.client.costs.events[name]++;
-      this.client.costs.requests.total++;
       this.client.costs.requests[method]++;
       this.client.costs.total += this.client.costs.prices[method];
     }

@@ -986,17 +986,20 @@ export class Schema {
         }
       }
       // PATCH: ensure arrays are always arrays
+      // Skip automatic array conversion if there's an afterUnmap hook that will handle it
       if (this.attributes) {
         if (typeof attrDef === 'string' && attrDef.includes('array')) {
-          if (Array.isArray(parsedValue)) {
-            // Already an array
-          } else if (typeof parsedValue === 'string' && parsedValue.trim().startsWith('[')) {
-            const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
-            if (okArr && Array.isArray(arr)) {
-              parsedValue = arr;
+          if (!hasAfterUnmapHook) {
+            if (Array.isArray(parsedValue)) {
+              // Already an array
+            } else if (typeof parsedValue === 'string' && parsedValue.trim().startsWith('[')) {
+              const [okArr, errArr, arr] = tryFnSync(() => JSON.parse(parsedValue));
+              if (okArr && Array.isArray(arr)) {
+                parsedValue = arr;
+              }
+            } else {
+              parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
             }
-          } else {
-            parsedValue = SchemaActions.toArray(parsedValue, { separator: this.options.arraySeparator });
           }
         }
       }

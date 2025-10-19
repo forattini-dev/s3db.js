@@ -35,6 +35,7 @@ describe('Costs Plugin', () => {
       await CostsPlugin.start.call(CostsPlugin);
 
       expect(client.costs.total).toBe(0);
+      expect(client.costs.totalRequests).toBe(0);
       expect(client.costs.requests).toEqual({
         get: 0,
         put: 0,
@@ -43,8 +44,7 @@ describe('Costs Plugin', () => {
         head: 0,
         post: 0,
         copy: 0,
-        select: 0,
-        total: 0
+        select: 0
       });
     });
 
@@ -78,7 +78,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.put).toBe(initialPutRequests + 1);
-      expect(client.costs.requests.total).toBeGreaterThan(0);
+      expect(client.costs.totalRequests).toBeGreaterThan(0);
     });
 
     test('should track GET operation costs', async () => {
@@ -96,7 +96,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.get).toBe(initialGetRequests + 1);
-      expect(client.costs.requests.total).toBeGreaterThan(1);
+      expect(client.costs.totalRequests).toBeGreaterThan(1);
     });
 
     test('should track DELETE operation costs', async () => {
@@ -114,7 +114,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.delete).toBe(initialDeleteRequests + 1);
-      expect(client.costs.requests.total).toBeGreaterThan(1);
+      expect(client.costs.totalRequests).toBeGreaterThan(1);
     });
 
     test('should track LIST operation costs', async () => {
@@ -127,7 +127,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.list).toBe(initialListRequests + 1);
-      expect(client.costs.requests.total).toBeGreaterThan(0);
+      expect(client.costs.totalRequests).toBeGreaterThan(0);
     });
 
     test('should track HEAD operation costs', async () => {
@@ -145,7 +145,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.head).toBe(initialHeadRequests + 1);
-      expect(client.costs.requests.total).toBeGreaterThan(1);
+      expect(client.costs.totalRequests).toBeGreaterThan(1);
     });
 
     test('should accumulate costs across multiple operations', async () => {
@@ -171,7 +171,7 @@ describe('Costs Plugin', () => {
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.put).toBe(2);
       expect(client.costs.requests.list).toBe(1);
-      expect(client.costs.requests.total).toBe(3);
+      expect(client.costs.totalRequests).toBe(3);
     });
 
     test('should track costs for large objects', async () => {
@@ -206,7 +206,7 @@ describe('Costs Plugin', () => {
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
       expect(client.costs.requests.get).toBe(initialGetRequests + 3);
-      expect(client.costs.requests.total).toBeGreaterThan(3);
+      expect(client.costs.totalRequests).toBeGreaterThan(3);
     });
   });
 
@@ -274,7 +274,7 @@ describe('Costs Plugin', () => {
 
     test('should handle failed operations gracefully', async () => {
       const initialCost = client.costs.total;
-      const initialRequests = client.costs.requests.total;
+      const initialRequests = client.costs.totalRequests;
 
       try {
         await client.getObject({
@@ -286,7 +286,7 @@ describe('Costs Plugin', () => {
 
       // Should still track the request attempt if it reached S3, but not for local validation errors
       // Accept both cases for robustness
-      const requestDelta = client.costs.requests.total - initialRequests;
+      const requestDelta = client.costs.totalRequests - initialRequests;
       expect([0, 1]).toContain(requestDelta);
       expect(client.costs.total).toBeGreaterThanOrEqual(initialCost);
     });
@@ -403,7 +403,7 @@ describe('Costs Plugin', () => {
       await Promise.all(operations);
 
       expect(client.costs.requests.put).toBe(50);
-      expect(client.costs.requests.total).toBe(50);
+      expect(client.costs.totalRequests).toBe(50);
     });
   });
 
@@ -455,7 +455,7 @@ describe('Costs Plugin', () => {
       await users.list();
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
-      expect(client.costs.requests.total).toBeGreaterThan(0);
+      expect(client.costs.totalRequests).toBeGreaterThan(0);
     });
 
     test('should track costs for bulk operations', async () => {
@@ -472,7 +472,7 @@ describe('Costs Plugin', () => {
       await users.getMany(['user-1', 'user-2', 'user-3']);
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
-      expect(client.costs.requests.total).toBeGreaterThan(0);
+      expect(client.costs.totalRequests).toBeGreaterThan(0);
     });
 
     test('should track costs for pagination operations', async () => {
@@ -493,7 +493,7 @@ describe('Costs Plugin', () => {
       await users.page({ offset: 4, size: 2 });
 
       expect(client.costs.total).toBeGreaterThan(initialCost);
-      expect(client.costs.requests.total).toBeGreaterThan(0);
+      expect(client.costs.totalRequests).toBeGreaterThan(0);
     });
   });
 
@@ -519,13 +519,13 @@ describe('Costs Plugin', () => {
       expect(client.costs.requests.put).toBe(1);
       expect(client.costs.requests.get).toBe(1);
       expect(client.costs.requests.list).toBe(1);
-      expect(client.costs.requests.total).toBe(3);
+      expect(client.costs.totalRequests).toBe(3);
       expect(client.costs.total).toBeGreaterThan(0);
     });
 
     test('should handle cost reporting with no operations', async () => {
       expect(client.costs.total).toBe(0);
-      expect(client.costs.requests.total).toBe(0);
+      expect(client.costs.totalRequests).toBe(0);
       expect(client.costs.requests.get).toBe(0);
       expect(client.costs.requests.put).toBe(0);
       expect(client.costs.requests.delete).toBe(0);
