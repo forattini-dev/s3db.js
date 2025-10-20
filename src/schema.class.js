@@ -365,17 +365,30 @@ export const SchemaActions = {
   },
 
   // Money type - Integer-based (banking standard)
-  encodeMoney: (value, { currency = 'USD' } = {}) => {
+  // Simplified approach: decimals instead of currency
+  encodeMoney: (value, { decimals = 2 } = {}) => {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'number') return value;
-    const [ok, err, encoded] = tryFnSync(() => encodeMoney(value, currency));
+
+    // Use decimal places directly instead of currency lookup
+    const multiplier = Math.pow(10, decimals);
+    const integerValue = Math.round(value * multiplier);
+
+    // Encode as base62 with $ prefix
+    const [ok, err, encoded] = tryFnSync(() => '$' + toBase62(integerValue));
     return ok ? encoded : value;
   },
-  decodeMoney: (value, { currency = 'USD' } = {}) => {
+  decodeMoney: (value, { decimals = 2 } = {}) => {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'string') return value;
-    const [ok, err, decoded] = tryFnSync(() => decodeMoney(value, currency));
-    return ok ? decoded : value;
+    if (!value.startsWith('$')) return value;
+
+    // Decode base62 and convert back to decimal
+    const [ok, err, integerValue] = tryFnSync(() => fromBase62(value.slice(1)));
+    if (!ok || isNaN(integerValue)) return value;
+
+    const divisor = Math.pow(10, decimals);
+    return integerValue / divisor;
   },
 
   // Decimal type - Fixed-point for non-monetary decimals
@@ -515,9 +528,11 @@ export class Schema {
     }
   }
 
-  addHook(hook, attribute, action) {
+  addHook(hook, attribute, action, params = {}) {
     if (!this.options.hooks[hook][attribute]) this.options.hooks[hook][attribute] = [];
-    this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], action])
+    // Store action with parameters if provided
+    const hookEntry = Object.keys(params).length > 0 ? { action, params } : action;
+    this.options.hooks[hook][attribute] = uniq([...this.options.hooks[hook][attribute], hookEntry])
   }
 
   extractObjectKeys(obj, prefix = '') {
@@ -704,17 +719,24 @@ export class Schema {
         continue;
       }
 
-      // Handle money type (integer-based, currency-aware)
-      if (defStr.includes("money") || defType === 'money') {
-        // Extract currency from money:BRL or money|currency:BRL notation
-        let currency = 'USD';
-        const currencyMatch = defStr.match(/money:([A-Z]{3,4})/i);
-        if (currencyMatch) {
-          currency = currencyMatch[1].toUpperCase();
+      // Handle money type (integer-based, decimal-aware)
+      if (defStr.includes("money") || defType === 'money' || defStr.includes("crypto") || defType === 'crypto') {
+        // Extract decimals from money:8 or crypto:8 notation
+        let decimals = 2; // Default for fiat money (2 decimal places)
+
+        // If it's crypto, default to 8 decimals (satoshi/standard crypto)
+        if (defStr.includes("crypto") || defType === 'crypto') {
+          decimals = 8;
         }
 
-        this.addHook("beforeMap", name, "encodeMoney", { currency });
-        this.addHook("afterUnmap", name, "decodeMoney", { currency });
+        // Override with explicit decimals if provided: money:8, crypto:18
+        const decimalsMatch = defStr.match(/(?:money|crypto):(\d+)/i);
+        if (decimalsMatch) {
+          decimals = parseInt(decimalsMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeMoney", { decimals });
+        this.addHook("afterUnmap", name, "decodeMoney", { decimals });
         continue;
       }
 
@@ -905,12 +927,17 @@ export class Schema {
   async applyHooksActions(resourceItem, hook) {
     const cloned = cloneDeep(resourceItem);
     for (const [attribute, actions] of Object.entries(this.options.hooks[hook])) {
-      for (const action of actions) {
+      for (const actionEntry of actions) {
+        // Support both string actions and {action, params} objects
+        const actionName = typeof actionEntry === 'string' ? actionEntry : actionEntry.action;
+        const actionParams = typeof actionEntry === 'object' ? actionEntry.params : {};
+
         const value = get(cloned, attribute)
-        if (value !== undefined && typeof SchemaActions[action] === 'function') {
-          set(cloned, attribute, await SchemaActions[action](value, {
+        if (value !== undefined && typeof SchemaActions[actionName] === 'function') {
+          set(cloned, attribute, await SchemaActions[actionName](value, {
             passphrase: this.passphrase,
             separator: this.options.arraySeparator,
+            ...actionParams  // Merge custom parameters (currency, precision, etc.)
           }))
         }
       }
@@ -1005,11 +1032,16 @@ export class Schema {
       }
       // PATCH: apply afterUnmap hooks for type restoration
       if (this.options.hooks && this.options.hooks.afterUnmap && this.options.hooks.afterUnmap[originalKey]) {
-        for (const action of this.options.hooks.afterUnmap[originalKey]) {
-          if (typeof SchemaActions[action] === 'function') {
-            parsedValue = await SchemaActions[action](parsedValue, {
+        for (const actionEntry of this.options.hooks.afterUnmap[originalKey]) {
+          // Support both string actions and {action, params} objects
+          const actionName = typeof actionEntry === 'string' ? actionEntry : actionEntry.action;
+          const actionParams = typeof actionEntry === 'object' ? actionEntry.params : {};
+
+          if (typeof SchemaActions[actionName] === 'function') {
+            parsedValue = await SchemaActions[actionName](parsedValue, {
               passphrase: this.passphrase,
               separator: this.options.arraySeparator,
+              ...actionParams  // Merge custom parameters (currency, precision, etc.)
             });
     }
         }
@@ -1057,10 +1089,11 @@ export class Schema {
           processed[key] = value.replace(/^ip6/, 'string');
           continue;
         }
-        // Expand money shorthand to number type with min validation
-        if (value === 'money' || value.startsWith('money:') || value.startsWith('money|')) {
-          // Extract any modifiers after money:CURRENCY
-          const rest = value.replace(/^money(:[A-Z]{3,4})?/, '');
+        // Expand money/crypto shorthand to number type with min validation
+        if (value === 'money' || value.startsWith('money:') || value.startsWith('money|') ||
+            value === 'crypto' || value.startsWith('crypto:') || value.startsWith('crypto|')) {
+          // Extract any modifiers after money:N or crypto:N
+          const rest = value.replace(/^(?:money|crypto)(?::\d+)?/, '');
           // Money must be non-negative
           const hasMin = rest.includes('min:');
           processed[key] = hasMin ? `number${rest}` : `number|min:0${rest}`;
@@ -1134,8 +1167,8 @@ export class Schema {
             processed[key] = { ...value, type: 'string' };
           } else if (value.type === 'ip6') {
             processed[key] = { ...value, type: 'string' };
-          } else if (value.type === 'money') {
-            // Money type → number with min:0
+          } else if (value.type === 'money' || value.type === 'crypto') {
+            // Money/crypto type → number with min:0
             processed[key] = { ...value, type: 'number', min: value.min !== undefined ? value.min : 0 };
           } else if (value.type === 'decimal') {
             // Decimal type → number

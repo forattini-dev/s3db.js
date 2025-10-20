@@ -220,6 +220,12 @@ function testResourceExtensionMethods(): void {
     async sub(id: string, field: string, amount: number): Promise<number> {
       return 100 - amount;
     },
+    async increment(id: string, field: string): Promise<number> {
+      return 101;
+    },
+    async decrement(id: string, field: string): Promise<number> {
+      return 99;
+    },
     async set(id: string, field: string, value: number): Promise<number> {
       return value;
     },

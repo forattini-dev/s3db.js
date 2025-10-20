@@ -874,7 +874,8 @@ describe('GeoPlugin', () => {
           name: 'string',
           latitude: 'number',
           longitude: 'number'
-        }
+        },
+        asyncPartitions: false // Use sync partitions for predictable test results
       });
 
       const plugin = new GeoPlugin({
@@ -894,6 +895,9 @@ describe('GeoPlugin', () => {
       const resource = database.resource('stores');
 
       await resource.insert({ name: 'Inside', latitude: -23.5505, longitude: -46.6333 });
+
+      // Small delay to ensure geo partitions are indexed
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
 
