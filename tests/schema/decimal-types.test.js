@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
-import Database from '../../src/database.class.js';
+import { createDatabaseForTest } from '../config.js';
 import { encodeMoney, decodeMoney } from '../../src/concerns/money.js';
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon } from '../../src/concerns/geo-encoding.js';
 import { encodeFixedPoint, decodeFixedPoint } from '../../src/concerns/base62.js';
@@ -187,16 +187,16 @@ describe('Schema Integration', () => {
   let database;
 
   beforeAll(async () => {
-    database = new Database({
-      connectionString: 's3://test:test@test-decimal-types?region=us-east-1',
+    database = createDatabaseForTest('schema/decimal-types', {
       passphrase: 'test-secret',
       verbose: false
     });
+    await database.connect();
   });
 
   afterAll(async () => {
-    if (database && database.client) {
-      await database.client.destroy();
+    if (database) {
+      await database.disconnect();
     }
   });
 
@@ -205,8 +205,8 @@ describe('Schema Integration', () => {
       name: 'products',
       attributes: {
         name: 'string|required',
-        price: 'money:USD|required',
-        cryptoPrice: 'money:BTC'
+        price: 'money|required',      // Fiat (2 decimals)
+        cryptoPrice: 'crypto'          // Crypto (8 decimals)
       }
     });
 
@@ -216,13 +216,13 @@ describe('Schema Integration', () => {
       cryptoPrice: 0.00012345
     };
 
-    const mapped = await resource.schema.map(data);
+    const mapped = await resource.schema.mapper(data);
 
     // Should be encoded
-    expect(mapped.price).toMatch(/^\$/);
-    expect(mapped.cryptoPrice).toMatch(/^\$/);
+    expect(mapped[resource.schema.map.price]).toMatch(/^\$/);
+    expect(mapped[resource.schema.map.cryptoPrice]).toMatch(/^\$/);
 
-    const unmapped = await resource.schema.unmap(mapped);
+    const unmapped = await resource.schema.unmapper(mapped);
 
     // Should be decoded back
     expect(unmapped.price).toBe(19.99);
@@ -243,13 +243,13 @@ describe('Schema Integration', () => {
       percentage: 0.8765
     };
 
-    const mapped = await resource.schema.map(data);
+    const mapped = await resource.schema.mapper(data);
 
     // Should be encoded with fixed-point
-    expect(mapped.score).toMatch(/^\^/);
-    expect(mapped.percentage).toMatch(/^\^/);
+    expect(mapped[resource.schema.map.score]).toMatch(/^\^/);
+    expect(mapped[resource.schema.map.percentage]).toMatch(/^\^/);
 
-    const unmapped = await resource.schema.unmap(mapped);
+    const unmapped = await resource.schema.unmapper(mapped);
 
     // Should be decoded back
     expect(unmapped.score).toBeCloseTo(4.5, 2);
@@ -272,13 +272,13 @@ describe('Schema Integration', () => {
       longitude: -46.633309
     };
 
-    const mapped = await resource.schema.map(data);
+    const mapped = await resource.schema.mapper(data);
 
     // Should be encoded
-    expect(mapped.latitude).toMatch(/^~/);
-    expect(mapped.longitude).toMatch(/^~/);
+    expect(mapped[resource.schema.map.latitude]).toMatch(/^~/);
+    expect(mapped[resource.schema.map.longitude]).toMatch(/^~/);
 
-    const unmapped = await resource.schema.unmap(mapped);
+    const unmapped = await resource.schema.unmapper(mapped);
 
     // Should be decoded back
     expect(unmapped.latitude).toBeCloseTo(-23.550519, 6);
@@ -294,9 +294,10 @@ describe('Schema Integration', () => {
     });
 
     // Should reject negative values
-    const [ok, err] = await resource.schema.validate({ amount: -10 });
-    expect(ok).toBe(false);
-    expect(err).toBeTruthy();
+    const result = await resource.schema.validate({ amount: -10 });
+    expect(result).not.toBe(true);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it('should validate geo coordinates are in range', async () => {
@@ -309,15 +310,17 @@ describe('Schema Integration', () => {
     });
 
     // Should reject out of range latitude
-    const [ok1, err1] = await resource.schema.validate({ lat: 91, lon: 0 });
-    expect(ok1).toBe(false);
+    const result1 = await resource.schema.validate({ lat: 91, lon: 0 });
+    expect(result1).not.toBe(true);
+    expect(Array.isArray(result1)).toBe(true);
 
     // Should reject out of range longitude
-    const [ok2, err2] = await resource.schema.validate({ lat: 0, lon: 181 });
-    expect(ok2).toBe(false);
+    const result2 = await resource.schema.validate({ lat: 0, lon: 181 });
+    expect(result2).not.toBe(true);
+    expect(Array.isArray(result2)).toBe(true);
 
     // Should accept valid coordinates
-    const [ok3, err3] = await resource.schema.validate({ lat: -23.5, lon: -46.6 });
-    expect(ok3).toBe(true);
+    const result3 = await resource.schema.validate({ lat: -23.5, lon: -46.6 });
+    expect(result3).toBe(true);
   });
 });
