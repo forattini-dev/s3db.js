@@ -193,6 +193,190 @@ await plugin.resource.query({ resourceType: 'aws_instance' })
 // ]
 ```
 
+## 📦 The 3 Resources Created
+
+**IMPORTANT**: When you install this plugin, it automatically creates **3 s3db resources** that you can query:
+
+### 1. **`plugin.resource`** - Infrastructure Resources
+
+This is the main resource containing all your infrastructure resources (EC2 instances, S3 buckets, RDS databases, etc).
+
+**What's inside:**
+- `resourceType` - Type of resource (e.g., `aws_instance`, `aws_s3_bucket`)
+- `resourceName` - Name given in Terraform
+- `resourceAddress` - Full address (e.g., `aws_instance.web_server`)
+- `attributes` - All the resource attributes (instance type, AMI, tags, etc.)
+- `stateSerial` - Which version of the state this came from
+- `sourceFile` - Which .tfstate file this came from
+
+**Example queries:**
+
+```javascript
+// Count all EC2 instances
+const ec2Count = await plugin.resource.count({
+  resourceType: 'aws_instance'
+});
+console.log(`Total EC2 instances: ${ec2Count}`);
+
+// Find all resources with a specific tag
+const prodResources = await plugin.resource.query({
+  'attributes.tags.Environment': 'production'
+});
+console.log(`Production resources: ${prodResources.length}`);
+
+// List all S3 buckets and their encryption status
+const buckets = await plugin.resource.query({
+  resourceType: 'aws_s3_bucket'
+});
+
+buckets.forEach(bucket => {
+  const encrypted = bucket.attributes.server_side_encryption_configuration ? 'Yes' : 'No';
+  console.log(`${bucket.resourceName}: encrypted=${encrypted}`);
+});
+
+// Find resources created in the last 24 hours
+const recentResources = await plugin.resource.query({
+  importedAt: { $gte: Date.now() - 86400000 }
+});
+```
+
+### 2. **`plugin.stateFilesResource`** - State File Metadata
+
+This resource tracks metadata about each `.tfstate` file that was imported.
+
+**What's inside:**
+- `sourceFile` - Path or S3 URI of the state file
+- `serial` - Serial number of the state
+- `lineage` - Terraform lineage identifier
+- `terraformVersion` - Which Terraform/OpenTofu version created this
+- `resourceCount` - How many resources in this state
+- `sha256Hash` - Hash for deduplication
+- `firstImportedAt` / `lastImportedAt` - When this was imported
+- `importCount` - How many times we've seen this exact state
+
+**Example queries:**
+
+```javascript
+// Get all state files we're tracking
+const allStateFiles = await plugin.stateFilesResource.list();
+console.log(`Tracking ${allStateFiles.length} state files`);
+
+// Find the latest version of a specific state file
+const latestProd = await plugin.stateFilesResource.query({
+  sourceFile: 'production/terraform.tfstate'
+}, {
+  limit: 1,
+  sort: { serial: -1 }
+});
+
+console.log(`Latest production state: serial ${latestProd[0].serial}`);
+console.log(`Contains ${latestProd[0].resourceCount} resources`);
+console.log(`Terraform version: ${latestProd[0].terraformVersion}`);
+
+// Find states imported in the last week
+const recentStates = await plugin.stateFilesResource.query({
+  lastImportedAt: { $gte: Date.now() - 7 * 86400000 }
+});
+
+recentStates.forEach(state => {
+  console.log(`${state.sourceFile}: serial ${state.serial} (${state.resourceCount} resources)`);
+});
+
+// Check for duplicate imports (same SHA256)
+const duplicates = await plugin.stateFilesResource.query({
+  importCount: { $gt: 1 }
+});
+console.log(`${duplicates.length} states were re-imported`);
+```
+
+### 3. **`plugin.diffsResource`** - Change History
+
+This resource tracks what changed between state file versions (only if `diffs.enabled: true`).
+
+**What's inside:**
+- `sourceFile` - Which state file this diff is for
+- `oldSerial` / `newSerial` - Which versions were compared
+- `summary` - Quick stats (`addedCount`, `modifiedCount`, `deletedCount`)
+- `changes` - Detailed arrays of what was added, modified, deleted
+- `calculatedAt` - When this diff was calculated
+
+**Example queries:**
+
+```javascript
+// Get latest changes across all state files
+const latestChanges = await plugin.diffsResource.query({}, {
+  limit: 10,
+  sort: { calculatedAt: -1 }
+});
+
+latestChanges.forEach(diff => {
+  console.log(`\n${diff.sourceFile} (serial ${diff.oldSerial} → ${diff.newSerial}):`);
+  console.log(`  ✅ ${diff.summary.addedCount} added`);
+  console.log(`  ✏️  ${diff.summary.modifiedCount} modified`);
+  console.log(`  ❌ ${diff.summary.deletedCount} deleted`);
+});
+
+// Find significant changes (>10 resources modified)
+const bigChanges = await plugin.diffsResource.query({
+  'summary.modifiedCount': { $gte: 10 }
+});
+
+console.log(`Found ${bigChanges.length} deployments with 10+ changes`);
+
+// Get detailed changes for a specific diff
+const diff = await plugin.diffsResource.get(diffId);
+
+console.log('\nAdded resources:');
+diff.changes.added.forEach(r => {
+  console.log(`  + ${r.type}.${r.name}`);
+});
+
+console.log('\nDeleted resources:');
+diff.changes.deleted.forEach(r => {
+  console.log(`  - ${r.type}.${r.name}`);
+});
+
+console.log('\nModified resources:');
+diff.changes.modified.forEach(r => {
+  console.log(`  ~ ${r.type}.${r.name}`);
+  r.changes.forEach(c => {
+    console.log(`      ${c.field}: ${c.oldValue} → ${c.newValue}`);
+  });
+});
+
+// Aggregate changes over time
+const allDiffs = await plugin.diffsResource.list({ limit: 100 });
+
+const totals = allDiffs.reduce((acc, diff) => {
+  acc.added += diff.summary.addedCount || 0;
+  acc.modified += diff.summary.modifiedCount || 0;
+  acc.deleted += diff.summary.deletedCount || 0;
+  return acc;
+}, { added: 0, modified: 0, deleted: 0 });
+
+console.log('\nTotal changes in last 100 deployments:');
+console.log(`  Added: ${totals.added}`);
+console.log(`  Modified: ${totals.modified}`);
+console.log(`  Deleted: ${totals.deleted}`);
+```
+
+### Summary: Which Resource Should I Use?
+
+- **Want to query infrastructure?** → Use `plugin.resource`
+  - "How many EC2 instances do I have?"
+  - "Which S3 buckets are not encrypted?"
+  - "List all RDS instances in production"
+
+- **Want to see state file history?** → Use `plugin.stateFilesResource`
+  - "What's the latest serial number?"
+  - "How many times has this state been imported?"
+  - "Which Terraform version is being used?"
+
+- **Want to see what changed?** → Use `plugin.diffsResource`
+  - "What was added in the last deployment?"
+  - "Show me all deletions from last week"
+  - "Which resource was modified between serial 100 and 110?"
+
 ## Quick Setup
 
 ### Option 1: Local Files (Development)
