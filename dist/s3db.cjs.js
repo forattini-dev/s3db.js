@@ -16789,6 +16789,76 @@ function generateBigQuerySchemaUpdate(attributes, existingSchema) {
   }
   return newFields;
 }
+function s3dbTypeToSQLite(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      return "TEXT";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INTEGER";
+      }
+      return "REAL";
+    case "boolean":
+      return "INTEGER";
+    // 0 or 1
+    case "object":
+    case "json":
+    case "array":
+      return "TEXT";
+    // Store as JSON string
+    case "embedding":
+      return "TEXT";
+    // Store as JSON array
+    case "ip4":
+    case "ip6":
+      return "TEXT";
+    case "secret":
+      return "TEXT";
+    case "uuid":
+      return "TEXT";
+    case "date":
+    case "datetime":
+      return "TEXT";
+    // SQLite stores dates as ISO strings or Unix timestamps
+    default:
+      return "TEXT";
+  }
+}
+function generateSQLiteCreateTable(tableName, attributes) {
+  const columns = [];
+  columns.push("id TEXT PRIMARY KEY");
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToSQLite(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    columns.push(`${fieldName} ${sqlType} ${nullConstraint}`);
+  }
+  if (!attributes.createdAt) {
+    columns.push("created_at TEXT DEFAULT (datetime('now'))");
+  }
+  if (!attributes.updatedAt) {
+    columns.push("updated_at TEXT DEFAULT (datetime('now'))");
+  }
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+  ${columns.join(",\n  ")}
+)`;
+}
+function generateSQLiteAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToSQLite(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN ${fieldName} ${sqlType} ${nullConstraint}`);
+  }
+  return alterStatements;
+}
 
 class BigqueryReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {
@@ -18183,6 +18253,295 @@ ${createSQL}`);
       this.pool = null;
     }
     await super.cleanup();
+  }
+}
+
+class PlanetScaleReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.host = config.host;
+    this.username = config.username;
+    this.password = config.password;
+    this.connection = null;
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || "alter",
+      onMismatch: config.schemaSync?.onMismatch || "error",
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false
+    };
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.host) errors.push("Host is required");
+    if (!this.username) errors.push("Username is required");
+    if (!this.password) errors.push("Password is required");
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    await requirePluginDependency("planetscale-replicator");
+    const [ok, err, sdk] = await tryFn(() => import('@planetscale/database'));
+    if (!ok) {
+      throw new ReplicationError("Failed to import PlanetScale SDK", {
+        operation: "initialize",
+        replicatorClass: "PlanetScaleReplicator",
+        original: err,
+        suggestion: "Install @planetscale/database: pnpm add @planetscale/database"
+      });
+    }
+    const { connect } = sdk;
+    this.connection = connect({
+      host: this.host,
+      username: this.username,
+      password: this.password
+    });
+    const [okTest, errTest] = await tryFn(async () => {
+      await this.connection.execute("SELECT 1");
+    });
+    if (!okTest) {
+      throw new ReplicationError("Failed to connect to PlanetScale database", {
+        operation: "initialize",
+        replicatorClass: "PlanetScaleReplicator",
+        host: this.host,
+        original: errTest,
+        suggestion: "Check PlanetScale credentials"
+      });
+    }
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
+    this.emit("connected", {
+      replicator: "PlanetScaleReplicator",
+      host: this.host
+    });
+  }
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[PlanetScaleReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+          if (this.schemaSync.onMismatch === "error") {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === "warn") {
+            console.warn(`[PlanetScaleReplicator] ${message}`);
+          }
+        }
+      }
+    }
+    this.emit("schema_sync_completed", {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    const existingSchema = await getMySQLTableSchema(this.connection, tableName);
+    if (!existingSchema) {
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+      if (this.schemaSync.strategy === "validate-only") {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+      const createSQL = generateMySQLCreateTable(tableName, attributes);
+      if (this.config.verbose) {
+        console.log(`[PlanetScaleReplicator] Creating table ${tableName}:
+${createSQL}`);
+      }
+      await this.connection.execute(createSQL);
+      this.emit("table_created", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "drop-create") {
+      if (this.config.verbose) {
+        console.warn(`[PlanetScaleReplicator] Dropping and recreating table ${tableName}`);
+      }
+      await this.connection.execute(`DROP TABLE IF EXISTS ${tableName}`);
+      const createSQL = generateMySQLCreateTable(tableName, attributes);
+      await this.connection.execute(createSQL);
+      this.emit("table_recreated", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
+      const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+      if (alterStatements.length > 0) {
+        if (this.config.verbose) {
+          console.log(`[PlanetScaleReplicator] Altering table ${tableName}:`, alterStatements);
+        }
+        for (const stmt of alterStatements) {
+          await this.connection.execute(stmt);
+        }
+        this.emit("table_altered", {
+          replicator: this.name,
+          tableName,
+          addedColumns: alterStatements.length
+        });
+      }
+    }
+    if (this.schemaSync.strategy === "validate-only") {
+      const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+      if (alterStatements.length > 0) {
+        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+      }
+    }
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    for (const table of tables) {
+      const [okTable, errTable] = await tryFn(async () => {
+        if (operation === "insert") {
+          const cleanData = this._cleanInternalFields(data);
+          const keys = Object.keys(cleanData);
+          const values = keys.map((k) => cleanData[k]);
+          const placeholders = keys.map(() => "?").join(", ");
+          const sql = `INSERT INTO ${table} (${keys.map((k) => `\`${k}\``).join(", ")}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE id=id`;
+          await this.connection.execute(sql, values);
+        } else if (operation === "update") {
+          const cleanData = this._cleanInternalFields(data);
+          const keys = Object.keys(cleanData).filter((k) => k !== "id");
+          const setClause = keys.map((k) => `\`${k}\`=?`).join(", ");
+          const values = keys.map((k) => cleanData[k]);
+          values.push(id);
+          const sql = `UPDATE ${table} SET ${setClause} WHERE id=?`;
+          await this.connection.execute(sql, values);
+        } else if (operation === "delete") {
+          const sql = `DELETE FROM ${table} WHERE id=?`;
+          await this.connection.execute(sql, [id]);
+        }
+        results.push({ table, success: true });
+      });
+      if (!okTable) {
+        errors.push({ table, error: errTable.message });
+      }
+    }
+    const success = errors.length === 0;
+    this.emit("replicated", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      tables,
+      results,
+      errors,
+      success
+    });
+    return { success, results, errors, tables };
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  async cleanup() {
+    this.connection = null;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.connection,
+      host: this.host,
+      resources: Object.keys(this.resources),
+      schemaSync: this.schemaSync
+    };
   }
 }
 
@@ -25340,6 +25699,304 @@ class SqsReplicator extends BaseReplicator {
   }
 }
 
+class TursoReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.url = config.url;
+    this.authToken = config.authToken;
+    this.client = null;
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || "alter",
+      onMismatch: config.schemaSync?.onMismatch || "error",
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false
+    };
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.url) errors.push("URL is required");
+    if (!this.authToken) errors.push("Auth token is required");
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    await requirePluginDependency("turso-replicator");
+    const [ok, err, sdk] = await tryFn(() => import('@libsql/client'));
+    if (!ok) {
+      throw new ReplicationError("Failed to import Turso SDK", {
+        operation: "initialize",
+        replicatorClass: "TursoReplicator",
+        original: err,
+        suggestion: "Install @libsql/client: pnpm add @libsql/client"
+      });
+    }
+    const { createClient } = sdk;
+    this.client = createClient({
+      url: this.url,
+      authToken: this.authToken
+    });
+    const [okTest, errTest] = await tryFn(async () => {
+      await this.client.execute("SELECT 1");
+    });
+    if (!okTest) {
+      throw new ReplicationError("Failed to connect to Turso database", {
+        operation: "initialize",
+        replicatorClass: "TursoReplicator",
+        url: this.url,
+        original: errTest,
+        suggestion: "Check Turso URL and auth token"
+      });
+    }
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
+    this.emit("connected", {
+      replicator: "TursoReplicator",
+      url: this.url
+    });
+  }
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[TursoReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+          if (this.schemaSync.onMismatch === "error") {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === "warn") {
+            console.warn(`[TursoReplicator] ${message}`);
+          }
+        }
+      }
+    }
+    this.emit("schema_sync_completed", {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    const [okCheck, errCheck, result] = await tryFn(async () => {
+      return await this.client.execute({
+        sql: "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        args: [tableName]
+      });
+    });
+    const tableExists = okCheck && result.rows.length > 0;
+    if (!tableExists) {
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+      if (this.schemaSync.strategy === "validate-only") {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+      const createSQL = generateSQLiteCreateTable(tableName, attributes);
+      if (this.config.verbose) {
+        console.log(`[TursoReplicator] Creating table ${tableName}:
+${createSQL}`);
+      }
+      await this.client.execute(createSQL);
+      this.emit("table_created", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "drop-create") {
+      if (this.config.verbose) {
+        console.warn(`[TursoReplicator] Dropping and recreating table ${tableName}`);
+      }
+      await this.client.execute(`DROP TABLE IF EXISTS ${tableName}`);
+      const createSQL = generateSQLiteCreateTable(tableName, attributes);
+      await this.client.execute(createSQL);
+      this.emit("table_recreated", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
+      const [okPragma, errPragma, pragmaResult] = await tryFn(async () => {
+        return await this.client.execute(`PRAGMA table_info(${tableName})`);
+      });
+      if (okPragma) {
+        const existingSchema = {};
+        for (const row of pragmaResult.rows) {
+          existingSchema[row.name] = { type: row.type };
+        }
+        const alterStatements = generateSQLiteAlterTable(tableName, attributes, existingSchema);
+        if (alterStatements.length > 0) {
+          if (this.config.verbose) {
+            console.log(`[TursoReplicator] Altering table ${tableName}:`, alterStatements);
+          }
+          for (const stmt of alterStatements) {
+            await this.client.execute(stmt);
+          }
+          this.emit("table_altered", {
+            replicator: this.name,
+            tableName,
+            addedColumns: alterStatements.length
+          });
+        }
+      }
+    }
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  shouldReplicateAction(resourceName, operation) {
+    if (!this.resources[resourceName]) return false;
+    return this.resources[resourceName].some(
+      (tableConfig) => tableConfig.actions.includes(operation)
+    );
+  }
+  getTablesForResource(resourceName, operation) {
+    if (!this.resources[resourceName]) return [];
+    return this.resources[resourceName].filter((tableConfig) => tableConfig.actions.includes(operation)).map((tableConfig) => tableConfig.table);
+  }
+  async replicate(resourceName, operation, data, id, beforeData = null) {
+    if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
+      return { skipped: true, reason: "resource_not_included" };
+    }
+    if (!this.shouldReplicateAction(resourceName, operation)) {
+      return { skipped: true, reason: "action_not_included" };
+    }
+    const tables = this.getTablesForResource(resourceName, operation);
+    if (tables.length === 0) {
+      return { skipped: true, reason: "no_tables_for_action" };
+    }
+    const results = [];
+    const errors = [];
+    for (const table of tables) {
+      const [okTable, errTable] = await tryFn(async () => {
+        if (operation === "insert") {
+          const cleanData = this._cleanInternalFields(data);
+          const keys = Object.keys(cleanData);
+          const values = keys.map((k) => cleanData[k]);
+          const placeholders = keys.map((_, i) => `?`).join(", ");
+          const sql = `INSERT OR IGNORE INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
+          await this.client.execute({ sql, args: values });
+        } else if (operation === "update") {
+          const cleanData = this._cleanInternalFields(data);
+          const keys = Object.keys(cleanData).filter((k) => k !== "id");
+          const setClause = keys.map((k) => `${k}=?`).join(", ");
+          const values = keys.map((k) => cleanData[k]);
+          values.push(id);
+          const sql = `UPDATE ${table} SET ${setClause} WHERE id=?`;
+          await this.client.execute({ sql, args: values });
+        } else if (operation === "delete") {
+          const sql = `DELETE FROM ${table} WHERE id=?`;
+          await this.client.execute({ sql, args: [id] });
+        }
+        results.push({ table, success: true });
+      });
+      if (!okTable) {
+        errors.push({ table, error: errTable.message });
+      }
+    }
+    const success = errors.length === 0;
+    this.emit("replicated", {
+      replicator: this.name,
+      resourceName,
+      operation,
+      id,
+      tables,
+      results,
+      errors,
+      success
+    });
+    return { success, results, errors, tables };
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  async cleanup() {
+    if (this.client) {
+      this.client.close();
+      this.client = null;
+    }
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.client,
+      url: this.url,
+      resources: Object.keys(this.resources),
+      schemaSync: this.schemaSync
+    };
+  }
+}
+
 class WebhookReplicator extends BaseReplicator {
   constructor(config = {}, resources = [], client = null) {
     super(config);
@@ -25759,6 +26416,8 @@ const REPLICATOR_DRIVERS = {
   mysql: MySQLReplicator,
   mariadb: MySQLReplicator,
   // MariaDB uses the same driver as MySQL
+  planetscale: PlanetScaleReplicator,
+  turso: TursoReplicator,
   dynamodb: DynamoDBReplicator,
   mongodb: MongoDBReplicator,
   webhook: WebhookReplicator
@@ -40806,6 +41465,7 @@ exports.PartitionAwareFilesystemCache = PartitionAwareFilesystemCache;
 exports.PartitionDriverError = PartitionDriverError;
 exports.PartitionError = PartitionError;
 exports.PermissionError = PermissionError;
+exports.PlanetScaleReplicator = PlanetScaleReplicator;
 exports.Plugin = Plugin;
 exports.PluginError = PluginError;
 exports.PluginObject = PluginObject;
@@ -40837,6 +41497,7 @@ exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;
 exports.StreamError = StreamError;
 exports.TfStatePlugin = TfStatePlugin;
+exports.TursoReplicator = TursoReplicator;
 exports.UnknownError = UnknownError;
 exports.ValidationError = ValidationError;
 exports.Validator = Validator;

@@ -251,9 +251,76 @@ async function example() {
   }
 
   // ========================================
-  // Example 6: Multiple strategies with onMismatch behaviors
+  // Example 7: Turso (SQLite edge database) with schema sync
   // ========================================
-  console.log('📘 Example 6: onMismatch behaviors');
+  console.log('📘 Example 7: Turso/LibSQL edge database schema sync');
+  console.log('─'.repeat(60));
+
+  const tursoReplicator = new ReplicatorPlugin({
+    replicators: [{
+      driver: 'turso',
+      config: {
+        url: 'libsql://my-db-user.turso.io',
+        authToken: process.env.TURSO_AUTH_TOKEN,
+        schemaSync: {
+          enabled: true,
+          strategy: 'alter',
+          autoCreateTable: true,
+          autoCreateColumns: true
+        }
+      },
+      resources: {
+        users: 'users_table'
+      }
+    }]
+  });
+
+  try {
+    await db.usePlugin(tursoReplicator);
+    console.log('✅ Turso table created/synced successfully');
+    console.log('   Schema format: SQLite (TEXT, INTEGER, REAL)\n');
+  } catch (err) {
+    console.log(`❌ Error: ${err.message}\n`);
+  }
+
+  // ========================================
+  // Example 8: PlanetScale (MySQL serverless) with schema sync
+  // ========================================
+  console.log('📘 Example 8: PlanetScale serverless MySQL schema sync');
+  console.log('─'.repeat(60));
+
+  const planetscaleReplicator = new ReplicatorPlugin({
+    replicators: [{
+      driver: 'planetscale',
+      config: {
+        host: 'aws.connect.psdb.cloud',
+        username: process.env.PLANETSCALE_USERNAME,
+        password: process.env.PLANETSCALE_PASSWORD,
+        schemaSync: {
+          enabled: true,
+          strategy: 'alter',
+          autoCreateTable: true,
+          autoCreateColumns: true
+        }
+      },
+      resources: {
+        users: 'users_table'
+      }
+    }]
+  });
+
+  try {
+    await db.usePlugin(planetscaleReplicator);
+    console.log('✅ PlanetScale table created/synced successfully');
+    console.log('   Schema format: MySQL-compatible\n');
+  } catch (err) {
+    console.log(`❌ Error: ${err.message}\n`);
+  }
+
+  // ========================================
+  // Example 9: Multiple strategies with onMismatch behaviors
+  // ========================================
+  console.log('📘 Example 9: onMismatch behaviors');
   console.log('─'.repeat(60));
 
   // ERROR: Throws error and stops
@@ -266,12 +333,12 @@ async function example() {
   console.log('onMismatch: ignore - Silently ignores mismatch\n');
 
   // ========================================
-  // Example 7: Listen to schema sync events
+  // Example 10: Listen to schema sync events
   // ========================================
-  console.log('📘 Example 7: Schema sync events');
+  console.log('📘 Example 10: Schema sync events');
   console.log('─'.repeat(60));
 
-  const replicator7 = new ReplicatorPlugin({
+  const replicator10 = new ReplicatorPlugin({
     replicators: [{
       driver: 'postgres',
       config: {
@@ -288,48 +355,48 @@ async function example() {
   });
 
   // Listen to events
-  replicator7.replicators[0].on('table_created', (event) => {
+  replicator10.replicators[0].on('table_created', (event) => {
     console.log(`✅ Table created: ${event.tableName}`);
     console.log(`   Attributes: ${event.attributes.join(', ')}`);
   });
 
-  replicator7.replicators[0].on('table_altered', (event) => {
+  replicator10.replicators[0].on('table_altered', (event) => {
     console.log(`✅ Table altered: ${event.tableName}`);
     console.log(`   Added ${event.addedColumns} column(s)`);
   });
 
-  replicator7.replicators[0].on('table_recreated', (event) => {
+  replicator10.replicators[0].on('table_recreated', (event) => {
     console.log(`⚠️  Table recreated: ${event.tableName}`);
     console.log(`   Attributes: ${event.attributes.join(', ')}`);
   });
 
-  replicator7.replicators[0].on('schema_sync_completed', (event) => {
+  replicator10.replicators[0].on('schema_sync_completed', (event) => {
     console.log(`✅ Schema sync completed for resources: ${event.resources.join(', ')}`);
   });
 
-  await db.usePlugin(replicator7);
+  await db.usePlugin(replicator10);
   console.log();
 
   // ========================================
   // Type mapping reference
   // ========================================
   console.log('📋 Type Mapping Reference');
-  console.log('─'.repeat(80));
-  console.log('S3DB Type        → PostgreSQL      → MySQL/MariaDB   → BigQuery');
-  console.log('─'.repeat(80));
-  console.log('string           → TEXT            → TEXT            → STRING');
-  console.log('string|max:255   → VARCHAR(255)    → VARCHAR(255)    → STRING');
-  console.log('number           → DOUBLE          → DOUBLE          → FLOAT64 / INT64');
-  console.log('boolean          → BOOLEAN         → TINYINT(1)      → BOOL');
-  console.log('object/json      → JSONB           → JSON            → JSON');
-  console.log('array            → JSONB           → JSON            → JSON');
-  console.log('embedding:1536   → JSONB           → JSON            → JSON');
-  console.log('ip4              → INET            → VARCHAR(15)     → STRING');
-  console.log('ip6              → INET            → VARCHAR(45)     → STRING');
-  console.log('secret           → TEXT            → TEXT            → STRING');
-  console.log('uuid             → UUID            → CHAR(36)        → STRING');
-  console.log('date             → DATE            → DATE            → DATE');
-  console.log('datetime         → TIMESTAMPTZ     → DATETIME        → TIMESTAMP');
+  console.log('─'.repeat(100));
+  console.log('S3DB Type        → PostgreSQL      → MySQL/MariaDB   → BigQuery        → Turso/SQLite    → PlanetScale');
+  console.log('─'.repeat(100));
+  console.log('string           → TEXT            → TEXT            → STRING          → TEXT            → TEXT');
+  console.log('string|max:255   → VARCHAR(255)    → VARCHAR(255)    → STRING          → TEXT            → VARCHAR(255)');
+  console.log('number           → DOUBLE          → DOUBLE          → FLOAT64/INT64   → REAL/INTEGER    → DOUBLE');
+  console.log('boolean          → BOOLEAN         → TINYINT(1)      → BOOL            → INTEGER         → TINYINT(1)');
+  console.log('object/json      → JSONB           → JSON            → JSON            → TEXT            → JSON');
+  console.log('array            → JSONB           → JSON            → JSON            → TEXT            → JSON');
+  console.log('embedding:1536   → JSONB           → JSON            → JSON            → TEXT            → JSON');
+  console.log('ip4              → INET            → VARCHAR(15)     → STRING          → TEXT            → VARCHAR(15)');
+  console.log('ip6              → INET            → VARCHAR(45)     → STRING          → TEXT            → VARCHAR(45)');
+  console.log('secret           → TEXT            → TEXT            → STRING          → TEXT            → TEXT');
+  console.log('uuid             → UUID            → CHAR(36)        → STRING          → TEXT            → CHAR(36)');
+  console.log('date             → DATE            → DATE            → DATE            → TEXT            → DATE');
+  console.log('datetime         → TIMESTAMPTZ     → DATETIME        → TIMESTAMP       → TEXT            → DATETIME');
   console.log();
 
   console.log('✅ Example completed!\n');
