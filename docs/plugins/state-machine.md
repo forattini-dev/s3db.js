@@ -1516,7 +1516,7 @@ R: Implementa máquinas de estado finitas (FSM) com transições controladas, gu
 **P: Para que serve?**
 R: Gerenciar workflows complexos (ex: pedidos, aprovações, processos), garantindo transições válidas e auditando mudanças de estado.
 
-**P: Como funciona?**
+**Q: How does it work?**
 R: Define estados, eventos que causam transições, guards (validações) e actions (efeitos colaterais).
 
 ### Configuração

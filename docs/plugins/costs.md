@@ -1195,7 +1195,7 @@ setInterval(() => {
 
 ### Storage & Data Transfer (Novos Recursos)
 
-**P: Como funciona o rastreamento de storage?**
+**Q: How does storage tracking work?**
 R: O plugin rastreia automaticamente o tamanho dos objetos durante PUT/POST/COPY operations:
 ```javascript
 const costs = db.client.costs;
@@ -1240,7 +1240,7 @@ const transferTier = costs.dataTransfer.tiers[costs.dataTransfer.currentTier];
 console.log(`Transfer OUT tier: $${transferTier.pricePerGB}/GB`);
 ```
 
-**P: Por que storage.subtotal é "monthly" mas requests.subtotal é total da sessão?**
+**Q: Why is storage.subtotal "monthly" but requests.subtotal is session total?**
 R: Storage é cobrado mensalmente pela AWS ($/GB/mês), então mostramos o custo mensal baseado no storage atual. Requests são cobrados por operação, então mostramos o total acumulado da sessão.
 
 **P: Como estimar meu custo mensal total?**
@@ -1306,7 +1306,7 @@ setInterval(() => {
 ```
 
 **P: Qual é o custo típico de operações comuns?**
-R: Exemplos práticos:
+A: Practical examples:
 
 | Operação | Quantidade | Custo Aproximado |
 |----------|-----------|------------------|

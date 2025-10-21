@@ -2,41 +2,41 @@
 
 ## ⚡ TLDR
 
-Replicação **real-time CDC** (Change Data Capture) para múltiplos destinos - **cada operação é replicada individualmente** em near real-time.
+**Real-time CDC** (Change Data Capture) replication to multiple destinations - **each operation is replicated individually** in near real-time.
 
-**1 linha para começar:**
+**1 line to get started:**
 ```javascript
 await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resources: ['users'], config: { connectionString: 's3://...' }}] }));
 ```
 
-**Principais features:**
-- ✅ **Real-Time CDC**: Cada insert/update/delete replicado individualmente (<10ms latency)
+**Key features:**
+- ✅ **Real-Time CDC**: Each insert/update/delete replicated individually (<10ms latency)
 - ✅ Multi-target: S3DB, BigQuery, PostgreSQL, MySQL, MariaDB, DynamoDB, MongoDB, SQS, Webhooks
-- ✅ Transformação de dados com funções customizadas
-- ✅ Retry automático com backoff exponencial
-- ✅ Dead letter queue para falhas
-- ✅ Event monitoring completo
+- ✅ Data transformation with custom functions
+- ✅ Automatic retry with exponential backoff
+- ✅ Dead letter queue for failures
+- ✅ Complete event monitoring
 
-**Quando usar:**
-- 📊 Analytics pipelines em tempo real
+**When to use:**
+- 📊 Real-time analytics pipelines
 - 🔄 Event sourcing / message queues
 - 🌍 Multi-destination sync
-- 📈 Audit trail contínuo
+- 📈 Continuous audit trail
 
-**Performance & Manutenção:**
+**Performance & Maintenance:**
 ```javascript
-// ❌ Sem replicator: Cron job manual exportando para PostgreSQL
-// - Roda 1x/dia à meia-noite
-// - Dados sempre com 24h de atraso
-// - Quebra quando schema muda
-// - 4 horas/semana de manutenção
+// ❌ Without replicator: Manual cron job exporting to PostgreSQL
+// - Runs once daily at midnight
+// - Data always 24h delayed
+// - Breaks when schema changes
+// - 4 hours/week maintenance
 
-// ✅ Com replicator: Sync automático em tempo real
-await users.insert({ name: 'John' }); // Replica automaticamente
-// - Dados disponíveis em ~2 segundos
-// - Zero manutenção
-// - Não quebra com mudanças de schema (com transform)
-// - Múltiplos destinos simultâneos
+// ✅ With replicator: Automatic real-time sync
+await users.insert({ name: 'John' }); // Automatically replicated
+// - Data available in ~2 seconds
+// - Zero maintenance
+// - Doesn't break with schema changes (with transform)
+// - Multiple simultaneous destinations
 ```
 
 ---
@@ -102,7 +102,7 @@ new BackupPlugin({
 ## 📋 Table of Contents
 
 - [Overview](#overview)
-- [Usage Journey](#usage-journey) - **Comece aqui para aprender passo-a-passo**
+- [Usage Journey](#usage-journey) - **Start here for step-by-step learning**
 - [Installation & Setup](#installation--setup)
 - [Configuration Options](#configuration-options)
 - [Replicator Drivers](#replicator-drivers)
@@ -140,30 +140,30 @@ The Replicator Plugin provides **enterprise-grade data replication** that synchr
 
 ### Level 1: Simple Backup (S3DB → S3DB)
 
-Comece aqui para backup básico entre buckets:
+Start here for basic backup between buckets:
 
 ```javascript
-// Step 1: Configure backup para outro bucket
+// Step 1: Configure backup to another bucket
 new ReplicatorPlugin({
   replicators: [{
     driver: 's3db',
-    resources: ['users'],  // Replica apenas users
+    resources: ['users'],  // Replicate only users
     config: {
       connectionString: 's3://KEY:SECRET@backup-bucket/database'
     }
   }]
 })
 
-// Step 2: Use normalmente - backup é automático
+// Step 2: Use normally - backup is automatic
 await users.insert({ name: 'John', email: 'john@example.com' });
-// Replicado automaticamente para backup-bucket em ~2s
+// Automatically replicated to backup-bucket in ~2s
 ```
 
-**O que você ganha:** Backup automático em tempo real, zero código adicional.
+**What you get:** Automatic real-time backup, zero additional code.
 
 ### Level 2: Add Data Transformation
 
-Quando precisar transformar dados antes de replicar:
+When you need to transform data before replicating:
 
 ```javascript
 new ReplicatorPlugin({
@@ -171,16 +171,16 @@ new ReplicatorPlugin({
     driver: 's3db',
     resources: {
       users: {
-        resource: 'users_backup',  // Nome diferente no destino
+        resource: 'users_backup',  // Different name in destination
         transform: (data) => ({
           id: data.id,
           name: data.name,
           email: data.email,
-          // Remove campos sensíveis
-          // password: OMITIDO
+          // Remove sensitive fields
+          // password: OMITTED
           created_at: new Date().toISOString()
         }),
-        actions: ['insert', 'update']  // Não replica deletes
+        actions: ['insert', 'update']  // Don't replicate deletes
       }
     },
     config: { connectionString: 's3://...' }
@@ -188,23 +188,23 @@ new ReplicatorPlugin({
 })
 ```
 
-**O que você ganha:** Controle total sobre o que e como é replicado.
+**What you get:** Full control over what and how is replicated.
 
 ### Level 3: Multi-Destination Replication
 
-Para analytics, webhooks e múltiplos sistemas:
+For analytics, webhooks and multiple systems:
 
 ```javascript
 new ReplicatorPlugin({
   replicators: [
-    // 1. Backup para S3
+    // 1. Backup to S3
     {
       driver: 's3db',
       resources: ['users', 'orders'],
       config: { connectionString: 's3://backup-bucket/...' }
     },
 
-    // 2. Analytics no PostgreSQL
+    // 2. Analytics in PostgreSQL
     {
       driver: 'postgresql',
       resources: {
@@ -214,7 +214,7 @@ new ReplicatorPlugin({
             order_id: data.id,
             total: data.total,
             created_at: data.createdAt,
-            // Campos otimizados para analytics
+            // Fields optimized for analytics
           })
         }
       },
@@ -223,7 +223,7 @@ new ReplicatorPlugin({
       }
     },
 
-    // 3. Event stream para SQS
+    // 3. Event stream to SQS
     {
       driver: 'sqs',
       resources: ['orders'],
@@ -233,12 +233,12 @@ new ReplicatorPlugin({
       }
     },
 
-    // 4. Webhook para CRM externo
+    // 4. Webhook to external CRM
     {
       driver: 'webhook',
       resources: {
         users: {
-          actions: ['insert'],  // Só novos usuários
+          actions: ['insert'],  // Only new users
           transform: (data) => ({
             user_id: data.id,
             email: data.email,
@@ -255,17 +255,17 @@ new ReplicatorPlugin({
 })
 ```
 
-**O que você ganha:** Um write, quatro destinos. Zero manutenção de scripts ETL.
+**What you get:** One write, four destinations. Zero ETL script maintenance.
 
 ### Level 4: Error Handling & Monitoring
 
-Adicionar resiliência e observabilidade:
+Add resilience and observability:
 
 ```javascript
 new ReplicatorPlugin({
-  verbose: true,  // Logs detalhados
-  persistReplicatorLog: true,  // Armazena logs no banco
-  maxRetries: 3,  // 3 tentativas antes de falhar
+  verbose: true,  // Detailed logs
+  persistReplicatorLog: true,  // Store logs in database
+  maxRetries: 3,  // 3 attempts before failing
 
   replicators: [{
     driver: 'postgresql',
@@ -274,29 +274,29 @@ new ReplicatorPlugin({
   }]
 })
 
-// Monitorar erros
+// Monitor errors
 db.on('replicator:error', ({ error, resource, data }) => {
-  console.error(`Falha ao replicar ${resource}:`, error.message);
-  // Enviar para Sentry/DataDog
+  console.error(`Failed to replicate ${resource}:`, error.message);
+  // Send to Sentry/DataDog
   Sentry.captureException(error, { extra: { resource, data } });
 });
 
-// Monitorar sucesso
+// Monitor success
 db.on('replicator:success', ({ resource, destination }) => {
-  console.log(`✓ ${resource} replicado para ${destination}`);
+  console.log(`✓ ${resource} replicated to ${destination}`);
 });
 
-// Ver logs persistidos
+// View persisted logs
 const logs = await db.resource('replicator_log');
 const errors = await logs.query({ status: 'error' });
-console.log(`${errors.length} erros de replicação`);
+console.log(`${errors.length} replication errors`);
 ```
 
-**O que você ganha:** Visibilidade completa, debugging fácil.
+**What you get:** Complete visibility, easy debugging.
 
 ### Level 5: Selective Replication with Filters
 
-Controle fino sobre o que replica:
+Fine-grained control over what replicates:
 
 ```javascript
 new ReplicatorPlugin({
@@ -304,11 +304,11 @@ new ReplicatorPlugin({
     driver: 'postgresql',
     resources: {
       orders: {
-        // Só replica orders completos
+        // Only replicate completed orders
         shouldReplicate: (data, action) => {
-          if (action === 'delete') return false;  // Nunca replica deletes
-          if (data.status !== 'completed') return false;  // Só completos
-          if (data.total < 100) return false;  // Só pedidos > $100
+          if (action === 'delete') return false;  // Never replicate deletes
+          if (data.status !== 'completed') return false;  // Only completed
+          if (data.total < 100) return false;  // Only orders > $100
           return true;
         },
 
@@ -325,16 +325,16 @@ new ReplicatorPlugin({
 })
 ```
 
-**O que você ganha:** Replica apenas o necessário, economiza storage e processamento.
+**What you get:** Replicate only what's needed, save storage and processing.
 
 ### Level 6: Production - Multi-Region Sync
 
-Para alta disponibilidade e disaster recovery:
+For high availability and disaster recovery:
 
 ```javascript
 new ReplicatorPlugin({
   replicators: [
-    // Primary backup (mesma região)
+    // Primary backup (same region)
     {
       driver: 's3db',
       resources: ['users', 'orders', 'products'],
@@ -343,7 +343,7 @@ new ReplicatorPlugin({
       }
     },
 
-    // Secondary backup (região diferente)
+    // Secondary backup (different region)
     {
       driver: 's3db',
       resources: ['users', 'orders', 'products'],
@@ -359,7 +359,7 @@ new ReplicatorPlugin({
         orders: {
           resource: 'analytics.orders',
           transform: (data) => ({
-            // Schema otimizado para BigQuery
+            // Schema optimized for BigQuery
             order_id: data.id,
             total_usd: parseFloat(data.total),
             created_timestamp: new Date(data.createdAt).getTime(),
@@ -384,7 +384,7 @@ app.get('/health/replication', async (req, res) => {
   const logs = await db.resource('replicator_log');
   const recentErrors = await logs.query({
     status: 'error',
-    timestamp: { $gte: Date.now() - 3600000 }  // Última hora
+    timestamp: { $gte: Date.now() - 3600000 }  // Last hour
   });
 
   if (recentErrors.length > 10) {
@@ -395,7 +395,7 @@ app.get('/health/replication', async (req, res) => {
 });
 ```
 
-**O que você ganha:** Multi-region, multi-destination, production-ready com monitoring.
+**What you get:** Multi-region, multi-destination, production-ready with monitoring.
 
 ---
 
@@ -1916,7 +1916,7 @@ R:
 - **BackupPlugin**: Batch snapshots - exporta TODO o database de uma vez em momentos específicos
 Ver [comparação completa](./BACKUP_VS_REPLICATOR.md).
 
-**P: Quando usar ReplicatorPlugin vs BackupPlugin?**
+**Q: When to use ReplicatorPlugin vs BackupPlugin?**
 R:
 - **ReplicatorPlugin**: Analytics em tempo real, event sourcing, sync contínuo
 - **BackupPlugin**: Disaster recovery, compliance, point-in-time recovery
@@ -1924,7 +1924,7 @@ R:
 **P: Quais drivers estão disponíveis?**
 R: `s3db` (outro S3DB), `sqs` (AWS SQS), `webhook` (HTTP/HTTPS), `postgresql`, `bigquery`
 
-**P: Como funciona o mapeamento de recursos?**
+**Q: How does resource mapping work?**
 R: Você pode mapear recursos 1:1, renomear ou transformar dados:
 ```javascript
 resources: {

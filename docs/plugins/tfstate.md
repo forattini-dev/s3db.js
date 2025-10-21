@@ -91,7 +91,7 @@ Armazena informações sobre cada arquivo `.tfstate` importado.
 - `bySourceFile` - Query por arquivo
 - `bySerial` - Query por versão
 
-**Exemplo:**
+**Example:**
 ```javascript
 // Ver todos os states importados
 const states = await plugin.stateFilesResource.list();
@@ -124,7 +124,7 @@ O resource principal contendo **todos os recursos de infraestrutura** (EC2, RDS,
 - `bySourceFile` - Query por arquivo
 - `byProviderAndType` - Query por provider + tipo
 
-**Exemplo:**
+**Example:**
 ```javascript
 // Todos os EC2 (usando partition)
 const ec2 = await plugin.getResourcesByType('aws_instance');
@@ -163,7 +163,7 @@ Rastreia o que mudou entre versões de states (se diff tracking estiver habilita
 - `bySourceFile` - Diffs de um state específico
 - `byOldSerial` / `byNewSerial` - Diffs envolvendo versões específicas
 
-**Exemplo:**
+**Example:**
 ```javascript
 // Ver últimas mudanças
 const recentDiffs = await plugin.diffsResource.query({}, {
