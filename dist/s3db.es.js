@@ -17356,6 +17356,207 @@ class MongoDBReplicator extends BaseReplicator {
   }
 }
 
+function parseFieldType(typeNotation) {
+  if (typeof typeNotation !== "string") {
+    return { type: "string", required: false, maxLength: null, options: {} };
+  }
+  const parts = typeNotation.split("|");
+  const baseType = parts[0];
+  const options = {};
+  let required = false;
+  let maxLength = null;
+  for (const part of parts.slice(1)) {
+    if (part === "required") {
+      required = true;
+    } else if (part.startsWith("maxlength:")) {
+      maxLength = parseInt(part.split(":")[1]);
+    } else if (part.startsWith("min:")) {
+      options.min = parseFloat(part.split(":")[1]);
+    } else if (part.startsWith("max:")) {
+      options.max = parseFloat(part.split(":")[1]);
+    } else if (part.startsWith("length:")) {
+      options.length = parseInt(part.split(":")[1]);
+    }
+  }
+  return { type: baseType, required, maxLength, options };
+}
+function s3dbTypeToPostgres(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      if (maxLength) return `VARCHAR(${maxLength})`;
+      return "TEXT";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INTEGER";
+      }
+      return "DOUBLE PRECISION";
+    case "boolean":
+      return "BOOLEAN";
+    case "object":
+    case "json":
+      return "JSONB";
+    case "array":
+      return "JSONB";
+    case "embedding":
+      return "JSONB";
+    case "ip4":
+    case "ip6":
+      return "INET";
+    case "secret":
+      return "TEXT";
+    case "uuid":
+      return "UUID";
+    case "date":
+    case "datetime":
+      return "TIMESTAMP WITH TIME ZONE";
+    default:
+      return "TEXT";
+  }
+}
+function s3dbTypeToMySQL(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      if (maxLength && maxLength <= 255) return `VARCHAR(${maxLength})`;
+      return "TEXT";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INT";
+      }
+      return "DOUBLE";
+    case "boolean":
+      return "TINYINT(1)";
+    case "object":
+    case "json":
+    case "array":
+      return "JSON";
+    case "embedding":
+      return "JSON";
+    case "ip4":
+      return "VARCHAR(15)";
+    case "ip6":
+      return "VARCHAR(45)";
+    case "secret":
+      return "TEXT";
+    case "uuid":
+      return "CHAR(36)";
+    case "date":
+    case "datetime":
+      return "DATETIME";
+    default:
+      return "TEXT";
+  }
+}
+function generatePostgresCreateTable(tableName, attributes) {
+  const columns = [];
+  columns.push("id VARCHAR(255) PRIMARY KEY");
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToPostgres(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    columns.push(`"${fieldName}" ${sqlType} ${nullConstraint}`);
+  }
+  if (!attributes.createdAt) {
+    columns.push("created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
+  }
+  if (!attributes.updatedAt) {
+    columns.push("updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
+  }
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+  ${columns.join(",\n  ")}
+)`;
+}
+function generateMySQLCreateTable(tableName, attributes) {
+  const columns = [];
+  columns.push("id VARCHAR(255) PRIMARY KEY");
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToMySQL(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    columns.push(`\`${fieldName}\` ${sqlType} ${nullConstraint}`);
+  }
+  if (!attributes.createdAt) {
+    columns.push("created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+  }
+  if (!attributes.updatedAt) {
+    columns.push("updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+  ${columns.join(",\n  ")}
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+}
+async function getPostgresTableSchema(client, tableName) {
+  const [ok, err, result] = await tryFn(async () => {
+    return await client.query(`
+      SELECT column_name, data_type, is_nullable, character_maximum_length
+      FROM information_schema.columns
+      WHERE table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+  });
+  if (!ok) return null;
+  const schema = {};
+  for (const row of result.rows) {
+    schema[row.column_name] = {
+      type: row.data_type,
+      nullable: row.is_nullable === "YES",
+      maxLength: row.character_maximum_length
+    };
+  }
+  return schema;
+}
+async function getMySQLTableSchema(connection, tableName) {
+  const [ok, err, [rows]] = await tryFn(async () => {
+    return await connection.query(`
+      SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = ?
+      ORDER BY ORDINAL_POSITION
+    `, [tableName]);
+  });
+  if (!ok) return null;
+  const schema = {};
+  for (const row of rows) {
+    schema[row.COLUMN_NAME] = {
+      type: row.DATA_TYPE,
+      nullable: row.IS_NULLABLE === "YES",
+      maxLength: row.CHARACTER_MAXIMUM_LENGTH
+    };
+  }
+  return schema;
+}
+function generatePostgresAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToPostgres(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${fieldName}" ${sqlType} ${nullConstraint}`);
+  }
+  return alterStatements;
+}
+function generateMySQLAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToMySQL(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN \`${fieldName}\` ${sqlType} ${nullConstraint}`);
+  }
+  return alterStatements;
+}
+
 class MySQLReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {
     super(config);
@@ -17369,6 +17570,14 @@ class MySQLReplicator extends BaseReplicator {
     this.ssl = config.ssl;
     this.connectionLimit = config.connectionLimit || 10;
     this.logTable = config.logTable;
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || "alter",
+      onMismatch: config.schemaSync?.onMismatch || "error",
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false,
+      dropMissingColumns: config.schemaSync?.dropMissingColumns || false
+    };
     this.resources = this.parseResourcesConfig(resources);
   }
   parseResourcesConfig(resources) {
@@ -17460,11 +17669,116 @@ class MySQLReplicator extends BaseReplicator {
     if (this.logTable) {
       await this._createLogTable();
     }
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
     this.emit("connected", {
       replicator: "MySQLReplicator",
       host: this.host,
       database: this.database
     });
+  }
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[MySQLReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+          if (this.schemaSync.onMismatch === "error") {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === "warn") {
+            console.warn(`[MySQLReplicator] ${message}`);
+          }
+        }
+      }
+    }
+    this.emit("schema_sync_completed", {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    const connection = await this.pool.promise().getConnection();
+    try {
+      const existingSchema = await getMySQLTableSchema(connection, tableName);
+      if (!existingSchema) {
+        if (!this.schemaSync.autoCreateTable) {
+          throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        }
+        if (this.schemaSync.strategy === "validate-only") {
+          throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        }
+        const createSQL = generateMySQLCreateTable(tableName, attributes);
+        if (this.config.verbose) {
+          console.log(`[MySQLReplicator] Creating table ${tableName}:
+${createSQL}`);
+        }
+        await connection.query(createSQL);
+        this.emit("table_created", {
+          replicator: this.name,
+          tableName,
+          attributes: Object.keys(attributes)
+        });
+        return;
+      }
+      if (this.schemaSync.strategy === "drop-create") {
+        if (this.config.verbose) {
+          console.warn(`[MySQLReplicator] Dropping and recreating table ${tableName}`);
+        }
+        await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+        const createSQL = generateMySQLCreateTable(tableName, attributes);
+        await connection.query(createSQL);
+        this.emit("table_recreated", {
+          replicator: this.name,
+          tableName,
+          attributes: Object.keys(attributes)
+        });
+        return;
+      }
+      if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
+        const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+        if (alterStatements.length > 0) {
+          if (this.config.verbose) {
+            console.log(`[MySQLReplicator] Altering table ${tableName}:`, alterStatements);
+          }
+          for (const stmt of alterStatements) {
+            await connection.query(stmt);
+          }
+          this.emit("table_altered", {
+            replicator: this.name,
+            tableName,
+            addedColumns: alterStatements.length
+          });
+        }
+      }
+      if (this.schemaSync.strategy === "validate-only") {
+        const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+        if (alterStatements.length > 0) {
+          throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+        }
+      }
+    } finally {
+      connection.release();
+    }
   }
   shouldReplicateResource(resourceName) {
     return this.resources.hasOwnProperty(resourceName);
@@ -17629,7 +17943,8 @@ class MySQLReplicator extends BaseReplicator {
       host: this.host,
       database: this.database,
       resources: Object.keys(this.resources),
-      poolConnections: this.pool ? this.pool.pool.allConnections.length : 0
+      poolConnections: this.pool ? this.pool.pool.allConnections.length : 0,
+      schemaSync: this.schemaSync
     };
   }
   async cleanup() {
@@ -17653,6 +17968,14 @@ class PostgresReplicator extends BaseReplicator {
     this.client = null;
     this.ssl = config.ssl;
     this.logTable = config.logTable;
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || "alter",
+      onMismatch: config.schemaSync?.onMismatch || "error",
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false,
+      dropMissingColumns: config.schemaSync?.dropMissingColumns || false
+    };
     this.resources = this.parseResourcesConfig(resources);
   }
   parseResourcesConfig(resources) {
@@ -17738,6 +18061,9 @@ class PostgresReplicator extends BaseReplicator {
     if (this.logTable) {
       await this.createLogTableIfNotExists();
     }
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
     this.emit("initialized", {
       replicator: this.name,
       database: this.database || "postgres",
@@ -17762,6 +18088,103 @@ class PostgresReplicator extends BaseReplicator {
       CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
     `;
     await this.client.query(createTableQuery);
+  }
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[PostgresReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+          if (this.schemaSync.onMismatch === "error") {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === "warn") {
+            console.warn(`[PostgresReplicator] ${message}`);
+          }
+        }
+      }
+    }
+    this.emit("schema_sync_completed", {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    const existingSchema = await getPostgresTableSchema(this.client, tableName);
+    if (!existingSchema) {
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+      if (this.schemaSync.strategy === "validate-only") {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+      const createSQL = generatePostgresCreateTable(tableName, attributes);
+      if (this.config.verbose) {
+        console.log(`[PostgresReplicator] Creating table ${tableName}:
+${createSQL}`);
+      }
+      await this.client.query(createSQL);
+      this.emit("table_created", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "drop-create") {
+      if (this.config.verbose) {
+        console.warn(`[PostgresReplicator] Dropping and recreating table ${tableName}`);
+      }
+      await this.client.query(`DROP TABLE IF EXISTS ${tableName} CASCADE`);
+      const createSQL = generatePostgresCreateTable(tableName, attributes);
+      await this.client.query(createSQL);
+      this.emit("table_recreated", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
+      const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
+      if (alterStatements.length > 0) {
+        if (this.config.verbose) {
+          console.log(`[PostgresReplicator] Altering table ${tableName}:`, alterStatements);
+        }
+        for (const stmt of alterStatements) {
+          await this.client.query(stmt);
+        }
+        this.emit("table_altered", {
+          replicator: this.name,
+          tableName,
+          addedColumns: alterStatements.length
+        });
+      }
+    }
+    if (this.schemaSync.strategy === "validate-only") {
+      const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
+      if (alterStatements.length > 0) {
+        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+      }
+    }
   }
   shouldReplicateResource(resourceName) {
     return this.resources.hasOwnProperty(resourceName);
@@ -17933,7 +18356,8 @@ class PostgresReplicator extends BaseReplicator {
       ...super.getStatus(),
       database: this.database || "postgres",
       resources: this.resources,
-      logTable: this.logTable
+      logTable: this.logTable,
+      schemaSync: this.schemaSync
     };
   }
 }
