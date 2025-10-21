@@ -25,6 +25,55 @@ await plugin.backup('full');  // Full backup created!
 - 📦 Long-term archiving
 - 🌍 Multi-region backup
 
+---
+
+## 🆚 BackupPlugin vs ReplicatorPlugin
+
+**BackupPlugin** creates **periodic snapshots** of your entire database (like taking photos):
+- ✅ Full database state at specific timestamps
+- ✅ Scheduled (cron) or manual execution
+- ✅ All resources exported at once (batch)
+- ✅ JSONL.gz format for portability
+- ✅ Perfect for: disaster recovery, compliance, migrations
+
+**ReplicatorPlugin** provides **real-time CDC** (Change Data Capture):
+- ✅ Individual records replicated as they change
+- ✅ Triggered on every insert/update/delete
+- ✅ Near real-time (<10ms latency)
+- ✅ Multiple destinations: PostgreSQL, BigQuery, SQS, Webhooks
+- ✅ Perfect for: analytics, event sourcing, multi-region sync
+
+| Aspect | BackupPlugin | ReplicatorPlugin |
+|--------|-------------|------------------|
+| **Timing** | Scheduled (hourly/daily) | Every operation |
+| **Granularity** | All resources at once | 1 record at a time |
+| **Latency** | Minutes/hours | Milliseconds |
+| **Use Case** | Disaster recovery | Real-time analytics |
+| **Format** | JSONL + s3db.json | Service-specific |
+
+**Use Both Together:**
+```javascript
+// BackupPlugin for disaster recovery
+new BackupPlugin({
+  driver: 's3',
+  config: { bucket: 'backups' },
+  schedule: { daily: '0 2 * * *' }  // 2am daily
+})
+
+// ReplicatorPlugin for real-time analytics
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 'bigquery',
+    resources: ['events', 'users'],
+    config: { projectId: 'my-project', dataset: 'analytics' }
+  }]
+})
+```
+
+📚 See [ReplicatorPlugin docs](./replicator.md) for real-time replication.
+
+---
+
 **Recovery Time:**
 ```javascript
 // ❌ Without backups: Data loss is permanent
