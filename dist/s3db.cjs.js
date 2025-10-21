@@ -2650,9 +2650,24 @@ function createResourceRoutes(resource, version, config = {}) {
       const offset = parseInt(query.offset) || 0;
       const partition = query.partition;
       const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+      const reservedKeys = ["limit", "offset", "partition", "partitionValues", "sort"];
+      const filters = {};
+      for (const [key, value] of Object.entries(query)) {
+        if (!reservedKeys.includes(key)) {
+          try {
+            filters[key] = JSON.parse(value);
+          } catch {
+            filters[key] = value;
+          }
+        }
+      }
       let items;
       let total;
-      if (partition && partitionValues) {
+      if (Object.keys(filters).length > 0) {
+        items = await resource.query(filters, { limit: limit + offset });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      } else if (partition && partitionValues) {
         items = await resource.listPartition({
           partition,
           partitionValues,
@@ -2755,7 +2770,14 @@ function createResourceRoutes(resource, version, config = {}) {
   if (methods.includes("HEAD")) {
     app.head("/", asyncHandler(async (c) => {
       const total = await resource.count();
+      const allItems = await resource.list({ limit: 1e3 });
+      const stats = {
+        total,
+        version: resource.config?.currentVersion || resource.version || "v0"
+      };
       c.header("X-Total-Count", total.toString());
+      c.header("X-Resource-Version", stats.version);
+      c.header("X-Schema-Fields", Object.keys(resource.config?.attributes || {}).length.toString());
       return c.body(null, 200);
     }));
     app.head("/:id", asyncHandler(async (c) => {
@@ -2764,49 +2786,50 @@ function createResourceRoutes(resource, version, config = {}) {
       if (!item) {
         return c.body(null, 404);
       }
+      if (item.updatedAt) {
+        c.header("Last-Modified", new Date(item.updatedAt).toUTCString());
+      }
       return c.body(null, 200);
     }));
   }
   if (methods.includes("OPTIONS")) {
-    app.options("*", (c) => {
+    app.options("/", asyncHandler(async (c) => {
       c.header("Allow", methods.join(", "));
+      const total = await resource.count();
+      const schema = resource.config?.attributes || {};
+      const version2 = resource.config?.currentVersion || resource.version || "v0";
+      const metadata = {
+        resource: resourceName,
+        version: version2,
+        totalRecords: total,
+        allowedMethods: methods,
+        schema: Object.entries(schema).map(([name, def]) => ({
+          name,
+          type: typeof def === "string" ? def.split("|")[0] : def.type,
+          rules: typeof def === "string" ? def.split("|").slice(1) : []
+        })),
+        endpoints: {
+          list: `/${version2}/${resourceName}`,
+          get: `/${version2}/${resourceName}/:id`,
+          create: `/${version2}/${resourceName}`,
+          update: `/${version2}/${resourceName}/:id`,
+          delete: `/${version2}/${resourceName}/:id`
+        },
+        queryParameters: {
+          limit: "number (1-1000, default: 100)",
+          offset: "number (min: 0, default: 0)",
+          partition: "string (partition name)",
+          partitionValues: "JSON string",
+          "[any field]": "any (filter by field value)"
+        }
+      };
+      return c.json(metadata);
+    }));
+    app.options("/:id", (c) => {
+      c.header("Allow", methods.filter((m) => m !== "POST").join(", "));
       return c.body(null, 204);
     });
   }
-  return app;
-}
-function createCountRoute(resource, version) {
-  const app = new hono.Hono();
-  app.get("/", asyncHandler(async (c) => {
-    const query = c.req.query();
-    const partition = query.partition;
-    const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
-    let total;
-    if (partition && partitionValues) {
-      total = await resource.count({ partition, partitionValues });
-    } else {
-      total = await resource.count();
-    }
-    const response = success({ count: total });
-    c.header("X-Total-Count", total.toString());
-    return c.json(response, response._status);
-  }));
-  return app;
-}
-function createQueryRoute(resource, version) {
-  const app = new hono.Hono();
-  app.post("/", asyncHandler(async (c) => {
-    const query = await c.req.json();
-    const { filter = {}, options = {} } = query;
-    const items = await resource.query(filter, options);
-    const response = list(items, {
-      total: items.length,
-      page: 1,
-      pageSize: items.length,
-      pageCount: 1
-    });
-    return c.json(response, response._status);
-  }));
   return app;
 }
 
@@ -2937,7 +2960,7 @@ function generateResourcePaths(resource, version, config = {}) {
       get: {
         tags: [resourceName],
         summary: `List ${resourceName}`,
-        description: `Retrieve a paginated list of ${resourceName}`,
+        description: `Retrieve a paginated list of ${resourceName}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.`,
         parameters: [
           {
             name: "limit",
@@ -3228,84 +3251,145 @@ function generateResourcePaths(resource, version, config = {}) {
       security: security.length > 0 ? security : void 0
     };
   }
-  paths[`${basePath}/count`] = {
-    get: {
+  if (methods.includes("HEAD")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].head = {
       tags: [resourceName],
-      summary: `Count ${resourceName}`,
-      description: `Get the total count of ${resourceName}`,
+      summary: `Get ${resourceName} statistics`,
+      description: `Get statistics about ${resourceName} collection without retrieving data. Returns statistics in response headers.`,
       responses: {
         200: {
-          description: "Successful response",
+          description: "Statistics retrieved successfully",
+          headers: {
+            "X-Total-Count": {
+              description: "Total number of records",
+              schema: { type: "integer" }
+            },
+            "X-Resource-Version": {
+              description: "Current resource version",
+              schema: { type: "string" }
+            },
+            "X-Schema-Fields": {
+              description: "Number of schema fields",
+              schema: { type: "integer" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].head = {
+      tags: [resourceName],
+      summary: `Check if ${resourceName} exists`,
+      description: `Check if a ${resourceName} exists without retrieving its data`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      responses: {
+        200: {
+          description: "Resource exists",
+          headers: {
+            "Last-Modified": {
+              description: "Last modification date",
+              schema: { type: "string", format: "date-time" }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found"
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("OPTIONS")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].options = {
+      tags: [resourceName],
+      summary: `Get ${resourceName} metadata`,
+      description: `Get complete metadata about ${resourceName} resource including schema, allowed methods, endpoints, and query parameters`,
+      responses: {
+        200: {
+          description: "Metadata retrieved successfully",
+          headers: {
+            "Allow": {
+              description: "Allowed HTTP methods",
+              schema: { type: "string", example: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS" }
+            }
+          },
           content: {
             "application/json": {
               schema: {
                 type: "object",
                 properties: {
-                  success: { type: "boolean", example: true },
-                  data: {
+                  resource: { type: "string" },
+                  version: { type: "string" },
+                  totalRecords: { type: "integer" },
+                  allowedMethods: {
+                    type: "array",
+                    items: { type: "string" }
+                  },
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        name: { type: "string" },
+                        type: { type: "string" },
+                        rules: { type: "array", items: { type: "string" } }
+                      }
+                    }
+                  },
+                  endpoints: {
                     type: "object",
                     properties: {
-                      count: { type: "integer" }
+                      list: { type: "string" },
+                      get: { type: "string" },
+                      create: { type: "string" },
+                      update: { type: "string" },
+                      delete: { type: "string" }
                     }
-                  }
+                  },
+                  queryParameters: { type: "object" }
                 }
               }
             }
           }
         }
-      },
-      security: security.length > 0 ? security : void 0
-    }
-  };
-  paths[`${basePath}/query`] = {
-    post: {
+      }
+    };
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].options = {
       tags: [resourceName],
-      summary: `Query ${resourceName}`,
-      description: `Query ${resourceName} with filters`,
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                filter: {
-                  type: "object",
-                  description: "Filter criteria"
-                },
-                options: {
-                  type: "object",
-                  properties: {
-                    limit: { type: "integer" }
-                  }
-                }
-              }
-            }
-          }
+      summary: `Get allowed methods for ${resourceName} item`,
+      description: `Get allowed HTTP methods for individual ${resourceName} operations`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
         }
-      },
+      ],
       responses: {
-        200: {
-          description: "Successful response",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  success: { type: "boolean", example: true },
-                  data: {
-                    type: "array",
-                    items: schema
-                  }
-                }
-              }
+        204: {
+          description: "Methods retrieved successfully",
+          headers: {
+            "Allow": {
+              description: "Allowed HTTP methods",
+              schema: { type: "string", example: "GET, PUT, PATCH, DELETE, HEAD, OPTIONS" }
             }
           }
         }
-      },
-      security: security.length > 0 ? security : void 0
-    }
-  };
+      }
+    };
+  }
   return paths;
 }
 function generateOpenAPISpec(database, config = {}) {
@@ -3532,9 +3616,9 @@ function generateOpenAPISpec(database, config = {}) {
   }
   spec.paths["/health"] = {
     get: {
-      tags: ["System"],
-      summary: "Health Check",
-      description: "Check API health status",
+      tags: ["Health"],
+      summary: "Generic Health Check",
+      description: "Generic health check endpoint that includes references to liveness and readiness probes",
       responses: {
         200: {
           description: "API is healthy",
@@ -3548,7 +3632,43 @@ function generateOpenAPISpec(database, config = {}) {
                     type: "object",
                     properties: {
                       status: { type: "string", example: "ok" },
-                      uptime: { type: "number" },
+                      uptime: { type: "number", description: "Process uptime in seconds" },
+                      timestamp: { type: "string", format: "date-time" },
+                      checks: {
+                        type: "object",
+                        properties: {
+                          liveness: { type: "string", example: "/health/live" },
+                          readiness: { type: "string", example: "/health/ready" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  spec.paths["/health/live"] = {
+    get: {
+      tags: ["Health"],
+      summary: "Liveness Probe",
+      description: "Kubernetes liveness probe - checks if the application is alive. If this fails, Kubernetes will restart the pod.",
+      responses: {
+        200: {
+          description: "Application is alive",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "alive" },
                       timestamp: { type: "string", format: "date-time" }
                     }
                   }
@@ -3560,9 +3680,77 @@ function generateOpenAPISpec(database, config = {}) {
       }
     }
   };
+  spec.paths["/health/ready"] = {
+    get: {
+      tags: ["Health"],
+      summary: "Readiness Probe",
+      description: "Kubernetes readiness probe - checks if the application is ready to receive traffic. If this fails, Kubernetes will remove the pod from service endpoints.",
+      responses: {
+        200: {
+          description: "Application is ready to receive traffic",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "ready" },
+                      database: {
+                        type: "object",
+                        properties: {
+                          connected: { type: "boolean", example: true },
+                          resources: { type: "integer", example: 5 }
+                        }
+                      },
+                      timestamp: { type: "string", format: "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        503: {
+          description: "Application is not ready",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: false },
+                  error: {
+                    type: "object",
+                    properties: {
+                      message: { type: "string", example: "Service not ready" },
+                      code: { type: "string", example: "NOT_READY" },
+                      details: {
+                        type: "object",
+                        properties: {
+                          database: {
+                            type: "object",
+                            properties: {
+                              connected: { type: "boolean", example: false },
+                              resources: { type: "integer", example: 0 }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
   spec.tags.push({
-    name: "System",
-    description: "System endpoints"
+    name: "Health",
+    description: "Health check endpoints for monitoring and Kubernetes probes"
   });
   return spec;
 }
@@ -3608,11 +3796,47 @@ class ApiServer {
     this.options.middlewares.forEach((middleware) => {
       this.app.use("*", middleware);
     });
+    this.app.get("/health/live", (c) => {
+      const response = success({
+        status: "alive",
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/health/ready", (c) => {
+      const isReady = this.options.database && this.options.database.connected && Object.keys(this.options.database.resources).length > 0;
+      if (!isReady) {
+        const response2 = error("Service not ready", {
+          status: 503,
+          code: "NOT_READY",
+          details: {
+            database: {
+              connected: this.options.database?.connected || false,
+              resources: Object.keys(this.options.database?.resources || {}).length
+            }
+          }
+        });
+        return c.json(response2, 503);
+      }
+      const response = success({
+        status: "ready",
+        database: {
+          connected: true,
+          resources: Object.keys(this.options.database.resources).length
+        },
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
     this.app.get("/health", (c) => {
       const response = success({
         status: "ok",
         uptime: process.uptime(),
-        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        checks: {
+          liveness: "/health/live",
+          readiness: "/health/ready"
+        }
       });
       return c.json(response);
     });
@@ -3689,10 +3913,6 @@ class ApiServer {
         enableValidation: config.validation !== false
       });
       this.app.route(`/${version}/${name}`, resourceApp);
-      const countApp = createCountRoute(resource);
-      this.app.route(`/${version}/${name}/count`, countApp);
-      const queryApp = createQueryRoute(resource);
-      this.app.route(`/${version}/${name}/query`, queryApp);
       if (this.options.verbose) {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
       }
@@ -3977,12 +4197,14 @@ class ApiPlugin extends Plugin {
       port: options.port || 3e3,
       host: options.host || "0.0.0.0",
       verbose: options.verbose || false,
-      // API Documentation
-      docsEnabled: options.docsEnabled !== false,
-      // Enable /docs by default
-      apiTitle: options.apiTitle || "s3db.js API",
-      apiVersion: options.apiVersion || "1.0.0",
-      apiDescription: options.apiDescription || "Auto-generated REST API for s3db.js resources",
+      // API Documentation (supports both new and legacy formats)
+      docs: {
+        enabled: options.docs?.enabled !== false && options.docsEnabled !== false,
+        // Enable by default
+        title: options.docs?.title || options.apiTitle || "s3db.js API",
+        version: options.docs?.version || options.apiVersion || "1.0.0",
+        description: options.docs?.description || options.apiDescription || "Auto-generated REST API for s3db.js resources"
+      },
       // Authentication configuration
       auth: {
         jwt: {
@@ -4254,10 +4476,10 @@ class ApiPlugin extends Plugin {
       middlewares: this.compiledMiddlewares,
       verbose: this.config.verbose,
       auth: this.config.auth,
-      docsEnabled: this.config.docsEnabled !== false,
-      apiTitle: this.config.apiTitle,
-      apiVersion: this.config.apiVersion,
-      apiDescription: this.config.apiDescription
+      docsEnabled: this.config.docs.enabled,
+      apiTitle: this.config.docs.title,
+      apiVersion: this.config.docs.version,
+      apiDescription: this.config.docs.description
     });
     await this.server.start();
     this.emit("plugin.started", {
@@ -31893,14 +32115,43 @@ class TfStatePlugin extends Plugin {
         console.log(`[TfStatePlugin] Driver initialized successfully`);
       }
     }
+    this.lineagesName = "plg_tfstate_lineages";
+    this.lineagesResource = await this.database.createResource({
+      name: this.lineagesName,
+      attributes: {
+        id: "string|required",
+        // = lineage UUID from Terraform state
+        name: "string",
+        // User-friendly name (optional)
+        latestSerial: "number",
+        // Track latest for quick access
+        latestStateId: "string",
+        // FK to stateFilesResource
+        totalStates: "number",
+        // Counter
+        firstImportedAt: "number",
+        lastImportedAt: "number",
+        metadata: "json"
+        // Custom tags, project info, etc.
+      },
+      timestamps: true,
+      asyncPartitions: true,
+      // Enable async for performance
+      partitions: {},
+      // No partitions for now (name is optional)
+      createdBy: "TfStatePlugin"
+    });
     this.stateFilesResource = await this.database.createResource({
       name: this.stateFilesName,
       attributes: {
         id: "string|required",
+        lineageId: "string|required",
+        // NEW: FK to lineages (= lineage UUID)
         sourceFile: "string|required",
         // Full path or s3:// URI
         serial: "number|required",
-        lineage: "string",
+        lineage: "string|required",
+        // Denormalized for queries
         terraformVersion: "string",
         stateVersion: "number|required",
         resourceCount: "number",
@@ -31909,10 +32160,15 @@ class TfStatePlugin extends Plugin {
         importedAt: "number|required"
       },
       timestamps: true,
-      asyncPartitions: false,
-      // Sync partitions for immediate query availability
+      asyncPartitions: true,
+      // NEW: Enable async for better performance
       partitions: {
+        byLineage: { fields: { lineageId: "string" } },
+        // NEW: Primary lookup
+        byLineageSerial: { fields: { lineageId: "string", serial: "number" } },
+        // NEW: Composite key
         bySourceFile: { fields: { sourceFile: "string" } },
+        // Legacy support
         bySerial: { fields: { serial: "number" } },
         bySha256: { fields: { sha256Hash: "string" } }
       },
@@ -31923,7 +32179,9 @@ class TfStatePlugin extends Plugin {
       attributes: {
         id: "string|required",
         stateFileId: "string|required",
-        // Foreign key to terraform_state_files
+        // FK to stateFilesResource
+        lineageId: "string|required",
+        // NEW: FK to lineages
         // Denormalized fields for fast queries
         stateSerial: "number|required",
         sourceFile: "string|required",
@@ -31939,14 +32197,21 @@ class TfStatePlugin extends Plugin {
         importedAt: "number|required"
       },
       timestamps: true,
-      asyncPartitions: false,
-      // Sync partitions for immediate query availability
+      asyncPartitions: true,
+      // NEW: Enable async for better performance
       partitions: {
+        byLineageSerial: { fields: { lineageId: "string", stateSerial: "number" } },
+        // NEW: Efficient diff queries
+        byLineage: { fields: { lineageId: "string" } },
+        // NEW: All resources for lineage
         byType: { fields: { resourceType: "string" } },
         byProvider: { fields: { providerName: "string" } },
         bySerial: { fields: { stateSerial: "number" } },
         bySourceFile: { fields: { sourceFile: "string" } },
-        byProviderAndType: { fields: { providerName: "string", resourceType: "string" } }
+        // Legacy support
+        byProviderAndType: { fields: { providerName: "string", resourceType: "string" } },
+        byLineageType: { fields: { lineageId: "string", resourceType: "string" } }
+        // NEW: Type queries per lineage
       },
       createdBy: "TfStatePlugin"
     });
@@ -31955,9 +32220,16 @@ class TfStatePlugin extends Plugin {
         name: this.diffsName,
         attributes: {
           id: "string|required",
-          sourceFile: "string|required",
+          lineageId: "string|required",
+          // NEW: FK to lineages
+          sourceFile: "string",
+          // Optional: for informational purposes
           oldSerial: "number|required",
           newSerial: "number|required",
+          oldStateId: "string",
+          // NEW: FK to stateFilesResource
+          newStateId: "string|required",
+          // NEW: FK to stateFilesResource
           calculatedAt: "number|required",
           // Summary statistics
           summary: {
@@ -31979,10 +32251,15 @@ class TfStatePlugin extends Plugin {
           }
         },
         timestamps: true,
-        asyncPartitions: false,
-        // Sync partitions for immediate query availability
+        asyncPartitions: true,
+        // NEW: Enable async for better performance
         partitions: {
+          byLineage: { fields: { lineageId: "string" } },
+          // NEW: All diffs for lineage
+          byLineageNewSerial: { fields: { lineageId: "string", newSerial: "number" } },
+          // NEW: Specific version lookup
           bySourceFile: { fields: { sourceFile: "string" } },
+          // Legacy support
           byNewSerial: { fields: { newSerial: "number" } },
           byOldSerial: { fields: { oldSerial: "number" } }
         },
@@ -31990,7 +32267,7 @@ class TfStatePlugin extends Plugin {
       });
     }
     if (this.verbose) {
-      const resourcesCreated = [this.stateFilesName, this.resourceName];
+      const resourcesCreated = [this.lineagesName, this.stateFilesName, this.resourceName];
       if (this.trackDiffs) resourcesCreated.push(this.diffsName);
       console.log(`[TfStatePlugin] Created resources: ${resourcesCreated.join(", ")}`);
     }
@@ -32408,6 +32685,54 @@ class TfStatePlugin extends Plugin {
     return regex.test(key);
   }
   /**
+   * Ensure lineage record exists and is up-to-date
+   * Creates or updates the lineage tracking record
+   * @private
+   */
+  async _ensureLineage(lineageUuid, stateMeta) {
+    if (!lineageUuid) {
+      throw new TfStateError("Lineage UUID is required for state tracking");
+    }
+    const [getOk, getErr, existingLineage] = await tryFn(async () => {
+      return await this.lineagesResource.get(lineageUuid);
+    });
+    const currentTime = Date.now();
+    if (existingLineage) {
+      const updates = {
+        lastImportedAt: currentTime
+      };
+      if (stateMeta.serial > (existingLineage.latestSerial || 0)) {
+        updates.latestSerial = stateMeta.serial;
+        updates.latestStateId = stateMeta.stateFileId;
+      }
+      if (existingLineage.totalStates !== void 0) {
+        updates.totalStates = existingLineage.totalStates + 1;
+      } else {
+        updates.totalStates = 1;
+      }
+      await this.lineagesResource.update(lineageUuid, updates);
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Updated lineage: ${lineageUuid} (serial ${stateMeta.serial})`);
+      }
+      return { ...existingLineage, ...updates };
+    } else {
+      const lineageRecord = {
+        id: lineageUuid,
+        latestSerial: stateMeta.serial,
+        latestStateId: stateMeta.stateFileId,
+        totalStates: 1,
+        firstImportedAt: currentTime,
+        lastImportedAt: currentTime,
+        metadata: {}
+      };
+      await this.lineagesResource.insert(lineageRecord);
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Created new lineage: ${lineageUuid}`);
+      }
+      return lineageRecord;
+    }
+  }
+  /**
    * Import Terraform/OpenTofu state from file
    * @param {string} filePath - Path to .tfstate file
    * @returns {Promise<Object>} Import result with statistics
@@ -32435,11 +32760,21 @@ class TfStatePlugin extends Plugin {
       };
     }
     const currentTime = Date.now();
+    const lineageUuid = state.lineage;
+    if (!lineageUuid) {
+      throw new TfStateError("State file missing lineage field - cannot track state progression", {
+        filePath,
+        serial: state.serial
+      });
+    }
     const stateFileRecord = {
       id: idGenerator(),
+      lineageId: lineageUuid,
+      // NEW: FK to lineages
       sourceFile: filePath,
       serial: state.serial,
       lineage: state.lineage,
+      // Denormalized for queries
       terraformVersion: state.terraform_version,
       stateVersion: state.version,
       resourceCount: (state.resources || []).length,
@@ -32455,12 +32790,16 @@ class TfStatePlugin extends Plugin {
       });
     }
     const stateFileId = stateFileResult.id;
-    const resources = await this._extractResources(state, filePath, stateFileId);
+    await this._ensureLineage(lineageUuid, {
+      serial: state.serial,
+      stateFileId
+    });
+    const resources = await this._extractResources(state, filePath, stateFileId, lineageUuid);
     let diff = null;
     if (this.trackDiffs) {
-      diff = await this._calculateDiff(state, filePath, stateFileId);
+      diff = await this._calculateDiff(state, lineageUuid, stateFileId);
       if (diff && !diff.isFirst) {
-        await this._saveDiff(diff, filePath, stateFileId);
+        await this._saveDiff(diff, lineageUuid, stateFileId);
       }
     }
     const inserted = await this._insertResources(resources);
@@ -32547,7 +32886,7 @@ class TfStatePlugin extends Plugin {
    * Extract resources from Terraform state
    * @private
    */
-  async _extractResources(state, filePath, stateFileId) {
+  async _extractResources(state, filePath, stateFileId, lineageId) {
     const resources = [];
     const stateSerial = state.serial;
     const stateVersion = state.version;
@@ -32565,8 +32904,10 @@ class TfStatePlugin extends Plugin {
             importedAt,
             filePath,
             // Pass source file path
-            stateFileId
+            stateFileId,
             // Pass state file ID (foreign key)
+            lineageId
+            // NEW: Pass lineage ID (foreign key)
           );
           if (this._shouldIncludeResource(extracted)) {
             resources.push(extracted);
@@ -32586,7 +32927,7 @@ class TfStatePlugin extends Plugin {
    * Extract single resource instance
    * @private
    */
-  _extractResourceInstance(resource, instance, stateSerial, stateVersion, importedAt, sourceFile, stateFileId) {
+  _extractResourceInstance(resource, instance, stateSerial, stateVersion, importedAt, sourceFile, stateFileId, lineageId) {
     const resourceType = resource.type;
     const resourceName = resource.name;
     const mode = resource.mode || "managed";
@@ -32597,11 +32938,13 @@ class TfStatePlugin extends Plugin {
     return {
       id: idGenerator(),
       stateFileId,
-      // Foreign key to terraform_state_files
+      // Foreign key to state_files
+      lineageId,
+      // NEW: Foreign key to lineages
       stateSerial,
       // Denormalized for fast queries
       sourceFile: sourceFile || null,
-      // Denormalized for fast queries
+      // Denormalized for informational purposes
       resourceType,
       resourceName,
       resourceAddress,
@@ -32684,72 +33027,91 @@ class TfStatePlugin extends Plugin {
   }
   /**
    * Calculate diff between current and previous state
-   * Finds previous state by sourceFile and serial number
+   * NEW: Uses lineage-based tracking for O(1) lookup
    * @private
    */
-  async _calculateDiff(currentState, sourceFile, currentStateFileId) {
+  async _calculateDiff(currentState, lineageId, currentStateFileId) {
     if (!this.diffsResource) return null;
-    const allStateFiles = await this.stateFilesResource.list({ limit: 1e4 });
-    const previousStateFiles = allStateFiles.filter((sf) => sf.sourceFile === sourceFile && sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
+    const currentSerial = currentState.serial;
+    const previousStateFiles = await this.stateFilesResource.listPartition({
+      partition: "byLineageSerial",
+      partitionValues: { lineageId, serial: currentSerial - 1 }
+    });
     if (this.verbose) {
       console.log(
-        `[TfStatePlugin] Diff calculation: found ${previousStateFiles.length} previous states for sourceFile=${sourceFile}, serial < ${currentState.serial}`
+        `[TfStatePlugin] Diff calculation (lineage-based): found ${previousStateFiles.length} previous states for lineage=${lineageId}, serial=${currentSerial - 1}`
       );
-      if (previousStateFiles.length > 0) {
-        console.log(
-          `[TfStatePlugin] Using previous state: serial ${previousStateFiles[0].serial}`
-        );
-      }
     }
     if (previousStateFiles.length === 0) {
-      return { added: [], modified: [], deleted: [], isFirst: true };
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] First state for lineage ${lineageId}, no previous state`);
+      }
+      return {
+        added: [],
+        modified: [],
+        deleted: [],
+        isFirst: true,
+        oldSerial: null,
+        newSerial: currentSerial,
+        oldStateId: null,
+        newStateId: currentStateFileId,
+        lineageId
+      };
     }
     const previousStateFile = previousStateFiles[0];
     const previousSerial = previousStateFile.serial;
+    const previousStateFileId = previousStateFile.id;
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Using previous state: serial ${previousSerial} (id: ${previousStateFileId})`
+      );
+    }
     const [ok, err, diff] = await tryFn(async () => {
-      return await this._computeDiff(previousSerial, currentState.serial);
+      return await this._computeDiff(previousSerial, currentSerial, lineageId);
     });
     if (!ok) {
-      throw new StateDiffError(previousSerial, currentState.serial, err);
+      throw new StateDiffError(previousSerial, currentSerial, err);
     }
     diff.oldSerial = previousSerial;
-    diff.newSerial = currentState.serial;
-    diff.sourceFile = sourceFile;
+    diff.newSerial = currentSerial;
+    diff.oldStateId = previousStateFileId;
+    diff.newStateId = currentStateFileId;
+    diff.lineageId = lineageId;
     return diff;
   }
   /**
    * Compute diff between two state serials
-   * Uses partition optimization for efficient resource lookup
+   * NEW: Uses lineage-based partition for efficient resource lookup
    * @private
    */
-  async _computeDiff(oldSerial, newSerial) {
-    const partitionName = this._findPartitionByField(this.resource, "stateSerial");
+  async _computeDiff(oldSerial, newSerial, lineageId) {
+    const partitionName = "byLineageSerial";
     let oldResources, newResources;
-    if (partitionName) {
-      this.stats.partitionQueriesOptimized += 2;
-      [oldResources, newResources] = await Promise.all([
-        this.resource.list({
-          partition: partitionName,
-          partitionValues: { stateSerial: oldSerial }
-        }),
-        this.resource.list({
-          partition: partitionName,
-          partitionValues: { stateSerial: newSerial }
-        })
-      ]);
+    this.stats.partitionQueriesOptimized += 2;
+    [oldResources, newResources] = await Promise.all([
+      this.resource.listPartition({
+        partition: partitionName,
+        partitionValues: { lineageId, stateSerial: oldSerial }
+      }),
+      this.resource.listPartition({
+        partition: partitionName,
+        partitionValues: { lineageId, stateSerial: newSerial }
+      })
+    ]);
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Diff computation using lineage partition: ${oldResources.length} old + ${newResources.length} new resources`
+      );
+    }
+    if (oldResources.length === 0 && newResources.length === 0) {
       if (this.verbose) {
-        console.log(
-          `[TfStatePlugin] Diff computation using partition ${partitionName}: ${oldResources.length + newResources.length} resources`
-        );
+        console.log("[TfStatePlugin] No resources found for either serial");
       }
-    } else {
-      if (this.verbose) {
-        console.log("[TfStatePlugin] No partition found for stateSerial, using full scan");
-      }
-      [oldResources, newResources] = await Promise.all([
-        this.resource.query({ stateSerial: oldSerial }),
-        this.resource.query({ stateSerial: newSerial })
-      ]);
+      return {
+        added: [],
+        modified: [],
+        deleted: []
+      };
     }
     const oldMap = new Map(oldResources.map((r) => [r.resourceAddress, r]));
     const newMap = new Map(newResources.map((r) => [r.resourceAddress, r]));
@@ -32808,14 +33170,22 @@ class TfStatePlugin extends Plugin {
   }
   /**
    * Save diff to diffsResource
+   * NEW: Includes lineage-based fields for efficient querying
    * @private
    */
-  async _saveDiff(diff, sourceFile, newStateFileId) {
+  async _saveDiff(diff, lineageId, newStateFileId) {
     const diffRecord = {
       id: idGenerator(),
-      sourceFile: diff.sourceFile || sourceFile,
+      lineageId: diff.lineageId || lineageId,
+      // NEW: FK to lineages
       oldSerial: diff.oldSerial,
       newSerial: diff.newSerial,
+      oldStateId: diff.oldStateId,
+      // NEW: FK to state_files
+      newStateId: diff.newStateId || newStateFileId,
+      // NEW: FK to state_files
+      sourceFile: null,
+      // Optional: for informational purposes
       calculatedAt: Date.now(),
       summary: {
         addedCount: diff.added.length,
