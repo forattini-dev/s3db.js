@@ -2,6 +2,11 @@ import tryFn from "#src/concerns/try-fn.js";
 import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
 import { ReplicationError } from '../replicator.errors.js';
+import {
+  generateMySQLCreateTable,
+  getMySQLTableSchema,
+  generateMySQLAlterTable
+} from './schema-sync.helper.js';
 
 /**
  * MySQL/MariaDB Replicator - Replicate data to MySQL or MariaDB tables
@@ -21,6 +26,13 @@ import { ReplicationError } from '../replicator.errors.js';
  * @param {Object} ssl - SSL configuration (optional)
  * @param {number} connectionLimit - Max connections in pool (default: 10)
  * @param {string} logTable - Table name for operation logging (optional)
+ * @param {Object} schemaSync - Schema synchronization configuration
+ * @param {boolean} schemaSync.enabled - Enable automatic schema management (default: false)
+ * @param {string} schemaSync.strategy - Sync strategy: 'alter' | 'drop-create' | 'validate-only' (default: 'alter')
+ * @param {string} schemaSync.onMismatch - Action on schema mismatch: 'error' | 'warn' | 'ignore' (default: 'error')
+ * @param {boolean} schemaSync.autoCreateTable - Auto-create table if not exists (default: true)
+ * @param {boolean} schemaSync.autoCreateColumns - Auto-add missing columns (default: true, only with strategy: 'alter')
+ * @param {boolean} schemaSync.dropMissingColumns - Remove extra columns (default: false, dangerous!)
  *
  * @example
  * new MySQLReplicator({
@@ -29,7 +41,12 @@ import { ReplicationError } from '../replicator.errors.js';
  *   database: 'analytics',
  *   user: 'replicator',
  *   password: 'secret',
- *   logTable: 'replication_log'
+ *   logTable: 'replication_log',
+ *   schemaSync: {
+ *     enabled: true,
+ *     strategy: 'alter',
+ *     onMismatch: 'error'
+ *   }
  * }, {
  *   users: [{ actions: ['insert', 'update'], table: 'users_table' }],
  *   orders: 'orders_table'
@@ -50,6 +67,16 @@ class MySQLReplicator extends BaseReplicator {
     this.ssl = config.ssl;
     this.connectionLimit = config.connectionLimit || 10;
     this.logTable = config.logTable;
+
+    // Schema sync configuration
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || 'alter',
+      onMismatch: config.schemaSync?.onMismatch || 'error',
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false,
+      dropMissingColumns: config.schemaSync?.dropMissingColumns || false
+    };
 
     // Parse resources configuration
     this.resources = this.parseResourcesConfig(resources);
@@ -166,11 +193,147 @@ class MySQLReplicator extends BaseReplicator {
       await this._createLogTable();
     }
 
+    // Sync schemas if enabled
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
+
     this.emit('connected', {
       replicator: 'MySQLReplicator',
       host: this.host,
       database: this.database
     });
+  }
+
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[MySQLReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+
+          if (this.schemaSync.onMismatch === 'error') {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === 'warn') {
+            console.warn(`[MySQLReplicator] ${message}`);
+          }
+        }
+      }
+    }
+
+    this.emit('schema_sync_completed', {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    const connection = await this.pool.promise().getConnection();
+
+    try {
+      // Check if table exists
+      const existingSchema = await getMySQLTableSchema(connection, tableName);
+
+      if (!existingSchema) {
+        if (!this.schemaSync.autoCreateTable) {
+          throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+        }
+
+        if (this.schemaSync.strategy === 'validate-only') {
+          throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+        }
+
+        // Create table
+        const createSQL = generateMySQLCreateTable(tableName, attributes);
+
+        if (this.config.verbose) {
+          console.log(`[MySQLReplicator] Creating table ${tableName}:\n${createSQL}`);
+        }
+
+        await connection.query(createSQL);
+
+        this.emit('table_created', {
+          replicator: this.name,
+          tableName,
+          attributes: Object.keys(attributes)
+        });
+
+        return;
+      }
+
+      // Table exists - check for schema changes
+      if (this.schemaSync.strategy === 'drop-create') {
+        if (this.config.verbose) {
+          console.warn(`[MySQLReplicator] Dropping and recreating table ${tableName}`);
+        }
+
+        await connection.query(`DROP TABLE IF EXISTS ${tableName}`);
+        const createSQL = generateMySQLCreateTable(tableName, attributes);
+        await connection.query(createSQL);
+
+        this.emit('table_recreated', {
+          replicator: this.name,
+          tableName,
+          attributes: Object.keys(attributes)
+        });
+
+        return;
+      }
+
+      if (this.schemaSync.strategy === 'alter' && this.schemaSync.autoCreateColumns) {
+        const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+
+        if (alterStatements.length > 0) {
+          if (this.config.verbose) {
+            console.log(`[MySQLReplicator] Altering table ${tableName}:`, alterStatements);
+          }
+
+          for (const stmt of alterStatements) {
+            await connection.query(stmt);
+          }
+
+          this.emit('table_altered', {
+            replicator: this.name,
+            tableName,
+            addedColumns: alterStatements.length
+          });
+        }
+      }
+
+      if (this.schemaSync.strategy === 'validate-only') {
+        const alterStatements = generateMySQLAlterTable(tableName, attributes, existingSchema);
+
+        if (alterStatements.length > 0) {
+          throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+        }
+      }
+    } finally {
+      connection.release();
+    }
   }
 
   shouldReplicateResource(resourceName) {
@@ -378,7 +541,8 @@ class MySQLReplicator extends BaseReplicator {
       host: this.host,
       database: this.database,
       resources: Object.keys(this.resources),
-      poolConnections: this.pool ? this.pool.pool.allConnections.length : 0
+      poolConnections: this.pool ? this.pool.pool.allConnections.length : 0,
+      schemaSync: this.schemaSync
     };
   }
 

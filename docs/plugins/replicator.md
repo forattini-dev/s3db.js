@@ -99,6 +99,242 @@ new BackupPlugin({
 
 ---
 
+## 🔧 Schema Sync (Auto-create Tables)
+
+**Automatically create and sync SQL database tables** based on your S3DB resource schemas. No manual DDL required!
+
+**Supported databases:** PostgreSQL, MySQL, MariaDB
+
+### Quick Example
+
+```javascript
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 'postgres',
+    config: {
+      connectionString: 'postgresql://user:pass@localhost/db',
+      schemaSync: {
+        enabled: true,              // Enable schema sync
+        strategy: 'alter',          // 'alter' | 'drop-create' | 'validate-only'
+        onMismatch: 'error',        // 'error' | 'warn' | 'ignore'
+        autoCreateTable: true,      // Create table if missing
+        autoCreateColumns: true     // Add missing columns
+      }
+    },
+    resources: { users: 'users_table' }
+  }]
+})
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable automatic schema management |
+| `strategy` | `string` | `'alter'` | Sync strategy (see below) |
+| `onMismatch` | `string` | `'error'` | Action on schema mismatch |
+| `autoCreateTable` | `boolean` | `true` | Auto-create table if not exists |
+| `autoCreateColumns` | `boolean` | `true` | Auto-add missing columns (with `alter`) |
+| `dropMissingColumns` | `boolean` | `false` | Remove extra columns (dangerous!) |
+
+### Strategies
+
+**`alter`** - Incremental changes (recommended):
+- Creates table if missing
+- Adds missing columns via `ALTER TABLE`
+- Preserves existing data
+- Safe for production
+
+**`drop-create`** - Full recreate (dangerous):
+- Drops entire table and recreates
+- **Loses all existing data!**
+- Use only in development/testing
+
+**`validate-only`** - Check only:
+- Validates schema matches
+- Throws error if mismatch detected
+- Never modifies database
+- Use in strict production environments
+
+### onMismatch Behaviors
+
+| Value | Behavior |
+|-------|----------|
+| `error` | Throws error and stops initialization |
+| `warn` | Logs warning but continues |
+| `ignore` | Silently ignores mismatch |
+
+### Type Mapping
+
+| S3DB Type | PostgreSQL | MySQL/MariaDB |
+|-----------|------------|---------------|
+| `string` | `TEXT` | `TEXT` |
+| `string\|maxlength:255` | `VARCHAR(255)` | `VARCHAR(255)` |
+| `number` | `DOUBLE PRECISION` | `DOUBLE` |
+| `boolean` | `BOOLEAN` | `TINYINT(1)` |
+| `object` / `json` | `JSONB` | `JSON` |
+| `array` | `JSONB` | `JSON` |
+| `embedding:1536` | `JSONB` | `JSON` |
+| `ip4` | `INET` | `VARCHAR(15)` |
+| `ip6` | `INET` | `VARCHAR(45)` |
+| `secret` | `TEXT` | `TEXT` |
+| `uuid` | `UUID` | `CHAR(36)` |
+| `date` / `datetime` | `TIMESTAMPTZ` | `DATETIME` |
+
+### Events
+
+Listen to schema sync events:
+
+```javascript
+replicator.on('table_created', ({ tableName, attributes }) => {
+  console.log(`Table ${tableName} created with columns: ${attributes.join(', ')}`);
+});
+
+replicator.on('table_altered', ({ tableName, addedColumns }) => {
+  console.log(`Added ${addedColumns} column(s) to ${tableName}`);
+});
+
+replicator.on('table_recreated', ({ tableName }) => {
+  console.log(`Table ${tableName} dropped and recreated`);
+});
+
+replicator.on('schema_sync_completed', ({ resources }) => {
+  console.log(`Schema sync completed for: ${resources.join(', ')}`);
+});
+```
+
+### Complete Example
+
+```javascript
+// Define S3DB resource
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required|maxlength:255',
+    name: 'string|required',
+    age: 'number',
+    active: 'boolean',
+    metadata: 'json'
+  }
+});
+
+// Configure replicator with schema sync
+await db.usePlugin(new ReplicatorPlugin({
+  replicators: [{
+    driver: 'postgres',
+    config: {
+      connectionString: 'postgresql://localhost/analytics',
+      schemaSync: {
+        enabled: true,
+        strategy: 'alter',
+        onMismatch: 'error'
+      }
+    },
+    resources: { users: 'users_table' }
+  }]
+}));
+
+// Table automatically created:
+// CREATE TABLE users_table (
+//   id VARCHAR(255) PRIMARY KEY,
+//   email VARCHAR(255) NOT NULL,
+//   name TEXT NOT NULL,
+//   age DOUBLE PRECISION,
+//   active BOOLEAN,
+//   metadata JSONB,
+//   created_at TIMESTAMPTZ DEFAULT NOW(),
+//   updated_at TIMESTAMPTZ DEFAULT NOW()
+// );
+
+// Add new field to resource
+await users.updateAttributes({
+  ...users.attributes,
+  phoneNumber: 'string|maxlength:20'  // NEW FIELD
+});
+
+// Re-initialize replicator
+// → Column "phoneNumber" automatically added via ALTER TABLE
+
+await users.insert({ email: 'john@example.com', name: 'John' });
+// → Automatically replicated to PostgreSQL
+```
+
+📚 See [Example 46](../examples/e46-replicator-schema-sync.js) for complete schema sync demonstration.
+
+---
+
+## ⚡ Quick Start
+
+Get started with real-time replication in under 2 minutes:
+
+```javascript
+import { Database, ReplicatorPlugin } from 's3db.js';
+
+// Step 1: Create database
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+// Step 2: Configure replicator (replicate to another S3DB instance)
+const replicatorPlugin = new ReplicatorPlugin({
+  replicators: [{
+    driver: 's3db',
+    resources: ['users'],  // Which resources to replicate
+    config: {
+      connectionString: 's3://key:secret@replica-bucket'  // Destination S3DB
+    }
+  }]
+});
+
+await db.usePlugin(replicatorPlugin);
+
+// Step 3: Create resource
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    name: 'string|required',
+    email: 'string|required'
+  }
+});
+
+// Step 4: All operations are automatically replicated!
+await users.insert({ name: 'Alice', email: 'alice@example.com' });
+// → Replicated to replica-bucket in ~2s
+
+await users.insert({ name: 'Bob', email: 'bob@example.com' });
+// → Replicated to replica-bucket in ~2s
+
+await users.update('user-1', { name: 'Alice Updated' });
+// → Update replicated in ~2s
+
+await users.delete('user-2');
+// → Delete replicated in ~2s
+
+// Step 5: Monitor replication status
+replicatorPlugin.on('replicated', (event) => {
+  console.log('Replicated:', event);
+  // { operation: 'insert', resource: 'users', recordId: 'user-1', duration: 156 }
+});
+
+replicatorPlugin.on('replicationError', (error) => {
+  console.error('Replication failed:', error);
+});
+
+console.log('All operations replicated in real-time! ✅');
+```
+
+**What just happened:**
+1. ✅ ReplicatorPlugin installed with s3db driver
+2. ✅ Configured to replicate `users` resource to another S3DB instance
+3. ✅ All insert/update/delete operations automatically replicated
+4. ✅ Near real-time sync (<10ms latency per operation)
+
+**Next steps:**
+- Try other drivers: PostgreSQL, BigQuery, SQS (see [Replicator Drivers](#replicator-drivers))
+- Add data transformation (see [Usage Examples](#usage-examples))
+- Configure retry and dead letter queue (see [Configuration Options](#configuration-options))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
