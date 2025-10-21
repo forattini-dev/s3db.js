@@ -89,6 +89,59 @@ export function s3dbTypeToPostgres(fieldType, fieldOptions = {}) {
 }
 
 /**
+ * Convert S3DB type to BigQuery type
+ */
+export function s3dbTypeToBigQuery(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+
+  switch (type) {
+    case 'string':
+      return 'STRING';
+
+    case 'number':
+      // BigQuery has INTEGER, FLOAT, NUMERIC
+      if (options.min !== undefined && options.min >= 0 && options.max !== undefined && options.max <= 2147483647) {
+        return 'INT64';
+      }
+      return 'FLOAT64';
+
+    case 'boolean':
+      return 'BOOL';
+
+    case 'object':
+    case 'json':
+      return 'JSON';
+
+    case 'array':
+      // BigQuery supports ARRAY types, but we'll use JSON for flexibility
+      return 'JSON';
+
+    case 'embedding':
+      // Vector embeddings stored as ARRAY<FLOAT64> or JSON
+      return 'JSON';
+
+    case 'ip4':
+    case 'ip6':
+      return 'STRING';
+
+    case 'secret':
+      return 'STRING';
+
+    case 'uuid':
+      return 'STRING';
+
+    case 'date':
+      return 'DATE';
+
+    case 'datetime':
+      return 'TIMESTAMP';
+
+    default:
+      return 'STRING';
+  }
+}
+
+/**
  * Convert S3DB type to MySQL type
  */
 export function s3dbTypeToMySQL(fieldType, fieldOptions = {}) {
@@ -338,15 +391,108 @@ export function generateMySQLAlterTable(tableName, attributes, existingSchema) {
   return alterStatements;
 }
 
+/**
+ * Generate BigQuery table schema from S3DB resource schema
+ */
+export function generateBigQuerySchema(attributes) {
+  const fields = [];
+
+  // Always add id field
+  fields.push({
+    name: 'id',
+    type: 'STRING',
+    mode: 'REQUIRED'
+  });
+
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === 'id') continue;
+
+    const fieldType = typeof fieldConfig === 'string' ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+
+    const bqType = s3dbTypeToBigQuery(fieldType);
+
+    fields.push({
+      name: fieldName,
+      type: bqType,
+      mode: required ? 'REQUIRED' : 'NULLABLE'
+    });
+  }
+
+  // Add timestamps if they don't exist
+  if (!attributes.createdAt) {
+    fields.push({ name: 'created_at', type: 'TIMESTAMP', mode: 'NULLABLE' });
+  }
+  if (!attributes.updatedAt) {
+    fields.push({ name: 'updated_at', type: 'TIMESTAMP', mode: 'NULLABLE' });
+  }
+
+  return fields;
+}
+
+/**
+ * Get existing BigQuery table schema
+ */
+export async function getBigQueryTableSchema(bigqueryClient, datasetId, tableId) {
+  const [ok, err, table] = await tryFn(async () => {
+    const dataset = bigqueryClient.dataset(datasetId);
+    const table = dataset.table(tableId);
+    const [metadata] = await table.getMetadata();
+    return metadata;
+  });
+
+  if (!ok) return null;
+
+  const schema = {};
+  if (table.schema && table.schema.fields) {
+    for (const field of table.schema.fields) {
+      schema[field.name] = {
+        type: field.type,
+        mode: field.mode
+      };
+    }
+  }
+
+  return schema;
+}
+
+/**
+ * Generate BigQuery schema update (add missing fields)
+ */
+export function generateBigQuerySchemaUpdate(attributes, existingSchema) {
+  const newFields = [];
+
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === 'id') continue;
+    if (existingSchema[fieldName]) continue; // Field exists
+
+    const fieldType = typeof fieldConfig === 'string' ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const bqType = s3dbTypeToBigQuery(fieldType);
+
+    newFields.push({
+      name: fieldName,
+      type: bqType,
+      mode: required ? 'REQUIRED' : 'NULLABLE'
+    });
+  }
+
+  return newFields;
+}
+
 export default {
   parseFieldType,
   s3dbTypeToPostgres,
   s3dbTypeToMySQL,
+  s3dbTypeToBigQuery,
   generatePostgresCreateTable,
   generateMySQLCreateTable,
+  generateBigQuerySchema,
   getPostgresTableSchema,
   getMySQLTableSchema,
+  getBigQueryTableSchema,
   compareSchemas,
   generatePostgresAlterTable,
-  generateMySQLAlterTable
+  generateMySQLAlterTable,
+  generateBigQuerySchemaUpdate
 };

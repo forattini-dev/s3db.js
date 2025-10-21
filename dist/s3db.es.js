@@ -16471,6 +16471,302 @@ class BaseReplicator extends EventEmitter {
   }
 }
 
+function parseFieldType(typeNotation) {
+  if (typeof typeNotation !== "string") {
+    return { type: "string", required: false, maxLength: null, options: {} };
+  }
+  const parts = typeNotation.split("|");
+  const baseType = parts[0];
+  const options = {};
+  let required = false;
+  let maxLength = null;
+  for (const part of parts.slice(1)) {
+    if (part === "required") {
+      required = true;
+    } else if (part.startsWith("maxlength:")) {
+      maxLength = parseInt(part.split(":")[1]);
+    } else if (part.startsWith("min:")) {
+      options.min = parseFloat(part.split(":")[1]);
+    } else if (part.startsWith("max:")) {
+      options.max = parseFloat(part.split(":")[1]);
+    } else if (part.startsWith("length:")) {
+      options.length = parseInt(part.split(":")[1]);
+    }
+  }
+  return { type: baseType, required, maxLength, options };
+}
+function s3dbTypeToPostgres(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      if (maxLength) return `VARCHAR(${maxLength})`;
+      return "TEXT";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INTEGER";
+      }
+      return "DOUBLE PRECISION";
+    case "boolean":
+      return "BOOLEAN";
+    case "object":
+    case "json":
+      return "JSONB";
+    case "array":
+      return "JSONB";
+    case "embedding":
+      return "JSONB";
+    case "ip4":
+    case "ip6":
+      return "INET";
+    case "secret":
+      return "TEXT";
+    case "uuid":
+      return "UUID";
+    case "date":
+    case "datetime":
+      return "TIMESTAMP WITH TIME ZONE";
+    default:
+      return "TEXT";
+  }
+}
+function s3dbTypeToBigQuery(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      return "STRING";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INT64";
+      }
+      return "FLOAT64";
+    case "boolean":
+      return "BOOL";
+    case "object":
+    case "json":
+      return "JSON";
+    case "array":
+      return "JSON";
+    case "embedding":
+      return "JSON";
+    case "ip4":
+    case "ip6":
+      return "STRING";
+    case "secret":
+      return "STRING";
+    case "uuid":
+      return "STRING";
+    case "date":
+      return "DATE";
+    case "datetime":
+      return "TIMESTAMP";
+    default:
+      return "STRING";
+  }
+}
+function s3dbTypeToMySQL(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+  switch (type) {
+    case "string":
+      if (maxLength && maxLength <= 255) return `VARCHAR(${maxLength})`;
+      return "TEXT";
+    case "number":
+      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
+        return "INT";
+      }
+      return "DOUBLE";
+    case "boolean":
+      return "TINYINT(1)";
+    case "object":
+    case "json":
+    case "array":
+      return "JSON";
+    case "embedding":
+      return "JSON";
+    case "ip4":
+      return "VARCHAR(15)";
+    case "ip6":
+      return "VARCHAR(45)";
+    case "secret":
+      return "TEXT";
+    case "uuid":
+      return "CHAR(36)";
+    case "date":
+    case "datetime":
+      return "DATETIME";
+    default:
+      return "TEXT";
+  }
+}
+function generatePostgresCreateTable(tableName, attributes) {
+  const columns = [];
+  columns.push("id VARCHAR(255) PRIMARY KEY");
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToPostgres(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    columns.push(`"${fieldName}" ${sqlType} ${nullConstraint}`);
+  }
+  if (!attributes.createdAt) {
+    columns.push("created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
+  }
+  if (!attributes.updatedAt) {
+    columns.push("updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
+  }
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+  ${columns.join(",\n  ")}
+)`;
+}
+function generateMySQLCreateTable(tableName, attributes) {
+  const columns = [];
+  columns.push("id VARCHAR(255) PRIMARY KEY");
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToMySQL(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    columns.push(`\`${fieldName}\` ${sqlType} ${nullConstraint}`);
+  }
+  if (!attributes.createdAt) {
+    columns.push("created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
+  }
+  if (!attributes.updatedAt) {
+    columns.push("updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+  }
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (
+  ${columns.join(",\n  ")}
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+}
+async function getPostgresTableSchema(client, tableName) {
+  const [ok, err, result] = await tryFn(async () => {
+    return await client.query(`
+      SELECT column_name, data_type, is_nullable, character_maximum_length
+      FROM information_schema.columns
+      WHERE table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+  });
+  if (!ok) return null;
+  const schema = {};
+  for (const row of result.rows) {
+    schema[row.column_name] = {
+      type: row.data_type,
+      nullable: row.is_nullable === "YES",
+      maxLength: row.character_maximum_length
+    };
+  }
+  return schema;
+}
+async function getMySQLTableSchema(connection, tableName) {
+  const [ok, err, [rows]] = await tryFn(async () => {
+    return await connection.query(`
+      SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = ?
+      ORDER BY ORDINAL_POSITION
+    `, [tableName]);
+  });
+  if (!ok) return null;
+  const schema = {};
+  for (const row of rows) {
+    schema[row.COLUMN_NAME] = {
+      type: row.DATA_TYPE,
+      nullable: row.IS_NULLABLE === "YES",
+      maxLength: row.CHARACTER_MAXIMUM_LENGTH
+    };
+  }
+  return schema;
+}
+function generatePostgresAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToPostgres(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${fieldName}" ${sqlType} ${nullConstraint}`);
+  }
+  return alterStatements;
+}
+function generateMySQLAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToMySQL(fieldType);
+    const nullConstraint = required ? "NOT NULL" : "NULL";
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN \`${fieldName}\` ${sqlType} ${nullConstraint}`);
+  }
+  return alterStatements;
+}
+function generateBigQuerySchema(attributes) {
+  const fields = [];
+  fields.push({
+    name: "id",
+    type: "STRING",
+    mode: "REQUIRED"
+  });
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const bqType = s3dbTypeToBigQuery(fieldType);
+    fields.push({
+      name: fieldName,
+      type: bqType,
+      mode: required ? "REQUIRED" : "NULLABLE"
+    });
+  }
+  if (!attributes.createdAt) {
+    fields.push({ name: "created_at", type: "TIMESTAMP", mode: "NULLABLE" });
+  }
+  if (!attributes.updatedAt) {
+    fields.push({ name: "updated_at", type: "TIMESTAMP", mode: "NULLABLE" });
+  }
+  return fields;
+}
+async function getBigQueryTableSchema(bigqueryClient, datasetId, tableId) {
+  const [ok, err, table] = await tryFn(async () => {
+    const dataset = bigqueryClient.dataset(datasetId);
+    const table2 = dataset.table(tableId);
+    const [metadata] = await table2.getMetadata();
+    return metadata;
+  });
+  if (!ok) return null;
+  const schema = {};
+  if (table.schema && table.schema.fields) {
+    for (const field of table.schema.fields) {
+      schema[field.name] = {
+        type: field.type,
+        mode: field.mode
+      };
+    }
+  }
+  return schema;
+}
+function generateBigQuerySchemaUpdate(attributes, existingSchema) {
+  const newFields = [];
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === "id") continue;
+    if (existingSchema[fieldName]) continue;
+    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const bqType = s3dbTypeToBigQuery(fieldType);
+    newFields.push({
+      name: fieldName,
+      type: bqType,
+      mode: required ? "REQUIRED" : "NULLABLE"
+    });
+  }
+  return newFields;
+}
+
 class BigqueryReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {
     super(config);
@@ -16480,6 +16776,13 @@ class BigqueryReplicator extends BaseReplicator {
     this.credentials = config.credentials;
     this.location = config.location || "US";
     this.logTable = config.logTable;
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || "alter",
+      onMismatch: config.schemaSync?.onMismatch || "error",
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false
+    };
     this.resources = this.parseResourcesConfig(resources);
   }
   parseResourcesConfig(resources) {
@@ -16554,12 +16857,116 @@ class BigqueryReplicator extends BaseReplicator {
       credentials: this.credentials,
       location: this.location
     });
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
     this.emit("initialized", {
       replicator: this.name,
       projectId: this.projectId,
       datasetId: this.datasetId,
       resources: Object.keys(this.resources)
     });
+  }
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[BigQueryReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+          if (this.schemaSync.onMismatch === "error") {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === "warn") {
+            console.warn(`[BigQueryReplicator] ${message}`);
+          }
+        }
+      }
+    }
+    this.emit("schema_sync_completed", {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Sync a single table schema in BigQuery
+   */
+  async syncTableSchema(tableName, attributes) {
+    const dataset = this.bigqueryClient.dataset(this.datasetId);
+    const table = dataset.table(tableName);
+    const [exists] = await table.exists();
+    if (!exists) {
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+      if (this.schemaSync.strategy === "validate-only") {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+      const schema = generateBigQuerySchema(attributes);
+      if (this.config.verbose) {
+        console.log(`[BigQueryReplicator] Creating table ${tableName} with schema:`, schema);
+      }
+      await dataset.createTable(tableName, { schema });
+      this.emit("table_created", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "drop-create") {
+      if (this.config.verbose) {
+        console.warn(`[BigQueryReplicator] Dropping and recreating table ${tableName}`);
+      }
+      await table.delete();
+      const schema = generateBigQuerySchema(attributes);
+      await dataset.createTable(tableName, { schema });
+      this.emit("table_recreated", {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+      return;
+    }
+    if (this.schemaSync.strategy === "alter" && this.schemaSync.autoCreateColumns) {
+      const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+      if (newFields.length > 0) {
+        if (this.config.verbose) {
+          console.log(`[BigQueryReplicator] Adding ${newFields.length} field(s) to table ${tableName}:`, newFields);
+        }
+        const [metadata] = await table.getMetadata();
+        const currentSchema = metadata.schema.fields;
+        const updatedSchema = [...currentSchema, ...newFields];
+        await table.setMetadata({ schema: updatedSchema });
+        this.emit("table_altered", {
+          replicator: this.name,
+          tableName,
+          addedColumns: newFields.length
+        });
+      }
+    }
+    if (this.schemaSync.strategy === "validate-only") {
+      const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+      if (newFields.length > 0) {
+        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${newFields.length}`);
+      }
+    }
   }
   shouldReplicateResource(resourceName) {
     return this.resources.hasOwnProperty(resourceName);
@@ -16802,7 +17209,8 @@ class BigqueryReplicator extends BaseReplicator {
       projectId: this.projectId,
       datasetId: this.datasetId,
       resources: this.resources,
-      logTable: this.logTable
+      logTable: this.logTable,
+      schemaSync: this.schemaSync
     };
   }
 }
@@ -17354,207 +17762,6 @@ class MongoDBReplicator extends BaseReplicator {
     }
     await super.cleanup();
   }
-}
-
-function parseFieldType(typeNotation) {
-  if (typeof typeNotation !== "string") {
-    return { type: "string", required: false, maxLength: null, options: {} };
-  }
-  const parts = typeNotation.split("|");
-  const baseType = parts[0];
-  const options = {};
-  let required = false;
-  let maxLength = null;
-  for (const part of parts.slice(1)) {
-    if (part === "required") {
-      required = true;
-    } else if (part.startsWith("maxlength:")) {
-      maxLength = parseInt(part.split(":")[1]);
-    } else if (part.startsWith("min:")) {
-      options.min = parseFloat(part.split(":")[1]);
-    } else if (part.startsWith("max:")) {
-      options.max = parseFloat(part.split(":")[1]);
-    } else if (part.startsWith("length:")) {
-      options.length = parseInt(part.split(":")[1]);
-    }
-  }
-  return { type: baseType, required, maxLength, options };
-}
-function s3dbTypeToPostgres(fieldType, fieldOptions = {}) {
-  const { type, maxLength, options } = parseFieldType(fieldType);
-  switch (type) {
-    case "string":
-      if (maxLength) return `VARCHAR(${maxLength})`;
-      return "TEXT";
-    case "number":
-      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
-        return "INTEGER";
-      }
-      return "DOUBLE PRECISION";
-    case "boolean":
-      return "BOOLEAN";
-    case "object":
-    case "json":
-      return "JSONB";
-    case "array":
-      return "JSONB";
-    case "embedding":
-      return "JSONB";
-    case "ip4":
-    case "ip6":
-      return "INET";
-    case "secret":
-      return "TEXT";
-    case "uuid":
-      return "UUID";
-    case "date":
-    case "datetime":
-      return "TIMESTAMP WITH TIME ZONE";
-    default:
-      return "TEXT";
-  }
-}
-function s3dbTypeToMySQL(fieldType, fieldOptions = {}) {
-  const { type, maxLength, options } = parseFieldType(fieldType);
-  switch (type) {
-    case "string":
-      if (maxLength && maxLength <= 255) return `VARCHAR(${maxLength})`;
-      return "TEXT";
-    case "number":
-      if (options.min !== void 0 && options.min >= 0 && options.max !== void 0 && options.max <= 2147483647) {
-        return "INT";
-      }
-      return "DOUBLE";
-    case "boolean":
-      return "TINYINT(1)";
-    case "object":
-    case "json":
-    case "array":
-      return "JSON";
-    case "embedding":
-      return "JSON";
-    case "ip4":
-      return "VARCHAR(15)";
-    case "ip6":
-      return "VARCHAR(45)";
-    case "secret":
-      return "TEXT";
-    case "uuid":
-      return "CHAR(36)";
-    case "date":
-    case "datetime":
-      return "DATETIME";
-    default:
-      return "TEXT";
-  }
-}
-function generatePostgresCreateTable(tableName, attributes) {
-  const columns = [];
-  columns.push("id VARCHAR(255) PRIMARY KEY");
-  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
-    if (fieldName === "id") continue;
-    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
-    const { required } = parseFieldType(fieldType);
-    const sqlType = s3dbTypeToPostgres(fieldType);
-    const nullConstraint = required ? "NOT NULL" : "NULL";
-    columns.push(`"${fieldName}" ${sqlType} ${nullConstraint}`);
-  }
-  if (!attributes.createdAt) {
-    columns.push("created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
-  }
-  if (!attributes.updatedAt) {
-    columns.push("updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()");
-  }
-  return `CREATE TABLE IF NOT EXISTS ${tableName} (
-  ${columns.join(",\n  ")}
-)`;
-}
-function generateMySQLCreateTable(tableName, attributes) {
-  const columns = [];
-  columns.push("id VARCHAR(255) PRIMARY KEY");
-  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
-    if (fieldName === "id") continue;
-    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
-    const { required } = parseFieldType(fieldType);
-    const sqlType = s3dbTypeToMySQL(fieldType);
-    const nullConstraint = required ? "NOT NULL" : "NULL";
-    columns.push(`\`${fieldName}\` ${sqlType} ${nullConstraint}`);
-  }
-  if (!attributes.createdAt) {
-    columns.push("created_at DATETIME DEFAULT CURRENT_TIMESTAMP");
-  }
-  if (!attributes.updatedAt) {
-    columns.push("updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
-  }
-  return `CREATE TABLE IF NOT EXISTS ${tableName} (
-  ${columns.join(",\n  ")}
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
-}
-async function getPostgresTableSchema(client, tableName) {
-  const [ok, err, result] = await tryFn(async () => {
-    return await client.query(`
-      SELECT column_name, data_type, is_nullable, character_maximum_length
-      FROM information_schema.columns
-      WHERE table_name = $1
-      ORDER BY ordinal_position
-    `, [tableName]);
-  });
-  if (!ok) return null;
-  const schema = {};
-  for (const row of result.rows) {
-    schema[row.column_name] = {
-      type: row.data_type,
-      nullable: row.is_nullable === "YES",
-      maxLength: row.character_maximum_length
-    };
-  }
-  return schema;
-}
-async function getMySQLTableSchema(connection, tableName) {
-  const [ok, err, [rows]] = await tryFn(async () => {
-    return await connection.query(`
-      SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = ?
-      ORDER BY ORDINAL_POSITION
-    `, [tableName]);
-  });
-  if (!ok) return null;
-  const schema = {};
-  for (const row of rows) {
-    schema[row.COLUMN_NAME] = {
-      type: row.DATA_TYPE,
-      nullable: row.IS_NULLABLE === "YES",
-      maxLength: row.CHARACTER_MAXIMUM_LENGTH
-    };
-  }
-  return schema;
-}
-function generatePostgresAlterTable(tableName, attributes, existingSchema) {
-  const alterStatements = [];
-  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
-    if (fieldName === "id") continue;
-    if (existingSchema[fieldName]) continue;
-    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
-    const { required } = parseFieldType(fieldType);
-    const sqlType = s3dbTypeToPostgres(fieldType);
-    const nullConstraint = required ? "NOT NULL" : "NULL";
-    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS "${fieldName}" ${sqlType} ${nullConstraint}`);
-  }
-  return alterStatements;
-}
-function generateMySQLAlterTable(tableName, attributes, existingSchema) {
-  const alterStatements = [];
-  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
-    if (fieldName === "id") continue;
-    if (existingSchema[fieldName]) continue;
-    const fieldType = typeof fieldConfig === "string" ? fieldConfig : fieldConfig.type;
-    const { required } = parseFieldType(fieldType);
-    const sqlType = s3dbTypeToMySQL(fieldType);
-    const nullConstraint = required ? "NOT NULL" : "NULL";
-    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN \`${fieldName}\` ${sqlType} ${nullConstraint}`);
-  }
-  return alterStatements;
 }
 
 class MySQLReplicator extends BaseReplicator {
