@@ -921,7 +921,7 @@ setInterval(maintainIndexes, 7 * 24 * 60 * 60 * 1000);
 **P: O que o FullTextPlugin faz?**
 R: Adiciona busca full-text em campos de texto usando índices invertidos armazenados no S3, similar a Elasticsearch mas usando S3DB.
 
-**P: Como funciona a indexação?**
+**Q: How does indexing work?**
 R: Tokeniza o texto, cria índices invertidos (palavra → IDs dos registros) e armazena no recurso `plg_fulltext_indexes`.
 
 **P: Suporta acentuação e caracteres especiais?**

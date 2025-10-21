@@ -1458,7 +1458,7 @@ R: Sim, use `type: 'incremental'` para backup apenas de mudanças desde o últim
 **P: Qual o formato dos backups?**
 R: JSONL (JSON Lines) comprimido com gzip (.jsonl.gz) + arquivo s3db.json com metadados. Compatível com BigQuery, Athena, e outras ferramentas de analytics.
 
-**P: Como funciona o streaming?**
+**Q: How does streaming work?**
 R: O BackupPlugin escreve os records um por um sem carregar o dataset inteiro na memória, usando apenas ~10KB de RAM constante independente do tamanho do banco.
 
 **P: Como restaurar um backup?**
@@ -1557,7 +1557,7 @@ const status = await backupPlugin.getBackupStatus('full-2025-01-15-abc123');
 
 ### Retenção
 
-**P: Como funciona a política de retenção GFS?**
+**Q: How does the GFS retention policy work?**
 R: Grandfather-Father-Son:
 - Daily: mantém X backups diários
 - Weekly: mantém X backups semanais
