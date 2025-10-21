@@ -35,41 +35,20 @@ export class QueueConsumerPlugin extends Plugin {
     
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
-      
-      // Handle legacy format where config is mixed with driver definition
-      if (consumerDefs.length === 0 && driverDef.resources) {
-        // Legacy format: { driver: 'sqs', resources: 'users', config: {...} }
-        const { resources, driver: defDriver, config: nestedConfig, ...directConfig } = driverDef;
+
+      // Structured format: { driver: 'sqs', config: {...}, consumers: [{ resources: 'users', ... }] }
+      for (const consumerDef of consumerDefs) {
+        const { resources, ...consumerConfig } = consumerDef;
         const resourceList = Array.isArray(resources) ? resources : [resources];
-        
-        // Flatten config - prioritize nested config if it exists, otherwise use direct config
-        const flatConfig = nestedConfig ? { ...directConfig, ...nestedConfig } : directConfig;
-        
         for (const resource of resourceList) {
+          const mergedConfig = { ...driverConfig, ...consumerConfig };
           const consumer = createConsumer(driver, {
-            ...flatConfig,
+            ...mergedConfig,
             onMessage: (msg) => this._handleMessage(msg, resource),
             onError: (err, raw) => this._handleError(err, raw, resource)
           });
-          
           await consumer.start();
           this.consumers.push(consumer);
-        }
-      } else {
-        // New format: { driver: 'sqs', config: {...}, consumers: [{ resources: 'users', ... }] }
-        for (const consumerDef of consumerDefs) {
-          const { resources, ...consumerConfig } = consumerDef;
-          const resourceList = Array.isArray(resources) ? resources : [resources];
-          for (const resource of resourceList) {
-            const mergedConfig = { ...driverConfig, ...consumerConfig };
-            const consumer = createConsumer(driver, {
-              ...mergedConfig,
-              onMessage: (msg) => this._handleMessage(msg, resource),
-              onError: (err, raw) => this._handleError(err, raw, resource)
-            });
-            await consumer.start();
-            this.consumers.push(consumer);
-          }
         }
       }
     }

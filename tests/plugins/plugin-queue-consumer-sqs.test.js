@@ -40,7 +40,6 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl,
             region: 'us-east-1',
@@ -48,7 +47,12 @@ describe('QueueConsumerPlugin (SQS driver, integration with LocalStack SQS)', ()
             poolingInterval: 1000,
             maxMessages: 2,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            }
+          ]
         }
       ]
     });
@@ -204,7 +208,6 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl,
             region: 'us-east-1',
@@ -212,7 +215,12 @@ describe('QueueConsumerPlugin (real SQS integration)', () => {
             poolingInterval: 1000,
             maxMessages: 2,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            }
+          ]
         }
       ]
     });
@@ -264,7 +272,6 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl,
             region: 'us-east-1',
@@ -272,19 +279,15 @@ describe('QueueConsumerPlugin (multi-resource, multi-queue integration)', () => 
             poolingInterval: 1000,
             maxMessages: 2,
             endpoint: 'http://localhost:4566',
-          }
-        },
-        {
-          driver: 'sqs',
-          resources: 'orders',
-          config: {
-            queueUrl,
-            region: 'us-east-1',
-            credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-            poolingInterval: 1000,
-            maxMessages: 2,
-            endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            },
+            {
+              resources: 'orders'
+            }
+          ]
         }
       ]
     });
@@ -346,7 +349,6 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl,
             region: 'us-east-1',
@@ -354,7 +356,12 @@ describe('QueueConsumerPlugin (SQS driver, batch insert)', () => {
             poolingInterval: 1000,
             maxMessages: 5,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            }
+          ]
         }
       ]
     });
@@ -413,7 +420,6 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl: queueUrlUsers,
             region: 'us-east-1',
@@ -421,11 +427,15 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
             poolingInterval: 1000,
             maxMessages: 2,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            }
+          ]
         },
         {
           driver: 'sqs',
-          resources: 'orders',
           config: {
             queueUrl: queueUrlOrders,
             region: 'us-east-1',
@@ -433,7 +443,12 @@ describe('QueueConsumerPlugin (SQS driver, multi-resource)', () => {
             poolingInterval: 1000,
             maxMessages: 2,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'orders'
+            }
+          ]
         }
       ]
     });
@@ -510,7 +525,6 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
       consumers: [
         {
           driver: 'sqs',
-          resources: 'users',
           config: {
             queueUrl,
             region: 'us-east-1',
@@ -518,7 +532,12 @@ describe('ReplicatorPlugin + QueueConsumerPlugin (SQS integration)', () => {
             poolingInterval: 1000,
             maxMessages: 5,
             endpoint: 'http://localhost:4566',
-          }
+          },
+          consumers: [
+            {
+              resources: 'users'
+            }
+          ]
         }
       ]
     });

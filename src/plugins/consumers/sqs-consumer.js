@@ -1,4 +1,5 @@
 import tryFn from "../../concerns/try-fn.js";
+import requirePluginDependency from "../concerns/plugin-dependencies.js";
 // Remove static SDK import
 // import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 
@@ -25,6 +26,9 @@ export class SqsConsumer {
   }
 
   async start() {
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('sqs-consumer');
+
     // Carregar SDK dinamicamente
     const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
     if (!ok) throw new Error('SqsConsumer: @aws-sdk/client-sqs is not installed. Please install it to use the SQS consumer.');
