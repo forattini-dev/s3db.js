@@ -5232,16 +5232,9 @@ function generateResourcePaths(resource, version, config = {}) {
     if (authMethods.includes("apiKey")) security.push({ apiKeyAuth: [] });
     if (authMethods.includes("basic")) security.push({ basicAuth: [] });
   }
-  const partitions = resource.config?.partitions || resource.partitions || {};
+  const partitions = resource.config?.options?.partitions || resource.config?.partitions || resource.partitions || {};
   const partitionNames = Object.keys(partitions);
   const hasPartitions = partitionNames.length > 0;
-  console.log(`
-[OpenAPI Debug] ========== Resource: ${resource.name} ==========`);
-  console.log("[OpenAPI Debug] config?.partitions:", JSON.stringify(resource.config?.partitions, null, 2));
-  console.log("[OpenAPI Debug] resource.partitions:", JSON.stringify(resource.partitions, null, 2));
-  console.log("[OpenAPI Debug] partitionNames:", partitionNames);
-  console.log("[OpenAPI Debug] hasPartitions:", hasPartitions);
-  console.log("[OpenAPI Debug] ================================================\n");
   let partitionDescription = "Partition name for filtering";
   let partitionValuesDescription = "Partition values as JSON string";
   let partitionExample = void 0;

@@ -11,7 +11,7 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 
 **Principais features:**
 - ✅ **Real-Time CDC**: Cada insert/update/delete replicado individualmente (<10ms latency)
-- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, SQS, Webhooks
+- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, MySQL, MariaDB, DynamoDB, MongoDB, SQS, Webhooks
 - ✅ Transformação de dados com funções customizadas
 - ✅ Retry automático com backoff exponencial
 - ✅ Dead letter queue para falhas
@@ -47,7 +47,7 @@ await users.insert({ name: 'John' }); // Replica automaticamente
 - ✅ Replicates **each operation** individually (insert/update/delete)
 - ✅ Near real-time (<10ms latency per operation)
 - ✅ Processes 1 record at a time
-- ✅ Multiple destinations: PostgreSQL, BigQuery, SQS, Webhooks
+- ✅ Multiple destinations: PostgreSQL, MySQL, MariaDB, DynamoDB, MongoDB, BigQuery, SQS, Webhooks
 - ✅ Perfect for: analytics pipelines, event sourcing, multi-destination sync
 
 **BackupPlugin** creates **periodic snapshots** (batch):
@@ -63,7 +63,7 @@ await users.insert({ name: 'John' }); // Replica automaticamente
 | **Granularity** | 1 record at a time | All resources at once |
 | **Latency** | Milliseconds | Minutes/hours |
 | **Use Case** | Real-time analytics | Disaster recovery |
-| **Destinations** | PostgreSQL, BigQuery, SQS, etc | JSONL.gz files |
+| **Destinations** | PostgreSQL, MySQL, DynamoDB, MongoDB, BigQuery, SQS, etc | JSONL.gz files |
 
 **Key Difference:**
 ```javascript
@@ -110,6 +110,9 @@ new BackupPlugin({
   - [SQS Replicator](#-sqs-replicator) - Send to AWS SQS queues
   - [Webhook Replicator](#-webhook-replicator) - HTTP/HTTPS webhooks
   - [BigQuery Replicator](#-bigquery-replicator) - Google BigQuery integration
+  - [MySQL / MariaDB Replicator](#-mysql--mariadb-replicator) - MySQL & MariaDB database integration
+  - [DynamoDB Replicator](#-dynamodb-replicator) - AWS DynamoDB integration
+  - [MongoDB Replicator](#-mongodb-replicator) - MongoDB database integration
   - [PostgreSQL Replicator](#-postgresql-replicator) - PostgreSQL database integration
 - [API Reference](#api-reference)
 - [Best Practices](#best-practices)
@@ -118,7 +121,7 @@ new BackupPlugin({
 
 ## Overview
 
-The Replicator Plugin provides **enterprise-grade data replication** that synchronizes your s3db data in real-time to multiple targets including other S3DB instances, SQS queues, BigQuery, PostgreSQL databases, and more. It features robust error handling, advanced transformation capabilities, and comprehensive monitoring.
+The Replicator Plugin provides **enterprise-grade data replication** that synchronizes your s3db data in real-time to multiple targets including other S3DB instances, SQS queues, relational databases (PostgreSQL, MySQL, MariaDB), NoSQL databases (DynamoDB, MongoDB), BigQuery, and more. It features robust error handling, advanced transformation capabilities, and comprehensive monitoring.
 
 ### How It Works
 
@@ -948,6 +951,316 @@ pnpm add @google-cloud/bigquery
   }
 }
 ```
+
+---
+
+### 🐬 MySQL / MariaDB Replicator
+
+**Relational database integration** for MySQL and MariaDB with connection pooling and optional replication logging.
+
+**Required Dependency:**
+```bash
+pnpm add mysql2
+```
+
+#### Basic Configuration
+
+```javascript
+{
+  driver: 'mysql',  // or 'mariadb' (uses same mysql2 driver)
+  config: {
+    host: 'localhost',
+    port: 3306,
+    database: 'production_db',
+    user: 'replicator_user',
+    password: 'secure_password',
+    connectionLimit: 10,  // Connection pool size
+    ssl: {  // Optional SSL configuration
+      rejectUnauthorized: true
+    },
+    logTable: 'replication_log'  // Optional: log all operations
+  },
+  resources: {
+    users: 'users_table',
+    orders: 'orders_table'
+  }
+}
+```
+
+#### Advanced Configuration
+
+```javascript
+{
+  driver: 'mysql',
+  config: {
+    host: 'mysql.example.com',
+    port: 3306,
+    database: 'analytics',
+    user: 'replicator',
+    password: process.env.MYSQL_PASSWORD,
+    connectionLimit: 20,
+    ssl: {
+      ca: fs.readFileSync('ca-cert.pem'),
+      cert: fs.readFileSync('client-cert.pem'),
+      key: fs.readFileSync('client-key.pem')
+    },
+    logTable: 'replication_audit'  // Track all replicated operations
+  },
+  resources: {
+    // Simple mapping
+    users: 'users',
+
+    // Multiple actions
+    products: [{
+      table: 'products',
+      actions: ['insert', 'update', 'delete']
+    }],
+
+    // Multiple tables for same resource
+    orders: [
+      { table: 'orders_current', actions: ['insert', 'update'] },
+      { table: 'orders_archive', actions: ['insert'] }
+    ]
+  }
+}
+```
+
+#### Features
+
+- ✅ **Connection Pooling**: Configurable pool size (default: 10 connections)
+- ✅ **SSL/TLS Support**: Secure connections with certificate validation
+- ✅ **Replication Logging**: Optional audit table for all operations
+- ✅ **Parameterized Queries**: SQL injection protection
+- ✅ **Insert, Update, Delete**: Full CRUD operation support
+- ✅ **Multi-Table Replication**: Same resource → multiple MySQL tables
+- ✅ **MariaDB Compatible**: Use same driver for MariaDB
+
+---
+
+### ⚡ DynamoDB Replicator
+
+**NoSQL database integration** for AWS DynamoDB with support for composite keys and DynamoDB Local.
+
+**Required Dependencies:**
+```bash
+pnpm add @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
+```
+
+#### Basic Configuration
+
+```javascript
+{
+  driver: 'dynamodb',
+  config: {
+    region: 'us-east-1',
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    endpoint: 'http://localhost:8000'  // Optional: for DynamoDB Local
+  },
+  resources: {
+    users: 'UsersTable',
+    sessions: 'SessionsTable'
+  }
+}
+```
+
+#### Advanced Configuration with Composite Keys
+
+```javascript
+{
+  driver: 'dynamodb',
+  config: {
+    region: 'us-west-2',
+    // Uses AWS SDK default credential chain if not specified
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      sessionToken: process.env.AWS_SESSION_TOKEN  // Optional for temporary credentials
+    }
+  },
+  resources: {
+    // Simple mapping (uses default 'id' as primary key)
+    users: 'UsersTable',
+
+    // Custom primary key
+    products: {
+      table: 'ProductsTable',
+      primaryKey: 'productId',
+      actions: ['insert', 'update', 'delete']
+    },
+
+    // Composite key (partition key + sort key)
+    orders: {
+      table: 'OrdersTable',
+      primaryKey: 'customerId',  // Partition key
+      sortKey: 'orderId',        // Sort key
+      actions: ['insert', 'update', 'delete']
+    },
+
+    // Multiple tables
+    analytics: [
+      { table: 'Analytics_Current', primaryKey: 'eventId', actions: ['insert'] },
+      { table: 'Analytics_Archive', primaryKey: 'eventId', actions: ['insert'] }
+    ]
+  }
+}
+```
+
+#### DynamoDB Local (Development)
+
+```javascript
+{
+  driver: 'dynamodb',
+  config: {
+    region: 'us-east-1',
+    endpoint: 'http://localhost:8000',  // DynamoDB Local
+    // No credentials needed for local
+  },
+  resources: {
+    users: {
+      table: 'Users',
+      primaryKey: 'id'
+    }
+  }
+}
+```
+
+#### Features
+
+- ✅ **AWS SDK v3**: Latest DynamoDB client with improved performance
+- ✅ **Composite Keys**: Support for partition key + sort key tables
+- ✅ **Custom Keys**: Configurable primary key field names
+- ✅ **DynamoDB Local**: Perfect for local development and testing
+- ✅ **Expression Builders**: Safe update expressions with attribute names/values
+- ✅ **AWS Credentials**: Supports access keys, IAM roles, session tokens
+- ✅ **Multi-Region**: Deploy to any AWS region
+
+---
+
+### 🍃 MongoDB Replicator
+
+**Document database integration** for MongoDB with support for standalone, replica sets, and MongoDB Atlas.
+
+**Required Dependency:**
+```bash
+pnpm add mongodb
+```
+
+#### Basic Configuration
+
+```javascript
+{
+  driver: 'mongodb',
+  config: {
+    host: 'localhost',
+    port: 27017,
+    database: 'production_db',
+    username: 'replicator_user',
+    password: 'secure_password',
+    logCollection: 'replication_log'  // Optional: log all operations
+  },
+  resources: {
+    users: 'users_collection',
+    products: 'products_collection'
+  }
+}
+```
+
+#### MongoDB Atlas Configuration
+
+```javascript
+{
+  driver: 'mongodb',
+  config: {
+    connectionString: 'mongodb+srv://user:pass@cluster0.mongodb.net/mydb?retryWrites=true&w=majority',
+    database: 'production',
+    logCollection: 'replication_audit'
+  },
+  resources: {
+    users: 'users',
+    orders: 'orders',
+    analytics: 'events'
+  }
+}
+```
+
+#### Advanced Configuration
+
+```javascript
+{
+  driver: 'mongodb',
+  config: {
+    // Connection string (supports all MongoDB connection formats)
+    connectionString: 'mongodb://admin:secret@host1:27017,host2:27017,host3:27017/mydb?replicaSet=rs0',
+
+    // Or individual parameters
+    host: 'mongodb.example.com',
+    port: 27017,
+    database: 'analytics',
+    username: 'replicator',
+    password: process.env.MONGO_PASSWORD,
+
+    // MongoDB client options
+    options: {
+      useUnifiedTopology: true,
+      useNewUrlParser: true,
+      maxPoolSize: 50,
+      minPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000
+    },
+
+    logCollection: 'replication_log'
+  },
+  resources: {
+    // Simple mapping
+    users: 'users',
+
+    // Multiple actions
+    products: {
+      collection: 'products',
+      actions: ['insert', 'update', 'delete']
+    },
+
+    // Multiple collections
+    orders: [
+      { collection: 'orders_active', actions: ['insert', 'update'] },
+      { collection: 'orders_archive', actions: ['insert'] }
+    ]
+  }
+}
+```
+
+#### Replica Set Configuration
+
+```javascript
+{
+  driver: 'mongodb',
+  config: {
+    connectionString: 'mongodb://host1:27017,host2:27017,host3:27017/mydb?replicaSet=myReplicaSet&readPreference=primaryPreferred',
+    options: {
+      w: 'majority',  // Write concern
+      j: true,        // Journal acknowledgment
+      wtimeout: 5000  // Write timeout
+    }
+  },
+  resources: {
+    users: 'users',
+    sessions: 'sessions'
+  }
+}
+```
+
+#### Features
+
+- ✅ **Multiple Formats**: Connection string or host/port configuration
+- ✅ **MongoDB Atlas**: Full support for cloud-hosted MongoDB
+- ✅ **Replica Sets**: Automatic failover and high availability
+- ✅ **Replication Logging**: Optional audit collection with indexes
+- ✅ **_id Preservation**: Keeps MongoDB _id field intact
+- ✅ **Connection Options**: Full MongoDB client options support
+- ✅ **Insert, Update, Delete**: Full CRUD operation support
+- ✅ **Multi-Collection**: Same resource → multiple MongoDB collections
 
 ---
 
