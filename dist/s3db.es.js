@@ -5232,6 +5232,77 @@ function generateResourcePaths(resource, version, config = {}) {
     if (authMethods.includes("apiKey")) security.push({ apiKeyAuth: [] });
     if (authMethods.includes("basic")) security.push({ basicAuth: [] });
   }
+  const partitions = resource.config?.partitions || resource.partitions || {};
+  const partitionNames = Object.keys(partitions);
+  const hasPartitions = partitionNames.length > 0;
+  if (resource.name === "posts") {
+    console.log("[OpenAPI Debug] Resource:", resource.name);
+    console.log("[OpenAPI Debug] config?.partitions:", resource.config?.partitions);
+    console.log("[OpenAPI Debug] partitions:", resource.partitions);
+    console.log("[OpenAPI Debug] partitionNames:", partitionNames);
+    console.log("[OpenAPI Debug] hasPartitions:", hasPartitions);
+  }
+  let partitionDescription = "Partition name for filtering";
+  let partitionValuesDescription = "Partition values as JSON string";
+  let partitionExample = void 0;
+  let partitionValuesExample = void 0;
+  if (hasPartitions) {
+    const partitionDocs = partitionNames.map((name) => {
+      const partition = partitions[name];
+      const fields = Object.keys(partition.fields || {});
+      const fieldTypes = Object.entries(partition.fields || {}).map(([field, type]) => `${field}: ${type}`).join(", ");
+      return `- **${name}**: Filters by ${fields.join(", ")} (${fieldTypes})`;
+    }).join("\n");
+    partitionDescription = `Available partitions:
+${partitionDocs}`;
+    const examplePartition = partitionNames[0];
+    const exampleFields = partitions[examplePartition]?.fields || {};
+    Object.entries(exampleFields).map(([field, type]) => `"${field}": <${type} value>`).join(", ");
+    partitionValuesDescription = `Partition field values as JSON string. Must match the structure of the selected partition.
+
+Example for "${examplePartition}" partition: \`{"${Object.keys(exampleFields)[0]}": "value"}\``;
+    partitionExample = examplePartition;
+    const firstField = Object.keys(exampleFields)[0];
+    const firstFieldType = exampleFields[firstField];
+    let exampleValue = "example";
+    if (firstFieldType === "number" || firstFieldType === "integer") {
+      exampleValue = 123;
+    } else if (firstFieldType === "boolean") {
+      exampleValue = true;
+    }
+    partitionValuesExample = JSON.stringify({ [firstField]: exampleValue });
+  }
+  const attributeQueryParams = [];
+  if (hasPartitions) {
+    const partitionFieldsSet = /* @__PURE__ */ new Set();
+    for (const [partitionName, partition] of Object.entries(partitions)) {
+      const fields = partition.fields || {};
+      for (const fieldName of Object.keys(fields)) {
+        partitionFieldsSet.add(fieldName);
+      }
+    }
+    const attributes = resource.config?.attributes || resource.attributes || {};
+    for (const fieldName of partitionFieldsSet) {
+      const fieldDef = attributes[fieldName];
+      if (!fieldDef) continue;
+      let fieldType;
+      if (typeof fieldDef === "object" && fieldDef.type) {
+        fieldType = fieldDef.type;
+      } else if (typeof fieldDef === "string") {
+        fieldType = fieldDef.split("|")[0].trim();
+      } else {
+        fieldType = "string";
+      }
+      const openAPIType = mapFieldTypeToOpenAPI(fieldType);
+      attributeQueryParams.push({
+        name: fieldName,
+        in: "query",
+        description: `Filter by ${fieldName} field (indexed via partitions for efficient querying). Value will be parsed as JSON if possible, otherwise treated as string.`,
+        required: false,
+        schema: openAPIType
+      });
+    }
+  }
   if (methods.includes("GET")) {
     paths[basePath] = {
       get: {
@@ -5244,7 +5315,7 @@ function generateResourcePaths(resource, version, config = {}) {
 - Second page: \`?limit=10&offset=10\`
 - Third page: \`?limit=10&offset=20\`
 
-The response includes pagination metadata in the \`pagination\` object with total count and page information.`,
+The response includes pagination metadata in the \`pagination\` object with total count and page information.${hasPartitions ? "\n\n**Partitioning**: This resource supports partitioned queries for optimized filtering. Use the `partition` and `partitionValues` parameters together." : ""}`,
         parameters: [
           {
             name: "limit",
@@ -5260,18 +5331,26 @@ The response includes pagination metadata in the \`pagination\` object with tota
             schema: { type: "integer", default: 0, minimum: 0 },
             example: 0
           },
-          {
-            name: "partition",
-            in: "query",
-            description: "Partition name for filtering",
-            schema: { type: "string" }
-          },
-          {
-            name: "partitionValues",
-            in: "query",
-            description: "Partition values (JSON string)",
-            schema: { type: "string" }
-          }
+          ...hasPartitions ? [
+            {
+              name: "partition",
+              in: "query",
+              description: partitionDescription,
+              schema: {
+                type: "string",
+                enum: partitionNames
+              },
+              example: partitionExample
+            },
+            {
+              name: "partitionValues",
+              in: "query",
+              description: partitionValuesDescription,
+              schema: { type: "string" },
+              example: partitionValuesExample
+            }
+          ] : [],
+          ...attributeQueryParams
         ],
         responses: {
           200: {
@@ -5337,7 +5416,7 @@ The response includes pagination metadata in the \`pagination\` object with tota
       get: {
         tags: [resourceName],
         summary: `Get ${resourceName} by ID`,
-        description: `Retrieve a single ${resourceName} by its ID`,
+        description: `Retrieve a single ${resourceName} by its ID${hasPartitions ? ". Optionally specify a partition for more efficient retrieval." : ""}`,
         parameters: [
           {
             name: "id",
@@ -5345,7 +5424,26 @@ The response includes pagination metadata in the \`pagination\` object with tota
             required: true,
             description: `${resourceName} ID`,
             schema: { type: "string" }
-          }
+          },
+          ...hasPartitions ? [
+            {
+              name: "partition",
+              in: "query",
+              description: partitionDescription,
+              schema: {
+                type: "string",
+                enum: partitionNames
+              },
+              example: partitionExample
+            },
+            {
+              name: "partitionValues",
+              in: "query",
+              description: partitionValuesDescription,
+              schema: { type: "string" },
+              example: partitionValuesExample
+            }
+          ] : []
         ],
         responses: {
           200: {
@@ -6114,6 +6212,8 @@ class ApiServer {
       // 'swagger' or 'redoc'
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       // 10MB default
+      rootHandler: options.rootHandler,
+      // Custom handler for root path, if not provided redirects to /docs
       apiInfo: {
         title: options.apiTitle || "s3db.js API",
         version: options.apiVersion || "1.0.0",
@@ -6194,30 +6294,10 @@ class ApiServer {
       return c.json(response);
     });
     this.app.get("/", (c) => {
-      const resources = Object.keys(this.options.database.resources).filter((name) => !name.startsWith("plg_")).map((name) => {
-        const resource = this.options.database.resources[name];
-        const version = resource.config?.currentVersion || resource.version || "v1";
-        return {
-          name,
-          version,
-          endpoints: {
-            list: `/${version}/${name}`,
-            get: `/${version}/${name}/:id`,
-            create: `/${version}/${name}`,
-            update: `/${version}/${name}/:id`,
-            delete: `/${version}/${name}/:id`,
-            count: `/${version}/${name}/count`,
-            query: `/${version}/${name}/query`
-          }
-        };
-      });
-      const response = success({
-        message: "s3db.js API",
-        version: "1.0.0",
-        resources,
-        documentation: this.options.docsEnabled ? "/docs" : void 0
-      });
-      return c.json(response);
+      if (this.options.rootHandler) {
+        return this.options.rootHandler(c);
+      }
+      return c.redirect("/docs", 302);
     });
     if (this.options.docsEnabled) {
       this.app.get("/openapi.json", (c) => {
@@ -23098,7 +23178,7 @@ class Database extends EventEmitter {
    */
   getNextVersion(versions = {}) {
     const versionNumbers = Object.keys(versions).filter((v) => v.startsWith("v")).map((v) => parseInt(v.substring(1))).filter((n) => !isNaN(n));
-    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : 0;
     return `v${maxVersion + 1}`;
   }
   /**
@@ -36120,7 +36200,8 @@ class TfStatePlugin extends Plugin {
    * @private
    */
   _matchesGlobPattern(key, pattern) {
-    let regexPattern = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, "\0").replace(/\\\?/g, "");
+    let regexPattern = pattern.replace(/\*\*/g, "\0\0").replace(/\*/g, "\0").replace(/\?/g, "");
+    regexPattern = regexPattern.replace(/[.+^${}()|\\]/g, "\\$&");
     regexPattern = regexPattern.replace(/\x00\x00/g, "__DOUBLE_STAR__").replace(/\x00/g, "[^/]*").replace(/\x01/g, ".");
     regexPattern = regexPattern.replace(/__DOUBLE_STAR__\//g, "(?:.*/)?");
     regexPattern = regexPattern.replace(/__DOUBLE_STAR__/g, ".*");
