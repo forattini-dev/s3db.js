@@ -1,4 +1,5 @@
 import tryFn from "../../concerns/try-fn.js";
+import requirePluginDependency from "../concerns/plugin-dependencies.js";
 
 export class RabbitMqConsumer {
   constructor({ amqpUrl, queue, prefetch = 10, reconnectInterval = 2000, onMessage, onError, driver = 'rabbitmq' }) {
@@ -15,6 +16,9 @@ export class RabbitMqConsumer {
   }
 
   async start() {
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('rabbitmq-consumer');
+
     this._stopped = false;
     await this._connect();
   }

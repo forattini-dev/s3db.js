@@ -369,9 +369,15 @@ describe('RelationPlugin - belongsTo Relations', () => {
     const results = await posts.list({ include: ['author'] });
 
     expect(results.length).toBe(3);
-    expect(results[0].author.id).toBe('u1');
-    expect(results[1].author.id).toBe('u2');
-    expect(results[2].author.id).toBe('u1');
+
+    // Find posts by ID (order may vary)
+    const p1 = results.find(p => p.id === 'p1');
+    const p2 = results.find(p => p.id === 'p2');
+    const p3 = results.find(p => p.id === 'p3');
+
+    expect(p1.author.id).toBe('u1');
+    expect(p2.author.id).toBe('u2');
+    expect(p3.author.id).toBe('u1');
   });
 });
 

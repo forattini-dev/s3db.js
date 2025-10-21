@@ -105,8 +105,7 @@
     "@aws-sdk/client-sqs": "^3.0.0",
     "@google-cloud/bigquery": "^7.0.0",
     "amqplib": "^0.10.8",
-    "pg": "^8.0.0",
-    "uuid": "^9.0.0"
+    "pg": "^8.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-sqs": {
@@ -116,9 +115,6 @@
       "optional": true
     },
     "pg": {
-      "optional": true
-    },
-    "uuid": {
       "optional": true
     },
     "amqplib": {
