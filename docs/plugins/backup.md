@@ -93,6 +93,78 @@ await plugin.restore(backups[0].id); // Restored in minutes
 
 ---
 
+## ⚡ Quick Start
+
+Get started with backups in under 2 minutes:
+
+```javascript
+import { Database, BackupPlugin } from 's3db.js';
+
+// Step 1: Create database and plugin
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+const backupPlugin = new BackupPlugin({
+  driver: 'filesystem',
+  config: {
+    path: './backups'  // Local backups directory
+  }
+});
+
+await db.usePlugin(backupPlugin);
+
+// Step 2: Create some data
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    name: 'string|required',
+    email: 'string|required'
+  }
+});
+
+await users.insert({ name: 'Alice', email: 'alice@example.com' });
+await users.insert({ name: 'Bob', email: 'bob@example.com' });
+
+// Step 3: Create a backup
+const backupResult = await backupPlugin.backup('full');
+console.log('Backup created:', backupResult);
+// Output:
+// Backup created: {
+//   id: 'full-2025-10-21',
+//   type: 'full',
+//   path: './backups/full-2025-10-21',
+//   resources: ['users'],
+//   files: {
+//     users: './backups/full-2025-10-21/users.jsonl.gz',
+//     metadata: './backups/full-2025-10-21/s3db.json'
+//   },
+//   size: '2.4 KB',
+//   compressed: '890 bytes',
+//   records: 2
+// }
+
+// Step 4: List available backups
+const backups = await backupPlugin.list();
+console.log('Available backups:', backups.length);
+
+// Step 5: Restore from backup (if needed)
+// WARNING: This will overwrite existing data!
+// await backupPlugin.restore(backupResult.id);
+```
+
+**What just happened:**
+1. ✅ Created BackupPlugin with filesystem driver
+2. ✅ Exported all resources to JSONL.gz format (70-90% compression)
+3. ✅ Saved s3db.json with full metadata (schemas, partitions, etc.)
+4. ✅ Files stored in `./backups/full-2025-10-21/`
+
+**Next steps:**
+- Add scheduling for automatic backups (see [Usage Journey](#usage-journey))
+- Configure S3 driver for cloud backups (see [Driver Types](#driver-types))
+- Set up retention policies (GFS) (see [Advanced Patterns](#advanced-patterns))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)

@@ -1984,13 +1984,352 @@ const response = await fetch('/v0/cars/car-1?partition=byRegion&partitionValues=
 
 ---
 
+## ❓ FAQ
+
+### For Developers
+
+**Q: Can I use the API Plugin with existing authentication systems (Auth0, Firebase, etc.)?**
+
+A: Yes! Use custom middlewares to integrate with any auth provider:
+
+```javascript
+resources: {
+  cars: {
+    customMiddleware: [
+      async (c, next) => {
+        const token = c.req.header('authorization')?.replace('Bearer ', '');
+
+        // Validate with Auth0
+        const user = await auth0.verifyToken(token);
+
+        if (!user) {
+          return c.json({ success: false, error: { message: 'Invalid token' } }, 401);
+        }
+
+        c.set('user', user);
+        await next();
+      }
+    ]
+  }
+}
+```
+
+**Q: How do I handle file uploads with the API?**
+
+A: For large files, consider using multipart/form-data and storing files directly in S3, then storing the S3 key in s3db:
+
+```javascript
+// Use a separate file upload endpoint
+app.post('/upload', async (c) => {
+  const formData = await c.req.formData();
+  const file = formData.get('file');
+
+  // Upload to S3
+  const key = await s3.upload(file);
+
+  // Store reference in s3db
+  await cars.insert({
+    brand: formData.get('brand'),
+    imageUrl: `https://s3.amazonaws.com/bucket/${key}`
+  });
+});
+```
+
+**Q: Can I customize the OpenAPI/Swagger documentation?**
+
+A: Yes! The plugin auto-generates OpenAPI specs from your resource schemas. Customize via:
+
+```javascript
+new ApiPlugin({
+  docs: {
+    enabled: true,
+    title: 'My Custom API',
+    version: '2.0.0',
+    description: 'Custom API documentation'
+  }
+})
+```
+
+The schema is automatically derived from resource attributes. For advanced customization, access the raw spec at `/openapi.json` and modify it externally.
+
+**Q: How do I implement pagination with cursor-based navigation instead of offset?**
+
+A: Use query filters with comparison operators:
+
+```javascript
+// Get first page (limit 50)
+GET /v0/cars?limit=50
+
+// Get next page using last ID as cursor
+GET /v0/cars?id={"$gt":"last-id-from-previous-page"}&limit=50
+```
+
+For custom cursor pagination, add middleware:
+
+```javascript
+resources: {
+  cars: {
+    customMiddleware: [
+      async (c, next) => {
+        const cursor = c.req.query('cursor');
+        if (cursor) {
+          // Decode cursor and apply filter
+          const decodedCursor = Buffer.from(cursor, 'base64').toString();
+          c.set('cursorFilter', { id: { $gt: decodedCursor } });
+        }
+        await next();
+      }
+    ]
+  }
+}
+```
+
+**Q: Can I serve the API behind a reverse proxy (nginx, Cloudflare)?**
+
+A: Yes! The API works perfectly behind reverse proxies. Key considerations:
+
+```javascript
+// Use X-Forwarded-For for rate limiting
+new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    keyGenerator: (c) => {
+      return c.req.header('x-forwarded-for') ||
+             c.req.header('x-real-ip') ||
+             'unknown';
+    }
+  }
+})
+```
+
+**Nginx configuration:**
+```nginx
+location /api/ {
+  proxy_pass http://localhost:3000/;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Q: How do I implement GraphQL instead of REST?**
+
+A: The API Plugin is REST-focused. For GraphQL, use the underlying database directly:
+
+```javascript
+import { ApolloServer } from '@apollo/server';
+
+const typeDefs = `
+  type Car {
+    id: ID!
+    brand: String!
+    model: String!
+    year: Int!
+  }
+  type Query {
+    cars: [Car]
+    car(id: ID!): Car
+  }
+`;
+
+const resolvers = {
+  Query: {
+    cars: async () => await cars.list({ limit: 1000 }),
+    car: async (_, { id }) => await cars.get(id)
+  }
+};
+
+const server = new ApolloServer({ typeDefs, resolvers });
+```
+
+---
+
+### For AI Agents
+
+**Q: What problem does the API Plugin solve?**
+
+A: It transforms s3db.js resources into production-ready REST API endpoints with automatic CRUD operations, authentication, validation, and enterprise features (rate limiting, CORS, compression, health checks). Eliminates need to manually write API routes.
+
+**Q: What are all the configuration parameters?**
+
+A: Core parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `port` | `number` | `3000` | HTTP server port |
+| `host` | `string` | `'0.0.0.0'` | Host to bind to |
+| `verbose` | `boolean` | `false` | Enable verbose logging |
+| `maxBodySize` | `number` | `10485760` | Max request body size (10MB) |
+| `auth` | `object` | `{}` | Authentication config (JWT, API key, Basic) |
+| `resources` | `object` | `{}` | Per-resource configuration |
+| `cors` | `object` | `{ enabled: false }` | CORS configuration |
+| `rateLimit` | `object` | `{ enabled: false }` | Rate limiting config |
+| `logging` | `object` | `{ enabled: true }` | Request logging config |
+| `compression` | `object` | `{ enabled: false }` | Response compression config |
+| `validation` | `object` | `{ enabled: true }` | Schema validation config |
+| `middlewares` | `array` | `[]` | Global middleware functions |
+| `docs` | `object` | `{ enabled: false }` | Swagger UI configuration |
+
+**Q: What are the default behaviors?**
+
+A: Defaults:
+- Server starts on port 3000, listens on 0.0.0.0
+- All resources automatically get REST endpoints (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS)
+- Endpoints versioned based on resource version (`/v0/cars`, `/v1/cars`)
+- Schema validation enabled by default
+- Authentication disabled by default (public access)
+- CORS disabled by default
+- Rate limiting disabled by default
+- Compression disabled by default
+- Swagger docs disabled by default
+- Request logging enabled by default
+- Automatic error handling with consistent JSON responses
+
+**Q: What events does this plugin emit?**
+
+A: Events:
+
+| Event | Payload | When Emitted |
+|-------|---------|--------------|
+| `apiServerStarted` | `{ port, host, resources }` | Server starts successfully |
+| `apiServerStopped` | `{}` | Server stops |
+| `apiRequestReceived` | `{ method, path, user, timestamp }` | Each request received |
+| `apiRequestCompleted` | `{ method, path, status, duration }` | Each request completed |
+| `apiAuthFailed` | `{ method, path, reason }` | Authentication fails |
+| `apiValidationFailed` | `{ resource, errors }` | Validation fails |
+| `apiRateLimitExceeded` | `{ key, limit, windowMs }` | Rate limit hit |
+| `apiError` | `{ error, method, path }` | Unhandled error occurs |
+
+**Q: How do I debug API issues?**
+
+A: Debugging strategies:
+
+```javascript
+// 1. Enable verbose logging
+new ApiPlugin({
+  verbose: true,
+  logging: { enabled: true, verbose: true }
+})
+
+// 2. Listen to events
+db.on('apiRequestReceived', (data) => {
+  console.log('Request:', data);
+});
+
+db.on('apiError', (data) => {
+  console.error('Error:', data);
+});
+
+// 3. Add debug middleware
+new ApiPlugin({
+  middlewares: [
+    async (c, next) => {
+      console.log('Request:', {
+        method: c.req.method,
+        path: c.req.path,
+        headers: c.req.header(),
+        query: c.req.query()
+      });
+      await next();
+    }
+  ]
+})
+
+// 4. Check health endpoints
+curl http://localhost:3000/health/ready
+
+// 5. Inspect OpenAPI spec
+curl http://localhost:3000/openapi.json | jq
+
+// 6. Test with verbose curl
+curl -v http://localhost:3000/v0/cars
+```
+
+**Q: What HTTP methods are supported per endpoint?**
+
+A: Default methods per endpoint:
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/{version}/{resource}` | GET, POST, HEAD, OPTIONS | List/create resources, get stats, get metadata |
+| `/{version}/{resource}/:id` | GET, PUT, PATCH, DELETE, HEAD | Get/update/delete single resource, check existence |
+| `/auth/register` | POST | User registration |
+| `/auth/login` | POST | User login |
+| `/auth/token/refresh` | POST | Refresh JWT token |
+| `/auth/me` | GET | Get current user |
+| `/auth/api-key/regenerate` | POST | Regenerate API key |
+| `/health` | GET | Generic health check |
+| `/health/live` | GET | Liveness probe |
+| `/health/ready` | GET | Readiness probe |
+| `/docs` | GET | Swagger UI |
+| `/openapi.json` | GET | OpenAPI 3.0 spec |
+| `/` | GET | API info |
+
+**Q: How does automatic versioning work?**
+
+A: Versioning is based on resource schema versions:
+
+1. Each resource has a `currentVersion` (e.g., `v0`, `v1`, `v2`)
+2. API creates endpoints for the current version: `/v0/cars`, `/v1/cars`
+3. When you update a resource schema with `updateResourceAttributes()`, a new version is created
+4. Both old and new versions remain accessible for backward compatibility
+5. Clients can specify which version to use in the URL path
+6. Each version serves data according to its schema definition
+
+Example flow:
+```
+// Initial: v0 endpoints created
+POST /v0/cars
+
+// Update schema → v1 created
+// Both versions available:
+GET /v0/cars  (old schema)
+GET /v1/cars  (new schema)
+```
+
+**Q: Can I use this with serverless platforms (AWS Lambda, Vercel, Cloudflare Workers)?**
+
+A: The API Plugin uses Hono, which supports multiple platforms:
+
+**AWS Lambda (with adapter):**
+```javascript
+import { handle } from 'hono/aws-lambda';
+
+const apiPlugin = new ApiPlugin({ port: 3000 });
+const app = apiPlugin.getApp();
+
+export const handler = handle(app);
+```
+
+**Vercel:**
+```javascript
+import { handle } from 'hono/vercel';
+
+const app = apiPlugin.getApp();
+export default handle(app);
+```
+
+**Cloudflare Workers:**
+```javascript
+const app = apiPlugin.getApp();
+
+export default {
+  fetch: app.fetch
+};
+```
+
+Note: Health probes and server lifecycle may need adaptation for serverless.
+
+---
+
 ## 📚 Examples
 
 See complete examples:
 - [e47-api-plugin-basic.js](../examples/e47-api-plugin-basic.js) - Basic usage
-- [e48-api-plugin-auth.js](../examples/e48-api-plugin-auth.js) - Authentication
-- [e49-api-plugin-custom-middleware.js](../examples/e49-api-plugin-custom-middleware.js) - Custom middlewares
-- [e50-api-plugin-multi-version.js](../examples/e50-api-plugin-multi-version.js) - Multiple versions
+- [e49-api-plugin-complete.js](../examples/e49-api-plugin-complete.js) - Complete features demo
+- [e58-api-rest-complete.js](../examples/e58-api-rest-complete.js) - Complete REST API
+- [e59-api-rest-simple.js](../examples/e59-api-rest-simple.js) - Simple REST API
 
 ---
 

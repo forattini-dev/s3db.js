@@ -1,27 +1,43 @@
 import tryFn from "#src/concerns/try-fn.js";
 import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
+import {
+  generateBigQuerySchema,
+  getBigQueryTableSchema,
+  generateBigQuerySchemaUpdate
+} from './schema-sync.helper.js';
 
 /**
  * BigQuery Replicator - Replicate data to Google BigQuery tables
- * 
+ *
  * ⚠️  REQUIRED DEPENDENCY: You must install the Google Cloud BigQuery SDK:
  * ```bash
  * pnpm add @google-cloud/bigquery
  * ```
- * 
+ *
  * Configuration:
  * @param {string} projectId - Google Cloud project ID (required)
- * @param {string} datasetId - BigQuery dataset ID (required) 
+ * @param {string} datasetId - BigQuery dataset ID (required)
  * @param {Object} credentials - Service account credentials object (optional)
  * @param {string} location - BigQuery dataset location/region (default: 'US')
  * @param {string} logTable - Table name for operation logging (optional)
- * 
+ * @param {Object} schemaSync - Schema synchronization configuration
+ * @param {boolean} schemaSync.enabled - Enable automatic schema management (default: false)
+ * @param {string} schemaSync.strategy - Sync strategy: 'alter' | 'drop-create' | 'validate-only' (default: 'alter')
+ * @param {string} schemaSync.onMismatch - Action on schema mismatch: 'error' | 'warn' | 'ignore' (default: 'error')
+ * @param {boolean} schemaSync.autoCreateTable - Auto-create table if not exists (default: true)
+ * @param {boolean} schemaSync.autoCreateColumns - Auto-add missing columns (default: true, only with strategy: 'alter')
+ *
  * @example
  * new BigqueryReplicator({
  *   projectId: 'my-gcp-project',
  *   datasetId: 'analytics',
- *   credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString())
+ *   credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString()),
+ *   schemaSync: {
+ *     enabled: true,
+ *     strategy: 'alter',
+ *     onMismatch: 'error'
+ *   }
  * }, {
  *   users: {
  *     table: 'users_table',
@@ -29,7 +45,7 @@ import BaseReplicator from './base-replicator.class.js';
  *   },
  *   orders: 'orders_table'
  * })
- * 
+ *
  * See PLUGINS.md for comprehensive configuration documentation.
  */
 class BigqueryReplicator extends BaseReplicator {
@@ -41,6 +57,15 @@ class BigqueryReplicator extends BaseReplicator {
     this.credentials = config.credentials;
     this.location = config.location || 'US';
     this.logTable = config.logTable;
+
+    // Schema sync configuration
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || 'alter',
+      onMismatch: config.schemaSync?.onMismatch || 'error',
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false
+    };
 
     // Parse resources configuration
     this.resources = this.parseResourcesConfig(resources);
@@ -131,12 +156,154 @@ class BigqueryReplicator extends BaseReplicator {
       credentials: this.credentials,
       location: this.location
     });
+
+    // Sync schemas if enabled
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
+
     this.emit('initialized', {
       replicator: this.name,
       projectId: this.projectId,
       datasetId: this.datasetId,
       resources: Object.keys(this.resources)
     });
+  }
+
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[BigQueryReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+
+          if (this.schemaSync.onMismatch === 'error') {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === 'warn') {
+            console.warn(`[BigQueryReplicator] ${message}`);
+          }
+        }
+      }
+    }
+
+    this.emit('schema_sync_completed', {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+
+  /**
+   * Sync a single table schema in BigQuery
+   */
+  async syncTableSchema(tableName, attributes) {
+    const dataset = this.bigqueryClient.dataset(this.datasetId);
+    const table = dataset.table(tableName);
+
+    // Check if table exists
+    const [exists] = await table.exists();
+
+    if (!exists) {
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+
+      if (this.schemaSync.strategy === 'validate-only') {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+
+      // Create table with schema
+      const schema = generateBigQuerySchema(attributes);
+
+      if (this.config.verbose) {
+        console.log(`[BigQueryReplicator] Creating table ${tableName} with schema:`, schema);
+      }
+
+      await dataset.createTable(tableName, { schema });
+
+      this.emit('table_created', {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+
+      return;
+    }
+
+    // Table exists - check for schema changes
+    if (this.schemaSync.strategy === 'drop-create') {
+      if (this.config.verbose) {
+        console.warn(`[BigQueryReplicator] Dropping and recreating table ${tableName}`);
+      }
+
+      await table.delete();
+      const schema = generateBigQuerySchema(attributes);
+      await dataset.createTable(tableName, { schema });
+
+      this.emit('table_recreated', {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+
+      return;
+    }
+
+    if (this.schemaSync.strategy === 'alter' && this.schemaSync.autoCreateColumns) {
+      const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+
+      if (newFields.length > 0) {
+        if (this.config.verbose) {
+          console.log(`[BigQueryReplicator] Adding ${newFields.length} field(s) to table ${tableName}:`, newFields);
+        }
+
+        // Get current schema
+        const [metadata] = await table.getMetadata();
+        const currentSchema = metadata.schema.fields;
+
+        // Add new fields to existing schema
+        const updatedSchema = [...currentSchema, ...newFields];
+
+        // Update table schema
+        await table.setMetadata({ schema: updatedSchema });
+
+        this.emit('table_altered', {
+          replicator: this.name,
+          tableName,
+          addedColumns: newFields.length
+        });
+      }
+    }
+
+    if (this.schemaSync.strategy === 'validate-only') {
+      const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+
+      if (newFields.length > 0) {
+        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${newFields.length}`);
+      }
+    }
   }
 
   shouldReplicateResource(resourceName) {
@@ -438,7 +605,8 @@ class BigqueryReplicator extends BaseReplicator {
       projectId: this.projectId,
       datasetId: this.datasetId,
       resources: this.resources,
-      logTable: this.logTable
+      logTable: this.logTable,
+      schemaSync: this.schemaSync
     };
   }
 }

@@ -30,6 +30,78 @@ console.log('Avg time:', metrics.performance.averageResponseTime);
 
 ---
 
+## ⚡ Quick Start
+
+Start collecting metrics in under 1 minute:
+
+```javascript
+import { Database, MetricsPlugin } from 's3db.js';
+
+// Step 1: Create database and add metrics plugin
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+const metricsPlugin = new MetricsPlugin({
+  enabled: true,
+  trackLatency: true,
+  trackErrors: true
+});
+
+await db.usePlugin(metricsPlugin);
+
+// Step 2: Create resource and perform operations
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    name: 'string|required',
+    email: 'string|required'
+  }
+});
+
+// Operations are automatically tracked
+await users.insert({ name: 'Alice', email: 'alice@example.com' });
+await users.insert({ name: 'Bob', email: 'bob@example.com' });
+await users.list({ limit: 10 });
+await users.count();
+
+// Step 3: View metrics
+const metrics = await metricsPlugin.getMetrics();
+console.log('Performance Metrics:');
+console.log('- Total operations:', metrics.operations.total);
+console.log('- Average response time:', metrics.performance.averageResponseTime, 'ms');
+console.log('- Inserts:', metrics.operations.byType.insert);
+console.log('- Lists:', metrics.operations.byType.list);
+console.log('- Errors:', metrics.errors.total);
+
+// Output:
+// Performance Metrics:
+// - Total operations: 4
+// - Average response time: 145 ms
+// - Inserts: 2
+// - Lists: 1
+// - Errors: 0
+
+// Step 4: Get resource-specific metrics
+const userMetrics = await metricsPlugin.getResourceMetrics('users');
+console.log('\nUsers Resource Metrics:');
+console.log('- Operations:', userMetrics.operations.total);
+console.log('- Avg latency:', userMetrics.performance.averageResponseTime, 'ms');
+console.log('- Slowest operation:', userMetrics.performance.slowestOperation);
+```
+
+**What just happened:**
+1. ✅ Metrics Plugin installed and enabled
+2. ✅ All operations automatically tracked (insert, list, count, etc.)
+3. ✅ Performance data collected (latency, counts, errors)
+4. ✅ Metrics available via API
+
+**Next steps:**
+- Configure Prometheus integration (see [Prometheus Integration](#-prometheus-integration))
+- Set up custom alerts and thresholds (see [Advanced Patterns](#advanced-patterns))
+- Export metrics to monitoring systems (see [Usage Examples](#usage-examples))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)

@@ -945,9 +945,207 @@ importer.on('complete', (result) => {
 
 ---
 
+## ❓ FAQ
+
+### For Developers
+
+**Q: Can ImporterPlugin restore BackupPlugin exports?**
+**A:** Yes! BackupPlugin exports to JSONL.gz format, which ImporterPlugin can import directly:
+
+```javascript
+// BackupPlugin export: users.jsonl.gz
+const importer = new ImporterPlugin({
+  resource: 'users',
+  format: 'jsonl',  // Gzip auto-detected
+  filePath: './backups/full-2025-10-21/users.jsonl.gz'
+});
+
+await importer.import();  // Restored!
+```
+
+**Q: What's the best format for large datasets?**
+**A:** JSONL (JSON Lines) is fastest:
+- **JSONL**: ~12s for 1M rows, streaming-friendly
+- **CSV**: ~15s for 1M rows, needs parsing
+- **JSON**: ~20s for 1M rows, loads entire array to memory
+- **Excel**: ~25s for 1M rows, overhead from XLSX format
+
+For maximum performance: Use JSONL with gzip compression.
+
+**Q: How do I handle schema differences between source and target?**
+**A:** Use field mapping and transformations:
+
+```javascript
+const importer = new ImporterPlugin({
+  resource: 'users',
+  filePath: './legacy-users.csv',
+  fieldMapping: {
+    'full_name': 'name',        // Rename field
+    'email_address': 'email',   // Rename field
+    'created': 'createdAt'      // Rename field
+  },
+  transforms: {
+    createdAt: (value) => new Date(value).toISOString(),  // Convert to ISO
+    email: (value) => value.toLowerCase()  // Normalize
+  }
+});
+```
+
+**Q: How do I skip duplicate records?**
+**A:** Use the `deduplicationKey` option:
+
+```javascript
+const importer = new ImporterPlugin({
+  resource: 'users',
+  filePath: './users.csv',
+  deduplicationKey: ['email'],  // Skip if email already exists
+  continueOnError: true  // Continue importing even if duplicates found
+});
+
+await importer.import();
+// Result: { imported: 950, skipped: 50, errors: 0 }
+```
+
+**Q: How much memory does ImporterPlugin use?**
+**A:** Very little! Streaming processing uses ~200MB for any file size:
+- 1K rows: ~200MB
+- 1M rows: ~200MB
+- 10M rows: ~200MB
+
+Memory usage depends on `batchSize * recordSize`, not total file size.
+
+**Q: Can I import from S3 directly?**
+**A:** Not directly, but you can download first:
+
+```javascript
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { pipeline } from 'stream/promises';
+import fs from 'fs';
+
+const s3 = new S3Client({ region: 'us-east-1' });
+const response = await s3.send(new GetObjectCommand({
+  Bucket: 'my-bucket',
+  Key: 'data/users.csv'
+}));
+
+// Stream to temp file
+await pipeline(response.Body, fs.createWriteStream('/tmp/users.csv'));
+
+// Then import
+const importer = new ImporterPlugin({
+  resource: 'users',
+  filePath: '/tmp/users.csv'
+});
+await importer.import();
+```
+
+### For AI Agents
+
+**Q: What problem does this plugin solve?**
+**A:** Enables high-performance bulk data import from multiple file formats (CSV, JSON, JSONL, Excel, Parquet) with streaming processing, schema mapping, transformations, validation, and deduplication.
+
+**Q: What are the minimum required parameters?**
+**A:** Three required parameters:
+- `resource`: Name of target s3db resource
+- `format`: File format (csv, json, jsonl, tsv, excel, parquet)
+- `filePath`: Path to file to import
+
+```javascript
+new ImporterPlugin({
+  resource: 'users',
+  format: 'csv',
+  filePath: './users.csv'
+})
+```
+
+**Q: What are the default values for all configurations?**
+**A:**
+```javascript
+{
+  resource: undefined,        // Required
+  format: undefined,          // Required
+  filePath: undefined,        // Required
+  batchSize: 1000,           // Records per batch
+  parallelism: 10,           // Concurrent batches
+  continueOnError: false,    // Stop on first error
+  skipValidation: false,     // Validate before insert
+  deduplicationKey: null,    // No deduplication
+  fieldMapping: {},          // No field renaming
+  transforms: {},            // No transformations
+  onProgress: null,          // No progress callback
+  onError: null,             // No error callback
+  encoding: 'utf8'           // File encoding
+}
+```
+
+**Q: What events does this plugin emit?**
+**A:**
+- `import:start` - Import started with total records estimate
+- `import:progress` - Progress update (every N records based on batchSize)
+- `import:batch` - Batch completed (records imported, time taken)
+- `import:error` - Import error occurred
+- `import:complete` - Import finished with summary stats
+
+Listen via:
+```javascript
+importer.on('import:progress', (data) => {
+  console.log(`Progress: ${data.processed}/${data.total} (${data.percent}%)`);
+});
+```
+
+**Q: How do I debug import issues?**
+**A:** Enable detailed logging and error callbacks:
+
+```javascript
+const importer = new ImporterPlugin({
+  resource: 'users',
+  filePath: './users.csv',
+  continueOnError: true,
+  onError: (error, record, index) => {
+    console.error(`Error at row ${index}:`, error.message);
+    console.error('Record:', record);
+  },
+  onProgress: (stats) => {
+    console.log(`Imported: ${stats.imported}, Skipped: ${stats.skipped}, Errors: ${stats.errors}`);
+  }
+});
+
+await importer.import();
+```
+
+**Q: What file formats are supported?**
+**A:**
+- **CSV** (`.csv`) - Comma-separated values
+- **TSV** (`.tsv`) - Tab-separated values
+- **JSON** (`.json`) - Single JSON array
+- **JSONL** (`.jsonl`, `.ndjson`) - JSON Lines (one object per line)
+- **Excel** (`.xlsx`, `.xls`) - Microsoft Excel
+- **Parquet** (`.parquet`) - Apache Parquet
+
+All formats support automatic gzip decompression (`.gz` extension).
+
+**Q: How do transformations work?**
+**A:** Transformations are applied to each field value before validation and insert:
+
+```javascript
+{
+  transforms: {
+    email: (value) => value.toLowerCase().trim(),
+    createdAt: (value) => new Date(value).toISOString(),
+    age: (value) => parseInt(value, 10),
+    tags: (value) => value.split(',').map(t => t.trim())
+  }
+}
+```
+
+Execution order: Read → Transform → Map → Validate → Insert
+
+---
+
 ## Related Documentation
 
 - [ReplicatorPlugin](./replicator.md#-csv-replicator) - Export data to multiple formats
+- [BackupPlugin](./backup.md) - Create JSONL.gz backups that ImporterPlugin can restore
 - [Schema Validation](../schema.md) - Resource schema definition
 - [Performance Optimization](../README.md#performance) - General performance tips
 

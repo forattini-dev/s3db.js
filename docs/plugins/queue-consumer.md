@@ -26,6 +26,83 @@ await db.usePlugin(new QueueConsumerPlugin({
 
 ---
 
+## ⚡ Quick Start
+
+Get started with queue consumption in under 2 minutes (using SQS):
+
+```javascript
+import { Database, QueueConsumerPlugin } from 's3db.js';
+
+// Step 1: Create database
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+// Step 2: Create resource
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    name: 'string|required',
+    email: 'string|required'
+  }
+});
+
+// Step 3: Configure queue consumer
+const queueConsumerPlugin = new QueueConsumerPlugin({
+  consumers: [{
+    driver: 'sqs',
+    config: {
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+      region: 'us-east-1'
+    },
+    consumers: [{
+      resources: 'users',  // Process messages for users resource
+      concurrency: 5       // Process up to 5 messages concurrently
+    }]
+  }]
+});
+
+await db.usePlugin(queueConsumerPlugin);
+
+// Step 4: Start consuming messages
+await queueConsumerPlugin.start();
+console.log('Queue consumer started! Listening for messages...');
+
+// Messages are automatically processed!
+// Example message from SQS:
+// {
+//   "operation": "insert",
+//   "resource": "users",
+//   "data": { "name": "Alice", "email": "alice@example.com" }
+// }
+// → Automatically calls: users.insert({ name: "Alice", email: "alice@example.com" })
+
+// Step 5: Monitor processing
+queueConsumerPlugin.on('messageProcessed', (event) => {
+  console.log('Processed:', event);
+  // { operation: 'insert', resource: 'users', recordId: 'user-1', duration: 145 }
+});
+
+queueConsumerPlugin.on('messageError', (error) => {
+  console.error('Processing failed:', error);
+});
+
+// Step 6: Stop when done (optional)
+// await queueConsumerPlugin.stop();
+```
+
+**What just happened:**
+1. ✅ QueueConsumerPlugin installed with SQS driver
+2. ✅ Configured to consume from SQS queue
+3. ✅ Messages automatically converted to insert/update/delete operations
+4. ✅ Concurrent processing with automatic retry on failure
+
+**Next steps:**
+- Try RabbitMQ driver (see [Supported Drivers](#supported-drivers))
+- Add custom message transformations (see [Usage Examples](#usage-examples))
+- Configure retry and dead letter queue (see [Configuration Options](#configuration-options))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
