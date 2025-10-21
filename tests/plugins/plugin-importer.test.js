@@ -3,6 +3,7 @@ import { createDatabaseForTest } from '../config.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import zlib from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -537,6 +538,113 @@ describe('ImporterPlugin', () => {
 
       await database.usePlugin(plugin);
       await expect(plugin.import('/non/existent/file.json')).rejects.toThrow('File not found');
+    });
+  });
+
+  describe('Gzip Compression Support', () => {
+    it('should import gzip-compressed JSONL files', async () => {
+      const testFile = path.join(testDataDir, 'test.jsonl.gz');
+      const testData = [
+        { id: 'u1', name: 'Alice', email: 'alice@example.com', age: 30 },
+        { id: 'u2', name: 'Bob', email: 'bob@example.com', age: 25 },
+        { id: 'u3', name: 'Charlie', email: 'charlie@example.com', age: 35 }
+      ];
+
+      // Create gzip-compressed JSONL file
+      const jsonlContent = testData.map(d => JSON.stringify(d)).join('\n');
+      const compressed = zlib.gzipSync(jsonlContent);
+      fs.writeFileSync(testFile, compressed);
+
+      const plugin = new ImporterPlugin({
+        resource: 'test_users',
+        format: 'jsonl'
+      });
+
+      await database.usePlugin(plugin);
+      const result = await plugin.import(testFile);
+
+      expect(result.processed).toBe(3);
+      expect(result.inserted).toBe(3);
+      expect(result.errors).toBe(0);
+
+      const users = await resource.list({ limit: 10 });
+      expect(users.length).toBe(3);
+      expect(users.map(u => u.name)).toContain('Alice');
+      expect(users.map(u => u.name)).toContain('Bob');
+      expect(users.map(u => u.name)).toContain('Charlie');
+    });
+
+    it('should import gzip-compressed CSV files', async () => {
+      const testFile = path.join(testDataDir, 'test.csv.gz');
+      const csvContent = 'id,name,email,age\nu1,Alice,alice@example.com,30\nu2,Bob,bob@example.com,25\nu3,Charlie,charlie@example.com,35';
+
+      // Create gzip-compressed CSV file
+      const compressed = zlib.gzipSync(csvContent);
+      fs.writeFileSync(testFile, compressed);
+
+      const plugin = new ImporterPlugin({
+        resource: 'test_users',
+        format: 'csv'
+      });
+
+      await database.usePlugin(plugin);
+      const result = await plugin.import(testFile);
+
+      expect(result.processed).toBe(3);
+      expect(result.inserted).toBe(3);
+      expect(result.errors).toBe(0);
+
+      const users = await resource.list({ limit: 10 });
+      expect(users.length).toBe(3);
+    });
+
+    it('should auto-detect gzip from .gz extension', async () => {
+      const testFile = path.join(testDataDir, 'auto-detect.jsonl.gz');
+      const testData = [
+        { id: 'u1', name: 'Test User' }
+      ];
+
+      const jsonlContent = testData.map(d => JSON.stringify(d)).join('\n');
+      const compressed = zlib.gzipSync(jsonlContent);
+      fs.writeFileSync(testFile, compressed);
+
+      const plugin = new ImporterPlugin({
+        resource: 'test_users',
+        format: 'jsonl'
+      });
+
+      await database.usePlugin(plugin);
+      const result = await plugin.import(testFile);
+
+      expect(result.processed).toBe(1);
+      expect(result.inserted).toBe(1);
+    });
+
+    it('should handle larger gzip-compressed files', async () => {
+      const testFile = path.join(testDataDir, 'larger.jsonl.gz');
+      const testData = [];
+      // Reduced from 1000 to 100 to keep test fast in LocalStack
+      for (let i = 0; i < 100; i++) {
+        testData.push({ id: `u${i}`, name: `User ${i}`, email: `user${i}@example.com` });
+      }
+
+      const jsonlContent = testData.map(d => JSON.stringify(d)).join('\n');
+      const compressed = zlib.gzipSync(jsonlContent);
+      fs.writeFileSync(testFile, compressed);
+
+      const plugin = new ImporterPlugin({
+        resource: 'test_users',
+        format: 'jsonl',
+        batchSize: 50,
+        parallelism: 5
+      });
+
+      await database.usePlugin(plugin);
+      const result = await plugin.import(testFile);
+
+      expect(result.processed).toBe(100);
+      expect(result.inserted).toBe(100);
+      expect(result.errors).toBe(0);
     });
   });
 });
