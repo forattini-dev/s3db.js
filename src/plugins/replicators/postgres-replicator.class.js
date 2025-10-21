@@ -1,15 +1,20 @@
 import tryFn from "#src/concerns/try-fn.js";
 import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
+import {
+  generatePostgresCreateTable,
+  getPostgresTableSchema,
+  generatePostgresAlterTable
+} from './schema-sync.helper.js';
 
 /**
  * PostgreSQL Replicator - Replicate data to PostgreSQL tables
- * 
+ *
  * ⚠️  REQUIRED DEPENDENCY: You must install the PostgreSQL client library:
  * ```bash
  * pnpm add pg
  * ```
- * 
+ *
  * Configuration:
  * @param {string} connectionString - PostgreSQL connection string (required)
  * @param {string} host - Database host (alternative to connectionString)
@@ -19,16 +24,29 @@ import BaseReplicator from './base-replicator.class.js';
  * @param {string} password - Database password
  * @param {Object} ssl - SSL configuration (optional)
  * @param {string} logTable - Table name for operation logging (optional)
- * 
+ * @param {Object} schemaSync - Schema synchronization configuration
+ * @param {boolean} schemaSync.enabled - Enable automatic schema management (default: false)
+ * @param {string} schemaSync.strategy - Sync strategy: 'alter' | 'drop-create' | 'validate-only' (default: 'alter')
+ * @param {string} schemaSync.onMismatch - Action on schema mismatch: 'error' | 'warn' | 'ignore' (default: 'error')
+ * @param {boolean} schemaSync.autoCreateTable - Auto-create table if not exists (default: true)
+ * @param {boolean} schemaSync.autoCreateColumns - Auto-add missing columns (default: true, only with strategy: 'alter')
+ * @param {boolean} schemaSync.dropMissingColumns - Remove extra columns (default: false, dangerous!)
+ *
  * @example
  * new PostgresReplicator({
  *   connectionString: 'postgresql://user:password@localhost:5432/analytics',
- *   logTable: 'replication_log'
+ *   logTable: 'replication_log',
+ *   schemaSync: {
+ *     enabled: true,
+ *     strategy: 'alter',
+ *     onMismatch: 'error',
+ *     autoCreateTable: true
+ *   }
  * }, {
  *   users: [{ actions: ['insert', 'update'], table: 'users_table' }],
  *   orders: 'orders_table'
  * })
- * 
+ *
  * See PLUGINS.md for comprehensive configuration documentation.
  */
 class PostgresReplicator extends BaseReplicator {
@@ -43,7 +61,17 @@ class PostgresReplicator extends BaseReplicator {
     this.client = null;
     this.ssl = config.ssl;
     this.logTable = config.logTable;
-    
+
+    // Schema sync configuration
+    this.schemaSync = {
+      enabled: config.schemaSync?.enabled || false,
+      strategy: config.schemaSync?.strategy || 'alter',
+      onMismatch: config.schemaSync?.onMismatch || 'error',
+      autoCreateTable: config.schemaSync?.autoCreateTable !== false,
+      autoCreateColumns: config.schemaSync?.autoCreateColumns !== false,
+      dropMissingColumns: config.schemaSync?.dropMissingColumns || false
+    };
+
     // Parse resources configuration
     this.resources = this.parseResourcesConfig(resources);
   }
@@ -141,10 +169,17 @@ class PostgresReplicator extends BaseReplicator {
     };
     this.client = new Client(config);
     await this.client.connect();
+
     // Create log table if configured
     if (this.logTable) {
       await this.createLogTableIfNotExists();
     }
+
+    // Sync schemas if enabled
+    if (this.schemaSync.enabled) {
+      await this.syncSchemas(database);
+    }
+
     this.emit('initialized', {
       replicator: this.name,
       database: this.database || 'postgres',
@@ -170,6 +205,139 @@ class PostgresReplicator extends BaseReplicator {
       CREATE INDEX IF NOT EXISTS idx_${this.logTable}_timestamp ON ${this.logTable}(timestamp);
     `;
     await this.client.query(createTableQuery);
+  }
+
+  /**
+   * Sync table schemas based on S3DB resource definitions
+   */
+  async syncSchemas(database) {
+    for (const [resourceName, tableConfigs] of Object.entries(this.resources)) {
+      // Get resource metadata from database
+      const [okRes, errRes, resource] = await tryFn(async () => {
+        return await database.getResource(resourceName);
+      });
+
+      if (!okRes) {
+        if (this.config.verbose) {
+          console.warn(`[PostgresReplicator] Could not get resource ${resourceName} for schema sync: ${errRes.message}`);
+        }
+        continue;
+      }
+
+      // Get resource attributes from current version
+      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+
+      // Sync each table configured for this resource
+      for (const tableConfig of tableConfigs) {
+        const tableName = tableConfig.table;
+
+        const [okSync, errSync] = await tryFn(async () => {
+          await this.syncTableSchema(tableName, attributes);
+        });
+
+        if (!okSync) {
+          const message = `Schema sync failed for table ${tableName}: ${errSync.message}`;
+
+          if (this.schemaSync.onMismatch === 'error') {
+            throw new Error(message);
+          } else if (this.schemaSync.onMismatch === 'warn') {
+            console.warn(`[PostgresReplicator] ${message}`);
+          }
+          // 'ignore' does nothing
+        }
+      }
+    }
+
+    this.emit('schema_sync_completed', {
+      replicator: this.name,
+      resources: Object.keys(this.resources)
+    });
+  }
+
+  /**
+   * Sync a single table schema
+   */
+  async syncTableSchema(tableName, attributes) {
+    // Check if table exists
+    const existingSchema = await getPostgresTableSchema(this.client, tableName);
+
+    if (!existingSchema) {
+      // Table doesn't exist
+      if (!this.schemaSync.autoCreateTable) {
+        throw new Error(`Table ${tableName} does not exist and autoCreateTable is disabled`);
+      }
+
+      if (this.schemaSync.strategy === 'validate-only') {
+        throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
+      }
+
+      // Create table
+      const createSQL = generatePostgresCreateTable(tableName, attributes);
+
+      if (this.config.verbose) {
+        console.log(`[PostgresReplicator] Creating table ${tableName}:\n${createSQL}`);
+      }
+
+      await this.client.query(createSQL);
+
+      this.emit('table_created', {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+
+      return;
+    }
+
+    // Table exists - check for schema changes
+    if (this.schemaSync.strategy === 'drop-create') {
+      // Drop and recreate table (DANGEROUS!)
+      if (this.config.verbose) {
+        console.warn(`[PostgresReplicator] Dropping and recreating table ${tableName}`);
+      }
+
+      await this.client.query(`DROP TABLE IF EXISTS ${tableName} CASCADE`);
+      const createSQL = generatePostgresCreateTable(tableName, attributes);
+      await this.client.query(createSQL);
+
+      this.emit('table_recreated', {
+        replicator: this.name,
+        tableName,
+        attributes: Object.keys(attributes)
+      });
+
+      return;
+    }
+
+    if (this.schemaSync.strategy === 'alter' && this.schemaSync.autoCreateColumns) {
+      // Add missing columns
+      const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
+
+      if (alterStatements.length > 0) {
+        if (this.config.verbose) {
+          console.log(`[PostgresReplicator] Altering table ${tableName}:`, alterStatements);
+        }
+
+        for (const stmt of alterStatements) {
+          await this.client.query(stmt);
+        }
+
+        this.emit('table_altered', {
+          replicator: this.name,
+          tableName,
+          addedColumns: alterStatements.length
+        });
+      }
+    }
+
+    if (this.schemaSync.strategy === 'validate-only') {
+      // Just validate, don't modify
+      const alterStatements = generatePostgresAlterTable(tableName, attributes, existingSchema);
+
+      if (alterStatements.length > 0) {
+        throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${alterStatements.length}`);
+      }
+    }
   }
 
   shouldReplicateResource(resourceName) {
@@ -379,9 +547,11 @@ class PostgresReplicator extends BaseReplicator {
       ...super.getStatus(),
       database: this.database || 'postgres',
       resources: this.resources,
-      logTable: this.logTable
+      logTable: this.logTable,
+      schemaSync: this.schemaSync
     };
   }
 }
+
 
 export default PostgresReplicator; 
