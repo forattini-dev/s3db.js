@@ -1,0 +1,2593 @@
+# 🌐 API Plugin
+
+## ⚡ TLDR
+
+**Transform s3db.js resources into production-ready REST API endpoints** with automatic versioning, multiple authentication methods, and enterprise features.
+
+**1 line to get started:**
+```javascript
+await db.usePlugin(new ApiPlugin({ port: 3000 }));  // Instant REST API!
+```
+
+**Key features:**
+- ✅ **Automatic REST endpoints** for all resources
+- ✅ **Swagger UI documentation**: Interactive API docs at `/docs`
+- ✅ **Kubernetes health probes**: `/health/live`, `/health/ready`, `/health`
+- ✅ **4 auth methods**: JWT, API Key, Basic Auth, Public
+- ✅ **Auto-versioning**: `/v0/cars`, `/v1/cars` based on resource version
+- ✅ **Production ready**: CORS, Rate Limiting, Logging, Compression
+- ✅ **Schema validation**: Automatic validation using resource schemas
+- ✅ **Custom middlewares**: Add your own middleware functions
+
+**Generated endpoints:**
+```
+GET     /v0/cars           → resource.list() or resource.query() with filters
+GET     /v0/cars/:id       → resource.get(id)
+POST    /v0/cars           → resource.insert(data)
+PUT     /v0/cars/:id       → resource.update(id, data)
+PATCH   /v0/cars/:id       → resource.update(id, partial)
+DELETE  /v0/cars/:id       → resource.delete(id)
+HEAD    /v0/cars           → resource.count() + statistics in headers
+OPTIONS /v0/cars           → resource metadata (schema, methods, endpoints)
+```
+
+**Filtering via query strings:**
+```
+GET /v0/cars?status=active&year=2024&inStock=true
+GET /v0/cars?limit=50&offset=100&brand=Toyota
+```
+
+---
+
+## 📊 HTTP Status Codes - Complete Reference
+
+The API Plugin implements **ALL standard HTTP status codes** with consistent, detailed responses. Every response follows the same JSON structure for predictability and ease of integration.
+
+### ✅ Success Codes (2xx)
+
+#### 200 OK - Successful Request
+**When**: GET requests, successful operations with data response
+**Example**: Getting a resource, listing resources, successful query
+
+```bash
+# Request
+GET /v0/cars/car-123
+
+# Response
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+```json
+{
+  "success": true,
+  "data": {
+    "id": "car-123",
+    "brand": "Toyota",
+    "model": "Corolla",
+    "year": 2024,
+    "price": 25000
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 201 Created - Resource Created
+**When**: POST requests that create new resources
+**Example**: Inserting a new record
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+{
+  "brand": "Honda",
+  "model": "Civic",
+  "year": 2024,
+  "price": 28000
+}
+
+# Response
+HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /v0/cars/car-456
+```
+```json
+{
+  "success": true,
+  "data": {
+    "id": "car-456",
+    "brand": "Honda",
+    "model": "Civic",
+    "year": 2024,
+    "price": 28000,
+    "createdAt": "2024-11-15T12:30:00.000Z"
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z",
+    "location": "/v0/cars/car-456"
+  }
+}
+```
+
+#### 204 No Content - Successful Deletion
+**When**: DELETE requests, successful operations with no response body
+**Example**: Deleting a resource
+
+```bash
+# Request
+DELETE /v0/cars/car-123
+
+# Response
+HTTP/1.1 204 No Content
+```
+```json
+{
+  "success": true,
+  "data": null,
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+---
+
+### ❌ Client Error Codes (4xx)
+
+#### 400 Bad Request - Validation Failed
+**When**: Request data doesn't match schema, validation rules violated
+**Example**: Missing required fields, invalid data types
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+{
+  "brand": "X",
+  "year": 1800
+}
+
+# Response
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Validation failed",
+    "code": "VALIDATION_ERROR",
+    "details": {
+      "errors": [
+        {
+          "field": "brand",
+          "message": "String length must be at least 2 characters",
+          "expected": "minlength:2",
+          "actual": "X"
+        },
+        {
+          "field": "model",
+          "message": "Field is required",
+          "expected": "required"
+        },
+        {
+          "field": "year",
+          "message": "Number must be at least 1900",
+          "expected": "min:1900",
+          "actual": 1800
+        },
+        {
+          "field": "price",
+          "message": "Field is required",
+          "expected": "required"
+        }
+      ]
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 401 Unauthorized - Authentication Required
+**When**: No credentials provided, invalid token, expired JWT
+**Example**: Accessing protected endpoint without authentication
+
+```bash
+# Request
+GET /v0/cars
+
+# Response
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+WWW-Authenticate: Bearer realm="API Access"
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Unauthorized - Authentication required",
+    "code": "UNAUTHORIZED",
+    "details": {
+      "suggestion": "Please provide valid authentication credentials (JWT token, API key, or Basic Auth)"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 403 Forbidden - Insufficient Permissions
+**When**: Authenticated but lacking permissions for the operation
+**Example**: Non-admin user trying to delete resources
+
+```bash
+# Request
+DELETE /v0/users/user-123
+Authorization: Bearer <valid-token-but-not-admin>
+
+# Response
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Forbidden - Insufficient permissions",
+    "code": "FORBIDDEN",
+    "details": {
+      "requiredRole": "admin",
+      "userRole": "user"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 404 Not Found - Resource Doesn't Exist
+**When**: Resource ID not found, route doesn't exist
+**Example**: Getting a non-existent resource
+
+```bash
+# Request
+GET /v0/cars/nonexistent-id
+
+# Response
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "cars with id 'nonexistent-id' not found",
+    "code": "NOT_FOUND",
+    "details": {
+      "resource": "cars",
+      "id": "nonexistent-id"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 413 Payload Too Large - Request Body Exceeds Limit
+**When**: Request body size exceeds configured maximum (default 10MB)
+**Example**: Uploading large JSON payload
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+Content-Length: 15728640
+{ ... very large payload ... }
+
+# Response
+HTTP/1.1 413 Payload Too Large
+Content-Type: application/json
+Connection: close
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Request payload too large",
+    "code": "PAYLOAD_TOO_LARGE",
+    "details": {
+      "receivedSize": 15728640,
+      "maxSize": 10485760,
+      "receivedMB": "15.00",
+      "maxMB": "10.00"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+**Configure max body size:**
+```javascript
+new ApiPlugin({
+  maxBodySize: 50 * 1024 * 1024  // 50MB
+})
+```
+
+#### 429 Too Many Requests - Rate Limit Exceeded
+**When**: Request rate exceeds configured limit
+**Example**: Too many requests in short time window
+
+```bash
+# Request (101st request in 1 minute)
+GET /v0/cars
+
+# Response
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 45
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1700054445
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Rate limit exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
+    "details": {
+      "retryAfter": 45,
+      "limit": 100,
+      "windowMs": 60000
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+**Configure rate limiting:**
+```javascript
+new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,     // 1 minute
+    maxRequests: 1000    // 1000 requests per minute
+  }
+})
+```
+
+---
+
+### 💥 Server Error Codes (5xx)
+
+#### 500 Internal Server Error - Unexpected Server Error
+**When**: Unhandled exceptions, S3 errors, database failures
+**Example**: S3 connection failure, unexpected error
+
+```bash
+# Request
+GET /v0/cars/car-123
+
+# Response
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Internal server error",
+    "code": "INTERNAL_ERROR",
+    "details": {
+      "suggestion": "Please try again later or contact support if the problem persists"
+    },
+    "stack": "Error: S3 connection timeout\n    at ..." // Only in development
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 503 Service Unavailable - Service Not Ready
+**When**: Database not connected, resources not loaded
+**Example**: Application starting up, health check failing
+
+```bash
+# Request
+GET /health/ready
+
+# Response
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Service not ready",
+    "code": "NOT_READY",
+    "details": {
+      "database": {
+        "connected": false,
+        "resources": 0
+      }
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+---
+
+### 📋 Status Code Summary Table
+
+| Code | Name | When | Response Body | Common Use Cases |
+|------|------|------|---------------|------------------|
+| **200** | OK | Successful GET, HEAD, OPTIONS | ✅ Yes | List resources, get resource, queries |
+| **201** | Created | Successful POST | ✅ Yes + Location header | Create resource, insert data |
+| **204** | No Content | Successful DELETE | ✅ Empty (null data) | Delete resource, bulk operations |
+| **400** | Bad Request | Validation failed | ❌ Error details | Invalid schema, missing fields |
+| **401** | Unauthorized | No auth credentials | ❌ Error + WWW-Authenticate | Missing token, expired JWT |
+| **403** | Forbidden | Insufficient permissions | ❌ Error details | Role restrictions, access denied |
+| **404** | Not Found | Resource/route not found | ❌ Error details | Invalid ID, wrong endpoint |
+| **413** | Payload Too Large | Body exceeds limit | ❌ Error + size details | Large uploads, bulk inserts |
+| **429** | Too Many Requests | Rate limit exceeded | ❌ Error + Retry-After | DDoS protection, API abuse |
+| **500** | Internal Error | Server exception | ❌ Error + stack (dev) | S3 errors, unhandled errors |
+| **503** | Service Unavailable | Not ready | ❌ Error + details | Startup, health check fail |
+
+---
+
+### 🎯 Response Structure Convention
+
+**All responses follow this consistent structure:**
+
+```typescript
+// Success responses
+{
+  success: true,
+  data: <any>,           // Response data (null for 204)
+  meta: {
+    timestamp: string,   // ISO 8601
+    location?: string,   // For 201 Created
+    ...                  // Additional metadata
+  },
+  pagination?: {         // For list endpoints
+    total: number,
+    page: number,
+    pageSize: number,
+    pageCount: number
+  }
+}
+
+// Error responses
+{
+  success: false,
+  error: {
+    message: string,     // Human-readable error message
+    code: string,        // Machine-readable error code
+    details: object,     // Additional error context
+    stack?: string       // Stack trace (development only)
+  },
+  meta: {
+    timestamp: string    // ISO 8601
+  }
+}
+```
+
+---
+
+### 💡 Best Practices
+
+**1. Always check `success` field:**
+```javascript
+const response = await fetch('/v0/cars/car-123');
+const json = await response.json();
+
+if (json.success) {
+  // Handle success
+  console.log(json.data);
+} else {
+  // Handle error
+  console.error(json.error.message);
+  console.error(json.error.code);
+}
+```
+
+**2. Use HTTP status codes for flow control:**
+```javascript
+const response = await fetch('/v0/cars', { method: 'POST', ... });
+
+switch (response.status) {
+  case 201:
+    console.log('Created successfully');
+    break;
+  case 400:
+    console.error('Validation failed');
+    break;
+  case 401:
+    console.error('Please login');
+    break;
+  case 413:
+    console.error('Payload too large');
+    break;
+  case 429:
+    const retryAfter = response.headers.get('Retry-After');
+    console.log(`Rate limited, retry after ${retryAfter}s`);
+    break;
+  case 500:
+    console.error('Server error, please try again');
+    break;
+}
+```
+
+**3. Handle rate limiting gracefully:**
+```javascript
+async function apiCallWithRetry(url, options, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await fetch(url, options);
+
+    if (response.status === 429) {
+      const retryAfter = parseInt(response.headers.get('Retry-After')) || 60;
+      console.log(`Rate limited, waiting ${retryAfter}s...`);
+      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+      continue;
+    }
+
+    return response;
+  }
+}
+```
+
+**4. Check payload size before sending:**
+```javascript
+const data = { /* large object */ };
+const json = JSON.stringify(data);
+const sizeBytes = new Blob([json]).size;
+const sizeMB = sizeBytes / 1024 / 1024;
+
+if (sizeMB > 10) {
+  console.warn(`Payload is ${sizeMB.toFixed(2)}MB, may exceed server limit`);
+  // Consider splitting into multiple requests
+}
+```
+
+---
+
+## 🚀 Quickstart
+
+### Installation
+
+```bash
+# Install required dependencies
+pnpm add hono @hono/node-server @hono/swagger-ui
+```
+
+### Basic Usage
+
+```javascript
+import { Database, ApiPlugin } from 's3db.js';
+
+const db = new Database({ connectionString: 's3://...' });
+await db.connect();
+
+// Create resource
+const cars = await db.createResource({
+  name: 'cars',
+  attributes: {
+    brand: 'string|required',
+    model: 'string|required',
+    year: 'number|required|min:1900|max:2025',
+    price: 'number|required|min:0'
+  }
+});
+
+// Add API Plugin
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  docs: { enabled: true },
+  cors: { enabled: true },
+  validation: { enabled: true }
+}));
+
+// Server running at http://localhost:3000
+// GET http://localhost:3000/v0/cars
+// View docs at http://localhost:3000/docs
+```
+
+---
+
+## 📚 Interactive API Documentation
+
+The API Plugin automatically generates **Swagger UI documentation** at `/docs`:
+
+```javascript
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+
+// Visit http://localhost:3000/docs
+// - Interactive API documentation
+// - Try requests directly from browser
+// - View all schemas and endpoints
+// - See authentication requirements
+```
+
+### Features
+
+- ✅ **Auto-generated from resources**: Schemas derived from resource attributes
+- ✅ **Interactive testing**: Try API calls directly in browser
+- ✅ **Authentication support**: Test with JWT, API Key, or Basic Auth
+- ✅ **Schema validation examples**: See required fields and data types
+- ✅ **OpenAPI 3.0 spec**: Available at `/openapi.json`
+
+### Customizing API Documentation
+
+```javascript
+new ApiPlugin({
+  port: 3000,
+
+  // Customize API docs (recommended format)
+  docs: {
+    enabled: true,
+    title: 'My Awesome API',
+    version: '2.1.0',
+    description: 'Complete API for managing cars, products, and users'
+  },
+
+  // Legacy format (still supported for backwards compatibility)
+  // docsEnabled: true,
+  // apiTitle: 'My Awesome API',
+  // apiVersion: '2.1.0',
+  // apiDescription: 'Complete API for managing cars, products, and users'
+})
+```
+
+### Accessing OpenAPI Spec
+
+```bash
+# Get raw OpenAPI 3.0 specification
+curl http://localhost:3000/openapi.json
+
+# Use with external tools
+swagger-cli validate http://localhost:3000/openapi.json
+```
+
+---
+
+## 📋 Configuration Options
+
+### Complete Configuration
+
+```javascript
+new ApiPlugin({
+  // Server configuration
+  port: 3000,
+  host: '0.0.0.0',
+  verbose: false,
+  maxBodySize: 10 * 1024 * 1024,         // 10MB (default)
+
+  // Authentication (all optional)
+  auth: {
+    jwt: {
+      enabled: true,
+      secret: 'your-jwt-secret-key',
+      expiresIn: '7d'                    // Token expiration
+    },
+    apiKey: {
+      enabled: true,
+      headerName: 'X-API-Key'            // Custom header name
+    },
+    basic: {
+      enabled: true,
+      realm: 'API Access',               // HTTP Basic realm
+      passphrase: 'secret'               // For password decryption
+    }
+  },
+
+  // Resource configuration
+  resources: {
+    cars: {
+      auth: ['jwt', 'apiKey'],           // Required auth methods
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      customMiddleware: [                // Resource-specific middleware
+        async (c, next) => {
+          // Custom logic
+          await next();
+        }
+      ]
+    },
+    products: {
+      auth: false,                       // Public access
+      methods: ['GET']                   // Read-only
+    }
+  },
+
+  // CORS configuration
+  cors: {
+    enabled: true,
+    origin: '*',                         // Allow all origins
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    exposedHeaders: ['X-Total-Count', 'X-Page-Count'],
+    credentials: true,
+    maxAge: 86400                        // 24 hours
+  },
+
+  // Rate limiting
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,                     // 1 minute
+    maxRequests: 100,                    // 100 requests per window
+    keyGenerator: (c) => {               // Custom key function
+      return c.req.header('x-forwarded-for') || 'unknown';
+    }
+  },
+
+  // Request logging
+  logging: {
+    enabled: true,
+    format: ':method :path :status :response-time ms - :user',
+    verbose: false
+  },
+
+  // Response compression
+  compression: {
+    enabled: true,
+    threshold: 1024,                     // Only compress if >1KB
+    level: 6                             // gzip compression level (1-9)
+  },
+
+  // Validation
+  validation: {
+    enabled: true,
+    validateOnInsert: true,
+    validateOnUpdate: true,
+    returnValidationErrors: true
+  },
+
+  // Global custom middlewares
+  middlewares: [
+    async (c, next) => {
+      c.set('requestId', crypto.randomUUID());
+      await next();
+    }
+  ]
+})
+```
+
+---
+
+## 🔐 Authentication
+
+### Overview
+
+The API Plugin supports 4 authentication methods that can be combined:
+
+1. **JWT Bearer Token** - Stateless, token in `Authorization: Bearer <token>`
+2. **API Key** - Static key in custom header (default: `X-API-Key`)
+3. **Basic Auth** - Username:password in `Authorization: Basic <base64>`
+4. **Public** - No authentication (configurable per resource)
+
+### JWT Authentication
+
+**Setup:**
+```javascript
+new ApiPlugin({
+  auth: {
+    jwt: {
+      enabled: true,
+      secret: 'your-256-bit-secret',
+      expiresIn: '7d'
+    }
+  },
+  resources: {
+    cars: {
+      auth: ['jwt']  // Require JWT
+    }
+  }
+})
+```
+
+**Usage:**
+```bash
+# 1. Register user
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"john","password":"secret123","email":"john@example.com"}'
+
+# 2. Login
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"john","password":"secret123"}'
+# Response: { "token": "eyJhbGc..." }
+
+# 3. Use token
+curl http://localhost:3000/v0/cars \
+  -H "Authorization: Bearer eyJhbGc..."
+```
+
+### API Key Authentication
+
+**Setup:**
+```javascript
+new ApiPlugin({
+  auth: {
+    apiKey: {
+      enabled: true,
+      headerName: 'X-API-Key'
+    }
+  },
+  resources: {
+    cars: {
+      auth: ['apiKey']
+    }
+  }
+})
+```
+
+**Usage:**
+```bash
+# 1. Register to get API key
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"john","password":"secret123"}'
+# Response includes: { "user": { "apiKey": "abc123..." } }
+
+# 2. Use API key
+curl http://localhost:3000/v0/cars \
+  -H "X-API-Key: abc123..."
+```
+
+### Basic Authentication
+
+**Setup:**
+```javascript
+new ApiPlugin({
+  auth: {
+    basic: {
+      enabled: true,
+      realm: 'API Access'
+    }
+  },
+  resources: {
+    cars: {
+      auth: ['basic']
+    }
+  }
+})
+```
+
+**Usage:**
+```bash
+# Use username:password
+curl http://localhost:3000/v0/cars \
+  -u john:secret123
+
+# Or with Authorization header
+curl http://localhost:3000/v0/cars \
+  -H "Authorization: Basic $(echo -n 'john:secret123' | base64)"
+```
+
+### Multiple Authentication Methods
+
+Allow multiple auth methods per resource:
+
+```javascript
+resources: {
+  cars: {
+    auth: ['jwt', 'apiKey', 'basic']  // Any method works
+  }
+}
+```
+
+### Public Access
+
+Disable authentication for specific resources:
+
+```javascript
+resources: {
+  cars: {
+    auth: false  // Public access
+  }
+}
+```
+
+### Authentication Endpoints
+
+The plugin automatically creates these auth endpoints:
+
+```
+POST /auth/register          - Register new user
+POST /auth/login             - Login with username/password
+POST /auth/token/refresh     - Refresh JWT token
+GET  /auth/me                - Get current user info
+POST /auth/api-key/regenerate - Regenerate API key
+```
+
+---
+
+## 🛣️ API Endpoints
+
+### Resource Endpoints
+
+For each resource, the following endpoints are automatically created:
+
+#### List Resources (with Filtering)
+```http
+GET /{version}/{resource}?limit=100&offset=0&status=active&year=2024
+
+Query Parameters:
+- limit (number): Max items to return (default: 100, max: 1000)
+- offset (number): Skip first N items (default: 0)
+- partition (string): Partition name
+- partitionValues (JSON): Partition values filter
+- [any field]: Any resource field for filtering (e.g., status=active, year=2024)
+
+Examples:
+  GET /v0/cars?inStock=true
+  GET /v0/cars?brand=Toyota&year=2024
+  GET /v0/cars?price={"$gte":20000,"$lte":30000}  (JSON filter)
+
+Response:
+{
+  "success": true,
+  "data": [...],
+  "pagination": {
+    "total": 150,
+    "page": 1,
+    "pageSize": 100,
+    "pageCount": 2
+  }
+}
+
+Headers:
+- X-Total-Count: Total number of records
+- X-Page-Count: Total number of pages
+
+Note: If any filter parameters are present (other than limit, offset, partition,
+partitionValues), the endpoint automatically uses resource.query() instead of
+resource.list() for efficient filtering.
+```
+
+#### Get Single Resource
+```http
+GET /{version}/{resource}/:id
+
+Response:
+{
+  "success": true,
+  "data": { "id": "car-1", ... }
+}
+```
+
+#### Create Resource
+```http
+POST /{version}/{resource}
+
+Body:
+{
+  "brand": "Toyota",
+  "model": "Corolla",
+  "year": 2024,
+  "price": 25000
+}
+
+Response:
+{
+  "success": true,
+  "data": { "id": "abc123", ... },
+  "meta": {
+    "location": "/v0/cars/abc123"
+  }
+}
+
+Headers:
+- Location: URL of created resource
+```
+
+#### Update Resource (Full)
+```http
+PUT /{version}/{resource}/:id
+
+Body: Complete resource object
+
+Response:
+{
+  "success": true,
+  "data": { "id": "car-1", ... }
+}
+```
+
+#### Update Resource (Partial)
+```http
+PATCH /{version}/{resource}/:id
+
+Body: Partial resource object
+{
+  "price": 24000
+}
+
+Response:
+{
+  "success": true,
+  "data": { "id": "car-1", "price": 24000, ... }
+}
+```
+
+#### Delete Resource
+```http
+DELETE /{version}/{resource}/:id
+
+Response:
+{
+  "success": true,
+  "data": null
+}
+```
+
+#### Get Resource Statistics
+```http
+HEAD /{version}/{resource}
+
+Response: Empty body (200 OK)
+
+Headers:
+- X-Total-Count: 150 (total number of records)
+- X-Resource-Version: v0 (current resource version)
+- X-Schema-Fields: 8 (number of fields in schema)
+
+Example:
+  curl -I http://localhost:3000/v0/cars
+
+  HTTP/1.1 200 OK
+  X-Total-Count: 150
+  X-Resource-Version: v0
+  X-Schema-Fields: 8
+```
+
+#### Check if Resource Exists
+```http
+HEAD /{version}/{resource}/:id
+
+Response: Empty body (200 OK or 404 Not Found)
+
+Headers (if exists):
+- Last-Modified: Tue, 15 Nov 2024 12:30:00 GMT
+
+Example:
+  curl -I http://localhost:3000/v0/cars/car-1
+
+  HTTP/1.1 200 OK
+  Last-Modified: Tue, 15 Nov 2024 12:30:00 GMT
+```
+
+#### Get Resource Metadata
+```http
+OPTIONS /{version}/{resource}
+
+Response:
+{
+  "resource": "cars",
+  "version": "v0",
+  "totalRecords": 150,
+  "allowedMethods": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+  "schema": [
+    {
+      "name": "brand",
+      "type": "string",
+      "rules": ["required", "minlength:2"]
+    },
+    {
+      "name": "year",
+      "type": "number",
+      "rules": ["required", "min:1900", "max:2025"]
+    }
+  ],
+  "endpoints": {
+    "list": "/v0/cars",
+    "get": "/v0/cars/:id",
+    "create": "/v0/cars",
+    "update": "/v0/cars/:id",
+    "delete": "/v0/cars/:id"
+  },
+  "queryParameters": {
+    "limit": "number (1-1000, default: 100)",
+    "offset": "number (min: 0, default: 0)",
+    "partition": "string (partition name)",
+    "partitionValues": "JSON string",
+    "[any field]": "any (filter by field value)"
+  }
+}
+
+Headers:
+- Allow: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+```
+
+### Health Check Endpoints (Kubernetes)
+
+The API provides 3 health check endpoints optimized for Kubernetes probes:
+
+```http
+GET /health/live
+# Liveness probe - checks if app is alive
+# If this fails, Kubernetes will restart the pod
+
+GET /health/ready
+# Readiness probe - checks if app is ready to receive traffic
+# If this fails, Kubernetes will remove pod from service endpoints
+
+GET /health
+# Generic health check with links to other probes
+```
+
+**Liveness Probe** (`/health/live`):
+```json
+{
+  "success": true,
+  "data": {
+    "status": "alive",
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+**Readiness Probe** (`/health/ready`):
+```json
+// When ready (200 OK)
+{
+  "success": true,
+  "data": {
+    "status": "ready",
+    "database": {
+      "connected": true,
+      "resources": 5
+    },
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+
+// When not ready (503 Service Unavailable)
+{
+  "success": false,
+  "error": {
+    "message": "Service not ready",
+    "code": "NOT_READY",
+    "details": {
+      "database": {
+        "connected": false,
+        "resources": 0
+      }
+    }
+  }
+}
+```
+
+**Kubernetes Configuration Example:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: s3db-api
+spec:
+  containers:
+  - name: api
+    image: my-s3db-api:latest
+    ports:
+    - containerPort: 3000
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: 3000
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: 3000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+```
+
+### Other Utility Endpoints
+
+```http
+GET /
+# API information and available resources
+
+GET /docs
+# Interactive Swagger UI documentation
+
+GET /openapi.json
+# OpenAPI 3.0 specification (JSON)
+```
+
+**Example `/` response:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "s3db.js API",
+    "version": "1.0.0",
+    "resources": [
+      {
+        "name": "cars",
+        "version": "v0",
+        "endpoints": {
+          "list": "/v0/cars",
+          "get": "/v0/cars/:id",
+          "create": "/v0/cars",
+          "update": "/v0/cars/:id",
+          "delete": "/v0/cars/:id"
+        }
+      }
+    ],
+    "documentation": "/docs"
+  }
+}
+```
+
+---
+
+## 🐳 Production Deployment
+
+### Docker Setup
+
+**Dockerfile:**
+```dockerfile
+# Multi-stage build for optimized production image
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY pnpm-lock.yaml ./
+
+# Install pnpm and dependencies
+RUN npm install -g pnpm && \
+    pnpm install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build if needed (optional, for TypeScript projects)
+# RUN pnpm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Copy package files
+COPY package*.json ./
+COPY pnpm-lock.yaml ./
+
+# Install production dependencies only
+RUN pnpm install --prod --frozen-lockfile
+
+# Copy application code
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/docs ./docs
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Change ownership
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health/live', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); })"
+
+# Start application
+CMD ["node", "src/your-api-server.js"]
+```
+
+**Docker Compose (for local development):**
+```yaml
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - S3_BUCKET=my-s3db-bucket
+      - S3_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - ./src:/app/src
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health/live"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Optional: LocalStack for S3 development
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+    volumes:
+      - ./localstack-data:/var/lib/localstack
+```
+
+**.dockerignore:**
+```
+node_modules/
+npm-debug.log
+.git/
+.gitignore
+*.md
+tests/
+coverage/
+.env
+.env.local
+localstack-data/
+```
+
+**Build and run:**
+```bash
+# Build image
+docker build -t my-s3db-api:1.0.0 .
+
+# Run locally
+docker run -p 3000:3000 \
+  -e S3_BUCKET=my-bucket \
+  -e AWS_ACCESS_KEY_ID=xxx \
+  -e AWS_SECRET_ACCESS_KEY=yyy \
+  my-s3db-api:1.0.0
+
+# Or use docker-compose
+docker-compose up -d
+
+# Check health
+curl http://localhost:3000/health/ready
+```
+
+---
+
+### Kubernetes Deployment
+
+**Complete Kubernetes manifests for production deployment:**
+
+**1. Namespace:**
+```yaml
+# namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: s3db-api
+  labels:
+    name: s3db-api
+```
+
+**2. ConfigMap (non-sensitive configuration):**
+```yaml
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3db-api-config
+  namespace: s3db-api
+data:
+  # Server configuration
+  PORT: "3000"
+  HOST: "0.0.0.0"
+  NODE_ENV: "production"
+
+  # S3 configuration
+  S3_BUCKET: "my-s3db-production"
+  S3_REGION: "us-east-1"
+
+  # API configuration
+  CORS_ENABLED: "true"
+  CORS_ORIGIN: "*"
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_MAX_REQUESTS: "100"
+  RATE_LIMIT_WINDOW_MS: "60000"
+
+  # Logging
+  LOGGING_ENABLED: "true"
+  VERBOSE: "false"
+```
+
+**3. Secret (sensitive data):**
+```yaml
+# secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3db-api-secret
+  namespace: s3db-api
+type: Opaque
+stringData:
+  # AWS Credentials (use IRSA in production - see below)
+  AWS_ACCESS_KEY_ID: "your-access-key-id"
+  AWS_SECRET_ACCESS_KEY: "your-secret-access-key"
+
+  # JWT Secret
+  JWT_SECRET: "your-super-secret-jwt-key-256-bits"
+
+  # API Keys (if using Basic Auth)
+  BASIC_AUTH_PASSPHRASE: "your-encryption-passphrase"
+```
+
+**4. Deployment:**
+```yaml
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+  labels:
+    app: s3db-api
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: s3db-api
+  template:
+    metadata:
+      labels:
+        app: s3db-api
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Use service account with IRSA for AWS credentials (recommended)
+      serviceAccountName: s3db-api-sa
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+      - name: api
+        image: my-registry/s3db-api:1.0.0
+        imagePullPolicy: Always
+
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: s3db-api-config
+        - secretRef:
+            name: s3db-api-secret
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        # Liveness probe - restart if unhealthy
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Readiness probe - remove from load balancer if not ready
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 2
+
+        # Startup probe - for slow-starting apps
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 12
+
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+
+      # Graceful shutdown
+      terminationGracePeriodSeconds: 30
+
+      # DNS policy
+      dnsPolicy: ClusterFirst
+
+      # Restart policy
+      restartPolicy: Always
+```
+
+**5. Service:**
+```yaml
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+  labels:
+    app: s3db-api
+spec:
+  type: ClusterIP
+  selector:
+    app: s3db-api
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  sessionAffinity: None
+```
+
+**6. Ingress (NGINX):**
+```yaml
+# ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - api.yourdomain.com
+    secretName: s3db-api-tls
+  rules:
+  - host: api.yourdomain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: s3db-api
+            port:
+              number: 80
+```
+
+**7. HorizontalPodAutoscaler:**
+```yaml
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: s3db-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 15
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 15
+      selectPolicy: Max
+```
+
+**8. ServiceAccount with IRSA (AWS IAM Roles for Service Accounts):**
+```yaml
+# serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: s3db-api-sa
+  namespace: s3db-api
+  annotations:
+    # AWS EKS - IRSA annotation (replaces access keys)
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/s3db-api-role
+```
+
+**9. PodDisruptionBudget:**
+```yaml
+# pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: s3db-api
+```
+
+---
+
+### Deploy to Kubernetes
+
+**1. Create namespace and apply manifests:**
+```bash
+# Create namespace
+kubectl apply -f namespace.yaml
+
+# Apply configurations
+kubectl apply -f configmap.yaml
+kubectl apply -f secret.yaml
+kubectl apply -f serviceaccount.yaml
+
+# Deploy application
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+kubectl apply -f ingress.yaml
+
+# Apply autoscaling and PDB
+kubectl apply -f hpa.yaml
+kubectl apply -f pdb.yaml
+
+# Verify deployment
+kubectl -n s3db-api get all
+kubectl -n s3db-api get pods
+kubectl -n s3db-api describe pod <pod-name>
+```
+
+**2. Check health probes:**
+```bash
+# Port-forward to test locally
+kubectl -n s3db-api port-forward svc/s3db-api 8080:80
+
+# Test health endpoints
+curl http://localhost:8080/health/live
+curl http://localhost:8080/health/ready
+curl http://localhost:8080/health
+
+# Check pod events
+kubectl -n s3db-api get events --sort-by=.metadata.creationTimestamp
+
+# Check logs
+kubectl -n s3db-api logs -f deployment/s3db-api
+```
+
+**3. Monitor rollout:**
+```bash
+# Watch rollout status
+kubectl -n s3db-api rollout status deployment/s3db-api
+
+# Check pod readiness
+kubectl -n s3db-api get pods -w
+
+# Describe deployment
+kubectl -n s3db-api describe deployment s3db-api
+```
+
+**4. Update deployment:**
+```bash
+# Update image
+kubectl -n s3db-api set image deployment/s3db-api \
+  api=my-registry/s3db-api:1.0.1
+
+# Or apply updated manifest
+kubectl apply -f deployment.yaml
+
+# Rollback if needed
+kubectl -n s3db-api rollout undo deployment/s3db-api
+kubectl -n s3db-api rollout history deployment/s3db-api
+```
+
+---
+
+### AWS IAM Policy for S3 Access
+
+**IAM Policy for s3db.js (attach to IRSA role):**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-s3db-production",
+        "arn:aws:s3:::my-s3db-production/*"
+      ]
+    }
+  ]
+}
+```
+
+**Trust policy for IRSA:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE:sub": "system:serviceaccount:s3db-api:s3db-api-sa"
+        }
+      }
+    }
+  ]
+}
+```
+
+---
+
+### Production Best Practices
+
+**1. Security:**
+- ✅ Use IRSA instead of access keys (no secrets in pods)
+- ✅ Run as non-root user (UID 1001)
+- ✅ Read-only root filesystem when possible
+- ✅ Drop all Linux capabilities
+- ✅ Use secrets for sensitive data
+- ✅ Enable TLS/HTTPS via Ingress
+- ✅ Use NetworkPolicies to restrict traffic
+
+**2. Reliability:**
+- ✅ Set resource requests and limits
+- ✅ Configure liveness and readiness probes
+- ✅ Use PodDisruptionBudget (min 1 pod available)
+- ✅ Enable HPA for auto-scaling
+- ✅ Use RollingUpdate strategy with maxUnavailable: 0
+- ✅ Set proper termination grace period (30s)
+
+**3. Monitoring:**
+- ✅ Expose metrics endpoint (Prometheus)
+- ✅ Configure structured logging
+- ✅ Use APM tools (DataDog, New Relic, etc.)
+- ✅ Set up alerts for health probe failures
+- ✅ Monitor S3 costs and API calls
+
+**4. High Availability:**
+- ✅ Run minimum 2 replicas (3+ recommended)
+- ✅ Spread pods across availability zones
+- ✅ Use pod anti-affinity for spreading
+- ✅ Configure backup S3 buckets
+- ✅ Implement circuit breakers for S3 calls
+
+**Example pod anti-affinity:**
+```yaml
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - s3db-api
+        topologyKey: topology.kubernetes.io/zone
+```
+
+---
+
+### Prometheus Monitoring
+
+The API Plugin integrates seamlessly with the MetricsPlugin to expose Prometheus metrics for monitoring and observability.
+
+**Two deployment modes:**
+
+1. **Integrated Mode** (Recommended): Metrics exposed on same port as API (`/metrics` endpoint)
+2. **Standalone Mode**: Separate metrics server on dedicated port (e.g., 9090)
+
+#### Integrated Mode Setup
+
+```javascript
+import { Database, ApiPlugin, MetricsPlugin } from 's3db.js';
+
+const db = new Database({ connectionString: 's3://...' });
+
+// 1. Add MetricsPlugin first (auto-detects API Plugin)
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'auto',        // Auto-detects API Plugin and integrates
+    path: '/metrics'      // Metrics available at /metrics
+  }
+}));
+
+// 2. Add API Plugin
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  resources: { /* ... */ }
+}));
+
+// Metrics now available at: http://localhost:3000/metrics
+```
+
+**Kubernetes Deployment with Prometheus Annotations:**
+
+The deployment example above (line 944-947) includes Prometheus annotations that tell Prometheus to scrape metrics:
+
+```yaml
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"      # Enable scraping
+    prometheus.io/port: "3000"        # Same port as API
+    prometheus.io/path: "/metrics"    # Metrics endpoint path
+```
+
+**ServiceMonitor (Prometheus Operator):**
+
+```yaml
+# servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+  labels:
+    app: s3db-api
+spec:
+  selector:
+    matchLabels:
+      app: s3db-api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+```
+
+**Apply ServiceMonitor:**
+```bash
+kubectl apply -f servicemonitor.yaml
+
+# Verify Prometheus is scraping
+kubectl -n monitoring get servicemonitor s3db-api
+```
+
+#### Standalone Mode Setup
+
+For security or compliance requirements, run metrics on a separate port:
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'standalone',   // Separate HTTP server
+    port: 9090,           // Dedicated metrics port
+    path: '/metrics'
+  }
+}));
+
+// API on port 3000, metrics on port 9090
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+```
+
+**Kubernetes Deployment for Standalone Mode:**
+
+```yaml
+# deployment.yaml (standalone metrics)
+spec:
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"         # Separate metrics port
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: api
+        ports:
+        - name: http
+          containerPort: 3000
+        - name: metrics          # Additional port for metrics
+          containerPort: 9090
+```
+
+**Service for Standalone Mode:**
+
+```yaml
+# service.yaml (with metrics port)
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+  - name: metrics        # Expose metrics port
+    port: 9090
+    targetPort: 9090
+  selector:
+    app: s3db-api
+```
+
+**ServiceMonitor for Standalone Mode:**
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s3db-api-metrics
+  namespace: s3db-api
+spec:
+  selector:
+    matchLabels:
+      app: s3db-api
+  endpoints:
+  - port: metrics        # Use dedicated metrics port
+    path: /metrics
+    interval: 30s
+```
+
+#### Exported Metrics
+
+The MetricsPlugin exports these Prometheus metrics:
+
+**Counters** (always increasing):
+- `s3db_operations_total{operation, resource}` - Total operations by type
+- `s3db_operation_errors_total{operation, resource}` - Total errors
+
+**Gauges** (can increase/decrease):
+- `s3db_operation_duration_seconds{operation, resource}` - Average operation duration
+- `s3db_uptime_seconds` - Process uptime
+- `s3db_resources_total` - Number of tracked resources
+- `s3db_info{version, node_version}` - Build information
+
+**Example Prometheus output:**
+```
+# HELP s3db_operations_total Total number of operations by type and resource
+# TYPE s3db_operations_total counter
+s3db_operations_total{operation="insert",resource="cars"} 1523
+s3db_operations_total{operation="update",resource="cars"} 342
+
+# HELP s3db_operation_duration_seconds Average operation duration in seconds
+# TYPE s3db_operation_duration_seconds gauge
+s3db_operation_duration_seconds{operation="insert",resource="cars"} 0.045
+```
+
+#### Testing Metrics Endpoint
+
+```bash
+# Integrated mode
+curl http://localhost:3000/metrics
+
+# Standalone mode
+curl http://localhost:9090/metrics
+
+# In Kubernetes (port-forward)
+kubectl -n s3db-api port-forward svc/s3db-api 8080:80
+curl http://localhost:8080/metrics
+```
+
+#### Grafana Dashboard Queries
+
+**Request Rate:**
+```promql
+rate(s3db_operations_total[5m])
+```
+
+**Error Rate:**
+```promql
+rate(s3db_operation_errors_total[5m]) / rate(s3db_operations_total[5m])
+```
+
+**P95 Latency:**
+```promql
+histogram_quantile(0.95, rate(s3db_operation_duration_seconds[5m]))
+```
+
+**Resource Operations by Type:**
+```promql
+sum by (operation) (rate(s3db_operations_total{resource="cars"}[5m]))
+```
+
+#### Complete Example
+
+See [e48-metrics-prometheus.js](../examples/e48-metrics-prometheus.js) for a complete working example demonstrating both integrated and standalone modes.
+
+For detailed MetricsPlugin configuration and features, see [MetricsPlugin documentation](./metrics.md#prometheus-integration).
+
+---
+
+## 🔄 Automatic Versioning
+
+The API Plugin automatically versions endpoints based on the resource version:
+
+```javascript
+// Resource with version v0
+const cars = await db.createResource({
+  name: 'cars',
+  // version defaults to 'v0'
+});
+
+// Endpoints created:
+// GET /v0/cars
+// POST /v0/cars
+// etc.
+
+// Update schema (creates v1)
+await database.updateResourceAttributes('cars', {
+  brand: 'string|required',
+  model: 'string|required',
+  year: 'number|required',
+  electric: 'boolean|default:false'  // New field
+});
+
+// Now both versions are available:
+// GET /v0/cars  (old schema)
+// GET /v1/cars  (new schema)
+```
+
+This allows clients to:
+- Continue using old API version
+- Migrate gradually to new version
+- Test new version before switching
+
+---
+
+## ✅ Schema Validation
+
+The API Plugin automatically validates requests using resource schemas:
+
+```javascript
+const cars = await db.createResource({
+  name: 'cars',
+  attributes: {
+    brand: 'string|required|minlength:2',
+    model: 'string|required',
+    year: 'number|required|min:1900|max:2025',
+    price: 'number|required|min:0'
+  }
+});
+```
+
+**Invalid Request:**
+```bash
+curl -X POST http://localhost:3000/v0/cars \
+  -H "Content-Type: application/json" \
+  -d '{"brand":"X","year":1800}'
+```
+
+**Response:**
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Validation failed",
+    "code": "VALIDATION_ERROR",
+    "details": {
+      "errors": [
+        {
+          "field": "brand",
+          "message": "String length must be at least 2 characters",
+          "expected": "minlength:2",
+          "actual": "X"
+        },
+        {
+          "field": "model",
+          "message": "Field is required",
+          "expected": "required"
+        },
+        {
+          "field": "year",
+          "message": "Number must be at least 1900",
+          "expected": "min:1900",
+          "actual": 1800
+        },
+        {
+          "field": "price",
+          "message": "Field is required",
+          "expected": "required"
+        }
+      ]
+    }
+  }
+}
+```
+
+Validation is automatic for:
+- POST (insert) - Full validation
+- PUT (update) - Full validation
+- PATCH (partial update) - Partial validation
+
+Disable validation per resource:
+```javascript
+resources: {
+  cars: {
+    validation: false  // Disable validation
+  }
+}
+```
+
+---
+
+## 🎛️ Custom Middlewares
+
+### Global Middlewares
+
+Add middleware to all requests:
+
+```javascript
+new ApiPlugin({
+  middlewares: [
+    // Request ID
+    async (c, next) => {
+      c.set('requestId', crypto.randomUUID());
+      await next();
+    },
+
+    // Request timing
+    async (c, next) => {
+      const start = Date.now();
+      await next();
+      const duration = Date.now() - start;
+      c.header('X-Response-Time', `${duration}ms`);
+    },
+
+    // Custom header
+    async (c, next) => {
+      c.header('X-Powered-By', 's3db.js');
+      await next();
+    }
+  ]
+})
+```
+
+### Resource-Specific Middlewares
+
+Add middleware to specific resources:
+
+```javascript
+resources: {
+  cars: {
+    customMiddleware: [
+      // Check ownership
+      async (c, next) => {
+        const user = c.get('user');
+        if (!user || user.role !== 'admin') {
+          return c.json({
+            success: false,
+            error: { message: 'Admin access required' }
+          }, 403);
+        }
+        await next();
+      },
+
+      // Add metadata
+      async (c, next) => {
+        await next();
+        // Modify response after route handler
+        c.header('X-Resource', 'cars');
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 📊 Rate Limiting
+
+Protect your API from abuse with built-in rate limiting:
+
+```javascript
+new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,        // 1 minute window
+    maxRequests: 100,       // 100 requests per window
+    keyGenerator: (c) => {
+      // Custom key (default: IP address)
+      const user = c.get('user');
+      return user ? user.id : c.req.header('x-forwarded-for') || 'unknown';
+    }
+  }
+})
+```
+
+**Response when limit exceeded:**
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Rate limit exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
+    "details": {
+      "retryAfter": 45
+    }
+  }
+}
+```
+
+**Response headers:**
+```
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1234567890
+Retry-After: 45
+```
+
+---
+
+## 📝 Request Logging
+
+Enable detailed request logging:
+
+```javascript
+new ApiPlugin({
+  logging: {
+    enabled: true,
+    format: ':method :path :status :response-time ms - :user',
+    verbose: false
+  }
+})
+```
+
+**Log output:**
+```
+[API Plugin] GET /v0/cars 200 45ms - john
+[API Plugin] POST /v0/cars 201 123ms - alice
+[API Plugin] DELETE /v0/cars/car-1 204 67ms - admin
+```
+
+---
+
+## 🗜️ Response Compression
+
+Reduce bandwidth with automatic gzip compression:
+
+```javascript
+new ApiPlugin({
+  compression: {
+    enabled: true,
+    threshold: 1024,  // Only compress responses > 1KB
+    level: 6          // Compression level (1-9, higher = better compression)
+  }
+})
+```
+
+Automatically compresses responses when client sends:
+```
+Accept-Encoding: gzip, deflate
+```
+
+---
+
+## 🌍 CORS Configuration
+
+Enable Cross-Origin Resource Sharing:
+
+```javascript
+new ApiPlugin({
+  cors: {
+    enabled: true,
+    origin: '*',  // Allow all origins
+    // or specific origins:
+    // origin: 'https://myapp.com',
+    // or multiple origins:
+    // origin: ['https://app1.com', 'https://app2.com'],
+
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    exposedHeaders: ['X-Total-Count', 'X-Page-Count'],
+    credentials: true,  // Allow cookies
+    maxAge: 86400       // Cache preflight for 24 hours
+  }
+})
+```
+
+---
+
+## 🎯 Best Practices
+
+### 1. Use Environment Variables
+
+```javascript
+new ApiPlugin({
+  port: process.env.API_PORT || 3000,
+  auth: {
+    jwt: {
+      enabled: true,
+      secret: process.env.JWT_SECRET,
+      expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+    }
+  }
+})
+```
+
+### 2. Configure Resources Appropriately
+
+```javascript
+resources: {
+  // Public read-only
+  products: {
+    auth: false,
+    methods: ['GET', 'HEAD']
+  },
+
+  // Authenticated CRUD
+  orders: {
+    auth: ['jwt', 'apiKey'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE']
+  },
+
+  // Admin only
+  users: {
+    auth: ['jwt'],
+    customMiddleware: [requireAdmin]
+  }
+}
+```
+
+### 3. Enable Production Features
+
+```javascript
+new ApiPlugin({
+  cors: { enabled: true, origin: 'https://myapp.com' },
+  rateLimit: { enabled: true, maxRequests: 1000 },
+  logging: { enabled: true },
+  compression: { enabled: true },
+  validation: { enabled: true }
+})
+```
+
+### 4. Handle Errors Gracefully
+
+All errors return consistent format:
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Error description",
+    "code": "ERROR_CODE",
+    "details": {}
+  }
+}
+```
+
+Common error codes:
+- `VALIDATION_ERROR` (400)
+- `UNAUTHORIZED` (401)
+- `FORBIDDEN` (403)
+- `NOT_FOUND` (404)
+- `RATE_LIMIT_EXCEEDED` (429)
+- `INTERNAL_ERROR` (500)
+
+---
+
+## 🚀 Advanced Usage
+
+### Custom Authentication
+
+Integrate with external auth services:
+
+```javascript
+resources: {
+  cars: {
+    customMiddleware: [
+      async (c, next) => {
+        const token = c.req.header('authorization');
+
+        // Validate with external service
+        const user = await myAuthService.verify(token);
+
+        if (!user) {
+          return c.json({ error: 'Unauthorized' }, 401);
+        }
+
+        c.set('user', user);
+        await next();
+      }
+    ]
+  }
+}
+```
+
+### Pagination Helpers
+
+```javascript
+// Client-side pagination helper
+function getPaginatedUrl(baseUrl, page, pageSize) {
+  const offset = (page - 1) * pageSize;
+  return `${baseUrl}?limit=${pageSize}&offset=${offset}`;
+}
+
+// Fetch page 2 with 50 items per page
+const url = getPaginatedUrl('/v0/cars', 2, 50);
+const response = await fetch(url);
+```
+
+### Filtering with Partitions
+
+```javascript
+// Query specific partition
+const response = await fetch('/v0/cars?partition=byRegion&partitionValues={"region":"US"}');
+
+// Get from specific partition
+const response = await fetch('/v0/cars/car-1?partition=byRegion&partitionValues={"region":"US"}');
+```
+
+---
+
+## 📚 Examples
+
+See complete examples:
+- [e47-api-plugin-basic.js](../examples/e47-api-plugin-basic.js) - Basic usage
+- [e48-api-plugin-auth.js](../examples/e48-api-plugin-auth.js) - Authentication
+- [e49-api-plugin-custom-middleware.js](../examples/e49-api-plugin-custom-middleware.js) - Custom middlewares
+- [e50-api-plugin-multi-version.js](../examples/e50-api-plugin-multi-version.js) - Multiple versions
+
+---
+
+## 🔧 Plugin Methods
+
+### getServerInfo()
+
+Get server status:
+
+```javascript
+const info = apiPlugin.getServerInfo();
+// {
+//   isRunning: true,
+//   port: 3000,
+//   host: '0.0.0.0',
+//   resources: 5
+// }
+```
+
+### getApp()
+
+Get Hono app instance for advanced usage:
+
+```javascript
+const app = apiPlugin.getApp();
+
+// Add custom route
+app.get('/custom', (c) => {
+  return c.json({ custom: true });
+});
+```
+
+### stop()
+
+Stop the server:
+
+```javascript
+await apiPlugin.stop();
+```
+
+### uninstall()
+
+Uninstall plugin and optionally purge data:
+
+```javascript
+await apiPlugin.uninstall({ purgeData: true });
+```
+
+---
+
+## 🎉 Summary
+
+The API Plugin transforms your s3db.js resources into a production-ready REST API with:
+
+✅ **Automatic endpoint generation**
+✅ **Multiple authentication methods**
+✅ **Automatic versioning**
+✅ **Schema validation**
+✅ **Rate limiting**
+✅ **CORS support**
+✅ **Request logging**
+✅ **Response compression**
+✅ **Custom middlewares**
+
+Perfect for:
+- Building REST APIs quickly
+- Exposing s3db.js resources to web/mobile clients
+- Microservices architecture
+- API-first development
+- Rapid prototyping
+
+Happy coding! 🚀
