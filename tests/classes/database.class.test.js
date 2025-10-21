@@ -529,7 +529,7 @@ describe('Database Definition Changes and Versioning', () => {
         'deleted-resource': {
           currentVersion: 'v1',
           versions: {
-            v0: {
+            v1: {
               hash: 'some-hash',
               attributes: { name: 'string|required' }
             }
@@ -539,7 +539,7 @@ describe('Database Definition Changes and Versioning', () => {
     };
 
     const changes = database.detectDefinitionChanges(savedMetadata);
-    
+
     expect(changes).toHaveLength(1);
     expect(changes[0].type).toBe('deleted');
     expect(changes[0].resourceName).toBe('deleted-resource');

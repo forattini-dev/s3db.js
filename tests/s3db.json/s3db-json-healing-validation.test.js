@@ -144,7 +144,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
       
       // The resource should be healed - currentVersion should be set to v0 since v1 doesn't exist
       expect(database.savedMetadata.resources.invitations).toBeDefined();
-      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v1');
+      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v0');
     });
 
     test('heals null hooks by filtering them out', async () => {
@@ -240,7 +240,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
       
       // Should connect successfully and clean hooks
       expect(database.resources.test).toBeDefined();
-      const hooks = database.savedMetadata.resources.test.versions.v0.hooks;
+      const hooks = database.savedMetadata.resources.test.versions.v1.hooks;
       expect(hooks.beforeInsert).toEqual([0, false, "valid_hook"]); // null and undefined filtered out
     });
   });

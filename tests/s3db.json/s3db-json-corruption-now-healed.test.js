@@ -190,7 +190,7 @@ describe('S3DB JSON Corruption - Now Successfully Healed', () => {
       expect(database.savedMetadata).toBeDefined();
       expect(database.resources.test).toBeDefined();
       // null, undefined, and empty strings should be filtered out
-      const hooks = database.savedMetadata.resources.test.versions.v0.hooks;
+      const hooks = database.savedMetadata.resources.test.versions.v1.hooks;
       expect(hooks.beforeInsert).toEqual([]);
     });
   });
