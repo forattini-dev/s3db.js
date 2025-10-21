@@ -1039,3 +1039,425 @@ new MetricsPlugin({
 ```
 
 ---
+
+## 🔥 Prometheus Integration
+
+The Metrics Plugin can export metrics in Prometheus text-based format for integration with Prometheus monitoring and Grafana dashboards.
+
+### Quick Start
+
+```javascript
+// Auto mode (default) - uses API Plugin if available, otherwise standalone server
+await db.usePlugin(new MetricsPlugin({
+  prometheus: { enabled: true }
+}));
+
+// Access metrics:
+// - If API Plugin active: GET http://localhost:3000/metrics
+// - Otherwise: GET http://localhost:9090/metrics
+```
+
+### Configuration Modes
+
+The Prometheus exporter supports **3 modes** to fit different deployment scenarios:
+
+#### 1. **Auto Mode** (Recommended)
+
+Automatically detects if API Plugin is active:
+- **With API Plugin**: Exposes `/metrics` on same port (integrated)
+- **Without API Plugin**: Creates standalone server on port 9090
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'auto'  // Default
+  }
+}));
+```
+
+**Use when**: You want zero configuration and automatic detection.
+
+#### 2. **Integrated Mode**
+
+Forces integration with API Plugin (same HTTP server):
+
+```javascript
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'integrated',  // Requires API Plugin
+    path: '/metrics'     // Custom path (optional)
+  }
+}));
+
+// Metrics available at: GET http://localhost:3000/metrics
+```
+
+**Use when**: You want all traffic on one port (recommended for Kubernetes).
+
+**Benefits:**
+- ✅ Single scrape target for Prometheus
+- ✅ Reuses existing server
+- ✅ Documented in Swagger UI
+- ✅ Same port for API + metrics + health checks
+
+#### 3. **Standalone Mode**
+
+Always creates separate HTTP server for metrics:
+
+```javascript
+await db.usePlugin(new MetricsPlugin({
+  prometheus: {
+    enabled: true,
+    mode: 'standalone',  // Separate server
+    port: 9090,          // Metrics-only port
+    path: '/metrics'
+  }
+}));
+
+// Metrics available at: GET http://localhost:9090/metrics
+```
+
+**Use when**:
+- Security: Metrics on internal port, API on public port
+- No API Plugin in use
+- Legacy Prometheus setup expects separate port
+
+---
+
+### Exported Metrics
+
+The plugin exports the following metrics in Prometheus format:
+
+#### **Counters** (always increasing):
+
+- `s3db_operations_total{operation, resource}` - Total operations by type and resource
+- `s3db_operation_errors_total{operation, resource}` - Total errors by operation
+
+#### **Gauges** (can increase or decrease):
+
+- `s3db_operation_duration_seconds{operation, resource}` - Average operation duration
+- `s3db_uptime_seconds` - Process uptime in seconds
+- `s3db_resources_total` - Total number of tracked resources
+- `s3db_info{version, node_version}` - Build information (always 1)
+
+#### Example Output:
+
+```
+# HELP s3db_operations_total Total number of operations by type and resource
+# TYPE s3db_operations_total counter
+s3db_operations_total{operation="insert",resource="cars"} 1523
+s3db_operations_total{operation="update",resource="cars"} 342
+s3db_operations_total{operation="get",resource="users"} 8945
+
+# HELP s3db_operation_duration_seconds Average operation duration in seconds
+# TYPE s3db_operation_duration_seconds gauge
+s3db_operation_duration_seconds{operation="insert",resource="cars"} 0.045
+s3db_operation_duration_seconds{operation="update",resource="cars"} 0.032
+
+# HELP s3db_operation_errors_total Total number of operation errors
+# TYPE s3db_operation_errors_total counter
+s3db_operation_errors_total{operation="insert",resource="cars"} 12
+
+# HELP s3db_uptime_seconds Process uptime in seconds
+# TYPE s3db_uptime_seconds gauge
+s3db_uptime_seconds 3600.5
+
+# HELP s3db_resources_total Total number of tracked resources
+# TYPE s3db_resources_total gauge
+s3db_resources_total 5
+
+# HELP s3db_info Build and runtime information
+# TYPE s3db_info gauge
+s3db_info{version="1.0.0",node_version="20.11.0"} 1
+```
+
+---
+
+### Kubernetes Configuration
+
+#### ServiceMonitor (Prometheus Operator)
+
+For **integrated mode** (metrics on same port as API):
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s3db-api-metrics
+  namespace: s3db-api
+  labels:
+    app: s3db-api
+spec:
+  selector:
+    matchLabels:
+      app: s3db-api
+  endpoints:
+  - port: http          # Same port as API
+    path: /metrics      # Metrics endpoint
+    interval: 30s       # Scrape every 30s
+    scrapeTimeout: 10s
+```
+
+For **standalone mode** (separate port):
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: s3db-metrics
+  namespace: s3db-api
+spec:
+  selector:
+    matchLabels:
+      app: s3db-api
+  endpoints:
+  - port: metrics       # Separate metrics port
+    path: /metrics
+    interval: 30s
+```
+
+**Service definition (standalone mode):**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3db-api
+  namespace: s3db-api
+spec:
+  selector:
+    app: s3db-api
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+  - name: metrics       # Additional port for metrics
+    port: 9090
+    targetPort: 9090
+```
+
+#### Pod Annotations (Auto-discovery)
+
+For **integrated mode**, add annotations to Pod:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3db-api
+spec:
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: api
+        image: my-s3db-api:latest
+        ports:
+        - containerPort: 3000
+          name: http
+```
+
+---
+
+### Traditional Prometheus Configuration
+
+#### Scrape Config (Integrated Mode)
+
+```yaml
+scrape_configs:
+  - job_name: 's3db-api'
+    static_configs:
+      - targets: ['s3db-api:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+```
+
+#### Scrape Config (Standalone Mode)
+
+```yaml
+scrape_configs:
+  - job_name: 's3db-metrics'
+    static_configs:
+      - targets: ['s3db-api:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+```
+
+#### Kubernetes Service Discovery
+
+```yaml
+scrape_configs:
+  - job_name: 'kubernetes-pods'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      # Only scrape pods with prometheus.io/scrape=true annotation
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      # Get port from annotation
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      # Get path from annotation
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+```
+
+---
+
+### Grafana Dashboard
+
+Example PromQL queries for Grafana:
+
+#### **Operation Rate:**
+```promql
+rate(s3db_operations_total[5m])
+```
+
+#### **Average Operation Duration:**
+```promql
+avg(s3db_operation_duration_seconds) by (operation)
+```
+
+#### **Error Rate:**
+```promql
+rate(s3db_operation_errors_total[5m])
+```
+
+#### **Total Operations by Resource:**
+```promql
+sum(s3db_operations_total) by (resource)
+```
+
+#### **Slowest Operations:**
+```promql
+topk(10, s3db_operation_duration_seconds)
+```
+
+---
+
+### Complete Example
+
+```javascript
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js/plugins';
+import { MetricsPlugin } from 's3db.js/plugins';
+
+const db = new Database({ useFakeS3: true });
+await db.connect();
+
+// Setup API Plugin (port 3000)
+await db.usePlugin(new ApiPlugin({ port: 3000 }));
+
+// Setup Metrics Plugin (auto mode - integrates with API)
+await db.usePlugin(new MetricsPlugin({
+  collectPerformance: true,
+  collectErrors: true,
+
+  prometheus: {
+    enabled: true,
+    mode: 'auto',  // Will use port 3000 automatically
+    path: '/metrics'
+  }
+}));
+
+// Create resources and perform operations
+const cars = await db.createResource({
+  name: 'cars',
+  attributes: {
+    brand: 'string|required',
+    model: 'string|required'
+  }
+});
+
+// Operations are automatically tracked
+await cars.insert({ brand: 'Toyota', model: 'Corolla' });
+await cars.insert({ brand: 'Honda', model: 'Civic' });
+await cars.list();
+
+// Metrics available at:
+// GET http://localhost:3000/metrics
+// GET http://localhost:3000/docs (Swagger UI includes /metrics)
+```
+
+---
+
+### Testing Metrics
+
+```bash
+# Test integrated mode
+curl http://localhost:3000/metrics
+
+# Test standalone mode
+curl http://localhost:9090/metrics
+
+# Validate Prometheus format
+curl http://localhost:3000/metrics | promtool check metrics
+
+# Test with Prometheus locally
+docker run -p 9091:9090 -v $(pwd)/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+```
+
+**prometheus.yml:**
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 's3db'
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+    metrics_path: '/metrics'
+```
+
+---
+
+### Best Practices
+
+1. **Use Integrated Mode in Kubernetes**: Single scrape target simplifies configuration
+2. **Set Scrape Interval**: 30s is good default, adjust based on workload
+3. **Monitor Error Rates**: Alert on `s3db_operation_errors_total` increases
+4. **Track Duration**: Set alerts for slow operations (>100ms for simple ops)
+5. **Use Labels Wisely**: `resource` and `operation` labels enable detailed filtering
+
+---
+
+### Troubleshooting
+
+**Q: Metrics endpoint returns 404?**
+A: Check:
+1. Prometheus is enabled: `prometheus.enabled: true`
+2. If using `mode: 'integrated'`, ensure API Plugin is active
+3. Correct path (default: `/metrics`)
+
+**Q: Metrics are empty/zero?**
+A:
+1. Ensure operations have been performed (metrics are collected in-memory)
+2. Check `flushInterval` hasn't reset counters
+3. Verify MetricsPlugin was installed BEFORE performing operations
+
+**Q: Standalone server won't start?**
+A:
+1. Check port 9090 is not in use: `lsof -i :9090`
+2. Verify `mode: 'standalone'` is set
+3. Check console for error messages
+
+**Q: How to disable Prometheus?**
+A:
+```javascript
+new MetricsPlugin({
+  prometheus: { enabled: false }
+})
+```
+
+---
