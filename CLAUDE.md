@@ -323,6 +323,7 @@ const report = await getPluginDependencyReport();
 | `sqs-replicator` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | `sqs-consumer` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | `rabbitmq-consumer` | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+| `tfstate-plugin` | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
 
 **Integration**: All plugins with external dependencies automatically validate on `initialize()` or `start()`
 
@@ -345,12 +346,12 @@ const report = await getPluginDependencyReport();
   resources: {
     users: {
       createdBy: 'user', // User-created resource
-      currentVersion: 'v0',
+      currentVersion: 'v1',
       versions: { ... }
     },
     users_transactions_balance: {
       createdBy: 'EventualConsistencyPlugin', // Plugin-created resource
-      currentVersion: 'v0',
+      currentVersion: 'v1',
       versions: { ... }
     }
   }
@@ -483,13 +484,14 @@ https://KEY:SECRET@nyc3.digitaloceanspaces.com/bucket  # DO Spaces
 
 ### Development
 ```bash
-pnpm install         # Use pnpm only
+pnpm install         # Installs everything (includes all plugin dependencies as devDependencies)
 pnpm run build       # Rollup build
 pnpm run dev         # Watch mode
 ```
 
 ### Testing
 ```bash
+# All plugin dependencies are already installed as devDependencies
 pnpm test                   # All tests
 pnpm test:js               # JavaScript only
 pnpm test:ts               # TypeScript only
