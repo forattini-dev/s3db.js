@@ -200,7 +200,7 @@ describe('Orphaned Partitions', () => {
         name: 'strict_resource',
         client: database.client,
         database,
-        version: 'v0',
+        version: 'v1',
         attributes: {
           id: 'string|required',
           name: 'string|required'
@@ -221,7 +221,7 @@ describe('Orphaned Partitions', () => {
         name: 'lenient_resource',
         client: database.client,
         database,
-        version: 'v0',
+        version: 'v1',
         attributes: {
           id: 'string|required',
           name: 'string|required'

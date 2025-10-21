@@ -75,6 +75,40 @@ The Queue Consumer Plugin allows you to consume messages from external queues (S
 
 ## Installation & Setup
 
+### 📦 Required Dependencies
+
+**Important:** Queue consumer drivers require additional dependencies. The s3db.js core package **does not include** these dependencies to keep the package lightweight.
+
+**Install only what you need:**
+
+```bash
+# For SQS queue consumption
+pnpm add @aws-sdk/client-sqs
+
+# For RabbitMQ queue consumption
+pnpm add amqplib
+```
+
+| Driver | Package | Version | Install Command |
+|--------|---------|---------|-----------------|
+| `sqs` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| `rabbitmq` | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+
+**Automatic Validation:** When you use a queue consumer, s3db.js automatically validates dependencies at runtime. If a dependency is missing, you'll get a clear error message with installation instructions.
+
+**Example Error:**
+
+```bash
+Error: SQS Queue Consumer - Missing dependencies detected!
+
+❌ Missing dependency: @aws-sdk/client-sqs
+   Description: AWS SDK for SQS
+   Required: ^3.0.0
+   Install: pnpm add @aws-sdk/client-sqs
+```
+
+---
+
 ### Basic Setup
 
 ```javascript

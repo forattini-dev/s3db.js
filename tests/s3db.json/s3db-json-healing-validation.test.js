@@ -144,7 +144,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
       
       // The resource should be healed - currentVersion should be set to v0 since v1 doesn't exist
       expect(database.savedMetadata.resources.invitations).toBeDefined();
-      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v0');
+      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v1');
     });
 
     test('heals null hooks by filtering them out', async () => {
@@ -190,7 +190,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             partitions: {}
           }
         }
@@ -214,10 +214,10 @@ describe('S3DB JSON Healing Validation Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             partitions: {},
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 behavior: "user-managed",
@@ -252,31 +252,31 @@ describe('S3DB JSON Healing Validation Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "valid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
             }
           },
           "invalid_no_versions": {
-            currentVersion: "v0"
+            currentVersion: "v1"
             // missing versions
           },
           "invalid_bad_version": {
             currentVersion: "v999",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
             }
           },
           "invalid_no_attributes": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test"
                 // missing attributes
               }
@@ -299,7 +299,7 @@ describe('S3DB JSON Healing Validation Tests', () => {
       
       // Resource with bad version should be healed to use v0
       expect(database.resources.invalid_bad_version).toBeDefined();
-      expect(database.savedMetadata.resources.invalid_bad_version.currentVersion).toBe("v0");
+      expect(database.savedMetadata.resources.invalid_bad_version.currentVersion).toBe("v1");
       
       // Resource without attributes should be removed
       expect(database.resources.invalid_no_attributes).toBeUndefined();
@@ -369,22 +369,22 @@ describe('S3DB JSON Healing Validation Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "valid1": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test1",
                 attributes: { name: "string" }
               }
             }
           },
           "invalid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {}
           },
           "valid2": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test2",
                 attributes: { email: "string" }
               }

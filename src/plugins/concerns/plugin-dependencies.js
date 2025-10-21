@@ -63,6 +63,36 @@ export const PLUGIN_DEPENDENCIES = {
         installCommand: 'pnpm add amqplib'
       }
     }
+  },
+  'tfstate-plugin': {
+    name: 'Terraform State Plugin',
+    dependencies: {
+      'node-cron': {
+        version: '^4.0.0',
+        description: 'Cron job scheduler for auto-sync functionality',
+        installCommand: 'pnpm add node-cron'
+      }
+    }
+  },
+  'api-plugin': {
+    name: 'API Plugin',
+    dependencies: {
+      'hono': {
+        version: '^4.0.0',
+        description: 'Ultra-light HTTP server framework',
+        installCommand: 'pnpm add hono'
+      },
+      '@hono/node-server': {
+        version: '^1.0.0',
+        description: 'Node.js adapter for Hono',
+        installCommand: 'pnpm add @hono/node-server'
+      },
+      '@hono/swagger-ui': {
+        version: '^0.4.0',
+        description: 'Swagger UI integration for Hono',
+        installCommand: 'pnpm add @hono/swagger-ui'
+      }
+    }
   }
 };
 
