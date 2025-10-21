@@ -246,6 +246,25 @@ const s3db = new S3db({
 });
 ```
 
+### 🧪 Development & Testing
+
+For local development, all plugin dependencies are already included as **devDependencies** - just run:
+
+```bash
+pnpm install  # Installs everything including plugin dependencies
+```
+
+This automatically installs all plugin dependencies so you can:
+- ✅ Run the full test suite (`pnpm test`)
+- ✅ Test all plugins without errors
+- ✅ Verify compatibility with all integrations
+
+**For end users:** They only install what they need via `peerDependencies`. The package manager automatically checks version compatibility.
+
+**For CI/CD:** Just `pnpm install` - no extra steps needed!
+
+---
+
 ### ⚡ HTTP Client Configuration
 
 s3db.js includes optimized HTTP client settings by default for excellent S3 performance. You can customize these settings based on your specific needs:
@@ -750,14 +769,32 @@ s3db.js automatically compresses numeric data using **Base62 encoding** to maxim
 
 Extend s3db.js with powerful plugins for caching, monitoring, replication, search, and more:
 
+> **📦 Important:** Some plugins require additional dependencies. The s3db.js core package is lightweight (~500KB) and **does not include** plugin-specific dependencies. Install only what you need:
+>
+> ```bash
+> # For PostgreSQL replication
+> pnpm add pg
+>
+> # For BigQuery replication
+> pnpm add @google-cloud/bigquery
+>
+> # For SQS replication/consumption
+> pnpm add @aws-sdk/client-sqs
+>
+> # For RabbitMQ consumption
+> pnpm add amqplib
+> ```
+>
+> s3db.js will automatically validate dependencies at runtime and provide clear error messages with install commands if something is missing. See [Plugin Dependencies](#plugin-dependencies) for details.
+
 ```javascript
-import { 
-  CachePlugin, 
-  CostsPlugin, 
-  FullTextPlugin, 
-  MetricsPlugin, 
-  ReplicatorPlugin, 
-  AuditPlugin 
+import {
+  CachePlugin,
+  CostsPlugin,
+  FullTextPlugin,
+  MetricsPlugin,
+  ReplicatorPlugin,
+  AuditPlugin
 } from 's3db.js';
 
 const s3db = new S3db({
@@ -802,6 +839,58 @@ await users.insert({ name: "John", email: "john@example.com" });
 
 **📖 For complete plugin documentation and overview:**
 **[📋 Plugin Documentation Index](./docs/plugins/README.md)**
+
+---
+
+#### Plugin Dependencies
+
+s3db.js uses a **lightweight core** approach - plugin-specific dependencies are **not bundled** with the main package. This keeps the core package small (~500KB) and lets you install only what you need.
+
+**How it works:**
+
+1. **Automatic Validation** - When you use a plugin, s3db.js validates its dependencies at runtime
+2. **Clear Error Messages** - If a dependency is missing, you get a helpful error with install commands
+3. **Version Checking** - Ensures installed packages meet minimum version requirements
+4. **Optional Dependencies** - All plugin dependencies are marked as `peerDependencies` (optional)
+
+**Dependency Matrix:**
+
+| Plugin | Required Package | Version | Install Command |
+|--------|-----------------|---------|-----------------|
+| PostgreSQL Replicator | `pg` | `^8.0.0` | `pnpm add pg` |
+| BigQuery Replicator | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
+| SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+| Terraform State Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
+
+**Example Error:**
+
+```bash
+Error: PostgreSQL Replicator - Missing dependencies detected!
+
+❌ Missing dependency: pg
+   Description: PostgreSQL client for Node.js
+   Required: ^8.0.0
+   Install: pnpm add pg
+
+Quick fix - Run all install commands:
+  pnpm add pg
+```
+
+**Checking Dependencies Programmatically:**
+
+```javascript
+import { getPluginDependencyReport } from 's3db.js/plugins/concerns/plugin-dependencies';
+
+// Get a full report of all plugin dependencies
+const report = await getPluginDependencyReport();
+console.log(report);
+```
+
+**Example:** See `docs/examples/e46-plugin-dependency-validation.js` for complete examples of dependency validation.
+
+---
 
 ### 🎛️ Resource Behaviors
 
