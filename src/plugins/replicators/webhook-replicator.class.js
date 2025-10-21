@@ -218,11 +218,9 @@ class WebhookReplicator extends BaseReplicator {
 
     if (!entry) return cleanData;
 
-    // Support both transform and transformer
+    // Apply transform function if configured
     if (typeof entry.transform === 'function') {
       result = entry.transform(cleanData);
-    } else if (typeof entry.transformer === 'function') {
-      result = entry.transformer(cleanData);
     }
 
     return result || cleanData;

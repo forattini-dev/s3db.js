@@ -1016,6 +1016,7 @@ export class Database extends EventEmitter {
       idGenerator: config.idGenerator,
       idSize: config.idSize,
       asyncEvents: config.asyncEvents,
+      asyncPartitions: config.asyncPartitions !== undefined ? config.asyncPartitions : true,
       events: config.events || {},
       createdBy: config.createdBy || 'user'
     });

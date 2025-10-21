@@ -270,6 +270,9 @@ class GeoPlugin extends Plugin {
     if (partitionsCreated > 0) {
       resource.config = updatedConfig;
 
+      // Re-setup partition hooks to register hooks for new geo partitions
+      resource.setupPartitionHooks();
+
       // Persist to metadata
       if (this.database.uploadMetadataFile) {
         await this.database.uploadMetadataFile();

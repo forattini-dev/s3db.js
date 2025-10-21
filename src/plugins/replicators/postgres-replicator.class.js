@@ -1,4 +1,5 @@
 import tryFn from "#src/concerns/try-fn.js";
+import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
 
 /**
@@ -111,6 +112,10 @@ class PostgresReplicator extends BaseReplicator {
 
   async initialize(database) {
     await super.initialize(database);
+
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('postgresql-replicator');
+
     const [ok, err, sdk] = await tryFn(() => import('pg'));
     if (!ok) {
       if (this.config.verbose) {

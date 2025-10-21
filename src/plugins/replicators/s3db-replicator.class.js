@@ -232,12 +232,6 @@ class S3dbReplicator extends BaseReplicator {
       if (transformedData && data && data.id && !transformedData.id) {
         transformedData.id = data.id;
       }
-    } else if (typeof destConfig === 'object' && destConfig.transformer && typeof destConfig.transformer === 'function') {
-      transformedData = destConfig.transformer(data);
-      // Ensure ID is preserved
-      if (transformedData && data && data.id && !transformedData.id) {
-        transformedData.id = data.id;
-      }
     } else {
       transformedData = data;
     }
@@ -281,18 +275,13 @@ class S3dbReplicator extends BaseReplicator {
         if (typeof item === 'object' && item.transform && typeof item.transform === 'function') {
           result = item.transform(cleanData);
           break;
-        } else if (typeof item === 'object' && item.transformer && typeof item.transformer === 'function') {
-          result = item.transformer(cleanData);
-          break;
         }
       }
       if (!result) result = cleanData;
     } else if (typeof entry === 'object') {
-      // Prefer transform, fallback to transformer for backwards compatibility
+      // Apply transform function if configured
       if (typeof entry.transform === 'function') {
         result = entry.transform(cleanData);
-      } else if (typeof entry.transformer === 'function') {
-        result = entry.transformer(cleanData);
       }
     } else if (typeof entry === 'function') {
       // Function directly as transformer

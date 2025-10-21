@@ -498,8 +498,6 @@ Solution:
 ${queueSize >= maxQueueSize
   ? 'Wait for queue to drain or increase maxQueueSize'
   : 'Check driver configuration and permissions'}
-
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
 `.trim();
     } else if (!description) {
       description = `
@@ -509,8 +507,6 @@ Driver: ${driver}
 Operation: ${operation}
 
 Check driver configuration and permissions.
-
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
 `.trim();
     }
 

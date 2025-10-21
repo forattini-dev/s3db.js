@@ -1,4 +1,5 @@
 import tryFn from "#src/concerns/try-fn.js";
+import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
 
 /**
@@ -32,8 +33,7 @@ class SqsReplicator extends BaseReplicator {
     this.client = client;
     this.queueUrl = config.queueUrl;
     this.queues = config.queues || {};
-    // Support legacy names but prefer defaultQueue
-    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault || null;
+    this.defaultQueue = config.defaultQueue || null;
     this.region = config.region || 'us-east-1';
     this.sqsClient = client || null;
     this.messageGroupId = config.messageGroupId;
@@ -94,19 +94,17 @@ class SqsReplicator extends BaseReplicator {
   _applyTransformer(resource, data) {
     // First, clean internal fields that shouldn't go to SQS
     let cleanData = this._cleanInternalFields(data);
-    
+
     const entry = this.resources[resource];
     let result = cleanData;
-    
+
     if (!entry) return cleanData;
-    
-    // Support both transform and transformer (backwards compatibility)
+
+    // Apply transform function if configured
     if (typeof entry.transform === 'function') {
       result = entry.transform(cleanData);
-    } else if (typeof entry.transformer === 'function') {
-      result = entry.transformer(cleanData);
     }
-    
+
     return result || cleanData;
   }
 
@@ -163,6 +161,10 @@ class SqsReplicator extends BaseReplicator {
 
   async initialize(database, client) {
     await super.initialize(database);
+
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('sqs-replicator');
+
     if (!this.sqsClient) {
       const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
       if (!ok) {

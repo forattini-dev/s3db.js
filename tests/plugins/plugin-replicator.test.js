@@ -78,18 +78,18 @@ describe('ReplicatorPlugin - config syntaxes', () => {
     expect(plugin.config.replicators[0].resources.users.transform).toBe(transform);
   });
 
-  test('accepts config with SQS driver and queueUrlDefault', () => {
+  test('accepts config with SQS driver and defaultQueue', () => {
     const plugin = new ReplicatorPlugin({
       replicators: [
         {
           driver: 'sqs',
-          queueUrlDefault: 'my-queue',
+          defaultQueue: 'my-queue',
           config: { credentials: 'test' },
           resources: { users: 'users' }
         }
       ]
     });
-    expect(plugin.config.replicators[0].queueUrlDefault).toBe('my-queue');
+    expect(plugin.config.replicators[0].defaultQueue).toBe('my-queue');
   });
 
   test('accepts config with SQS driver and per-resource queue URLs', () => {
@@ -126,7 +126,7 @@ describe('ReplicatorPlugin - config syntaxes', () => {
     const plugin = new ReplicatorPlugin({
       replicators: [
         { driver: 's3db', config: { connectionString: 's3://a' }, resources: { users: 'users' } },
-        { driver: 'sqs', queueUrlDefault: 'q', config: { credentials: 'x' }, resources: { orders: 'orders' } }
+        { driver: 'sqs', defaultQueue: 'q', config: { credentials: 'x' }, resources: { orders: 'orders' } }
       ]
     });
     expect(plugin.config.replicators.length).toBe(2);

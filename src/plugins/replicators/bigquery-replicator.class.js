@@ -1,5 +1,5 @@
 import tryFn from "#src/concerns/try-fn.js";
-
+import requirePluginDependency from "#src/plugins/concerns/plugin-dependencies.js";
 import BaseReplicator from './base-replicator.class.js';
 
 /**
@@ -113,6 +113,10 @@ class BigqueryReplicator extends BaseReplicator {
 
   async initialize(database) {
     await super.initialize(database);
+
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('bigquery-replicator');
+
     const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
     if (!ok) {
       if (this.config.verbose) {

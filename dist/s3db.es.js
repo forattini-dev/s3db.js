@@ -2,11 +2,14 @@ import crypto, { createHash } from 'crypto';
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import EventEmitter from 'events';
 import { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile, rm, watch } from 'fs/promises';
-import fs, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync } from 'fs';
+import * as fs from 'fs';
+import fs__default, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync } from 'fs';
 import { pipeline } from 'stream/promises';
-import path$1, { join } from 'path';
+import * as path$1 from 'path';
+import path__default, { join } from 'path';
 import zlib from 'node:zlib';
-import os from 'os';
+import * as os from 'os';
+import os__default from 'os';
 import jsonStableStringify from 'json-stable-stringify';
 import require$$3, { Transform, Writable } from 'stream';
 import { PromisePool } from '@supercharge/promise-pool';
@@ -754,8 +757,6 @@ Possible causes:
 
 Solution:
 ${queueSize >= maxQueueSize ? "Wait for queue to drain or increase maxQueueSize" : "Check driver configuration and permissions"}
-
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
 `.trim();
     } else if (!description) {
       description = `
@@ -765,8 +766,6 @@ Driver: ${driver}
 Operation: ${operation}
 
 Check driver configuration and permissions.
-
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/README.md#partition-drivers
 `.trim();
     }
     super(message, {
@@ -2972,8 +2971,8 @@ class FilesystemBackupDriver extends BaseBackupDriver {
   }
   async upload(filePath, backupId, manifest) {
     const targetDir = this.resolvePath(backupId, manifest);
-    const targetPath = path$1.join(targetDir, `${backupId}.backup`);
-    const manifestPath = path$1.join(targetDir, `${backupId}.manifest.json`);
+    const targetPath = path__default.join(targetDir, `${backupId}.backup`);
+    const manifestPath = path__default.join(targetDir, `${backupId}.manifest.json`);
     const [createDirOk, createDirErr] = await tryFn(
       () => mkdir(targetDir, { recursive: true, mode: this.config.directoryPermissions })
     );
@@ -3028,7 +3027,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     };
   }
   async download(backupId, targetPath, metadata) {
-    const sourcePath = metadata.path || path$1.join(
+    const sourcePath = metadata.path || path__default.join(
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
@@ -3042,7 +3041,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
         suggestion: "Check if backup exists using list() method"
       });
     }
-    const targetDir = path$1.dirname(targetPath);
+    const targetDir = path__default.dirname(targetPath);
     await tryFn(() => mkdir(targetDir, { recursive: true }));
     const [copyOk, copyErr] = await tryFn(() => copyFile(sourcePath, targetPath));
     if (!copyOk) {
@@ -3060,11 +3059,11 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     return targetPath;
   }
   async delete(backupId, metadata) {
-    const backupPath = metadata.path || path$1.join(
+    const backupPath = metadata.path || path__default.join(
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
-    const manifestPath = metadata.manifestPath || path$1.join(
+    const manifestPath = metadata.manifestPath || path__default.join(
       this.resolvePath(backupId, metadata),
       `${backupId}.manifest.json`
     );
@@ -3087,7 +3086,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     const basePath = this.resolvePath("*").replace("*", "");
     try {
       const results = [];
-      await this._scanDirectory(path$1.dirname(basePath), prefix, results, limit);
+      await this._scanDirectory(path__default.dirname(basePath), prefix, results, limit);
       results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       return results.slice(0, limit);
     } catch (error) {
@@ -3101,7 +3100,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     if (!readDirOk) return;
     for (const file of files) {
       if (results.length >= limit) break;
-      const fullPath = path$1.join(dirPath, file);
+      const fullPath = path__default.join(dirPath, file);
       const [statOk, , stats] = await tryFn(() => stat(fullPath));
       if (!statOk) continue;
       if (stats.isDirectory()) {
@@ -3132,7 +3131,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
     }
   }
   async verify(backupId, expectedChecksum, metadata) {
-    const backupPath = metadata.path || path$1.join(
+    const backupPath = metadata.path || path__default.join(
       this.resolvePath(backupId, metadata),
       `${backupId}.backup`
     );
@@ -3209,7 +3208,7 @@ class S3BackupDriver extends BaseBackupDriver {
     const dateStr = now.toISOString().slice(0, 10);
     const timeStr = now.toISOString().slice(11, 19).replace(/:/g, "-");
     const basePath = this.config.path.replace("{date}", dateStr).replace("{time}", timeStr).replace("{year}", now.getFullYear().toString()).replace("{month}", (now.getMonth() + 1).toString().padStart(2, "0")).replace("{day}", now.getDate().toString().padStart(2, "0")).replace("{backupId}", backupId).replace("{type}", manifest.type || "backup");
-    return path$1.posix.join(basePath, `${backupId}.backup`);
+    return path__default.posix.join(basePath, `${backupId}.backup`);
   }
   resolveManifestKey(backupId, manifest = {}) {
     return this.resolveKey(backupId, manifest).replace(".backup", ".manifest.json");
@@ -3365,7 +3364,7 @@ class S3BackupDriver extends BaseBackupDriver {
       if (manifestOk) {
         try {
           const manifest = JSON.parse(manifestContent);
-          const backupId = path$1.basename(obj.Key, ".manifest.json");
+          const backupId = path__default.basename(obj.Key, ".manifest.json");
           results.push({
             id: backupId,
             bucket: this.config.bucket,
@@ -3817,7 +3816,7 @@ class BackupPlugin extends Plugin {
       include: options.include || null,
       exclude: options.exclude || [],
       backupMetadataResource: options.backupMetadataResource || "plg_backup_metadata",
-      tempDir: options.tempDir || path$1.join(os.tmpdir(), "s3db", "backups"),
+      tempDir: options.tempDir || path__default.join(os__default.tmpdir(), "s3db", "backups"),
       verbose: options.verbose || false,
       // Hooks
       onBackupStart: options.onBackupStart || null,
@@ -3899,7 +3898,7 @@ class BackupPlugin extends Plugin {
       }
       this.emit("backup_start", { id: backupId, type });
       const metadata = await this._createBackupMetadata(backupId, type);
-      const tempBackupDir = path$1.join(this.config.tempDir, backupId);
+      const tempBackupDir = path__default.join(this.config.tempDir, backupId);
       await mkdir(tempBackupDir, { recursive: true });
       try {
         const manifest = await this._createBackupManifest(type, options);
@@ -3908,7 +3907,7 @@ class BackupPlugin extends Plugin {
           throw new Error("No resources were exported for backup");
         }
         const archiveExtension = this.config.compression !== "none" ? ".tar.gz" : ".json";
-        const finalPath = path$1.join(tempBackupDir, `${backupId}${archiveExtension}`);
+        const finalPath = path__default.join(tempBackupDir, `${backupId}${archiveExtension}`);
         const totalSize = await this._createArchive(exportedFiles, finalPath, this.config.compression);
         const checksum = await this._generateChecksum(finalPath);
         const uploadResult = await this.driver.upload(finalPath, backupId, manifest);
@@ -4023,7 +4022,7 @@ class BackupPlugin extends Plugin {
         }
         continue;
       }
-      const exportPath = path$1.join(tempDir, `${resourceName}.json`);
+      const exportPath = path__default.join(tempDir, `${resourceName}.json`);
       let records;
       if (type === "incremental") {
         const [lastBackupOk, , lastBackups] = await tryFn(
@@ -4081,7 +4080,7 @@ class BackupPlugin extends Plugin {
         }
         continue;
       }
-      const fileName = path$1.basename(filePath);
+      const fileName = path__default.basename(filePath);
       totalSize += content.length;
       archive.files.push({
         name: fileName,
@@ -4142,10 +4141,10 @@ class BackupPlugin extends Plugin {
       if (backup.status !== "completed") {
         throw new Error(`Backup '${backupId}' is not in completed status`);
       }
-      const tempRestoreDir = path$1.join(this.config.tempDir, `restore-${backupId}`);
+      const tempRestoreDir = path__default.join(this.config.tempDir, `restore-${backupId}`);
       await mkdir(tempRestoreDir, { recursive: true });
       try {
-        const downloadPath = path$1.join(tempRestoreDir, `${backupId}.backup`);
+        const downloadPath = path__default.join(tempRestoreDir, `${backupId}.backup`);
         await this.driver.download(backupId, downloadPath, backup.driverInfo);
         if (this.config.verification && backup.checksum) {
           const actualChecksum = await this._generateChecksum(downloadPath);
@@ -5047,7 +5046,7 @@ class FilesystemCache extends Cache {
     if (!directory) {
       throw new Error("FilesystemCache: directory parameter is required");
     }
-    this.directory = path$1.resolve(directory);
+    this.directory = path__default.resolve(directory);
     this.prefix = prefix;
     this.ttl = ttl;
     this.enableCompression = enableCompression;
@@ -5066,7 +5065,7 @@ class FilesystemCache extends Cache {
     this.enableLocking = enableLocking;
     this.lockTimeout = lockTimeout;
     this.enableJournal = enableJournal;
-    this.journalFile = path$1.join(this.directory, journalFile);
+    this.journalFile = path__default.join(this.directory, journalFile);
     this.stats = {
       hits: 0,
       misses: 0,
@@ -5102,7 +5101,7 @@ class FilesystemCache extends Cache {
   _getFilePath(key) {
     const sanitizedKey = key.replace(/[<>:"/\\|?*]/g, "_");
     const filename = `${this.prefix}_${sanitizedKey}${this.fileExtension}`;
-    return path$1.join(this.directory, filename);
+    return path__default.join(this.directory, filename);
   }
   _getMetadataPath(filePath) {
     return filePath + ".meta";
@@ -5298,7 +5297,7 @@ class FilesystemCache extends Cache {
         return true;
       });
       for (const file of cacheFiles) {
-        const filePath = path$1.join(this.directory, file);
+        const filePath = path__default.join(this.directory, file);
         try {
           if (await this._fileExists(filePath)) {
             await unlink(filePath);
@@ -5398,7 +5397,7 @@ class FilesystemCache extends Cache {
         if (!file.startsWith(this.prefix) || !file.endsWith(this.fileExtension)) {
           continue;
         }
-        const filePath = path$1.join(this.directory, file);
+        const filePath = path__default.join(this.directory, file);
         let shouldDelete = false;
         if (this.enableMetadata) {
           const metadataPath = this._getMetadataPath(filePath);
@@ -5456,7 +5455,7 @@ class FilesystemCache extends Cache {
     };
     const [ok, err] = await tryFn(async () => {
       const line = JSON.stringify(entry) + "\n";
-      await fs.promises.appendFile(this.journalFile, line, this.encoding);
+      await fs__default.promises.appendFile(this.journalFile, line, this.encoding);
     });
     if (!ok) {
       console.warn("FilesystemCache journal error:", err.message);
@@ -5501,7 +5500,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     this.preloadRelated = preloadRelated;
     this.preloadThreshold = preloadThreshold;
     this.maxCacheSize = maxCacheSize;
-    this.usageStatsFile = path$1.join(this.directory, usageStatsFile);
+    this.usageStatsFile = path__default.join(this.directory, usageStatsFile);
     this.partitionUsage = /* @__PURE__ */ new Map();
     this.loadUsageStats();
   }
@@ -5529,12 +5528,12 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
    * Get directory path for partition cache
    */
   _getPartitionDirectory(resource, partition, partitionValues = {}) {
-    const basePath = path$1.join(this.directory, `resource=${resource}`);
+    const basePath = path__default.join(this.directory, `resource=${resource}`);
     if (!partition) {
       return basePath;
     }
     if (this.partitionStrategy === "flat") {
-      return path$1.join(basePath, "partitions");
+      return path__default.join(basePath, "partitions");
     }
     if (this.partitionStrategy === "temporal" && this._isTemporalPartition(partition, partitionValues)) {
       return this._getTemporalDirectory(basePath, partition, partitionValues);
@@ -5546,7 +5545,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
         pathParts.push(`${field}=${this._sanitizePathValue(value)}`);
       }
     }
-    return path$1.join(...pathParts);
+    return path__default.join(...pathParts);
   }
   /**
    * Enhanced set method with partition awareness
@@ -5557,7 +5556,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
       const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
       await this._ensureDirectory(partitionDir);
-      const filePath = path$1.join(partitionDir, this._sanitizeFileName(partitionKey));
+      const filePath = path__default.join(partitionDir, this._sanitizeFileName(partitionKey));
       if (this.trackUsage) {
         await this._trackPartitionUsage(resource, partition, partitionValues);
       }
@@ -5603,7 +5602,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     if (resource && partition) {
       const partitionKey = this._getPartitionCacheKey(resource, action, partition, partitionValues, params);
       const partitionDir = this._getPartitionDirectory(resource, partition, partitionValues);
-      const filePath = path$1.join(partitionDir, this._sanitizeFileName(partitionKey));
+      const filePath = path__default.join(partitionDir, this._sanitizeFileName(partitionKey));
       if (!await this._fileExists(filePath)) {
         if (this.preloadRelated) {
           await this._preloadRelatedPartitions(resource, partition, partitionValues);
@@ -5640,7 +5639,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
    * Clear all partitions for a resource
    */
   async clearResourcePartitions(resource) {
-    const resourceDir = path$1.join(this.directory, `resource=${resource}`);
+    const resourceDir = path__default.join(this.directory, `resource=${resource}`);
     const [ok, err] = await tryFn(async () => {
       if (await this._fileExists(resourceDir)) {
         await rm(resourceDir, { recursive: true });
@@ -5664,7 +5663,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
       partitions: {},
       usage: {}
     };
-    const resourceDir = path$1.join(this.directory, `resource=${resource}`);
+    const resourceDir = path__default.join(this.directory, `resource=${resource}`);
     if (!await this._fileExists(resourceDir)) {
       return stats;
     }
@@ -5764,9 +5763,9 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const dateValue = Object.values(partitionValues)[0];
     if (typeof dateValue === "string" && dateValue.match(/^\d{4}-\d{2}-\d{2}/)) {
       const [year, month, day] = dateValue.split("-");
-      return path$1.join(basePath, "temporal", year, month, day);
+      return path__default.join(basePath, "temporal", year, month, day);
     }
-    return path$1.join(basePath, `partition=${partition}`);
+    return path__default.join(basePath, `partition=${partition}`);
   }
   _sanitizePathValue(value) {
     return String(value).replace(/[<>:"/\\|?*]/g, "_");
@@ -5778,7 +5777,7 @@ class PartitionAwareFilesystemCache extends FilesystemCache {
     const [ok, err, files] = await tryFn(() => readdir(dir));
     if (!ok) return;
     for (const file of files) {
-      const filePath = path$1.join(dir, file);
+      const filePath = path__default.join(dir, file);
       const [statOk, statErr, fileStat] = await tryFn(() => stat(filePath));
       if (statOk) {
         if (fileStat.isDirectory()) {
@@ -10487,6 +10486,158 @@ class MetricsPlugin extends Plugin {
   }
 }
 
+const PLUGIN_DEPENDENCIES = {
+  "postgresql-replicator": {
+    name: "PostgreSQL Replicator",
+    dependencies: {
+      "pg": {
+        version: "^8.0.0",
+        description: "PostgreSQL client for Node.js",
+        installCommand: "pnpm add pg"
+      }
+    }
+  },
+  "bigquery-replicator": {
+    name: "BigQuery Replicator",
+    dependencies: {
+      "@google-cloud/bigquery": {
+        version: "^7.0.0",
+        description: "Google Cloud BigQuery SDK",
+        installCommand: "pnpm add @google-cloud/bigquery"
+      }
+    }
+  },
+  "sqs-replicator": {
+    name: "SQS Replicator",
+    dependencies: {
+      "@aws-sdk/client-sqs": {
+        version: "^3.0.0",
+        description: "AWS SDK for SQS",
+        installCommand: "pnpm add @aws-sdk/client-sqs"
+      }
+    }
+  },
+  "sqs-consumer": {
+    name: "SQS Queue Consumer",
+    dependencies: {
+      "@aws-sdk/client-sqs": {
+        version: "^3.0.0",
+        description: "AWS SDK for SQS",
+        installCommand: "pnpm add @aws-sdk/client-sqs"
+      }
+    }
+  },
+  "rabbitmq-consumer": {
+    name: "RabbitMQ Queue Consumer",
+    dependencies: {
+      "amqplib": {
+        version: "^0.10.0",
+        description: "AMQP 0-9-1 library for RabbitMQ",
+        installCommand: "pnpm add amqplib"
+      }
+    }
+  }
+};
+function isVersionCompatible(actual, required) {
+  if (!actual || !required) return false;
+  const cleanRequired = required.replace(/^[\^~]/, "");
+  const actualMajor = parseInt(actual.split(".")[0], 10);
+  const requiredMajor = parseInt(cleanRequired.split(".")[0], 10);
+  if (required.startsWith("^")) {
+    return actualMajor === requiredMajor;
+  }
+  if (required.startsWith("~")) {
+    const actualMinor = parseInt(actual.split(".")[1] || "0", 10);
+    const requiredMinor = parseInt(cleanRequired.split(".")[1] || "0", 10);
+    return actualMajor === requiredMajor && actualMinor >= requiredMinor;
+  }
+  return actualMajor >= requiredMajor;
+}
+async function tryLoadPackage(packageName) {
+  try {
+    const pkg = await import(packageName);
+    let version = null;
+    try {
+      const pkgJson = await import(`${packageName}/package.json`, { assert: { type: 'json' } });
+      version = pkgJson.default?.version || pkgJson.version || null;
+    } catch (e) {
+      version = "unknown";
+    }
+    return { installed: true, version, error: null };
+  } catch (error) {
+    return { installed: false, version: null, error };
+  }
+}
+async function requirePluginDependency(pluginId, options = {}) {
+  const {
+    throwOnError = true,
+    checkVersions = true
+  } = options;
+  const pluginDef = PLUGIN_DEPENDENCIES[pluginId];
+  if (!pluginDef) {
+    const error = new Error(
+      `Unknown plugin identifier: ${pluginId}. Available plugins: ${Object.keys(PLUGIN_DEPENDENCIES).join(", ")}`
+    );
+    if (throwOnError) throw error;
+    return { valid: false, missing: [], incompatible: [], messages: [error.message] };
+  }
+  const missing = [];
+  const incompatible = [];
+  const messages = [];
+  for (const [pkgName, pkgInfo] of Object.entries(pluginDef.dependencies)) {
+    const { installed, version, error } = await tryLoadPackage(pkgName);
+    if (!installed) {
+      missing.push(pkgName);
+      messages.push(
+        `\u274C Missing dependency: ${pkgName}
+   Description: ${pkgInfo.description}
+   Required: ${pkgInfo.version}
+   Install: ${pkgInfo.installCommand}`
+      );
+      continue;
+    }
+    if (checkVersions && version && version !== "unknown") {
+      const compatible = isVersionCompatible(version, pkgInfo.version);
+      if (!compatible) {
+        incompatible.push(pkgName);
+        messages.push(
+          `\u26A0\uFE0F  Incompatible version: ${pkgName}
+   Installed: ${version}
+   Required: ${pkgInfo.version}
+   Update: ${pkgInfo.installCommand}`
+        );
+      } else {
+        messages.push(
+          `\u2705 ${pkgName}@${version} (compatible with ${pkgInfo.version})`
+        );
+      }
+    } else {
+      messages.push(
+        `\u2705 ${pkgName}@${version || "unknown"} (installed)`
+      );
+    }
+  }
+  const valid = missing.length === 0 && incompatible.length === 0;
+  if (!valid && throwOnError) {
+    const errorMsg = [
+      `
+${pluginDef.name} - Missing dependencies detected!
+`,
+      `Plugin ID: ${pluginId}`,
+      "",
+      ...messages,
+      "",
+      "Quick fix - Run all install commands:",
+      Object.values(pluginDef.dependencies).map((dep) => `  ${dep.installCommand}`).join("\n"),
+      "",
+      "Or install all peer dependencies at once:",
+      `  pnpm add ${Object.keys(pluginDef.dependencies).join(" ")}`
+    ].join("\n");
+    throw new Error(errorMsg);
+  }
+  return { valid, missing, incompatible, messages };
+}
+
 class SqsConsumer {
   constructor({ queueUrl, onMessage, onError, poolingInterval = 5e3, maxMessages = 10, region = "us-east-1", credentials, endpoint, driver = "sqs" }) {
     this.driver = driver;
@@ -10508,6 +10659,7 @@ class SqsConsumer {
     this._DeleteMessageCommand = null;
   }
   async start() {
+    await requirePluginDependency("sqs-consumer");
     const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
     if (!ok) throw new Error("SqsConsumer: @aws-sdk/client-sqs is not installed. Please install it to use the SQS consumer.");
     const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = sdk;
@@ -10593,6 +10745,7 @@ class RabbitMqConsumer {
     this._stopped = false;
   }
   async start() {
+    await requirePluginDependency("rabbitmq-consumer");
     this._stopped = false;
     await this._connect();
   }
@@ -10683,33 +10836,18 @@ class QueueConsumerPlugin extends Plugin {
   async onInstall() {
     for (const driverDef of this.driversConfig) {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
-      if (consumerDefs.length === 0 && driverDef.resources) {
-        const { resources, driver: defDriver, config: nestedConfig, ...directConfig } = driverDef;
+      for (const consumerDef of consumerDefs) {
+        const { resources, ...consumerConfig } = consumerDef;
         const resourceList = Array.isArray(resources) ? resources : [resources];
-        const flatConfig = nestedConfig ? { ...directConfig, ...nestedConfig } : directConfig;
         for (const resource of resourceList) {
+          const mergedConfig = { ...driverConfig, ...consumerConfig };
           const consumer = createConsumer(driver, {
-            ...flatConfig,
+            ...mergedConfig,
             onMessage: (msg) => this._handleMessage(msg, resource),
             onError: (err, raw) => this._handleError(err, raw, resource)
           });
           await consumer.start();
           this.consumers.push(consumer);
-        }
-      } else {
-        for (const consumerDef of consumerDefs) {
-          const { resources, ...consumerConfig } = consumerDef;
-          const resourceList = Array.isArray(resources) ? resources : [resources];
-          for (const resource of resourceList) {
-            const mergedConfig = { ...driverConfig, ...consumerConfig };
-            const consumer = createConsumer(driver, {
-              ...mergedConfig,
-              onMessage: (msg) => this._handleMessage(msg, resource),
-              onError: (err, raw) => this._handleError(err, raw, resource)
-            });
-            await consumer.start();
-            this.consumers.push(consumer);
-          }
         }
       }
     }
@@ -10855,11 +10993,14 @@ class RelationPlugin extends Plugin {
     this.preventN1 = config.preventN1 !== void 0 ? config.preventN1 : true;
     this.verbose = config.verbose || false;
     this._loaderCache = /* @__PURE__ */ new Map();
+    this._partitionCache = /* @__PURE__ */ new Map();
     this.stats = {
       totalRelationLoads: 0,
       cachedLoads: 0,
       batchLoads: 0,
-      cascadeOperations: 0
+      cascadeOperations: 0,
+      partitionCacheHits: 0,
+      deduplicatedQueries: 0
     };
   }
   /**
@@ -11114,9 +11255,24 @@ class RelationPlugin extends Plugin {
       records.forEach((r) => r[relationName] = null);
       return records;
     }
-    const relatedRecords = await relatedResource.query({
-      [config.foreignKey]: { $in: localKeys }
-    });
+    const partitionName = config.partitionHint || this._findPartitionByField(relatedResource, config.foreignKey);
+    let relatedRecords;
+    if (partitionName) {
+      relatedRecords = await this._batchLoadWithPartitions(
+        relatedResource,
+        partitionName,
+        config.foreignKey,
+        localKeys
+      );
+    } else {
+      if (this.verbose) {
+        console.log(
+          `[RelationPlugin] No partition found for ${relatedResource.name}.${config.foreignKey}, using full scan`
+        );
+      }
+      const allRelated = await relatedResource.list({ limit: 1e4 });
+      relatedRecords = allRelated.filter((r) => localKeys.includes(r[config.foreignKey]));
+    }
     const relatedMap = /* @__PURE__ */ new Map();
     relatedRecords.forEach((related) => {
       relatedMap.set(related[config.foreignKey], related);
@@ -11144,9 +11300,24 @@ class RelationPlugin extends Plugin {
       records.forEach((r) => r[relationName] = []);
       return records;
     }
-    const relatedRecords = await relatedResource.query({
-      [config.foreignKey]: { $in: localKeys }
-    });
+    const partitionName = config.partitionHint || this._findPartitionByField(relatedResource, config.foreignKey);
+    let relatedRecords;
+    if (partitionName) {
+      relatedRecords = await this._batchLoadWithPartitions(
+        relatedResource,
+        partitionName,
+        config.foreignKey,
+        localKeys
+      );
+    } else {
+      if (this.verbose) {
+        console.log(
+          `[RelationPlugin] No partition found for ${relatedResource.name}.${config.foreignKey}, using full scan`
+        );
+      }
+      const allRelated = await relatedResource.list({ limit: 1e4 });
+      relatedRecords = allRelated.filter((r) => localKeys.includes(r[config.foreignKey]));
+    }
     const relatedMap = /* @__PURE__ */ new Map();
     relatedRecords.forEach((related) => {
       const fkValue = related[config.foreignKey];
@@ -11182,9 +11353,23 @@ class RelationPlugin extends Plugin {
       return records;
     }
     const [ok, err, parentRecords] = await tryFn(async () => {
-      return await relatedResource.query({
-        [config.localKey]: { $in: foreignKeys }
-      });
+      const partitionName = config.partitionHint || this._findPartitionByField(relatedResource, config.localKey);
+      if (partitionName) {
+        return await this._batchLoadWithPartitions(
+          relatedResource,
+          partitionName,
+          config.localKey,
+          foreignKeys
+        );
+      } else {
+        if (this.verbose) {
+          console.log(
+            `[RelationPlugin] No partition found for ${relatedResource.name}.${config.localKey}, using full scan`
+          );
+        }
+        const allRelated = await relatedResource.list({ limit: 1e4 });
+        return allRelated.filter((r) => foreignKeys.includes(r[config.localKey]));
+      }
     });
     if (!ok) {
       throw new RelationError(`Failed to load belongsTo relation "${relationName}": ${err.message}`, {
@@ -11230,17 +11415,47 @@ class RelationPlugin extends Plugin {
       records.forEach((r) => r[relationName] = []);
       return records;
     }
-    const junctionRecords = await junctionResource.query({
-      [config.foreignKey]: { $in: localKeys }
-    });
+    const junctionPartitionName = config.junctionPartitionHint || this._findPartitionByField(junctionResource, config.foreignKey);
+    let junctionRecords;
+    if (junctionPartitionName) {
+      junctionRecords = await this._batchLoadWithPartitions(
+        junctionResource,
+        junctionPartitionName,
+        config.foreignKey,
+        localKeys
+      );
+    } else {
+      if (this.verbose) {
+        console.log(
+          `[RelationPlugin] No partition found for ${junctionResource.name}.${config.foreignKey}, using full scan`
+        );
+      }
+      const allJunction = await junctionResource.list({ limit: 1e4 });
+      junctionRecords = allJunction.filter((j) => localKeys.includes(j[config.foreignKey]));
+    }
     if (junctionRecords.length === 0) {
       records.forEach((r) => r[relationName] = []);
       return records;
     }
     const otherKeys = [...new Set(junctionRecords.map((j) => j[config.otherKey]).filter(Boolean))];
-    const relatedRecords = await relatedResource.query({
-      [config.localKey]: { $in: otherKeys }
-    });
+    const relatedPartitionName = config.partitionHint || this._findPartitionByField(relatedResource, config.localKey);
+    let relatedRecords;
+    if (relatedPartitionName) {
+      relatedRecords = await this._batchLoadWithPartitions(
+        relatedResource,
+        relatedPartitionName,
+        config.localKey,
+        otherKeys
+      );
+    } else {
+      if (this.verbose) {
+        console.log(
+          `[RelationPlugin] No partition found for ${relatedResource.name}.${config.localKey}, using full scan`
+        );
+      }
+      const allRelated = await relatedResource.list({ limit: 1e4 });
+      relatedRecords = allRelated.filter((r) => otherKeys.includes(r[config.localKey]));
+    }
     const relatedMap = /* @__PURE__ */ new Map();
     relatedRecords.forEach((related) => {
       relatedMap.set(related[config.localKey], related);
@@ -11264,7 +11479,80 @@ class RelationPlugin extends Plugin {
     return records;
   }
   /**
+   * Find partition by field name (for efficient relation loading)
+   * Uses cache to avoid repeated lookups
+   * @private
+   */
+  _findPartitionByField(resource, fieldName) {
+    if (!resource.config.partitions) return null;
+    const cacheKey = `${resource.name}:${fieldName}`;
+    if (this._partitionCache.has(cacheKey)) {
+      this.stats.partitionCacheHits++;
+      return this._partitionCache.get(cacheKey);
+    }
+    let bestPartition = null;
+    let bestFieldCount = Infinity;
+    for (const [partitionName, partitionConfig] of Object.entries(resource.config.partitions)) {
+      if (partitionConfig.fields && fieldName in partitionConfig.fields) {
+        const fieldCount = Object.keys(partitionConfig.fields).length;
+        if (fieldCount < bestFieldCount) {
+          bestPartition = partitionName;
+          bestFieldCount = fieldCount;
+        }
+      }
+    }
+    this._partitionCache.set(cacheKey, bestPartition);
+    return bestPartition;
+  }
+  /**
+   * Batch load records using partitions with controlled parallelism
+   * Deduplicates keys to avoid redundant queries
+   * @private
+   */
+  async _batchLoadWithPartitions(resource, partitionName, fieldName, keys) {
+    if (keys.length === 0) return [];
+    const uniqueKeys = [...new Set(keys)];
+    const deduplicatedCount = keys.length - uniqueKeys.length;
+    if (deduplicatedCount > 0) {
+      this.stats.deduplicatedQueries += deduplicatedCount;
+      if (this.verbose) {
+        console.log(
+          `[RelationPlugin] Deduplicated ${deduplicatedCount} queries (${keys.length} -> ${uniqueKeys.length} unique keys)`
+        );
+      }
+    }
+    if (uniqueKeys.length === 1) {
+      return await resource.list({
+        partition: partitionName,
+        partitionValues: { [fieldName]: uniqueKeys[0] }
+      });
+    }
+    const chunkSize = this.batchSize || 10;
+    const chunks = [];
+    for (let i = 0; i < uniqueKeys.length; i += chunkSize) {
+      chunks.push(uniqueKeys.slice(i, i + chunkSize));
+    }
+    if (this.verbose) {
+      console.log(
+        `[RelationPlugin] Batch loading ${uniqueKeys.length} keys from ${resource.name} using partition ${partitionName} (${chunks.length} batches)`
+      );
+    }
+    const allResults = [];
+    for (const chunk of chunks) {
+      const chunkPromises = chunk.map(
+        (key) => resource.list({
+          partition: partitionName,
+          partitionValues: { [fieldName]: key }
+        })
+      );
+      const chunkResults = await Promise.all(chunkPromises);
+      allResults.push(...chunkResults.flat());
+    }
+    return allResults;
+  }
+  /**
    * Cascade delete operation
+   * Uses partitions when available for efficient cascade
    * @private
    */
   async _cascadeDelete(record, resource, relationName, config) {
@@ -11278,9 +11566,23 @@ class RelationPlugin extends Plugin {
     }
     try {
       if (config.type === "hasMany") {
-        const relatedRecords = await relatedResource.query({
-          [config.foreignKey]: record[config.localKey]
-        });
+        let relatedRecords;
+        const partitionName = this._findPartitionByField(relatedResource, config.foreignKey);
+        if (partitionName) {
+          relatedRecords = await relatedResource.list({
+            partition: partitionName,
+            partitionValues: { [config.foreignKey]: record[config.localKey] }
+          });
+          if (this.verbose) {
+            console.log(
+              `[RelationPlugin] Cascade delete using partition ${partitionName} for ${config.foreignKey}`
+            );
+          }
+        } else {
+          relatedRecords = await relatedResource.query({
+            [config.foreignKey]: record[config.localKey]
+          });
+        }
         for (const related of relatedRecords) {
           await relatedResource.delete(related.id);
         }
@@ -11290,18 +11592,41 @@ class RelationPlugin extends Plugin {
           );
         }
       } else if (config.type === "hasOne") {
-        const relatedRecords = await relatedResource.query({
-          [config.foreignKey]: record[config.localKey]
-        });
+        let relatedRecords;
+        const partitionName = this._findPartitionByField(relatedResource, config.foreignKey);
+        if (partitionName) {
+          relatedRecords = await relatedResource.list({
+            partition: partitionName,
+            partitionValues: { [config.foreignKey]: record[config.localKey] }
+          });
+        } else {
+          relatedRecords = await relatedResource.query({
+            [config.foreignKey]: record[config.localKey]
+          });
+        }
         if (relatedRecords.length > 0) {
           await relatedResource.delete(relatedRecords[0].id);
         }
       } else if (config.type === "belongsToMany") {
         const junctionResource = this.database.resource(config.through);
         if (junctionResource) {
-          const junctionRecords = await junctionResource.query({
-            [config.foreignKey]: record[config.localKey]
-          });
+          let junctionRecords;
+          const partitionName = this._findPartitionByField(junctionResource, config.foreignKey);
+          if (partitionName) {
+            junctionRecords = await junctionResource.list({
+              partition: partitionName,
+              partitionValues: { [config.foreignKey]: record[config.localKey] }
+            });
+            if (this.verbose) {
+              console.log(
+                `[RelationPlugin] Cascade delete junction using partition ${partitionName}`
+              );
+            }
+          } else {
+            junctionRecords = await junctionResource.query({
+              [config.foreignKey]: record[config.localKey]
+            });
+          }
           for (const junction of junctionRecords) {
             await junctionResource.delete(junction.id);
           }
@@ -11321,6 +11646,7 @@ class RelationPlugin extends Plugin {
   }
   /**
    * Cascade update operation (update foreign keys when local key changes)
+   * Uses partitions when available for efficient cascade
    * @private
    */
   async _cascadeUpdate(record, changes, resource, relationName, config) {
@@ -11335,9 +11661,23 @@ class RelationPlugin extends Plugin {
       if (oldLocalKeyValue === newLocalKeyValue) {
         return;
       }
-      const relatedRecords = await relatedResource.query({
-        [config.foreignKey]: oldLocalKeyValue
-      });
+      let relatedRecords;
+      const partitionName = this._findPartitionByField(relatedResource, config.foreignKey);
+      if (partitionName) {
+        relatedRecords = await relatedResource.list({
+          partition: partitionName,
+          partitionValues: { [config.foreignKey]: oldLocalKeyValue }
+        });
+        if (this.verbose) {
+          console.log(
+            `[RelationPlugin] Cascade update using partition ${partitionName} for ${config.foreignKey}`
+          );
+        }
+      } else {
+        relatedRecords = await relatedResource.query({
+          [config.foreignKey]: oldLocalKeyValue
+        });
+      }
       for (const related of relatedRecords) {
         await relatedResource.update(related.id, {
           [config.foreignKey]: newLocalKeyValue
@@ -11369,10 +11709,11 @@ class RelationPlugin extends Plugin {
     };
   }
   /**
-   * Clear loader cache (useful between requests)
+   * Clear loader cache and partition cache (useful between requests)
    */
   clearCache() {
     this._loaderCache.clear();
+    this._partitionCache.clear();
   }
   /**
    * Cleanup on plugin stop
@@ -11571,6 +11912,7 @@ class BigqueryReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
+    await requirePluginDependency("bigquery-replicator");
     const [ok, err, sdk] = await tryFn(() => import('@google-cloud/bigquery'));
     if (!ok) {
       if (this.config.verbose) {
@@ -11906,6 +12248,7 @@ class PostgresReplicator extends BaseReplicator {
   }
   async initialize(database) {
     await super.initialize(database);
+    await requirePluginDependency("postgresql-replicator");
     const [ok, err, sdk] = await tryFn(() => import('pg'));
     if (!ok) {
       if (this.config.verbose) {
@@ -12281,7 +12624,7 @@ class Client extends EventEmitter {
   }
   async putObject({ key, metadata, contentType, body, contentEncoding, contentLength, ifMatch }) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    keyPrefix ? path$1.join(keyPrefix, key) : key;
+    keyPrefix ? path__default.join(keyPrefix, key) : key;
     const stringMetadata = {};
     if (metadata) {
       for (const [k, v] of Object.entries(metadata)) {
@@ -12292,7 +12635,7 @@ class Client extends EventEmitter {
     }
     const options = {
       Bucket: this.config.bucket,
-      Key: keyPrefix ? path$1.join(keyPrefix, key) : key,
+      Key: keyPrefix ? path__default.join(keyPrefix, key) : key,
       Metadata: stringMetadata,
       Body: body || Buffer.alloc(0)
     };
@@ -12316,7 +12659,7 @@ class Client extends EventEmitter {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const options = {
       Bucket: this.config.bucket,
-      Key: keyPrefix ? path$1.join(keyPrefix, key) : key
+      Key: keyPrefix ? path__default.join(keyPrefix, key) : key
     };
     const [ok, err, response] = await tryFn(async () => {
       const res = await this.sendCommand(new GetObjectCommand(options));
@@ -12344,7 +12687,7 @@ class Client extends EventEmitter {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
     const options = {
       Bucket: this.config.bucket,
-      Key: keyPrefix ? path$1.join(keyPrefix, key) : key
+      Key: keyPrefix ? path__default.join(keyPrefix, key) : key
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new HeadObjectCommand(options)));
     this.emit("headObject", err || response, { key });
@@ -12361,8 +12704,8 @@ class Client extends EventEmitter {
   async copyObject({ from, to }) {
     const options = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path$1.join(this.config.keyPrefix, to) : to,
-      CopySource: path$1.join(this.config.bucket, this.config.keyPrefix ? path$1.join(this.config.keyPrefix, from) : from)
+      Key: this.config.keyPrefix ? path__default.join(this.config.keyPrefix, to) : to,
+      CopySource: path__default.join(this.config.bucket, this.config.keyPrefix ? path__default.join(this.config.keyPrefix, from) : from)
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
     this.emit("copyObject", err || response, { from, to });
@@ -12384,10 +12727,10 @@ class Client extends EventEmitter {
   }
   async deleteObject(key) {
     const keyPrefix = typeof this.config.keyPrefix === "string" ? this.config.keyPrefix : "";
-    keyPrefix ? path$1.join(keyPrefix, key) : key;
+    keyPrefix ? path__default.join(keyPrefix, key) : key;
     const options = {
       Bucket: this.config.bucket,
-      Key: keyPrefix ? path$1.join(keyPrefix, key) : key
+      Key: keyPrefix ? path__default.join(keyPrefix, key) : key
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new DeleteObjectCommand(options)));
     this.emit("deleteObject", err || response, { key });
@@ -12406,7 +12749,7 @@ class Client extends EventEmitter {
     const packages = chunk(keys, 1e3);
     const { results, errors } = await PromisePool.for(packages).withConcurrency(this.parallelism).process(async (keys2) => {
       for (const key of keys2) {
-        keyPrefix ? path$1.join(keyPrefix, key) : key;
+        keyPrefix ? path__default.join(keyPrefix, key) : key;
         this.config.bucket;
         await this.exists(key);
       }
@@ -12414,7 +12757,7 @@ class Client extends EventEmitter {
         Bucket: this.config.bucket,
         Delete: {
           Objects: keys2.map((key) => ({
-            Key: keyPrefix ? path$1.join(keyPrefix, key) : key
+            Key: keyPrefix ? path__default.join(keyPrefix, key) : key
           }))
         }
       };
@@ -12446,7 +12789,7 @@ class Client extends EventEmitter {
     do {
       const listCommand = new ListObjectsV2Command({
         Bucket: this.config.bucket,
-        Prefix: keyPrefix ? path$1.join(keyPrefix, prefix || "") : prefix || "",
+        Prefix: keyPrefix ? path__default.join(keyPrefix, prefix || "") : prefix || "",
         ContinuationToken: continuationToken
       });
       const listResponse = await this.client.send(listCommand);
@@ -12493,7 +12836,7 @@ class Client extends EventEmitter {
       Bucket: this.config.bucket,
       MaxKeys: maxKeys,
       ContinuationToken: continuationToken,
-      Prefix: this.config.keyPrefix ? path$1.join(this.config.keyPrefix, prefix || "") : prefix || ""
+      Prefix: this.config.keyPrefix ? path__default.join(this.config.keyPrefix, prefix || "") : prefix || ""
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
     if (!ok) {
@@ -17753,6 +18096,7 @@ class Database extends EventEmitter {
       idGenerator: config.idGenerator,
       idSize: config.idSize,
       asyncEvents: config.asyncEvents,
+      asyncPartitions: config.asyncPartitions !== void 0 ? config.asyncPartitions : true,
       events: config.events || {},
       createdBy: config.createdBy || "user"
     });
@@ -18166,11 +18510,6 @@ class S3dbReplicator extends BaseReplicator {
       if (transformedData && data && data.id && !transformedData.id) {
         transformedData.id = data.id;
       }
-    } else if (typeof destConfig === "object" && destConfig.transformer && typeof destConfig.transformer === "function") {
-      transformedData = destConfig.transformer(data);
-      if (transformedData && data && data.id && !transformedData.id) {
-        transformedData.id = data.id;
-      }
     } else {
       transformedData = data;
     }
@@ -18205,17 +18544,12 @@ class S3dbReplicator extends BaseReplicator {
         if (typeof item === "object" && item.transform && typeof item.transform === "function") {
           result = item.transform(cleanData);
           break;
-        } else if (typeof item === "object" && item.transformer && typeof item.transformer === "function") {
-          result = item.transformer(cleanData);
-          break;
         }
       }
       if (!result) result = cleanData;
     } else if (typeof entry === "object") {
       if (typeof entry.transform === "function") {
         result = entry.transform(cleanData);
-      } else if (typeof entry.transformer === "function") {
-        result = entry.transformer(cleanData);
       }
     } else if (typeof entry === "function") {
       result = entry(cleanData);
@@ -18389,7 +18723,7 @@ class SqsReplicator extends BaseReplicator {
     this.client = client;
     this.queueUrl = config.queueUrl;
     this.queues = config.queues || {};
-    this.defaultQueue = config.defaultQueue || config.defaultQueueUrl || config.queueUrlDefault || null;
+    this.defaultQueue = config.defaultQueue || null;
     this.region = config.region || "us-east-1";
     this.sqsClient = client || null;
     this.messageGroupId = config.messageGroupId;
@@ -18447,8 +18781,6 @@ class SqsReplicator extends BaseReplicator {
     if (!entry) return cleanData;
     if (typeof entry.transform === "function") {
       result = entry.transform(cleanData);
-    } else if (typeof entry.transformer === "function") {
-      result = entry.transformer(cleanData);
     }
     return result || cleanData;
   }
@@ -18499,6 +18831,7 @@ class SqsReplicator extends BaseReplicator {
   }
   async initialize(database, client) {
     await super.initialize(database);
+    await requirePluginDependency("sqs-replicator");
     if (!this.sqsClient) {
       const [ok, err, sdk] = await tryFn(() => import('@aws-sdk/client-sqs'));
       if (!ok) {
@@ -18806,8 +19139,6 @@ class WebhookReplicator extends BaseReplicator {
     if (!entry) return cleanData;
     if (typeof entry.transform === "function") {
       result = entry.transform(cleanData);
-    } else if (typeof entry.transformer === "function") {
-      result = entry.transformer(cleanData);
     }
     return result || cleanData;
   }
@@ -19110,12 +19441,1249 @@ class WebhookReplicator extends BaseReplicator {
   }
 }
 
+class BaseOutputDriver {
+  /**
+   * Write data to file
+   * @param {string} filePath - File path
+   * @param {string|Buffer} data - Data to write
+   * @param {Object} options - Write options
+   * @returns {Promise<void>}
+   */
+  async write(filePath, data, options = {}) {
+    throw new Error("write() must be implemented by subclass");
+  }
+  /**
+   * Append data to file
+   * @param {string} filePath - File path
+   * @param {string|Buffer} data - Data to append
+   * @param {Object} options - Append options
+   * @returns {Promise<void>}
+   */
+  async append(filePath, data, options = {}) {
+    throw new Error("append() must be implemented by subclass");
+  }
+  /**
+   * Read file
+   * @param {string} filePath - File path
+   * @returns {Promise<string|Buffer>}
+   */
+  async read(filePath) {
+    throw new Error("read() must be implemented by subclass");
+  }
+  /**
+   * Check if file exists
+   * @param {string} filePath - File path
+   * @returns {Promise<boolean>}
+   */
+  async exists(filePath) {
+    throw new Error("exists() must be implemented by subclass");
+  }
+  /**
+   * Delete file
+   * @param {string} filePath - File path
+   * @returns {Promise<void>}
+   */
+  async delete(filePath) {
+    throw new Error("delete() must be implemented by subclass");
+  }
+  /**
+   * List files
+   * @param {string} prefix - Path prefix
+   * @returns {Promise<string[]>}
+   */
+  async list(prefix = "") {
+    throw new Error("list() must be implemented by subclass");
+  }
+  /**
+   * Get file size
+   * @param {string} filePath - File path
+   * @returns {Promise<number>} Size in bytes
+   */
+  async size(filePath) {
+    throw new Error("size() must be implemented by subclass");
+  }
+}
+class S3OutputDriver extends BaseOutputDriver {
+  /**
+   * @param {Object} config
+   * @param {PluginStorage} config.pluginStorage - PluginStorage instance (for default S3)
+   * @param {Client} config.client - S3 Client instance (for custom S3)
+   * @param {string} config.basePath - Base path for files
+   */
+  constructor(config = {}) {
+    super();
+    if (!config.pluginStorage && !config.client) {
+      throw new Error("S3OutputDriver requires either pluginStorage or client");
+    }
+    this.pluginStorage = config.pluginStorage;
+    this.client = config.client;
+    this.basePath = config.basePath || "";
+  }
+  _getFullPath(filePath) {
+    return this.basePath ? `${this.basePath}/${filePath}` : filePath;
+  }
+  async write(filePath, data, options = {}) {
+    const fullPath = this._getFullPath(filePath);
+    if (this.pluginStorage) {
+      await this.pluginStorage.set(
+        this.pluginStorage.getPluginKey(null, fullPath),
+        { content: data },
+        { behavior: "body-only", ...options }
+      );
+    } else {
+      await this.client.putObject({
+        key: fullPath,
+        body: typeof data === "string" ? data : JSON.stringify(data),
+        contentType: options.contentType || "application/octet-stream"
+      });
+    }
+  }
+  async append(filePath, data, options = {}) {
+    this._getFullPath(filePath);
+    const [existsOk, existsErr, existing] = await tryFn(() => this.read(filePath));
+    const existingData = existsOk ? existing : "";
+    const newData = existingData + data;
+    await this.write(filePath, newData, options);
+  }
+  async read(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    if (this.pluginStorage) {
+      const data = await this.pluginStorage.get(
+        this.pluginStorage.getPluginKey(null, fullPath)
+      );
+      return data?.content || null;
+    } else {
+      const [ok, err, response] = await tryFn(() => this.client.getObject(fullPath));
+      if (!ok) {
+        if (err.name === "NoSuchKey") return null;
+        throw err;
+      }
+      return await response.Body.transformToString();
+    }
+  }
+  async exists(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    if (this.pluginStorage) {
+      return await this.pluginStorage.has(
+        this.pluginStorage.getPluginKey(null, fullPath)
+      );
+    } else {
+      return await this.client.exists(fullPath);
+    }
+  }
+  async delete(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    if (this.pluginStorage) {
+      await this.pluginStorage.delete(
+        this.pluginStorage.getPluginKey(null, fullPath)
+      );
+    } else {
+      await this.client.deleteObject(fullPath);
+    }
+  }
+  async list(prefix = "") {
+    const fullPrefix = this._getFullPath(prefix);
+    if (this.pluginStorage) {
+      return await this.pluginStorage.list(fullPrefix);
+    } else {
+      const response = await this.client.listObjects({ prefix: fullPrefix });
+      return response.Contents?.map((item) => item.Key) || [];
+    }
+  }
+  async size(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    if (this.pluginStorage) {
+      const data = await this.read(filePath);
+      if (!data) return 0;
+      return Buffer.byteLength(data, "utf8");
+    } else {
+      const response = await this.client.headObject(fullPath);
+      return response.ContentLength || 0;
+    }
+  }
+}
+class FilesystemOutputDriver extends BaseOutputDriver {
+  /**
+   * @param {Object} config
+   * @param {string} config.basePath - Base directory path
+   */
+  constructor(config = {}) {
+    super();
+    if (!config.basePath) {
+      throw new Error("FilesystemOutputDriver requires basePath");
+    }
+    this.basePath = config.basePath;
+  }
+  _getFullPath(filePath) {
+    return path$1.join(this.basePath, filePath);
+  }
+  _ensureDirectory(filePath) {
+    const dir = path$1.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+  async write(filePath, data, options = {}) {
+    const fullPath = this._getFullPath(filePath);
+    this._ensureDirectory(fullPath);
+    await fs.promises.writeFile(
+      fullPath,
+      data,
+      { encoding: options.encoding || "utf8" }
+    );
+  }
+  async append(filePath, data, options = {}) {
+    const fullPath = this._getFullPath(filePath);
+    this._ensureDirectory(fullPath);
+    await fs.promises.appendFile(
+      fullPath,
+      data,
+      { encoding: options.encoding || "utf8" }
+    );
+  }
+  async read(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    const [ok, err, data] = await tryFn(
+      () => fs.promises.readFile(fullPath, { encoding: "utf8" })
+    );
+    if (!ok) {
+      if (err.code === "ENOENT") return null;
+      throw err;
+    }
+    return data;
+  }
+  async exists(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    return fs.existsSync(fullPath);
+  }
+  async delete(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    if (await this.exists(filePath)) {
+      await fs.promises.unlink(fullPath);
+    }
+  }
+  async list(prefix = "") {
+    const fullPath = this._getFullPath(prefix);
+    const [ok, err, files] = await tryFn(async () => {
+      if (!fs.existsSync(fullPath)) return [];
+      const entries = await fs.promises.readdir(fullPath, { withFileTypes: true });
+      return entries.filter((entry) => entry.isFile()).map((entry) => path$1.join(prefix, entry.name));
+    });
+    return ok ? files : [];
+  }
+  async size(filePath) {
+    const fullPath = this._getFullPath(filePath);
+    const [ok, err, stats] = await tryFn(
+      () => fs.promises.stat(fullPath)
+    );
+    if (!ok) {
+      if (err.code === "ENOENT") return 0;
+      throw err;
+    }
+    return stats.size;
+  }
+}
+class OutputDriverFactory {
+  /**
+   * Create output driver from configuration
+   *
+   * @param {Object} config - Driver configuration
+   * @param {string} config.driver - Driver type ('s3', 'filesystem')
+   * @param {string} config.path - Base path
+   * @param {string} config.connectionString - S3 connection string (for custom S3)
+   * @param {PluginStorage} config.pluginStorage - PluginStorage instance (for default S3)
+   * @returns {BaseOutputDriver}
+   *
+   * @example
+   * // S3 with PluginStorage (default)
+   * OutputDriverFactory.create({
+   *   driver: 's3',
+   *   path: 'exports',
+   *   pluginStorage: storage
+   * });
+   *
+   * // S3 with custom connection
+   * OutputDriverFactory.create({
+   *   driver: 's3',
+   *   connectionString: 's3://...',
+   *   path: 'exports'
+   * });
+   *
+   * // Filesystem
+   * OutputDriverFactory.create({
+   *   driver: 'filesystem',
+   *   path: './exports'
+   * });
+   */
+  static create(config = {}) {
+    const { driver = "s3", path: basePath, connectionString, pluginStorage } = config;
+    switch (driver) {
+      case "s3": {
+        if (connectionString) {
+          const client = new Client({ connectionString });
+          return new S3OutputDriver({ client, basePath });
+        } else if (pluginStorage) {
+          return new S3OutputDriver({ pluginStorage, basePath });
+        } else {
+          throw new Error("S3 driver requires either connectionString or pluginStorage");
+        }
+      }
+      case "filesystem": {
+        if (!basePath) {
+          throw new Error("Filesystem driver requires path");
+        }
+        return new FilesystemOutputDriver({ basePath });
+      }
+      default:
+        throw new Error(`Unknown output driver: ${driver}. Available: s3, filesystem`);
+    }
+  }
+}
+
+class CsvReplicator extends BaseReplicator {
+  constructor(config = {}) {
+    super(config);
+    this.outputConfig = config.output || { driver: "s3", path: "exports" };
+    this.delimiter = config.delimiter || ",";
+    this.mode = config.mode || "append";
+    this.includeHeaders = config.includeHeaders !== false;
+    this.rotateBy = config.rotateBy || null;
+    this.rotateSize = config.rotateSize || 100 * 1024 * 1024;
+    this.encoding = config.encoding || "utf8";
+    this.writtenHeaders = /* @__PURE__ */ new Set();
+    this.outputDriver = null;
+    this.stats = {
+      recordsWritten: 0,
+      filesCreated: 0,
+      bytesWritten: 0,
+      errors: 0
+    };
+  }
+  /**
+   * Initialize replicator
+   */
+  async initialize(database) {
+    await super.initialize(database);
+    this.outputDriver = OutputDriverFactory.create({
+      ...this.outputConfig,
+      pluginStorage: this.pluginStorage
+      // Pass PluginStorage for default S3
+    });
+    if (this.verbose) {
+      console.log(`[CsvReplicator] Initialized with ${this.outputConfig.driver} output`);
+      if (this.outputConfig.connectionString) {
+        console.log(`[CsvReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
+      }
+    }
+  }
+  /**
+   * Replicate a single record
+   */
+  async replicate(resourceName, operation, data, id) {
+    if (operation === "delete") {
+      return {
+        success: true,
+        skipped: true,
+        reason: "CSV format does not support delete operations"
+      };
+    }
+    try {
+      const filePath = this._getFilePath(resourceName);
+      if (!this.writtenHeaders.has(filePath)) {
+        await this._writeHeader(filePath, data);
+        this.writtenHeaders.add(filePath);
+      }
+      const csvLine = this._recordToCsvLine(data);
+      await this.outputDriver.append(filePath, csvLine + "\n", {
+        encoding: this.encoding
+      });
+      this.stats.recordsWritten++;
+      this.stats.bytesWritten += Buffer.byteLength(csvLine, this.encoding);
+      if (this.rotateBy === "size") {
+        await this._checkRotation(resourceName, filePath);
+      }
+      return {
+        success: true,
+        resourceName,
+        id,
+        operation,
+        filePath,
+        stats: { ...this.stats }
+      };
+    } catch (error) {
+      this.stats.errors++;
+      throw new ReplicationError(
+        `Failed to replicate to CSV: ${error.message}`,
+        {
+          driver: "csv",
+          resourceName,
+          operation,
+          id,
+          outputDriver: this.outputConfig.driver,
+          original: error,
+          suggestion: "Check output driver configuration and permissions"
+        }
+      );
+    }
+  }
+  /**
+   * Get file path for resource
+   */
+  _getFilePath(resourceName) {
+    if (this.rotateBy === "date") {
+      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      return `${resourceName}_${date}.csv`;
+    } else if (this.rotateBy === "size") {
+      return `${resourceName}.csv`;
+    } else {
+      return `${resourceName}.csv`;
+    }
+  }
+  /**
+   * Write CSV header
+   */
+  async _writeHeader(filePath, data) {
+    if (!this.includeHeaders) return;
+    const columns = Object.keys(data).sort();
+    const header = columns.join(this.delimiter);
+    const exists = await this.outputDriver.exists(filePath);
+    if (!exists || this.mode === "overwrite") {
+      await this.outputDriver.write(filePath, header + "\n", {
+        encoding: this.encoding
+      });
+      this.stats.filesCreated++;
+    }
+  }
+  /**
+   * Convert record to CSV line
+   */
+  _recordToCsvLine(data) {
+    const columns = Object.keys(data).sort();
+    const values = columns.map((col) => {
+      const value = data[col];
+      return this._escapeCsvField(value);
+    });
+    return values.join(this.delimiter);
+  }
+  /**
+   * Escape CSV field value
+   */
+  _escapeCsvField(value) {
+    if (value === null || value === void 0) {
+      return "";
+    }
+    let str = String(value);
+    const needsQuoting = str.includes(this.delimiter) || str.includes("\n") || str.includes("\r") || str.includes('"');
+    if (needsQuoting) {
+      str = str.replace(/"/g, '""');
+      return `"${str}"`;
+    }
+    return str;
+  }
+  /**
+   * Check if file needs rotation
+   */
+  async _checkRotation(resourceName, filePath) {
+    const size = await this.outputDriver.size(filePath);
+    if (size >= this.rotateSize) {
+      const timestamp = Date.now();
+      const newPath = `${resourceName}_${timestamp}.csv`;
+      const content = await this.outputDriver.read(filePath);
+      if (content) {
+        await this.outputDriver.write(newPath, content, {
+          encoding: this.encoding
+        });
+      }
+      await this.outputDriver.delete(filePath);
+      this.writtenHeaders.delete(filePath);
+      if (this.verbose) {
+        console.log(`[CsvReplicator] Rotated ${filePath} \u2192 ${newPath} (${size} bytes)`);
+      }
+    }
+  }
+  /**
+   * Get replicator statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      outputDriver: this.outputConfig.driver,
+      outputPath: this.outputConfig.path
+    };
+  }
+  /**
+   * Cleanup on uninstall
+   */
+  async uninstall(database) {
+    if (this.verbose) {
+      console.log("[CsvReplicator] Cleaning up...");
+    }
+    await super.uninstall(database);
+  }
+}
+
+class JsonlReplicator extends BaseReplicator {
+  constructor(config = {}) {
+    super(config);
+    this.outputConfig = config.output || { driver: "s3", path: "exports" };
+    this.mode = config.mode || "append";
+    this.rotateBy = config.rotateBy || null;
+    this.rotateSize = config.rotateSize || 100 * 1024 * 1024;
+    this.compress = config.compress || false;
+    this.encoding = config.encoding || "utf8";
+    this.outputDriver = null;
+    this.stats = {
+      recordsWritten: 0,
+      filesCreated: 0,
+      bytesWritten: 0,
+      errors: 0
+    };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    this.outputDriver = OutputDriverFactory.create({
+      ...this.outputConfig,
+      pluginStorage: this.pluginStorage
+    });
+    if (this.verbose) {
+      console.log(`[JsonlReplicator] Initialized with ${this.outputConfig.driver} output`);
+      if (this.compress) {
+        console.log("[JsonlReplicator] Compression enabled");
+      }
+    }
+  }
+  async replicate(resourceName, operation, data, id) {
+    if (operation === "delete") {
+      return {
+        success: true,
+        skipped: true,
+        reason: "JSONL format does not support delete operations"
+      };
+    }
+    try {
+      const filePath = this._getFilePath(resourceName);
+      const jsonLine = JSON.stringify(data) + "\n";
+      await this.outputDriver.append(filePath, jsonLine, {
+        encoding: this.encoding
+      });
+      this.stats.recordsWritten++;
+      this.stats.bytesWritten += Buffer.byteLength(jsonLine, this.encoding);
+      if (this.rotateBy === "size") {
+        await this._checkRotation(resourceName, filePath);
+      }
+      return {
+        success: true,
+        resourceName,
+        id,
+        operation,
+        filePath,
+        stats: { ...this.stats }
+      };
+    } catch (error) {
+      this.stats.errors++;
+      throw new ReplicationError(
+        `Failed to replicate to JSONL: ${error.message}`,
+        {
+          driver: "jsonl",
+          resourceName,
+          operation,
+          id,
+          outputDriver: this.outputConfig.driver,
+          original: error,
+          suggestion: "Check output driver configuration and permissions"
+        }
+      );
+    }
+  }
+  _getFilePath(resourceName) {
+    const ext = this.compress ? ".jsonl.gz" : ".jsonl";
+    if (this.rotateBy === "date") {
+      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      return `${resourceName}_${date}${ext}`;
+    } else if (this.rotateBy === "size") {
+      return `${resourceName}${ext}`;
+    } else {
+      return `${resourceName}${ext}`;
+    }
+  }
+  async _checkRotation(resourceName, filePath) {
+    const size = await this.outputDriver.size(filePath);
+    if (size >= this.rotateSize) {
+      const timestamp = Date.now();
+      const ext = this.compress ? ".jsonl.gz" : ".jsonl";
+      const newPath = `${resourceName}_${timestamp}${ext}`;
+      const content = await this.outputDriver.read(filePath);
+      if (content) {
+        await this.outputDriver.write(newPath, content, {
+          encoding: this.encoding
+        });
+      }
+      await this.outputDriver.delete(filePath);
+      if (this.verbose) {
+        console.log(`[JsonlReplicator] Rotated ${filePath} \u2192 ${newPath} (${size} bytes)`);
+      }
+    }
+  }
+  getStats() {
+    return {
+      ...this.stats,
+      outputDriver: this.outputConfig.driver,
+      outputPath: this.outputConfig.path
+    };
+  }
+  async uninstall(database) {
+    if (this.verbose) {
+      console.log("[JsonlReplicator] Cleaning up...");
+    }
+    await super.uninstall(database);
+  }
+}
+
+class ParquetReplicator extends BaseReplicator {
+  constructor(config = {}) {
+    super(config);
+    this.outputConfig = config.output || { driver: "s3", path: "exports" };
+    this.compression = config.compression || "snappy";
+    this.rowGroupSize = config.rowGroupSize || 5e3;
+    this.pageSize = config.pageSize || 8192;
+    this.mode = config.mode || "append";
+    this.rotateBy = config.rotateBy || null;
+    this.outputDriver = null;
+    this.tempDir = path$1.join(os.tmpdir(), "s3db-parquet");
+    this.buffers = /* @__PURE__ */ new Map();
+    this.stats = {
+      recordsWritten: 0,
+      filesCreated: 0,
+      bytesWritten: 0,
+      errors: 0
+    };
+    this.parquetjs = null;
+    this.parquetAvailable = false;
+  }
+  /**
+   * Initialize replicator
+   */
+  async initialize(database) {
+    await super.initialize(database);
+    try {
+      this.parquetjs = await import('parquetjs');
+      this.parquetAvailable = true;
+    } catch (error) {
+      throw new ReplicationError(
+        'Parquet replicator requires the "parquetjs" package. Install it with: npm install parquetjs',
+        {
+          operation: "initialize",
+          replicatorClass: this.name,
+          suggestion: "Run: npm install parquetjs",
+          originalError: error
+        }
+      );
+    }
+    this.outputDriver = OutputDriverFactory.create({
+      ...this.outputConfig,
+      pluginStorage: this.pluginStorage
+    });
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    if (this.verbose) {
+      console.log(`[ParquetReplicator] Initialized with ${this.outputConfig.driver} output`);
+      console.log(`[ParquetReplicator] Compression: ${this.compression}`);
+      if (this.outputConfig.connectionString) {
+        console.log(`[ParquetReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
+      }
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      outputDriver: this.outputConfig.driver,
+      compression: this.compression
+    });
+  }
+  /**
+   * Get file path for resource
+   */
+  _getFilePath(resourceName) {
+    if (this.rotateBy === "date") {
+      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+      return `${resourceName}_${date}.parquet`;
+    } else if (this.rotateBy === "size") {
+      return `${resourceName}.parquet`;
+    } else {
+      return `${resourceName}.parquet`;
+    }
+  }
+  /**
+   * Get temporary file path for parquet generation
+   */
+  _getTempFilePath(resourceName) {
+    const timestamp = Date.now();
+    return path$1.join(this.tempDir, `${resourceName}_${timestamp}.parquet`);
+  }
+  /**
+   * Infer Parquet schema from S3DB data
+   */
+  _inferSchema(data) {
+    const schema = {};
+    for (const [key, value] of Object.entries(data)) {
+      const type = typeof value;
+      if (type === "string") {
+        schema[key] = { type: "UTF8" };
+      } else if (type === "number") {
+        if (Number.isInteger(value)) {
+          schema[key] = { type: "INT64" };
+        } else {
+          schema[key] = { type: "DOUBLE" };
+        }
+      } else if (type === "boolean") {
+        schema[key] = { type: "BOOLEAN" };
+      } else if (Array.isArray(value)) {
+        schema[key] = { type: "JSON" };
+      } else if (type === "object" && value !== null) {
+        schema[key] = { type: "JSON" };
+      } else {
+        schema[key] = { type: "UTF8", optional: true };
+      }
+    }
+    return schema;
+  }
+  /**
+   * Prepare data for Parquet (convert complex types to JSON strings)
+   */
+  _prepareData(data) {
+    const prepared = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === "object" && value !== null) {
+        prepared[key] = JSON.stringify(value);
+      } else {
+        prepared[key] = value;
+      }
+    }
+    return prepared;
+  }
+  /**
+   * Write buffered records to Parquet file
+   */
+  async _flushBuffer(resourceName) {
+    if (!this.parquetAvailable) {
+      throw new ReplicationError("Parquet library not available", {
+        operation: "_flushBuffer",
+        replicatorClass: this.name
+      });
+    }
+    const buffer = this.buffers.get(resourceName);
+    if (!buffer || buffer.length === 0) {
+      return { success: true, recordsWritten: 0 };
+    }
+    let tempFilePath = null;
+    try {
+      const filePath = this._getFilePath(resourceName);
+      tempFilePath = this._getTempFilePath(resourceName);
+      const schema = this._inferSchema(buffer[0]);
+      const parquetSchema = new this.parquetjs.ParquetSchema(schema);
+      const writer = await this.parquetjs.ParquetWriter.openFile(parquetSchema, tempFilePath, {
+        compression: this.compression.toUpperCase(),
+        rowGroupSize: this.rowGroupSize,
+        pageSize: this.pageSize
+      });
+      for (const record of buffer) {
+        const prepared = this._prepareData(record);
+        await writer.appendRow(prepared);
+      }
+      await writer.close();
+      const fileContent = await fs.promises.readFile(tempFilePath);
+      if (this.mode === "append") {
+        const existing = await this.outputDriver.read(filePath);
+        if (existing) {
+          if (this.verbose) {
+            console.log(`[ParquetReplicator] Warning: Overwriting ${filePath} (Parquet doesn't support append)`);
+          }
+        }
+      }
+      await this.outputDriver.write(filePath, fileContent);
+      const recordsWritten = buffer.length;
+      this.stats.recordsWritten += recordsWritten;
+      this.stats.filesCreated++;
+      this.stats.bytesWritten += fileContent.length;
+      this.buffers.set(resourceName, []);
+      if (fs.existsSync(tempFilePath)) {
+        await fs.promises.unlink(tempFilePath);
+      }
+      return {
+        success: true,
+        resourceName,
+        recordsWritten,
+        filePath
+      };
+    } catch (error) {
+      this.stats.errors++;
+      this.emit("error", {
+        replicator: this.name,
+        resourceName,
+        error: error.message
+      });
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try {
+          await fs.promises.unlink(tempFilePath);
+        } catch (unlinkError) {
+        }
+      }
+      throw new ReplicationError(`Failed to write Parquet: ${error.message}`, {
+        operation: "_flushBuffer",
+        replicatorClass: this.name,
+        resourceName,
+        originalError: error
+      });
+    }
+  }
+  /**
+   * Write record to Parquet (buffered)
+   */
+  async replicate(resourceName, operation, data, id) {
+    if (operation === "delete") {
+      return { success: true, skipped: true, reason: "Parquet format does not support deletes" };
+    }
+    if (!this.buffers.has(resourceName)) {
+      this.buffers.set(resourceName, []);
+    }
+    this.buffers.get(resourceName).push(data);
+    if (this.buffers.get(resourceName).length >= this.rowGroupSize) {
+      await this._flushBuffer(resourceName);
+    }
+    return {
+      success: true,
+      resourceName,
+      id,
+      operation,
+      buffered: true
+    };
+  }
+  /**
+   * Write batch of records to Parquet
+   */
+  async replicateBatch(resourceName, records) {
+    if (!records || records.length === 0) {
+      return {
+        success: true,
+        recordsWritten: 0
+      };
+    }
+    if (!this.buffers.has(resourceName)) {
+      this.buffers.set(resourceName, []);
+    }
+    const buffer = this.buffers.get(resourceName);
+    for (const record of records) {
+      if (record.operation !== "delete") {
+        buffer.push(record.data);
+      }
+    }
+    const result = await this._flushBuffer(resourceName);
+    return result;
+  }
+  /**
+   * Test connection (check if output driver is accessible and parquetjs is available)
+   */
+  async testConnection() {
+    if (!this.parquetAvailable) {
+      throw new ReplicationError("Parquet library not available. Install with: npm install parquetjs", {
+        operation: "testConnection",
+        replicatorClass: this.name
+      });
+    }
+    try {
+      const testFile = ".test.parquet";
+      await this.outputDriver.write(testFile, "test");
+      await this.outputDriver.delete(testFile);
+      return true;
+    } catch (error) {
+      throw new ReplicationError(`Output driver not accessible: ${error.message}`, {
+        operation: "testConnection",
+        replicatorClass: this.name,
+        outputDriver: this.outputConfig.driver
+      });
+    }
+  }
+  /**
+   * Get replicator statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      outputDriver: this.outputConfig.driver,
+      outputPath: this.outputConfig.path
+    };
+  }
+  /**
+   * Get status
+   */
+  async getStatus() {
+    return {
+      ...await super.getStatus(),
+      connected: this.parquetAvailable,
+      outputDriver: this.outputConfig.driver,
+      parquetAvailable: this.parquetAvailable,
+      stats: this.stats
+    };
+  }
+  /**
+   * Close and flush all buffers
+   */
+  async close() {
+    for (const resourceName of this.buffers.keys()) {
+      await this._flushBuffer(resourceName);
+    }
+    this.buffers.clear();
+  }
+}
+
+class ExcelReplicator extends BaseReplicator {
+  constructor(config = {}) {
+    super(config);
+    this.outputConfig = config.output || { driver: "s3", path: "exports" };
+    this.filename = config.filename || "export.xlsx";
+    this.mode = config.mode || "append";
+    this.sheetPerResource = config.sheetPerResource !== false;
+    this.freezeHeaders = config.freezeHeaders !== false;
+    this.autoFilter = config.autoFilter !== false;
+    this.autoFitColumns = config.autoFitColumns !== false;
+    this.maxRowsPerSheet = config.maxRowsPerSheet || 1048576;
+    this.formatCurrency = config.formatCurrency || false;
+    this.outputDriver = null;
+    this.tempDir = path$1.join(os.tmpdir(), "s3db-excel");
+    this.buffers = /* @__PURE__ */ new Map();
+    this.workbooks = /* @__PURE__ */ new Map();
+    this.stats = {
+      recordsWritten: 0,
+      filesCreated: 0,
+      sheetsCreated: 0,
+      bytesWritten: 0,
+      errors: 0
+    };
+    this.ExcelJS = null;
+    this.excelAvailable = false;
+  }
+  /**
+   * Initialize replicator
+   */
+  async initialize(database) {
+    await super.initialize(database);
+    try {
+      const module = await import('exceljs');
+      this.ExcelJS = module.default || module;
+      this.excelAvailable = true;
+    } catch (error) {
+      throw new ReplicationError(
+        'Excel replicator requires the "exceljs" package. Install it with: npm install exceljs',
+        {
+          operation: "initialize",
+          replicatorClass: this.name,
+          suggestion: "Run: npm install exceljs",
+          originalError: error
+        }
+      );
+    }
+    this.outputDriver = OutputDriverFactory.create({
+      ...this.outputConfig,
+      pluginStorage: this.pluginStorage
+    });
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    if (this.verbose) {
+      console.log(`[ExcelReplicator] Initialized with ${this.outputConfig.driver} output`);
+      console.log(`[ExcelReplicator] Filename: ${this.filename}`);
+      if (this.outputConfig.connectionString) {
+        console.log(`[ExcelReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
+      }
+    }
+    this.emit("initialized", {
+      replicator: this.name,
+      outputDriver: this.outputConfig.driver,
+      filename: this.filename
+    });
+  }
+  /**
+   * Get file path
+   */
+  _getFilePath() {
+    const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+    const baseFilename = this.filename.replace(".xlsx", "");
+    return `${baseFilename}_${date}.xlsx`;
+  }
+  /**
+   * Get temporary file path for Excel generation
+   */
+  _getTempFilePath() {
+    const timestamp = Date.now();
+    const baseFilename = this.filename.replace(".xlsx", "");
+    return path$1.join(this.tempDir, `${baseFilename}_${timestamp}.xlsx`);
+  }
+  /**
+   * Get or create workbook
+   */
+  async _getWorkbook(filePath) {
+    if (this.workbooks.has(filePath)) {
+      return this.workbooks.get(filePath);
+    }
+    const workbook = new this.ExcelJS.Workbook();
+    workbook.creator = "S3DB Replicator";
+    workbook.created = /* @__PURE__ */ new Date();
+    this.workbooks.set(filePath, workbook);
+    this.stats.filesCreated++;
+    return workbook;
+  }
+  /**
+   * Get or create worksheet
+   */
+  _getWorksheet(workbook, resourceName) {
+    let worksheet = workbook.getWorksheet(resourceName);
+    if (!worksheet) {
+      worksheet = workbook.addWorksheet(resourceName, {
+        views: this.freezeHeaders ? [{ state: "frozen", ySplit: 1 }] : []
+      });
+      this.stats.sheetsCreated++;
+    }
+    return worksheet;
+  }
+  /**
+   * Setup worksheet headers
+   */
+  _setupHeaders(worksheet, columns) {
+    worksheet.addRow(columns);
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE0E0E0" }
+    };
+    if (this.autoFilter) {
+      worksheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: 1, column: columns.length }
+      };
+    }
+    if (this.autoFitColumns) {
+      worksheet.columns = columns.map((col) => ({
+        header: col,
+        key: col,
+        width: Math.max(col.length + 2, 10)
+      }));
+    }
+  }
+  /**
+   * Format cell value based on type
+   */
+  _formatCellValue(value) {
+    if (value === null || value === void 0) {
+      return "";
+    }
+    const type = typeof value;
+    if (type === "object") {
+      if (value instanceof Date) {
+        return value;
+      }
+      if (Array.isArray(value)) {
+        return JSON.stringify(value);
+      }
+      return JSON.stringify(value);
+    }
+    return value;
+  }
+  /**
+   * Add row to worksheet
+   */
+  _addRow(worksheet, data, columns) {
+    const rowData = columns.map((col) => this._formatCellValue(data[col]));
+    worksheet.addRow(rowData);
+  }
+  /**
+   * Write buffered records to Excel
+   */
+  async _flushBuffer(resourceName) {
+    if (!this.excelAvailable) {
+      throw new ReplicationError("Excel library not available", {
+        operation: "_flushBuffer",
+        replicatorClass: this.name
+      });
+    }
+    const buffer = this.buffers.get(resourceName);
+    if (!buffer || buffer.length === 0) {
+      return { success: true, recordsWritten: 0 };
+    }
+    let tempFilePath = null;
+    try {
+      const filePath = this._getFilePath();
+      tempFilePath = this._getTempFilePath();
+      const workbook = await this._getWorkbook(tempFilePath);
+      const worksheet = this._getWorksheet(workbook, resourceName);
+      const columnsSet = /* @__PURE__ */ new Set();
+      for (const record of buffer) {
+        Object.keys(record).forEach((col) => columnsSet.add(col));
+      }
+      const columns = Array.from(columnsSet).sort();
+      if (worksheet.rowCount === 0) {
+        this._setupHeaders(worksheet, columns);
+      }
+      for (const record of buffer) {
+        if (worksheet.rowCount >= this.maxRowsPerSheet) {
+          this.emit("warning", {
+            replicator: this.name,
+            resourceName,
+            message: `Reached max rows per sheet (${this.maxRowsPerSheet})`
+          });
+          break;
+        }
+        this._addRow(worksheet, record, columns);
+      }
+      await workbook.xlsx.writeFile(tempFilePath);
+      const fileContent = await fs.promises.readFile(tempFilePath);
+      await this.outputDriver.write(filePath, fileContent);
+      const recordsWritten = buffer.length;
+      this.stats.recordsWritten += recordsWritten;
+      this.stats.bytesWritten += fileContent.length;
+      this.buffers.set(resourceName, []);
+      this.workbooks.delete(tempFilePath);
+      if (fs.existsSync(tempFilePath)) {
+        await fs.promises.unlink(tempFilePath);
+      }
+      return {
+        success: true,
+        resourceName,
+        recordsWritten,
+        filePath
+      };
+    } catch (error) {
+      this.stats.errors++;
+      this.emit("error", {
+        replicator: this.name,
+        resourceName,
+        error: error.message
+      });
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try {
+          await fs.promises.unlink(tempFilePath);
+        } catch (unlinkError) {
+        }
+      }
+      throw new ReplicationError(`Failed to write Excel: ${error.message}`, {
+        operation: "_flushBuffer",
+        replicatorClass: this.name,
+        resourceName,
+        originalError: error
+      });
+    }
+  }
+  /**
+   * Write record to Excel (buffered)
+   */
+  async replicate(resourceName, operation, data, id) {
+    if (operation === "delete") {
+      return { success: true, skipped: true, reason: "Excel format does not support deletes" };
+    }
+    if (!this.buffers.has(resourceName)) {
+      this.buffers.set(resourceName, []);
+    }
+    this.buffers.get(resourceName).push(data);
+    if (this.buffers.get(resourceName).length >= 1e3) {
+      await this._flushBuffer(resourceName);
+    }
+    return {
+      success: true,
+      resourceName,
+      id,
+      operation,
+      buffered: true
+    };
+  }
+  /**
+   * Write batch of records to Excel
+   */
+  async replicateBatch(resourceName, records) {
+    if (!records || records.length === 0) {
+      return {
+        success: true,
+        recordsWritten: 0
+      };
+    }
+    if (!this.buffers.has(resourceName)) {
+      this.buffers.set(resourceName, []);
+    }
+    const buffer = this.buffers.get(resourceName);
+    for (const record of records) {
+      if (record.operation !== "delete") {
+        buffer.push(record.data);
+      }
+    }
+    const result = await this._flushBuffer(resourceName);
+    return result;
+  }
+  /**
+   * Test connection (check if output driver is accessible and exceljs is available)
+   */
+  async testConnection() {
+    if (!this.excelAvailable) {
+      throw new ReplicationError("Excel library not available. Install with: npm install exceljs", {
+        operation: "testConnection",
+        replicatorClass: this.name
+      });
+    }
+    try {
+      const testFile = ".test.xlsx";
+      await this.outputDriver.write(testFile, "test");
+      await this.outputDriver.delete(testFile);
+      return true;
+    } catch (error) {
+      throw new ReplicationError(`Output driver not accessible: ${error.message}`, {
+        operation: "testConnection",
+        replicatorClass: this.name,
+        outputDriver: this.outputConfig.driver
+      });
+    }
+  }
+  /**
+   * Get replicator statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      outputDriver: this.outputConfig.driver,
+      outputPath: this.outputConfig.path
+    };
+  }
+  /**
+   * Get status
+   */
+  async getStatus() {
+    return {
+      ...await super.getStatus(),
+      connected: this.excelAvailable,
+      outputDriver: this.outputConfig.driver,
+      excelAvailable: this.excelAvailable,
+      stats: this.stats
+    };
+  }
+  /**
+   * Close and flush all buffers
+   */
+  async close() {
+    for (const resourceName of this.buffers.keys()) {
+      await this._flushBuffer(resourceName);
+    }
+    this.buffers.clear();
+    this.workbooks.clear();
+  }
+}
+
 const REPLICATOR_DRIVERS = {
   s3db: S3dbReplicator,
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
   postgres: PostgresReplicator,
-  webhook: WebhookReplicator
+  webhook: WebhookReplicator,
+  csv: CsvReplicator,
+  jsonl: JsonlReplicator,
+  parquet: ParquetReplicator,
+  excel: ExcelReplicator
 };
 function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
@@ -22364,7 +23932,7 @@ function requireBackgroundScheduledTask () {
 	    return (mod && mod.__esModule) ? mod : { "default": mod };
 	};
 	Object.defineProperty(backgroundScheduledTask, "__esModule", { value: true });
-	const path_1 = path$1;
+	const path_1 = path__default;
 	const child_process_1 = require$$1;
 	const create_id_1 = requireCreateId();
 	const stream_1 = require$$3;
@@ -22601,7 +24169,7 @@ function requireNodeCron () {
 		const task_registry_1 = requireTaskRegistry();
 		const pattern_validation_1 = __importDefault(requirePatternValidation());
 		const background_scheduled_task_1 = __importDefault(requireBackgroundScheduledTask());
-		const path_1 = __importDefault(path$1);
+		const path_1 = __importDefault(path__default);
 		const url_1 = require$$5;
 		const registry = new task_registry_1.TaskRegistry();
 		function schedule(expression, func, options) {
@@ -30940,7 +32508,8 @@ class TfStatePlugin extends Plugin {
       this.driverConfig = {};
       this.resourceName = config.resourceName || "plg_tfstate_resources";
       this.stateFilesName = config.stateFilesName || "plg_tfstate_state_files";
-      this.diffsName = config.diffsName || "plg_tfstate_state_diffs";
+      this.diffsName = config.diffsName || config.stateHistoryName || "plg_tfstate_state_diffs";
+      this.stateHistoryName = this.diffsName;
       this.autoSync = config.autoSync || false;
       this.watchPaths = Array.isArray(config.watchPaths) ? config.watchPaths : [];
       this.filters = config.filters || {};
@@ -30958,13 +32527,16 @@ class TfStatePlugin extends Plugin {
     this.watchers = [];
     this.cronTask = null;
     this.lastProcessedSerial = null;
+    this._partitionCache = /* @__PURE__ */ new Map();
     this.stats = {
       statesProcessed: 0,
       resourcesExtracted: 0,
       resourcesInserted: 0,
       diffsCalculated: 0,
       errors: 0,
-      lastProcessedSerial: null
+      lastProcessedSerial: null,
+      partitionCacheHits: 0,
+      partitionQueriesOptimized: 0
     };
   }
   /**
@@ -31002,29 +32574,17 @@ class TfStatePlugin extends Plugin {
         terraformVersion: "string",
         stateVersion: "number|required",
         resourceCount: "number",
-        outputCount: "number",
         sha256Hash: "string|required",
         // SHA256 hash for deduplication
-        // S3-specific metadata (if imported from S3)
-        s3Bucket: "string",
-        s3Key: "string",
-        s3Region: "string",
-        // Import tracking
-        firstImportedAt: "number|required",
-        lastImportedAt: "number|required",
-        importCount: "number|required"
+        importedAt: "number|required"
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          bySourceFile: { fields: { sourceFile: "string" } },
-          bySerial: { fields: { serial: "number" } },
-          byLineage: { fields: { lineage: "string" } },
-          byImportDate: { fields: { firstImportedAt: "number" } },
-          byBucket: { fields: { s3Bucket: "string" } },
-          bySerialAndSource: { fields: { serial: "number", sourceFile: "string" } },
-          bySha256: { fields: { sha256Hash: "string" } }
-        }
+      timestamps: true,
+      asyncPartitions: false,
+      // Sync partitions for immediate query availability
+      partitions: {
+        bySourceFile: { fields: { sourceFile: "string" } },
+        bySerial: { fields: { serial: "number" } },
+        bySha256: { fields: { sha256Hash: "string" } }
       },
       createdBy: "TfStatePlugin"
     });
@@ -31041,25 +32601,22 @@ class TfStatePlugin extends Plugin {
         resourceType: "string|required",
         resourceName: "string|required",
         resourceAddress: "string|required",
-        providerName: "string",
+        providerName: "string|required",
         mode: "string",
         // managed or data
         attributes: "json",
         dependencies: "array",
-        importedAt: "number|required",
-        stateVersion: "number"
+        importedAt: "number|required"
       },
-      options: {
-        timestamps: true,
-        partitions: {
-          byType: { fields: { resourceType: "string" } },
-          bySerial: { fields: { stateSerial: "number" } },
-          bySourceFile: { fields: { sourceFile: "string" } },
-          byTypeAndSerial: { fields: { resourceType: "string", stateSerial: "number" } },
-          bySourceAndSerial: { fields: { sourceFile: "string", stateSerial: "number" } },
-          byMode: { fields: { mode: "string" } },
-          byImportDate: { fields: { importedAt: "number" } }
-        }
+      timestamps: true,
+      asyncPartitions: false,
+      // Sync partitions for immediate query availability
+      partitions: {
+        byType: { fields: { resourceType: "string" } },
+        byProvider: { fields: { providerName: "string" } },
+        bySerial: { fields: { stateSerial: "number" } },
+        bySourceFile: { fields: { sourceFile: "string" } },
+        byProviderAndType: { fields: { providerName: "string", resourceType: "string" } }
       },
       createdBy: "TfStatePlugin"
     });
@@ -31071,10 +32628,6 @@ class TfStatePlugin extends Plugin {
           sourceFile: "string|required",
           oldSerial: "number|required",
           newSerial: "number|required",
-          oldStateFileId: "string",
-          // Foreign key to old state file
-          newStateFileId: "string|required",
-          // Foreign key to new state file
           calculatedAt: "number|required",
           // Summary statistics
           summary: {
@@ -31095,15 +32648,13 @@ class TfStatePlugin extends Plugin {
             }
           }
         },
-        options: {
-          timestamps: true,
-          partitions: {
-            bySourceFile: { fields: { sourceFile: "string" } },
-            byNewSerial: { fields: { newSerial: "number" } },
-            byOldSerial: { fields: { oldSerial: "number" } },
-            bySourceAndNewSerial: { fields: { sourceFile: "string", newSerial: "number" } },
-            byCalculatedDate: { fields: { calculatedAt: "number" } }
-          }
+        timestamps: true,
+        asyncPartitions: false,
+        // Sync partitions for immediate query availability
+        partitions: {
+          bySourceFile: { fields: { sourceFile: "string" } },
+          byNewSerial: { fields: { newSerial: "number" } },
+          byOldSerial: { fields: { oldSerial: "number" } }
         },
         createdBy: "TfStatePlugin"
       });
@@ -31190,7 +32741,7 @@ class TfStatePlugin extends Plugin {
     try {
       const client = options.client || this.database.client;
       const [ok, err, data] = await tryFn(async () => {
-        return await client.getObject({ Bucket: bucket, Key: key });
+        return await client.getObject(key);
       });
       if (!ok) {
         throw new StateFileNotFoundError(sourceFile, {
@@ -31209,15 +32760,22 @@ class TfStatePlugin extends Plugin {
       this._validateState(state, sourceFile);
       this._validateStateVersion(state);
       const sha256Hash = this._calculateSHA256(state);
-      const existingByHash = await this.stateFilesResource.query({ sha256Hash }, { limit: 1 });
+      const partitionName = this._findPartitionByField(this.stateFilesResource, "sha256Hash");
+      let existingByHash;
+      if (partitionName) {
+        this.stats.partitionQueriesOptimized++;
+        existingByHash = await this.stateFilesResource.list({
+          partition: partitionName,
+          partitionValues: { sha256Hash },
+          limit: 1
+        });
+      } else {
+        existingByHash = await this.stateFilesResource.query({ sha256Hash }, { limit: 1 });
+      }
       if (existingByHash.length > 0) {
         const existing = existingByHash[0];
-        await this.stateFilesResource.update(existing.id, {
-          lastImportedAt: Date.now(),
-          importCount: existing.importCount + 1
-        });
         if (this.verbose) {
-          console.log(`[TfStatePlugin] State already imported (SHA256 match), updated import tracking`);
+          console.log(`[TfStatePlugin] State already imported (SHA256 match), skipping`);
         }
         return {
           skipped: true,
@@ -31229,7 +32787,6 @@ class TfStatePlugin extends Plugin {
         };
       }
       const currentTime = Date.now();
-      const region = options.region || this.database.client.config?.region || null;
       const stateFileRecord = {
         id: idGenerator(),
         sourceFile,
@@ -31238,16 +32795,8 @@ class TfStatePlugin extends Plugin {
         terraformVersion: state.terraform_version,
         stateVersion: state.version,
         resourceCount: (state.resources || []).length,
-        outputCount: Object.keys(state.outputs || {}).length,
         sha256Hash,
-        // S3-specific metadata
-        s3Bucket: bucket,
-        s3Key: key,
-        s3Region: region,
-        // Import tracking
-        firstImportedAt: currentTime,
-        lastImportedAt: currentTime,
-        importCount: 1
+        importedAt: currentTime
       };
       const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
         return await this.stateFilesResource.insert(stateFileRecord);
@@ -31309,24 +32858,24 @@ class TfStatePlugin extends Plugin {
    * Import multiple Terraform/OpenTofu states from S3 using glob pattern
    * @param {string} bucket - S3 bucket name
    * @param {string} pattern - Glob pattern for matching state files
-   * @param {Object} options - Optional S3 client override and concurrency settings
+   * @param {Object} options - Optional S3 client override and parallelism settings
    * @returns {Promise<Object>} Consolidated import result with statistics
    */
   async importStatesFromS3Glob(bucket, pattern, options = {}) {
     const startTime = Date.now();
     const client = options.client || this.database.client;
-    const concurrency = options.concurrency || 5;
+    const parallelism = options.parallelism || 5;
     if (this.verbose) {
       console.log(`[TfStatePlugin] Listing S3 objects: s3://${bucket}/${pattern}`);
     }
     try {
       const [ok, err, data] = await tryFn(async () => {
-        const params = { Bucket: bucket };
+        const params = {};
         const prefixMatch = pattern.match(/^([^*?[\]]+)/);
         if (prefixMatch) {
-          params.Prefix = prefixMatch[1];
+          params.prefix = prefixMatch[1];
         }
-        return await client.listObjectsV2(params);
+        return await client.listObjects(params);
       });
       if (!ok) {
         throw new TfStateError(`Failed to list objects in s3://${bucket}`, {
@@ -31351,8 +32900,8 @@ class TfStatePlugin extends Plugin {
       }
       const results = [];
       const files = [];
-      for (let i = 0; i < matchingObjects.length; i += concurrency) {
-        const batch = matchingObjects.slice(i, i + concurrency);
+      for (let i = 0; i < matchingObjects.length; i += parallelism) {
+        const batch = matchingObjects.slice(i, i + parallelism);
         const batchPromises = batch.map(async (obj) => {
           try {
             const result = await this.importStateFromS3(bucket, obj.Key, options);
@@ -31428,12 +32977,8 @@ class TfStatePlugin extends Plugin {
     const existingByHash = await this.stateFilesResource.query({ sha256Hash }, { limit: 1 });
     if (existingByHash.length > 0) {
       const existing = existingByHash[0];
-      await this.stateFilesResource.update(existing.id, {
-        lastImportedAt: Date.now(),
-        importCount: existing.importCount + 1
-      });
       if (this.verbose) {
-        console.log(`[TfStatePlugin] State already imported (SHA256 match), updated import tracking`);
+        console.log(`[TfStatePlugin] State already imported (SHA256 match), skipping`);
       }
       return {
         skipped: true,
@@ -31452,14 +32997,8 @@ class TfStatePlugin extends Plugin {
       terraformVersion: state.terraform_version,
       stateVersion: state.version,
       resourceCount: (state.resources || []).length,
-      outputCount: Object.keys(state.outputs || {}).length,
       sha256Hash,
-      s3Bucket: null,
-      s3Key: null,
-      s3Region: null,
-      firstImportedAt: currentTime,
-      lastImportedAt: currentTime,
-      importCount: 1
+      importedAt: currentTime
     };
     const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
       return await this.stateFilesResource.insert(stateFileRecord);
@@ -31605,8 +33144,8 @@ class TfStatePlugin extends Plugin {
     const resourceType = resource.type;
     const resourceName = resource.name;
     const mode = resource.mode || "managed";
-    const providerName = resource.provider || "";
-    const resourceAddress = `${resourceType}.${resourceName}`;
+    const providerName = this._detectProvider(resourceType);
+    const resourceAddress = mode === "data" ? `data.${resourceType}.${resourceName}` : `${resourceType}.${resourceName}`;
     const attributes = instance.attributes || instance.attributes_flat || {};
     const dependencies = resource.depends_on || instance.depends_on || [];
     return {
@@ -31624,16 +33163,46 @@ class TfStatePlugin extends Plugin {
       mode,
       attributes,
       dependencies,
-      importedAt,
-      stateVersion
+      importedAt
     };
+  }
+  /**
+   * Detect provider from resource type
+   * @private
+   */
+  _detectProvider(resourceType) {
+    if (!resourceType) return "unknown";
+    const prefix = resourceType.split("_")[0];
+    const providerMap = {
+      "aws": "aws",
+      "google": "google",
+      "azurerm": "azure",
+      "azuread": "azure",
+      "azuredevops": "azure",
+      "kubernetes": "kubernetes",
+      "helm": "kubernetes",
+      "random": "random",
+      "null": "null",
+      "local": "local",
+      "time": "time",
+      "tls": "tls",
+      "http": "http",
+      "external": "external",
+      "terraform": "terraform",
+      "datadog": "datadog",
+      "cloudflare": "cloudflare",
+      "github": "github",
+      "gitlab": "gitlab",
+      "vault": "vault"
+    };
+    return providerMap[prefix] || "unknown";
   }
   /**
    * Check if resource should be included based on filters
    * @private
    */
   _shouldIncludeResource(resource) {
-    const { types, exclude, include } = this.filters;
+    const { types, providers, exclude, include } = this.filters;
     if (include && include.length > 0) {
       const matches = include.some((pattern) => {
         return this._matchesPattern(resource.resourceAddress, pattern);
@@ -31642,6 +33211,11 @@ class TfStatePlugin extends Plugin {
     }
     if (types && types.length > 0) {
       if (!types.includes(resource.resourceType)) {
+        return false;
+      }
+    }
+    if (providers && providers.length > 0) {
+      if (!providers.includes(resource.providerName)) {
         return false;
       }
     }
@@ -31664,17 +33238,32 @@ class TfStatePlugin extends Plugin {
   }
   /**
    * Calculate diff between current and previous state
+   * Uses partition optimization for efficient lookup
    * @private
    */
   async _calculateDiff(currentState, sourceFile, currentStateFileId) {
     if (!this.diffsResource) return null;
-    const previousStateFiles = await this.stateFilesResource.query({
-      sourceFile,
-      serial: { $lt: currentState.serial }
-    }, {
-      limit: 1,
-      sort: { serial: -1 }
-    });
+    const partitionName = this._findPartitionByField(this.stateFilesResource, "sourceFile");
+    let previousStateFiles;
+    if (partitionName) {
+      this.stats.partitionQueriesOptimized++;
+      const allFromSource = await this.stateFilesResource.list({
+        partition: partitionName,
+        partitionValues: { sourceFile }
+      });
+      previousStateFiles = allFromSource.filter((sf) => sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
+      if (this.verbose && previousStateFiles.length > 0) {
+        console.log(
+          `[TfStatePlugin] Found previous state using partition ${partitionName}: serial ${previousStateFiles[0].serial}`
+        );
+      }
+    } else {
+      if (this.verbose) {
+        console.log("[TfStatePlugin] No partition found for sourceFile, using full scan with filter");
+      }
+      const allStateFiles = await this.stateFilesResource.list({ limit: 1e4 });
+      previousStateFiles = allStateFiles.filter((sf) => sf.sourceFile === sourceFile && sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
+    }
     if (previousStateFiles.length === 0) {
       return { added: [], modified: [], deleted: [], isFirst: true };
     }
@@ -31688,18 +33277,43 @@ class TfStatePlugin extends Plugin {
     }
     diff.oldSerial = previousSerial;
     diff.newSerial = currentState.serial;
-    diff.oldStateFileId = previousStateFile.id;
-    diff.newStateFileId = currentStateFileId;
     diff.sourceFile = sourceFile;
     return diff;
   }
   /**
    * Compute diff between two state serials
+   * Uses partition optimization for efficient resource lookup
    * @private
    */
   async _computeDiff(oldSerial, newSerial) {
-    const oldResources = await this.resource.query({ stateSerial: oldSerial });
-    const newResources = await this.resource.query({ stateSerial: newSerial });
+    const partitionName = this._findPartitionByField(this.resource, "stateSerial");
+    let oldResources, newResources;
+    if (partitionName) {
+      this.stats.partitionQueriesOptimized += 2;
+      [oldResources, newResources] = await Promise.all([
+        this.resource.list({
+          partition: partitionName,
+          partitionValues: { stateSerial: oldSerial }
+        }),
+        this.resource.list({
+          partition: partitionName,
+          partitionValues: { stateSerial: newSerial }
+        })
+      ]);
+      if (this.verbose) {
+        console.log(
+          `[TfStatePlugin] Diff computation using partition ${partitionName}: ${oldResources.length + newResources.length} resources`
+        );
+      }
+    } else {
+      if (this.verbose) {
+        console.log("[TfStatePlugin] No partition found for stateSerial, using full scan");
+      }
+      [oldResources, newResources] = await Promise.all([
+        this.resource.query({ stateSerial: oldSerial }),
+        this.resource.query({ stateSerial: newSerial })
+      ]);
+    }
     const oldMap = new Map(oldResources.map((r) => [r.resourceAddress, r]));
     const newMap = new Map(newResources.map((r) => [r.resourceAddress, r]));
     const added = [];
@@ -31765,8 +33379,6 @@ class TfStatePlugin extends Plugin {
       sourceFile: diff.sourceFile || sourceFile,
       oldSerial: diff.oldSerial,
       newSerial: diff.newSerial,
-      oldStateFileId: diff.oldStateFileId,
-      newStateFileId: diff.newStateFileId || newStateFileId,
       calculatedAt: Date.now(),
       summary: {
         addedCount: diff.added.length,
@@ -31801,23 +33413,38 @@ class TfStatePlugin extends Plugin {
     return createHash("sha256").update(stateString).digest("hex");
   }
   /**
-   * Insert resources into database
+   * Insert resources into database with controlled parallelism
    * @private
    */
   async _insertResources(resources) {
+    if (resources.length === 0) return [];
     const inserted = [];
-    for (const resource of resources) {
-      const [ok, err, result] = await tryFn(async () => {
-        return await this.resource.insert(resource);
-      });
-      if (ok) {
-        inserted.push(result);
-      } else {
-        this.stats.errors++;
-        if (this.verbose) {
-          console.error(`[TfStatePlugin] Failed to insert resource ${resource.resourceAddress}:`, err);
+    const parallelism = this.database.parallelism || 10;
+    for (let i = 0; i < resources.length; i += parallelism) {
+      const batch = resources.slice(i, i + parallelism);
+      const batchPromises = batch.map(async (resource) => {
+        const [ok, err, result] = await tryFn(async () => {
+          return await this.resource.insert(resource);
+        });
+        if (ok) {
+          return { success: true, result };
+        } else {
+          this.stats.errors++;
+          if (this.verbose) {
+            console.error(`[TfStatePlugin] Failed to insert resource ${resource.resourceAddress}:`, err);
+          }
+          return { success: false, error: err };
         }
-      }
+      });
+      const batchResults = await Promise.all(batchPromises);
+      batchResults.forEach((br) => {
+        if (br.success) {
+          inserted.push(br.result);
+        }
+      });
+    }
+    if (this.verbose && resources.length > parallelism) {
+      console.log(`[TfStatePlugin] Batch inserted ${inserted.length}/${resources.length} resources (parallelism: ${parallelism})`);
     }
     return inserted;
   }
@@ -31879,7 +33506,7 @@ class TfStatePlugin extends Plugin {
             shouldProcess = true;
             newFiles++;
           } else {
-            const lastImported = existing[0].lastImportedAt;
+            const lastImported = existing[0].importedAt;
             const hasChanged = await this.driver.hasBeenModified(
               fileMetadata.path,
               new Date(lastImported)
@@ -31896,11 +33523,6 @@ class TfStatePlugin extends Plugin {
             const sha256Hash = this._calculateSHA256(state);
             const duplicates = await this.stateFilesResource.query({ sha256Hash }, { limit: 1 });
             if (duplicates.length > 0) {
-              const dup = duplicates[0];
-              await this.stateFilesResource.update(dup.id, {
-                lastImportedAt: Date.now(),
-                importCount: dup.importCount + 1
-              });
               if (this.verbose) {
                 console.log(`[TfStatePlugin] Skipped duplicate: ${fileMetadata.path}`);
               }
@@ -31915,14 +33537,8 @@ class TfStatePlugin extends Plugin {
               terraformVersion: state.terraform_version,
               stateVersion: state.version,
               resourceCount: (state.resources || []).length,
-              outputCount: Object.keys(state.outputs || {}).length,
               sha256Hash,
-              s3Bucket: fileMetadata.bucket || null,
-              s3Key: fileMetadata.key || null,
-              s3Region: fileMetadata.region || null,
-              firstImportedAt: currentTime,
-              lastImportedAt: currentTime,
-              importCount: 1
+              importedAt: currentTime
             };
             const [insertOk, insertErr, stateFileResult] = await tryFn(async () => {
               return await this.stateFilesResource.insert(stateFileRecord);
@@ -32053,8 +33669,8 @@ class TfStatePlugin extends Plugin {
     } = options;
     let targetSerial = serial;
     if (!targetSerial) {
-      const queryFilter2 = sourceFile ? { sourceFile } : {};
-      const latestStateFiles = await this.stateFilesResource.query(queryFilter2, {
+      const queryFilter = sourceFile ? { sourceFile } : {};
+      const latestStateFiles = await this.stateFilesResource.query(queryFilter, {
         limit: 1,
         sort: { serial: -1 }
       });
@@ -32065,11 +33681,33 @@ class TfStatePlugin extends Plugin {
         targetSerial = this.lastProcessedSerial || 1;
       }
     }
-    const queryFilter = { stateSerial: targetSerial };
-    if (resourceTypes && resourceTypes.length > 0) {
-      queryFilter.resourceType = { $in: resourceTypes };
+    const partitionName = this._findPartitionByField(this.resource, "stateSerial");
+    let resources;
+    if (partitionName) {
+      this.stats.partitionQueriesOptimized++;
+      resources = await this.resource.list({
+        partition: partitionName,
+        partitionValues: { stateSerial: targetSerial }
+      });
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Export using partition ${partitionName}: ${resources.length} resources`);
+      }
+      if (resourceTypes && resourceTypes.length > 0) {
+        resources = resources.filter((r) => resourceTypes.includes(r.resourceType));
+      }
+    } else {
+      if (this.verbose) {
+        console.log("[TfStatePlugin] No partition found for stateSerial, using full scan");
+      }
+      const allResources = await this.resource.list({ limit: 1e5 });
+      resources = allResources.filter((r) => {
+        if (r.stateSerial !== targetSerial) return false;
+        if (resourceTypes && resourceTypes.length > 0) {
+          return resourceTypes.includes(r.resourceType);
+        }
+        return true;
+      });
     }
-    const resources = await this.resource.query(queryFilter);
     if (this.verbose) {
       console.log(`[TfStatePlugin] Exporting ${resources.length} resources from serial ${targetSerial}`);
     }
@@ -32088,6 +33726,16 @@ class TfStatePlugin extends Plugin {
       resourceMap.get(key).instances.push({
         attributes: resource.attributes,
         dependencies: resource.dependencies || []
+      });
+    }
+    for (const resourceGroup of resourceMap.values()) {
+      resourceGroup.instances.sort((a, b) => {
+        const aId = a.attributes?.id;
+        const bId = b.attributes?.id;
+        if (aId && bId) {
+          return String(aId).localeCompare(String(bId));
+        }
+        return JSON.stringify(a.attributes).localeCompare(JSON.stringify(b.attributes));
       });
     }
     const terraformResources = Array.from(resourceMap.values());
@@ -32160,10 +33808,9 @@ class TfStatePlugin extends Plugin {
     const state = await this.exportState(options);
     const client = options.client || this.database.client;
     await client.putObject({
-      Bucket: bucket,
-      Key: key,
-      Body: JSON.stringify(state, null, 2),
-      ContentType: "application/json"
+      key,
+      body: JSON.stringify(state, null, 2),
+      contentType: "application/json"
     });
     if (this.verbose) {
       console.log(`[TfStatePlugin] State exported to S3: s3://${bucket}/${key}`);
@@ -32217,9 +33864,7 @@ class TfStatePlugin extends Plugin {
         oldSerial: diff.oldSerial,
         newSerial: diff.newSerial,
         calculatedAt: diff.calculatedAt,
-        summary: diff.summary,
-        oldStateFileId: diff.oldStateFileId,
-        newStateFileId: diff.newStateFileId
+        summary: diff.summary
       }));
     }
     return diffs;
@@ -32319,17 +33964,162 @@ class TfStatePlugin extends Plugin {
     return await this._monitorStateFiles();
   }
   /**
-   * Get plugin statistics
-   * @returns {Object} Statistics
+   * Get resources by type (uses partition for fast queries)
+   * @param {string} type - Resource type (e.g., 'aws_instance')
+   * @returns {Promise<Array>} Resources of the specified type
+   *
+   * @example
+   * const ec2Instances = await plugin.getResourcesByType('aws_instance');
    */
-  getStats() {
+  async getResourcesByType(type) {
+    return await this.resource.listPartition({
+      partition: "byType",
+      partitionValues: { resourceType: type }
+    });
+  }
+  /**
+   * Get resources by provider (uses partition for fast queries)
+   * @param {string} provider - Provider name (e.g., 'aws', 'google', 'azure')
+   * @returns {Promise<Array>} Resources from the specified provider
+   *
+   * @example
+   * const awsResources = await plugin.getResourcesByProvider('aws');
+   */
+  async getResourcesByProvider(provider) {
+    return await this.resource.listPartition({
+      partition: "byProvider",
+      partitionValues: { providerName: provider }
+    });
+  }
+  /**
+   * Get resources by provider and type (uses partition for ultra-fast queries)
+   * @param {string} provider - Provider name (e.g., 'aws')
+   * @param {string} type - Resource type (e.g., 'aws_instance')
+   * @returns {Promise<Array>} Resources matching both provider and type
+   *
+   * @example
+   * const awsRds = await plugin.getResourcesByProviderAndType('aws', 'aws_db_instance');
+   */
+  async getResourcesByProviderAndType(provider, type) {
+    return await this.resource.listPartition({
+      partition: "byProviderAndType",
+      partitionValues: {
+        providerName: provider,
+        resourceType: type
+      }
+    });
+  }
+  /**
+   * Get diff between two state serials
+   * Alias for compareStates() for API consistency
+   * @param {string} sourceFile - Source file path
+   * @param {number} oldSerial - Old state serial
+   * @param {number} newSerial - New state serial
+   * @returns {Promise<Object>} Diff object
+   *
+   * @example
+   * const diff = await plugin.getDiff('terraform.tfstate', 1, 2);
+   */
+  async getDiff(sourceFile, oldSerial, newSerial) {
+    return await this.compareStates(sourceFile, oldSerial, newSerial);
+  }
+  /**
+   * Get statistics by provider
+   * @returns {Promise<Object>} Provider counts { aws: 150, google: 30, ... }
+   *
+   * @example
+   * const stats = await plugin.getStatsByProvider();
+   * console.log(`AWS resources: ${stats.aws}`);
+   */
+  async getStatsByProvider() {
+    const allResources = await this.resource.list({ limit: 1e5 });
+    const providerCounts = {};
+    for (const resource of allResources) {
+      const provider = resource.providerName || "unknown";
+      providerCounts[provider] = (providerCounts[provider] || 0) + 1;
+    }
+    return providerCounts;
+  }
+  /**
+   * Get statistics by resource type
+   * @returns {Promise<Object>} Type counts { aws_instance: 20, aws_s3_bucket: 50, ... }
+   *
+   * @example
+   * const stats = await plugin.getStatsByType();
+   * console.log(`EC2 instances: ${stats.aws_instance}`);
+   */
+  async getStatsByType() {
+    const allResources = await this.resource.list({ limit: 1e5 });
+    const typeCounts = {};
+    for (const resource of allResources) {
+      const type = resource.resourceType;
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    }
+    return typeCounts;
+  }
+  /**
+   * Find partition by field name (for efficient queries)
+   * Uses cache to avoid repeated lookups
+   * @private
+   */
+  _findPartitionByField(resource, fieldName) {
+    if (!resource.config.partitions) return null;
+    const cacheKey = `${resource.name}:${fieldName}`;
+    if (this._partitionCache.has(cacheKey)) {
+      this.stats.partitionCacheHits++;
+      return this._partitionCache.get(cacheKey);
+    }
+    let bestPartition = null;
+    let bestFieldCount = Infinity;
+    for (const [partitionName, partitionConfig] of Object.entries(resource.config.partitions)) {
+      if (partitionConfig.fields && fieldName in partitionConfig.fields) {
+        const fieldCount = Object.keys(partitionConfig.fields).length;
+        if (fieldCount < bestFieldCount) {
+          bestPartition = partitionName;
+          bestFieldCount = fieldCount;
+        }
+      }
+    }
+    this._partitionCache.set(cacheKey, bestPartition);
+    return bestPartition;
+  }
+  /**
+   * Get plugin statistics
+   * @returns {Promise<Object>} Statistics with provider/type breakdowns
+   *
+   * @example
+   * const stats = await plugin.getStats();
+   * console.log(`Total: ${stats.totalResources} resources`);
+   * console.log(`Providers:`, stats.providers);
+   */
+  async getStats() {
+    const stateFiles = await this.stateFilesResource.list({ limit: 1e5 });
+    const allResources = await this.resource.list({ limit: 1e5 });
+    const providers = {};
+    const types = {};
+    for (const resource of allResources) {
+      const provider = resource.providerName || "unknown";
+      const type = resource.resourceType;
+      providers[provider] = (providers[provider] || 0) + 1;
+      types[type] = (types[type] || 0) + 1;
+    }
+    const latestSerial = stateFiles.length > 0 ? Math.max(...stateFiles.map((sf) => sf.serial)) : null;
+    const diffsCount = this.trackDiffs && this.diffsResource ? (await this.diffsResource.list({ limit: 1e5 })).length : 0;
     return {
-      ...this.stats,
-      watchersActive: this.watchers.length,
-      lastProcessedSerial: this.lastProcessedSerial,
-      monitoringEnabled: this.monitorEnabled,
-      cronExpression: this.monitorCron,
-      diffsLookback: this.diffsLookback
+      totalStates: stateFiles.length,
+      totalResources: allResources.length,
+      totalDiffs: diffsCount,
+      latestSerial,
+      providers,
+      types,
+      // Runtime stats
+      statesProcessed: this.stats.statesProcessed,
+      resourcesExtracted: this.stats.resourcesExtracted,
+      resourcesInserted: this.stats.resourcesInserted,
+      diffsCalculated: this.stats.diffsCalculated,
+      errors: this.stats.errors,
+      partitionCacheHits: this.stats.partitionCacheHits,
+      partitionQueriesOptimized: this.stats.partitionQueriesOptimized
     };
   }
 }
@@ -33419,5 +35209,5 @@ var metrics = /*#__PURE__*/Object.freeze({
   silhouetteScore: silhouetteScore
 });
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, InvalidResourceItem, MemoryCache, MetadataLimitError, MetricsPlugin, MissingMetadata, MultiBackupDriver, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TfStatePlugin, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, createBackupDriver, createConsumer, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig };
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, CsvReplicator, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, ExcelReplicator, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, InvalidResourceItem, JsonlReplicator, MemoryCache, MetadataLimitError, MetricsPlugin, MissingMetadata, MultiBackupDriver, NoSuchBucket, NoSuchKey, NotFound, ParquetReplicator, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TfStatePlugin, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, createBackupDriver, createConsumer, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig };
 //# sourceMappingURL=s3db.es.js.map

@@ -79,6 +79,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `encodeIPv4()` / `decodeIPv4()` | `src/concerns/ip.js` | `const encoded = encodeIPv4('192.168.1.1')` | IPv4 binary encoding (47% savings) |
 | `encodeIPv6()` / `decodeIPv6()` | `src/concerns/ip.js` | `const encoded = encodeIPv6('2001:db8::1')` | IPv6 binary encoding (44% savings) |
 | `isValidIPv4()` / `isValidIPv6()` | `src/concerns/ip.js` | `const valid = isValidIPv4('192.168.1.1')` | IP address validation |
+| `requirePluginDependency()` | `src/plugins/concerns/plugin-dependencies.js` | `await requirePluginDependency('postgresql-replicator')` | Validate plugin dependencies at runtime |
 
 ### Streams
 
@@ -99,6 +100,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Advanced examples | `docs/examples/e08-e17` | Partitions, versioning, hooks | Complex features |
 | Plugin examples | `docs/examples/e18-e33` | Replicators, caching, queue consumers | Plugin usage |
 | Vector examples | `docs/examples/e41-e43` | RAG chatbot, embeddings | AI/ML integration |
+| Maintenance | `docs/examples/e44` | Orphaned partitions recovery | Data recovery |
+| Plugin dependencies | `docs/examples/e46` | Validate plugin dependencies | Dependency management |
 
 ### Error Classes
 
@@ -287,6 +290,50 @@ if (partitionsUsingField.length > 0) {
 - `costs`: AWS API cost tracking
 - `metrics`: Performance monitoring
 - `fulltext`: Text search
+
+### Plugin Dependency Management
+**Location**: `src/plugins/concerns/plugin-dependencies.js`
+**Purpose**: Validate plugin dependencies at runtime to keep core package lightweight
+
+**Key Functions**:
+```javascript
+// Validate single plugin (throws on error)
+await requirePluginDependency('postgresql-replicator');
+
+// Check without throwing
+const result = await requirePluginDependency('bigquery-replicator', {
+  throwOnError: false
+});
+
+// Check multiple plugins
+const results = await checkPluginDependencies([
+  'postgresql-replicator',
+  'sqs-replicator'
+]);
+
+// Get comprehensive report
+const report = await getPluginDependencyReport();
+```
+
+**Dependency Registry** (`PLUGIN_DEPENDENCIES`):
+| Plugin ID | Package | Version | Install Command |
+|-----------|---------|---------|-----------------|
+| `postgresql-replicator` | `pg` | `^8.0.0` | `pnpm add pg` |
+| `bigquery-replicator` | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
+| `sqs-replicator` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| `sqs-consumer` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| `rabbitmq-consumer` | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+
+**Integration**: All plugins with external dependencies automatically validate on `initialize()` or `start()`
+
+**Benefits**:
+- ✅ Core package stays lightweight (~500KB)
+- ✅ Users only install dependencies they need
+- ✅ Clear error messages with install commands
+- ✅ Version compatibility checking
+- ✅ Graceful degradation for missing dependencies
+
+**Example**: See `docs/examples/e46-plugin-dependency-validation.js`
 
 ### Resource Origin Tracking (createdBy)
 **Purpose**: Track who created a resource to enable plugin-aware behavior

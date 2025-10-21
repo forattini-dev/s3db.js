@@ -1,342 +1,298 @@
-# 🏗️ TfState Plugin - Track Infrastructure Changes
+# 🏗️ TfState Plugin - Inventário de Infraestrutura Terraform
 
 ## ⚡ TL;DR
 
-**Track and query** your Terraform/OpenTofu infrastructure state as s3db resources with **automatic change detection** and **cron-based monitoring**.
+**Importe e consulte** seus estados do Terraform/OpenTofu como recursos s3db com **tracking automático de mudanças** e **queries inteligentes por partições**.
 
 ```javascript
-// NEW: Auto-monitoring with drivers
+import { TfStatePlugin } from 's3db.js/plugins';
+
 const plugin = new TfStatePlugin({
-  driver: 's3',  // or 'filesystem'
-  config: {
-    connectionString: 's3://key:secret@terraform-states/prod',
-    selector: '**/*.tfstate'
-  },
-  monitor: {
-    enabled: true,
-    cron: '*/5 * * * *'  // Check every 5 minutes
-  },
-  diffs: {
-    enabled: true,
-    lookback: 50  // Keep last 50 changes
+  filters: {
+    types: ['aws_instance', 'aws_db_instance', 'aws_s3_bucket'],
+    providers: ['aws']  // aws, google, azure, kubernetes
   }
 });
 
 await db.usePlugin(plugin);
 
-// Get diff history
-const timeline = await plugin.getDiffTimeline('terraform.tfstate', { lookback: 20 });
-console.log(`Total added: ${timeline.summary.totalAdded}`);
-console.log(`Total deleted: ${timeline.summary.totalDeleted}`);
+// Importar state local
+await plugin.importState('./terraform.tfstate');
+
+// Importar do S3
+await plugin.importStateFromS3('prod/terraform.tfstate');
+
+// Importar múltiplos states (glob)
+await plugin.importStatesGlob('./terraform/**/*.tfstate');
+await plugin.importStatesFromS3Glob('environments/**/terraform.tfstate');
+
+// Queries inteligentes usando partitions
+const ec2Instances = await plugin.getResourcesByType('aws_instance');
+const awsResources = await plugin.getResourcesByProvider('aws');
+const rdsInstances = await plugin.getResourcesByProviderAndType('aws', 'aws_db_instance');
+
+// Estatísticas
+const stats = await plugin.getStats();
+console.log(`Total: ${stats.totalResources} resources`);
+console.log(`Providers: ${Object.keys(stats.providers).length}`);
+
+// Tracking de mudanças
+const diff = await plugin.getDiff('terraform.tfstate', 1, 2);
+console.log(`Added: ${diff.summary.addedCount}`);
+console.log(`Modified: ${diff.summary.modifiedCount}`);
+console.log(`Deleted: ${diff.summary.deletedCount}`);
 ```
 
-**Key Features:**
-- ✅ **Auto-monitoring**: Cron-based checks for state file changes
-- ✅ **Drivers**: S3 (with connection strings) or Filesystem
-- ✅ **Diff tracking**: Compare any two versions with lookback
-- ✅ **SHA256 deduplication**: Never import the same state twice
-- ✅ **Glob patterns**: `**/*.tfstate` imports
-- ✅ **Manual triggers**: `await plugin.triggerMonitoring()`
+**Features Principais:**
+- ✅ **Import flexível**: Local files, S3, glob patterns
+- ✅ **Queries inteligentes**: Partitions por tipo, provider, serial
+- ✅ **Diff tracking**: Compare versões e veja mudanças
+- ✅ **Inventário completo**: Catálogo de toda infraestrutura
+- ✅ **Auditoria**: Histórico de todas as mudanças
+- ✅ **Provider detection**: Identifica aws, google, azure, kubernetes
+- ✅ **SHA256 deduplication**: Nunca importa o mesmo state 2x
+- ✅ **Filtros**: Por tipo de recurso e provider
 
 ---
 
-## What Does This Plugin Do?
+## 📦 O Que Este Plugin Faz?
 
-You use **Terraform** or **OpenTofu** to manage your infrastructure (servers, databases, load balancers, etc). Every time you run `terraform apply`, Terraform saves the current state of your infrastructure in a `.tfstate` file.
+Você usa **Terraform** ou **OpenTofu** para gerenciar sua infraestrutura. Cada vez que roda `terraform apply`, o Terraform salva o estado atual em um arquivo `.tfstate`.
 
-**The problem**: These `.tfstate` files are hard to query. You can't easily answer questions like:
+**O problema**: Esses arquivos são difíceis de consultar. Você não consegue responder facilmente:
 
-- How many EC2 servers am I running right now?
-- What changed between yesterday and today?
-- When was this S3 bucket created?
-- Which resources were deleted last week?
+- Quantos servidores EC2 estou rodando?
+- O que mudou entre ontem e hoje?
+- Quais recursos foram deletados na última semana?
+- Quantos recursos do Google Cloud tenho?
 
-**The solution**: The TfState Plugin reads these `.tfstate` files and transforms them into **queryable data** inside s3db. You can now run SQL-like queries on your infrastructure.
+**A solução**: O TfState Plugin lê esses arquivos `.tfstate` e transforma em **dados consultáveis** dentro do s3db.
 
-## Why Would You Use This?
+---
 
-### Scenario 1: Auditing and Compliance
+## 🗄️ Os 3 Resources Criados
 
-You need to prove to auditors that no servers were created without approval:
+Quando você instala este plugin, ele cria automaticamente **3 resources s3db**:
 
+### 1. `plg_tfstate_states` - Metadados dos State Files
+
+Armazena informações sobre cada arquivo `.tfstate` importado.
+
+**Campos principais:**
+- `sourceFile` - Caminho ou S3 URI do state (`prod/terraform.tfstate`)
+- `serial` - Número serial do state
+- `lineage` - Identificador de lineage do Terraform
+- `terraformVersion` - Versão do Terraform/OpenTofu
+- `resourceCount` - Quantos recursos neste state
+- `sha256Hash` - Hash para deduplicação
+- `importedAt` - Quando foi importado
+
+**Partitions:**
+- `bySourceFile` - Query por arquivo
+- `bySerial` - Query por versão
+
+**Exemplo:**
 ```javascript
-// Find all servers created in the last week
-const newServers = await plugin.resource.query({
+// Ver todos os states importados
+const states = await plugin.stateFilesResource.list();
+
+// Buscar última versão de um state específico
+const latest = await plugin.stateFilesResource.listPartition({
+  partition: 'bySourceFile',
+  partitionValues: { sourceFile: 'prod/terraform.tfstate' }
+});
+```
+
+### 2. `plg_tfstate_resources` - Recursos Extraídos
+
+O resource principal contendo **todos os recursos de infraestrutura** (EC2, RDS, S3, etc).
+
+**Campos principais:**
+- `resourceType` - Tipo do recurso (`aws_instance`, `aws_s3_bucket`)
+- `resourceName` - Nome dado no Terraform
+- `resourceAddress` - Endereço completo (`aws_instance.web_server`)
+- `providerName` - Provider (`aws`, `google`, `azure`, `kubernetes`)
+- `attributes` - Todos os atributos do recurso (JSON)
+- `mode` - `managed` ou `data`
+- `stateSerial` - De qual versão veio
+- `sourceFile` - De qual arquivo veio
+
+**Partitions (sync para queries rápidas):**
+- `byType` - Query por tipo de recurso
+- `byProvider` - Query por provider
+- `bySerial` - Query por versão
+- `bySourceFile` - Query por arquivo
+- `byProviderAndType` - Query por provider + tipo
+
+**Exemplo:**
+```javascript
+// Todos os EC2 (usando partition)
+const ec2 = await plugin.getResourcesByType('aws_instance');
+
+// Todos os recursos AWS (usando partition)
+const aws = await plugin.getResourcesByProvider('aws');
+
+// Todos os RDS da AWS (partition combinada)
+const rds = await plugin.getResourcesByProviderAndType('aws', 'aws_db_instance');
+
+// Query complexa
+const prodInstances = await plugin.resource.query({
   resourceType: 'aws_instance',
-  importedAt: { $gte: Date.now() - 7 * 24 * 60 * 60 * 1000 }
-});
-
-console.log(`${newServers.length} servers created in the last 7 days`);
-newServers.forEach(s => {
-  console.log(`- ${s.resourceName} (${s.attributes.instance_type})`);
-});
-```
-
-### Scenario 2: Cost Analysis
-
-You want to know how many RDS instances you have and their types:
-
-```javascript
-// Count RDS instances by type
-const rdsInstances = await plugin.resource.query({
-  resourceType: 'aws_db_instance'
-});
-
-const byType = {};
-rdsInstances.forEach(db => {
-  const type = db.attributes.instance_class;
-  byType[type] = (byType[type] || 0) + 1;
-});
-
-console.log('RDS by type:', byType);
-// { 'db.t3.micro': 5, 'db.m5.large': 2, 'db.r5.xlarge': 1 }
-```
-
-### Scenario 3: Track Changes
-
-See what changed between two infrastructure versions:
-
-```javascript
-// Import new state
-await plugin.importStateFromS3('terraform-bucket', 'prod/terraform.tfstate');
-
-// Plugin automatically calculates the diff
-// Get the latest change
-const latestDiff = await plugin.diffsResource.query({}, {
-  limit: 1,
-  sort: { calculatedAt: -1 }
-});
-
-console.log('Latest change:');
-console.log(`  ${latestDiff[0].summary.addedCount} resources created`);
-console.log(`  ${latestDiff[0].summary.modifiedCount} resources modified`);
-console.log(`  ${latestDiff[0].summary.deletedCount} resources deleted`);
-```
-
-### Scenario 4: Automatic Monitoring (NEW!)
-
-Watch for infrastructure changes automatically:
-
-```javascript
-// NEW! Cron-based monitoring
-const plugin = new TfStatePlugin({
-  driver: 's3',
-  config: {
-    connectionString: 's3://key:secret@terraform-states/production',
-    selector: '**/*.tfstate'
-  },
-  monitor: {
-    enabled: true,
-    cron: '*/10 * * * *'  // Check every 10 minutes
-  },
-  diffs: {
-    enabled: true,
-    lookback: 50  // Keep history of 50 changes
-  }
-});
-
-// Plugin now monitors automatically and emits events
-plugin.on('stateFileProcessed', (event) => {
-  console.log(`New version detected: serial ${event.serial}`);
-  console.log(`  ${event.resourcesExtracted} resources processed`);
-
-  // Send alert to Slack/Discord/etc
-  if (event.resourcesExtracted > 100) {
-    sendAlert(`⚠️ Large change detected! ${event.resourcesExtracted} resources`);
-  }
-});
-```
-
-## How It Works
-
-The plugin transforms this:
-
-```javascript
-// terraform.tfstate (giant, hard-to-read JSON file)
-{
-  "version": 4,
-  "serial": 42,
-  "resources": [
-    {
-      "type": "aws_instance",
-      "name": "web_server",
-      "instances": [{
-        "attributes": {
-          "id": "i-1234567",
-          "instance_type": "t3.micro",
-          "ami": "ami-abc123"
-        }
-      }]
-    },
-    // ... hundreds or thousands of resources ...
-  ]
-}
-```
-
-Into this:
-
-```javascript
-// Queryable data in s3db
-await plugin.resource.query({ resourceType: 'aws_instance' })
-// [
-//   {
-//     id: 'xyz789',
-//     resourceType: 'aws_instance',
-//     resourceName: 'web_server',
-//     stateSerial: 42,
-//     attributes: {
-//       id: 'i-1234567',
-//       instance_type: 't3.micro',
-//       ami: 'ami-abc123'
-//     }
-//   }
-// ]
-```
-
-## 📦 The 3 Resources Created
-
-**IMPORTANT**: When you install this plugin, it automatically creates **3 s3db resources** that you can query:
-
-### 1. **`plugin.resource`** - Infrastructure Resources
-
-This is the main resource containing all your infrastructure resources (EC2 instances, S3 buckets, RDS databases, etc).
-
-**What's inside:**
-- `resourceType` - Type of resource (e.g., `aws_instance`, `aws_s3_bucket`)
-- `resourceName` - Name given in Terraform
-- `resourceAddress` - Full address (e.g., `aws_instance.web_server`)
-- `attributes` - All the resource attributes (instance type, AMI, tags, etc.)
-- `stateSerial` - Which version of the state this came from
-- `sourceFile` - Which .tfstate file this came from
-
-**Example queries:**
-
-```javascript
-// Count all EC2 instances
-const ec2Count = await plugin.resource.count({
-  resourceType: 'aws_instance'
-});
-console.log(`Total EC2 instances: ${ec2Count}`);
-
-// Find all resources with a specific tag
-const prodResources = await plugin.resource.query({
   'attributes.tags.Environment': 'production'
 });
-console.log(`Production resources: ${prodResources.length}`);
-
-// List all S3 buckets and their encryption status
-const buckets = await plugin.resource.query({
-  resourceType: 'aws_s3_bucket'
-});
-
-buckets.forEach(bucket => {
-  const encrypted = bucket.attributes.server_side_encryption_configuration ? 'Yes' : 'No';
-  console.log(`${bucket.resourceName}: encrypted=${encrypted}`);
-});
-
-// Find resources created in the last 24 hours
-const recentResources = await plugin.resource.query({
-  importedAt: { $gte: Date.now() - 86400000 }
-});
 ```
 
-### 2. **`plugin.stateFilesResource`** - State File Metadata
+### 3. `plg_tfstate_diffs` - Histórico de Mudanças
 
-This resource tracks metadata about each `.tfstate` file that was imported.
+Rastreia o que mudou entre versões de states (se diff tracking estiver habilitado).
 
-**What's inside:**
-- `sourceFile` - Path or S3 URI of the state file
-- `serial` - Serial number of the state
-- `lineage` - Terraform lineage identifier
-- `terraformVersion` - Which Terraform/OpenTofu version created this
-- `resourceCount` - How many resources in this state
-- `sha256Hash` - Hash for deduplication
-- `firstImportedAt` / `lastImportedAt` - When this was imported
-- `importCount` - How many times we've seen this exact state
+**Campos principais:**
+- `sourceFile` - Qual state file
+- `oldSerial` / `newSerial` - Quais versões foram comparadas
+- `summary` - Estatísticas rápidas
+  - `addedCount` - Quantos recursos foram criados
+  - `modifiedCount` - Quantos foram modificados
+  - `deletedCount` - Quantos foram deletados
+- `changes` - Arrays detalhados
+  - `added` - Lista de recursos criados
+  - `modified` - Lista de recursos modificados (com detalhes dos campos alterados)
+  - `deleted` - Lista de recursos deletados
+- `calculatedAt` - Quando o diff foi calculado
 
-**Example queries:**
+**Partitions:**
+- `bySourceFile` - Diffs de um state específico
+- `byOldSerial` / `byNewSerial` - Diffs envolvendo versões específicas
 
+**Exemplo:**
 ```javascript
-// Get all state files we're tracking
-const allStateFiles = await plugin.stateFilesResource.list();
-console.log(`Tracking ${allStateFiles.length} state files`);
-
-// Find the latest version of a specific state file
-const latestProd = await plugin.stateFilesResource.query({
-  sourceFile: 'production/terraform.tfstate'
-}, {
-  limit: 1,
-  sort: { serial: -1 }
-});
-
-console.log(`Latest production state: serial ${latestProd[0].serial}`);
-console.log(`Contains ${latestProd[0].resourceCount} resources`);
-console.log(`Terraform version: ${latestProd[0].terraformVersion}`);
-
-// Find states imported in the last week
-const recentStates = await plugin.stateFilesResource.query({
-  lastImportedAt: { $gte: Date.now() - 7 * 86400000 }
-});
-
-recentStates.forEach(state => {
-  console.log(`${state.sourceFile}: serial ${state.serial} (${state.resourceCount} resources)`);
-});
-
-// Check for duplicate imports (same SHA256)
-const duplicates = await plugin.stateFilesResource.query({
-  importCount: { $gt: 1 }
-});
-console.log(`${duplicates.length} states were re-imported`);
-```
-
-### 3. **`plugin.diffsResource`** - Change History
-
-This resource tracks what changed between state file versions (only if `diffs.enabled: true`).
-
-**What's inside:**
-- `sourceFile` - Which state file this diff is for
-- `oldSerial` / `newSerial` - Which versions were compared
-- `summary` - Quick stats (`addedCount`, `modifiedCount`, `deletedCount`)
-- `changes` - Detailed arrays of what was added, modified, deleted
-- `calculatedAt` - When this diff was calculated
-
-**Example queries:**
-
-```javascript
-// Get latest changes across all state files
-const latestChanges = await plugin.diffsResource.query({}, {
+// Ver últimas mudanças
+const recentDiffs = await plugin.diffsResource.query({}, {
   limit: 10,
   sort: { calculatedAt: -1 }
 });
 
-latestChanges.forEach(diff => {
-  console.log(`\n${diff.sourceFile} (serial ${diff.oldSerial} → ${diff.newSerial}):`);
-  console.log(`  ✅ ${diff.summary.addedCount} added`);
-  console.log(`  ✏️  ${diff.summary.modifiedCount} modified`);
-  console.log(`  ❌ ${diff.summary.deletedCount} deleted`);
+// Ver mudanças de um state específico
+const prodDiffs = await plugin.diffsResource.listPartition({
+  partition: 'bySourceFile',
+  partitionValues: { sourceFile: 'prod/terraform.tfstate' }
 });
 
-// Find significant changes (>10 resources modified)
-const bigChanges = await plugin.diffsResource.query({
-  'summary.modifiedCount': { $gte: 10 }
+// Detalhes de um diff
+const diff = await plugin.getDiff('terraform.tfstate', 100, 101);
+console.log('Recursos adicionados:');
+diff.changes.added.forEach(r => {
+  console.log(`  + ${r.type}.${r.name}`);
+});
+```
+
+---
+
+## 🚀 Quick Start
+
+### Instalação Básica
+
+```javascript
+import { Database } from 's3db.js';
+import { TfStatePlugin } from 's3db.js/plugins';
+
+const db = new Database({
+  connectionString: process.env.S3DB_CONNECTION
 });
 
-console.log(`Found ${bigChanges.length} deployments with 10+ changes`);
+await db.connect();
 
-// Get detailed changes for a specific diff
-const diff = await plugin.diffsResource.get(diffId);
+// Configuração simples
+const plugin = new TfStatePlugin({
+  // Opcional: filtrar por tipos específicos
+  filters: {
+    types: ['aws_instance', 'aws_db_instance', 'aws_s3_bucket'],
+    providers: ['aws', 'google']
+  }
+});
 
-console.log('\nAdded resources:');
+await db.usePlugin(plugin);
+```
+
+### Importar States
+
+```javascript
+// 1. Arquivo local
+await plugin.importState('./terraform.tfstate');
+
+// 2. Do S3 (usa database.client)
+await plugin.importStateFromS3('prod/terraform.tfstate');
+
+// 3. Múltiplos arquivos locais (glob)
+await plugin.importStatesGlob('./terraform/**/*.tfstate');
+
+// 4. Múltiplos do S3 (glob)
+await plugin.importStatesFromS3Glob('environments/**/terraform.tfstate');
+```
+
+### Consultar Recursos
+
+```javascript
+// Por tipo (usa partition - rápido!)
+const ec2 = await plugin.getResourcesByType('aws_instance');
+const buckets = await plugin.getResourcesByType('aws_s3_bucket');
+
+// Por provider (usa partition - rápido!)
+const awsResources = await plugin.getResourcesByProvider('aws');
+const gcpResources = await plugin.getResourcesByProvider('google');
+
+// Por provider + tipo (partition combinada - ultra rápido!)
+const awsRds = await plugin.getResourcesByProviderAndType('aws', 'aws_db_instance');
+const gcpVMs = await plugin.getResourcesByProviderAndType('google', 'google_compute_instance');
+
+// Query manual
+const prodEC2 = await plugin.resource.query({
+  resourceType: 'aws_instance',
+  'attributes.tags.Environment': 'production'
+});
+```
+
+### Ver Estatísticas
+
+```javascript
+// Overview geral
+const stats = await plugin.getStats();
+console.log(`Total states: ${stats.totalStates}`);
+console.log(`Total resources: ${stats.totalResources}`);
+console.log(`Latest serial: ${stats.latestSerial}`);
+console.log('Providers:', stats.providers);  // { aws: 150, google: 30 }
+console.log('Types:', stats.types);          // { aws_instance: 20, aws_s3_bucket: 50 }
+
+// Por provider
+const byProvider = await plugin.getStatsByProvider();
+console.log(byProvider);  // { aws: 150, google: 30, azure: 10 }
+
+// Por tipo
+const byType = await plugin.getStatsByType();
+console.log(byType);  // { aws_instance: 20, aws_s3_bucket: 50, ... }
+```
+
+### Tracking de Mudanças
+
+```javascript
+// Importar 2 versões
+await plugin.importState('./terraform-v1.tfstate');
+await plugin.importState('./terraform-v2.tfstate');
+
+// Ver diff entre versões
+const diff = await plugin.getDiff('terraform.tfstate', 1, 2);
+
+console.log('Mudanças:');
+console.log(`  ✅ ${diff.summary.addedCount} recursos adicionados`);
+console.log(`  ✏️  ${diff.summary.modifiedCount} recursos modificados`);
+console.log(`  ❌ ${diff.summary.deletedCount} recursos deletados`);
+
+// Detalhes
+console.log('\nRecursos adicionados:');
 diff.changes.added.forEach(r => {
   console.log(`  + ${r.type}.${r.name}`);
 });
 
-console.log('\nDeleted resources:');
-diff.changes.deleted.forEach(r => {
-  console.log(`  - ${r.type}.${r.name}`);
-});
-
-console.log('\nModified resources:');
+console.log('\nRecursos modificados:');
 diff.changes.modified.forEach(r => {
   console.log(`  ~ ${r.type}.${r.name}`);
   r.changes.forEach(c => {
@@ -344,512 +300,365 @@ diff.changes.modified.forEach(r => {
   });
 });
 
-// Aggregate changes over time
-const allDiffs = await plugin.diffsResource.list({ limit: 100 });
-
-const totals = allDiffs.reduce((acc, diff) => {
-  acc.added += diff.summary.addedCount || 0;
-  acc.modified += diff.summary.modifiedCount || 0;
-  acc.deleted += diff.summary.deletedCount || 0;
-  return acc;
-}, { added: 0, modified: 0, deleted: 0 });
-
-console.log('\nTotal changes in last 100 deployments:');
-console.log(`  Added: ${totals.added}`);
-console.log(`  Modified: ${totals.modified}`);
-console.log(`  Deleted: ${totals.deleted}`);
-```
-
-### Summary: Which Resource Should I Use?
-
-- **Want to query infrastructure?** → Use `plugin.resource`
-  - "How many EC2 instances do I have?"
-  - "Which S3 buckets are not encrypted?"
-  - "List all RDS instances in production"
-
-- **Want to see state file history?** → Use `plugin.stateFilesResource`
-  - "What's the latest serial number?"
-  - "How many times has this state been imported?"
-  - "Which Terraform version is being used?"
-
-- **Want to see what changed?** → Use `plugin.diffsResource`
-  - "What was added in the last deployment?"
-  - "Show me all deletions from last week"
-  - "Which resource was modified between serial 100 and 110?"
-
-## Quick Setup
-
-### Option 1: Local Files (Development)
-
-```javascript
-import { Database } from 's3db.js';
-import { TfStatePlugin } from 's3db.js/plugins';
-
-const db = new Database({
-  bucketName: 'my-bucket',
-  region: 'us-east-1'
-});
-
-await db.connect();
-
-// Simple config for local files
-const plugin = new TfStatePlugin({
-  driver: 'filesystem',
-  config: {
-    basePath: './terraform',  // Folder with .tfstate files
-    selector: '**/*.tfstate'  // Find all .tfstate files
-  },
-  monitor: {
-    enabled: true,
-    cron: '*/1 * * * *'  // Check every 1 minute
-  }
-});
-
-await db.usePlugin(plugin);
-
-// Done! Plugin is now monitoring the ./terraform folder
-console.log('Monitoring .tfstate files in ./terraform folder');
-```
-
-### Option 2: S3 Backend (Production)
-
-```javascript
-// Config to read from Terraform's S3 backend
-const plugin = new TfStatePlugin({
-  driver: 's3',
-  config: {
-    // Connect directly to Terraform bucket
-    connectionString: process.env.TERRAFORM_BACKEND_URL,
-    // Or: 's3://key:secret@terraform-states/production'
-
-    // Find all .tfstate files
-    selector: '**/*.tfstate'
-  },
-  monitor: {
-    enabled: true,
-    cron: '*/5 * * * *'  // Every 5 minutes
-  },
-  diffs: {
-    enabled: true,
-    lookback: 100  // Keep history of 100 changes
-  }
-});
-
-await db.usePlugin(plugin);
-
-// Manual trigger if needed
-await plugin.triggerMonitoring();
-```
-
-## Common Queries
-
-### View All Resources
-
-```javascript
-const allResources = await plugin.resource.list({ limit: 1000 });
-console.log(`Total: ${allResources.length} resources`);
-```
-
-### Filter by Type
-
-```javascript
-// All EC2 instances
-const ec2 = await plugin.resource.query({
-  resourceType: 'aws_instance'
-});
-
-// All S3 buckets
-const buckets = await plugin.resource.query({
-  resourceType: 'aws_s3_bucket'
-});
-
-// All RDS databases
-const databases = await plugin.resource.query({
-  resourceType: 'aws_db_instance'
+console.log('\nRecursos deletados:');
+diff.changes.deleted.forEach(r => {
+  console.log(`  - ${r.type}.${r.name}`);
 });
 ```
 
-### View Change History (NEW!)
+---
+
+## 📚 Use Cases Reais
+
+### 1. Dashboard de Infraestrutura
 
 ```javascript
-// Last 10 changes
-const recentChanges = await plugin.getDiffsWithLookback('terraform.tfstate', {
-  lookback: 10
-});
+async function getInfraDashboard() {
+  const stats = await plugin.getStats();
 
-recentChanges.forEach(diff => {
-  console.log(`\nSerial ${diff.oldSerial} → ${diff.newSerial}:`);
-  console.log(`  ✅ ${diff.summary.addedCount} added`);
-  console.log(`  ✏️  ${diff.summary.modifiedCount} modified`);
-  console.log(`  ❌ ${diff.summary.deletedCount} deleted`);
-});
-```
+  console.log('📊 Infrastructure Overview:');
+  console.log(`  Total Resources: ${stats.totalResources}`);
+  console.log(`  Latest Version: serial ${stats.latestSerial}`);
+  console.log('');
 
-### Timeline of Changes (NEW!)
-
-```javascript
-// View progression of changes over time
-const timeline = await plugin.getDiffTimeline('terraform.tfstate', {
-  lookback: 30  // Last 30 changes
-});
-
-console.log('Timeline:');
-console.log(`  Period: serial ${timeline.summary.serialRange.oldest} to ${timeline.summary.serialRange.newest}`);
-console.log(`  Total resources added: ${timeline.summary.totalAdded}`);
-console.log(`  Total resources deleted: ${timeline.summary.totalDeleted}`);
-console.log(`  Net change: ${timeline.summary.totalAdded - timeline.summary.totalDeleted}`);
-```
-
-### Compare Two Specific Versions (NEW!)
-
-```javascript
-// Compare serial 100 with serial 110
-const diff = await plugin.compareStates('terraform.tfstate', 100, 110);
-
-console.log('Changes between version 100 and 110:');
-console.log('\nAdded Resources:');
-diff.added.forEach(r => console.log(`  + ${r.type}.${r.name}`));
-
-console.log('\nDeleted Resources:');
-diff.deleted.forEach(r => console.log(`  - ${r.type}.${r.name}`));
-
-console.log('\nModified Resources:');
-diff.modified.forEach(r => {
-  console.log(`  ~ ${r.type}.${r.name}`);
-  r.changes.forEach(c => {
-    console.log(`      ${c.field}: ${c.oldValue} → ${c.newValue}`);
+  console.log('By Provider:');
+  Object.entries(stats.providers).forEach(([provider, count]) => {
+    console.log(`  ${provider}: ${count} resources`);
   });
-});
-```
+  console.log('');
 
-## Real-World Use Cases
+  console.log('Top 10 Resource Types:');
+  const topTypes = Object.entries(stats.types)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
 
-### 1. Infrastructure Dashboard
-
-```javascript
-// Create a real-time dashboard
-async function getDashboard() {
-  const stats = {
-    ec2: await plugin.resource.count({ resourceType: 'aws_instance' }),
-    rds: await plugin.resource.count({ resourceType: 'aws_db_instance' }),
-    s3: await plugin.resource.count({ resourceType: 'aws_s3_bucket' }),
-    lambda: await plugin.resource.count({ resourceType: 'aws_lambda_function' })
-  };
-
-  console.log('📊 Infrastructure:');
-  console.log(`  🖥️  EC2 Instances: ${stats.ec2}`);
-  console.log(`  💾 RDS Databases: ${stats.rds}`);
-  console.log(`  🪣 S3 Buckets: ${stats.s3}`);
-  console.log(`  ⚡ Lambda Functions: ${stats.lambda}`);
-
-  return stats;
+  topTypes.forEach(([type, count]) => {
+    console.log(`  ${type}: ${count}`);
+  });
 }
 
-// Update every 5 minutes
-setInterval(getDashboard, 5 * 60 * 1000);
+// Atualizar a cada 5 minutos
+setInterval(getInfraDashboard, 5 * 60 * 1000);
 ```
 
-### 2. Automatic Alerts
+### 2. Auditoria e Compliance
 
 ```javascript
-plugin.on('stateFileProcessed', async (event) => {
-  // Get most recent diff
-  const diffs = await plugin.diffsResource.query({}, {
-    limit: 1,
-    sort: { calculatedAt: -1 }
+// Ver todos os recursos criados na última semana
+const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+
+const recentResources = await plugin.resource.query({
+  importedAt: { $gte: weekAgo }
+});
+
+console.log(`${recentResources.length} recursos criados nos últimos 7 dias:`);
+recentResources.forEach(r => {
+  console.log(`  ${r.resourceType}.${r.resourceName} (serial ${r.stateSerial})`);
+});
+
+// Ver mudanças grandes (>10 recursos)
+const bigChanges = await plugin.diffsResource.query({
+  $or: [
+    { 'summary.addedCount': { $gte: 10 } },
+    { 'summary.deletedCount': { $gte: 10 } }
+  ]
+});
+
+console.log(`\n${bigChanges.length} mudanças grandes detectadas`);
+```
+
+### 3. Análise de Custos
+
+```javascript
+// Listar todos os recursos "caros"
+const expensiveTypes = [
+  'aws_db_instance',
+  'aws_elasticache_cluster',
+  'aws_redshift_cluster',
+  'google_compute_instance'
+];
+
+for (const type of expensiveTypes) {
+  const resources = await plugin.getResourcesByType(type);
+
+  console.log(`\n${type}: ${resources.length} instances`);
+  resources.forEach(r => {
+    const size = r.attributes.instance_class || r.attributes.machine_type || 'unknown';
+    console.log(`  - ${r.resourceName}: ${size}`);
   });
+}
+```
 
-  if (diffs.length === 0) return;
+### 4. Inventário Multi-Provider
 
-  const lastDiff = diffs[0];
+```javascript
+// Ver recursos de todos os providers
+const providers = ['aws', 'google', 'azure', 'kubernetes'];
 
-  // Alert if many things changed
-  if (lastDiff.summary.deletedCount > 10) {
-    await sendSlackAlert({
-      text: `⚠️ ALERT: ${lastDiff.summary.deletedCount} resources were DELETED!`,
-      resources: lastDiff.changes.deleted.map(r => r.address)
+for (const provider of providers) {
+  const resources = await plugin.getResourcesByProvider(provider);
+
+  if (resources.length > 0) {
+    console.log(`\n${provider.toUpperCase()}: ${resources.length} resources`);
+
+    // Agrupar por tipo
+    const byType = {};
+    resources.forEach(r => {
+      byType[r.resourceType] = (byType[r.resourceType] || 0) + 1;
+    });
+
+    Object.entries(byType).forEach(([type, count]) => {
+      console.log(`  ${type}: ${count}`);
     });
   }
-
-  // Alert if expensive resources were created
-  const added = lastDiff.changes.added;
-  const expensiveTypes = ['aws_db_instance', 'aws_elasticache_cluster'];
-  const expensiveAdded = added.filter(r => expensiveTypes.includes(r.type));
-
-  if (expensiveAdded.length > 0) {
-    await sendSlackAlert({
-      text: `💰 Expensive resources were created:`,
-      resources: expensiveAdded.map(r => `${r.type}.${r.name}`)
-    });
-  }
-});
-```
-
-### 3. Backup and Disaster Recovery
-
-```javascript
-// Automatic backup of all states
-async function backupAllStates() {
-  const stateFiles = await plugin.stateFilesResource.list();
-
-  for (const state of stateFiles) {
-    const backupKey = `backups/${state.serial}-${Date.now()}.tfstate`;
-
-    await plugin.exportStateToS3(
-      'disaster-recovery-bucket',
-      backupKey,
-      { serial: state.serial }
-    );
-
-    console.log(`✅ Backup: ${state.sourceFile} → ${backupKey}`);
-  }
-}
-
-// Run backup daily
-setInterval(backupAllStates, 24 * 60 * 60 * 1000);
-```
-
-### 4. Trend Analysis
-
-```javascript
-// See how infrastructure grew over time
-async function analyzeGrowth() {
-  const stateFiles = await plugin.stateFilesResource.list();
-
-  // Sort by serial
-  stateFiles.sort((a, b) => a.serial - b.serial);
-
-  console.log('📈 Infrastructure Growth:\n');
-
-  for (const state of stateFiles.slice(-10)) {  // Last 10 versions
-    const date = new Date(state.lastImportedAt).toLocaleDateString();
-    console.log(`Serial ${state.serial} (${date}): ${state.resourceCount} resources`);
-  }
-
-  // Calculate growth rate
-  const first = stateFiles[0];
-  const last = stateFiles[stateFiles.length - 1];
-  const growth = ((last.resourceCount - first.resourceCount) / first.resourceCount) * 100;
-
-  console.log(`\n📊 Total growth: ${growth.toFixed(1)}%`);
 }
 ```
 
-## Complete Configuration
+---
+
+## ⚙️ Configuração Completa
 
 ```javascript
 const plugin = new TfStatePlugin({
-  // === DRIVER (how to access files) ===
-  driver: 's3',  // or 'filesystem'
+  // === NOMES DOS RESOURCES (opcional) ===
+  resourceName: 'terraform_resources',        // Default: plg_tfstate_resources
+  stateFilesName: 'terraform_state_files',    // Default: plg_tfstate_states
+  diffsName: 'terraform_diffs',               // Default: plg_tfstate_diffs
 
-  config: {
-    // S3 Driver:
-    connectionString: 's3://accessKey:secretKey@bucket/prefix?region=us-east-1',
+  // === DIFF TRACKING (opcional) ===
+  trackDiffs: true,  // Default: true
 
-    // Filesystem Driver:
-    // basePath: './terraform-states',
-
-    // Both:
-    selector: '**/*.tfstate'  // Glob pattern
-  },
-
-  // === TABLE NAMES ===
-  resources: {
-    stateFiles: 'infra_state_files',    // File metadata
-    resources: 'infra_resources',        // Extracted resources
-    diffs: 'infra_changes'               // Change history
-  },
-
-  // === AUTOMATIC MONITORING ===
-  monitor: {
-    enabled: true,
-    cron: '*/10 * * * *'  // Every 10 minutes
-  },
-
-  // === CHANGE TRACKING ===
-  diffs: {
-    enabled: true,
-    lookback: 100  // Keep last 100 changes
-  },
-
-  // === FILTERS (optional) ===
+  // === FILTROS (opcional) ===
   filters: {
-    // Import only these types
+    // Importar apenas estes tipos
     types: ['aws_instance', 'aws_db_instance', 'aws_s3_bucket'],
 
-    // Exclude data sources
+    // Importar apenas estes providers
+    providers: ['aws', 'google'],
+
+    // Excluir data sources
     exclude: ['data.*']
   },
 
   // === DEBUG ===
-  verbose: true  // Log operations
+  verbose: true  // Default: false - logs detalhados
 });
 ```
-
-## Plugin Events
-
-The plugin emits events you can listen to:
-
-```javascript
-// When a new or modified file is found
-plugin.on('stateFileProcessed', (event) => {
-  console.log(`✅ Processed: ${event.path}`);
-  console.log(`   Serial: ${event.serial}`);
-  console.log(`   Resources: ${event.resourcesExtracted}`);
-});
-
-// When monitoring completes a round
-plugin.on('monitoringCompleted', (result) => {
-  console.log(`🔍 Monitoring completed:`);
-  console.log(`   Files checked: ${result.totalFiles}`);
-  console.log(`   New: ${result.newFiles}`);
-  console.log(`   Modified: ${result.changedFiles}`);
-});
-
-// When processing errors occur
-plugin.on('processingError', (error) => {
-  console.error(`❌ Error: ${error.path}`);
-  console.error(`   Message: ${error.error}`);
-});
-```
-
-## Before vs After
-
-### Before (without plugin)
-
-```bash
-# To know how many servers you have:
-$ cat terraform.tfstate | jq '.resources[] | select(.type=="aws_instance")' | wc -l
-
-# To see changes:
-$ terraform plan
-# (only shows future changes, not history)
-
-# To see history:
-$ git log terraform.tfstate
-# (hard to read, no queries)
-```
-
-### After (with plugin)
-
-```javascript
-// How many servers?
-const count = await plugin.resource.count({ resourceType: 'aws_instance' });
-
-// Changes in the last 7 days?
-const diffs = await plugin.diffsResource.query({
-  calculatedAt: { $gte: Date.now() - 7 * 24 * 60 * 60 * 1000 }
-});
-
-// Complete history?
-const timeline = await plugin.getDiffTimeline('terraform.tfstate', {
-  lookback: 100
-});
-
-// Real-time dashboard?
-setInterval(async () => {
-  const stats = {
-    ec2: await plugin.resource.count({ resourceType: 'aws_instance' }),
-    rds: await plugin.resource.count({ resourceType: 'aws_db_instance' })
-  };
-  updateDashboard(stats);
-}, 60000);
-```
-
-## Common Questions
-
-### Does the plugin modify my .tfstate files?
-
-**No!** The plugin only **reads** the files. It never modifies the original `.tfstate` files. Data is imported into s3db where you can query it, but the original files remain untouched.
-
-### Does it work with OpenTofu?
-
-**Yes!** OpenTofu uses the same `.tfstate` file format as Terraform. The plugin works perfectly with both.
-
-### Can I use this in production?
-
-**Yes!** The plugin:
-- Never modifies original files
-- Has SHA256 deduplication (doesn't import the same file twice)
-- Supports automatic monitoring
-- Emits events for integration
-- Is fully backward compatible
-
-### How do I update the data?
-
-You have two options:
-
-1. **Automatic**: Set `monitor.enabled: true` and the plugin checks by itself
-2. **Manual**: Call `await plugin.triggerMonitoring()` whenever you want
-
-### Does it consume a lot of space?
-
-Not much. The plugin stores:
-- File metadata (a few KB)
-- Extracted resources (depends on quantity)
-- Diffs (only changes, doesn't duplicate data)
-
-Uses SHA256 deduplication - identical files are not reimported.
-
-## API Reference (NEW Methods)
-
-### `getDiffsWithLookback(sourceFile, options)`
-
-Get last N diffs for a state file.
-
-```javascript
-const diffs = await plugin.getDiffsWithLookback('terraform.tfstate', {
-  lookback: 20,           // Number of diffs to retrieve
-  includeDetails: true    // Include detailed changes
-});
-```
-
-### `getDiffTimeline(sourceFile, options)`
-
-Get timeline with cumulative statistics.
-
-```javascript
-const timeline = await plugin.getDiffTimeline('terraform.tfstate', {
-  lookback: 50
-});
-console.log(timeline.summary);  // Cumulative stats
-console.log(timeline.diffs);    // Chronological history
-```
-
-### `compareStates(sourceFile, oldSerial, newSerial)`
-
-Compare two specific state versions.
-
-```javascript
-const diff = await plugin.compareStates('terraform.tfstate', 100, 110);
-console.log(diff.added);     // Resources added
-console.log(diff.modified);  // Resources modified
-console.log(diff.deleted);   // Resources deleted
-```
-
-### `triggerMonitoring()`
-
-Manually trigger a monitoring check.
-
-```javascript
-const result = await plugin.triggerMonitoring();
-console.log(`Processed ${result.newFiles} new files`);
-console.log(`Found ${result.changedFiles} changed files`);
-```
-
-## Next Steps
-
-1. **See complete example**: `docs/examples/e48-tfstate-advanced-monitoring.js`
-2. **Understand partitions** (for faster queries): `docs/partitioning.md`
-3. **Integrate with other plugins**: Use with `CachePlugin`, `AuditPlugin`, etc.
-
-## Compatibility
-
-- ✅ Terraform (all versions)
-- ✅ OpenTofu (all versions)
-- ✅ State versions: v3, v4
-- ✅ Backends: local, S3, anywhere accessible
 
 ---
 
-**💡 Tip**: Start simple with `driver: 'filesystem'` and `monitor.cron: '*/1 * * * *'` to see the plugin working locally. Then migrate to S3 in production.
+## 🔌 API Completa
+
+### Métodos de Importação
+
+#### `importState(filePath, options)`
+Importa um arquivo `.tfstate` local.
+
+```javascript
+await plugin.importState('./terraform.tfstate');
+await plugin.importState('./terraform.tfstate', {
+  sourceFile: 'custom-name.tfstate'  // Override source file name
+});
+```
+
+#### `importStateFromS3(key, options)`
+Importa um state do S3 (usa o database.client).
+
+```javascript
+await plugin.importStateFromS3('prod/terraform.tfstate');
+await plugin.importStateFromS3('environments/staging/terraform.tfstate');
+```
+
+#### `importStatesGlob(pattern, options)`
+Importa múltiplos states locais usando glob pattern.
+
+```javascript
+await plugin.importStatesGlob('./terraform/**/*.tfstate');
+await plugin.importStatesGlob('./environments/*/terraform.tfstate');
+```
+
+#### `importStatesFromS3Glob(pattern, options)`
+Importa múltiplos states do S3 usando glob pattern.
+
+```javascript
+await plugin.importStatesFromS3Glob('**/terraform.tfstate');
+await plugin.importStatesFromS3Glob('environments/*/terraform.tfstate');
+```
+
+### Métodos de Query
+
+#### `getResourcesByType(type)`
+Busca recursos por tipo usando partition (rápido).
+
+```javascript
+const ec2 = await plugin.getResourcesByType('aws_instance');
+const buckets = await plugin.getResourcesByType('aws_s3_bucket');
+```
+
+#### `getResourcesByProvider(provider)`
+Busca recursos por provider usando partition (rápido).
+
+```javascript
+const aws = await plugin.getResourcesByProvider('aws');
+const gcp = await plugin.getResourcesByProvider('google');
+```
+
+#### `getResourcesByProviderAndType(provider, type)`
+Busca recursos por provider + tipo usando partition combinada (ultra rápido).
+
+```javascript
+const awsRds = await plugin.getResourcesByProviderAndType('aws', 'aws_db_instance');
+const gcpVMs = await plugin.getResourcesByProviderAndType('google', 'google_compute_instance');
+```
+
+### Métodos de Diff
+
+#### `getDiff(sourceFile, oldSerial, newSerial)`
+Compara duas versões específicas de um state.
+
+```javascript
+const diff = await plugin.getDiff('terraform.tfstate', 100, 101);
+console.log(diff.summary);    // { addedCount, modifiedCount, deletedCount }
+console.log(diff.changes);    // { added: [], modified: [], deleted: [] }
+```
+
+#### `getLatestDiff(sourceFile)`
+Pega o diff mais recente de um state.
+
+```javascript
+const latest = await plugin.getLatestDiff('terraform.tfstate');
+```
+
+#### `getAllDiffs(sourceFile)`
+Pega todos os diffs de um state.
+
+```javascript
+const allDiffs = await plugin.getAllDiffs('terraform.tfstate');
+```
+
+### Métodos de Estatísticas
+
+#### `getStats()`
+Estatísticas gerais de toda a infraestrutura.
+
+```javascript
+const stats = await plugin.getStats();
+// {
+//   totalStates: 5,
+//   totalResources: 150,
+//   totalDiffs: 20,
+//   latestSerial: 45,
+//   providers: { aws: 120, google: 30 },
+//   types: { aws_instance: 20, aws_s3_bucket: 50, ... }
+// }
+```
+
+#### `getStatsByProvider()`
+Agrupa recursos por provider.
+
+```javascript
+const byProvider = await plugin.getStatsByProvider();
+// { aws: 120, google: 30, azure: 0 }
+```
+
+#### `getStatsByType()`
+Agrupa recursos por tipo.
+
+```javascript
+const byType = await plugin.getStatsByType();
+// { aws_instance: 20, aws_s3_bucket: 50, ... }
+```
+
+---
+
+## 🎯 Provider Detection
+
+O plugin detecta automaticamente o provider de cada recurso:
+
+```javascript
+// AWS
+aws_instance → provider: 'aws'
+aws_s3_bucket → provider: 'aws'
+
+// Google Cloud
+google_compute_instance → provider: 'google'
+google_storage_bucket → provider: 'google'
+
+// Azure
+azurerm_virtual_machine → provider: 'azure'
+azurerm_storage_account → provider: 'azure'
+
+// Kubernetes
+kubernetes_deployment → provider: 'kubernetes'
+kubernetes_service → provider: 'kubernetes'
+
+// Outros
+random_id → provider: 'random'
+null_resource → provider: 'null'
+```
+
+---
+
+## ❓ FAQ
+
+### O plugin modifica meus arquivos .tfstate?
+
+**Não!** O plugin apenas **lê** os arquivos. Ele nunca modifica os arquivos `.tfstate` originais.
+
+### Funciona com OpenTofu?
+
+**Sim!** OpenTofu usa o mesmo formato `.tfstate` que o Terraform. O plugin funciona perfeitamente com ambos.
+
+### Posso usar em produção?
+
+**Sim!** O plugin:
+- Nunca modifica arquivos originais
+- Tem deduplicação SHA256 (não importa o mesmo arquivo 2x)
+- Usa partitions para queries rápidas
+- É totalmente backward compatible
+
+### Como atualizar os dados?
+
+Você tem que chamar manualmente os métodos de import quando quiser atualizar:
+
+```javascript
+// Manual
+await plugin.importState('./terraform.tfstate');
+await plugin.importStateFromS3('prod/terraform.tfstate');
+
+// Ou criar um cron job/scheduler externo
+setInterval(async () => {
+  await plugin.importStateFromS3('prod/terraform.tfstate');
+}, 5 * 60 * 1000);  // A cada 5 minutos
+```
+
+### Quanto espaço consome?
+
+Depende da quantidade de recursos:
+- Metadados de states: alguns KB por state
+- Recursos extraídos: depende do número de recursos
+- Diffs: apenas as mudanças, não duplica dados
+
+A deduplicação SHA256 garante que states idênticos não sejam reimportados.
+
+---
+
+## 📖 Próximos Passos
+
+1. **Ver exemplo completo**: `docs/examples/e48-tfstate-basic.js`
+2. **Entender partitions**: `docs/partitioning.md`
+3. **Integrar com outros plugins**: Combine com `CachePlugin`, `AuditPlugin`, etc.
+
+---
+
+## ✅ Compatibilidade
+
+- ✅ Terraform (todas as versões)
+- ✅ OpenTofu (todas as versões)
+- ✅ State versions: v3, v4
+- ✅ Backends: local, S3, qualquer lugar acessível
+- ✅ Providers: AWS, Google Cloud, Azure, Kubernetes, e outros
+
+---
+
+**💡 Dica**: Comece importando um state local para testar. Depois migre para S3 em produção.
