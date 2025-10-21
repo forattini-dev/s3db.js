@@ -1,38 +1,89 @@
 # 🔌 s3db.js Plugin System
 
 <p align="center">
-  <strong>Comprehensive guide to all s3db.js plugins</strong><br>
-  <em>Extend your database with powerful features</em>
+  <strong>Extend your database with powerful plugins</strong><br>
+  <em>18 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
+
+---
+
+## 🎯 All Available Plugins
+
+| Plugin | Purpose | Use Cases | Docs |
+|--------|---------|-----------|------|
+| **[💾 Cache](./cache.md)** | Multi-driver caching (memory/S3/filesystem) | Performance, cost reduction | [→](./cache.md) |
+| **[💰 Costs](./costs.md)** | Real-time AWS S3 cost tracking | Budget monitoring, optimization | [→](./costs.md) |
+| **[📝 Audit](./audit.md)** | Comprehensive operation logging | Compliance, security | [→](./audit.md) |
+| **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
+| **[💾 Backup](./backup.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](./backup.md) |
+| **[🔄 Replicator](./replicator.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator.md) |
+| **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
+| **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
+| **[⚡ Eventual Consistency](./eventual-consistency.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](./eventual-consistency.md) |
+| **[🤖 State Machine](./state-machine.md)** | Finite state machine workflows | Business processes, automation | [→](./state-machine.md) |
+| **[⏰ Scheduler](./scheduler.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler.md) |
+| **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
+| **[🔒 S3Queue](./s3-queue.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue.md) |
+| **[🌐 API](./api.md)** | Auto-generated REST API with OpenAPI | RESTful endpoints, Swagger UI | [→](./api.md) |
+| **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
+| **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
+| **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
+| **[🏗️ Terraform State](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
+
+**💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
 
 ---
 
 ## 📋 Table of Contents
 
-- [🚀 Overview](#-overview)
+- [🚀 Quick Start](#-quick-start)
 - [🏗️ Plugin Architecture](#️-plugin-architecture)
-- [📦 Getting Started](#-getting-started)
-- [🧩 Available Plugins](#-available-plugins)
 - [⏰ Plugin Timing](#-plugin-timing-before-vs-after-resource-creation)
-- [🔧 Plugin Development](#-plugin-development)
 - [💡 Plugin Combinations](#-plugin-combinations)
+- [🔧 Build Your Own Plugin](#-build-your-own-plugin)
 - [🎯 Best Practices](#-best-practices)
 - [🔍 Troubleshooting](#-troubleshooting)
 - [📚 Additional Resources](#-additional-resources)
 
 ---
 
-## 🚀 Overview
+## 🚀 Quick Start
 
-The s3db.js plugin system provides a powerful and flexible way to extend database functionality. Plugins can intercept operations, add new methods to resources, track metrics, implement caching, and much more.
+```javascript
+import { S3db, CachePlugin, AuditPlugin, MetricsPlugin } from 's3db.js';
 
-### Key Capabilities
+const db = new S3db({
+  connectionString: "s3://KEY:SECRET@BUCKET/path",
+  plugins: [
+    // Performance
+    new CachePlugin({ driver: 'memory', config: { maxSize: 1000 } }),
 
-- **🔌 Extensible**: Add new functionality without modifying core code
-- **🎯 Flexible**: Plugins can be added before or after resources exist
-- **🔄 Composable**: Combine multiple plugins for complex workflows
-- **📊 Observable**: Rich event system for monitoring and integration
-- **🛠️ Maintainable**: Clean separation of concerns
+    // Monitoring
+    new AuditPlugin({ trackOperations: ['insert', 'update', 'delete'] }),
+    new MetricsPlugin({ trackLatency: true }),
+
+    // Cost tracking (no config needed)
+    CostsPlugin
+  ]
+});
+
+await db.connect();
+
+// Plugins automatically enhance all resources
+const users = await db.createResource({
+  name: 'users',
+  attributes: { email: 'string|required' }
+});
+
+// Cache, audit, metrics all work automatically!
+await users.insert({ email: 'user@example.com' });
+```
+
+**What just happened?**
+- ✅ Every read is cached automatically
+- ✅ Every operation is logged for audit
+- ✅ Performance metrics are tracked
+- ✅ AWS costs are calculated in real-time
 
 ---
 
@@ -557,74 +608,6 @@ Some plugins provide static factory methods:
 await database.usePlugin(CostsPlugin); // Static plugin
 ```
 
----
-
-## 🧩 Available Plugins
-
-### Core Plugins
-
-| Plugin | Description | Type | Use Cases |
-|--------|-------------|------|-----------|
-| **[💾 Cache Plugin](./cache.md)** | Driver-based caching system | Instance | Performance optimization, cost reduction |
-| **[💰 Costs Plugin](./costs.md)** | Real-time AWS S3 cost tracking | Static | Cost monitoring, budget management |
-| **[📝 Audit Plugin](./audit.md)** | Comprehensive audit logging | Instance | Compliance, security monitoring |
-| **[📊 Metrics Plugin](./metrics.md)** | Performance monitoring and analytics | Instance | Performance tracking, insights |
-
-### Data Management Plugins
-
-| Plugin | Description | Type | Use Cases |
-|--------|-------------|------|-----------|
-| **[💾 Backup Plugin](./backup.md)** | Multi-destination backup system | Instance | Data protection, disaster recovery |
-| **[🔄 Replicator Plugin](./replicator.md)** | Real-time data replication | Instance | Data synchronization, multi-environment |
-| **[📥 Importer Plugin](./importer.md)** | Multi-format data import (JSON, CSV) | Instance | Data migration, bulk import, ETL |
-| **[📤 Export Replicators](./replicator.md#-csv-replicator)** | Auto-export to CSV/JSONL/Parquet/Excel | Instance | Analytics, reporting, data warehouses |
-| **[🔍 FullText Plugin](./fulltext.md)** | Full-text search capabilities | Instance | Search functionality, content discovery |
-| **[⚡ Eventual Consistency Plugin](./eventual-consistency.md)** | Transaction-based eventual consistency | Instance | Counters, balances, accumulator fields |
-
-### Workflow Plugins
-
-| Plugin | Description | Type | Use Cases |
-|--------|-------------|------|-----------|
-| **[🤖 State Machine Plugin](./state-machine.md)** | Finite state machine workflows | Instance | Business processes, workflow management |
-| **[⏰ Scheduler Plugin](./scheduler.md)** | Cron-based job scheduling | Instance | Automated tasks, maintenance jobs |
-| **[📬 Queue Consumer Plugin](./queue-consumer.md)** | External queue message processing | Instance | Event-driven architecture, integration |
-| **[🔒 S3Queue Plugin](./s3-queue.md)** | Distributed queue processing with zero race conditions | Instance | Task queues, message processing, worker pools |
-
-### Plugin Quick Reference
-
-```javascript
-// Core functionality
-import { 
-  CachePlugin,      // 💾 Intelligent caching
-  CostsPlugin,      // 💰 Cost tracking  
-  AuditPlugin,      // 📝 Operation logging
-  MetricsPlugin     // 📊 Performance monitoring
-} from 's3db.js';
-
-// Data management
-import {
-  BackupPlugin,              // 💾 Data protection
-  ReplicatorPlugin,          // 🔄 Data replication
-  ImporterPlugin,            // 📥 Multi-format import
-  // Export Replicators (via ReplicatorPlugin):
-  // - CSV Replicator        // 📄 CSV exports
-  // - JSONL Replicator      // 📋 JSONL exports
-  // - Parquet Replicator    // 📦 Parquet exports
-  // - Excel Replicator      // 📊 Excel exports
-  FullTextPlugin,            // 🔍 Search capabilities
-  EventualConsistencyPlugin  // ⚡ Eventual consistency
-} from 's3db.js';
-
-// Workflow automation
-import {
-  StateMachinePlugin,   // 🤖 Business workflows
-  SchedulerPlugin,      // ⏰ Job scheduling
-  QueueConsumerPlugin,  // 📬 Message processing
-  S3QueuePlugin         // 🔒 Distributed queue processing
-} from 's3db.js';
-```
-
----
 
 ## ⏰ Plugin Timing: Before vs After Resource Creation
 
@@ -735,7 +718,9 @@ class MyResourcePlugin extends Plugin {
 
 ---
 
-## 🔧 Plugin Development
+## 🔧 Build Your Own Plugin
+
+Building a plugin is easier than you think! Here's a complete plugin in ~50 lines:
 
 ### Creating a Custom Plugin
 
