@@ -12,9 +12,8 @@ var promises = require('fs/promises');
 var fs = require('fs');
 var promises$1 = require('stream/promises');
 var path$1 = require('path');
-var zlib = require('zlib');
 var require$$3 = require('stream');
-var zlib$1 = require('node:zlib');
+var zlib = require('node:zlib');
 var os = require('os');
 var jsonStableStringify = require('json-stable-stringify');
 var os$1 = require('node:os');
@@ -2552,6 +2551,18 @@ function notFound(resource, id) {
     details: { resource, id }
   });
 }
+function payloadTooLarge(size, limit) {
+  return error("Request payload too large", {
+    status: 413,
+    code: "PAYLOAD_TOO_LARGE",
+    details: {
+      receivedSize: size,
+      maxSize: limit,
+      receivedMB: (size / 1024 / 1024).toFixed(2),
+      maxMB: (limit / 1024 / 1024).toFixed(2)
+    }
+  });
+}
 
 const errorStatusMap = {
   "ValidationError": 400,
@@ -3752,6 +3763,37 @@ function generateOpenAPISpec(database, config = {}) {
     name: "Health",
     description: "Health check endpoints for monitoring and Kubernetes probes"
   });
+  const metricsPlugin = database.plugins?.metrics || database.plugins?.MetricsPlugin;
+  if (metricsPlugin && metricsPlugin.config?.prometheus?.enabled) {
+    const metricsPath = metricsPlugin.config.prometheus.path || "/metrics";
+    const isIntegrated = metricsPlugin.config.prometheus.mode !== "standalone";
+    if (isIntegrated) {
+      spec.paths[metricsPath] = {
+        get: {
+          tags: ["Monitoring"],
+          summary: "Prometheus Metrics",
+          description: "Exposes application metrics in Prometheus text-based exposition format for monitoring and observability. Metrics include operation counts, durations, errors, uptime, and resource statistics.",
+          responses: {
+            200: {
+              description: "Metrics in Prometheus format",
+              content: {
+                "text/plain": {
+                  schema: {
+                    type: "string",
+                    example: '# HELP s3db_operations_total Total number of operations by type and resource\n# TYPE s3db_operations_total counter\ns3db_operations_total{operation="insert",resource="cars"} 1523\ns3db_operations_total{operation="update",resource="cars"} 342\n\n# HELP s3db_operation_duration_seconds Average operation duration in seconds\n# TYPE s3db_operation_duration_seconds gauge\ns3db_operation_duration_seconds{operation="insert",resource="cars"} 0.045\n\n# HELP s3db_operation_errors_total Total number of operation errors\n# TYPE s3db_operation_errors_total counter\ns3db_operation_errors_total{operation="insert",resource="cars"} 12\n'
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      spec.tags.push({
+        name: "Monitoring",
+        description: "Monitoring and observability endpoints (Prometheus)"
+      });
+    }
+  }
   return spec;
 }
 
@@ -3776,6 +3818,8 @@ class ApiServer {
       auth: options.auth || {},
       docsEnabled: options.docsEnabled !== false,
       // Enable /docs by default
+      maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
+      // 10MB default
       apiInfo: {
         title: options.apiTitle || "s3db.js API",
         version: options.apiVersion || "1.0.0",
@@ -3795,6 +3839,21 @@ class ApiServer {
   _setupRoutes() {
     this.options.middlewares.forEach((middleware) => {
       this.app.use("*", middleware);
+    });
+    this.app.use("*", async (c, next) => {
+      const method = c.req.method;
+      if (["POST", "PUT", "PATCH"].includes(method)) {
+        const contentLength = c.req.header("content-length");
+        if (contentLength) {
+          const size = parseInt(contentLength);
+          if (size > this.options.maxBodySize) {
+            const response = payloadTooLarge(size, this.options.maxBodySize);
+            c.header("Connection", "close");
+            return c.json(response, response._status);
+          }
+        }
+      }
+      await next();
     });
     this.app.get("/health/live", (c) => {
       const response = success({
@@ -6319,7 +6378,7 @@ class BackupPlugin extends Plugin {
       await promises.writeFile(targetPath, archiveJson, "utf8");
     } else {
       const output = fs.createWriteStream(targetPath);
-      const gzip = zlib$1.createGzip({ level: 6 });
+      const gzip = zlib.createGzip({ level: 6 });
       await promises$1.pipeline(
         async function* () {
           yield Buffer.from(archiveJson, "utf8");
@@ -6407,7 +6466,7 @@ class BackupPlugin extends Plugin {
       let archiveData = "";
       if (this.config.compression !== "none") {
         const input = fs.createReadStream(backupPath);
-        const gunzip = zlib$1.createGunzip();
+        const gunzip = zlib.createGunzip();
         const chunks = [];
         await new Promise((resolve, reject) => {
           input.pipe(gunzip).on("data", (chunk) => chunks.push(chunk)).on("end", resolve).on("error", reject);
@@ -6778,7 +6837,7 @@ class S3Cache extends Cache {
         originalSize: jsonString.length
       };
     }
-    const compressed = zlib$1.gzipSync(jsonString).toString("base64");
+    const compressed = zlib.gzipSync(jsonString).toString("base64");
     return {
       data: compressed,
       compressed: true,
@@ -6796,7 +6855,7 @@ class S3Cache extends Cache {
       return storedData && storedData.data ? JSON.parse(storedData.data) : null;
     }
     const buffer = Buffer.from(storedData.data, "base64");
-    const decompressed = zlib$1.unzipSync(buffer).toString();
+    const decompressed = zlib.unzipSync(buffer).toString();
     return JSON.parse(decompressed);
   }
   async _set(key, data) {
@@ -6890,7 +6949,7 @@ class MemoryCache extends Cache {
     if (this.enableCompression) {
       try {
         if (originalSize >= this.compressionThreshold) {
-          const compressedBuffer = zlib$1.gzipSync(Buffer.from(serialized, "utf8"));
+          const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, "utf8"));
           finalData = {
             __compressed: true,
             __data: compressedBuffer.toString("base64"),
@@ -6962,7 +7021,7 @@ class MemoryCache extends Cache {
     if (rawData && typeof rawData === "object" && rawData.__compressed) {
       try {
         const compressedBuffer = Buffer.from(rawData.__data, "base64");
-        const decompressed = zlib$1.gunzipSync(compressedBuffer).toString("utf8");
+        const decompressed = zlib.gunzipSync(compressedBuffer).toString("utf8");
         return JSON.parse(decompressed);
       } catch (error) {
         console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
@@ -7180,7 +7239,7 @@ class FilesystemCache extends Cache {
       let compressed = false;
       let finalData = serialized;
       if (this.enableCompression && originalSize >= this.compressionThreshold) {
-        const compressedBuffer = zlib$1.gzipSync(Buffer.from(serialized, this.encoding));
+        const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, this.encoding));
         finalData = compressedBuffer.toString("base64");
         compressed = true;
       }
@@ -7286,7 +7345,7 @@ class FilesystemCache extends Cache {
         if (isCompressed || this.enableCompression && content.match(/^[A-Za-z0-9+/=]+$/)) {
           try {
             const compressedBuffer = Buffer.from(content, "base64");
-            finalContent = zlib$1.gunzipSync(compressedBuffer).toString(this.encoding);
+            finalContent = zlib.gunzipSync(compressedBuffer).toString(this.encoding);
           } catch (decompressError) {
             finalContent = content;
           }
@@ -12098,6 +12157,18 @@ class MetricsPlugin extends Plugin {
       retentionDays: options.retentionDays || 30,
       flushInterval: options.flushInterval || 6e4,
       // 1 minute
+      // Prometheus configuration
+      prometheus: {
+        enabled: options.prometheus?.enabled !== false,
+        // Enabled by default
+        mode: options.prometheus?.mode || "auto",
+        // 'auto' | 'integrated' | 'standalone'
+        port: options.prometheus?.port || 9090,
+        // Standalone server port
+        path: options.prometheus?.path || "/metrics",
+        // Metrics endpoint path
+        includeResourceLabels: options.prometheus?.includeResourceLabels !== false
+      },
       ...options
     };
     this.metrics = {
@@ -12115,6 +12186,7 @@ class MetricsPlugin extends Plugin {
       startTime: (/* @__PURE__ */ new Date()).toISOString()
     };
     this.flushTimer = null;
+    this.metricsServer = null;
   }
   async onInstall() {
     if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
@@ -12191,11 +12263,21 @@ class MetricsPlugin extends Plugin {
     }
   }
   async start() {
+    await this._setupPrometheusExporter();
   }
   async stop() {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
+    }
+    if (this.metricsServer) {
+      await new Promise((resolve) => {
+        this.metricsServer.close(() => {
+          console.log("[Metrics Plugin] Standalone metrics server stopped");
+          this.metricsServer = null;
+          resolve();
+        });
+      });
     }
     this.removeDatabaseHooks();
   }
@@ -12633,6 +12715,116 @@ class MetricsPlugin extends Plugin {
         }
       }
     }
+  }
+  /**
+   * Get metrics in Prometheus format
+   * @returns {Promise<string>} Prometheus metrics text
+   */
+  async getPrometheusMetrics() {
+    const { formatPrometheusMetrics } = await Promise.resolve().then(function () { return prometheusFormatter; });
+    return formatPrometheusMetrics(this);
+  }
+  /**
+   * Setup Prometheus metrics exporter
+   * Chooses mode based on configuration and API Plugin availability
+   * @private
+   */
+  async _setupPrometheusExporter() {
+    if (!this.config.prometheus.enabled) {
+      return;
+    }
+    const mode = this.config.prometheus.mode;
+    const apiPlugin = this.database.plugins?.api || this.database.plugins?.ApiPlugin;
+    if (mode === "auto") {
+      if (apiPlugin && apiPlugin.server) {
+        await this._setupIntegratedMetrics(apiPlugin);
+      } else {
+        await this._setupStandaloneMetrics();
+      }
+    } else if (mode === "integrated") {
+      if (!apiPlugin || !apiPlugin.server) {
+        throw new Error(
+          "[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active"
+        );
+      }
+      await this._setupIntegratedMetrics(apiPlugin);
+    } else if (mode === "standalone") {
+      await this._setupStandaloneMetrics();
+    } else {
+      console.warn(
+        `[Metrics Plugin] Unknown prometheus.mode="${mode}". Valid modes: auto, integrated, standalone`
+      );
+    }
+  }
+  /**
+   * Setup integrated metrics (uses API Plugin's server)
+   * @param {ApiPlugin} apiPlugin - API Plugin instance
+   * @private
+   */
+  async _setupIntegratedMetrics(apiPlugin) {
+    const app = apiPlugin.getApp();
+    const path = this.config.prometheus.path;
+    if (!app) {
+      console.error("[Metrics Plugin] Failed to get Hono app from API Plugin");
+      return;
+    }
+    app.get(path, async (c) => {
+      try {
+        const metrics = await this.getPrometheusMetrics();
+        return c.text(metrics, 200, {
+          "Content-Type": "text/plain; version=0.0.4; charset=utf-8"
+        });
+      } catch (err) {
+        console.error("[Metrics Plugin] Error generating Prometheus metrics:", err);
+        return c.text("Internal Server Error", 500);
+      }
+    });
+    const port = apiPlugin.config?.port || 3e3;
+    console.log(
+      `[Metrics Plugin] Prometheus metrics available at http://localhost:${port}${path} (integrated mode)`
+    );
+  }
+  /**
+   * Setup standalone metrics server (separate HTTP server)
+   * @private
+   */
+  async _setupStandaloneMetrics() {
+    const { createServer } = await import('http');
+    const port = this.config.prometheus.port;
+    const path = this.config.prometheus.path;
+    this.metricsServer = createServer(async (req, res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      if (req.url === path && req.method === "GET") {
+        try {
+          const metrics = await this.getPrometheusMetrics();
+          res.writeHead(200, {
+            "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
+            "Content-Length": Buffer.byteLength(metrics, "utf8")
+          });
+          res.end(metrics);
+        } catch (err) {
+          console.error("[Metrics Plugin] Error generating Prometheus metrics:", err);
+          res.writeHead(500, { "Content-Type": "text/plain" });
+          res.end("Internal Server Error");
+        }
+      } else if (req.method === "OPTIONS") {
+        res.writeHead(204);
+        res.end();
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found");
+      }
+    });
+    this.metricsServer.listen(port, "0.0.0.0", () => {
+      console.log(
+        `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)`
+      );
+    });
+    this.metricsServer.on("error", (err) => {
+      console.error("[Metrics Plugin] Standalone metrics server error:", err);
+    });
   }
 }
 
@@ -32121,8 +32313,6 @@ class TfStatePlugin extends Plugin {
       attributes: {
         id: "string|required",
         // = lineage UUID from Terraform state
-        name: "string",
-        // User-friendly name (optional)
         latestSerial: "number",
         // Track latest for quick access
         latestStateId: "string",
@@ -32138,7 +32328,7 @@ class TfStatePlugin extends Plugin {
       asyncPartitions: true,
       // Enable async for performance
       partitions: {},
-      // No partitions for now (name is optional)
+      // No partitions - simple tracking resource
       createdBy: "TfStatePlugin"
     });
     this.stateFilesResource = await this.database.createResource({
@@ -32222,8 +32412,6 @@ class TfStatePlugin extends Plugin {
           id: "string|required",
           lineageId: "string|required",
           // NEW: FK to lineages
-          sourceFile: "string",
-          // Optional: for informational purposes
           oldSerial: "number|required",
           newSerial: "number|required",
           oldStateId: "string",
@@ -32258,8 +32446,6 @@ class TfStatePlugin extends Plugin {
           // NEW: All diffs for lineage
           byLineageNewSerial: { fields: { lineageId: "string", newSerial: "number" } },
           // NEW: Specific version lookup
-          bySourceFile: { fields: { sourceFile: "string" } },
-          // Legacy support
           byNewSerial: { fields: { newSerial: "number" } },
           byOldSerial: { fields: { oldSerial: "number" } }
         },
@@ -33184,8 +33370,6 @@ class TfStatePlugin extends Plugin {
       // NEW: FK to state_files
       newStateId: diff.newStateId || newStateFileId,
       // NEW: FK to state_files
-      sourceFile: null,
-      // Optional: for informational purposes
       calculatedAt: Date.now(),
       summary: {
         addedCount: diff.added.length,
@@ -34805,6 +34989,164 @@ class VectorPlugin extends Plugin {
     return findOptimalK(vectors, options);
   }
 }
+
+function sanitizeLabel(value) {
+  if (typeof value !== "string") {
+    value = String(value);
+  }
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+function sanitizeMetricName(name) {
+  let sanitized = name.replace(/[^a-zA-Z0-9_]/g, "_");
+  if (/^\d/.test(sanitized)) {
+    sanitized = "_" + sanitized;
+  }
+  return sanitized;
+}
+function formatLabels(labels) {
+  if (!labels || Object.keys(labels).length === 0) {
+    return "";
+  }
+  const labelPairs = Object.entries(labels).map(([key, value]) => `${key}="${sanitizeLabel(value)}"`).join(",");
+  return `{${labelPairs}}`;
+}
+function formatMetric(name, type, help, values) {
+  const lines = [];
+  lines.push(`# HELP ${name} ${help}`);
+  lines.push(`# TYPE ${name} ${type}`);
+  for (const { labels, value } of values) {
+    const labelsStr = formatLabels(labels);
+    lines.push(`${name}${labelsStr} ${value}`);
+  }
+  return lines.join("\n");
+}
+function formatPrometheusMetrics(metricsPlugin) {
+  const lines = [];
+  const metrics = metricsPlugin.metrics;
+  const operationsTotalValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.count > 0) {
+      operationsTotalValues.push({
+        labels: { operation, resource: "_global" },
+        value: data.count
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.count > 0) {
+        operationsTotalValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: data.count
+        });
+      }
+    }
+  }
+  if (operationsTotalValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operations_total",
+      "counter",
+      "Total number of operations by type and resource",
+      operationsTotalValues
+    ));
+    lines.push("");
+  }
+  const durationValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.count > 0) {
+      const avgSeconds = data.totalTime / data.count / 1e3;
+      durationValues.push({
+        labels: { operation, resource: "_global" },
+        value: avgSeconds.toFixed(6)
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.count > 0) {
+        const avgSeconds = data.totalTime / data.count / 1e3;
+        durationValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: avgSeconds.toFixed(6)
+        });
+      }
+    }
+  }
+  if (durationValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operation_duration_seconds",
+      "gauge",
+      "Average operation duration in seconds",
+      durationValues
+    ));
+    lines.push("");
+  }
+  const errorsValues = [];
+  for (const [operation, data] of Object.entries(metrics.operations)) {
+    if (data.errors > 0) {
+      errorsValues.push({
+        labels: { operation, resource: "_global" },
+        value: data.errors
+      });
+    }
+  }
+  for (const [resourceName, operations] of Object.entries(metrics.resources)) {
+    for (const [operation, data] of Object.entries(operations)) {
+      if (data.errors > 0) {
+        errorsValues.push({
+          labels: { operation, resource: sanitizeMetricName(resourceName) },
+          value: data.errors
+        });
+      }
+    }
+  }
+  if (errorsValues.length > 0) {
+    lines.push(formatMetric(
+      "s3db_operation_errors_total",
+      "counter",
+      "Total number of operation errors",
+      errorsValues
+    ));
+    lines.push("");
+  }
+  const startTime = new Date(metrics.startTime);
+  const uptimeSeconds = (Date.now() - startTime.getTime()) / 1e3;
+  lines.push(formatMetric(
+    "s3db_uptime_seconds",
+    "gauge",
+    "Process uptime in seconds",
+    [{ labels: {}, value: uptimeSeconds.toFixed(2) }]
+  ));
+  lines.push("");
+  const resourcesCount = Object.keys(metrics.resources).length;
+  lines.push(formatMetric(
+    "s3db_resources_total",
+    "gauge",
+    "Total number of tracked resources",
+    [{ labels: {}, value: resourcesCount }]
+  ));
+  lines.push("");
+  const nodeVersion = process.version || "unknown";
+  const s3dbVersion = "1.0.0";
+  lines.push(formatMetric(
+    "s3db_info",
+    "gauge",
+    "Build and runtime information",
+    [{
+      labels: {
+        version: s3dbVersion,
+        node_version: nodeVersion
+      },
+      value: 1
+    }]
+  ));
+  return lines.join("\n") + "\n";
+}
+
+var prometheusFormatter = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  formatPrometheusMetrics: formatPrometheusMetrics
+});
 
 function getDefaultExportFromCjs (x) {
 	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;

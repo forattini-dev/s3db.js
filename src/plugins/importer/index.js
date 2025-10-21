@@ -46,8 +46,8 @@
  *
  * | Format | Extensions | Streaming | Notes |
  * |--------|-----------|-----------|-------|
- * | **JSON** | .json, .jsonl, .ndjson | ✅ | Line-delimited JSON for large files |
- * | **CSV** | .csv, .tsv | ✅ | Auto-detect delimiter, encoding |
+ * | **JSON** | .json, .jsonl, .ndjson, .gz | ✅ | Line-delimited JSON, auto-detect gzip |
+ * | **CSV** | .csv, .tsv, .gz | ✅ | Auto-detect delimiter, encoding, gzip |
  * | **Parquet** | .parquet | ✅ | Columnar format, very fast |
  * | **Iceberg** | .iceberg | ✅ | Modern data lakehouse format |
  * | **Excel** | .xls, .xlsx | ⚠️ | Memory-intensive for large files |
@@ -312,6 +312,7 @@ import { idGenerator } from '../../concerns/id.js';
 import * as fs from 'fs';
 import * as readline from 'readline';
 import { pipeline } from 'stream/promises';
+import zlib from 'node:zlib';
 
 /**
  * Base Importer Driver Interface
@@ -348,7 +349,21 @@ class ImporterDriver extends EventEmitter {
  */
 class JSONImportDriver extends ImporterDriver {
   async *parse(filePath, options = {}) {
-    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    // Auto-detect gzip compression based on file extension
+    const isGzipped = filePath.endsWith('.gz');
+
+    // Create file stream (binary if gzipped, utf8 otherwise)
+    let fileStream = fs.createReadStream(filePath);
+
+    // If gzipped, pipe through gunzip decompression
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding('utf8');
+    } else {
+      fileStream.setEncoding('utf8');
+    }
+
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity
@@ -440,14 +455,29 @@ class JSONImportDriver extends ImporterDriver {
   }
 
   async validate(filePath) {
-    // Check file exists and has .json/.jsonl/.ndjson extension
+    // Check file exists and has .json/.jsonl/.ndjson extension (or .gz compressed)
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    const ext = filePath.toLowerCase().split('.').pop();
-    if (!['json', 'jsonl', 'ndjson'].includes(ext)) {
-      throw new Error(`Invalid file extension for JSON driver: .${ext}`);
+    // Handle .gz extension by checking the extension before .gz
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.endsWith('.gz')) {
+      // Check format before .gz (e.g., .jsonl.gz -> .jsonl)
+      const parts = lowerPath.split('.');
+      if (parts.length < 3) {
+        throw new Error(`Invalid file extension for JSON driver: .gz without format extension`);
+      }
+      const formatExt = parts[parts.length - 2];
+      if (!['json', 'jsonl', 'ndjson'].includes(formatExt)) {
+        throw new Error(`Invalid file extension for JSON driver: .${formatExt}.gz (expected .json.gz, .jsonl.gz, or .ndjson.gz)`);
+      }
+    } else {
+      // Regular non-compressed file
+      const ext = lowerPath.split('.').pop();
+      if (!['json', 'jsonl', 'ndjson'].includes(ext)) {
+        throw new Error(`Invalid file extension for JSON driver: .${ext}`);
+      }
     }
 
     return true;
@@ -463,7 +493,21 @@ class CSVImportDriver extends ImporterDriver {
     const delimiter = options.delimiter || await this._detectDelimiter(filePath);
     const hasHeader = options.hasHeader !== undefined ? options.hasHeader : true;
 
-    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    // Auto-detect gzip compression based on file extension
+    const isGzipped = filePath.endsWith('.gz');
+
+    // Create file stream (binary if gzipped, utf8 otherwise)
+    let fileStream = fs.createReadStream(filePath);
+
+    // If gzipped, pipe through gunzip decompression
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding('utf8');
+    } else {
+      fileStream.setEncoding('utf8');
+    }
+
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity
@@ -544,7 +588,21 @@ class CSVImportDriver extends ImporterDriver {
    * @private
    */
   async _detectDelimiter(filePath) {
-    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    // Auto-detect gzip compression based on file extension
+    const isGzipped = filePath.endsWith('.gz');
+
+    // Create file stream (binary if gzipped, utf8 otherwise)
+    let fileStream = fs.createReadStream(filePath);
+
+    // If gzipped, pipe through gunzip decompression
+    if (isGzipped) {
+      const gunzip = zlib.createGunzip();
+      fileStream = fileStream.pipe(gunzip);
+      fileStream.setEncoding('utf8');
+    } else {
+      fileStream.setEncoding('utf8');
+    }
+
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity
@@ -579,14 +637,29 @@ class CSVImportDriver extends ImporterDriver {
   }
 
   async validate(filePath) {
-    // Check file exists and has .csv/.tsv extension
+    // Check file exists and has .csv/.tsv extension (or .gz compressed)
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    const ext = filePath.toLowerCase().split('.').pop();
-    if (!['csv', 'tsv', 'txt'].includes(ext)) {
-      throw new Error(`Invalid file extension for CSV driver: .${ext}`);
+    // Handle .gz extension by checking the extension before .gz
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.endsWith('.gz')) {
+      // Check format before .gz (e.g., .csv.gz -> .csv)
+      const parts = lowerPath.split('.');
+      if (parts.length < 3) {
+        throw new Error(`Invalid file extension for CSV driver: .gz without format extension`);
+      }
+      const formatExt = parts[parts.length - 2];
+      if (!['csv', 'tsv', 'txt'].includes(formatExt)) {
+        throw new Error(`Invalid file extension for CSV driver: .${formatExt}.gz (expected .csv.gz or .tsv.gz)`);
+      }
+    } else {
+      // Regular non-compressed file
+      const ext = lowerPath.split('.').pop();
+      if (!['csv', 'tsv', 'txt'].includes(ext)) {
+        throw new Error(`Invalid file extension for CSV driver: .${ext}`);
+      }
     }
 
     return true;
