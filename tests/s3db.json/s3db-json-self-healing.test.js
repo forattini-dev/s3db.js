@@ -80,7 +80,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
       // Resource should be healed - currentVersion should be changed to v0
       expect(Object.keys(database.resources)).toHaveLength(1);
       expect(database.resources.invitations).toBeDefined();
-      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v1');
+      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v0');
     });
 
     test('should heal null hooks by filtering them out', async () => {
@@ -297,7 +297,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
       await database.connect();
 
       expect(database.resources.valid).toBeDefined();
-      // invalid_version should be healed - currentVersion changed from v999 to v0
+      // invalid_version should be healed - currentVersion changed from v999 to v1 (first available version)
       expect(database.resources.invalid_version).toBeDefined();
       expect(database.savedMetadata.resources.invalid_version.currentVersion).toBe('v1');
       // no_versions should be removed since it has no valid versions
