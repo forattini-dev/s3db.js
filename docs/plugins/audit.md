@@ -43,6 +43,27 @@ const log = await audits.query({ recordId: 'user-123', operation: 'delete' });
 
 ---
 
+## 📑 Table of Contents
+
+1. [⚡ TLDR](#-tldr)
+2. [⚡ Quickstart](#-quickstart)
+3. [Usage Journey](#usage-journey)
+   - [Level 1: Basic Audit Trail](#level-1-basic-audit-trail)
+   - [Level 2: Add User Tracking](#level-2-add-user-tracking)
+   - [Level 3: Store Before/After Data](#level-3-store-beforeafter-data)
+   - [Level 4: Add Metadata & Context](#level-4-add-metadata--context)
+   - [Level 5: Filtered Audit Logging](#level-5-filtered-audit-logging)
+   - [Level 6: Production - Compliance Ready](#level-6-production---compliance-ready)
+4. [📊 Configuration Reference](#-configuration-reference)
+5. [📚 Configuration Examples](#-configuration-examples)
+6. [🔧 API Reference](#-api-reference)
+7. [✅ Best Practices](#-best-practices)
+8. [🔗 See Also](#-see-also)
+9. [🐛 Troubleshooting](#-troubleshooting)
+10. [❓ FAQ](#-faq)
+
+---
+
 ## ⚡ Quickstart
 
 ```javascript

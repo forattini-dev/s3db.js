@@ -23,6 +23,19 @@ await wallets.add('w1', 'balance', 100);  // Creates transaction and consolidate
 - 📊 Counters/metrics (async mode)
 - 📈 Dashboards with pre-calculated analytics
 
+---
+
+## 📋 Table of Contents
+
+- [TL;DR](#-tldr)
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Configuration Reference](#-configuration-reference)
+- [API](#api)
+- [Examples](#examples)
+- [Analytics API](#analytics-api)
+- [Sync vs Async Mode](#sync-vs-async-mode)
+- [FAQ](#-faq)
 
 ---
 
@@ -101,45 +114,147 @@ Creates aggregations in `plg_{resource}_an_{field}`:
 
 ---
 
-## API
+## ⚙️ Configuration Reference
 
-### Constructor
+### Core Options
 
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `resources` | Object | **Required** | Map of resource names to array of field names to track |
+| `verbose` | Boolean | `true` | Enable detailed logging |
+| `debug` | Boolean | `false` | Enable additional debug mode |
+
+**Example:**
 ```javascript
 new EventualConsistencyPlugin({
+  resources: {
+    wallets: ['balance'],
+    users: ['points', 'credits']
+  }
+})
+```
+
+### Consolidation Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `consolidation.mode` | String | `'async'` | Consolidation mode: `'sync'` (immediate) or `'async'` (eventual) |
+| `consolidation.auto` | Boolean | `true` | Enable auto-consolidation |
+| `consolidation.interval` | Number | `300` | Auto-consolidation interval in seconds |
+| `consolidation.window` | Number | `24` | Consolidation window in hours |
+| `consolidation.concurrency` | Number | `5` | Number of parallel consolidations |
+| `consolidation.markAppliedConcurrency` | Number | `50` | Concurrency for marking transactions as applied |
+
+**Example:**
+```javascript
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  consolidation: {
+    mode: 'sync',      // Immediate consolidation
+    auto: true,        // Auto-consolidate
+    interval: 300,     // Every 5 minutes
+    window: 24,        // Last 24 hours
+    concurrency: 10    // 10 parallel consolidations
+  }
+})
+```
+
+### Analytics Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `analytics.enabled` | Boolean | `false` | Enable pre-calculated analytics |
+| `analytics.periods` | Array&lt;String&gt; | `['hour', 'day', 'month']` | Time periods to calculate: `'hour'`, `'day'`, `'week'`, `'month'` |
+| `analytics.metrics` | Array&lt;String&gt; | `['count', 'sum', 'avg', 'min', 'max']` | Metrics to calculate |
+
+**Example:**
+```javascript
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  analytics: {
+    enabled: true,
+    periods: ['hour', 'day', 'week', 'month'],
+    metrics: ['count', 'sum', 'avg', 'min', 'max']
+  }
+})
+```
+
+### Advanced Options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `locks.timeout` | Number | `300` | Lock timeout in seconds |
+| `garbageCollection.enabled` | Boolean | `true` | Enable garbage collection for old transactions |
+| `garbageCollection.interval` | Number | `86400` | GC interval in seconds (24 hours) |
+| `garbageCollection.retention` | Number | `30` | Retention days for applied transactions |
+| `checkpoints.enabled` | Boolean | `true` | Enable checkpoints for recovery |
+| `checkpoints.strategy` | String | `'hourly'` | Checkpoint strategy |
+| `checkpoints.retention` | Number | `90` | Checkpoint retention in days |
+| `cohort.timezone` | String | `'UTC'` | Timezone for analytics (or use `TZ` env var) |
+
+**Example:**
+```javascript
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  locks: { timeout: 600 },
+  garbageCollection: {
+    enabled: true,
+    interval: 43200,   // 12 hours
+    retention: 60      // 60 days
+  },
+  checkpoints: {
+    enabled: true,
+    strategy: 'hourly',
+    retention: 180     // 180 days
+  },
+  cohort: { timezone: 'America/New_York' }
+})
+```
+
+### Complete Configuration Example
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
   // Required
   resources: {
-    resourceName: ['field1', 'field2', ...]
+    wallets: ['balance'],
+    users: ['points', 'credits']
   },
 
   // Consolidation
   consolidation: {
-    mode: 'sync',                   // 'sync' or 'async' (default: 'async')
-    auto: true,                     // Auto-consolidation (default: true)
-    interval: 300,                  // Interval in seconds (default: 300)
-    window: 24,                     // Window in hours (default: 24)
-    concurrency: 5,                 // Parallel consolidations (default: 5)
-    markAppliedConcurrency: 50      // ✅ NEW: Concurrency for mark applied (default: 50)
+    mode: 'async',
+    auto: true,
+    interval: 300,
+    window: 24,
+    concurrency: 5,
+    markAppliedConcurrency: 50
   },
 
-  // Analytics (optional)
+  // Analytics
   analytics: {
-    enabled: false,      // Enable analytics (default: false)
-    periods: ['hour', 'day', 'month'],
+    enabled: true,
+    periods: ['hour', 'day', 'week', 'month'],
     metrics: ['count', 'sum', 'avg', 'min', 'max']
   },
 
-  // Debug and logging
-  verbose: true,           // Detailed logging (default: true)
-  debug: false,            // Additional debug mode (default: false)
+  // Debug
+  verbose: true,
+  debug: false,
 
-  // Advanced options
+  // Advanced
   locks: { timeout: 300 },
   garbageCollection: { enabled: true, interval: 86400, retention: 30 },
   checkpoints: { enabled: true, strategy: 'hourly', retention: 90 },
-  cohort: { timezone: 'UTC' }  // Default: UTC (or TZ env var)
-})
+  cohort: { timezone: 'UTC' }
+});
+
+await db.usePlugin(plugin);
 ```
+
+---
+
+## API
 
 ### Resource Methods
 
@@ -1034,6 +1149,193 @@ Config: {"resource":"urls","field":undefined}
 
 This confirms the bug is the shared config race condition.
 
+
+---
+
+## ❓ FAQ
+
+### For Developers
+
+**Q: What's the difference between sync and async mode?**
+**A:**
+- **Sync mode**: Consolidation happens immediately when you call `add()`/`sub()`. Good for critical data like wallets/balances where you need immediate accuracy.
+- **Async mode**: Consolidation happens eventually (background job every 5 minutes by default). Good for non-critical data like counters/metrics where eventual accuracy is acceptable.
+
+```javascript
+// Sync mode (wallets, balances)
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  consolidation: { mode: 'sync', auto: false }  // Manual control
+});
+
+// Async mode (counters, metrics)
+new EventualConsistencyPlugin({
+  resources: { posts: ['views'] },
+  consolidation: { mode: 'async', auto: true, interval: 300 }  // Auto every 5min
+});
+```
+
+**Q: Does the plugin create records automatically?**
+**A:** No! The plugin DOES NOT create records. Transactions remain pending until you create the record manually. This prevents accidental record creation from transactions.
+
+```javascript
+// ❌ This won't work - no record exists
+await wallets.add('new-wallet-id', 'balance', 100);
+
+// ✅ This works - create record first
+await wallets.insert({ id: 'new-wallet-id', balance: 0 });
+await wallets.add('new-wallet-id', 'balance', 100);
+```
+
+**Q: How do I handle race conditions with concurrent add() calls?**
+**A:** The plugin uses transactions to handle concurrency:
+1. Each `add()`/`sub()` creates a transaction
+2. Consolidation reads all pending transactions
+3. All transactions are applied atomically
+4. Transactions are marked as applied
+
+This ensures all operations are eventually consistent, even with concurrent calls.
+
+**Q: Can I use nested fields?**
+**A:** Yes! Use dot notation for nested paths:
+
+```javascript
+new EventualConsistencyPlugin({
+  resources: {
+    users: ['profile.stats.totalPosts', 'metrics.engagement.likes']
+  }
+});
+
+await users.add('user-123', 'profile.stats.totalPosts', 1);
+```
+
+**Q: How do I query analytics data?**
+**A:** Use the analytics API methods:
+
+```javascript
+// Last 7 days
+const last7Days = await plugin.getLastNPeriods(
+  'posts', 'views', 'day', 7
+);
+
+// Specific time range
+const analytics = await plugin.getAnalyticsByTimeRange(
+  'posts', 'views', 'hour',
+  { start: '2024-01-01', end: '2024-01-31' }
+);
+
+// Chart-ready format
+console.log(analytics);
+// [{
+//   period: '2024-01-01T00:00:00Z',
+//   count: 1500,
+//   sum: 50000,
+//   avg: 33.33
+// }, ...]
+```
+
+**Q: What's the performance impact of analytics?**
+**A:** Analytics are pre-calculated in the background, so queries are O(1) lookups:
+- Hour analytics: ~720 records per month per field
+- Day analytics: ~30 records per month per field
+- Week analytics: ~52 records per year per field
+- Month analytics: ~12 records per year per field
+
+Queries are partition-based for fast access.
+
+### For AI Agents
+
+**Q: What problem does this plugin solve?**
+**A:** Provides atomic transactions (add/sub/set) for numeric fields with complete audit trail, eventual consistency guarantees, and pre-calculated time-series analytics by hour/day/week/month.
+
+**Q: What are the minimum required parameters?**
+**A:** Only `resources` is required:
+
+```javascript
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] }
+})
+```
+
+All other options have sensible defaults.
+
+**Q: What are the default values for all configurations?**
+**A:**
+```javascript
+{
+  resources: {},              // Required
+  consolidation: {
+    mode: 'async',            // Eventual consolidation
+    auto: true,               // Auto-consolidate
+    interval: 300,            // Every 5 minutes
+    window: 24,               // Last 24 hours
+    concurrency: 5,           // 5 parallel consolidations
+    markAppliedConcurrency: 50
+  },
+  analytics: {
+    enabled: false,           // Disabled by default
+    periods: ['hour', 'day', 'month'],
+    metrics: ['count', 'sum', 'avg', 'min', 'max']
+  },
+  verbose: true,              // Logging enabled
+  debug: false,
+  locks: { timeout: 300 },
+  garbageCollection: { enabled: true, interval: 86400, retention: 30 },
+  checkpoints: { enabled: true, strategy: 'hourly', retention: 90 },
+  cohort: { timezone: 'UTC' }
+}
+```
+
+**Q: What events does this plugin emit?**
+**A:** The plugin doesn't emit custom events. It uses standard s3db resource events (insert, update, delete) on the 3 created resources:
+- `plg_{resource}_tx_{field}` - Transaction resource
+- `plg_{resource}_an_{field}` - Analytics resource (if enabled)
+- Original resource - Updated values after consolidation
+
+**Q: How do I debug issues with this plugin?**
+**A:** Enable verbose logging (enabled by default):
+
+```javascript
+const plugin = new EventualConsistencyPlugin({
+  verbose: true,    // Already default
+  debug: true,      // Additional debug info
+  resources: { wallets: ['balance'] }
+});
+```
+
+All operations will log detailed information to console.
+
+**Q: What resources are created automatically?**
+**A:** For each tracked field, the plugin creates:
+1. **Transaction resource**: `plg_{resourceName}_tx_{fieldName}` - Stores all add/sub/set transactions
+2. **Analytics resource** (if enabled): `plg_{resourceName}_an_{fieldName}` - Pre-calculated time-series data
+
+Example for `wallets.balance`:
+- `plg_wallets_tx_balance` - All balance transactions
+- `plg_wallets_an_balance` - Balance analytics (if enabled)
+
+**Q: Can I use custom reducers?**
+**A:** Yes! The default reducer is `sum`, but you can implement custom logic:
+
+```javascript
+// The consolidation process:
+// 1. Fetches all pending transactions
+// 2. Applies reducer (sum by default)
+// 3. Updates original field
+// 4. Marks transactions as applied
+
+// For custom behavior, use hooks:
+await db.createResource({
+  name: 'wallets',
+  hooks: {
+    beforeUpdate: [(data) => {
+      // Custom validation or transformation
+      if (data.balance < 0) throw new Error('Negative balance');
+      return data;
+    }]
+  }
+});
+```
 
 ---
 
