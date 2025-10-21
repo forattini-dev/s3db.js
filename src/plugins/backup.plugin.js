@@ -1,6 +1,7 @@
 import Plugin from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createBackupDriver, validateBackupConfig } from "./backup/index.js";
+import { StreamingExporter } from "./backup/streaming-exporter.js";
 import { createWriteStream, createReadStream } from 'fs';
 import zlib from 'node:zlib';
 import { pipeline } from 'stream/promises';
@@ -370,7 +371,45 @@ export class BackupPlugin extends Plugin {
 
   async _exportResources(resourceNames, tempDir, type) {
     const exportedFiles = [];
-    
+    const resourceStats = new Map();
+
+    // Create StreamingExporter
+    const exporter = new StreamingExporter({
+      compress: true, // Always use gzip for backups
+      onProgress: this.config.verbose ? (stats) => {
+        if (stats.recordCount % 10000 === 0) {
+          console.log(`[BackupPlugin] Exported ${stats.recordCount} records from '${stats.resourceName}'`);
+        }
+      } : null
+    });
+
+    // Determine timestamp for incremental backups
+    let sinceTimestamp = null;
+    if (type === 'incremental') {
+      const [lastBackupOk, , lastBackups] = await tryFn(() =>
+        this.database.resource(this.config.backupMetadataResource).list({
+          filter: {
+            status: 'completed',
+            type: { $in: ['full', 'incremental'] }
+          },
+          sort: { timestamp: -1 },
+          limit: 1
+        })
+      );
+
+      if (lastBackupOk && lastBackups && lastBackups.length > 0) {
+        sinceTimestamp = new Date(lastBackups[0].timestamp);
+      } else {
+        // No previous backup found, use last 24 hours as fallback
+        sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      }
+
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Incremental backup since ${sinceTimestamp.toISOString()}`);
+      }
+    }
+
+    // Export each resource using streaming
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
@@ -379,61 +418,75 @@ export class BackupPlugin extends Plugin {
         }
         continue;
       }
-      
-      const exportPath = path.join(tempDir, `${resourceName}.json`);
-      
-      // Export resource data
-      let records;
-      if (type === 'incremental') {
-        // For incremental, only export records changed since last successful backup
-        const [lastBackupOk, , lastBackups] = await tryFn(() =>
-          this.database.resource(this.config.backupMetadataResource).list({
-            filter: {
-              status: 'completed',
-              type: { $in: ['full', 'incremental'] }
-            },
-            sort: { timestamp: -1 },
-            limit: 1
-          })
-        );
 
-        let sinceTimestamp;
-        if (lastBackupOk && lastBackups && lastBackups.length > 0) {
-          sinceTimestamp = new Date(lastBackups[0].timestamp);
-        } else {
-          // No previous backup found, use last 24 hours as fallback
-          sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        }
+      const exportPath = path.join(tempDir, `${resourceName}.jsonl.gz`);
+
+      try {
+        // Export with streaming (constant memory usage!)
+        const stats = await exporter.exportResource(resource, exportPath, type, sinceTimestamp);
+
+        exportedFiles.push(exportPath);
+        resourceStats.set(resourceName, {
+          ...stats,
+          definition: resource.config
+        });
 
         if (this.config.verbose) {
-          console.log(`[BackupPlugin] Incremental backup for '${resourceName}' since ${sinceTimestamp.toISOString()}`);
+          console.log(
+            `[BackupPlugin] Exported ${stats.recordCount} records from '${resourceName}' ` +
+            `(${(stats.bytesWritten / 1024 / 1024).toFixed(2)} MB compressed)`
+          );
         }
-
-        // Get records updated since last backup
-        records = await resource.list({
-          filter: { updatedAt: { '>': sinceTimestamp.toISOString() } }
-        });
-      } else {
-        records = await resource.list();
-      }
-      
-      const exportData = {
-        resourceName,
-        definition: resource.config,
-        records,
-        exportedAt: new Date().toISOString(),
-        type
-      };
-      
-      await writeFile(exportPath, JSON.stringify(exportData, null, 2));
-      exportedFiles.push(exportPath);
-      
-      if (this.config.verbose) {
-        console.log(`[BackupPlugin] Exported ${records.length} records from '${resourceName}'`);
+      } catch (error) {
+        if (this.config.verbose) {
+          console.error(`[BackupPlugin] Error exporting '${resourceName}': ${error.message}`);
+        }
+        throw error;
       }
     }
-    
+
+    // Generate s3db.json metadata file
+    await this._generateMetadataFile(tempDir, resourceStats, type);
+    exportedFiles.push(path.join(tempDir, 's3db.json'));
+
     return exportedFiles;
+  }
+
+  /**
+   * Generate s3db.json metadata file
+   */
+  async _generateMetadataFile(tempDir, resourceStats, type) {
+    const metadata = {
+      version: '1.0',
+      backupType: type,
+      exportedAt: new Date().toISOString(),
+      database: {
+        bucket: this.database.bucket,
+        region: this.database.region
+      },
+      resources: {}
+    };
+
+    for (const [resourceName, stats] of resourceStats.entries()) {
+      metadata.resources[resourceName] = {
+        name: resourceName,
+        attributes: stats.definition.attributes || {},
+        partitions: stats.definition.partitions || {},
+        timestamps: stats.definition.timestamps || false,
+        recordCount: stats.recordCount,
+        exportFile: `${resourceName}.jsonl.gz`,
+        compression: 'gzip',
+        format: 'jsonl',
+        bytesWritten: stats.bytesWritten
+      };
+    }
+
+    const metadataPath = path.join(tempDir, 's3db.json');
+    await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+
+    if (this.config.verbose) {
+      console.log(`[BackupPlugin] Generated s3db.json metadata`);
+    }
   }
 
   async _createArchive(files, targetPath, compressionType) {

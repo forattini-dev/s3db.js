@@ -159,7 +159,7 @@ export class Database extends EventEmitter {
     
     // Create resources from saved metadata using current version
     for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
-      const currentVersion = resourceMetadata.currentVersion || 'v0';
+      const currentVersion = resourceMetadata.currentVersion || 'v1';
       const versionData = resourceMetadata.versions?.[currentVersion];
       
       if (versionData) {
@@ -240,7 +240,7 @@ export class Database extends EventEmitter {
         });
       } else {
         // Get current version hash from saved metadata
-        const currentVersion = savedResource.currentVersion || 'v0';
+        const currentVersion = savedResource.currentVersion || 'v1';
         const versionData = savedResource.versions?.[currentVersion];
         const savedHash = versionData?.hash;
         
@@ -260,7 +260,7 @@ export class Database extends EventEmitter {
     // Check for deleted resources
     for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
       if (!this.resources[name]) {
-        const currentVersion = savedResource.currentVersion || 'v0';
+        const currentVersion = savedResource.currentVersion || 'v1';
         const versionData = savedResource.versions?.[currentVersion];
         changes.push({
           type: 'deleted',
@@ -312,8 +312,8 @@ export class Database extends EventEmitter {
       .filter(v => v.startsWith('v'))
       .map(v => parseInt(v.substring(1)))
       .filter(n => !isNaN(n));
-    
-    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : -1;
+
+    const maxVersion = versionNumbers.length > 0 ? Math.max(...versionNumbers) : 0;
     return `v${maxVersion + 1}`;
   }
 
@@ -500,7 +500,7 @@ export class Database extends EventEmitter {
       
       // Check if resource exists in saved metadata
       const existingResource = this.savedMetadata?.resources?.[name];
-      const currentVersion = existingResource?.currentVersion || 'v0';
+      const currentVersion = existingResource?.currentVersion || 'v1';
       const existingVersionData = existingResource?.versions?.[currentVersion];
       
       let version, isNewVersion;
@@ -727,7 +727,7 @@ export class Database extends EventEmitter {
 
     // Ensure currentVersion exists
     if (!healed.currentVersion) {
-      healed.currentVersion = 'v0';
+      healed.currentVersion = 'v1';
       healingLog.push(`Resource ${name}: added missing currentVersion`);
       changed = true;
     }
@@ -984,7 +984,7 @@ export class Database extends EventEmitter {
       // Only upload metadata if hash actually changed
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata = this.savedMetadata?.resources?.[name];
-      const currentVersion = existingMetadata?.currentVersion || 'v0';
+      const currentVersion = existingMetadata?.currentVersion || 'v1';
       const existingVersionData = existingMetadata?.versions?.[currentVersion];
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
@@ -993,7 +993,7 @@ export class Database extends EventEmitter {
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
-    const version = existingMetadata?.currentVersion || 'v0';
+    const version = existingMetadata?.currentVersion || 'v1';
     const resource = new Resource({
       name,
       client: this.client,
