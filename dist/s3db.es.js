@@ -1,27 +1,25 @@
 import crypto$1, { createHash } from 'crypto';
 import { customAlphabet, urlAlphabet } from 'nanoid';
 import EventEmitter from 'events';
-import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
-import { swaggerUI } from '@hono/swagger-ui';
+import { createServer, Agent } from 'http';
+import { Http2ServerRequest } from 'http2';
+import require$$3, { Readable, Transform, Writable } from 'stream';
 import { mkdir, copyFile, unlink, stat, access, readdir, writeFile, readFile, rm, watch } from 'fs/promises';
 import fs, { createReadStream, createWriteStream, realpathSync as realpathSync$1, readlinkSync, readdirSync, readdir as readdir$2, lstatSync, existsSync } from 'fs';
 import { pipeline } from 'stream/promises';
 import path$1, { join } from 'path';
-import require$$3, { Transform, Writable } from 'stream';
 import zlib from 'node:zlib';
 import os from 'os';
 import jsonStableStringify from 'json-stable-stringify';
 import os$1 from 'node:os';
 import { PromisePool } from '@supercharge/promise-pool';
 import { chunk, merge, isString, isEmpty, invert, uniq, cloneDeep, get, set, isObject, isFunction } from 'lodash-es';
-import { Agent } from 'http';
 import { Agent as Agent$1 } from 'https';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { flatten, unflatten } from 'flat';
 import FastestValidator from 'fastest-validator';
-import { ReadableStream } from 'node:stream/web';
+import { ReadableStream as ReadableStream$1 } from 'node:stream/web';
 import { fileURLToPath } from 'node:url';
 import { win32, posix } from 'node:path';
 import * as actualFS from 'node:fs';
@@ -2453,6 +2451,2291 @@ const PluginObject = {
   }
 };
 
+// src/compose.ts
+var compose = (middleware, onError, onNotFound) => {
+  return (context, next) => {
+    let index = -1;
+    return dispatch(0);
+    async function dispatch(i) {
+      if (i <= index) {
+        throw new Error("next() called multiple times");
+      }
+      index = i;
+      let res;
+      let isError = false;
+      let handler;
+      if (middleware[i]) {
+        handler = middleware[i][0][0];
+        context.req.routeIndex = i;
+      } else {
+        handler = i === middleware.length && next || void 0;
+      }
+      if (handler) {
+        try {
+          res = await handler(context, () => dispatch(i + 1));
+        } catch (err) {
+          if (err instanceof Error && onError) {
+            context.error = err;
+            res = await onError(err, context);
+            isError = true;
+          } else {
+            throw err;
+          }
+        }
+      } else {
+        if (context.finalized === false && onNotFound) {
+          res = await onNotFound(context);
+        }
+      }
+      if (res && (context.finalized === false || isError)) {
+        context.res = res;
+      }
+      return context;
+    }
+  };
+};
+
+// src/request/constants.ts
+var GET_MATCH_RESULT = Symbol();
+
+// src/utils/body.ts
+var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
+  const { all = false, dot = false } = options;
+  const headers = request instanceof HonoRequest ? request.raw.headers : request.headers;
+  const contentType = headers.get("Content-Type");
+  if (contentType?.startsWith("multipart/form-data") || contentType?.startsWith("application/x-www-form-urlencoded")) {
+    return parseFormData(request, { all, dot });
+  }
+  return {};
+};
+async function parseFormData(request, options) {
+  const formData = await request.formData();
+  if (formData) {
+    return convertFormDataToBodyData(formData, options);
+  }
+  return {};
+}
+function convertFormDataToBodyData(formData, options) {
+  const form = /* @__PURE__ */ Object.create(null);
+  formData.forEach((value, key) => {
+    const shouldParseAllValues = options.all || key.endsWith("[]");
+    if (!shouldParseAllValues) {
+      form[key] = value;
+    } else {
+      handleParsingAllValues(form, key, value);
+    }
+  });
+  if (options.dot) {
+    Object.entries(form).forEach(([key, value]) => {
+      const shouldParseDotValues = key.includes(".");
+      if (shouldParseDotValues) {
+        handleParsingNestedValues(form, key, value);
+        delete form[key];
+      }
+    });
+  }
+  return form;
+}
+var handleParsingAllValues = (form, key, value) => {
+  if (form[key] !== void 0) {
+    if (Array.isArray(form[key])) {
+      form[key].push(value);
+    } else {
+      form[key] = [form[key], value];
+    }
+  } else {
+    if (!key.endsWith("[]")) {
+      form[key] = value;
+    } else {
+      form[key] = [value];
+    }
+  }
+};
+var handleParsingNestedValues = (form, key, value) => {
+  let nestedForm = form;
+  const keys = key.split(".");
+  keys.forEach((key2, index) => {
+    if (index === keys.length - 1) {
+      nestedForm[key2] = value;
+    } else {
+      if (!nestedForm[key2] || typeof nestedForm[key2] !== "object" || Array.isArray(nestedForm[key2]) || nestedForm[key2] instanceof File) {
+        nestedForm[key2] = /* @__PURE__ */ Object.create(null);
+      }
+      nestedForm = nestedForm[key2];
+    }
+  });
+};
+
+// src/utils/url.ts
+var splitPath = (path) => {
+  const paths = path.split("/");
+  if (paths[0] === "") {
+    paths.shift();
+  }
+  return paths;
+};
+var splitRoutingPath = (routePath) => {
+  const { groups, path } = extractGroupsFromPath(routePath);
+  const paths = splitPath(path);
+  return replaceGroupMarks(paths, groups);
+};
+var extractGroupsFromPath = (path) => {
+  const groups = [];
+  path = path.replace(/\{[^}]+\}/g, (match, index) => {
+    const mark = `@${index}`;
+    groups.push([mark, match]);
+    return mark;
+  });
+  return { groups, path };
+};
+var replaceGroupMarks = (paths, groups) => {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const [mark] = groups[i];
+    for (let j = paths.length - 1; j >= 0; j--) {
+      if (paths[j].includes(mark)) {
+        paths[j] = paths[j].replace(mark, groups[i][1]);
+        break;
+      }
+    }
+  }
+  return paths;
+};
+var patternCache = {};
+var getPattern = (label, next) => {
+  if (label === "*") {
+    return "*";
+  }
+  const match = label.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+  if (match) {
+    const cacheKey = `${label}#${next}`;
+    if (!patternCache[cacheKey]) {
+      if (match[2]) {
+        patternCache[cacheKey] = next && next[0] !== ":" && next[0] !== "*" ? [cacheKey, match[1], new RegExp(`^${match[2]}(?=/${next})`)] : [label, match[1], new RegExp(`^${match[2]}$`)];
+      } else {
+        patternCache[cacheKey] = [label, match[1], true];
+      }
+    }
+    return patternCache[cacheKey];
+  }
+  return null;
+};
+var tryDecode = (str, decoder) => {
+  try {
+    return decoder(str);
+  } catch {
+    return str.replace(/(?:%[0-9A-Fa-f]{2})+/g, (match) => {
+      try {
+        return decoder(match);
+      } catch {
+        return match;
+      }
+    });
+  }
+};
+var tryDecodeURI = (str) => tryDecode(str, decodeURI);
+var getPath = (request) => {
+  const url = request.url;
+  const start = url.indexOf("/", url.indexOf(":") + 4);
+  let i = start;
+  for (; i < url.length; i++) {
+    const charCode = url.charCodeAt(i);
+    if (charCode === 37) {
+      const queryIndex = url.indexOf("?", i);
+      const path = url.slice(start, queryIndex === -1 ? void 0 : queryIndex);
+      return tryDecodeURI(path.includes("%25") ? path.replace(/%25/g, "%2525") : path);
+    } else if (charCode === 63) {
+      break;
+    }
+  }
+  return url.slice(start, i);
+};
+var getPathNoStrict = (request) => {
+  const result = getPath(request);
+  return result.length > 1 && result.at(-1) === "/" ? result.slice(0, -1) : result;
+};
+var mergePath = (base, sub, ...rest) => {
+  if (rest.length) {
+    sub = mergePath(sub, ...rest);
+  }
+  return `${base?.[0] === "/" ? "" : "/"}${base}${sub === "/" ? "" : `${base?.at(-1) === "/" ? "" : "/"}${sub?.[0] === "/" ? sub.slice(1) : sub}`}`;
+};
+var checkOptionalParameter = (path) => {
+  if (path.charCodeAt(path.length - 1) !== 63 || !path.includes(":")) {
+    return null;
+  }
+  const segments = path.split("/");
+  const results = [];
+  let basePath = "";
+  segments.forEach((segment) => {
+    if (segment !== "" && !/\:/.test(segment)) {
+      basePath += "/" + segment;
+    } else if (/\:/.test(segment)) {
+      if (/\?/.test(segment)) {
+        if (results.length === 0 && basePath === "") {
+          results.push("/");
+        } else {
+          results.push(basePath);
+        }
+        const optionalSegment = segment.replace("?", "");
+        basePath += "/" + optionalSegment;
+        results.push(basePath);
+      } else {
+        basePath += "/" + segment;
+      }
+    }
+  });
+  return results.filter((v, i, a) => a.indexOf(v) === i);
+};
+var _decodeURI = (value) => {
+  if (!/[%+]/.test(value)) {
+    return value;
+  }
+  if (value.indexOf("+") !== -1) {
+    value = value.replace(/\+/g, " ");
+  }
+  return value.indexOf("%") !== -1 ? tryDecode(value, decodeURIComponent_) : value;
+};
+var _getQueryParam = (url, key, multiple) => {
+  let encoded;
+  if (!multiple && key && !/[%+]/.test(key)) {
+    let keyIndex2 = url.indexOf(`?${key}`, 8);
+    if (keyIndex2 === -1) {
+      keyIndex2 = url.indexOf(`&${key}`, 8);
+    }
+    while (keyIndex2 !== -1) {
+      const trailingKeyCode = url.charCodeAt(keyIndex2 + key.length + 1);
+      if (trailingKeyCode === 61) {
+        const valueIndex = keyIndex2 + key.length + 2;
+        const endIndex = url.indexOf("&", valueIndex);
+        return _decodeURI(url.slice(valueIndex, endIndex === -1 ? void 0 : endIndex));
+      } else if (trailingKeyCode == 38 || isNaN(trailingKeyCode)) {
+        return "";
+      }
+      keyIndex2 = url.indexOf(`&${key}`, keyIndex2 + 1);
+    }
+    encoded = /[%+]/.test(url);
+    if (!encoded) {
+      return void 0;
+    }
+  }
+  const results = {};
+  encoded ??= /[%+]/.test(url);
+  let keyIndex = url.indexOf("?", 8);
+  while (keyIndex !== -1) {
+    const nextKeyIndex = url.indexOf("&", keyIndex + 1);
+    let valueIndex = url.indexOf("=", keyIndex);
+    if (valueIndex > nextKeyIndex && nextKeyIndex !== -1) {
+      valueIndex = -1;
+    }
+    let name = url.slice(
+      keyIndex + 1,
+      valueIndex === -1 ? nextKeyIndex === -1 ? void 0 : nextKeyIndex : valueIndex
+    );
+    if (encoded) {
+      name = _decodeURI(name);
+    }
+    keyIndex = nextKeyIndex;
+    if (name === "") {
+      continue;
+    }
+    let value;
+    if (valueIndex === -1) {
+      value = "";
+    } else {
+      value = url.slice(valueIndex + 1, nextKeyIndex === -1 ? void 0 : nextKeyIndex);
+      if (encoded) {
+        value = _decodeURI(value);
+      }
+    }
+    if (multiple) {
+      if (!(results[name] && Array.isArray(results[name]))) {
+        results[name] = [];
+      }
+      results[name].push(value);
+    } else {
+      results[name] ??= value;
+    }
+  }
+  return key ? results[key] : results;
+};
+var getQueryParam = _getQueryParam;
+var getQueryParams = (url, key) => {
+  return _getQueryParam(url, key, true);
+};
+var decodeURIComponent_ = decodeURIComponent;
+
+// src/request.ts
+var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
+var HonoRequest = class {
+  raw;
+  #validatedData;
+  #matchResult;
+  routeIndex = 0;
+  path;
+  bodyCache = {};
+  constructor(request, path = "/", matchResult = [[]]) {
+    this.raw = request;
+    this.path = path;
+    this.#matchResult = matchResult;
+    this.#validatedData = {};
+  }
+  param(key) {
+    return key ? this.#getDecodedParam(key) : this.#getAllDecodedParams();
+  }
+  #getDecodedParam(key) {
+    const paramKey = this.#matchResult[0][this.routeIndex][1][key];
+    const param = this.#getParamValue(paramKey);
+    return param && /\%/.test(param) ? tryDecodeURIComponent(param) : param;
+  }
+  #getAllDecodedParams() {
+    const decoded = {};
+    const keys = Object.keys(this.#matchResult[0][this.routeIndex][1]);
+    for (const key of keys) {
+      const value = this.#getParamValue(this.#matchResult[0][this.routeIndex][1][key]);
+      if (value !== void 0) {
+        decoded[key] = /\%/.test(value) ? tryDecodeURIComponent(value) : value;
+      }
+    }
+    return decoded;
+  }
+  #getParamValue(paramKey) {
+    return this.#matchResult[1] ? this.#matchResult[1][paramKey] : paramKey;
+  }
+  query(key) {
+    return getQueryParam(this.url, key);
+  }
+  queries(key) {
+    return getQueryParams(this.url, key);
+  }
+  header(name) {
+    if (name) {
+      return this.raw.headers.get(name) ?? void 0;
+    }
+    const headerData = {};
+    this.raw.headers.forEach((value, key) => {
+      headerData[key] = value;
+    });
+    return headerData;
+  }
+  async parseBody(options) {
+    return this.bodyCache.parsedBody ??= await parseBody(this, options);
+  }
+  #cachedBody = (key) => {
+    const { bodyCache, raw } = this;
+    const cachedBody = bodyCache[key];
+    if (cachedBody) {
+      return cachedBody;
+    }
+    const anyCachedKey = Object.keys(bodyCache)[0];
+    if (anyCachedKey) {
+      return bodyCache[anyCachedKey].then((body) => {
+        if (anyCachedKey === "json") {
+          body = JSON.stringify(body);
+        }
+        return new Response(body)[key]();
+      });
+    }
+    return bodyCache[key] = raw[key]();
+  };
+  json() {
+    return this.#cachedBody("text").then((text) => JSON.parse(text));
+  }
+  text() {
+    return this.#cachedBody("text");
+  }
+  arrayBuffer() {
+    return this.#cachedBody("arrayBuffer");
+  }
+  blob() {
+    return this.#cachedBody("blob");
+  }
+  formData() {
+    return this.#cachedBody("formData");
+  }
+  addValidatedData(target, data) {
+    this.#validatedData[target] = data;
+  }
+  valid(target) {
+    return this.#validatedData[target];
+  }
+  get url() {
+    return this.raw.url;
+  }
+  get method() {
+    return this.raw.method;
+  }
+  get [GET_MATCH_RESULT]() {
+    return this.#matchResult;
+  }
+  get matchedRoutes() {
+    return this.#matchResult[0].map(([[, route]]) => route);
+  }
+  get routePath() {
+    return this.#matchResult[0].map(([[, route]]) => route)[this.routeIndex].path;
+  }
+};
+
+// src/utils/html.ts
+var HtmlEscapedCallbackPhase = {
+  Stringify: 1};
+var raw = (value, callbacks) => {
+  const escapedString = new String(value);
+  escapedString.isEscaped = true;
+  escapedString.callbacks = callbacks;
+  return escapedString;
+};
+var escapeRe = /[&<>'"]/;
+var stringBufferToString = async (buffer, callbacks) => {
+  let str = "";
+  callbacks ||= [];
+  const resolvedBuffer = await Promise.all(buffer);
+  for (let i = resolvedBuffer.length - 1; ; i--) {
+    str += resolvedBuffer[i];
+    i--;
+    if (i < 0) {
+      break;
+    }
+    let r = resolvedBuffer[i];
+    if (typeof r === "object") {
+      callbacks.push(...r.callbacks || []);
+    }
+    const isEscaped = r.isEscaped;
+    r = await (typeof r === "object" ? r.toString() : r);
+    if (typeof r === "object") {
+      callbacks.push(...r.callbacks || []);
+    }
+    if (r.isEscaped ?? isEscaped) {
+      str += r;
+    } else {
+      const buf = [str];
+      escapeToBuffer(r, buf);
+      str = buf[0];
+    }
+  }
+  return raw(str, callbacks);
+};
+var escapeToBuffer = (str, buffer) => {
+  const match = str.search(escapeRe);
+  if (match === -1) {
+    buffer[0] += str;
+    return;
+  }
+  let escape;
+  let index;
+  let lastIndex = 0;
+  for (index = match; index < str.length; index++) {
+    switch (str.charCodeAt(index)) {
+      case 34:
+        escape = "&quot;";
+        break;
+      case 39:
+        escape = "&#39;";
+        break;
+      case 38:
+        escape = "&amp;";
+        break;
+      case 60:
+        escape = "&lt;";
+        break;
+      case 62:
+        escape = "&gt;";
+        break;
+      default:
+        continue;
+    }
+    buffer[0] += str.substring(lastIndex, index) + escape;
+    lastIndex = index + 1;
+  }
+  buffer[0] += str.substring(lastIndex, index);
+};
+var resolveCallbackSync = (str) => {
+  const callbacks = str.callbacks;
+  if (!callbacks?.length) {
+    return str;
+  }
+  const buffer = [str];
+  const context = {};
+  callbacks.forEach((c) => c({ phase: HtmlEscapedCallbackPhase.Stringify, buffer, context }));
+  return buffer[0];
+};
+var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => {
+  if (typeof str === "object" && !(str instanceof String)) {
+    if (!(str instanceof Promise)) {
+      str = str.toString();
+    }
+    if (str instanceof Promise) {
+      str = await str;
+    }
+  }
+  const callbacks = str.callbacks;
+  if (!callbacks?.length) {
+    return Promise.resolve(str);
+  }
+  if (buffer) {
+    buffer[0] += str;
+  } else {
+    buffer = [str];
+  }
+  const resStr = Promise.all(callbacks.map((c) => c({ phase, buffer, context }))).then(
+    (res) => Promise.all(
+      res.filter(Boolean).map((str2) => resolveCallback(str2, phase, false, context, buffer))
+    ).then(() => buffer[0])
+  );
+  {
+    return resStr;
+  }
+};
+
+// src/context.ts
+var TEXT_PLAIN = "text/plain; charset=UTF-8";
+var setDefaultContentType = (contentType, headers) => {
+  return {
+    "Content-Type": contentType,
+    ...headers
+  };
+};
+var Context = class {
+  #rawRequest;
+  #req;
+  env = {};
+  #var;
+  finalized = false;
+  error;
+  #status;
+  #executionCtx;
+  #res;
+  #layout;
+  #renderer;
+  #notFoundHandler;
+  #preparedHeaders;
+  #matchResult;
+  #path;
+  constructor(req, options) {
+    this.#rawRequest = req;
+    if (options) {
+      this.#executionCtx = options.executionCtx;
+      this.env = options.env;
+      this.#notFoundHandler = options.notFoundHandler;
+      this.#path = options.path;
+      this.#matchResult = options.matchResult;
+    }
+  }
+  get req() {
+    this.#req ??= new HonoRequest(this.#rawRequest, this.#path, this.#matchResult);
+    return this.#req;
+  }
+  get event() {
+    if (this.#executionCtx && "respondWith" in this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no FetchEvent");
+    }
+  }
+  get executionCtx() {
+    if (this.#executionCtx) {
+      return this.#executionCtx;
+    } else {
+      throw Error("This context has no ExecutionContext");
+    }
+  }
+  get res() {
+    return this.#res ||= new Response(null, {
+      headers: this.#preparedHeaders ??= new Headers()
+    });
+  }
+  set res(_res) {
+    if (this.#res && _res) {
+      _res = new Response(_res.body, _res);
+      for (const [k, v] of this.#res.headers.entries()) {
+        if (k === "content-type") {
+          continue;
+        }
+        if (k === "set-cookie") {
+          const cookies = this.#res.headers.getSetCookie();
+          _res.headers.delete("set-cookie");
+          for (const cookie of cookies) {
+            _res.headers.append("set-cookie", cookie);
+          }
+        } else {
+          _res.headers.set(k, v);
+        }
+      }
+    }
+    this.#res = _res;
+    this.finalized = true;
+  }
+  render = (...args) => {
+    this.#renderer ??= (content) => this.html(content);
+    return this.#renderer(...args);
+  };
+  setLayout = (layout) => this.#layout = layout;
+  getLayout = () => this.#layout;
+  setRenderer = (renderer) => {
+    this.#renderer = renderer;
+  };
+  header = (name, value, options) => {
+    if (this.finalized) {
+      this.#res = new Response(this.#res.body, this.#res);
+    }
+    const headers = this.#res ? this.#res.headers : this.#preparedHeaders ??= new Headers();
+    if (value === void 0) {
+      headers.delete(name);
+    } else if (options?.append) {
+      headers.append(name, value);
+    } else {
+      headers.set(name, value);
+    }
+  };
+  status = (status) => {
+    this.#status = status;
+  };
+  set = (key, value) => {
+    this.#var ??= /* @__PURE__ */ new Map();
+    this.#var.set(key, value);
+  };
+  get = (key) => {
+    return this.#var ? this.#var.get(key) : void 0;
+  };
+  get var() {
+    if (!this.#var) {
+      return {};
+    }
+    return Object.fromEntries(this.#var);
+  }
+  #newResponse(data, arg, headers) {
+    const responseHeaders = this.#res ? new Headers(this.#res.headers) : this.#preparedHeaders ?? new Headers();
+    if (typeof arg === "object" && "headers" in arg) {
+      const argHeaders = arg.headers instanceof Headers ? arg.headers : new Headers(arg.headers);
+      for (const [key, value] of argHeaders) {
+        if (key.toLowerCase() === "set-cookie") {
+          responseHeaders.append(key, value);
+        } else {
+          responseHeaders.set(key, value);
+        }
+      }
+    }
+    if (headers) {
+      for (const [k, v] of Object.entries(headers)) {
+        if (typeof v === "string") {
+          responseHeaders.set(k, v);
+        } else {
+          responseHeaders.delete(k);
+          for (const v2 of v) {
+            responseHeaders.append(k, v2);
+          }
+        }
+      }
+    }
+    const status = typeof arg === "number" ? arg : arg?.status ?? this.#status;
+    return new Response(data, { status, headers: responseHeaders });
+  }
+  newResponse = (...args) => this.#newResponse(...args);
+  body = (data, arg, headers) => this.#newResponse(data, arg, headers);
+  text = (text, arg, headers) => {
+    return !this.#preparedHeaders && !this.#status && !arg && !headers && !this.finalized ? new Response(text) : this.#newResponse(
+      text,
+      arg,
+      setDefaultContentType(TEXT_PLAIN, headers)
+    );
+  };
+  json = (object, arg, headers) => {
+    return this.#newResponse(
+      JSON.stringify(object),
+      arg,
+      setDefaultContentType("application/json", headers)
+    );
+  };
+  html = (html, arg, headers) => {
+    const res = (html2) => this.#newResponse(html2, arg, setDefaultContentType("text/html; charset=UTF-8", headers));
+    return typeof html === "object" ? resolveCallback(html, HtmlEscapedCallbackPhase.Stringify, false, {}).then(res) : res(html);
+  };
+  redirect = (location, status) => {
+    const locationString = String(location);
+    this.header(
+      "Location",
+      !/[^\x00-\xFF]/.test(locationString) ? locationString : encodeURI(locationString)
+    );
+    return this.newResponse(null, status ?? 302);
+  };
+  notFound = () => {
+    this.#notFoundHandler ??= () => new Response();
+    return this.#notFoundHandler(this);
+  };
+};
+
+// src/router.ts
+var METHOD_NAME_ALL = "ALL";
+var METHOD_NAME_ALL_LOWERCASE = "all";
+var METHODS = ["get", "post", "put", "delete", "options", "patch"];
+var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is already built.";
+var UnsupportedPathError = class extends Error {
+};
+
+// src/utils/constants.ts
+var COMPOSED_HANDLER = "__COMPOSED_HANDLER";
+
+// src/hono-base.ts
+var notFoundHandler = (c) => {
+  return c.text("404 Not Found", 404);
+};
+var errorHandler$1 = (err, c) => {
+  if ("getResponse" in err) {
+    const res = err.getResponse();
+    return c.newResponse(res.body, res);
+  }
+  console.error(err);
+  return c.text("Internal Server Error", 500);
+};
+var Hono$1 = class Hono {
+  get;
+  post;
+  put;
+  delete;
+  options;
+  patch;
+  all;
+  on;
+  use;
+  router;
+  getPath;
+  _basePath = "/";
+  #path = "/";
+  routes = [];
+  constructor(options = {}) {
+    const allMethods = [...METHODS, METHOD_NAME_ALL_LOWERCASE];
+    allMethods.forEach((method) => {
+      this[method] = (args1, ...args) => {
+        if (typeof args1 === "string") {
+          this.#path = args1;
+        } else {
+          this.#addRoute(method, this.#path, args1);
+        }
+        args.forEach((handler) => {
+          this.#addRoute(method, this.#path, handler);
+        });
+        return this;
+      };
+    });
+    this.on = (method, path, ...handlers) => {
+      for (const p of [path].flat()) {
+        this.#path = p;
+        for (const m of [method].flat()) {
+          handlers.map((handler) => {
+            this.#addRoute(m.toUpperCase(), this.#path, handler);
+          });
+        }
+      }
+      return this;
+    };
+    this.use = (arg1, ...handlers) => {
+      if (typeof arg1 === "string") {
+        this.#path = arg1;
+      } else {
+        this.#path = "*";
+        handlers.unshift(arg1);
+      }
+      handlers.forEach((handler) => {
+        this.#addRoute(METHOD_NAME_ALL, this.#path, handler);
+      });
+      return this;
+    };
+    const { strict, ...optionsWithoutStrict } = options;
+    Object.assign(this, optionsWithoutStrict);
+    this.getPath = strict ?? true ? options.getPath ?? getPath : getPathNoStrict;
+  }
+  #clone() {
+    const clone = new Hono$1({
+      router: this.router,
+      getPath: this.getPath
+    });
+    clone.errorHandler = this.errorHandler;
+    clone.#notFoundHandler = this.#notFoundHandler;
+    clone.routes = this.routes;
+    return clone;
+  }
+  #notFoundHandler = notFoundHandler;
+  errorHandler = errorHandler$1;
+  route(path, app) {
+    const subApp = this.basePath(path);
+    app.routes.map((r) => {
+      let handler;
+      if (app.errorHandler === errorHandler$1) {
+        handler = r.handler;
+      } else {
+        handler = async (c, next) => (await compose([], app.errorHandler)(c, () => r.handler(c, next))).res;
+        handler[COMPOSED_HANDLER] = r.handler;
+      }
+      subApp.#addRoute(r.method, r.path, handler);
+    });
+    return this;
+  }
+  basePath(path) {
+    const subApp = this.#clone();
+    subApp._basePath = mergePath(this._basePath, path);
+    return subApp;
+  }
+  onError = (handler) => {
+    this.errorHandler = handler;
+    return this;
+  };
+  notFound = (handler) => {
+    this.#notFoundHandler = handler;
+    return this;
+  };
+  mount(path, applicationHandler, options) {
+    let replaceRequest;
+    let optionHandler;
+    if (options) {
+      if (typeof options === "function") {
+        optionHandler = options;
+      } else {
+        optionHandler = options.optionHandler;
+        if (options.replaceRequest === false) {
+          replaceRequest = (request) => request;
+        } else {
+          replaceRequest = options.replaceRequest;
+        }
+      }
+    }
+    const getOptions = optionHandler ? (c) => {
+      const options2 = optionHandler(c);
+      return Array.isArray(options2) ? options2 : [options2];
+    } : (c) => {
+      let executionContext = void 0;
+      try {
+        executionContext = c.executionCtx;
+      } catch {
+      }
+      return [c.env, executionContext];
+    };
+    replaceRequest ||= (() => {
+      const mergedPath = mergePath(this._basePath, path);
+      const pathPrefixLength = mergedPath === "/" ? 0 : mergedPath.length;
+      return (request) => {
+        const url = new URL(request.url);
+        url.pathname = url.pathname.slice(pathPrefixLength) || "/";
+        return new Request(url, request);
+      };
+    })();
+    const handler = async (c, next) => {
+      const res = await applicationHandler(replaceRequest(c.req.raw), ...getOptions(c));
+      if (res) {
+        return res;
+      }
+      await next();
+    };
+    this.#addRoute(METHOD_NAME_ALL, mergePath(path, "*"), handler);
+    return this;
+  }
+  #addRoute(method, path, handler) {
+    method = method.toUpperCase();
+    path = mergePath(this._basePath, path);
+    const r = { basePath: this._basePath, path, method, handler };
+    this.router.add(method, path, [handler, r]);
+    this.routes.push(r);
+  }
+  #handleError(err, c) {
+    if (err instanceof Error) {
+      return this.errorHandler(err, c);
+    }
+    throw err;
+  }
+  #dispatch(request, executionCtx, env, method) {
+    if (method === "HEAD") {
+      return (async () => new Response(null, await this.#dispatch(request, executionCtx, env, "GET")))();
+    }
+    const path = this.getPath(request, { env });
+    const matchResult = this.router.match(method, path);
+    const c = new Context(request, {
+      path,
+      matchResult,
+      env,
+      executionCtx,
+      notFoundHandler: this.#notFoundHandler
+    });
+    if (matchResult[0].length === 1) {
+      let res;
+      try {
+        res = matchResult[0][0][0][0](c, async () => {
+          c.res = await this.#notFoundHandler(c);
+        });
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+      return res instanceof Promise ? res.then(
+        (resolved) => resolved || (c.finalized ? c.res : this.#notFoundHandler(c))
+      ).catch((err) => this.#handleError(err, c)) : res ?? this.#notFoundHandler(c);
+    }
+    const composed = compose(matchResult[0], this.errorHandler, this.#notFoundHandler);
+    return (async () => {
+      try {
+        const context = await composed(c);
+        if (!context.finalized) {
+          throw new Error(
+            "Context is not finalized. Did you forget to return a Response object or `await next()`?"
+          );
+        }
+        return context.res;
+      } catch (err) {
+        return this.#handleError(err, c);
+      }
+    })();
+  }
+  fetch = (request, ...rest) => {
+    return this.#dispatch(request, rest[1], rest[0], request.method);
+  };
+  request = (input, requestInit, Env, executionCtx) => {
+    if (input instanceof Request) {
+      return this.fetch(requestInit ? new Request(input, requestInit) : input, Env, executionCtx);
+    }
+    input = input.toString();
+    return this.fetch(
+      new Request(
+        /^https?:\/\//.test(input) ? input : `http://localhost${mergePath("/", input)}`,
+        requestInit
+      ),
+      Env,
+      executionCtx
+    );
+  };
+  fire = () => {
+    addEventListener("fetch", (event) => {
+      event.respondWith(this.#dispatch(event.request, event, void 0, event.request.method));
+    });
+  };
+};
+
+// src/router/reg-exp-router/matcher.ts
+var emptyParam = [];
+function match$1(method, path) {
+  const matchers = this.buildAllMatchers();
+  const match2 = (method2, path2) => {
+    const matcher = matchers[method2] || matchers[METHOD_NAME_ALL];
+    const staticMatch = matcher[2][path2];
+    if (staticMatch) {
+      return staticMatch;
+    }
+    const match3 = path2.match(matcher[0]);
+    if (!match3) {
+      return [[], emptyParam];
+    }
+    const index = match3.indexOf("", 1);
+    return [matcher[1][index], match3];
+  };
+  this.match = match2;
+  return match2(method, path);
+}
+
+// src/router/reg-exp-router/node.ts
+var LABEL_REG_EXP_STR = "[^/]+";
+var ONLY_WILDCARD_REG_EXP_STR = ".*";
+var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
+var PATH_ERROR = Symbol();
+var regExpMetaChars = new Set(".\\+*[^]$()");
+function compareKey(a, b) {
+  if (a.length === 1) {
+    return b.length === 1 ? a < b ? -1 : 1 : -1;
+  }
+  if (b.length === 1) {
+    return 1;
+  }
+  if (a === ONLY_WILDCARD_REG_EXP_STR || a === TAIL_WILDCARD_REG_EXP_STR) {
+    return 1;
+  } else if (b === ONLY_WILDCARD_REG_EXP_STR || b === TAIL_WILDCARD_REG_EXP_STR) {
+    return -1;
+  }
+  if (a === LABEL_REG_EXP_STR) {
+    return 1;
+  } else if (b === LABEL_REG_EXP_STR) {
+    return -1;
+  }
+  return a.length === b.length ? a < b ? -1 : 1 : b.length - a.length;
+}
+var Node$1 = class Node {
+  #index;
+  #varIndex;
+  #children = /* @__PURE__ */ Object.create(null);
+  insert(tokens, index, paramMap, context, pathErrorCheckOnly) {
+    if (tokens.length === 0) {
+      if (this.#index !== void 0) {
+        throw PATH_ERROR;
+      }
+      if (pathErrorCheckOnly) {
+        return;
+      }
+      this.#index = index;
+      return;
+    }
+    const [token, ...restTokens] = tokens;
+    const pattern = token === "*" ? restTokens.length === 0 ? ["", "", ONLY_WILDCARD_REG_EXP_STR] : ["", "", LABEL_REG_EXP_STR] : token === "/*" ? ["", "", TAIL_WILDCARD_REG_EXP_STR] : token.match(/^\:([^\{\}]+)(?:\{(.+)\})?$/);
+    let node;
+    if (pattern) {
+      const name = pattern[1];
+      let regexpStr = pattern[2] || LABEL_REG_EXP_STR;
+      if (name && pattern[2]) {
+        if (regexpStr === ".*") {
+          throw PATH_ERROR;
+        }
+        regexpStr = regexpStr.replace(/^\((?!\?:)(?=[^)]+\)$)/, "(?:");
+        if (/\((?!\?:)/.test(regexpStr)) {
+          throw PATH_ERROR;
+        }
+      }
+      node = this.#children[regexpStr];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[regexpStr] = new Node$1();
+        if (name !== "") {
+          node.#varIndex = context.varIndex++;
+        }
+      }
+      if (!pathErrorCheckOnly && name !== "") {
+        paramMap.push([name, node.#varIndex]);
+      }
+    } else {
+      node = this.#children[token];
+      if (!node) {
+        if (Object.keys(this.#children).some(
+          (k) => k.length > 1 && k !== ONLY_WILDCARD_REG_EXP_STR && k !== TAIL_WILDCARD_REG_EXP_STR
+        )) {
+          throw PATH_ERROR;
+        }
+        if (pathErrorCheckOnly) {
+          return;
+        }
+        node = this.#children[token] = new Node$1();
+      }
+    }
+    node.insert(restTokens, index, paramMap, context, pathErrorCheckOnly);
+  }
+  buildRegExpStr() {
+    const childKeys = Object.keys(this.#children).sort(compareKey);
+    const strList = childKeys.map((k) => {
+      const c = this.#children[k];
+      return (typeof c.#varIndex === "number" ? `(${k})@${c.#varIndex}` : regExpMetaChars.has(k) ? `\\${k}` : k) + c.buildRegExpStr();
+    });
+    if (typeof this.#index === "number") {
+      strList.unshift(`#${this.#index}`);
+    }
+    if (strList.length === 0) {
+      return "";
+    }
+    if (strList.length === 1) {
+      return strList[0];
+    }
+    return "(?:" + strList.join("|") + ")";
+  }
+};
+
+// src/router/reg-exp-router/trie.ts
+var Trie = class {
+  #context = { varIndex: 0 };
+  #root = new Node$1();
+  insert(path, index, pathErrorCheckOnly) {
+    const paramAssoc = [];
+    const groups = [];
+    for (let i = 0; ; ) {
+      let replaced = false;
+      path = path.replace(/\{[^}]+\}/g, (m) => {
+        const mark = `@\\${i}`;
+        groups[i] = [mark, m];
+        i++;
+        replaced = true;
+        return mark;
+      });
+      if (!replaced) {
+        break;
+      }
+    }
+    const tokens = path.match(/(?::[^\/]+)|(?:\/\*$)|./g) || [];
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const [mark] = groups[i];
+      for (let j = tokens.length - 1; j >= 0; j--) {
+        if (tokens[j].indexOf(mark) !== -1) {
+          tokens[j] = tokens[j].replace(mark, groups[i][1]);
+          break;
+        }
+      }
+    }
+    this.#root.insert(tokens, index, paramAssoc, this.#context, pathErrorCheckOnly);
+    return paramAssoc;
+  }
+  buildRegExp() {
+    let regexp = this.#root.buildRegExpStr();
+    if (regexp === "") {
+      return [/^$/, [], []];
+    }
+    let captureIndex = 0;
+    const indexReplacementMap = [];
+    const paramReplacementMap = [];
+    regexp = regexp.replace(/#(\d+)|@(\d+)|\.\*\$/g, (_, handlerIndex, paramIndex) => {
+      if (handlerIndex !== void 0) {
+        indexReplacementMap[++captureIndex] = Number(handlerIndex);
+        return "$()";
+      }
+      if (paramIndex !== void 0) {
+        paramReplacementMap[Number(paramIndex)] = ++captureIndex;
+        return "";
+      }
+      return "";
+    });
+    return [new RegExp(`^${regexp}`), indexReplacementMap, paramReplacementMap];
+  }
+};
+
+// src/router/reg-exp-router/router.ts
+var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
+var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+function buildWildcardRegExp(path) {
+  return wildcardRegExpCache[path] ??= new RegExp(
+    path === "*" ? "" : `^${path.replace(
+      /\/\*$|([.\\+*[^\]$()])/g,
+      (_, metaChar) => metaChar ? `\\${metaChar}` : "(?:|/.*)"
+    )}$`
+  );
+}
+function clearWildcardRegExpCache() {
+  wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
+}
+function buildMatcherFromPreprocessedRoutes(routes) {
+  const trie = new Trie();
+  const handlerData = [];
+  if (routes.length === 0) {
+    return nullMatcher;
+  }
+  const routesWithStaticPathFlag = routes.map(
+    (route) => [!/\*|\/:/.test(route[0]), ...route]
+  ).sort(
+    ([isStaticA, pathA], [isStaticB, pathB]) => isStaticA ? 1 : isStaticB ? -1 : pathA.length - pathB.length
+  );
+  const staticMap = /* @__PURE__ */ Object.create(null);
+  for (let i = 0, j = -1, len = routesWithStaticPathFlag.length; i < len; i++) {
+    const [pathErrorCheckOnly, path, handlers] = routesWithStaticPathFlag[i];
+    if (pathErrorCheckOnly) {
+      staticMap[path] = [handlers.map(([h]) => [h, /* @__PURE__ */ Object.create(null)]), emptyParam];
+    } else {
+      j++;
+    }
+    let paramAssoc;
+    try {
+      paramAssoc = trie.insert(path, j, pathErrorCheckOnly);
+    } catch (e) {
+      throw e === PATH_ERROR ? new UnsupportedPathError(path) : e;
+    }
+    if (pathErrorCheckOnly) {
+      continue;
+    }
+    handlerData[j] = handlers.map(([h, paramCount]) => {
+      const paramIndexMap = /* @__PURE__ */ Object.create(null);
+      paramCount -= 1;
+      for (; paramCount >= 0; paramCount--) {
+        const [key, value] = paramAssoc[paramCount];
+        paramIndexMap[key] = value;
+      }
+      return [h, paramIndexMap];
+    });
+  }
+  const [regexp, indexReplacementMap, paramReplacementMap] = trie.buildRegExp();
+  for (let i = 0, len = handlerData.length; i < len; i++) {
+    for (let j = 0, len2 = handlerData[i].length; j < len2; j++) {
+      const map = handlerData[i][j]?.[1];
+      if (!map) {
+        continue;
+      }
+      const keys = Object.keys(map);
+      for (let k = 0, len3 = keys.length; k < len3; k++) {
+        map[keys[k]] = paramReplacementMap[map[keys[k]]];
+      }
+    }
+  }
+  const handlerMap = [];
+  for (const i in indexReplacementMap) {
+    handlerMap[i] = handlerData[indexReplacementMap[i]];
+  }
+  return [regexp, handlerMap, staticMap];
+}
+function findMiddleware(middleware, path) {
+  if (!middleware) {
+    return void 0;
+  }
+  for (const k of Object.keys(middleware).sort((a, b) => b.length - a.length)) {
+    if (buildWildcardRegExp(k).test(path)) {
+      return [...middleware[k]];
+    }
+  }
+  return void 0;
+}
+var RegExpRouter = class {
+  name = "RegExpRouter";
+  #middleware;
+  #routes;
+  constructor() {
+    this.#middleware = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+    this.#routes = { [METHOD_NAME_ALL]: /* @__PURE__ */ Object.create(null) };
+  }
+  add(method, path, handler) {
+    const middleware = this.#middleware;
+    const routes = this.#routes;
+    if (!middleware || !routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    if (!middleware[method]) {
+      [middleware, routes].forEach((handlerMap) => {
+        handlerMap[method] = /* @__PURE__ */ Object.create(null);
+        Object.keys(handlerMap[METHOD_NAME_ALL]).forEach((p) => {
+          handlerMap[method][p] = [...handlerMap[METHOD_NAME_ALL][p]];
+        });
+      });
+    }
+    if (path === "/*") {
+      path = "*";
+    }
+    const paramCount = (path.match(/\/:/g) || []).length;
+    if (/\*$/.test(path)) {
+      const re = buildWildcardRegExp(path);
+      if (method === METHOD_NAME_ALL) {
+        Object.keys(middleware).forEach((m) => {
+          middleware[m][path] ||= findMiddleware(middleware[m], path) || findMiddleware(middleware[METHOD_NAME_ALL], path) || [];
+        });
+      } else {
+        middleware[method][path] ||= findMiddleware(middleware[method], path) || findMiddleware(middleware[METHOD_NAME_ALL], path) || [];
+      }
+      Object.keys(middleware).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(middleware[m]).forEach((p) => {
+            re.test(p) && middleware[m][p].push([handler, paramCount]);
+          });
+        }
+      });
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          Object.keys(routes[m]).forEach(
+            (p) => re.test(p) && routes[m][p].push([handler, paramCount])
+          );
+        }
+      });
+      return;
+    }
+    const paths = checkOptionalParameter(path) || [path];
+    for (let i = 0, len = paths.length; i < len; i++) {
+      const path2 = paths[i];
+      Object.keys(routes).forEach((m) => {
+        if (method === METHOD_NAME_ALL || method === m) {
+          routes[m][path2] ||= [
+            ...findMiddleware(middleware[m], path2) || findMiddleware(middleware[METHOD_NAME_ALL], path2) || []
+          ];
+          routes[m][path2].push([handler, paramCount - len + i + 1]);
+        }
+      });
+    }
+  }
+  match = match$1;
+  buildAllMatchers() {
+    const matchers = /* @__PURE__ */ Object.create(null);
+    Object.keys(this.#routes).concat(Object.keys(this.#middleware)).forEach((method) => {
+      matchers[method] ||= this.#buildMatcher(method);
+    });
+    this.#middleware = this.#routes = void 0;
+    clearWildcardRegExpCache();
+    return matchers;
+  }
+  #buildMatcher(method) {
+    const routes = [];
+    let hasOwnRoute = method === METHOD_NAME_ALL;
+    [this.#middleware, this.#routes].forEach((r) => {
+      const ownRoute = r[method] ? Object.keys(r[method]).map((path) => [path, r[method][path]]) : [];
+      if (ownRoute.length !== 0) {
+        hasOwnRoute ||= true;
+        routes.push(...ownRoute);
+      } else if (method !== METHOD_NAME_ALL) {
+        routes.push(
+          ...Object.keys(r[METHOD_NAME_ALL]).map((path) => [path, r[METHOD_NAME_ALL][path]])
+        );
+      }
+    });
+    if (!hasOwnRoute) {
+      return null;
+    } else {
+      return buildMatcherFromPreprocessedRoutes(routes);
+    }
+  }
+};
+
+// src/router/smart-router/router.ts
+var SmartRouter = class {
+  name = "SmartRouter";
+  #routers = [];
+  #routes = [];
+  constructor(init) {
+    this.#routers = init.routers;
+  }
+  add(method, path, handler) {
+    if (!this.#routes) {
+      throw new Error(MESSAGE_MATCHER_IS_ALREADY_BUILT);
+    }
+    this.#routes.push([method, path, handler]);
+  }
+  match(method, path) {
+    if (!this.#routes) {
+      throw new Error("Fatal error");
+    }
+    const routers = this.#routers;
+    const routes = this.#routes;
+    const len = routers.length;
+    let i = 0;
+    let res;
+    for (; i < len; i++) {
+      const router = routers[i];
+      try {
+        for (let i2 = 0, len2 = routes.length; i2 < len2; i2++) {
+          router.add(...routes[i2]);
+        }
+        res = router.match(method, path);
+      } catch (e) {
+        if (e instanceof UnsupportedPathError) {
+          continue;
+        }
+        throw e;
+      }
+      this.match = router.match.bind(router);
+      this.#routers = [router];
+      this.#routes = void 0;
+      break;
+    }
+    if (i === len) {
+      throw new Error("Fatal error");
+    }
+    this.name = `SmartRouter + ${this.activeRouter.name}`;
+    return res;
+  }
+  get activeRouter() {
+    if (this.#routes || this.#routers.length !== 1) {
+      throw new Error("No active router has been determined yet.");
+    }
+    return this.#routers[0];
+  }
+};
+
+// src/router/trie-router/node.ts
+var emptyParams = /* @__PURE__ */ Object.create(null);
+var Node = class {
+  #methods;
+  #children;
+  #patterns;
+  #order = 0;
+  #params = emptyParams;
+  constructor(method, handler, children) {
+    this.#children = children || /* @__PURE__ */ Object.create(null);
+    this.#methods = [];
+    if (method && handler) {
+      const m = /* @__PURE__ */ Object.create(null);
+      m[method] = { handler, possibleKeys: [], score: 0 };
+      this.#methods = [m];
+    }
+    this.#patterns = [];
+  }
+  insert(method, path, handler) {
+    this.#order = ++this.#order;
+    let curNode = this;
+    const parts = splitRoutingPath(path);
+    const possibleKeys = [];
+    for (let i = 0, len = parts.length; i < len; i++) {
+      const p = parts[i];
+      const nextP = parts[i + 1];
+      const pattern = getPattern(p, nextP);
+      const key = Array.isArray(pattern) ? pattern[0] : p;
+      if (key in curNode.#children) {
+        curNode = curNode.#children[key];
+        if (pattern) {
+          possibleKeys.push(pattern[1]);
+        }
+        continue;
+      }
+      curNode.#children[key] = new Node();
+      if (pattern) {
+        curNode.#patterns.push(pattern);
+        possibleKeys.push(pattern[1]);
+      }
+      curNode = curNode.#children[key];
+    }
+    curNode.#methods.push({
+      [method]: {
+        handler,
+        possibleKeys: possibleKeys.filter((v, i, a) => a.indexOf(v) === i),
+        score: this.#order
+      }
+    });
+    return curNode;
+  }
+  #getHandlerSets(node, method, nodeParams, params) {
+    const handlerSets = [];
+    for (let i = 0, len = node.#methods.length; i < len; i++) {
+      const m = node.#methods[i];
+      const handlerSet = m[method] || m[METHOD_NAME_ALL];
+      const processedSet = {};
+      if (handlerSet !== void 0) {
+        handlerSet.params = /* @__PURE__ */ Object.create(null);
+        handlerSets.push(handlerSet);
+        if (nodeParams !== emptyParams || params && params !== emptyParams) {
+          for (let i2 = 0, len2 = handlerSet.possibleKeys.length; i2 < len2; i2++) {
+            const key = handlerSet.possibleKeys[i2];
+            const processed = processedSet[handlerSet.score];
+            handlerSet.params[key] = params?.[key] && !processed ? params[key] : nodeParams[key] ?? params?.[key];
+            processedSet[handlerSet.score] = true;
+          }
+        }
+      }
+    }
+    return handlerSets;
+  }
+  search(method, path) {
+    const handlerSets = [];
+    this.#params = emptyParams;
+    const curNode = this;
+    let curNodes = [curNode];
+    const parts = splitPath(path);
+    const curNodesQueue = [];
+    for (let i = 0, len = parts.length; i < len; i++) {
+      const part = parts[i];
+      const isLast = i === len - 1;
+      const tempNodes = [];
+      for (let j = 0, len2 = curNodes.length; j < len2; j++) {
+        const node = curNodes[j];
+        const nextNode = node.#children[part];
+        if (nextNode) {
+          nextNode.#params = node.#params;
+          if (isLast) {
+            if (nextNode.#children["*"]) {
+              handlerSets.push(
+                ...this.#getHandlerSets(nextNode.#children["*"], method, node.#params)
+              );
+            }
+            handlerSets.push(...this.#getHandlerSets(nextNode, method, node.#params));
+          } else {
+            tempNodes.push(nextNode);
+          }
+        }
+        for (let k = 0, len3 = node.#patterns.length; k < len3; k++) {
+          const pattern = node.#patterns[k];
+          const params = node.#params === emptyParams ? {} : { ...node.#params };
+          if (pattern === "*") {
+            const astNode = node.#children["*"];
+            if (astNode) {
+              handlerSets.push(...this.#getHandlerSets(astNode, method, node.#params));
+              astNode.#params = params;
+              tempNodes.push(astNode);
+            }
+            continue;
+          }
+          const [key, name, matcher] = pattern;
+          if (!part && !(matcher instanceof RegExp)) {
+            continue;
+          }
+          const child = node.#children[key];
+          const restPathString = parts.slice(i).join("/");
+          if (matcher instanceof RegExp) {
+            const m = matcher.exec(restPathString);
+            if (m) {
+              params[name] = m[0];
+              handlerSets.push(...this.#getHandlerSets(child, method, node.#params, params));
+              if (Object.keys(child.#children).length) {
+                child.#params = params;
+                const componentCount = m[0].match(/\//)?.length ?? 0;
+                const targetCurNodes = curNodesQueue[componentCount] ||= [];
+                targetCurNodes.push(child);
+              }
+              continue;
+            }
+          }
+          if (matcher === true || matcher.test(part)) {
+            params[name] = part;
+            if (isLast) {
+              handlerSets.push(...this.#getHandlerSets(child, method, params, node.#params));
+              if (child.#children["*"]) {
+                handlerSets.push(
+                  ...this.#getHandlerSets(child.#children["*"], method, params, node.#params)
+                );
+              }
+            } else {
+              child.#params = params;
+              tempNodes.push(child);
+            }
+          }
+        }
+      }
+      curNodes = tempNodes.concat(curNodesQueue.shift() ?? []);
+    }
+    if (handlerSets.length > 1) {
+      handlerSets.sort((a, b) => {
+        return a.score - b.score;
+      });
+    }
+    return [handlerSets.map(({ handler, params }) => [handler, params])];
+  }
+};
+
+// src/router/trie-router/router.ts
+var TrieRouter = class {
+  name = "TrieRouter";
+  #node;
+  constructor() {
+    this.#node = new Node();
+  }
+  add(method, path, handler) {
+    const results = checkOptionalParameter(path);
+    if (results) {
+      for (let i = 0, len = results.length; i < len; i++) {
+        this.#node.insert(method, results[i], handler);
+      }
+      return;
+    }
+    this.#node.insert(method, path, handler);
+  }
+  match(method, path) {
+    return this.#node.search(method, path);
+  }
+};
+
+// src/hono.ts
+var Hono = class extends Hono$1 {
+  constructor(options = {}) {
+    super(options);
+    this.router = options.router ?? new SmartRouter({
+      routers: [new RegExpRouter(), new TrieRouter()]
+    });
+  }
+};
+
+// src/server.ts
+var RequestError = class extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = "RequestError";
+  }
+};
+var toRequestError = (e) => {
+  if (e instanceof RequestError) {
+    return e;
+  }
+  return new RequestError(e.message, { cause: e });
+};
+var GlobalRequest = global.Request;
+var Request$1 = class Request extends GlobalRequest {
+  constructor(input, options) {
+    if (typeof input === "object" && getRequestCache in input) {
+      input = input[getRequestCache]();
+    }
+    if (typeof options?.body?.getReader !== "undefined") {
+      options.duplex ??= "half";
+    }
+    super(input, options);
+  }
+};
+var newHeadersFromIncoming = (incoming) => {
+  const headerRecord = [];
+  const rawHeaders = incoming.rawHeaders;
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    const { [i]: key, [i + 1]: value } = rawHeaders;
+    if (key.charCodeAt(0) !== /*:*/
+    58) {
+      headerRecord.push([key, value]);
+    }
+  }
+  return new Headers(headerRecord);
+};
+var wrapBodyStream = Symbol("wrapBodyStream");
+var newRequestFromIncoming = (method, url, headers, incoming, abortController) => {
+  const init = {
+    method,
+    headers,
+    signal: abortController.signal
+  };
+  if (method === "TRACE") {
+    init.method = "GET";
+    const req = new Request$1(url, init);
+    Object.defineProperty(req, "method", {
+      get() {
+        return "TRACE";
+      }
+    });
+    return req;
+  }
+  if (!(method === "GET" || method === "HEAD")) {
+    if ("rawBody" in incoming && incoming.rawBody instanceof Buffer) {
+      init.body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(incoming.rawBody);
+          controller.close();
+        }
+      });
+    } else if (incoming[wrapBodyStream]) {
+      let reader;
+      init.body = new ReadableStream({
+        async pull(controller) {
+          try {
+            reader ||= Readable.toWeb(incoming).getReader();
+            const { done, value } = await reader.read();
+            if (done) {
+              controller.close();
+            } else {
+              controller.enqueue(value);
+            }
+          } catch (error) {
+            controller.error(error);
+          }
+        }
+      });
+    } else {
+      init.body = Readable.toWeb(incoming);
+    }
+  }
+  return new Request$1(url, init);
+};
+var getRequestCache = Symbol("getRequestCache");
+var requestCache = Symbol("requestCache");
+var incomingKey = Symbol("incomingKey");
+var urlKey = Symbol("urlKey");
+var headersKey = Symbol("headersKey");
+var abortControllerKey = Symbol("abortControllerKey");
+var getAbortController = Symbol("getAbortController");
+var requestPrototype = {
+  get method() {
+    return this[incomingKey].method || "GET";
+  },
+  get url() {
+    return this[urlKey];
+  },
+  get headers() {
+    return this[headersKey] ||= newHeadersFromIncoming(this[incomingKey]);
+  },
+  [getAbortController]() {
+    this[getRequestCache]();
+    return this[abortControllerKey];
+  },
+  [getRequestCache]() {
+    this[abortControllerKey] ||= new AbortController();
+    return this[requestCache] ||= newRequestFromIncoming(
+      this.method,
+      this[urlKey],
+      this.headers,
+      this[incomingKey],
+      this[abortControllerKey]
+    );
+  }
+};
+[
+  "body",
+  "bodyUsed",
+  "cache",
+  "credentials",
+  "destination",
+  "integrity",
+  "mode",
+  "redirect",
+  "referrer",
+  "referrerPolicy",
+  "signal",
+  "keepalive"
+].forEach((k) => {
+  Object.defineProperty(requestPrototype, k, {
+    get() {
+      return this[getRequestCache]()[k];
+    }
+  });
+});
+["arrayBuffer", "blob", "clone", "formData", "json", "text"].forEach((k) => {
+  Object.defineProperty(requestPrototype, k, {
+    value: function() {
+      return this[getRequestCache]()[k]();
+    }
+  });
+});
+Object.setPrototypeOf(requestPrototype, Request$1.prototype);
+var newRequest = (incoming, defaultHostname) => {
+  const req = Object.create(requestPrototype);
+  req[incomingKey] = incoming;
+  const incomingUrl = incoming.url || "";
+  if (incomingUrl[0] !== "/" && // short-circuit for performance. most requests are relative URL.
+  (incomingUrl.startsWith("http://") || incomingUrl.startsWith("https://"))) {
+    if (incoming instanceof Http2ServerRequest) {
+      throw new RequestError("Absolute URL for :path is not allowed in HTTP/2");
+    }
+    try {
+      const url2 = new URL(incomingUrl);
+      req[urlKey] = url2.href;
+    } catch (e) {
+      throw new RequestError("Invalid absolute URL", { cause: e });
+    }
+    return req;
+  }
+  const host = (incoming instanceof Http2ServerRequest ? incoming.authority : incoming.headers.host) || defaultHostname;
+  if (!host) {
+    throw new RequestError("Missing host header");
+  }
+  let scheme;
+  if (incoming instanceof Http2ServerRequest) {
+    scheme = incoming.scheme;
+    if (!(scheme === "http" || scheme === "https")) {
+      throw new RequestError("Unsupported scheme");
+    }
+  } else {
+    scheme = incoming.socket && incoming.socket.encrypted ? "https" : "http";
+  }
+  const url = new URL(`${scheme}://${host}${incomingUrl}`);
+  if (url.hostname.length !== host.length && url.hostname !== host.replace(/:\d+$/, "")) {
+    throw new RequestError("Invalid host header");
+  }
+  req[urlKey] = url.href;
+  return req;
+};
+
+// src/response.ts
+var responseCache = Symbol("responseCache");
+var getResponseCache = Symbol("getResponseCache");
+var cacheKey = Symbol("cache");
+var GlobalResponse = global.Response;
+var Response2 = class _Response {
+  #body;
+  #init;
+  [getResponseCache]() {
+    delete this[cacheKey];
+    return this[responseCache] ||= new GlobalResponse(this.#body, this.#init);
+  }
+  constructor(body, init) {
+    let headers;
+    this.#body = body;
+    if (init instanceof _Response) {
+      const cachedGlobalResponse = init[responseCache];
+      if (cachedGlobalResponse) {
+        this.#init = cachedGlobalResponse;
+        this[getResponseCache]();
+        return;
+      } else {
+        this.#init = init.#init;
+        headers = new Headers(init.#init.headers);
+      }
+    } else {
+      this.#init = init;
+    }
+    if (typeof body === "string" || typeof body?.getReader !== "undefined" || body instanceof Blob || body instanceof Uint8Array) {
+      headers ||= init?.headers || { "content-type": "text/plain; charset=UTF-8" };
+      this[cacheKey] = [init?.status || 200, body, headers];
+    }
+  }
+  get headers() {
+    const cache = this[cacheKey];
+    if (cache) {
+      if (!(cache[2] instanceof Headers)) {
+        cache[2] = new Headers(cache[2]);
+      }
+      return cache[2];
+    }
+    return this[getResponseCache]().headers;
+  }
+  get status() {
+    return this[cacheKey]?.[0] ?? this[getResponseCache]().status;
+  }
+  get ok() {
+    const status = this.status;
+    return status >= 200 && status < 300;
+  }
+};
+["body", "bodyUsed", "redirected", "statusText", "trailers", "type", "url"].forEach((k) => {
+  Object.defineProperty(Response2.prototype, k, {
+    get() {
+      return this[getResponseCache]()[k];
+    }
+  });
+});
+["arrayBuffer", "blob", "clone", "formData", "json", "text"].forEach((k) => {
+  Object.defineProperty(Response2.prototype, k, {
+    value: function() {
+      return this[getResponseCache]()[k]();
+    }
+  });
+});
+Object.setPrototypeOf(Response2, GlobalResponse);
+Object.setPrototypeOf(Response2.prototype, GlobalResponse.prototype);
+
+// src/utils.ts
+async function readWithoutBlocking(readPromise) {
+  return Promise.race([readPromise, Promise.resolve().then(() => Promise.resolve(void 0))]);
+}
+function writeFromReadableStreamDefaultReader(reader, writable, currentReadPromise) {
+  const cancel = (error) => {
+    reader.cancel(error).catch(() => {
+    });
+  };
+  writable.on("close", cancel);
+  writable.on("error", cancel);
+  (currentReadPromise ?? reader.read()).then(flow, handleStreamError);
+  return reader.closed.finally(() => {
+    writable.off("close", cancel);
+    writable.off("error", cancel);
+  });
+  function handleStreamError(error) {
+    if (error) {
+      writable.destroy(error);
+    }
+  }
+  function onDrain() {
+    reader.read().then(flow, handleStreamError);
+  }
+  function flow({ done, value }) {
+    try {
+      if (done) {
+        writable.end();
+      } else if (!writable.write(value)) {
+        writable.once("drain", onDrain);
+      } else {
+        return reader.read().then(flow, handleStreamError);
+      }
+    } catch (e) {
+      handleStreamError(e);
+    }
+  }
+}
+function writeFromReadableStream(stream, writable) {
+  if (stream.locked) {
+    throw new TypeError("ReadableStream is locked.");
+  } else if (writable.destroyed) {
+    return;
+  }
+  return writeFromReadableStreamDefaultReader(stream.getReader(), writable);
+}
+var buildOutgoingHttpHeaders = (headers) => {
+  const res = {};
+  if (!(headers instanceof Headers)) {
+    headers = new Headers(headers ?? void 0);
+  }
+  const cookies = [];
+  for (const [k, v] of headers) {
+    if (k === "set-cookie") {
+      cookies.push(v);
+    } else {
+      res[k] = v;
+    }
+  }
+  if (cookies.length > 0) {
+    res["set-cookie"] = cookies;
+  }
+  res["content-type"] ??= "text/plain; charset=UTF-8";
+  return res;
+};
+
+// src/utils/response/constants.ts
+var X_ALREADY_SENT = "x-hono-already-sent";
+var webFetch = global.fetch;
+if (typeof global.crypto === "undefined") {
+  global.crypto = crypto$1;
+}
+global.fetch = (info, init) => {
+  init = {
+    // Disable compression handling so people can return the result of a fetch
+    // directly in the loader without messing with the Content-Encoding header.
+    compress: false,
+    ...init
+  };
+  return webFetch(info, init);
+};
+
+// src/listener.ts
+var outgoingEnded = Symbol("outgoingEnded");
+var handleRequestError = () => new Response(null, {
+  status: 400
+});
+var handleFetchError = (e) => new Response(null, {
+  status: e instanceof Error && (e.name === "TimeoutError" || e.constructor.name === "TimeoutError") ? 504 : 500
+});
+var handleResponseError = (e, outgoing) => {
+  const err = e instanceof Error ? e : new Error("unknown error", { cause: e });
+  if (err.code === "ERR_STREAM_PREMATURE_CLOSE") {
+    console.info("The user aborted a request.");
+  } else {
+    console.error(e);
+    if (!outgoing.headersSent) {
+      outgoing.writeHead(500, { "Content-Type": "text/plain" });
+    }
+    outgoing.end(`Error: ${err.message}`);
+    outgoing.destroy(err);
+  }
+};
+var flushHeaders = (outgoing) => {
+  if ("flushHeaders" in outgoing && outgoing.writable) {
+    outgoing.flushHeaders();
+  }
+};
+var responseViaCache = async (res, outgoing) => {
+  let [status, body, header] = res[cacheKey];
+  if (header instanceof Headers) {
+    header = buildOutgoingHttpHeaders(header);
+  }
+  if (typeof body === "string") {
+    header["Content-Length"] = Buffer.byteLength(body);
+  } else if (body instanceof Uint8Array) {
+    header["Content-Length"] = body.byteLength;
+  } else if (body instanceof Blob) {
+    header["Content-Length"] = body.size;
+  }
+  outgoing.writeHead(status, header);
+  if (typeof body === "string" || body instanceof Uint8Array) {
+    outgoing.end(body);
+  } else if (body instanceof Blob) {
+    outgoing.end(new Uint8Array(await body.arrayBuffer()));
+  } else {
+    flushHeaders(outgoing);
+    await writeFromReadableStream(body, outgoing)?.catch(
+      (e) => handleResponseError(e, outgoing)
+    );
+  }
+  outgoing[outgoingEnded]?.();
+};
+var isPromise = (res) => typeof res.then === "function";
+var responseViaResponseObject = async (res, outgoing, options = {}) => {
+  if (isPromise(res)) {
+    if (options.errorHandler) {
+      try {
+        res = await res;
+      } catch (err) {
+        const errRes = await options.errorHandler(err);
+        if (!errRes) {
+          return;
+        }
+        res = errRes;
+      }
+    } else {
+      res = await res.catch(handleFetchError);
+    }
+  }
+  if (cacheKey in res) {
+    return responseViaCache(res, outgoing);
+  }
+  const resHeaderRecord = buildOutgoingHttpHeaders(res.headers);
+  if (res.body) {
+    const reader = res.body.getReader();
+    const values = [];
+    let done = false;
+    let currentReadPromise = void 0;
+    if (resHeaderRecord["transfer-encoding"] !== "chunked") {
+      let maxReadCount = 2;
+      for (let i = 0; i < maxReadCount; i++) {
+        currentReadPromise ||= reader.read();
+        const chunk = await readWithoutBlocking(currentReadPromise).catch((e) => {
+          console.error(e);
+          done = true;
+        });
+        if (!chunk) {
+          if (i === 1) {
+            await new Promise((resolve) => setTimeout(resolve));
+            maxReadCount = 3;
+            continue;
+          }
+          break;
+        }
+        currentReadPromise = void 0;
+        if (chunk.value) {
+          values.push(chunk.value);
+        }
+        if (chunk.done) {
+          done = true;
+          break;
+        }
+      }
+      if (done && !("content-length" in resHeaderRecord)) {
+        resHeaderRecord["content-length"] = values.reduce((acc, value) => acc + value.length, 0);
+      }
+    }
+    outgoing.writeHead(res.status, resHeaderRecord);
+    values.forEach((value) => {
+      outgoing.write(value);
+    });
+    if (done) {
+      outgoing.end();
+    } else {
+      if (values.length === 0) {
+        flushHeaders(outgoing);
+      }
+      await writeFromReadableStreamDefaultReader(reader, outgoing, currentReadPromise);
+    }
+  } else if (resHeaderRecord[X_ALREADY_SENT]) ; else {
+    outgoing.writeHead(res.status, resHeaderRecord);
+    outgoing.end();
+  }
+  outgoing[outgoingEnded]?.();
+};
+var getRequestListener = (fetchCallback, options = {}) => {
+  const autoCleanupIncoming = options.autoCleanupIncoming ?? true;
+  if (options.overrideGlobalObjects !== false && global.Request !== Request$1) {
+    Object.defineProperty(global, "Request", {
+      value: Request$1
+    });
+    Object.defineProperty(global, "Response", {
+      value: Response2
+    });
+  }
+  return async (incoming, outgoing) => {
+    let res, req;
+    try {
+      req = newRequest(incoming, options.hostname);
+      let incomingEnded = !autoCleanupIncoming || incoming.method === "GET" || incoming.method === "HEAD";
+      if (!incomingEnded) {
+        ;
+        incoming[wrapBodyStream] = true;
+        incoming.on("end", () => {
+          incomingEnded = true;
+        });
+        if (incoming instanceof Http2ServerRequest) {
+          ;
+          outgoing[outgoingEnded] = () => {
+            if (!incomingEnded) {
+              setTimeout(() => {
+                if (!incomingEnded) {
+                  setTimeout(() => {
+                    incoming.destroy();
+                    outgoing.destroy();
+                  });
+                }
+              });
+            }
+          };
+        }
+      }
+      outgoing.on("close", () => {
+        const abortController = req[abortControllerKey];
+        if (abortController) {
+          if (incoming.errored) {
+            req[abortControllerKey].abort(incoming.errored.toString());
+          } else if (!outgoing.writableFinished) {
+            req[abortControllerKey].abort("Client connection prematurely closed.");
+          }
+        }
+        if (!incomingEnded) {
+          setTimeout(() => {
+            if (!incomingEnded) {
+              setTimeout(() => {
+                incoming.destroy();
+              });
+            }
+          });
+        }
+      });
+      res = fetchCallback(req, { incoming, outgoing });
+      if (cacheKey in res) {
+        return responseViaCache(res, outgoing);
+      }
+    } catch (e) {
+      if (!res) {
+        if (options.errorHandler) {
+          res = await options.errorHandler(req ? e : toRequestError(e));
+          if (!res) {
+            return;
+          }
+        } else if (!req) {
+          res = handleRequestError();
+        } else {
+          res = handleFetchError(e);
+        }
+      } else {
+        return handleResponseError(e, outgoing);
+      }
+    }
+    try {
+      return await responseViaResponseObject(res, outgoing, options);
+    } catch (e) {
+      return handleResponseError(e, outgoing);
+    }
+  };
+};
+
+// src/server.ts
+var createAdaptorServer = (options) => {
+  const fetchCallback = options.fetch;
+  const requestListener = getRequestListener(fetchCallback, {
+    hostname: options.hostname,
+    overrideGlobalObjects: options.overrideGlobalObjects,
+    autoCleanupIncoming: options.autoCleanupIncoming
+  });
+  const createServer$1 = options.createServer || createServer;
+  const server = createServer$1(options.serverOptions || {}, requestListener);
+  return server;
+};
+var serve = (options, listeningListener) => {
+  const server = createAdaptorServer(options);
+  server.listen(options?.port ?? 3e3, options.hostname, () => {
+    const serverInfo = server.address();
+    listeningListener && listeningListener(serverInfo);
+  });
+  return server;
+};
+
+// src/helper/html/index.ts
+var html = (strings, ...values) => {
+  const buffer = [""];
+  for (let i = 0, len = strings.length - 1; i < len; i++) {
+    buffer[0] += strings[i];
+    const children = Array.isArray(values[i]) ? values[i].flat(Infinity) : [values[i]];
+    for (let i2 = 0, len2 = children.length; i2 < len2; i2++) {
+      const child = children[i2];
+      if (typeof child === "string") {
+        escapeToBuffer(child, buffer);
+      } else if (typeof child === "number") {
+        buffer[0] += child;
+      } else if (typeof child === "boolean" || child === null || child === void 0) {
+        continue;
+      } else if (typeof child === "object" && child.isEscaped) {
+        if (child.callbacks) {
+          buffer.unshift("", child);
+        } else {
+          const tmp = child.toString();
+          if (tmp instanceof Promise) {
+            buffer.unshift("", tmp);
+          } else {
+            buffer[0] += tmp;
+          }
+        }
+      } else if (child instanceof Promise) {
+        buffer.unshift("", child);
+      } else {
+        escapeToBuffer(child.toString(), buffer);
+      }
+    }
+  }
+  buffer[0] += strings.at(-1);
+  return buffer.length === 1 ? "callbacks" in buffer ? raw(resolveCallbackSync(raw(buffer[0], buffer.callbacks))) : raw(buffer[0]) : stringBufferToString(buffer, buffer.callbacks);
+};
+
+// src/index.ts
+
+// src/swagger/renderer.ts
+var RENDER_TYPE = {
+  STRING_ARRAY: "string_array",
+  STRING: "string",
+  JSON_STRING: "json_string",
+  RAW: "raw"
+};
+var RENDER_TYPE_MAP = {
+  configUrl: RENDER_TYPE.STRING,
+  deepLinking: RENDER_TYPE.RAW,
+  presets: RENDER_TYPE.STRING_ARRAY,
+  plugins: RENDER_TYPE.STRING_ARRAY,
+  spec: RENDER_TYPE.JSON_STRING,
+  url: RENDER_TYPE.STRING,
+  urls: RENDER_TYPE.JSON_STRING,
+  layout: RENDER_TYPE.STRING,
+  docExpansion: RENDER_TYPE.STRING,
+  maxDisplayedTags: RENDER_TYPE.RAW,
+  operationsSorter: RENDER_TYPE.RAW,
+  requestInterceptor: RENDER_TYPE.RAW,
+  responseInterceptor: RENDER_TYPE.RAW,
+  persistAuthorization: RENDER_TYPE.RAW,
+  defaultModelsExpandDepth: RENDER_TYPE.RAW,
+  defaultModelExpandDepth: RENDER_TYPE.RAW,
+  defaultModelRendering: RENDER_TYPE.STRING,
+  displayRequestDuration: RENDER_TYPE.RAW,
+  filter: RENDER_TYPE.RAW,
+  showExtensions: RENDER_TYPE.RAW,
+  showCommonExtensions: RENDER_TYPE.RAW,
+  queryConfigEnabled: RENDER_TYPE.RAW,
+  displayOperationId: RENDER_TYPE.RAW,
+  tagsSorter: RENDER_TYPE.RAW,
+  onComplete: RENDER_TYPE.RAW,
+  syntaxHighlight: RENDER_TYPE.JSON_STRING,
+  tryItOutEnabled: RENDER_TYPE.RAW,
+  requestSnippetsEnabled: RENDER_TYPE.RAW,
+  requestSnippets: RENDER_TYPE.JSON_STRING,
+  oauth2RedirectUrl: RENDER_TYPE.STRING,
+  showMutabledRequest: RENDER_TYPE.RAW,
+  request: RENDER_TYPE.JSON_STRING,
+  supportedSubmitMethods: RENDER_TYPE.JSON_STRING,
+  validatorUrl: RENDER_TYPE.STRING,
+  withCredentials: RENDER_TYPE.RAW,
+  modelPropertyMacro: RENDER_TYPE.RAW,
+  parameterMacro: RENDER_TYPE.RAW
+};
+var renderSwaggerUIOptions = (options) => {
+  const optionsStrings = Object.entries(options).map(([k, v]) => {
+    const key = k;
+    if (!RENDER_TYPE_MAP[key] || v === void 0) {
+      return "";
+    }
+    switch (RENDER_TYPE_MAP[key]) {
+      case RENDER_TYPE.STRING:
+        return `${key}: '${v}'`;
+      case RENDER_TYPE.STRING_ARRAY:
+        if (!Array.isArray(v)) {
+          return "";
+        }
+        return `${key}: [${v.map((ve) => `${ve}`).join(",")}]`;
+      case RENDER_TYPE.JSON_STRING:
+        return `${key}: ${JSON.stringify(v)}`;
+      case RENDER_TYPE.RAW:
+        return `${key}: ${v}`;
+      default:
+        return "";
+    }
+  }).filter((item) => item !== "").join(",");
+  return optionsStrings;
+};
+
+// src/swagger/resource.ts
+var remoteAssets = ({ version }) => {
+  const url = `https://cdn.jsdelivr.net/npm/swagger-ui-dist${version !== void 0 ? `@${version}` : ""}`;
+  return {
+    css: [`${url}/swagger-ui.css`],
+    js: [`${url}/swagger-ui-bundle.js`]
+  };
+};
+
+// src/index.ts
+var SwaggerUI = (options) => {
+  const asset = remoteAssets({ version: options?.version });
+  delete options.version;
+  if (options.manuallySwaggerUIHtml) {
+    return options.manuallySwaggerUIHtml(asset);
+  }
+  const optionsStrings = renderSwaggerUIOptions(options);
+  return `
+    <div>
+      <div id="swagger-ui"></div>
+      ${asset.css.map((url) => html`<link rel="stylesheet" href="${url}" />`)}
+      ${asset.js.map((url) => html`<script src="${url}" crossorigin="anonymous"></script>`)}
+      <script>
+        window.onload = () => {
+          window.ui = SwaggerUIBundle({
+            dom_id: '#swagger-ui',${optionsStrings},
+          })
+        }
+      </script>
+    </div>
+  `;
+};
+var middleware = (options) => async (c) => {
+  const title = options?.title ?? "SwaggerUI";
+  return c.html(
+    /* html */
+    `
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="description" content="SwaggerUI" />
+          <title>${title}</title>
+        </head>
+        <body>
+          ${SwaggerUI(options)}
+        </body>
+      </html>
+    `
+  );
+};
+
 function success(data, options = {}) {
   const { status = 200, meta = {} } = options;
   return {
@@ -2756,19 +5039,19 @@ function createResourceRoutes(resource, version, config = {}) {
     }));
   }
   if (methods.includes("HEAD")) {
-    app.head("/", asyncHandler(async (c) => {
+    app.on("HEAD", "/", asyncHandler(async (c) => {
       const total = await resource.count();
       const allItems = await resource.list({ limit: 1e3 });
       const stats = {
         total,
-        version: resource.config?.currentVersion || resource.version || "v0"
+        version: resource.config?.currentVersion || resource.version || "v1"
       };
       c.header("X-Total-Count", total.toString());
       c.header("X-Resource-Version", stats.version);
       c.header("X-Schema-Fields", Object.keys(resource.config?.attributes || {}).length.toString());
       return c.body(null, 200);
     }));
-    app.head("/:id", asyncHandler(async (c) => {
+    app.on("HEAD", "/:id", asyncHandler(async (c) => {
       const id = c.req.param("id");
       const item = await resource.get(id);
       if (!item) {
@@ -2785,7 +5068,7 @@ function createResourceRoutes(resource, version, config = {}) {
       c.header("Allow", methods.join(", "));
       const total = await resource.count();
       const schema = resource.config?.attributes || {};
-      const version2 = resource.config?.currentVersion || resource.version || "v0";
+      const version2 = resource.config?.currentVersion || resource.version || "v1";
       const metadata = {
         resource: resourceName,
         version: version2,
@@ -2890,6 +5173,12 @@ function generateResourceSchema(resource) {
   const properties = {};
   const required = [];
   const attributes = resource.config?.attributes || resource.attributes || {};
+  properties.id = {
+    type: "string",
+    description: "Unique identifier for the resource",
+    example: "2_gDTpeU6EI0e8B92n_R3Y",
+    readOnly: true
+  };
   for (const [fieldName, fieldDef] of Object.entries(attributes)) {
     if (typeof fieldDef === "object" && fieldDef.type) {
       const baseType = mapFieldTypeToOpenAPI(fieldDef.type);
@@ -2948,19 +5237,28 @@ function generateResourcePaths(resource, version, config = {}) {
       get: {
         tags: [resourceName],
         summary: `List ${resourceName}`,
-        description: `Retrieve a paginated list of ${resourceName}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.`,
+        description: `Retrieve a paginated list of ${resourceName}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
+
+**Pagination**: Use \`limit\` and \`offset\` to paginate results. For example:
+- First page (10 items): \`?limit=10&offset=0\`
+- Second page: \`?limit=10&offset=10\`
+- Third page: \`?limit=10&offset=20\`
+
+The response includes pagination metadata in the \`pagination\` object with total count and page information.`,
         parameters: [
           {
             name: "limit",
             in: "query",
-            description: "Maximum number of items to return",
-            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 }
+            description: "Maximum number of items to return per page (page size)",
+            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 },
+            example: 10
           },
           {
             name: "offset",
             in: "query",
-            description: "Number of items to skip",
-            schema: { type: "integer", default: 0, minimum: 0 }
+            description: "Number of items to skip before starting to return results. Use for pagination: offset = (page - 1) * limit",
+            schema: { type: "integer", default: 0, minimum: 0 },
+            example: 0
           },
           {
             name: "partition",
@@ -2990,11 +5288,28 @@ function generateResourcePaths(resource, version, config = {}) {
                     },
                     pagination: {
                       type: "object",
+                      description: "Pagination metadata for the current request",
                       properties: {
-                        total: { type: "integer" },
-                        page: { type: "integer" },
-                        pageSize: { type: "integer" },
-                        pageCount: { type: "integer" }
+                        total: {
+                          type: "integer",
+                          description: "Total number of items available",
+                          example: 150
+                        },
+                        page: {
+                          type: "integer",
+                          description: "Current page number (1-indexed)",
+                          example: 1
+                        },
+                        pageSize: {
+                          type: "integer",
+                          description: "Number of items per page (same as limit parameter)",
+                          example: 10
+                        },
+                        pageCount: {
+                          type: "integer",
+                          description: "Total number of pages available",
+                          example: 15
+                        }
                       }
                     }
                   }
@@ -3390,7 +5705,7 @@ function generateOpenAPISpec(database, config = {}) {
     resources: resourceConfigs = {}
   } = config;
   const spec = {
-    openapi: "3.0.0",
+    openapi: "3.1.0",
     info: {
       title,
       version,
@@ -3490,7 +5805,7 @@ function generateOpenAPISpec(database, config = {}) {
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
       auth: false
     };
-    const version2 = resource.config?.currentVersion || resource.version || "v0";
+    const version2 = resource.config?.currentVersion || resource.version || "v1";
     const paths = generateResourcePaths(resource, version2, config2);
     Object.assign(spec.paths, paths);
     spec.tags.push({
@@ -3795,6 +6110,8 @@ class ApiServer {
       auth: options.auth || {},
       docsEnabled: options.docsEnabled !== false,
       // Enable /docs by default
+      docsUI: options.docsUI || "redoc",
+      // 'swagger' or 'redoc'
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       // 10MB default
       apiInfo: {
@@ -3879,7 +6196,7 @@ class ApiServer {
     this.app.get("/", (c) => {
       const resources = Object.keys(this.options.database.resources).filter((name) => !name.startsWith("plg_")).map((name) => {
         const resource = this.options.database.resources[name];
-        const version = resource.config?.currentVersion || resource.version || "v0";
+        const version = resource.config?.currentVersion || resource.version || "v1";
         return {
           name,
           version,
@@ -3909,9 +6226,32 @@ class ApiServer {
         }
         return c.json(this.openAPISpec);
       });
-      this.app.get("/docs", swaggerUI({
-        url: "/openapi.json"
-      }));
+      if (this.options.docsUI === "swagger") {
+        this.app.get("/docs", middleware({
+          url: "/openapi.json"
+        }));
+      } else {
+        this.app.get("/docs", (c) => {
+          return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${this.options.apiInfo.title} - API Documentation</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <redoc spec-url="/openapi.json"></redoc>
+  <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"><\/script>
+</body>
+</html>`);
+        });
+      }
     }
     this._setupResourceRoutes();
     this.app.onError((err, c) => {
@@ -3942,7 +6282,7 @@ class ApiServer {
       }
       const config = resourceConfigs[name] || {
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]};
-      const version = resource.config?.currentVersion || resource.version || "v0";
+      const version = resource.config?.currentVersion || resource.version || "v1";
       const resourceApp = createResourceRoutes(resource, version, {
         methods: config.methods,
         customMiddleware: config.customMiddleware || [],
@@ -4237,6 +6577,8 @@ class ApiPlugin extends Plugin {
       docs: {
         enabled: options.docs?.enabled !== false && options.docsEnabled !== false,
         // Enable by default
+        ui: options.docs?.ui || "redoc",
+        // 'swagger' or 'redoc' (redoc is prettier!)
         title: options.docs?.title || options.apiTitle || "s3db.js API",
         version: options.docs?.version || options.apiVersion || "1.0.0",
         description: options.docs?.description || options.apiDescription || "Auto-generated REST API for s3db.js resources"
@@ -4296,6 +6638,22 @@ class ApiPlugin extends Plugin {
         validateOnInsert: options.validation?.validateOnInsert !== false,
         validateOnUpdate: options.validation?.validateOnUpdate !== false,
         returnValidationErrors: options.validation?.returnValidationErrors !== false
+      },
+      // Content Security Policy (CSP) configuration
+      csp: {
+        enabled: options.csp?.enabled || false,
+        // Default CSP that works with Redoc v2.5.1 (allows CDN scripts/styles)
+        directives: options.csp?.directives || {
+          "default-src": ["'self'"],
+          "script-src": ["'self'", "'unsafe-inline'", "https://cdn.redoc.ly/redoc/v2.5.1/"],
+          "style-src": ["'self'", "'unsafe-inline'", "https://cdn.redoc.ly/redoc/v2.5.1/", "https://fonts.googleapis.com"],
+          "font-src": ["'self'", "https://fonts.gstatic.com"],
+          "img-src": ["'self'", "data:", "https:"],
+          "connect-src": ["'self'"]
+        },
+        reportOnly: options.csp?.reportOnly || false,
+        // If true, uses Content-Security-Policy-Report-Only
+        reportUri: options.csp?.reportUri || null
       },
       // Custom global middlewares
       middlewares: options.middlewares || []
@@ -4390,6 +6748,10 @@ class ApiPlugin extends Plugin {
       const corsMiddleware = await this._createCorsMiddleware();
       middlewares.push(corsMiddleware);
     }
+    if (this.config.csp.enabled) {
+      const cspMiddleware = await this._createCSPMiddleware();
+      middlewares.push(cspMiddleware);
+    }
     if (this.config.rateLimit.enabled) {
       const rateLimitMiddleware = await this._createRateLimitMiddleware();
       middlewares.push(rateLimitMiddleware);
@@ -4423,6 +6785,30 @@ class ApiPlugin extends Plugin {
       if (c.req.method === "OPTIONS") {
         return c.body(null, 204);
       }
+      await next();
+    };
+  }
+  /**
+   * Create CSP middleware
+   * @private
+   */
+  async _createCSPMiddleware() {
+    return async (c, next) => {
+      const { directives, reportOnly, reportUri } = this.config.csp;
+      const cspParts = [];
+      for (const [directive, values] of Object.entries(directives)) {
+        if (Array.isArray(values) && values.length > 0) {
+          cspParts.push(`${directive} ${values.join(" ")}`);
+        } else if (typeof values === "string") {
+          cspParts.push(`${directive} ${values}`);
+        }
+      }
+      if (reportUri) {
+        cspParts.push(`report-uri ${reportUri}`);
+      }
+      const cspValue = cspParts.join("; ");
+      const headerName = reportOnly ? "Content-Security-Policy-Report-Only" : "Content-Security-Policy";
+      c.header(headerName, cspValue);
       await next();
     };
   }
@@ -4513,6 +6899,7 @@ class ApiPlugin extends Plugin {
       verbose: this.config.verbose,
       auth: this.config.auth,
       docsEnabled: this.config.docs.enabled,
+      docsUI: this.config.docs.ui,
       apiTitle: this.config.docs.title,
       apiVersion: this.config.docs.version,
       apiDescription: this.config.docs.description
@@ -14347,6 +16734,840 @@ class BigqueryReplicator extends BaseReplicator {
   }
 }
 
+class DynamoDBReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.region = config.region || "us-east-1";
+    this.accessKeyId = config.accessKeyId;
+    this.secretAccessKey = config.secretAccessKey;
+    this.endpoint = config.endpoint;
+    this.credentials = config.credentials;
+    this.client = null;
+    this.docClient = null;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"],
+          primaryKey: "id"
+          // Default primary key
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"], primaryKey: "id" };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"],
+            primaryKey: item.primaryKey || "id",
+            sortKey: item.sortKey
+            // Optional sort key
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"],
+          primaryKey: config.primaryKey || "id",
+          sortKey: config.sortKey
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (this.region === "") {
+      errors.push("AWS region is required");
+    }
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const { DynamoDBClient } = requirePluginDependency("@aws-sdk/client-dynamodb", "DynamoDBReplicator");
+    const { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand } = requirePluginDependency("@aws-sdk/lib-dynamodb", "DynamoDBReplicator");
+    this.PutCommand = PutCommand;
+    this.UpdateCommand = UpdateCommand;
+    this.DeleteCommand = DeleteCommand;
+    const [ok, err] = await tryFn(async () => {
+      const clientConfig = {
+        region: this.region
+      };
+      if (this.endpoint) {
+        clientConfig.endpoint = this.endpoint;
+      }
+      if (this.credentials) {
+        clientConfig.credentials = this.credentials;
+      } else if (this.accessKeyId && this.secretAccessKey) {
+        clientConfig.credentials = {
+          accessKeyId: this.accessKeyId,
+          secretAccessKey: this.secretAccessKey
+        };
+      }
+      this.client = new DynamoDBClient(clientConfig);
+      this.docClient = DynamoDBDocumentClient.from(this.client);
+      const { ListTablesCommand } = requirePluginDependency("@aws-sdk/client-dynamodb", "DynamoDBReplicator");
+      await this.client.send(new ListTablesCommand({ Limit: 1 }));
+    });
+    if (!ok) {
+      throw new ReplicationError("Failed to connect to DynamoDB", {
+        operation: "initialize",
+        replicatorClass: "DynamoDBReplicator",
+        region: this.region,
+        endpoint: this.endpoint,
+        original: err,
+        suggestion: "Check AWS credentials and ensure DynamoDB is accessible"
+      });
+    }
+    this.emit("connected", {
+      replicator: "DynamoDBReplicator",
+      region: this.region,
+      endpoint: this.endpoint || "default"
+    });
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  async replicate(resourceName, operation, data, id) {
+    if (!this.resources[resourceName]) {
+      throw new ReplicationError("Resource not configured for replication", {
+        operation: "replicate",
+        replicatorClass: "DynamoDBReplicator",
+        resourceName,
+        configuredResources: Object.keys(this.resources),
+        suggestion: "Add resource to replicator resources configuration"
+      });
+    }
+    const results = [];
+    for (const tableConfig of this.resources[resourceName]) {
+      if (!tableConfig.actions.includes(operation)) {
+        continue;
+      }
+      const [ok, error, result] = await tryFn(async () => {
+        switch (operation) {
+          case "insert":
+            return await this._putItem(tableConfig.table, data);
+          case "update":
+            return await this._updateItem(tableConfig.table, id, data, tableConfig);
+          case "delete":
+            return await this._deleteItem(tableConfig.table, id, tableConfig);
+          default:
+            throw new ReplicationError(`Unsupported operation: ${operation}`, {
+              operation: "replicate",
+              replicatorClass: "DynamoDBReplicator",
+              invalidOperation: operation,
+              supportedOperations: ["insert", "update", "delete"]
+            });
+        }
+      });
+      if (ok) {
+        results.push(result);
+      } else {
+        this.emit("replication_error", {
+          resource: resourceName,
+          operation,
+          table: tableConfig.table,
+          error: error.message
+        });
+        if (this.config.verbose) {
+          console.error(`[DynamoDBReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
+        }
+      }
+    }
+    return results.length > 0 ? results[0] : null;
+  }
+  async _putItem(table, data) {
+    const cleanData = this._cleanInternalFields(data);
+    const command = new this.PutCommand({
+      TableName: table,
+      Item: cleanData
+    });
+    const result = await this.docClient.send(command);
+    return result;
+  }
+  async _updateItem(table, id, data, tableConfig) {
+    const cleanData = this._cleanInternalFields(data);
+    const updateExpressions = [];
+    const expressionAttributeNames = {};
+    const expressionAttributeValues = {};
+    let index = 0;
+    for (const [key2, value] of Object.entries(cleanData)) {
+      if (key2 === tableConfig.primaryKey || key2 === tableConfig.sortKey) {
+        continue;
+      }
+      const attrName = `#attr${index}`;
+      const attrValue = `:val${index}`;
+      expressionAttributeNames[attrName] = key2;
+      expressionAttributeValues[attrValue] = value;
+      updateExpressions.push(`${attrName} = ${attrValue}`);
+      index++;
+    }
+    const key = { [tableConfig.primaryKey]: id };
+    if (tableConfig.sortKey && cleanData[tableConfig.sortKey]) {
+      key[tableConfig.sortKey] = cleanData[tableConfig.sortKey];
+    }
+    const command = new this.UpdateCommand({
+      TableName: table,
+      Key: key,
+      UpdateExpression: `SET ${updateExpressions.join(", ")}`,
+      ExpressionAttributeNames: expressionAttributeNames,
+      ExpressionAttributeValues: expressionAttributeValues,
+      ReturnValues: "ALL_NEW"
+    });
+    const result = await this.docClient.send(command);
+    return result;
+  }
+  async _deleteItem(table, id, tableConfig) {
+    const key = { [tableConfig.primaryKey]: id };
+    const command = new this.DeleteCommand({
+      TableName: table,
+      Key: key
+    });
+    const result = await this.docClient.send(command);
+    return result;
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, result] = await tryFn(
+        () => this.replicate(resourceName, record.operation, record.data, record.id)
+      );
+      if (ok) {
+        results.push(result);
+      } else {
+        errors.push({ id: record.id, error: err.message });
+      }
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.client) {
+        throw new Error("Client not initialized");
+      }
+      const { ListTablesCommand } = requirePluginDependency("@aws-sdk/client-dynamodb", "DynamoDBReplicator");
+      await this.client.send(new ListTablesCommand({ Limit: 1 }));
+      return true;
+    });
+    if (!ok) {
+      this.emit("connection_error", { replicator: "DynamoDBReplicator", error: err.message });
+      return false;
+    }
+    return true;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.client,
+      region: this.region,
+      endpoint: this.endpoint || "default",
+      resources: Object.keys(this.resources)
+    };
+  }
+  async cleanup() {
+    if (this.client) {
+      this.client.destroy();
+      this.client = null;
+      this.docClient = null;
+    }
+    await super.cleanup();
+  }
+}
+
+class MongoDBReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.connectionString = config.connectionString;
+    this.host = config.host || "localhost";
+    this.port = config.port || 27017;
+    this.database = config.database;
+    this.username = config.username;
+    this.password = config.password;
+    this.options = config.options || {};
+    this.client = null;
+    this.db = null;
+    this.logCollection = config.logCollection;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          collection: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { collection: item, actions: ["insert"] };
+          }
+          return {
+            collection: item.collection,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          collection: config.collection,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.connectionString && !this.database) {
+      errors.push("Database name or connection string is required");
+    }
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, collections] of Object.entries(this.resources)) {
+      for (const collectionConfig of collections) {
+        if (!collectionConfig.collection) {
+          errors.push(`Collection name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(collectionConfig.actions) || collectionConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const { MongoClient } = requirePluginDependency("mongodb", "MongoDBReplicator");
+    const [ok, err] = await tryFn(async () => {
+      let uri;
+      if (this.connectionString) {
+        uri = this.connectionString;
+      } else {
+        const auth = this.username && this.password ? `${encodeURIComponent(this.username)}:${encodeURIComponent(this.password)}@` : "";
+        uri = `mongodb://${auth}${this.host}:${this.port}/${this.database}`;
+      }
+      this.client = new MongoClient(uri, {
+        ...this.options,
+        useUnifiedTopology: true,
+        useNewUrlParser: true
+      });
+      await this.client.connect();
+      this.db = this.client.db(this.database);
+      await this.db.admin().ping();
+    });
+    if (!ok) {
+      throw new ReplicationError("Failed to connect to MongoDB database", {
+        operation: "initialize",
+        replicatorClass: "MongoDBReplicator",
+        host: this.host,
+        port: this.port,
+        database: this.database,
+        original: err,
+        suggestion: "Check MongoDB connection credentials and ensure database is accessible"
+      });
+    }
+    if (this.logCollection) {
+      await this._createLogCollection();
+    }
+    this.emit("connected", {
+      replicator: "MongoDBReplicator",
+      host: this.host,
+      database: this.database
+    });
+  }
+  async _createLogCollection() {
+    const [ok] = await tryFn(async () => {
+      const collections = await this.db.listCollections({ name: this.logCollection }).toArray();
+      if (collections.length === 0) {
+        await this.db.createCollection(this.logCollection);
+        await this.db.collection(this.logCollection).createIndexes([
+          { key: { resource_name: 1 } },
+          { key: { timestamp: 1 } }
+        ]);
+      }
+    });
+    if (!ok && this.config.verbose) {
+      console.warn("[MongoDBReplicator] Failed to create log collection");
+    }
+  }
+  async replicate(resourceName, operation, data, id) {
+    if (!this.resources[resourceName]) {
+      throw new ReplicationError("Resource not configured for replication", {
+        operation: "replicate",
+        replicatorClass: "MongoDBReplicator",
+        resourceName,
+        configuredResources: Object.keys(this.resources),
+        suggestion: "Add resource to replicator resources configuration"
+      });
+    }
+    const results = [];
+    for (const collectionConfig of this.resources[resourceName]) {
+      if (!collectionConfig.actions.includes(operation)) {
+        continue;
+      }
+      const [ok, error, result] = await tryFn(async () => {
+        switch (operation) {
+          case "insert":
+            return await this._insertDocument(collectionConfig.collection, data);
+          case "update":
+            return await this._updateDocument(collectionConfig.collection, id, data);
+          case "delete":
+            return await this._deleteDocument(collectionConfig.collection, id);
+          default:
+            throw new ReplicationError(`Unsupported operation: ${operation}`, {
+              operation: "replicate",
+              replicatorClass: "MongoDBReplicator",
+              invalidOperation: operation,
+              supportedOperations: ["insert", "update", "delete"]
+            });
+        }
+      });
+      if (ok) {
+        results.push(result);
+        if (this.logCollection) {
+          await this._logOperation(resourceName, operation, id, data);
+        }
+      } else {
+        this.emit("replication_error", {
+          resource: resourceName,
+          operation,
+          collection: collectionConfig.collection,
+          error: error.message
+        });
+        if (this.config.verbose) {
+          console.error(`[MongoDBReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
+        }
+      }
+    }
+    return results.length > 0 ? results[0] : null;
+  }
+  async _insertDocument(collectionName, data) {
+    const cleanData = this._cleanInternalFields(data);
+    const collection = this.db.collection(collectionName);
+    const result = await collection.insertOne(cleanData);
+    return result;
+  }
+  async _updateDocument(collectionName, id, data) {
+    const cleanData = this._cleanInternalFields(data);
+    const collection = this.db.collection(collectionName);
+    delete cleanData._id;
+    const result = await collection.updateOne(
+      { _id: id },
+      { $set: cleanData }
+    );
+    return result;
+  }
+  async _deleteDocument(collectionName, id) {
+    const collection = this.db.collection(collectionName);
+    const result = await collection.deleteOne({ _id: id });
+    return result;
+  }
+  async _logOperation(resourceName, operation, id, data) {
+    const [ok] = await tryFn(async () => {
+      const collection = this.db.collection(this.logCollection);
+      await collection.insertOne({
+        resource_name: resourceName,
+        operation,
+        record_id: id,
+        data,
+        timestamp: /* @__PURE__ */ new Date()
+      });
+    });
+    if (!ok && this.config.verbose) {
+      console.warn("[MongoDBReplicator] Failed to log operation");
+    }
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key === "_id") {
+        return;
+      }
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, result] = await tryFn(
+        () => this.replicate(resourceName, record.operation, record.data, record.id)
+      );
+      if (ok) {
+        results.push(result);
+      } else {
+        errors.push({ id: record.id, error: err.message });
+      }
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.client) {
+        throw new Error("Client not initialized");
+      }
+      await this.db.admin().ping();
+      return true;
+    });
+    if (!ok) {
+      this.emit("connection_error", { replicator: "MongoDBReplicator", error: err.message });
+      return false;
+    }
+    return true;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.client && !!this.db,
+      host: this.host,
+      database: this.database,
+      resources: Object.keys(this.resources)
+    };
+  }
+  async cleanup() {
+    if (this.client) {
+      await this.client.close();
+      this.client = null;
+      this.db = null;
+    }
+    await super.cleanup();
+  }
+}
+
+class MySQLReplicator extends BaseReplicator {
+  constructor(config = {}, resources = {}) {
+    super(config);
+    this.connectionString = config.connectionString;
+    this.host = config.host || "localhost";
+    this.port = config.port || 3306;
+    this.database = config.database;
+    this.user = config.user;
+    this.password = config.password;
+    this.pool = null;
+    this.ssl = config.ssl;
+    this.connectionLimit = config.connectionLimit || 10;
+    this.logTable = config.logTable;
+    this.resources = this.parseResourcesConfig(resources);
+  }
+  parseResourcesConfig(resources) {
+    const parsed = {};
+    for (const [resourceName, config] of Object.entries(resources)) {
+      if (typeof config === "string") {
+        parsed[resourceName] = [{
+          table: config,
+          actions: ["insert"]
+        }];
+      } else if (Array.isArray(config)) {
+        parsed[resourceName] = config.map((item) => {
+          if (typeof item === "string") {
+            return { table: item, actions: ["insert"] };
+          }
+          return {
+            table: item.table,
+            actions: item.actions || ["insert"]
+          };
+        });
+      } else if (typeof config === "object") {
+        parsed[resourceName] = [{
+          table: config.table,
+          actions: config.actions || ["insert"]
+        }];
+      }
+    }
+    return parsed;
+  }
+  validateConfig() {
+    const errors = [];
+    if (!this.database) {
+      errors.push("Database name is required");
+    }
+    if (!this.user) {
+      errors.push("Database user is required");
+    }
+    if (!this.password) {
+      errors.push("Database password is required");
+    }
+    if (Object.keys(this.resources).length === 0) {
+      errors.push("At least one resource must be configured");
+    }
+    for (const [resourceName, tables] of Object.entries(this.resources)) {
+      for (const tableConfig of tables) {
+        if (!tableConfig.table) {
+          errors.push(`Table name is required for resource '${resourceName}'`);
+        }
+        if (!Array.isArray(tableConfig.actions) || tableConfig.actions.length === 0) {
+          errors.push(`Actions array is required for resource '${resourceName}'`);
+        }
+      }
+    }
+    return { isValid: errors.length === 0, errors };
+  }
+  async initialize(database) {
+    await super.initialize(database);
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const [ok, err] = await tryFn(async () => {
+      const poolConfig = {
+        host: this.host,
+        port: this.port,
+        user: this.user,
+        password: this.password,
+        database: this.database,
+        connectionLimit: this.connectionLimit,
+        waitForConnections: true,
+        queueLimit: 0
+      };
+      if (this.ssl) {
+        poolConfig.ssl = this.ssl;
+      }
+      this.pool = mysql.createPool(poolConfig);
+      const connection = await this.pool.promise().getConnection();
+      await connection.ping();
+      connection.release();
+    });
+    if (!ok) {
+      throw new ReplicationError("Failed to connect to MySQL database", {
+        operation: "initialize",
+        replicatorClass: "MySQLReplicator",
+        host: this.host,
+        port: this.port,
+        database: this.database,
+        original: err,
+        suggestion: "Check MySQL connection credentials and ensure database is accessible"
+      });
+    }
+    if (this.logTable) {
+      await this._createLogTable();
+    }
+    this.emit("connected", {
+      replicator: "MySQLReplicator",
+      host: this.host,
+      database: this.database
+    });
+  }
+  shouldReplicateResource(resourceName) {
+    return this.resources.hasOwnProperty(resourceName);
+  }
+  async _createLogTable() {
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const [ok] = await tryFn(async () => {
+      await this.pool.promise().query(`
+        CREATE TABLE IF NOT EXISTS ${mysql.escapeId(this.logTable)} (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          resource_name VARCHAR(255) NOT NULL,
+          operation VARCHAR(50) NOT NULL,
+          record_id VARCHAR(255),
+          data JSON,
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_resource (resource_name),
+          INDEX idx_timestamp (timestamp)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+    });
+    if (!ok && this.config.verbose) {
+      console.warn("[MySQLReplicator] Failed to create log table");
+    }
+  }
+  async replicate(resourceName, operation, data, id) {
+    if (!this.resources[resourceName]) {
+      throw new ReplicationError("Resource not configured for replication", {
+        operation: "replicate",
+        replicatorClass: "MySQLReplicator",
+        resourceName,
+        configuredResources: Object.keys(this.resources),
+        suggestion: "Add resource to replicator resources configuration"
+      });
+    }
+    const results = [];
+    for (const tableConfig of this.resources[resourceName]) {
+      if (!tableConfig.actions.includes(operation)) {
+        continue;
+      }
+      const [ok, error, result] = await tryFn(async () => {
+        switch (operation) {
+          case "insert":
+            return await this._insertRecord(tableConfig.table, data);
+          case "update":
+            return await this._updateRecord(tableConfig.table, id, data);
+          case "delete":
+            return await this._deleteRecord(tableConfig.table, id);
+          default:
+            throw new ReplicationError(`Unsupported operation: ${operation}`, {
+              operation: "replicate",
+              replicatorClass: "MySQLReplicator",
+              invalidOperation: operation,
+              supportedOperations: ["insert", "update", "delete"]
+            });
+        }
+      });
+      if (ok) {
+        results.push(result);
+        if (this.logTable) {
+          await this._logOperation(resourceName, operation, id, data);
+        }
+      } else {
+        this.emit("replication_error", {
+          resource: resourceName,
+          operation,
+          table: tableConfig.table,
+          error: error.message
+        });
+        if (this.config.verbose) {
+          console.error(`[MySQLReplicator] Failed to replicate ${operation} for ${resourceName}:`, error);
+        }
+      }
+    }
+    return results.length > 0 ? results[0] : null;
+  }
+  async _insertRecord(table, data) {
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const cleanData = this._cleanInternalFields(data);
+    const columns = Object.keys(cleanData);
+    const values = Object.values(cleanData);
+    const placeholders = values.map(() => "?").join(", ");
+    const query = `INSERT INTO ${mysql.escapeId(table)} (${columns.map((c) => mysql.escapeId(c)).join(", ")}) VALUES (${placeholders})`;
+    const [result] = await this.pool.promise().query(query, values);
+    return result;
+  }
+  async _updateRecord(table, id, data) {
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const cleanData = this._cleanInternalFields(data);
+    const updates = Object.keys(cleanData).map((col) => `${mysql.escapeId(col)} = ?`).join(", ");
+    const values = [...Object.values(cleanData), id];
+    const query = `UPDATE ${mysql.escapeId(table)} SET ${updates} WHERE id = ?`;
+    const [result] = await this.pool.promise().query(query, values);
+    return result;
+  }
+  async _deleteRecord(table, id) {
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const query = `DELETE FROM ${mysql.escapeId(table)} WHERE id = ?`;
+    const [result] = await this.pool.promise().query(query, [id]);
+    return result;
+  }
+  async _logOperation(resourceName, operation, id, data) {
+    const mysql = requirePluginDependency("mysql2", "MySQLReplicator");
+    const [ok] = await tryFn(async () => {
+      const query = `INSERT INTO ${mysql.escapeId(this.logTable)} (resource_name, operation, record_id, data) VALUES (?, ?, ?, ?)`;
+      await this.pool.promise().query(query, [resourceName, operation, id, JSON.stringify(data)]);
+    });
+    if (!ok && this.config.verbose) {
+      console.warn("[MySQLReplicator] Failed to log operation");
+    }
+  }
+  _cleanInternalFields(data) {
+    if (!data || typeof data !== "object") return data;
+    const cleanData = { ...data };
+    Object.keys(cleanData).forEach((key) => {
+      if (key.startsWith("$") || key.startsWith("_")) {
+        delete cleanData[key];
+      }
+    });
+    return cleanData;
+  }
+  async replicateBatch(resourceName, records) {
+    const results = [];
+    const errors = [];
+    for (const record of records) {
+      const [ok, err, result] = await tryFn(
+        () => this.replicate(resourceName, record.operation, record.data, record.id)
+      );
+      if (ok) {
+        results.push(result);
+      } else {
+        errors.push({ id: record.id, error: err.message });
+      }
+    }
+    return {
+      success: errors.length === 0,
+      results,
+      errors,
+      total: records.length
+    };
+  }
+  async testConnection() {
+    const [ok, err] = await tryFn(async () => {
+      if (!this.pool) {
+        throw new Error("Pool not initialized");
+      }
+      const connection = await this.pool.promise().getConnection();
+      await connection.ping();
+      connection.release();
+      return true;
+    });
+    if (!ok) {
+      this.emit("connection_error", { replicator: "MySQLReplicator", error: err.message });
+      return false;
+    }
+    return true;
+  }
+  async getStatus() {
+    const baseStatus = await super.getStatus();
+    return {
+      ...baseStatus,
+      connected: !!this.pool,
+      host: this.host,
+      database: this.database,
+      resources: Object.keys(this.resources),
+      poolConnections: this.pool ? this.pool.pool.allConnections.length : 0
+    };
+  }
+  async cleanup() {
+    if (this.pool) {
+      await this.pool.end();
+      this.pool = null;
+    }
+    await super.cleanup();
+  }
+}
+
 class PostgresReplicator extends BaseReplicator {
   constructor(config = {}, resources = {}) {
     super(config);
@@ -16456,7 +19677,7 @@ class ResourceIdsReader extends EventEmitter {
     super();
     this.resource = resource;
     this.client = resource.client;
-    this.stream = new ReadableStream({
+    this.stream = new ReadableStream$1({
       highWaterMark: this.client.parallelism * 3,
       start: this._start.bind(this),
       pull: this._pull.bind(this),
@@ -17075,7 +20296,7 @@ class Resource extends AsyncEventEmitter {
    * @param {Object} config - Resource configuration
    * @param {string} config.name - Resource name
    * @param {Object} config.client - S3 client instance
-   * @param {string} [config.version='v0'] - Resource version
+   * @param {string} [config.version='v1'] - Resource version
    * @param {Object} [config.attributes={}] - Resource attributes schema
    * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase
@@ -18972,7 +22193,7 @@ ${errorDetails}`,
   }
   /**
    * Get schema for a specific version
-   * @param {string} version - Version string (e.g., 'v0', 'v1')
+   * @param {string} version - Version string (e.g., 'v1', 'v2')
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {
@@ -19751,7 +22972,7 @@ class Database extends EventEmitter {
     this.savedMetadata = metadata;
     const definitionChanges = this.detectDefinitionChanges(metadata);
     for (const [name, resourceMetadata] of Object.entries(metadata.resources || {})) {
-      const currentVersion = resourceMetadata.currentVersion || "v0";
+      const currentVersion = resourceMetadata.currentVersion || "v1";
       const versionData = resourceMetadata.versions?.[currentVersion];
       if (versionData) {
         let restoredIdGenerator, restoredIdSize;
@@ -19819,7 +23040,7 @@ class Database extends EventEmitter {
           savedHash: null
         });
       } else {
-        const currentVersion = savedResource.currentVersion || "v0";
+        const currentVersion = savedResource.currentVersion || "v1";
         const versionData = savedResource.versions?.[currentVersion];
         const savedHash = versionData?.hash;
         if (savedHash !== currentHash) {
@@ -19836,7 +23057,7 @@ class Database extends EventEmitter {
     }
     for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
       if (!this.resources[name]) {
-        const currentVersion = savedResource.currentVersion || "v0";
+        const currentVersion = savedResource.currentVersion || "v1";
         const versionData = savedResource.versions?.[currentVersion];
         changes.push({
           type: "deleted",
@@ -20026,7 +23247,7 @@ class Database extends EventEmitter {
       const resourceDef = resource.export();
       const definitionHash = this.generateDefinitionHash(resourceDef);
       const existingResource = this.savedMetadata?.resources?.[name];
-      const currentVersion = existingResource?.currentVersion || "v0";
+      const currentVersion = existingResource?.currentVersion || "v1";
       const existingVersionData = existingResource?.versions?.[currentVersion];
       let version, isNewVersion;
       if (!existingVersionData || existingVersionData.hash !== definitionHash) {
@@ -20216,7 +23437,7 @@ class Database extends EventEmitter {
     let healed = { ...resource };
     let changed = false;
     if (!healed.currentVersion) {
-      healed.currentVersion = "v0";
+      healed.currentVersion = "v1";
       healingLog.push(`Resource ${name}: added missing currentVersion`);
       changed = true;
     }
@@ -20426,7 +23647,7 @@ class Database extends EventEmitter {
       }
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata2 = this.savedMetadata?.resources?.[name];
-      const currentVersion = existingMetadata2?.currentVersion || "v0";
+      const currentVersion = existingMetadata2?.currentVersion || "v1";
       const existingVersionData = existingMetadata2?.versions?.[currentVersion];
       if (!existingVersionData || existingVersionData.hash !== newHash) {
         await this.uploadMetadataFile();
@@ -20435,7 +23656,7 @@ class Database extends EventEmitter {
       return existingResource;
     }
     const existingMetadata = this.savedMetadata?.resources?.[name];
-    const version = existingMetadata?.currentVersion || "v0";
+    const version = existingMetadata?.currentVersion || "v1";
     const resource = new Resource({
       name,
       client: this.client,
@@ -21808,6 +25029,11 @@ const REPLICATOR_DRIVERS = {
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
   postgres: PostgresReplicator,
+  mysql: MySQLReplicator,
+  mariadb: MySQLReplicator,
+  // MariaDB uses the same driver as MySQL
+  dynamodb: DynamoDBReplicator,
+  mongodb: MongoDBReplicator,
   webhook: WebhookReplicator
 };
 function createReplicator(driver, config = {}, resources = [], client = null) {
@@ -23518,7 +26744,13 @@ class StateMachinePlugin extends Plugin {
       stateResource: options.stateResource || "plg_entity_states",
       retryAttempts: options.retryAttempts || 3,
       retryDelay: options.retryDelay || 100,
-      verbose: options.verbose || false
+      verbose: options.verbose || false,
+      // Distributed lock configuration (prevents concurrent transitions)
+      workerId: options.workerId || "default",
+      lockTimeout: options.lockTimeout || 1e3,
+      // Wait up to 1s for lock
+      lockTTL: options.lockTTL || 5
+      // Lock expires after 5s (prevent deadlock)
     };
     this.database = null;
     this.machines = /* @__PURE__ */ new Map();
@@ -23619,63 +26851,68 @@ class StateMachinePlugin extends Plugin {
         suggestion: "Check machine ID or use getMachines() to list available machines"
       });
     }
-    const currentState = await this.getState(machineId, entityId);
-    const stateConfig = machine.config.states[currentState];
-    if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
-      throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
-        operation: "send",
-        machineId,
-        entityId,
-        event,
-        currentState,
-        validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
-        suggestion: "Use getValidEvents() to check which events are valid for the current state"
-      });
-    }
-    const targetState = stateConfig.on[event];
-    if (stateConfig.guards && stateConfig.guards[event]) {
-      const guardName = stateConfig.guards[event];
-      const guard = this.config.guards[guardName];
-      if (guard) {
-        const [guardOk, guardErr, guardResult] = await tryFn(
-          () => guard(context, event, { database: this.database, machineId, entityId })
-        );
-        if (!guardOk || !guardResult) {
-          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
-            operation: "send",
-            machineId,
-            entityId,
-            event,
-            currentState,
-            guardName,
-            guardError: guardErr?.message || "Guard returned false",
-            suggestion: "Check guard conditions or modify the context to satisfy guard requirements"
-          });
+    const lockName = await this._acquireTransitionLock(machineId, entityId);
+    try {
+      const currentState = await this.getState(machineId, entityId);
+      const stateConfig = machine.config.states[currentState];
+      if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
+        throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
+          operation: "send",
+          machineId,
+          entityId,
+          event,
+          currentState,
+          validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
+          suggestion: "Use getValidEvents() to check which events are valid for the current state"
+        });
+      }
+      const targetState = stateConfig.on[event];
+      if (stateConfig.guards && stateConfig.guards[event]) {
+        const guardName = stateConfig.guards[event];
+        const guard = this.config.guards[guardName];
+        if (guard) {
+          const [guardOk, guardErr, guardResult] = await tryFn(
+            () => guard(context, event, { database: this.database, machineId, entityId })
+          );
+          if (!guardOk || !guardResult) {
+            throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
+              operation: "send",
+              machineId,
+              entityId,
+              event,
+              currentState,
+              guardName,
+              guardError: guardErr?.message || "Guard returned false",
+              suggestion: "Check guard conditions or modify the context to satisfy guard requirements"
+            });
+          }
         }
       }
+      if (stateConfig.exit) {
+        await this._executeAction(stateConfig.exit, context, event, machineId, entityId);
+      }
+      await this._transition(machineId, entityId, currentState, targetState, event, context);
+      const targetStateConfig = machine.config.states[targetState];
+      if (targetStateConfig && targetStateConfig.entry) {
+        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
+      }
+      this.emit("transition", {
+        machineId,
+        entityId,
+        from: currentState,
+        to: targetState,
+        event,
+        context
+      });
+      return {
+        from: currentState,
+        to: targetState,
+        event,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      };
+    } finally {
+      await this._releaseTransitionLock(lockName);
     }
-    if (stateConfig.exit) {
-      await this._executeAction(stateConfig.exit, context, event, machineId, entityId);
-    }
-    await this._transition(machineId, entityId, currentState, targetState, event, context);
-    const targetStateConfig = machine.config.states[targetState];
-    if (targetStateConfig && targetStateConfig.entry) {
-      await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
-    }
-    this.emit("transition", {
-      machineId,
-      entityId,
-      from: currentState,
-      to: targetState,
-      event,
-      context
-    });
-    return {
-      from: currentState,
-      to: targetState,
-      event,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    };
   }
   async _executeAction(actionName, context, event, machineId, entityId) {
     const action = this.config.actions[actionName];
@@ -23752,6 +26989,42 @@ class StateMachinePlugin extends Plugin {
           console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
         }
       }
+    }
+  }
+  /**
+   * Acquire distributed lock for transition
+   * Prevents concurrent transitions for the same entity
+   * @private
+   */
+  async _acquireTransitionLock(machineId, entityId) {
+    const storage = this.getStorage();
+    const lockName = `transition-${machineId}-${entityId}`;
+    const lock = await storage.acquireLock(lockName, {
+      ttl: this.config.lockTTL,
+      timeout: this.config.lockTimeout,
+      workerId: this.config.workerId
+    });
+    if (!lock) {
+      throw new StateMachineError("Could not acquire transition lock - concurrent transition in progress", {
+        operation: "send",
+        machineId,
+        entityId,
+        lockTimeout: this.config.lockTimeout,
+        workerId: this.config.workerId,
+        suggestion: "Wait for current transition to complete or increase lockTimeout"
+      });
+    }
+    return lockName;
+  }
+  /**
+   * Release distributed lock for transition
+   * @private
+   */
+  async _releaseTransitionLock(lockName) {
+    const storage = this.getStorage();
+    const [ok, err] = await tryFn(() => storage.releaseLock(lockName));
+    if (!ok && this.config.verbose) {
+      console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
     }
   }
   /**
@@ -32220,6 +35493,7 @@ class TfStatePlugin extends Plugin {
       const diffs = config.diffs || {};
       this.trackDiffs = diffs.enabled !== void 0 ? diffs.enabled : true;
       this.diffsLookback = diffs.lookback || 10;
+      this.asyncPartitions = config.asyncPartitions !== void 0 ? config.asyncPartitions : true;
       this.autoSync = false;
       this.watchPaths = [];
       this.filters = config.filters || {};
@@ -32236,6 +35510,7 @@ class TfStatePlugin extends Plugin {
       this.filters = config.filters || {};
       this.trackDiffs = config.trackDiffs !== void 0 ? config.trackDiffs : true;
       this.diffsLookback = 10;
+      this.asyncPartitions = config.asyncPartitions !== void 0 ? config.asyncPartitions : true;
       this.verbose = config.verbose || false;
       this.monitorEnabled = false;
       this.monitorCron = "*/5 * * * *";
@@ -32302,8 +35577,8 @@ class TfStatePlugin extends Plugin {
         // Custom tags, project info, etc.
       },
       timestamps: true,
-      asyncPartitions: true,
-      // Enable async for performance
+      asyncPartitions: this.asyncPartitions,
+      // Configurable async partitions
       partitions: {},
       // No partitions - simple tracking resource
       createdBy: "TfStatePlugin"
@@ -32327,8 +35602,8 @@ class TfStatePlugin extends Plugin {
         importedAt: "number|required"
       },
       timestamps: true,
-      asyncPartitions: true,
-      // NEW: Enable async for better performance
+      asyncPartitions: this.asyncPartitions,
+      // Configurable async partitions
       partitions: {
         byLineage: { fields: { lineageId: "string" } },
         // NEW: Primary lookup
@@ -32364,8 +35639,8 @@ class TfStatePlugin extends Plugin {
         importedAt: "number|required"
       },
       timestamps: true,
-      asyncPartitions: true,
-      // NEW: Enable async for better performance
+      asyncPartitions: this.asyncPartitions,
+      // Configurable async partitions
       partitions: {
         byLineageSerial: { fields: { lineageId: "string", stateSerial: "number" } },
         // NEW: Efficient diff queries
@@ -32415,9 +35690,11 @@ class TfStatePlugin extends Plugin {
             }
           }
         },
+        behavior: "body-only",
+        // Force all data to body for reliable nested object handling
         timestamps: true,
-        asyncPartitions: true,
-        // NEW: Enable async for better performance
+        asyncPartitions: this.asyncPartitions,
+        // Configurable async partitions
         partitions: {
           byLineage: { fields: { lineageId: "string" } },
           // NEW: All diffs for lineage
@@ -32705,7 +35982,7 @@ class TfStatePlugin extends Plugin {
       const inserted = await this._insertResources(resources);
       this.lastProcessedSerial = state.serial;
       this.stats.statesProcessed++;
-      this.stats.resourcesExtracted += resources.length;
+      this.stats.resourcesExtracted += resources.totalExtracted || resources.length;
       this.stats.resourcesInserted += inserted.length;
       this.stats.lastProcessedSerial = state.serial;
       if (diff && !diff.isFirst) this.stats.diffsCalculated++;
@@ -32714,7 +35991,7 @@ class TfStatePlugin extends Plugin {
         serial: state.serial,
         lineage: state.lineage,
         terraformVersion: state.terraform_version,
-        resourcesExtracted: resources.length,
+        resourcesExtracted: resources.totalExtracted || resources.length,
         resourcesInserted: inserted.length,
         stateFileId,
         sha256Hash,
@@ -32843,7 +36120,10 @@ class TfStatePlugin extends Plugin {
    * @private
    */
   _matchesGlobPattern(key, pattern) {
-    const regexPattern = pattern.replace(/\*\*/g, "__DOUBLE_STAR__").replace(/\*/g, "[^/]*").replace(/__DOUBLE_STAR__/g, ".*").replace(/\?/g, ".").replace(/\[([^\]]+)\]/g, "[$1]");
+    let regexPattern = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, "\0").replace(/\\\?/g, "");
+    regexPattern = regexPattern.replace(/\x00\x00/g, "__DOUBLE_STAR__").replace(/\x00/g, "[^/]*").replace(/\x01/g, ".");
+    regexPattern = regexPattern.replace(/__DOUBLE_STAR__\//g, "(?:.*/)?");
+    regexPattern = regexPattern.replace(/__DOUBLE_STAR__/g, ".*");
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(key);
   }
@@ -32958,6 +36238,7 @@ class TfStatePlugin extends Plugin {
       stateFileId
     });
     const resources = await this._extractResources(state, filePath, stateFileId, lineageUuid);
+    const inserted = await this._insertResources(resources);
     let diff = null;
     if (this.trackDiffs) {
       diff = await this._calculateDiff(state, lineageUuid, stateFileId);
@@ -32965,10 +36246,9 @@ class TfStatePlugin extends Plugin {
         await this._saveDiff(diff, lineageUuid, stateFileId);
       }
     }
-    const inserted = await this._insertResources(resources);
     this.lastProcessedSerial = state.serial;
     this.stats.statesProcessed++;
-    this.stats.resourcesExtracted += resources.length;
+    this.stats.resourcesExtracted += resources.totalExtracted || resources.length;
     this.stats.resourcesInserted += inserted.length;
     this.stats.lastProcessedSerial = state.serial;
     if (diff && !diff.isFirst) this.stats.diffsCalculated++;
@@ -32977,7 +36257,7 @@ class TfStatePlugin extends Plugin {
       serial: state.serial,
       lineage: state.lineage,
       terraformVersion: state.terraform_version,
-      resourcesExtracted: resources.length,
+      resourcesExtracted: resources.totalExtracted || resources.length,
       resourcesInserted: inserted.length,
       stateFileId,
       sha256Hash,
@@ -33051,6 +36331,7 @@ class TfStatePlugin extends Plugin {
    */
   async _extractResources(state, filePath, stateFileId, lineageId) {
     const resources = [];
+    let totalExtracted = 0;
     const stateSerial = state.serial;
     const stateVersion = state.version;
     const importedAt = Date.now();
@@ -33059,6 +36340,7 @@ class TfStatePlugin extends Plugin {
       try {
         const instances = resource.instances || [resource];
         for (const instance of instances) {
+          totalExtracted++;
           const extracted = this._extractResourceInstance(
             resource,
             instance,
@@ -33084,6 +36366,7 @@ class TfStatePlugin extends Plugin {
         throw new ResourceExtractionError(resource.name || "unknown", error);
       }
     }
+    resources.totalExtracted = totalExtracted;
     return resources;
   }
   /**
@@ -33184,7 +36467,7 @@ class TfStatePlugin extends Plugin {
    * @private
    */
   _matchesPattern(address, pattern) {
-    const regexPattern = pattern.replace(/\./g, "\\.").replace(/\*/g, ".*");
+    const regexPattern = pattern.replace(/\.\*/g, "___WILDCARD___").replace(/\*/g, "[^.]*").replace(/\./g, "\\.").replace(/___WILDCARD___/g, ".*");
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(address);
   }
@@ -33531,16 +36814,16 @@ class TfStatePlugin extends Plugin {
             }
             const inserted = await this._insertResources(resources);
             this.stats.statesProcessed++;
-            this.stats.resourcesExtracted += resources.length;
+            this.stats.resourcesExtracted += resources.totalExtracted || resources.length;
             this.stats.resourcesInserted += inserted.length;
             this.stats.lastProcessedSerial = state.serial;
             if (this.verbose) {
-              console.log(`[TfStatePlugin] Processed ${fileMetadata.path}: ${resources.length} resources`);
+              console.log(`[TfStatePlugin] Processed ${fileMetadata.path}: ${resources.totalExtracted || resources.length} resources`);
             }
             this.emit("stateFileProcessed", {
               path: fileMetadata.path,
               serial: state.serial,
-              resourcesExtracted: resources.length,
+              resourcesExtracted: resources.totalExtracted || resources.length,
               resourcesInserted: inserted.length
             });
           }
@@ -36750,5 +40033,5 @@ var metrics = /*#__PURE__*/Object.freeze({
   silhouetteScore: silhouetteScore
 });
 
-export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, EncryptionError, ErrorMap, EventualConsistencyPlugin, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, InvalidResourceItem, MemoryCache, MetadataLimitError, MetricsPlugin, MissingMetadata, MultiBackupDriver, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TfStatePlugin, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, createBackupDriver, createConsumer, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig };
+export { AVAILABLE_BEHAVIORS, AnalyticsNotEnabledError, ApiPlugin, AuditPlugin, AuthenticationError, BACKUP_DRIVERS, BackupPlugin, BaseBackupDriver, BaseError, BaseReplicator, BehaviorError, BigqueryReplicator, CONSUMER_DRIVERS, Cache, CachePlugin, Client, ConnectionString, ConnectionStringError, CostsPlugin, CryptoError, DEFAULT_BEHAVIOR, Database, DatabaseError, DynamoDBReplicator, EncryptionError, ErrorMap, EventualConsistencyPlugin, FilesystemBackupDriver, FilesystemCache, FullTextPlugin, InvalidResourceItem, MemoryCache, MetadataLimitError, MetricsPlugin, MissingMetadata, MongoDBReplicator, MultiBackupDriver, MySQLReplicator, NoSuchBucket, NoSuchKey, NotFound, PartitionAwareFilesystemCache, PartitionDriverError, PartitionError, PermissionError, Plugin, PluginError, PluginObject, PluginStorageError, PostgresReplicator, QueueConsumerPlugin, REPLICATOR_DRIVERS, RabbitMqConsumer, RelationPlugin, ReplicatorPlugin, Resource, ResourceError, ResourceIdsPageReader, ResourceIdsReader, ResourceNotFound, ResourceReader, ResourceWriter, S3BackupDriver, S3Cache, S3QueuePlugin, Database as S3db, S3dbError, S3dbReplicator, SchedulerPlugin, Schema, SchemaError, SqsConsumer, SqsReplicator, StateMachinePlugin, StreamError, TfStatePlugin, UnknownError, ValidationError, Validator, VectorPlugin, WebhookReplicator, behaviors, calculateAttributeNamesSize, calculateAttributeSizes, calculateEffectiveLimit, calculateSystemOverhead, calculateTotalSize, calculateUTF8Bytes, clearUTF8Cache, clearUTF8Memo, clearUTF8Memory, createBackupDriver, createConsumer, createReplicator, decode, decodeDecimal, decodeFixedPoint, decodeFixedPointBatch, decrypt, S3db as default, encode, encodeDecimal, encodeFixedPoint, encodeFixedPointBatch, encrypt, getBehavior, getSizeBreakdown, idGenerator, mapAwsError, md5, passwordGenerator, sha256, streamToString, transformValue, tryFn, tryFnSync, validateBackupConfig, validateReplicatorConfig };
 //# sourceMappingURL=s3db.es.js.map
