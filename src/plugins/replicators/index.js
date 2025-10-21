@@ -1,26 +1,24 @@
 import BaseReplicator from './base-replicator.class.js';
 import BigqueryReplicator from './bigquery-replicator.class.js';
+import DynamoDBReplicator from './dynamodb-replicator.class.js';
+import MongoDBReplicator from './mongodb-replicator.class.js';
+import MySQLReplicator from './mysql-replicator.class.js';
 import PostgresReplicator from './postgres-replicator.class.js';
 import S3dbReplicator from './s3db-replicator.class.js';
 import SqsReplicator from './sqs-replicator.class.js';
 import WebhookReplicator from './webhook-replicator.class.js';
-import CsvReplicator from './csv-replicator.class.js';
-import JsonlReplicator from './jsonl-replicator.class.js';
-import ParquetReplicator from './parquet-replicator.class.js';
-import ExcelReplicator from './excel-replicator.class.js';
 import { ReplicationError } from '../replicator.errors.js';
 
 export {
   BaseReplicator,
   BigqueryReplicator,
+  DynamoDBReplicator,
+  MongoDBReplicator,
+  MySQLReplicator,
   PostgresReplicator,
   S3dbReplicator,
   SqsReplicator,
-  WebhookReplicator,
-  CsvReplicator,
-  JsonlReplicator,
-  ParquetReplicator,
-  ExcelReplicator
+  WebhookReplicator
 };
 
 /**
@@ -31,16 +29,16 @@ export const REPLICATOR_DRIVERS = {
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
   postgres: PostgresReplicator,
-  webhook: WebhookReplicator,
-  csv: CsvReplicator,
-  jsonl: JsonlReplicator,
-  parquet: ParquetReplicator,
-  excel: ExcelReplicator
+  mysql: MySQLReplicator,
+  mariadb: MySQLReplicator, // MariaDB uses the same driver as MySQL
+  dynamodb: DynamoDBReplicator,
+  mongodb: MongoDBReplicator,
+  webhook: WebhookReplicator
 };
 
 /**
  * Create a replicator instance based on driver type
- * @param {string} driver - Driver type (s3db, sqs, bigquery, postgres, webhook, csv, jsonl, parquet, excel)
+ * @param {string} driver - Driver type (s3db, sqs, bigquery, postgres, mysql, mariadb, dynamodb, mongodb, webhook)
  * @param {Object} config - Replicator configuration
  * @returns {BaseReplicator} Replicator instance
  */
