@@ -5,13 +5,15 @@
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [✨ Custom Types](#-custom-types---space-optimized-for-s3)
+  - [🔐 secret - Auto-Encrypted Fields](#-secret---auto-encrypted-fields)
+  - [🎯 embedding - Vector Embeddings](#-embedding---vector-embeddings-77-compression)
+  - [🌐 ip4/ip6 - IPv4/IPv6 Addresses](#-ip4--ip6---ipv4ipv6-addresses-44-47-compression)
+  - [🌍 geoLat/geoLon - Geographic Coordinates](#-geolat--geolon---geographic-coordinates-45-55-compression)
+  - [📋 json - JSON Serialization](#-json---json-serialization)
 - [The Philosophy](#the-philosophy)
 - [Resource Creation](#resource-creation)
 - [Validation Engine](#validation-engine-fastest-validator)
-- [Custom Types](#custom-types)
-  - [secret - Auto-Encrypted Fields](#secret---auto-encrypted-fields)
-  - [embedding - Vector Embeddings](#embedding---vector-embeddings)
-  - [json - JSON Serialization](#json---json-serialization)
 - [Standard Types](#standard-types)
 - [Nested Objects](#nested-objects)
 - [Arrays](#arrays)
@@ -66,6 +68,135 @@ const user = await users.insert({
 - 🎯 Embedding compressed by 77% with fixed-point encoding
 - 📦 Everything stored in S3 metadata (or body if too large)
 - 🚀 Schema versioned and cached for future operations
+
+---
+
+## ✨ Custom Types - Space-Optimized for S3
+
+S3DB extends standard types with custom types optimized for S3's 2KB metadata limit. These types provide automatic compression, encryption, and encoding.
+
+### 🔐 `secret` - Auto-Encrypted Fields
+
+**Store sensitive data with AES-256-GCM encryption:**
+
+```javascript
+attributes: {
+  password: 'secret|required',           // String, auto-encrypted
+  apiKey: 'secret|min:32',              // With validation
+  pin: 'secretNumber',                  // Number, auto-encrypted
+  metadata: 'secretAny'                 // Any type, auto-encrypted
+}
+```
+
+**🔒 Security:** PBKDF2 key derivation (100k iterations) • Random salt/IV per field • Base64 encoding
+
+**[Full details →](#secret---auto-encrypted-fields)**
+
+---
+
+### 🎯 `embedding` - Vector Embeddings (77% Compression)
+
+**Store high-dimensional vectors with massive space savings:**
+
+```javascript
+attributes: {
+  vector: 'embedding:1536',            // OpenAI text-embedding-3-small/large
+  vector768: 'embedding:768',          // BERT base
+  vector384: 'embedding:384'           // Sentence Transformers
+}
+```
+
+**💾 Compression:** `[0.123, -0.456, ...]` (30KB JSON) → `"2kF_nX_pQ..."` (7KB, 77% smaller!)
+
+**[Full details →](#embedding---vector-embeddings)**
+
+---
+
+### 🌐 `ip4` / `ip6` - IPv4/IPv6 Addresses (44-47% Compression)
+
+**Compact binary encoding for IP addresses:**
+
+```javascript
+attributes: {
+  clientIP: 'ip4',                     // IPv4: 11-15 chars → 8 chars (47% savings)
+  serverIP: 'ip6',                     // IPv6: up to 39 chars → 24 chars (44% savings)
+  requiredIP: 'ip4|required'           // With validation
+}
+
+// Automatic encoding/decoding
+await resource.insert({ clientIP: '192.168.1.1' });
+// Stored as: { clientIP: 'wKgBAQ==' }
+
+const record = await resource.get(id);
+console.log(record.clientIP); // '192.168.1.1' (auto-decoded)
+```
+
+**📦 Storage:** Binary encoding with Base64 • Validates IP format • Preserves null/undefined
+
+**[Full details →](#ip4--ip6---ipv4ipv6-addresses)**
+
+---
+
+### 🌍 `geoLat` / `geoLon` - Geographic Coordinates (45-55% Compression)
+
+**Optimized storage for latitude/longitude:**
+
+```javascript
+attributes: {
+  latitude: 'geoLat',                  // -90 to +90 → normalized + base62
+  longitude: 'geoLon'                  // -180 to +180 → normalized + base62
+}
+
+// Automatic encoding/decoding
+await locations.insert({
+  latitude: -23.550519,
+  longitude: -46.633309
+});
+// Stored as: { latitude: '~18kPxZ', longitude: '~36WqLj' }
+// 15 bytes → 8 bytes = 47% savings
+
+const loc = await locations.get(id);
+console.log(loc.latitude);  // -23.550519 (auto-decoded)
+```
+
+**🎯 Precision:** 6 decimals (default) = ~11cm GPS accuracy • Configurable precision • No negative sign overhead
+
+**💡 Pro tip:** Combine with [GeoPlugin](./plugins/geo.md) for automatic geohash indexing and proximity search!
+
+---
+
+### 📋 `json` - JSON Serialization
+
+**Auto-stringify/parse for complex objects:**
+
+```javascript
+attributes: {
+  metadata: 'json',                    // Any JSON-serializable value
+  settings: 'json|optional'
+}
+
+await posts.insert({
+  title: 'My Post',
+  metadata: { views: 100, likes: 50, tags: ['news', 'tech'] }
+});
+
+const post = await posts.get(id);
+console.log(post.metadata.views);  // 100 (auto-parsed)
+```
+
+---
+
+### 📊 Custom Types Comparison
+
+| Type | Input Example | Stored As | Savings | Use Case |
+|------|---------------|-----------|---------|----------|
+| `secret` | `"password123"` | `"salt:iv:encrypted:tag"` | Encrypted | Passwords, API keys, tokens |
+| `embedding:1536` | `[0.1, 0.2, ...]` (30KB) | `"2kF_nX..."` (7KB) | **77%** | Vector search, RAG, ML |
+| `ip4` | `"192.168.1.1"` (15 bytes) | `"wKgBAQ=="` (8 bytes) | **47%** | IP tracking, analytics |
+| `ip6` | `"2001:db8::1"` (39 bytes) | `"IAENuAAAA..."` (24 bytes) | **44%** | IPv6 networks |
+| `geoLat` | `-23.550519` (15 bytes) | `"~18kPxZ"` (8 bytes) | **47%** | Location services |
+| `geoLon` | `-46.633309` (16 bytes) | `"~36WqLj"` (8 bytes) | **50%** | Maps, routing |
+| `json` | `{a:1, b:2}` | `'{"a":1,"b":2}'` | Serialized | Complex metadata |
 
 ---
 
@@ -256,9 +387,9 @@ await users.insert({
 
 ---
 
-## Custom Types
+## Detailed Custom Types Reference
 
-S3DB extends fastest-validator with custom types optimized for S3 storage.
+This section provides full documentation for each custom type. For a quick overview, see [Custom Types Summary](#-custom-types---space-optimized-for-s3).
 
 ### `secret` - Auto-Encrypted Fields
 
@@ -430,6 +561,315 @@ await posts.insert({
 // Retrieve - auto-parsed
 const post = await posts.get(id);
 console.log(post.metadata.views);  // 100
+```
+
+---
+
+### `ip4` / `ip6` - IPv4/IPv6 Addresses
+
+Compact binary encoding for IP addresses to save space in S3 metadata.
+
+#### IPv4 Addresses (`ip4`)
+
+Store IPv4 addresses with 47% space savings:
+
+```javascript
+const logs = await database.createResource({
+  name: 'access_logs',
+  attributes: {
+    clientIP: 'ip4',                     // Basic IPv4
+    requiredIP: 'ip4|required',          // Required IPv4
+    serverIP: { type: 'ip4', required: true }  // Object notation
+  }
+});
+
+// Insert - automatic encoding
+await logs.insert({
+  clientIP: '192.168.1.1',
+  serverIP: '10.0.0.1'
+});
+// Stored as: { clientIP: 'wKgBAQ==', serverIP: 'CgAAAQ==' }
+
+// Retrieve - automatic decoding
+const log = await logs.get(id);
+console.log(log.clientIP);  // '192.168.1.1'
+```
+
+**Encoding Details:**
+- **Input**: `"192.168.1.1"` (11-15 characters)
+- **Stored**: 4 bytes → Base64 (8 characters with padding)
+- **Savings**: ~47% vs string representation
+- **Validation**: Validates IPv4 format (0-255 per octet)
+- **Null handling**: Preserves `null` and `undefined` values
+
+#### IPv6 Addresses (`ip6`)
+
+Store IPv6 addresses with 44% space savings:
+
+```javascript
+const connections = await database.createResource({
+  name: 'connections',
+  attributes: {
+    clientIPv6: 'ip6',                   // Basic IPv6
+    gatewayIPv6: 'ip6|optional',         // Optional IPv6
+    serverIPv6: { type: 'ip6' }          // Object notation
+  }
+});
+
+// Insert - automatic encoding
+await connections.insert({
+  clientIPv6: '2001:db8::1',
+  serverIPv6: 'fe80::1'
+});
+// Stored as: { clientIPv6: 'IAENuAAAAAAAAAAAAAAAAQ==', serverIPv6: '...' }
+
+// Retrieve - automatic decoding
+const conn = await connections.get(id);
+console.log(conn.clientIPv6);  // '2001:db8::1' (compressed format)
+```
+
+**Encoding Details:**
+- **Input**: `"2001:db8::1"` (up to 39 characters)
+- **Stored**: 16 bytes → Base64 (24 characters with padding)
+- **Savings**: ~44% vs string representation
+- **Validation**: Validates IPv6 format (hex groups, compression)
+- **Compression**: Automatically compresses IPv6 on decode (`::` notation)
+- **Null handling**: Preserves `null` and `undefined` values
+
+#### Mixed IPv4/IPv6 Example
+
+```javascript
+const network = await database.createResource({
+  name: 'network_events',
+  attributes: {
+    ipv4: 'ip4',
+    ipv6: 'ip6',
+    timestamp: 'number',
+    userAgent: 'string'
+  }
+});
+
+await network.insert({
+  ipv4: '192.168.1.1',
+  ipv6: '2001:db8::1',
+  timestamp: Date.now(),
+  userAgent: 'Mozilla/5.0...'
+});
+```
+
+#### Validation & Error Handling
+
+```javascript
+// ✅ Valid IPv4
+await logs.insert({ clientIP: '192.168.1.1' });    // OK
+await logs.insert({ clientIP: '10.0.0.1' });       // OK
+await logs.insert({ clientIP: '255.255.255.255' }); // OK
+
+// ❌ Invalid IPv4 - validation error
+await logs.insert({ clientIP: '256.1.1.1' });      // Error: Invalid IPv4
+await logs.insert({ clientIP: '192.168.1' });      // Error: Invalid IPv4
+await logs.insert({ clientIP: 'not-an-ip' });      // Error: Invalid IPv4
+
+// ✅ Valid IPv6
+await conns.insert({ clientIPv6: '2001:db8::1' }); // OK
+await conns.insert({ clientIPv6: 'fe80::1' });     // OK
+await conns.insert({ clientIPv6: '::1' });         // OK (localhost)
+
+// ❌ Invalid IPv6 - validation error
+await conns.insert({ clientIPv6: 'not-an-ipv6' }); // Error: Invalid IPv6
+```
+
+#### Use Cases
+
+**IPv4 (`ip4`):**
+- Web server access logs
+- API request tracking
+- User analytics
+- Network monitoring
+- Rate limiting by IP
+
+**IPv6 (`ip6`):**
+- Modern network infrastructure
+- IoT device tracking
+- Cloud provider networks
+- Mobile carrier networks
+- Future-proof applications
+
+#### Performance Benefits
+
+```javascript
+// 1000 IPv4 addresses
+// String storage: 1000 × 15 bytes = ~15KB
+// Binary storage: 1000 × 8 bytes = ~8KB
+// Savings: 47% (7KB saved)
+
+// 1000 IPv6 addresses
+// String storage: 1000 × 39 bytes = ~39KB
+// Binary storage: 1000 × 24 bytes = ~24KB
+// Savings: 44% (15KB saved)
+```
+
+---
+
+### `geoLat` / `geoLon` - Geographic Coordinates
+
+Optimized storage for latitude and longitude with normalized fixed-point encoding.
+
+#### Usage
+
+```javascript
+const locations = await database.createResource({
+  name: 'store_locations',
+  attributes: {
+    name: 'string|required',
+    latitude: 'geoLat',                  // -90 to +90
+    longitude: 'geoLon',                 // -180 to +180
+    address: 'string'
+  }
+});
+
+// Insert - automatic encoding
+await locations.insert({
+  name: 'Downtown Store',
+  latitude: -23.550519,
+  longitude: -46.633309,
+  address: 'São Paulo, Brazil'
+});
+// Stored as: { latitude: '~18kPxZ', longitude: '~36WqLj' }
+
+// Retrieve - automatic decoding
+const store = await locations.get(id);
+console.log(store.latitude);   // -23.550519
+console.log(store.longitude);  // -46.633309
+```
+
+#### Encoding Details
+
+**Latitude (`geoLat`):**
+- **Range**: -90 to +90
+- **Normalization**: Adds 90 to eliminate negative sign (0 to 180)
+- **Precision**: 6 decimals (default) = ~11cm GPS accuracy
+- **Encoding**: Fixed-point → Base62
+- **Prefix**: `~` to identify as geo coordinate
+- **Example**: `-23.550519` (15 bytes) → `"~18kPxZ"` (8 bytes) = 47% savings
+
+**Longitude (`geoLon`):**
+- **Range**: -180 to +180
+- **Normalization**: Adds 180 to eliminate negative sign (0 to 360)
+- **Precision**: 6 decimals (default) = ~11cm GPS accuracy
+- **Encoding**: Fixed-point → Base62
+- **Prefix**: `~` to identify as geo coordinate
+- **Example**: `-46.633309` (16 bytes) → `"~36WqLj"` (8 bytes) = 50% savings
+
+#### Precision Levels
+
+```javascript
+// Precision = decimal places
+// 6 decimals (default): ~11cm accuracy (GPS standard)
+// 5 decimals: ~1.1m accuracy (sufficient for most apps)
+// 4 decimals: ~11m accuracy (building-level)
+// 3 decimals: ~111m accuracy (neighborhood)
+
+// Precision is configurable in encoding (future feature)
+```
+
+#### Real-World Examples
+
+```javascript
+// Restaurant locations
+await restaurants.insert({
+  name: 'Pizza Palace',
+  latitude: 40.7128,    // New York
+  longitude: -74.0060
+});
+
+// Delivery zones
+await zones.insert({
+  name: 'Zone A',
+  centerLat: 51.5074,   // London
+  centerLon: -0.1278,
+  radiusKm: 5
+});
+
+// User check-ins
+await checkins.insert({
+  userId: 'user123',
+  latitude: 35.6762,    // Tokyo
+  longitude: 139.6503,
+  timestamp: Date.now()
+});
+```
+
+#### Validation & Error Handling
+
+```javascript
+// ✅ Valid coordinates
+await locations.insert({ latitude: 0, longitude: 0 });           // Equator
+await locations.insert({ latitude: 90, longitude: 180 });        // North Pole
+await locations.insert({ latitude: -23.5, longitude: -46.6 });   // São Paulo
+
+// ❌ Out of range - throws error
+await locations.insert({ latitude: 91, longitude: 0 });          // Error: lat > 90
+await locations.insert({ latitude: -91, longitude: 0 });         // Error: lat < -90
+await locations.insert({ latitude: 0, longitude: 181 });         // Error: lon > 180
+await locations.insert({ latitude: 0, longitude: -181 });        // Error: lon < -180
+
+// ✅ Null/undefined handling
+await locations.insert({ latitude: null, longitude: null });     // OK (preserved)
+await locations.insert({ latitude: undefined });                 // OK (preserved)
+```
+
+#### Integration with GeoPlugin
+
+Combine with [GeoPlugin](./plugins/geo.md) for powerful geospatial features:
+
+```javascript
+import { GeoPlugin } from 's3db.js';
+
+const db = new S3db({
+  connectionString: 's3://...',
+  plugins: [
+    new GeoPlugin({
+      resources: {
+        locations: {
+          latField: 'latitude',
+          lonField: 'longitude',
+          precision: 6  // Geohash precision
+        }
+      }
+    })
+  ]
+});
+
+await db.connect();
+
+const locations = await db.createResource({
+  name: 'locations',
+  attributes: {
+    name: 'string|required',
+    latitude: 'geoLat',
+    longitude: 'geoLon'
+  }
+});
+
+// Automatic geohash indexing + proximity search
+const nearby = await locations.findNearby({
+  lat: -23.5505,
+  lon: -46.6333,
+  radius: 5  // 5km radius
+});
+```
+
+#### Performance Benefits
+
+```javascript
+// 1000 locations
+// JSON floats: 1000 × 15.5 bytes (avg) = ~15.5KB
+// Geo encoding: 1000 × 8 bytes = ~8KB
+// Savings: 48% (7.5KB saved)
+
+// Stays within S3 metadata limit:
+// 2047 bytes ÷ 8 bytes = ~255 location pairs in metadata
 ```
 
 ---
