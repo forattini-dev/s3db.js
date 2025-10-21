@@ -11,7 +11,7 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 
 **Key features:**
 - ✅ **Real-Time CDC**: Each insert/update/delete replicated individually (<10ms latency)
-- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, MySQL, MariaDB, DynamoDB, MongoDB, SQS, Webhooks
+- ✅ Multi-target: S3DB, BigQuery, PostgreSQL, MySQL, MariaDB, PlanetScale, Turso, DynamoDB, MongoDB, SQS, Webhooks
 - ✅ Data transformation with custom functions
 - ✅ Automatic retry with exponential backoff
 - ✅ Dead letter queue for failures
@@ -47,7 +47,7 @@ await users.insert({ name: 'John' }); // Automatically replicated
 - ✅ Replicates **each operation** individually (insert/update/delete)
 - ✅ Near real-time (<10ms latency per operation)
 - ✅ Processes 1 record at a time
-- ✅ Multiple destinations: PostgreSQL, MySQL, MariaDB, DynamoDB, MongoDB, BigQuery, SQS, Webhooks
+- ✅ Multiple destinations: PostgreSQL, MySQL, MariaDB, PlanetScale, Turso, DynamoDB, MongoDB, BigQuery, SQS, Webhooks
 - ✅ Perfect for: analytics pipelines, event sourcing, multi-destination sync
 
 **BackupPlugin** creates **periodic snapshots** (batch):
@@ -103,7 +103,7 @@ new BackupPlugin({
 
 **Automatically create and sync SQL database tables** based on your S3DB resource schemas. No manual DDL required!
 
-**Supported databases:** PostgreSQL, MySQL, MariaDB, **BigQuery**
+**Supported databases:** PostgreSQL, MySQL, MariaDB, **BigQuery**, **PlanetScale** (MySQL serverless), **Turso** (SQLite edge)
 
 ### Quick Example
 

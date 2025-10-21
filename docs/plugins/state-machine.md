@@ -27,6 +27,118 @@ await db.stateMachine('order').send('order-123', 'PAY');
 
 ---
 
+## ⚡ Quick Start
+
+Build a simple order workflow in under 2 minutes:
+
+```javascript
+import { Database, StateMachinePlugin } from 's3db.js';
+
+// Step 1: Create database
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+// Step 2: Create orders resource
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: {
+    customerId: 'string|required',
+    total: 'number|required',
+    status: 'string|required'  // State field
+  }
+});
+
+// Step 3: Configure state machine
+const stateMachinePlugin = new StateMachinePlugin({
+  stateMachines: {
+    order: {
+      resource: 'orders',           // Resource to manage
+      stateField: 'status',         // Field that stores state
+      initialState: 'pending',      // Initial state for new orders
+
+      states: {
+        pending: {
+          on: {
+            PAY: 'paid',            // Event PAY → paid state
+            CANCEL: 'cancelled'     // Event CANCEL → cancelled state
+          }
+        },
+        paid: {
+          on: {
+            SHIP: 'shipped',
+            CANCEL: 'refunded'
+          }
+        },
+        shipped: {
+          on: {
+            DELIVER: 'delivered'
+          }
+        },
+        delivered: {
+          type: 'final'             // Final state (no more transitions)
+        },
+        cancelled: {
+          type: 'final'
+        },
+        refunded: {
+          type: 'final'
+        }
+      }
+    }
+  }
+});
+
+await db.usePlugin(stateMachinePlugin);
+
+// Step 4: Create an order (starts in 'pending' state)
+const order = await orders.insert({
+  customerId: 'customer-1',
+  total: 99.99,
+  status: 'pending'
+});
+
+console.log('Order created:', order.id, 'Status:', order.status);
+// Order created: order-1 Status: pending
+
+// Step 5: Transition through states
+await db.stateMachine('order').send(order.id, 'PAY');
+const paidOrder = await orders.get(order.id);
+console.log('After payment:', paidOrder.status);
+// After payment: paid
+
+await db.stateMachine('order').send(order.id, 'SHIP');
+const shippedOrder = await orders.get(order.id);
+console.log('After shipping:', shippedOrder.status);
+// After shipping: shipped
+
+await db.stateMachine('order').send(order.id, 'DELIVER');
+const deliveredOrder = await orders.get(order.id);
+console.log('After delivery:', deliveredOrder.status);
+// After delivery: delivered
+
+// Step 6: Try invalid transition (will throw error)
+try {
+  await db.stateMachine('order').send(order.id, 'SHIP');
+  // Error! Can't ship when already delivered
+} catch (error) {
+  console.log('Invalid transition prevented:', error.message);
+  // Invalid transition prevented: No transition defined for event 'SHIP' from state 'delivered'
+}
+```
+
+**What just happened:**
+1. ✅ State machine configured with 6 states (pending → paid → shipped → delivered)
+2. ✅ Automatic state validation (only valid transitions allowed)
+3. ✅ State persisted in database (`status` field)
+4. ✅ Invalid transitions prevented automatically
+
+**Next steps:**
+- Add guard functions for conditional transitions (see [Usage Examples](#usage-examples))
+- Add action handlers for transition side-effects (see [Advanced Patterns](#advanced-patterns))
+- Enable audit trail for state changes (see [Configuration Options](#configuration-options))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)

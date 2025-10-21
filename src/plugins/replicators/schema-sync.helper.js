@@ -480,19 +480,122 @@ export function generateBigQuerySchemaUpdate(attributes, existingSchema) {
   return newFields;
 }
 
+/**
+ * Convert S3DB type to SQLite type (for Turso)
+ */
+export function s3dbTypeToSQLite(fieldType, fieldOptions = {}) {
+  const { type, maxLength, options } = parseFieldType(fieldType);
+
+  switch (type) {
+    case 'string':
+      return 'TEXT';
+
+    case 'number':
+      // SQLite uses REAL for floating point, INTEGER for integers
+      if (options.min !== undefined && options.min >= 0 && options.max !== undefined && options.max <= 2147483647) {
+        return 'INTEGER';
+      }
+      return 'REAL';
+
+    case 'boolean':
+      return 'INTEGER'; // 0 or 1
+
+    case 'object':
+    case 'json':
+    case 'array':
+      return 'TEXT'; // Store as JSON string
+
+    case 'embedding':
+      return 'TEXT'; // Store as JSON array
+
+    case 'ip4':
+    case 'ip6':
+      return 'TEXT';
+
+    case 'secret':
+      return 'TEXT';
+
+    case 'uuid':
+      return 'TEXT';
+
+    case 'date':
+    case 'datetime':
+      return 'TEXT'; // SQLite stores dates as ISO strings or Unix timestamps
+
+    default:
+      return 'TEXT';
+  }
+}
+
+/**
+ * Generate SQLite CREATE TABLE statement from S3DB resource schema
+ */
+export function generateSQLiteCreateTable(tableName, attributes) {
+  const columns = [];
+
+  // Always add id as primary key
+  columns.push('id TEXT PRIMARY KEY');
+
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === 'id') continue;
+
+    const fieldType = typeof fieldConfig === 'string' ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+
+    const sqlType = s3dbTypeToSQLite(fieldType);
+    const nullConstraint = required ? 'NOT NULL' : 'NULL';
+
+    columns.push(`${fieldName} ${sqlType} ${nullConstraint}`);
+  }
+
+  // Add timestamps
+  if (!attributes.createdAt) {
+    columns.push('created_at TEXT DEFAULT (datetime(\'now\'))');
+  }
+  if (!attributes.updatedAt) {
+    columns.push('updated_at TEXT DEFAULT (datetime(\'now\'))');
+  }
+
+  return `CREATE TABLE IF NOT EXISTS ${tableName} (\n  ${columns.join(',\n  ')}\n)`;
+}
+
+/**
+ * Generate ALTER TABLE statements for SQLite
+ */
+export function generateSQLiteAlterTable(tableName, attributes, existingSchema) {
+  const alterStatements = [];
+
+  for (const [fieldName, fieldConfig] of Object.entries(attributes)) {
+    if (fieldName === 'id') continue;
+    if (existingSchema[fieldName]) continue;
+
+    const fieldType = typeof fieldConfig === 'string' ? fieldConfig : fieldConfig.type;
+    const { required } = parseFieldType(fieldType);
+    const sqlType = s3dbTypeToSQLite(fieldType);
+    const nullConstraint = required ? 'NOT NULL' : 'NULL';
+
+    alterStatements.push(`ALTER TABLE ${tableName} ADD COLUMN ${fieldName} ${sqlType} ${nullConstraint}`);
+  }
+
+  return alterStatements;
+}
+
 export default {
   parseFieldType,
   s3dbTypeToPostgres,
   s3dbTypeToMySQL,
   s3dbTypeToBigQuery,
+  s3dbTypeToSQLite,
   generatePostgresCreateTable,
   generateMySQLCreateTable,
   generateBigQuerySchema,
+  generateSQLiteCreateTable,
   getPostgresTableSchema,
   getMySQLTableSchema,
   getBigQueryTableSchema,
   compareSchemas,
   generatePostgresAlterTable,
   generateMySQLAlterTable,
-  generateBigQuerySchemaUpdate
+  generateBigQuerySchemaUpdate,
+  generateSQLiteAlterTable
 };

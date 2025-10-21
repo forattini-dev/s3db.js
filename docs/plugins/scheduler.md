@@ -25,6 +25,116 @@ await db.usePlugin(new SchedulerPlugin({ jobs: { daily_cleanup: { schedule: '0 3
 
 ---
 
+## ⚡ Quick Start
+
+Schedule your first job in under 2 minutes:
+
+```javascript
+import { Database, SchedulerPlugin } from 's3db.js';
+
+// Step 1: Create database
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+// Step 2: Create a resource to track (example: sessions)
+const sessions = await db.createResource({
+  name: 'sessions',
+  attributes: {
+    userId: 'string|required',
+    expiresAt: 'number|required',
+    active: 'boolean'
+  }
+});
+
+// Step 3: Configure scheduler
+const schedulerPlugin = new SchedulerPlugin({
+  jobs: {
+    // Clean up expired sessions every hour
+    cleanup_sessions: {
+      schedule: '0 * * * *',     // Every hour at minute 0
+      action: async (db) => {
+        const now = Date.now();
+        const sessions = db.resource('sessions');
+
+        // Find expired sessions
+        const expired = await sessions.query({
+          expiresAt: { $lt: now },
+          active: true
+        });
+
+        console.log(`Found ${expired.length} expired sessions to clean up`);
+
+        // Mark as inactive
+        for (const session of expired) {
+          await sessions.update(session.id, { active: false });
+        }
+
+        return { cleaned: expired.length };
+      },
+      retries: 3,
+      timeout: 30000  // 30 seconds
+    },
+
+    // Daily report at 8am
+    daily_report: {
+      schedule: '0 8 * * *',     // Every day at 8am
+      timezone: 'America/New_York',
+      action: async (db) => {
+        const sessions = db.resource('sessions');
+        const count = await sessions.count();
+
+        console.log(`Daily Report: ${count} total sessions`);
+
+        return { totalSessions: count };
+      }
+    }
+  }
+});
+
+await db.usePlugin(schedulerPlugin);
+
+// Step 4: Start the scheduler
+await schedulerPlugin.start();
+console.log('Scheduler started! Jobs will run on schedule.');
+
+// Jobs run automatically based on schedule!
+// cleanup_sessions → runs every hour
+// daily_report     → runs every day at 8am EST
+
+// Step 5: Monitor job execution
+schedulerPlugin.on('jobStarted', ({ jobName, scheduledTime }) => {
+  console.log(`Job ${jobName} started at ${new Date(scheduledTime)}`);
+});
+
+schedulerPlugin.on('jobCompleted', ({ jobName, result, duration }) => {
+  console.log(`Job ${jobName} completed in ${duration}ms:`, result);
+});
+
+schedulerPlugin.on('jobFailed', ({ jobName, error, attempts }) => {
+  console.error(`Job ${jobName} failed (attempt ${attempts}):`, error.message);
+});
+
+// Step 6: Manually trigger a job (optional)
+await schedulerPlugin.runJob('cleanup_sessions');
+console.log('Manual job execution completed');
+
+// Step 7: Stop scheduler when done (optional)
+// await schedulerPlugin.stop();
+```
+
+**What just happened:**
+1. ✅ Scheduler configured with 2 jobs (hourly cleanup + daily report)
+2. ✅ Jobs run automatically based on cron schedule
+3. ✅ Automatic retry on failure (3 attempts)
+4. ✅ Job history tracked in database
+
+**Next steps:**
+- Add distributed locking for multi-instance deployments (see [Configuration Options](#configuration-options))
+- Configure timezone-aware schedules (see [Usage Examples](#usage-examples))
+- View job history and monitoring (see [API Reference](#api-reference))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
