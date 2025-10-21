@@ -185,18 +185,10 @@ function generateResourcePaths(resource, version, config = {}) {
   }
 
   // Extract partition information for documentation
-  const partitions = resource.config?.partitions || resource.partitions || {};
+  // Partitions are stored in resource.config.options.partitions
+  const partitions = resource.config?.options?.partitions || resource.config?.partitions || resource.partitions || {};
   const partitionNames = Object.keys(partitions);
   const hasPartitions = partitionNames.length > 0;
-
-  // Debug: log partition info
-  if (resource.name === 'posts') {
-    console.log('[OpenAPI Debug] Resource:', resource.name);
-    console.log('[OpenAPI Debug] config?.partitions:', resource.config?.partitions);
-    console.log('[OpenAPI Debug] partitions:', resource.partitions);
-    console.log('[OpenAPI Debug] partitionNames:', partitionNames);
-    console.log('[OpenAPI Debug] hasPartitions:', hasPartitions);
-  }
 
   // Build partition documentation
   let partitionDescription = 'Partition name for filtering';

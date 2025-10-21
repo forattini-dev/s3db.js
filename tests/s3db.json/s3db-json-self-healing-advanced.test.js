@@ -321,8 +321,8 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       });
 
       await database.connect();
-      
-      const hooks = database.savedMetadata.resources.test.versions.v0.hooks;
+
+      const hooks = database.savedMetadata.resources.test.versions.v1.hooks;
       expect(hooks.beforeInsert).toEqual(["valid_hook"]);
       expect(hooks.afterInsert).toEqual([]);
     });
@@ -356,8 +356,8 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       });
 
       await database.connect();
-      
-      const hooks = database.savedMetadata.resources.test.versions.v0.hooks;
+
+      const hooks = database.savedMetadata.resources.test.versions.v1.hooks;
       expect(hooks.beforeInsert).toBeUndefined();
       expect(hooks.afterInsert).toBeUndefined();
       expect(hooks.beforeUpdate).toEqual(["valid_array"]);
@@ -388,8 +388,8 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       });
 
       await database.connect();
-      
-      const hooks = database.savedMetadata.resources.test.versions.v0.hooks;
+
+      const hooks = database.savedMetadata.resources.test.versions.v1.hooks;
       expect(hooks).toEqual({});
     });
   });
