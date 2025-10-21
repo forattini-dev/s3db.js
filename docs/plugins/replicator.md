@@ -2,7 +2,7 @@
 
 ## ⚡ TLDR
 
-Replicação **real-time** para múltiplos destinos (S3DB, BigQuery, PostgreSQL, SQS, Webhooks) com transformação de dados.
+Replicação **real-time CDC** (Change Data Capture) para múltiplos destinos - **cada operação é replicada individualmente** em near real-time.
 
 **1 linha para começar:**
 ```javascript
@@ -10,11 +10,18 @@ await db.usePlugin(new ReplicatorPlugin({ replicators: [{ driver: 's3db', resour
 ```
 
 **Principais features:**
+- ✅ **Real-Time CDC**: Cada insert/update/delete replicado individualmente (<10ms latency)
 - ✅ Multi-target: S3DB, BigQuery, PostgreSQL, SQS, Webhooks
 - ✅ Transformação de dados com funções customizadas
 - ✅ Retry automático com backoff exponencial
 - ✅ Dead letter queue para falhas
 - ✅ Event monitoring completo
+
+**Quando usar:**
+- 📊 Analytics pipelines em tempo real
+- 🔄 Event sourcing / message queues
+- 🌍 Multi-destination sync
+- 📈 Audit trail contínuo
 
 **Performance & Manutenção:**
 ```javascript
@@ -34,6 +41,64 @@ await users.insert({ name: 'John' }); // Replica automaticamente
 
 ---
 
+## 🆚 ReplicatorPlugin vs BackupPlugin
+
+**ReplicatorPlugin** provides **real-time CDC** (Change Data Capture):
+- ✅ Replicates **each operation** individually (insert/update/delete)
+- ✅ Near real-time (<10ms latency per operation)
+- ✅ Processes 1 record at a time
+- ✅ Multiple destinations: PostgreSQL, BigQuery, SQS, Webhooks
+- ✅ Perfect for: analytics pipelines, event sourcing, multi-destination sync
+
+**BackupPlugin** creates **periodic snapshots** (batch):
+- ✅ Complete snapshots of ALL resources at specific timestamps
+- ✅ Scheduled (cron) or manual (daily/weekly/monthly)
+- ✅ Exports entire datasets with streaming (constant ~10KB memory)
+- ✅ JSONL.gz format for portability
+- ✅ Perfect for: disaster recovery, compliance, point-in-time recovery
+
+| Aspect | ReplicatorPlugin | BackupPlugin |
+|--------|-----------------|--------------|
+| **Timing** | Every operation | Scheduled (hourly/daily) |
+| **Granularity** | 1 record at a time | All resources at once |
+| **Latency** | Milliseconds | Minutes/hours |
+| **Use Case** | Real-time analytics | Disaster recovery |
+| **Destinations** | PostgreSQL, BigQuery, SQS, etc | JSONL.gz files |
+
+**Key Difference:**
+```javascript
+// ReplicatorPlugin: Every operation is replicated
+await users.insert({ name: 'John' });  // → Replicated to all destinations in ~2s
+await users.update('1', { name: 'Jane' });  // → Replicated in ~2s
+await users.delete('2');  // → Replicated in ~2s
+
+// BackupPlugin: Scheduled snapshots of entire database
+await backupPlugin.backup('full');  // → Snapshot of ALL resources at this moment
+```
+
+**Use Both Together:**
+```javascript
+// ReplicatorPlugin for real-time analytics
+new ReplicatorPlugin({
+  replicators: [{
+    driver: 'bigquery',
+    resources: ['events', 'users'],
+    config: { projectId: 'my-project', dataset: 'analytics' }
+  }]
+})
+
+// BackupPlugin for disaster recovery
+new BackupPlugin({
+  driver: 's3',
+  config: { bucket: 'backups' },
+  schedule: { daily: '0 2 * * *' }  // 2am daily
+})
+```
+
+📚 See [BackupPlugin docs](./backup.md) for periodic snapshots and disaster recovery.
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -45,11 +110,7 @@ await users.insert({ name: 'John' }); // Replica automaticamente
   - [SQS Replicator](#-sqs-replicator) - Send to AWS SQS queues
   - [Webhook Replicator](#-webhook-replicator) - HTTP/HTTPS webhooks
   - [BigQuery Replicator](#-bigquery-replicator) - Google BigQuery integration
-  - [CSV Replicator](#-csv-replicator) - Export to CSV format
-  - [JSONL Replicator](#-jsonl-replicator) - Export to JSON Lines
-  - [Parquet Replicator](#-parquet-replicator) - Export to Apache Parquet
-  - [Excel Replicator](#-excel-replicator) - Export to Excel (.xlsx)
-  - [Multi-Format Export](#-multi-format-export) - Export to multiple formats
+  - [PostgreSQL Replicator](#-postgresql-replicator) - PostgreSQL database integration
 - [API Reference](#api-reference)
 - [Best Practices](#best-practices)
 
@@ -62,12 +123,13 @@ The Replicator Plugin provides **enterprise-grade data replication** that synchr
 ### How It Works
 
 1. **Real-time Monitoring**: Listens to all database operations (insert, update, delete)
-2. **Multi-Target Support**: Replicates to multiple destinations simultaneously
-3. **Data Transformation**: Transform data before replication using custom functions
-4. **Error Resilience**: Automatic retries and comprehensive error reporting
-5. **Flexible Configuration**: Multiple resource mapping syntaxes for complex scenarios
+2. **Near Real-Time CDC**: Replicates each record individually as operations occur (<10ms latency)
+3. **Multi-Target Support**: Replicates to multiple destinations simultaneously
+4. **Data Transformation**: Transform data before replication using custom functions
+5. **Error Resilience**: Automatic retries and comprehensive error reporting
+6. **Flexible Configuration**: Multiple resource mapping syntaxes for complex scenarios
 
-> 🔄 **Enterprise Ready**: Perfect for backup strategies, data warehousing, event streaming, and multi-environment synchronization.
+> 🔄 **Real-Time CDC**: ReplicatorPlugin provides Change Data Capture - every insert/update/delete is replicated individually in near real-time.
 
 ---
 
@@ -335,6 +397,47 @@ app.get('/health/replication', async (req, res) => {
 ---
 
 ## Installation & Setup
+
+### 📦 Required Dependencies
+
+**Important:** Some replicator drivers require additional dependencies. The s3db.js core package **does not include** these dependencies to keep the package lightweight.
+
+**Install only what you need:**
+
+```bash
+# For PostgreSQL replication
+pnpm add pg
+
+# For BigQuery replication
+pnpm add @google-cloud/bigquery
+
+# For SQS replication
+pnpm add @aws-sdk/client-sqs
+```
+
+| Driver | Package | Version | Install Command |
+|--------|---------|---------|-----------------|
+| `postgresql` | `pg` | `^8.0.0` | `pnpm add pg` |
+| `bigquery` | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
+| `sqs` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| `s3db` | *(built-in)* | - | No installation needed |
+| `webhook` | *(built-in)* | - | No installation needed |
+| `csv`, `jsonl`, `parquet`, `excel` | *(built-in)* | - | No installation needed |
+
+**Automatic Validation:** When you use a replicator, s3db.js automatically validates dependencies at runtime. If a dependency is missing, you'll get a clear error message with installation instructions.
+
+**Example Error:**
+
+```bash
+Error: PostgreSQL Replicator - Missing dependencies detected!
+
+❌ Missing dependency: pg
+   Description: PostgreSQL client for Node.js
+   Required: ^8.0.0
+   Install: pnpm add pg
+```
+
+---
 
 ### Basic Setup
 
@@ -847,302 +950,6 @@ pnpm add @google-cloud/bigquery
 ```
 
 ---
-
-### 📁 CSV Replicator
-
-Export data to CSV (Comma-Separated Values) format for Excel and business users.
-
-**S3 Default (PluginStorage):**
-```javascript
-{
-  driver: 'csv',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 's3',                  // Uses database's PluginStorage
-      path: 'exports/csv'            // Relative to plugin storage
-    },
-    delimiter: ',',                  // ',', ';', '\t', '|'
-    mode: 'append',                  // 'append' or 'overwrite'
-    rotateBy: 'date',                // 'date', 'size', or null
-    rotateSize: 100 * 1024 * 1024   // Rotate at 100MB
-  }
-}
-```
-
-**S3 Custom (External Bucket):**
-```javascript
-{
-  driver: 'csv',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 's3',
-      connectionString: 's3://KEY:SECRET@analytics-bucket/csv-exports',
-      path: 'daily'
-    },
-    delimiter: ','
-  }
-}
-```
-
-**Filesystem:**
-```javascript
-{
-  driver: 'csv',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 'filesystem',
-      path: './exports/csv'
-    },
-    delimiter: ','
-  }
-}
-```
-
-**Features:**
-- ✅ Export to S3 (default/custom) or filesystem
-- ✅ Quoted fields with proper CSV escaping
-- ✅ Custom delimiters (comma, semicolon, tab, pipe)
-- ✅ File rotation by date or size
-- ✅ Append or overwrite modes
-
-**Use Cases:** Business reporting, Excel analysis, data sharing
-
----
-
-### 📋 JSONL Replicator
-
-Export data to JSON Lines (JSONL/NDJSON) format for analytics and log processing.
-
-**S3 Default (PluginStorage):**
-```javascript
-{
-  driver: 'jsonl',
-  resources: ['events', 'logs'],
-  config: {
-    output: {
-      driver: 's3',
-      path: 'exports/jsonl'
-    },
-    mode: 'append',
-    rotateBy: 'date',
-    compress: false                  // Enable gzip compression
-  }
-}
-```
-
-**S3 Custom (BigQuery Import):**
-```javascript
-{
-  driver: 'jsonl',
-  resources: ['events'],
-  config: {
-    output: {
-      driver: 's3',
-      connectionString: 's3://KEY:SECRET@analytics/bigquery-import'
-    },
-    compress: true
-  }
-}
-```
-
-**Filesystem:**
-```javascript
-{
-  driver: 'jsonl',
-  resources: ['logs'],
-  config: {
-    output: {
-      driver: 'filesystem',
-      path: './logs'
-    }
-  }
-}
-```
-
-**Features:**
-- ✅ Export to S3 (default/custom) or filesystem
-- ✅ One JSON object per line
-- ✅ Streaming writes (memory-efficient)
-- ✅ Optional gzip compression
-- ✅ BigQuery/Athena compatible
-
-**Use Cases:** Log processing, BigQuery import, streaming analytics
-
----
-
-### 📦 Parquet Replicator
-
-Export data to Apache Parquet format for data warehouses (10-100x faster queries, 90% compression).
-
-**Required Dependency:**
-```bash
-pnpm add parquetjs
-```
-
-**S3 Default (PluginStorage):**
-```javascript
-{
-  driver: 'parquet',
-  resources: ['events', 'analytics'],
-  config: {
-    output: {
-      driver: 's3',
-      path: 'exports/parquet'
-    },
-    compression: 'snappy',           // 'snappy', 'gzip', 'lz4'
-    rowGroupSize: 5000,
-    rotateBy: 'date'
-  }
-}
-```
-
-**S3 Custom (Data Warehouse):**
-```javascript
-{
-  driver: 'parquet',
-  resources: ['events'],
-  config: {
-    output: {
-      driver: 's3',
-      connectionString: 's3://KEY:SECRET@analytics-bucket/parquet-exports'
-    },
-    compression: 'gzip'
-  }
-}
-```
-
-**Filesystem:**
-```javascript
-{
-  driver: 'parquet',
-  resources: ['events'],
-  config: {
-    output: {
-      driver: 'filesystem',
-      path: './exports/parquet'
-    }
-  }
-}
-```
-
-**Features:**
-- ✅ Export to S3 (default/custom) or filesystem
-- ✅ Columnar storage format
-- ✅ High compression (90% vs CSV)
-- ✅ 10-100x faster queries
-- ✅ Schema inference
-
-**Use Cases:** Snowflake, AWS Athena, Apache Spark, ML pipelines
-
-**Performance:**
-- Query Speed: ~0.5s (vs CSV: ~45s = **90x faster**)
-- File Size: ~45MB (vs CSV: ~450MB = **90% reduction**)
-
----
-
-### 📊 Excel Replicator
-
-Export data to Excel (.xlsx) format for business reporting.
-
-**Required Dependency:**
-```bash
-pnpm add exceljs
-```
-
-**S3 Default (PluginStorage):**
-```javascript
-{
-  driver: 'excel',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 's3',
-      path: 'exports/excel'
-    },
-    filename: 'export.xlsx',
-    freezeHeaders: true,
-    autoFilter: true
-  }
-}
-```
-
-**S3 Custom (Business Reports):**
-```javascript
-{
-  driver: 'excel',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 's3',
-      connectionString: 's3://KEY:SECRET@analytics-bucket/excel-exports'
-    },
-    filename: 'daily-report.xlsx'
-  }
-}
-```
-
-**Filesystem:**
-```javascript
-{
-  driver: 'excel',
-  resources: ['users', 'orders'],
-  config: {
-    output: {
-      driver: 'filesystem',
-      path: './exports/excel'
-    },
-    filename: 'export.xlsx'
-  }
-}
-```
-
-**Features:**
-- ✅ Export to S3 (default/custom) or filesystem
-- ✅ Multiple worksheets support (one per resource)
-- ✅ Auto-formatting (headers, filters, freeze panes)
-- ✅ Styled headers
-- ✅ Business-ready output
-
-**Use Cases:** Executive reports, dashboards, business presentations
-
----
-
-### 🔀 Multi-Format Export
-
-Export to multiple formats simultaneously:
-
-```javascript
-const replicator = new ReplicatorPlugin({
-  replicators: [
-    { driver: 'csv', config: { outputPath: './exports' } },
-    { driver: 'jsonl', config: { outputPath: './exports' } },
-    { driver: 'parquet', config: { outputPath: './exports' } },
-    { driver: 'excel', config: { outputPath: './exports', filename: 'report.xlsx' } }
-  ]
-});
-
-await db.usePlugin(replicator);
-
-// Single insert creates 4 files!
-await users.insert({ id: 'u1', name: 'Alice', email: 'alice@example.com' });
-// Files created:
-// - ./exports/users_2025-10-20.csv
-// - ./exports/users_2025-10-20.jsonl
-// - ./exports/users_2025-10-20.parquet
-// - ./exports/report_2025-10-20.xlsx
-```
-
-**Export Format Comparison:**
-
-| Format | Best For | File Size | Query Speed | Compression |
-|--------|----------|-----------|-------------|-------------|
-| CSV | Excel, Business Users | Large | Slow | None |
-| JSONL | Log Processing, BigQuery | Medium | Medium | Optional |
-| **Parquet** | Data Warehouses | **Smallest** | **Fastest** | **90%** |
-| Excel | Business Reporting | Large | Slow | None |
 
 ## Usage Examples
 
@@ -1777,6 +1584,8 @@ async function replicateWithRetry(replicator, resource, operation, data, id, max
 
 ## See Also
 
+- [BackupPlugin vs ReplicatorPlugin](./BACKUP_VS_REPLICATOR.md) - When to use each plugin
+- [BackupPlugin](./backup.md) - Batch snapshots for disaster recovery
 - [Plugin Development Guide](./plugin-development.md)
 - [Audit Plugin](./audit.md) - Track replication operations
 - [Metrics Plugin](./metrics.md) - Monitor replication performance
@@ -1786,10 +1595,21 @@ async function replicateWithRetry(replicator, resource, operation, data, id, max
 ### Básico
 
 **P: Para que serve o ReplicatorPlugin?**
-R: Replica dados automaticamente para outros bancos de dados (S3DB, PostgreSQL, BigQuery), filas (SQS) ou outro destino quando há insert/update/delete.
+R: Replica **cada operação** (insert/update/delete) automaticamente em tempo real para outros destinos. Cada record é processado individualmente com latência <10ms.
+
+**P: Qual a diferença entre ReplicatorPlugin e BackupPlugin?**
+R:
+- **ReplicatorPlugin**: Real-time CDC - replica cada operação individualmente (1 record por vez)
+- **BackupPlugin**: Batch snapshots - exporta TODO o database de uma vez em momentos específicos
+Ver [comparação completa](./BACKUP_VS_REPLICATOR.md).
+
+**P: Quando usar ReplicatorPlugin vs BackupPlugin?**
+R:
+- **ReplicatorPlugin**: Analytics em tempo real, event sourcing, sync contínuo
+- **BackupPlugin**: Disaster recovery, compliance, point-in-time recovery
 
 **P: Quais drivers estão disponíveis?**
-R: `s3db` (outro bucket S3DB), `sqs` (AWS SQS), `postgresql`, `bigquery`, `s3` (S3 puro).
+R: `s3db` (outro S3DB), `sqs` (AWS SQS), `webhook` (HTTP/HTTPS), `postgresql`, `bigquery`
 
 **P: Como funciona o mapeamento de recursos?**
 R: Você pode mapear recursos 1:1, renomear ou transformar dados:
