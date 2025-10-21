@@ -512,6 +512,8 @@ await database.usePlugin(CostsPlugin); // Static plugin
 |--------|-------------|------|-----------|
 | **[💾 Backup Plugin](./backup.md)** | Multi-destination backup system | Instance | Data protection, disaster recovery |
 | **[🔄 Replicator Plugin](./replicator.md)** | Real-time data replication | Instance | Data synchronization, multi-environment |
+| **[📥 Importer Plugin](./importer.md)** | Multi-format data import (JSON, CSV) | Instance | Data migration, bulk import, ETL |
+| **[📤 Export Replicators](./replicator.md#-csv-replicator)** | Auto-export to CSV/JSONL/Parquet/Excel | Instance | Analytics, reporting, data warehouses |
 | **[🔍 FullText Plugin](./fulltext.md)** | Full-text search capabilities | Instance | Search functionality, content discovery |
 | **[⚡ Eventual Consistency Plugin](./eventual-consistency.md)** | Transaction-based eventual consistency | Instance | Counters, balances, accumulator fields |
 
@@ -539,6 +541,12 @@ import {
 import {
   BackupPlugin,              // 💾 Data protection
   ReplicatorPlugin,          // 🔄 Data replication
+  ImporterPlugin,            // 📥 Multi-format import
+  // Export Replicators (via ReplicatorPlugin):
+  // - CSV Replicator        // 📄 CSV exports
+  // - JSONL Replicator      // 📋 JSONL exports
+  // - Parquet Replicator    // 📦 Parquet exports
+  // - Excel Replicator      // 📊 Excel exports
   FullTextPlugin,            // 🔍 Search capabilities
   EventualConsistencyPlugin  // ⚡ Eventual consistency
 } from 's3db.js';

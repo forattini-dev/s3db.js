@@ -125,8 +125,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
   describe('Plugin Installation', () => {
     test('should create plugin with default configuration', () => {
       const plugin = new TfStatePlugin();
-      expect(plugin.resourceName).toBe('terraform_resources');
-      expect(plugin.stateHistoryName).toBe('terraform_state_history');
+      expect(plugin.resourceName).toBe('plg_tfstate_resources');
+      expect(plugin.stateFilesName).toBe('plg_tfstate_state_files');
+      expect(plugin.diffsName).toBe('plg_tfstate_state_diffs');
       expect(plugin.trackDiffs).toBe(true);
       expect(plugin.autoSync).toBe(false);
       expect(plugin.verbose).toBe(false);
@@ -162,12 +163,12 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       expect(plugin.database).toBe(database);
       expect(plugin.resource).toBeDefined();
-      expect(plugin.resource.name).toBe('terraform_resources');
-      expect(plugin.stateHistoryResource).toBeDefined();
-      expect(plugin.stateHistoryResource.name).toBe('terraform_state_history');
+      expect(plugin.resource.name).toBe('plg_tfstate_resources');
+      expect(plugin.diffsResource).toBeDefined();
+      expect(plugin.diffsResource.name).toBe('plg_tfstate_state_diffs');
     });
 
-    test('should create terraform_resources with correct schema', async () => {
+    test('should create plg_tfstate_resources with correct schema', async () => {
       const plugin = new TfStatePlugin();
       await plugin.install(database);
 
@@ -181,18 +182,18 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(attributes.attributes).toBeDefined();
     });
 
-    test('should create terraform_state_history with correct schema', async () => {
+    test('should create plg_tfstate_state_diffs with correct schema', async () => {
       const plugin = new TfStatePlugin({ trackDiffs: true });
       await plugin.install(database);
 
-      const attributes = plugin.stateHistoryResource.attributes;
+      const attributes = plugin.diffsResource.attributes;
       expect(attributes.id).toBeDefined();
-      expect(attributes.serial).toBeDefined();
-      expect(attributes.lineage).toBeDefined();
-      expect(attributes.terraformVersion).toBeDefined();
-      expect(attributes.stateVersion).toBeDefined();
-      expect(attributes.resourceCount).toBeDefined();
-      expect(attributes.diff).toBeDefined();
+      expect(attributes.sourceFile).toBeDefined();
+      expect(attributes.oldSerial).toBeDefined();
+      expect(attributes.newSerial).toBeDefined();
+      expect(attributes.calculatedAt).toBeDefined();
+      expect(attributes.summary).toBeDefined();
+      expect(attributes.changes).toBeDefined();
     });
 
     test('should not create state history when trackDiffs is false', async () => {
@@ -200,7 +201,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       await plugin.install(database);
 
       expect(plugin.resource).toBeDefined();
-      expect(plugin.stateHistoryResource).toBeNull();
+      expect(plugin.diffsResource).toBeNull();
     });
 
     test('should create resources with partitions', async () => {
@@ -209,15 +210,18 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Verify plugin created resources
       expect(plugin.resource).toBeDefined();
-      expect(plugin.resource.name).toBe('terraform_resources');
+      expect(plugin.resource.name).toBe('plg_tfstate_resources');
 
       // Test partition functionality by inserting and querying
       const testResource = {
         id: 'test-1',
+        stateFileId: 'test-state-file-id',
         stateSerial: 1,
+        sourceFile: '/tmp/test.tfstate',
         resourceType: 'aws_instance',
         resourceName: 'test',
         resourceAddress: 'aws_instance.test',
+        providerName: '',
         mode: 'managed',
         attributes: {},
         dependencies: [],
@@ -225,7 +229,13 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
         stateVersion: 4
       };
 
-      await plugin.resource.insert(testResource);
+      const insertResult = await plugin.resource.insert(testResource);
+      expect(insertResult).toBeDefined();
+      expect(insertResult.id).toBe('test-1');
+
+      // Verify insert worked by listing all
+      const all = await plugin.resource.list();
+      expect(all.length).toBeGreaterThanOrEqual(1);
 
       // Try partition query - if partitions work, this should succeed
       const byType = await plugin.resource.listPartition({
@@ -549,7 +559,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       await plugin.importState(stateFile);
 
-      const history = await plugin.stateHistoryResource.list();
+      const history = await plugin.diffsResource.list();
       expect(history).toHaveLength(1);
       expect(history[0].diff.isFirst).toBe(true);
       expect(history[0].diff.added).toEqual([]);
@@ -571,7 +581,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       ]);
       await plugin.importState(stateFile2);
 
-      const history = await plugin.stateHistoryResource.query({ serial: 2 });
+      const history = await plugin.diffsResource.query({ serial: 2 });
       expect(history).toHaveLength(1);
       expect(history[0].diff.isFirst).toBe(false);
       expect(history[0].diff.added).toHaveLength(1);
@@ -593,7 +603,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       ]);
       await plugin.importState(stateFile2);
 
-      const history = await plugin.stateHistoryResource.query({ serial: 2 });
+      const history = await plugin.diffsResource.query({ serial: 2 });
       expect(history[0].diff.deleted).toHaveLength(1);
       expect(history[0].diff.deleted[0].address).toBe('aws_s3_bucket.bucket');
     });
@@ -621,7 +631,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       ]);
       await plugin.importState(stateFile2);
 
-      const history = await plugin.stateHistoryResource.query({ serial: 2 });
+      const history = await plugin.diffsResource.query({ serial: 2 });
       expect(history[0].diff.modified).toHaveLength(1);
       expect(history[0].diff.modified[0].address).toBe('aws_instance.web');
       expect(history[0].diff.modified[0].changes).toHaveLength(1);
@@ -647,7 +657,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       ]);
       await plugin.importState(stateFile2);
 
-      const history = await plugin.stateHistoryResource.query({ serial: 2 });
+      const history = await plugin.diffsResource.query({ serial: 2 });
       const diff = history[0].diff;
       expect(diff.added).toHaveLength(1);
       expect(diff.added[0].address).toBe('aws_db_instance.db');
@@ -836,7 +846,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       await plugin.importState(stateFile);
 
-      const history = await plugin.stateHistoryResource.list();
+      const history = await plugin.diffsResource.list();
       expect(history).toHaveLength(1);
       expect(history[0].serial).toBe(1);
       expect(history[0].terraformVersion).toBe('1.5.0');
@@ -852,7 +862,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       await plugin.importState(stateFile);
 
-      const history = await plugin.stateHistoryResource.list();
+      const history = await plugin.diffsResource.list();
       expect(history[0].checksum).toBeDefined();
       expect(typeof history[0].checksum).toBe('string');
     });
@@ -865,7 +875,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
         await plugin.importState(stateFile);
       }
 
-      const history = await plugin.stateHistoryResource.list({ sort: { serial: 1 } });
+      const history = await plugin.diffsResource.list({ sort: { serial: 1 } });
       expect(history).toHaveLength(5);
       expect(history.map(h => h.serial)).toEqual([1, 2, 3, 4, 5]);
     });
@@ -1037,7 +1047,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(resources).toHaveLength(5); // 2 from state1 + 3 from state2
 
       // Verify diff tracking
-      const history = await plugin.stateHistoryResource.query({ serial: 2 });
+      const history = await plugin.diffsResource.query({ serial: 2 });
       expect(history[0].diff.added).toHaveLength(1);
       expect(history[0].diff.modified).toHaveLength(1);
 
@@ -1170,10 +1180,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       // Upload all state files to S3
       for (const state of states) {
         await database.client.putObject({
-          Bucket: testBucket,
-          Key: state.key,
-          Body: JSON.stringify(state.content),
-          ContentType: 'application/json'
+          key: state.key,
+          body: JSON.stringify(state.content),
+          contentType: 'application/json'
         });
       }
 
@@ -1207,7 +1216,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Cleanup
       for (const state of states) {
-        await database.client.deleteObject({ Bucket: testBucket, Key: state.key });
+        await database.client.deleteObject({ key: state.key });
       }
     });
 
@@ -1221,9 +1230,8 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       for (const state of states) {
         await database.client.putObject({
-          Bucket: testBucket,
-          Key: state.key,
-          Body: JSON.stringify({
+          key: state.key,
+          body: JSON.stringify({
             version: 4,
             terraform_version: '1.5.0',
             serial: state.serial,
@@ -1238,7 +1246,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
               }
             ]
           }),
-          ContentType: 'application/json'
+          contentType: 'application/json'
         });
       }
 
@@ -1250,7 +1258,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Cleanup
       for (const state of states) {
-        await database.client.deleteObject({ Bucket: testBucket, Key: state.key });
+        await database.client.deleteObject({ key: state.key });
       }
     });
 
@@ -1264,9 +1272,8 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       for (const state of states) {
         await database.client.putObject({
-          Bucket: testBucket,
-          Key: state.key,
-          Body: JSON.stringify({
+          key: state.key,
+          body: JSON.stringify({
             version: 4,
             terraform_version: '1.5.0',
             serial: 1,
@@ -1281,7 +1288,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
               }
             ]
           }),
-          ContentType: 'application/json'
+          contentType: 'application/json'
         });
       }
 
@@ -1293,7 +1300,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Cleanup
       for (const state of states) {
-        await database.client.deleteObject({ Bucket: testBucket, Key: state.key });
+        await database.client.deleteObject({ key: state.key });
       }
     });
 
@@ -1335,10 +1342,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       for (const state of states) {
         await database.client.putObject({
-          Bucket: testBucket,
-          Key: state.key,
-          Body: JSON.stringify(state.content),
-          ContentType: 'application/json'
+          key: state.key,
+          body: JSON.stringify(state.content),
+          contentType: 'application/json'
         });
       }
 
@@ -1354,7 +1360,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Cleanup
       for (const state of states) {
-        await database.client.deleteObject({ Bucket: testBucket, Key: state.key });
+        await database.client.deleteObject({ key: state.key });
       }
     });
 
@@ -1384,10 +1390,9 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       for (const state of states) {
         await database.client.putObject({
-          Bucket: testBucket,
-          Key: state.key,
-          Body: JSON.stringify(state.content),
-          ContentType: 'application/json'
+          key: state.key,
+          body: JSON.stringify(state.content),
+          contentType: 'application/json'
         });
       }
 
@@ -1401,7 +1406,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Cleanup
       for (const state of states) {
-        await database.client.deleteObject({ Bucket: testBucket, Key: state.key });
+        await database.client.deleteObject({ key: state.key });
       }
     });
 
@@ -1412,9 +1417,8 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
       // Upload a state file
       await database.client.putObject({
-        Bucket: testBucket,
-        Key: 'terraform/test.tfstate',
-        Body: JSON.stringify({
+        key: 'terraform/test.tfstate',
+        body: JSON.stringify({
           version: 4,
           terraform_version: '1.5.0',
           serial: 1,
@@ -1429,7 +1433,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
             }
           ]
         }),
-        ContentType: 'application/json'
+        contentType: 'application/json'
       });
 
       // Import
@@ -1441,7 +1445,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(eventData.totalResourcesExtracted).toBe(1);
 
       // Cleanup
-      await database.client.deleteObject({ Bucket: testBucket, Key: 'terraform/test.tfstate' });
+      await database.client.deleteObject({ key: 'terraform/test.tfstate' });
     });
   });
 
@@ -1580,7 +1584,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(result.groupedResourceCount).toBe(2);
 
       // Verify file exists in S3
-      const s3Object = await database.client.getObject({ Bucket: bucket, Key: key });
+      const s3Object = await database.client.getObject({ key });
       const content = await s3Object.Body.transformToString();
       const state = JSON.parse(content);
 
@@ -1588,7 +1592,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(state.resources).toHaveLength(2);
 
       // Cleanup
-      await database.client.deleteObject({ Bucket: bucket, Key: key });
+      await database.client.deleteObject({ key });
     });
 
     test('should emit stateExported event', async () => {
@@ -1619,7 +1623,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(eventData.serial).toBe(1);
 
       // Cleanup
-      await database.client.deleteObject({ Bucket: bucket, Key: key });
+      await database.client.deleteObject({ key });
     });
 
     test('should handle export with no resources', async () => {

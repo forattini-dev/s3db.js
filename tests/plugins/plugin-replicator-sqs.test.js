@@ -21,7 +21,7 @@ describe('SqsReplicator - Comprehensive Integration Tests', () => {
       replicators: [
         {
           driver: 'sqs',
-          queueUrlDefault: queueUrl,
+          defaultQueue: queueUrl,
           client: sqsClient,
           resources: ['users']
         }
@@ -105,10 +105,10 @@ describe('SqsReplicator - Comprehensive Integration Tests', () => {
 
   test('validates configuration correctly', () => {
     const replicator = new SqsReplicator({
-      queueUrlDefault: 'https://sqs.test.com/queue',
+      defaultQueue: 'https://sqs.test.com/queue',
       client: sqsClient
     }, ['users']);
-    
+
     expect(replicator.shouldReplicateResource('users', 'insert')).toBe(true);
     // With default queue, all resources are accepted
     expect(replicator.shouldReplicateResource('products', 'insert')).toBe(true);
