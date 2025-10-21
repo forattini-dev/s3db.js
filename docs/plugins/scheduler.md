@@ -1462,7 +1462,7 @@ R: Executa tarefas agendadas com expressões cron, com suporte a retries, timeou
 **P: Quais formatos de schedule são suportados?**
 R: Expressões cron padrão (5 campos) e atalhos (`@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`).
 
-**P: Como funciona o distributed locking?**
+**Q: How does distributed locking work?**
 R: Usa `PluginStorage` com TTL para garantir que apenas uma instância execute o job por vez em ambientes distribuídos.
 
 ### Configuração

@@ -2,27 +2,27 @@
 
 ## ⚡ TLDR
 
-Sistema de **fila distribuída** usando S3 como backend, com garantia de zero duplicação.
+**Distributed queue system** using S3 as backend, with zero duplication guarantee.
 
-**3 linhas para começar:**
+**3 lines to get started:**
 ```javascript
 const queue = new S3QueuePlugin({ resource: 'tasks', onMessage: async (task) => { console.log('Processing:', task); } });
 await db.usePlugin(queue);
 await tasks.enqueue({ type: 'send-email', data: {...} });
 ```
 
-**Principais features:**
-- ✅ Zero duplicação (distributed locks + ETag + cache)
-- ✅ Visibility timeout (como AWS SQS)
-- ✅ Retry automático com exponential backoff
+**Key features:**
+- ✅ Zero duplication (distributed locks + ETag + cache)
+- ✅ Visibility timeout (like AWS SQS)
+- ✅ Automatic retry with exponential backoff
 - ✅ Dead letter queue
-- ✅ Worker pool configurável
+- ✅ Configurable worker pool
 
-**Quando usar:**
-- 📧 Filas de email/SMS
-- 🎬 Processamento de mídia
-- 📊 Geração de relatórios
-- 🔄 Jobs em background
+**When to use:**
+- 📧 Email/SMS queues
+- 🎬 Media processing
+- 📊 Report generation
+- 🔄 Background jobs
 - 🔔 Webhook delivery
 
 ---
