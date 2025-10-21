@@ -39,535 +39,7 @@ GET /v0/cars?limit=50&offset=100&brand=Toyota
 
 ---
 
-## 📊 HTTP Status Codes - Complete Reference
-
-The API Plugin implements **ALL standard HTTP status codes** with consistent, detailed responses. Every response follows the same JSON structure for predictability and ease of integration.
-
-### ✅ Success Codes (2xx)
-
-#### 200 OK - Successful Request
-**When**: GET requests, successful operations with data response
-**Example**: Getting a resource, listing resources, successful query
-
-```bash
-# Request
-GET /v0/cars/car-123
-
-# Response
-HTTP/1.1 200 OK
-Content-Type: application/json
-```
-```json
-{
-  "success": true,
-  "data": {
-    "id": "car-123",
-    "brand": "Toyota",
-    "model": "Corolla",
-    "year": 2024,
-    "price": 25000
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 201 Created - Resource Created
-**When**: POST requests that create new resources
-**Example**: Inserting a new record
-
-```bash
-# Request
-POST /v0/cars
-Content-Type: application/json
-{
-  "brand": "Honda",
-  "model": "Civic",
-  "year": 2024,
-  "price": 28000
-}
-
-# Response
-HTTP/1.1 201 Created
-Content-Type: application/json
-Location: /v0/cars/car-456
-```
-```json
-{
-  "success": true,
-  "data": {
-    "id": "car-456",
-    "brand": "Honda",
-    "model": "Civic",
-    "year": 2024,
-    "price": 28000,
-    "createdAt": "2024-11-15T12:30:00.000Z"
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z",
-    "location": "/v0/cars/car-456"
-  }
-}
-```
-
-#### 204 No Content - Successful Deletion
-**When**: DELETE requests, successful operations with no response body
-**Example**: Deleting a resource
-
-```bash
-# Request
-DELETE /v0/cars/car-123
-
-# Response
-HTTP/1.1 204 No Content
-```
-```json
-{
-  "success": true,
-  "data": null,
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
----
-
-### ❌ Client Error Codes (4xx)
-
-#### 400 Bad Request - Validation Failed
-**When**: Request data doesn't match schema, validation rules violated
-**Example**: Missing required fields, invalid data types
-
-```bash
-# Request
-POST /v0/cars
-Content-Type: application/json
-{
-  "brand": "X",
-  "year": 1800
-}
-
-# Response
-HTTP/1.1 400 Bad Request
-Content-Type: application/json
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Validation failed",
-    "code": "VALIDATION_ERROR",
-    "details": {
-      "errors": [
-        {
-          "field": "brand",
-          "message": "String length must be at least 2 characters",
-          "expected": "minlength:2",
-          "actual": "X"
-        },
-        {
-          "field": "model",
-          "message": "Field is required",
-          "expected": "required"
-        },
-        {
-          "field": "year",
-          "message": "Number must be at least 1900",
-          "expected": "min:1900",
-          "actual": 1800
-        },
-        {
-          "field": "price",
-          "message": "Field is required",
-          "expected": "required"
-        }
-      ]
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 401 Unauthorized - Authentication Required
-**When**: No credentials provided, invalid token, expired JWT
-**Example**: Accessing protected endpoint without authentication
-
-```bash
-# Request
-GET /v0/cars
-
-# Response
-HTTP/1.1 401 Unauthorized
-Content-Type: application/json
-WWW-Authenticate: Bearer realm="API Access"
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Unauthorized - Authentication required",
-    "code": "UNAUTHORIZED",
-    "details": {
-      "suggestion": "Please provide valid authentication credentials (JWT token, API key, or Basic Auth)"
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 403 Forbidden - Insufficient Permissions
-**When**: Authenticated but lacking permissions for the operation
-**Example**: Non-admin user trying to delete resources
-
-```bash
-# Request
-DELETE /v0/users/user-123
-Authorization: Bearer <valid-token-but-not-admin>
-
-# Response
-HTTP/1.1 403 Forbidden
-Content-Type: application/json
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Forbidden - Insufficient permissions",
-    "code": "FORBIDDEN",
-    "details": {
-      "requiredRole": "admin",
-      "userRole": "user"
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 404 Not Found - Resource Doesn't Exist
-**When**: Resource ID not found, route doesn't exist
-**Example**: Getting a non-existent resource
-
-```bash
-# Request
-GET /v0/cars/nonexistent-id
-
-# Response
-HTTP/1.1 404 Not Found
-Content-Type: application/json
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "cars with id 'nonexistent-id' not found",
-    "code": "NOT_FOUND",
-    "details": {
-      "resource": "cars",
-      "id": "nonexistent-id"
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 413 Payload Too Large - Request Body Exceeds Limit
-**When**: Request body size exceeds configured maximum (default 10MB)
-**Example**: Uploading large JSON payload
-
-```bash
-# Request
-POST /v0/cars
-Content-Type: application/json
-Content-Length: 15728640
-{ ... very large payload ... }
-
-# Response
-HTTP/1.1 413 Payload Too Large
-Content-Type: application/json
-Connection: close
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Request payload too large",
-    "code": "PAYLOAD_TOO_LARGE",
-    "details": {
-      "receivedSize": 15728640,
-      "maxSize": 10485760,
-      "receivedMB": "15.00",
-      "maxMB": "10.00"
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-**Configure max body size:**
-```javascript
-new ApiPlugin({
-  maxBodySize: 50 * 1024 * 1024  // 50MB
-})
-```
-
-#### 429 Too Many Requests - Rate Limit Exceeded
-**When**: Request rate exceeds configured limit
-**Example**: Too many requests in short time window
-
-```bash
-# Request (101st request in 1 minute)
-GET /v0/cars
-
-# Response
-HTTP/1.1 429 Too Many Requests
-Content-Type: application/json
-Retry-After: 45
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 0
-X-RateLimit-Reset: 1700054445
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Rate limit exceeded",
-    "code": "RATE_LIMIT_EXCEEDED",
-    "details": {
-      "retryAfter": 45,
-      "limit": 100,
-      "windowMs": 60000
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-**Configure rate limiting:**
-```javascript
-new ApiPlugin({
-  rateLimit: {
-    enabled: true,
-    windowMs: 60000,     // 1 minute
-    maxRequests: 1000    // 1000 requests per minute
-  }
-})
-```
-
----
-
-### 💥 Server Error Codes (5xx)
-
-#### 500 Internal Server Error - Unexpected Server Error
-**When**: Unhandled exceptions, S3 errors, database failures
-**Example**: S3 connection failure, unexpected error
-
-```bash
-# Request
-GET /v0/cars/car-123
-
-# Response
-HTTP/1.1 500 Internal Server Error
-Content-Type: application/json
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Internal server error",
-    "code": "INTERNAL_ERROR",
-    "details": {
-      "suggestion": "Please try again later or contact support if the problem persists"
-    },
-    "stack": "Error: S3 connection timeout\n    at ..." // Only in development
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
-#### 503 Service Unavailable - Service Not Ready
-**When**: Database not connected, resources not loaded
-**Example**: Application starting up, health check failing
-
-```bash
-# Request
-GET /health/ready
-
-# Response
-HTTP/1.1 503 Service Unavailable
-Content-Type: application/json
-```
-```json
-{
-  "success": false,
-  "error": {
-    "message": "Service not ready",
-    "code": "NOT_READY",
-    "details": {
-      "database": {
-        "connected": false,
-        "resources": 0
-      }
-    }
-  },
-  "meta": {
-    "timestamp": "2024-11-15T12:30:00.000Z"
-  }
-}
-```
-
----
-
-### 📋 Status Code Summary Table
-
-| Code | Name | When | Response Body | Common Use Cases |
-|------|------|------|---------------|------------------|
-| **200** | OK | Successful GET, HEAD, OPTIONS | ✅ Yes | List resources, get resource, queries |
-| **201** | Created | Successful POST | ✅ Yes + Location header | Create resource, insert data |
-| **204** | No Content | Successful DELETE | ✅ Empty (null data) | Delete resource, bulk operations |
-| **400** | Bad Request | Validation failed | ❌ Error details | Invalid schema, missing fields |
-| **401** | Unauthorized | No auth credentials | ❌ Error + WWW-Authenticate | Missing token, expired JWT |
-| **403** | Forbidden | Insufficient permissions | ❌ Error details | Role restrictions, access denied |
-| **404** | Not Found | Resource/route not found | ❌ Error details | Invalid ID, wrong endpoint |
-| **413** | Payload Too Large | Body exceeds limit | ❌ Error + size details | Large uploads, bulk inserts |
-| **429** | Too Many Requests | Rate limit exceeded | ❌ Error + Retry-After | DDoS protection, API abuse |
-| **500** | Internal Error | Server exception | ❌ Error + stack (dev) | S3 errors, unhandled errors |
-| **503** | Service Unavailable | Not ready | ❌ Error + details | Startup, health check fail |
-
----
-
-### 🎯 Response Structure Convention
-
-**All responses follow this consistent structure:**
-
-```typescript
-// Success responses
-{
-  success: true,
-  data: <any>,           // Response data (null for 204)
-  meta: {
-    timestamp: string,   // ISO 8601
-    location?: string,   // For 201 Created
-    ...                  // Additional metadata
-  },
-  pagination?: {         // For list endpoints
-    total: number,
-    page: number,
-    pageSize: number,
-    pageCount: number
-  }
-}
-
-// Error responses
-{
-  success: false,
-  error: {
-    message: string,     // Human-readable error message
-    code: string,        // Machine-readable error code
-    details: object,     // Additional error context
-    stack?: string       // Stack trace (development only)
-  },
-  meta: {
-    timestamp: string    // ISO 8601
-  }
-}
-```
-
----
-
-### 💡 Best Practices
-
-**1. Always check `success` field:**
-```javascript
-const response = await fetch('/v0/cars/car-123');
-const json = await response.json();
-
-if (json.success) {
-  // Handle success
-  console.log(json.data);
-} else {
-  // Handle error
-  console.error(json.error.message);
-  console.error(json.error.code);
-}
-```
-
-**2. Use HTTP status codes for flow control:**
-```javascript
-const response = await fetch('/v0/cars', { method: 'POST', ... });
-
-switch (response.status) {
-  case 201:
-    console.log('Created successfully');
-    break;
-  case 400:
-    console.error('Validation failed');
-    break;
-  case 401:
-    console.error('Please login');
-    break;
-  case 413:
-    console.error('Payload too large');
-    break;
-  case 429:
-    const retryAfter = response.headers.get('Retry-After');
-    console.log(`Rate limited, retry after ${retryAfter}s`);
-    break;
-  case 500:
-    console.error('Server error, please try again');
-    break;
-}
-```
-
-**3. Handle rate limiting gracefully:**
-```javascript
-async function apiCallWithRetry(url, options, maxRetries = 3) {
-  for (let i = 0; i < maxRetries; i++) {
-    const response = await fetch(url, options);
-
-    if (response.status === 429) {
-      const retryAfter = parseInt(response.headers.get('Retry-After')) || 60;
-      console.log(`Rate limited, waiting ${retryAfter}s...`);
-      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-      continue;
-    }
-
-    return response;
-  }
-}
-```
-
-**4. Check payload size before sending:**
-```javascript
-const data = { /* large object */ };
-const json = JSON.stringify(data);
-const sizeBytes = new Blob([json]).size;
-const sizeMB = sizeBytes / 1024 / 1024;
-
-if (sizeMB > 10) {
-  console.warn(`Payload is ${sizeMB.toFixed(2)}MB, may exceed server limit`);
-  // Consider splitting into multiple requests
-}
-```
-
----
-
-## 🚀 Quickstart
+## 🚀 Quick Start
 
 ### Installation
 
@@ -2591,3 +2063,534 @@ Perfect for:
 - Rapid prototyping
 
 Happy coding! 🚀
+
+---
+
+## 📊 HTTP Status Codes - Complete Reference
+
+The API Plugin implements **ALL standard HTTP status codes** with consistent, detailed responses. Every response follows the same JSON structure for predictability and ease of integration.
+
+### ✅ Success Codes (2xx)
+
+#### 200 OK - Successful Request
+**When**: GET requests, successful operations with data response
+**Example**: Getting a resource, listing resources, successful query
+
+```bash
+# Request
+GET /v0/cars/car-123
+
+# Response
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+```json
+{
+  "success": true,
+  "data": {
+    "id": "car-123",
+    "brand": "Toyota",
+    "model": "Corolla",
+    "year": 2024,
+    "price": 25000
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 201 Created - Resource Created
+**When**: POST requests that create new resources
+**Example**: Inserting a new record
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+{
+  "brand": "Honda",
+  "model": "Civic",
+  "year": 2024,
+  "price": 28000
+}
+
+# Response
+HTTP/1.1 201 Created
+Content-Type: application/json
+Location: /v0/cars/car-456
+```
+```json
+{
+  "success": true,
+  "data": {
+    "id": "car-456",
+    "brand": "Honda",
+    "model": "Civic",
+    "year": 2024,
+    "price": 28000,
+    "createdAt": "2024-11-15T12:30:00.000Z"
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z",
+    "location": "/v0/cars/car-456"
+  }
+}
+```
+
+#### 204 No Content - Successful Deletion
+**When**: DELETE requests, successful operations with no response body
+**Example**: Deleting a resource
+
+```bash
+# Request
+DELETE /v0/cars/car-123
+
+# Response
+HTTP/1.1 204 No Content
+```
+```json
+{
+  "success": true,
+  "data": null,
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+---
+
+### ❌ Client Error Codes (4xx)
+
+#### 400 Bad Request - Validation Failed
+**When**: Request data doesn't match schema, validation rules violated
+**Example**: Missing required fields, invalid data types
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+{
+  "brand": "X",
+  "year": 1800
+}
+
+# Response
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Validation failed",
+    "code": "VALIDATION_ERROR",
+    "details": {
+      "errors": [
+        {
+          "field": "brand",
+          "message": "String length must be at least 2 characters",
+          "expected": "minlength:2",
+          "actual": "X"
+        },
+        {
+          "field": "model",
+          "message": "Field is required",
+          "expected": "required"
+        },
+        {
+          "field": "year",
+          "message": "Number must be at least 1900",
+          "expected": "min:1900",
+          "actual": 1800
+        },
+        {
+          "field": "price",
+          "message": "Field is required",
+          "expected": "required"
+        }
+      ]
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 401 Unauthorized - Authentication Required
+**When**: No credentials provided, invalid token, expired JWT
+**Example**: Accessing protected endpoint without authentication
+
+```bash
+# Request
+GET /v0/cars
+
+# Response
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+WWW-Authenticate: Bearer realm="API Access"
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Unauthorized - Authentication required",
+    "code": "UNAUTHORIZED",
+    "details": {
+      "suggestion": "Please provide valid authentication credentials (JWT token, API key, or Basic Auth)"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 403 Forbidden - Insufficient Permissions
+**When**: Authenticated but lacking permissions for the operation
+**Example**: Non-admin user trying to delete resources
+
+```bash
+# Request
+DELETE /v0/users/user-123
+Authorization: Bearer <valid-token-but-not-admin>
+
+# Response
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Forbidden - Insufficient permissions",
+    "code": "FORBIDDEN",
+    "details": {
+      "requiredRole": "admin",
+      "userRole": "user"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 404 Not Found - Resource Doesn't Exist
+**When**: Resource ID not found, route doesn't exist
+**Example**: Getting a non-existent resource
+
+```bash
+# Request
+GET /v0/cars/nonexistent-id
+
+# Response
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "cars with id 'nonexistent-id' not found",
+    "code": "NOT_FOUND",
+    "details": {
+      "resource": "cars",
+      "id": "nonexistent-id"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 413 Payload Too Large - Request Body Exceeds Limit
+**When**: Request body size exceeds configured maximum (default 10MB)
+**Example**: Uploading large JSON payload
+
+```bash
+# Request
+POST /v0/cars
+Content-Type: application/json
+Content-Length: 15728640
+{ ... very large payload ... }
+
+# Response
+HTTP/1.1 413 Payload Too Large
+Content-Type: application/json
+Connection: close
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Request payload too large",
+    "code": "PAYLOAD_TOO_LARGE",
+    "details": {
+      "receivedSize": 15728640,
+      "maxSize": 10485760,
+      "receivedMB": "15.00",
+      "maxMB": "10.00"
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+**Configure max body size:**
+```javascript
+new ApiPlugin({
+  maxBodySize: 50 * 1024 * 1024  // 50MB
+})
+```
+
+#### 429 Too Many Requests - Rate Limit Exceeded
+**When**: Request rate exceeds configured limit
+**Example**: Too many requests in short time window
+
+```bash
+# Request (101st request in 1 minute)
+GET /v0/cars
+
+# Response
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+Retry-After: 45
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1700054445
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Rate limit exceeded",
+    "code": "RATE_LIMIT_EXCEEDED",
+    "details": {
+      "retryAfter": 45,
+      "limit": 100,
+      "windowMs": 60000
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+**Configure rate limiting:**
+```javascript
+new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    windowMs: 60000,     // 1 minute
+    maxRequests: 1000    // 1000 requests per minute
+  }
+})
+```
+
+---
+
+### 💥 Server Error Codes (5xx)
+
+#### 500 Internal Server Error - Unexpected Server Error
+**When**: Unhandled exceptions, S3 errors, database failures
+**Example**: S3 connection failure, unexpected error
+
+```bash
+# Request
+GET /v0/cars/car-123
+
+# Response
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Internal server error",
+    "code": "INTERNAL_ERROR",
+    "details": {
+      "suggestion": "Please try again later or contact support if the problem persists"
+    },
+    "stack": "Error: S3 connection timeout\n    at ..." // Only in development
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+#### 503 Service Unavailable - Service Not Ready
+**When**: Database not connected, resources not loaded
+**Example**: Application starting up, health check failing
+
+```bash
+# Request
+GET /health/ready
+
+# Response
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+```
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Service not ready",
+    "code": "NOT_READY",
+    "details": {
+      "database": {
+        "connected": false,
+        "resources": 0
+      }
+    }
+  },
+  "meta": {
+    "timestamp": "2024-11-15T12:30:00.000Z"
+  }
+}
+```
+
+---
+
+### 📋 Status Code Summary Table
+
+| Code | Name | When | Response Body | Common Use Cases |
+|------|------|------|---------------|------------------|
+| **200** | OK | Successful GET, HEAD, OPTIONS | ✅ Yes | List resources, get resource, queries |
+| **201** | Created | Successful POST | ✅ Yes + Location header | Create resource, insert data |
+| **204** | No Content | Successful DELETE | ✅ Empty (null data) | Delete resource, bulk operations |
+| **400** | Bad Request | Validation failed | ❌ Error details | Invalid schema, missing fields |
+| **401** | Unauthorized | No auth credentials | ❌ Error + WWW-Authenticate | Missing token, expired JWT |
+| **403** | Forbidden | Insufficient permissions | ❌ Error details | Role restrictions, access denied |
+| **404** | Not Found | Resource/route not found | ❌ Error details | Invalid ID, wrong endpoint |
+| **413** | Payload Too Large | Body exceeds limit | ❌ Error + size details | Large uploads, bulk inserts |
+| **429** | Too Many Requests | Rate limit exceeded | ❌ Error + Retry-After | DDoS protection, API abuse |
+| **500** | Internal Error | Server exception | ❌ Error + stack (dev) | S3 errors, unhandled errors |
+| **503** | Service Unavailable | Not ready | ❌ Error + details | Startup, health check fail |
+
+---
+
+### 🎯 Response Structure Convention
+
+**All responses follow this consistent structure:**
+
+```typescript
+// Success responses
+{
+  success: true,
+  data: <any>,           // Response data (null for 204)
+  meta: {
+    timestamp: string,   // ISO 8601
+    location?: string,   // For 201 Created
+    ...                  // Additional metadata
+  },
+  pagination?: {         // For list endpoints
+    total: number,
+    page: number,
+    pageSize: number,
+    pageCount: number
+  }
+}
+
+// Error responses
+{
+  success: false,
+  error: {
+    message: string,     // Human-readable error message
+    code: string,        // Machine-readable error code
+    details: object,     // Additional error context
+    stack?: string       // Stack trace (development only)
+  },
+  meta: {
+    timestamp: string    // ISO 8601
+  }
+}
+```
+
+---
+
+### 💡 Best Practices
+
+**1. Always check `success` field:**
+```javascript
+const response = await fetch('/v0/cars/car-123');
+const json = await response.json();
+
+if (json.success) {
+  // Handle success
+  console.log(json.data);
+} else {
+  // Handle error
+  console.error(json.error.message);
+  console.error(json.error.code);
+}
+```
+
+**2. Use HTTP status codes for flow control:**
+```javascript
+const response = await fetch('/v0/cars', { method: 'POST', ... });
+
+switch (response.status) {
+  case 201:
+    console.log('Created successfully');
+    break;
+  case 400:
+    console.error('Validation failed');
+    break;
+  case 401:
+    console.error('Please login');
+    break;
+  case 413:
+    console.error('Payload too large');
+    break;
+  case 429:
+    const retryAfter = response.headers.get('Retry-After');
+    console.log(`Rate limited, retry after ${retryAfter}s`);
+    break;
+  case 500:
+    console.error('Server error, please try again');
+    break;
+}
+```
+
+**3. Handle rate limiting gracefully:**
+```javascript
+async function apiCallWithRetry(url, options, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await fetch(url, options);
+
+    if (response.status === 429) {
+      const retryAfter = parseInt(response.headers.get('Retry-After')) || 60;
+      console.log(`Rate limited, waiting ${retryAfter}s...`);
+      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+      continue;
+    }
+
+    return response;
+  }
+}
+```
+
+**4. Check payload size before sending:**
+```javascript
+const data = { /* large object */ };
+const json = JSON.stringify(data);
+const sizeBytes = new Blob([json]).size;
+const sizeMB = sizeBytes / 1024 / 1024;
+
+if (sizeMB > 10) {
+  console.warn(`Payload is ${sizeMB.toFixed(2)}MB, may exceed server limit`);
+  // Consider splitting into multiple requests
+}
+```
+
+---
+
