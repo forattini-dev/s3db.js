@@ -10,9 +10,19 @@ export class MetricsPlugin extends Plugin {
       collectUsage: options.collectUsage !== false,
       retentionDays: options.retentionDays || 30,
       flushInterval: options.flushInterval || 60000, // 1 minute
+
+      // Prometheus configuration
+      prometheus: {
+        enabled: options.prometheus?.enabled !== false, // Enabled by default
+        mode: options.prometheus?.mode || 'auto',       // 'auto' | 'integrated' | 'standalone'
+        port: options.prometheus?.port || 9090,         // Standalone server port
+        path: options.prometheus?.path || '/metrics',   // Metrics endpoint path
+        includeResourceLabels: options.prometheus?.includeResourceLabels !== false
+      },
+
       ...options
     };
-    
+
     this.metrics = {
       operations: {
         insert: { count: 0, totalTime: 0, errors: 0 },
@@ -27,8 +37,9 @@ export class MetricsPlugin extends Plugin {
       performance: [],
       startTime: new Date().toISOString()
     };
-    
+
     this.flushTimer = null;
+    this.metricsServer = null; // Standalone HTTP server (if needed)
   }
 
   async onInstall() {
@@ -113,7 +124,8 @@ export class MetricsPlugin extends Plugin {
   }
 
   async start() {
-    // Plugin is ready
+    // Setup Prometheus metrics exporter
+    await this._setupPrometheusExporter();
   }
 
   async stop() {
@@ -122,7 +134,18 @@ export class MetricsPlugin extends Plugin {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    
+
+    // Stop standalone metrics server if running
+    if (this.metricsServer) {
+      await new Promise((resolve) => {
+        this.metricsServer.close(() => {
+          console.log('[Metrics Plugin] Standalone metrics server stopped');
+          this.metricsServer = null;
+          resolve();
+        });
+      });
+    }
+
     // Remove database hooks
     this.removeDatabaseHooks();
   }
@@ -671,6 +694,142 @@ export class MetricsPlugin extends Plugin {
         }
       }
     }
+  }
+
+  /**
+   * Get metrics in Prometheus format
+   * @returns {Promise<string>} Prometheus metrics text
+   */
+  async getPrometheusMetrics() {
+    const { formatPrometheusMetrics } = await import('./concerns/prometheus-formatter.js');
+    return formatPrometheusMetrics(this);
+  }
+
+  /**
+   * Setup Prometheus metrics exporter
+   * Chooses mode based on configuration and API Plugin availability
+   * @private
+   */
+  async _setupPrometheusExporter() {
+    if (!this.config.prometheus.enabled) {
+      return; // Prometheus export disabled
+    }
+
+    const mode = this.config.prometheus.mode;
+    const apiPlugin = this.database.plugins?.api || this.database.plugins?.ApiPlugin;
+
+    // AUTO mode: detect API Plugin
+    if (mode === 'auto') {
+      if (apiPlugin && apiPlugin.server) {
+        await this._setupIntegratedMetrics(apiPlugin);
+      } else {
+        await this._setupStandaloneMetrics();
+      }
+    }
+
+    // INTEGRATED mode: requires API Plugin
+    else if (mode === 'integrated') {
+      if (!apiPlugin || !apiPlugin.server) {
+        throw new Error(
+          '[Metrics Plugin] prometheus.mode=integrated requires API Plugin to be active'
+        );
+      }
+      await this._setupIntegratedMetrics(apiPlugin);
+    }
+
+    // STANDALONE mode: always separate server
+    else if (mode === 'standalone') {
+      await this._setupStandaloneMetrics();
+    }
+
+    else {
+      console.warn(
+        `[Metrics Plugin] Unknown prometheus.mode="${mode}". Valid modes: auto, integrated, standalone`
+      );
+    }
+  }
+
+  /**
+   * Setup integrated metrics (uses API Plugin's server)
+   * @param {ApiPlugin} apiPlugin - API Plugin instance
+   * @private
+   */
+  async _setupIntegratedMetrics(apiPlugin) {
+    const app = apiPlugin.getApp();
+    const path = this.config.prometheus.path;
+
+    if (!app) {
+      console.error('[Metrics Plugin] Failed to get Hono app from API Plugin');
+      return;
+    }
+
+    // Add /metrics route to Hono app
+    app.get(path, async (c) => {
+      try {
+        const metrics = await this.getPrometheusMetrics();
+        return c.text(metrics, 200, {
+          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8'
+        });
+      } catch (err) {
+        console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
+        return c.text('Internal Server Error', 500);
+      }
+    });
+
+    const port = apiPlugin.config?.port || 3000;
+    console.log(
+      `[Metrics Plugin] Prometheus metrics available at http://localhost:${port}${path} (integrated mode)`
+    );
+  }
+
+  /**
+   * Setup standalone metrics server (separate HTTP server)
+   * @private
+   */
+  async _setupStandaloneMetrics() {
+    const { createServer } = await import('http');
+    const port = this.config.prometheus.port;
+    const path = this.config.prometheus.path;
+
+    this.metricsServer = createServer(async (req, res) => {
+      // CORS headers to allow scraping from anywhere
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.url === path && req.method === 'GET') {
+        try {
+          const metrics = await this.getPrometheusMetrics();
+          res.writeHead(200, {
+            'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+            'Content-Length': Buffer.byteLength(metrics, 'utf8')
+          });
+          res.end(metrics);
+        } catch (err) {
+          console.error('[Metrics Plugin] Error generating Prometheus metrics:', err);
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Internal Server Error');
+        }
+      } else if (req.method === 'OPTIONS') {
+        // Handle preflight requests
+        res.writeHead(204);
+        res.end();
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+      }
+    });
+
+    this.metricsServer.listen(port, '0.0.0.0', () => {
+      console.log(
+        `[Metrics Plugin] Prometheus metrics available at http://0.0.0.0:${port}${path} (standalone mode)`
+      );
+    });
+
+    // Handle server errors
+    this.metricsServer.on('error', (err) => {
+      console.error('[Metrics Plugin] Standalone metrics server error:', err);
+    });
   }
 }
 
