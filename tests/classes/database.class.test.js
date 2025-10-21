@@ -502,7 +502,7 @@ describe('Database Definition Changes and Versioning', () => {
     const savedMetadata = {
       resources: {
         'changed-resource': {
-          currentVersion: 'v0',
+          currentVersion: 'v1',
           versions: {
             v0: {
               hash: 'different-hash',
@@ -519,7 +519,7 @@ describe('Database Definition Changes and Versioning', () => {
     expect(changes[0].type).toBe('changed');
     expect(changes[0].resourceName).toBe('changed-resource');
     expect(changes[0].currentHash).not.toBe('different-hash');
-    expect(changes[0].fromVersion).toBe('v0');
+    expect(changes[0].fromVersion).toBe('v1');
     expect(changes[0].toVersion).toBe('v1');
   });
 
@@ -527,7 +527,7 @@ describe('Database Definition Changes and Versioning', () => {
     const savedMetadata = {
       resources: {
         'deleted-resource': {
-          currentVersion: 'v0',
+          currentVersion: 'v1',
           versions: {
             v0: {
               hash: 'some-hash',
@@ -545,7 +545,7 @@ describe('Database Definition Changes and Versioning', () => {
     expect(changes[0].resourceName).toBe('deleted-resource');
     expect(changes[0].currentHash).toBeNull();
     expect(changes[0].savedHash).toBe('some-hash');
-    expect(changes[0].deletedVersion).toBe('v0');
+    expect(changes[0].deletedVersion).toBe('v1');
   });
 
   test('should generate consistent hashes', () => {
@@ -567,7 +567,7 @@ describe('Database Definition Changes and Versioning', () => {
   });
 
   test('should get next version correctly', () => {
-    expect(database.getNextVersion({})).toBe('v0');
+    expect(database.getNextVersion({})).toBe('v1');
     expect(database.getNextVersion({ v0: {} })).toBe('v1');
     expect(database.getNextVersion({ v0: {}, v1: {}, v2: {} })).toBe('v3');
     expect(database.getNextVersion({ v0: {}, v5: {} })).toBe('v6');
@@ -624,7 +624,7 @@ describe('Database Metadata and File Operations', () => {
     const uploadedBody = JSON.parse(uploadSpy.mock.calls[0][0].body);
     expect(uploadedBody.version).toBe('1');
     expect(uploadedBody.resources['metadata-test']).toBeDefined();
-    expect(uploadedBody.resources['metadata-test'].currentVersion).toBe('v0');
+    expect(uploadedBody.resources['metadata-test'].currentVersion).toBe('v1');
   });
 
   test('should handle metadata with existing versions', async () => {
@@ -640,7 +640,7 @@ describe('Database Metadata and File Operations', () => {
       s3dbVersion: database.s3dbVersion,
       resources: {
         'version-test': {
-          currentVersion: 'v0',
+          currentVersion: 'v1',
           versions: {
             v0: {
               hash: 'old-hash',

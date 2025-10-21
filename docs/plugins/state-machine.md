@@ -16,6 +16,7 @@ await db.stateMachine('order').send('order-123', 'PAY');
 - ✅ Action handlers (transition logic)
 - ✅ Automatic audit trail
 - ✅ State persistence in DB
+- ✅ Distributed locks (prevent race conditions)
 
 **When to use:**
 - 🛒 Order processing
@@ -53,6 +54,51 @@ The State Machine Plugin provides finite state machine capabilities for managing
 
 > 🤖 **Workflow Automation**: Perfect for order processing, user onboarding, approval workflows, and any process with defined states and business rules.
 
+### State Machine Diagram Example
+
+Here's a visual representation of an order processing state machine:
+
+```
+                    ┌──────────┐
+                    │  draft   │
+                    └────┬─────┘
+                         │ SUBMIT
+                         ▼
+                ┌────────────────┐
+                │ pending_payment│
+                └────┬───────┬───┘
+                     │       │ CANCEL
+              PAY    │       ▼
+                     │  ┌───────────┐
+                     │  │ cancelled │ (final)
+                     │  └───────────┘
+                     ▼
+                ┌────────┐
+                │  paid  │
+                └────┬───┘
+                     │ FULFILL
+                     ▼
+              ┌──────────────┐
+              │  fulfilling  │
+              └────┬─────────┘
+                   │ SHIP
+                   ▼
+              ┌──────────┐
+              │ shipped  │
+              └────┬─────┘
+                   │ DELIVER
+                   ▼
+              ┌───────────┐
+              │ delivered │ (final)
+              └───────────┘
+```
+
+> **Interactive Visualization**: Use the `visualize()` method to generate GraphViz diagrams:
+> ```bash
+> $ node -e "console.log(machine.visualize())" > state-machine.dot
+> $ dot -Tpng state-machine.dot > state-machine.png
+> ```
+
 ---
 
 ## Key Features
@@ -70,6 +116,8 @@ The State Machine Plugin provides finite state machine capabilities for managing
 - **Error Handling**: Robust error handling with rollback capabilities
 - **Audit Trail**: Complete history of state transitions
 - **Async Support**: Full support for asynchronous operations
+- **Distributed Locks**: Prevent concurrent transitions with PluginStorage locks
+- **Multi-Worker Safe**: Automatic concurrency control across multiple workers
 
 ---
 
@@ -139,6 +187,19 @@ await orders.insert({
 await s3db.stateMachine('order_processing').send('order-123', 'CONFIRM');
 ```
 
+### Plugin Resources
+
+The StateMachinePlugin automatically creates internal resources for state tracking and audit:
+
+| Resource | Purpose | Structure |
+|----------|---------|-----------|
+| `state_machine_transitions` | Complete transition history for audit trail | `{ id, machineId, entityId, from, to, event, context, timestamp }` |
+| `state_machine_entities` | Current state of all entities | `{ id, machineId, entityId, currentState, context, updatedAt }` |
+
+> **Automatic Management**: These resources are created automatically when the plugin starts. The transitions resource provides complete audit trail with full context, and entities resource stores current state for fast lookups.
+
+> **Partition Optimization**: Transitions are partitioned by `machineId` and `entityId` for efficient historical queries. Use `getTransitionHistory()` to leverage partition-based lookups.
+
 ---
 
 ## Configuration Options
@@ -169,9 +230,41 @@ await s3db.stateMachine('order_processing').send('order-123', 'CONFIRM');
   guards: {
     [guardName]: function              // Named guard functions
   },
-  stateField: string                   // Field name for state (default: '_state')
+  stateField: string,                  // Field name for state (default: '_state')
+
+  // Concurrency Control (Distributed Locks)
+  workerId: string,                    // Worker identifier (default: 'default')
+  lockTimeout: number,                 // Max wait for lock in ms (default: 1000)
+  lockTTL: number                      // Lock TTL in seconds (default: 5)
 }
 ```
+
+### Concurrency Control
+
+The plugin uses **distributed locks** (via PluginStorage) to prevent concurrent transitions for the same entity, ensuring state consistency in multi-worker environments.
+
+```javascript
+new StateMachinePlugin({
+  stateMachines: { /* ... */ },
+
+  // Configure distributed locking
+  workerId: 'worker-1',      // Unique worker identifier
+  lockTimeout: 2000,         // Wait up to 2s for lock acquisition
+  lockTTL: 10                // Lock expires after 10s (prevent deadlock)
+});
+```
+
+**How it works:**
+1. Before each transition, a distributed lock is acquired for `{machineId}-{entityId}`
+2. If lock cannot be acquired within `lockTimeout`, transition fails with error
+3. Lock is automatically released after transition completes (success or failure)
+4. If worker crashes, lock expires after `lockTTL` seconds (auto-recovery)
+
+**Benefits:**
+- ✅ Prevents race conditions in concurrent transitions
+- ✅ Automatic deadlock prevention (TTL)
+- ✅ Multi-worker safe (different workers can't corrupt state)
+- ✅ Transparent (no API changes required)
 
 ### State Definition
 
@@ -560,6 +653,55 @@ Get transition history for a record.
 const history = await machine.getHistory('order-123');
 ```
 
+#### `getValidEvents(recordId)`
+Get all valid events for the current state of a record.
+
+```javascript
+const validEvents = await machine.getValidEvents('order-123');
+// Returns: ['SHIP', 'CANCEL'] (if in 'confirmed' state)
+```
+
+#### `getTransitionHistory(recordId, options?)`
+Get complete transition history for a record with filtering options.
+
+```javascript
+const history = await machine.getTransitionHistory('order-123', {
+  limit: 50,
+  fromDate: new Date('2024-01-01'),
+  toDate: new Date('2024-12-31')
+});
+// Returns: [{ from, to, event, context, timestamp }, ...]
+```
+
+**Options:**
+- `limit` (number): Maximum number of transitions to return (default: 100)
+- `fromDate` (Date): Filter transitions after this date
+- `toDate` (Date): Filter transitions before this date
+- `status` (string): Filter by transition status ('success', 'failed')
+
+#### `initializeEntity(recordId, context?)`
+Initialize a new entity with the initial state and optional context.
+
+```javascript
+await machine.initializeEntity('order-456', {
+  customerId: 'user-123',
+  amount: 100.00
+});
+// Entity state set to initialState (e.g., 'pending')
+```
+
+#### `visualize()`
+Generate GraphViz DOT format visualization of the state machine.
+
+```javascript
+const dot = machine.visualize();
+// Save to file and convert to image:
+// $ echo "$dot" > state-machine.dot
+// $ dot -Tpng state-machine.dot > state-machine.png
+```
+
+**Returns**: DOT format string for GraphViz visualization, useful for documenting and debugging state machines.
+
 ### Action Functions
 
 Action functions receive `(context, event, machine)` parameters:
@@ -920,6 +1062,84 @@ describe('Order Processing State Machine', () => {
   });
 });
 ```
+
+### 7. State Persistence and Consistency
+
+```javascript
+// Configure state field name (default: '_state')
+new StateMachinePlugin({
+  stateField: 'status',  // Use 'status' instead of '_state'
+  stateMachines: { ...}
+});
+
+// Ensure state is always in sync with database
+actions: {
+  onStateChange: async (context, event, machine) => {
+    // Update entity record with new state
+    await machine.database.resource('orders').update(context.id, {
+      status: event.to,
+      status_updated_at: new Date().toISOString(),
+      status_updated_by: event.userId || 'system',
+      previous_status: event.from
+    });
+
+    // Store detailed transition in audit log
+    await machine.database.resource('state_transitions').insert({
+      id: `transition_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      entity_type: 'order',
+      entity_id: context.id,
+      from_state: event.from,
+      to_state: event.to,
+      event_name: event.event,
+      triggered_by: event.userId,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        ip_address: event.ip,
+        user_agent: event.userAgent,
+        reason: event.reason
+      }
+    });
+
+    return { state_persisted: true };
+  }
+}
+
+// Read state consistently
+async function getOrderWithState(orderId) {
+  const order = await db.resource('orders').get(orderId);
+  const currentState = await stateMachine.getState(orderId);
+
+  // Verify consistency between database and state machine
+  if (order.status !== currentState) {
+    console.warn(`State mismatch detected: DB has '${order.status}', machine has '${currentState}'`);
+
+    // Option 1: Trust database
+    await stateMachine.setState(orderId, order.status);
+
+    // Option 2: Trust state machine
+    // await db.resource('orders').update(orderId, { status: currentState });
+  }
+
+  return { ...order, _state: currentState };
+}
+
+// Handle state restoration on startup
+async function restoreStateMachineState(orderId) {
+  const order = await db.resource('orders').get(orderId);
+
+  // Initialize state machine with database state
+  await stateMachine.initializeEntity(orderId, {
+    ...order,
+    _state: order.status
+  });
+
+  console.log(`Restored state for order ${orderId}: ${order.status}`);
+}
+```
+
+> **Important**: Always update the entity record when state changes to keep database and state machine in sync. Use the `stateField` option to customize which field stores the state.
+
+> **Best Practice**: Store transition history in a separate audit resource for compliance and debugging. This enables full traceability of state changes over time.
 
 ---
 
@@ -1398,6 +1618,151 @@ const dot = stateMachinePlugin.visualize('order_processing');
 // Salve em arquivo .dot e converta para imagem
 ```
 
+### Monitoramento
+
+**P: Como obter estatísticas de transições?**
+R: Use event listeners para rastrear:
+```javascript
+let stats = { total: 0, success: 0, failed: 0 };
+
+stateMachinePlugin.on('transition_completed', (data) => {
+  stats.total++;
+  stats.success++;
+  console.log(`✅ ${data.entityId}: ${data.from} → ${data.to}`);
+});
+
+stateMachinePlugin.on('transition_failed', (data) => {
+  stats.total++;
+  stats.failed++;
+  console.error(`❌ Transition failed: ${data.error}`);
+});
+
+console.log(`Success rate: ${(stats.success / stats.total * 100).toFixed(2)}%`);
+```
+
+**P: Como monitorar guards que falham frequentemente?**
+R: Log guard failures para análise:
+```javascript
+guards: {
+  canShip: async (context, event, machine) => {
+    const result = await checkInventory(context);
+
+    if (!result) {
+      // Log failed guard check
+      await machine.database.resource('guard_failures').insert({
+        machine: 'order_processing',
+        guard: 'canShip',
+        entity_id: context.id,
+        reason: 'Insufficient inventory',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return result;
+  }
+}
+```
+
+**P: Como obter métricas de performance?**
+R: Track execution time:
+```javascript
+actions: {
+  onStateChange: async (context, event, machine) => {
+    const startTime = Date.now();
+
+    try {
+      // Execute transition logic
+      await processTransition(context, event);
+
+      const duration = Date.now() - startTime;
+
+      // Log performance metrics
+      await machine.database.resource('transition_metrics').insert({
+        machine: 'order_processing',
+        entity_id: context.id,
+        transition: `${event.from} → ${event.to}`,
+        duration,
+        success: true,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      const duration = Date.now() - startTime;
+
+      // Log failed transitions
+      await machine.database.resource('transition_metrics').insert({
+        machine: 'order_processing',
+        entity_id: context.id,
+        transition: `${event.from} → ${event.to}`,
+        duration,
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+
+      throw error;
+    }
+  }
+}
+```
+
+**P: Como evitar race conditions em transições concorrentes?**
+R: Use optimistic locking:
+```javascript
+actions: {
+  safeTransition: async (context, event, machine) => {
+    // Get current record with version
+    const record = await machine.database.resource('orders').get(context.id);
+
+    // Check state hasn't changed
+    if (record._state !== context._state) {
+      throw new Error(`State conflict: expected ${context._state}, got ${record._state}`);
+    }
+
+    // Update with version check (optimistic lock)
+    await machine.database.resource('orders').update(context.id, {
+      _state: event.to,
+      updated_at: new Date().toISOString()
+    }, {
+      ifMatch: record._etag  // S3 conditional update
+    });
+  }
+}
+```
+
+**P: Como garantir atomicidade em transições com múltiplas operações?**
+R: Use try-catch com rollback:
+```javascript
+actions: {
+  processOrder: async (context, event, machine) => {
+    const rollbackActions = [];
+
+    try {
+      // Step 1: Reserve inventory
+      await reserveInventory(context.items);
+      rollbackActions.push(() => releaseInventory(context.items));
+
+      // Step 2: Charge payment
+      const paymentId = await chargePayment(context.amount);
+      rollbackActions.push(() => refundPayment(paymentId));
+
+      // Step 3: Update order status
+      await machine.database.resource('orders').update(context.id, {
+        _state: 'paid',
+        payment_id: paymentId
+      });
+
+      return { success: true };
+    } catch (error) {
+      // Rollback in reverse order
+      for (const rollback of rollbackActions.reverse()) {
+        await rollback().catch(console.error);
+      }
+      throw error;
+    }
+  }
+}
+```
+
 ### Troubleshooting
 
 **P: Transição está sendo rejeitada?**
@@ -1411,5 +1776,41 @@ R: Verifique se o nome da action está correto e registrado em `actions: {}`.
 
 **P: Como debugar guards?**
 R: Ative `verbose: true` e veja logs de erros de guards.
+
+### Concorrência e Locks
+
+**P: Como o plugin previne race conditions?**
+R: O plugin usa **distributed locks** (via PluginStorage) automaticamente antes de cada transição. Um lock é adquirido para `{machineId}-{entityId}`, prevenindo transições concorrentes para a mesma entidade.
+
+**P: O que acontece se duas transições concorrentes tentarem executar?**
+R: Uma delas adquire o lock e executa a transição. A outra espera até `lockTimeout` (default 1s) e então falha com erro `Could not acquire transition lock`.
+
+**P: Como configurar o timeout de lock?**
+R:
+```javascript
+new StateMachinePlugin({
+  stateMachines: { /* ... */ },
+  lockTimeout: 2000,  // Espera até 2s pelo lock
+  lockTTL: 10         // Lock expira após 10s (previne deadlock)
+});
+```
+
+**P: O que acontece se um worker travar enquanto tem um lock?**
+R: O lock expira automaticamente após `lockTTL` segundos (default 5s). Isso previne deadlocks se um worker falhar durante uma transição.
+
+**P: Posso identificar qual worker adquiriu o lock?**
+R: Sim, use `workerId`:
+```javascript
+new StateMachinePlugin({
+  stateMachines: { /* ... */ },
+  workerId: `worker-${process.env.POD_NAME || process.pid}`
+});
+```
+
+**P: Locks afetam performance?**
+R: Minimamente. PluginStorage usa direct S3 operations e TTL automático. O overhead é ~10-20ms por transição.
+
+**P: Posso desativar locks?**
+R: Não diretamente, pois locks são essenciais para prevenir inconsistência. Mas você pode reduzir `lockTimeout: 0` para falhar imediatamente se lock não estiver disponível.
 
 ---
