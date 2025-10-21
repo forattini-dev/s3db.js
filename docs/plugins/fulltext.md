@@ -25,6 +25,124 @@ const results = await db.plugins.fulltext.searchRecords('articles', 'machine lea
 
 ---
 
+## ⚡ Quick Start
+
+Add full-text search to your app in under 2 minutes:
+
+```javascript
+import { Database, FullTextPlugin } from 's3db.js';
+
+// Step 1: Create database
+const db = new Database({ connectionString: 's3://key:secret@bucket' });
+await db.connect();
+
+// Step 2: Create a resource (example: articles)
+const articles = await db.createResource({
+  name: 'articles',
+  attributes: {
+    title: 'string|required',
+    description: 'string',
+    content: 'string|required',
+    author: 'string',
+    tags: 'array'
+  }
+});
+
+// Step 3: Configure full-text search
+const fulltextPlugin = new FullTextPlugin({
+  resources: {
+    articles: {
+      fields: ['title', 'description', 'content'],  // Fields to index
+      weights: {
+        title: 3,        // Title matches are 3x more important
+        description: 2,  // Description 2x
+        content: 1       // Content has base weight
+      }
+    }
+  }
+});
+
+await db.usePlugin(fulltextPlugin);
+
+// Step 4: Add some articles (automatically indexed)
+await articles.insert({
+  title: 'Introduction to Machine Learning',
+  description: 'A beginner-friendly guide to ML concepts',
+  content: 'Machine learning is a subset of artificial intelligence...',
+  author: 'Alice',
+  tags: ['AI', 'ML', 'Tutorial']
+});
+
+await articles.insert({
+  title: 'Deep Learning Fundamentals',
+  description: 'Understanding neural networks and deep learning',
+  content: 'Deep learning uses neural networks with multiple layers...',
+  author: 'Bob',
+  tags: ['AI', 'Deep Learning', 'Neural Networks']
+});
+
+await articles.insert({
+  title: 'Data Science Best Practices',
+  description: 'Essential practices for data scientists',
+  content: 'Data science combines statistics, programming, and domain knowledge...',
+  author: 'Carol',
+  tags: ['Data Science', 'Best Practices']
+});
+
+// Step 5: Search for articles
+const results = await fulltextPlugin.search('articles', 'machine learning');
+
+console.log(`Found ${results.length} results:`);
+results.forEach((result, index) => {
+  console.log(`\n${index + 1}. ${result.title} (score: ${result.score.toFixed(2)})`);
+  console.log(`   ${result.description}`);
+  console.log(`   Matched in: ${result.matchedFields.join(', ')}`);
+});
+
+// Output:
+// Found 2 results:
+//
+// 1. Introduction to Machine Learning (score: 8.45)
+//    A beginner-friendly guide to ML concepts
+//    Matched in: title, description, content
+//
+// 2. Deep Learning Fundamentals (score: 2.10)
+//    Understanding neural networks and deep learning
+//    Matched in: content
+
+// Step 6: Search with highlighting
+const highlightedResults = await fulltextPlugin.search('articles', 'machine learning', {
+  highlight: true,
+  highlightTag: 'mark'
+});
+
+console.log('\nWith highlighting:');
+console.log(highlightedResults[0].highlighted.title);
+// Output: Introduction to <mark>Machine</mark> <mark>Learning</mark>
+
+// Step 7: Fuzzy search (handles typos)
+const fuzzyResults = await fulltextPlugin.search('articles', 'machne lerning', {
+  fuzzy: true,
+  maxDistance: 2  // Allow 2 character differences
+});
+
+console.log(`\nFuzzy search found ${fuzzyResults.length} results`);
+// Still finds "machine learning" despite typos!
+```
+
+**What just happened:**
+1. ✅ Full-text index created for 3 fields (title, description, content)
+2. ✅ Field weights configured (title 3x more important)
+3. ✅ Articles automatically indexed on insert
+4. ✅ Search with relevance scoring and highlighting
+
+**Next steps:**
+- Add multi-resource search (see [Usage Examples](#usage-examples))
+- Configure stemming and stop words (see [Configuration Options](#configuration-options))
+- Enable autocomplete suggestions (see [Advanced Patterns](#advanced-patterns))
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
