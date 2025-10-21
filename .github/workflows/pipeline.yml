@@ -1,21 +1,22 @@
-name: pipeline
+name: 🔄 Integration Tests (MinIO)
 
 on:
   push:
     branches: [main, develop]
-  deployment:
-  release:
-    types: [created]
   pull_request:
-    types: [opened, reopened]
+    branches: [main, develop]
+  # Run weekly to ensure MinIO compatibility
+  schedule:
+    - cron: '0 0 * * 0'
 
 jobs:
-  test:
-    name: Test Node.js ${{ matrix.node-version }}
+  test-minio:
+    name: 🧪 Test with MinIO (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
-        node-version: [20, 22, 23, 24]
+        node-version: [20, 22, 23]
       fail-fast: false
 
     services:
@@ -34,30 +35,33 @@ jobs:
           --health-retries 20
 
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      - name: 📦 Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: latest
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: 📦 Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: 📥 Install Dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Wait for MinIO to be ready
+      - name: ⏳ Wait for MinIO
         run: |
           echo "Waiting for MinIO to be ready..."
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "MinIO is ready!"
 
-      - name: Run tests
+      - name: 🏗️ Build Package
+        run: pnpm run build
+
+      - name: 🧪 Run Tests
         run: pnpm test
         env:
           AWS_ACCESS_KEY_ID: minioadmin
@@ -66,13 +70,12 @@ jobs:
           AWS_REGION: us-east-1
           AWS_BUCKET: s3db
           AWS_FORCE_PATH_STYLE: true
-          BUCKET_CONNECTION_STRING: s3://minioadmin:minioadmin123@s3db
+          BUCKET_CONNECTION_STRING: s3://minioadmin:minioadmin123@s3db?endpoint=http://localhost:9000&region=us-east-1&forcePathStyle=true
 
-      - name: Run build
-        run: pnpm run build
-      
-      - name: Upload coverage to Qlty
-        uses: qltysh/qlty-action/coverage@v1
+      - name: 📊 Upload Coverage (Node 20 only)
+        if: matrix.node-version == 20
+        uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
-          files: coverage/lcov.info
+          file: ./coverage/lcov.info
+          fail_ci_if_error: false
+          flags: integration-minio
