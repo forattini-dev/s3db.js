@@ -105,72 +105,117 @@
  * - TTL is enforced by checking object creation time
  */
 import zlib from "node:zlib";
-import { join } from "path";
-
-import { Cache } from "./cache.class.js"
-import { streamToString } from "../../stream/index.js";
-import tryFn from "../../concerns/try-fn.js";
+import { PluginStorage } from "../../concerns/plugin-storage.js";
+import { Cache } from "./cache.class.js";
 
 export class S3Cache extends Cache {
-  constructor({ 
-    client, 
+  constructor({
+    client,
     keyPrefix = 'cache',
     ttl = 0,
-    prefix = undefined
+    prefix = undefined,
+    enableCompression = true,
+    compressionThreshold = 1024
   }) {
     super();
-    this.client = client
+    this.client = client;
     this.keyPrefix = keyPrefix;
     this.config.ttl = ttl;
     this.config.client = client;
     this.config.prefix = prefix !== undefined ? prefix : keyPrefix + (keyPrefix.endsWith('/') ? '' : '/');
+    this.config.enableCompression = enableCompression;
+    this.config.compressionThreshold = compressionThreshold;
+
+    // Create PluginStorage instance for consistent storage operations with TTL support
+    this.storage = new PluginStorage(client, 'cache');
+  }
+
+  /**
+   * Compress data if enabled and above threshold
+   * @private
+   */
+  _compressData(data) {
+    const jsonString = JSON.stringify(data);
+
+    // Don't compress if disabled or below threshold
+    if (!this.config.enableCompression || jsonString.length < this.config.compressionThreshold) {
+      return {
+        data: jsonString,
+        compressed: false,
+        originalSize: jsonString.length
+      };
+    }
+
+    // Compress with gzip
+    const compressed = zlib.gzipSync(jsonString).toString('base64');
+    return {
+      data: compressed,
+      compressed: true,
+      originalSize: jsonString.length,
+      compressedSize: compressed.length,
+      compressionRatio: (compressed.length / jsonString.length).toFixed(2)
+    };
+  }
+
+  /**
+   * Decompress data if needed
+   * @private
+   */
+  _decompressData(storedData) {
+    if (!storedData || !storedData.compressed) {
+      // Not compressed - parse JSON directly
+      return storedData && storedData.data ? JSON.parse(storedData.data) : null;
+    }
+
+    // Decompress gzip data
+    const buffer = Buffer.from(storedData.data, 'base64');
+    const decompressed = zlib.unzipSync(buffer).toString();
+    return JSON.parse(decompressed);
   }
 
   async _set(key, data) {
-    let body = JSON.stringify(data);
-    const lengthSerialized = body.length;
-    body = zlib.gzipSync(body).toString('base64');
+    const compressed = this._compressData(data);
 
-    return this.client.putObject({
-      key: join(this.keyPrefix, key),
-      body,
-      contentEncoding: "gzip",
-      contentType: "application/gzip",
-      metadata: {
-        compressor: "zlib",
-        compressed: 'true',
-        "client-id": this.client.id,
-        "length-serialized": String(lengthSerialized),
-        "length-compressed": String(body.length),
-        "compression-gain": (body.length/lengthSerialized).toFixed(2),
-      },
-    });
+    // Use PluginStorage with body-only behavior (compressed data doesn't benefit from metadata encoding)
+    // TTL is handled automatically by PluginStorage
+    return this.storage.set(
+      this.storage.getPluginKey(null, this.keyPrefix, key),
+      compressed,
+      {
+        ttl: this.config.ttl,
+        behavior: 'body-only', // Compressed data is already optimized, skip metadata encoding
+        contentType: compressed.compressed ? 'application/gzip' : 'application/json'
+      }
+    );
   }
 
   async _get(key) {
-    const [ok, err, result] = await tryFn(async () => {
-      const { Body } = await this.client.getObject(join(this.keyPrefix, key));
-      let content = await streamToString(Body);
-      content = Buffer.from(content, 'base64');
-      content = zlib.unzipSync(content).toString();
-      return JSON.parse(content);
-    });
-    if (ok) return result;
-    if (err.name === 'NoSuchKey' || err.name === 'NotFound') return null;
-    throw err;
+    // PluginStorage automatically checks TTL and deletes expired items
+    const storedData = await this.storage.get(
+      this.storage.getPluginKey(null, this.keyPrefix, key)
+    );
+
+    if (!storedData) return null;
+
+    return this._decompressData(storedData);
   }
 
   async _del(key) {
-    await this.client.deleteObject(join(this.keyPrefix, key));
-    return true
+    await this.storage.delete(
+      this.storage.getPluginKey(null, this.keyPrefix, key)
+    );
+    return true;
   }
 
   async _clear() {
-    const keys = await this.client.getAllKeys({ 
-      prefix: this.keyPrefix,
-    });
+    // Get all keys with the cache plugin prefix
+    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
+    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
 
-    await this.client.deleteObjects(keys);
+    // Delete all cache keys
+    for (const key of allKeys) {
+      await this.storage.delete(key);
+    }
   }
 
   async size() {
@@ -179,10 +224,13 @@ export class S3Cache extends Cache {
   }
 
   async keys() {
-    // Busca todas as chaves com o prefixo do cache e remove o prefixo
-    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
-    const prefix = this.keyPrefix.endsWith('/') ? this.keyPrefix : this.keyPrefix + '/';
-    return allKeys.map(k => k.startsWith(prefix) ? k.slice(prefix.length) : k);
+    // Get all keys with the cache plugin prefix
+    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
+    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
+
+    // Remove the plugin prefix to return just the cache keys
+    const prefixToRemove = `plugin=cache/${this.keyPrefix}/`;
+    return allKeys.map(k => k.startsWith(prefixToRemove) ? k.slice(prefixToRemove.length) : k);
   }
 }
 

@@ -2,20 +2,23 @@
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-var crypto = require('crypto');
+var crypto$1 = require('crypto');
 var nanoid = require('nanoid');
 var EventEmitter = require('events');
+var hono = require('hono');
+var nodeServer = require('@hono/node-server');
+var swaggerUi = require('@hono/swagger-ui');
 var promises = require('fs/promises');
 var fs = require('fs');
 var promises$1 = require('stream/promises');
 var path$1 = require('path');
-var zlib = require('node:zlib');
+var zlib = require('zlib');
+var require$$3 = require('stream');
+var zlib$1 = require('node:zlib');
 var os = require('os');
 var jsonStableStringify = require('json-stable-stringify');
-var require$$3 = require('stream');
-var promisePool = require('@supercharge/promise-pool');
-var web = require('node:stream/web');
 var os$1 = require('node:os');
+var promisePool = require('@supercharge/promise-pool');
 var lodashEs = require('lodash-es');
 var http = require('http');
 var https = require('https');
@@ -23,9 +26,7 @@ var nodeHttpHandler = require('@smithy/node-http-handler');
 var clientS3 = require('@aws-sdk/client-s3');
 var flat = require('flat');
 var FastestValidator = require('fastest-validator');
-var require$$0 = require('node:crypto');
-var require$$1 = require('child_process');
-var require$$5 = require('url');
+var web = require('node:stream/web');
 var node_url = require('node:url');
 var node_path = require('node:path');
 var actualFS = require('node:fs');
@@ -33,6 +34,9 @@ var promises$2 = require('node:fs/promises');
 var node_events = require('node:events');
 var Stream = require('node:stream');
 var node_string_decoder = require('node:string_decoder');
+var require$$0 = require('node:crypto');
+var require$$1 = require('child_process');
+var require$$5 = require('url');
 
 function _interopNamespaceDefault(e) {
   var n = Object.create(null);
@@ -51,9 +55,21 @@ function _interopNamespaceDefault(e) {
   return Object.freeze(n);
 }
 
-var fs__namespace = /*#__PURE__*/_interopNamespaceDefault(fs);
-var path__namespace = /*#__PURE__*/_interopNamespaceDefault(path$1);
-var os__namespace = /*#__PURE__*/_interopNamespaceDefault(os);
+function _mergeNamespaces(n, m) {
+  m.forEach(function (e) {
+    e && typeof e !== 'string' && !Array.isArray(e) && Object.keys(e).forEach(function (k) {
+      if (k !== 'default' && !(k in n)) {
+        var d = Object.getOwnPropertyDescriptor(e, k);
+        Object.defineProperty(n, k, d.get ? d : {
+          enumerable: true,
+          get: function () { return e[k]; }
+        });
+      }
+    });
+  });
+  return Object.freeze(n);
+}
+
 var actualFS__namespace = /*#__PURE__*/_interopNamespaceDefault(actualFS);
 
 const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -991,7 +1007,7 @@ function tryFnSync(fn) {
 async function dynamicCrypto() {
   let lib;
   if (typeof process !== "undefined") {
-    lib = crypto.webcrypto;
+    lib = crypto$1.webcrypto;
   } else if (typeof window !== "undefined") {
     lib = window.crypto;
   }
@@ -1045,7 +1061,7 @@ async function md5(data) {
     throw new CryptoError("MD5 hashing is only available in Node.js environment", { context: "md5" });
   }
   const [ok, err, result] = await tryFn(async () => {
-    return crypto.createHash("md5").update(data).digest("base64");
+    return crypto$1.createHash("md5").update(data).digest("base64");
   });
   if (!ok) {
     throw new CryptoError("MD5 hashing failed", { original: err, data });
@@ -2461,6 +2477,1839 @@ const PluginObject = {
   }
 };
 
+function success(data, options = {}) {
+  const { status = 200, meta = {} } = options;
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      ...meta
+    },
+    _status: status
+  };
+}
+function error(error2, options = {}) {
+  const { status = 500, code = "INTERNAL_ERROR", details = {} } = options;
+  const errorMessage = error2 instanceof Error ? error2.message : error2;
+  const errorStack = error2 instanceof Error && process.env.NODE_ENV !== "production" ? error2.stack : void 0;
+  return {
+    success: false,
+    error: {
+      message: errorMessage,
+      code,
+      details,
+      stack: errorStack
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: status
+  };
+}
+function list(items, pagination = {}) {
+  const { total, page, pageSize, pageCount } = pagination;
+  return {
+    success: true,
+    data: items,
+    pagination: {
+      total: total || items.length,
+      page: page || 1,
+      pageSize: pageSize || items.length,
+      pageCount: pageCount || 1
+    },
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 200
+  };
+}
+function created(data, location) {
+  return {
+    success: true,
+    data,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      location
+    },
+    _status: 201
+  };
+}
+function noContent() {
+  return {
+    success: true,
+    data: null,
+    meta: {
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    _status: 204
+  };
+}
+function notFound(resource, id) {
+  return error(`${resource} with id '${id}' not found`, {
+    status: 404,
+    code: "NOT_FOUND",
+    details: { resource, id }
+  });
+}
+
+const errorStatusMap = {
+  "ValidationError": 400,
+  "InvalidResourceItem": 400,
+  "ResourceNotFound": 404,
+  "NoSuchKey": 404,
+  "NoSuchBucket": 404,
+  "PartitionError": 400,
+  "CryptoError": 500,
+  "SchemaError": 400,
+  "QueueError": 500,
+  "ResourceError": 500
+};
+function getStatusFromError(err) {
+  if (err.name && errorStatusMap[err.name]) {
+    return errorStatusMap[err.name];
+  }
+  if (err.constructor && err.constructor.name && errorStatusMap[err.constructor.name]) {
+    return errorStatusMap[err.constructor.name];
+  }
+  if (err.message) {
+    if (err.message.includes("not found") || err.message.includes("does not exist")) {
+      return 404;
+    }
+    if (err.message.includes("validation") || err.message.includes("invalid")) {
+      return 400;
+    }
+    if (err.message.includes("unauthorized") || err.message.includes("authentication")) {
+      return 401;
+    }
+    if (err.message.includes("forbidden") || err.message.includes("permission")) {
+      return 403;
+    }
+  }
+  return 500;
+}
+function errorHandler(err, c) {
+  const status = getStatusFromError(err);
+  const code = err.name || "INTERNAL_ERROR";
+  const details = {};
+  if (err.resource) details.resource = err.resource;
+  if (err.bucket) details.bucket = err.bucket;
+  if (err.key) details.key = err.key;
+  if (err.operation) details.operation = err.operation;
+  if (err.suggestion) details.suggestion = err.suggestion;
+  if (err.availableResources) details.availableResources = err.availableResources;
+  const response = error(err, {
+    status,
+    code,
+    details
+  });
+  if (status >= 500) {
+    console.error("[API Plugin] Error:", {
+      message: err.message,
+      code,
+      status,
+      stack: err.stack,
+      details
+    });
+  } else if (status >= 400 && status < 500 && c.get("verbose")) {
+    console.warn("[API Plugin] Client error:", {
+      message: err.message,
+      code,
+      status,
+      details
+    });
+  }
+  return c.json(response, response._status);
+}
+function asyncHandler(fn) {
+  return async (c) => {
+    try {
+      return await fn(c);
+    } catch (err) {
+      return errorHandler(err, c);
+    }
+  };
+}
+
+function createResourceRoutes(resource, version, config = {}) {
+  const app = new hono.Hono();
+  const {
+    methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    customMiddleware = [],
+    enableValidation = true
+  } = config;
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}`;
+  customMiddleware.forEach((middleware) => {
+    app.use("*", middleware);
+  });
+  if (methods.includes("GET")) {
+    app.get("/", asyncHandler(async (c) => {
+      const query = c.req.query();
+      const limit = parseInt(query.limit) || 100;
+      const offset = parseInt(query.offset) || 0;
+      const partition = query.partition;
+      const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+      let items;
+      let total;
+      if (partition && partitionValues) {
+        items = await resource.listPartition({
+          partition,
+          partitionValues,
+          limit: limit + offset
+        });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      } else {
+        items = await resource.list({ limit: limit + offset });
+        items = items.slice(offset, offset + limit);
+        total = items.length;
+      }
+      const response = list(items, {
+        total,
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit,
+        pageCount: Math.ceil(total / limit)
+      });
+      c.header("X-Total-Count", total.toString());
+      c.header("X-Page-Count", Math.ceil(total / limit).toString());
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("GET")) {
+    app.get("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const query = c.req.query();
+      const partition = query.partition;
+      const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+      let item;
+      if (partition && partitionValues) {
+        item = await resource.getFromPartition({
+          id,
+          partitionName: partition,
+          partitionValues
+        });
+      } else {
+        item = await resource.get(id);
+      }
+      if (!item) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const response = success(item);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("POST")) {
+    app.post("/", asyncHandler(async (c) => {
+      const data = await c.req.json();
+      const item = await resource.insert(data);
+      const location = `${basePath}/${item.id}`;
+      const response = created(item, location);
+      c.header("Location", location);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("PUT")) {
+    app.put("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const data = await c.req.json();
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const updated = await resource.update(id, data);
+      const response = success(updated);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("PATCH")) {
+    app.patch("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const data = await c.req.json();
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      const merged = { ...existing, ...data, id };
+      const updated = await resource.update(id, merged);
+      const response = success(updated);
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("DELETE")) {
+    app.delete("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const existing = await resource.get(id);
+      if (!existing) {
+        const response2 = notFound(resourceName, id);
+        return c.json(response2, response2._status);
+      }
+      await resource.delete(id);
+      const response = noContent();
+      return c.json(response, response._status);
+    }));
+  }
+  if (methods.includes("HEAD")) {
+    app.head("/", asyncHandler(async (c) => {
+      const total = await resource.count();
+      c.header("X-Total-Count", total.toString());
+      return c.body(null, 200);
+    }));
+    app.head("/:id", asyncHandler(async (c) => {
+      const id = c.req.param("id");
+      const item = await resource.get(id);
+      if (!item) {
+        return c.body(null, 404);
+      }
+      return c.body(null, 200);
+    }));
+  }
+  if (methods.includes("OPTIONS")) {
+    app.options("*", (c) => {
+      c.header("Allow", methods.join(", "));
+      return c.body(null, 204);
+    });
+  }
+  return app;
+}
+function createCountRoute(resource, version) {
+  const app = new hono.Hono();
+  app.get("/", asyncHandler(async (c) => {
+    const query = c.req.query();
+    const partition = query.partition;
+    const partitionValues = query.partitionValues ? JSON.parse(query.partitionValues) : void 0;
+    let total;
+    if (partition && partitionValues) {
+      total = await resource.count({ partition, partitionValues });
+    } else {
+      total = await resource.count();
+    }
+    const response = success({ count: total });
+    c.header("X-Total-Count", total.toString());
+    return c.json(response, response._status);
+  }));
+  return app;
+}
+function createQueryRoute(resource, version) {
+  const app = new hono.Hono();
+  app.post("/", asyncHandler(async (c) => {
+    const query = await c.req.json();
+    const { filter = {}, options = {} } = query;
+    const items = await resource.query(filter, options);
+    const response = list(items, {
+      total: items.length,
+      page: 1,
+      pageSize: items.length,
+      pageCount: 1
+    });
+    return c.json(response, response._status);
+  }));
+  return app;
+}
+
+function mapFieldTypeToOpenAPI(fieldType) {
+  const type = fieldType.split("|")[0].trim();
+  const typeMap = {
+    "string": { type: "string" },
+    "number": { type: "number" },
+    "integer": { type: "integer" },
+    "boolean": { type: "boolean" },
+    "array": { type: "array", items: { type: "string" } },
+    "object": { type: "object" },
+    "json": { type: "object" },
+    "secret": { type: "string", format: "password" },
+    "email": { type: "string", format: "email" },
+    "url": { type: "string", format: "uri" },
+    "date": { type: "string", format: "date" },
+    "datetime": { type: "string", format: "date-time" },
+    "ip4": { type: "string", format: "ipv4", description: "IPv4 address" },
+    "ip6": { type: "string", format: "ipv6", description: "IPv6 address" },
+    "embedding": { type: "array", items: { type: "number" }, description: "Vector embedding" }
+  };
+  if (type.startsWith("embedding:")) {
+    const length = parseInt(type.split(":")[1]);
+    return {
+      type: "array",
+      items: { type: "number" },
+      minItems: length,
+      maxItems: length,
+      description: `Vector embedding (${length} dimensions)`
+    };
+  }
+  return typeMap[type] || { type: "string" };
+}
+function extractValidationRules(fieldDef) {
+  const rules = {};
+  const parts = fieldDef.split("|");
+  for (const part of parts) {
+    const [rule, value] = part.split(":").map((s) => s.trim());
+    switch (rule) {
+      case "required":
+        rules.required = true;
+        break;
+      case "min":
+        rules.minimum = parseFloat(value);
+        break;
+      case "max":
+        rules.maximum = parseFloat(value);
+        break;
+      case "minlength":
+        rules.minLength = parseInt(value);
+        break;
+      case "maxlength":
+        rules.maxLength = parseInt(value);
+        break;
+      case "pattern":
+        rules.pattern = value;
+        break;
+      case "enum":
+        rules.enum = value.split(",").map((v) => v.trim());
+        break;
+      case "default":
+        rules.default = value;
+        break;
+    }
+  }
+  return rules;
+}
+function generateResourceSchema(resource) {
+  const properties = {};
+  const required = [];
+  const attributes = resource.config?.attributes || resource.attributes || {};
+  for (const [fieldName, fieldDef] of Object.entries(attributes)) {
+    if (typeof fieldDef === "object" && fieldDef.type) {
+      const baseType = mapFieldTypeToOpenAPI(fieldDef.type);
+      properties[fieldName] = {
+        ...baseType,
+        description: fieldDef.description || void 0
+      };
+      if (fieldDef.required) {
+        required.push(fieldName);
+      }
+      if (fieldDef.type === "object" && fieldDef.props) {
+        properties[fieldName].properties = {};
+        for (const [propName, propDef] of Object.entries(fieldDef.props)) {
+          const propType = typeof propDef === "string" ? propDef : propDef.type;
+          properties[fieldName].properties[propName] = mapFieldTypeToOpenAPI(propType);
+        }
+      }
+      if (fieldDef.type === "array" && fieldDef.items) {
+        properties[fieldName].items = mapFieldTypeToOpenAPI(fieldDef.items);
+      }
+    } else if (typeof fieldDef === "string") {
+      const baseType = mapFieldTypeToOpenAPI(fieldDef);
+      const rules = extractValidationRules(fieldDef);
+      properties[fieldName] = {
+        ...baseType,
+        ...rules
+      };
+      if (rules.required) {
+        required.push(fieldName);
+        delete properties[fieldName].required;
+      }
+    }
+  }
+  return {
+    type: "object",
+    properties,
+    required: required.length > 0 ? required : void 0
+  };
+}
+function generateResourcePaths(resource, version, config = {}) {
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}`;
+  const schema = generateResourceSchema(resource);
+  const methods = config.methods || ["GET", "POST", "PUT", "PATCH", "DELETE"];
+  const authMethods = config.auth || [];
+  const requiresAuth = authMethods && authMethods.length > 0;
+  const paths = {};
+  const security = [];
+  if (requiresAuth) {
+    if (authMethods.includes("jwt")) security.push({ bearerAuth: [] });
+    if (authMethods.includes("apiKey")) security.push({ apiKeyAuth: [] });
+    if (authMethods.includes("basic")) security.push({ basicAuth: [] });
+  }
+  if (methods.includes("GET")) {
+    paths[basePath] = {
+      get: {
+        tags: [resourceName],
+        summary: `List ${resourceName}`,
+        description: `Retrieve a paginated list of ${resourceName}`,
+        parameters: [
+          {
+            name: "limit",
+            in: "query",
+            description: "Maximum number of items to return",
+            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 }
+          },
+          {
+            name: "offset",
+            in: "query",
+            description: "Number of items to skip",
+            schema: { type: "integer", default: 0, minimum: 0 }
+          },
+          {
+            name: "partition",
+            in: "query",
+            description: "Partition name for filtering",
+            schema: { type: "string" }
+          },
+          {
+            name: "partitionValues",
+            in: "query",
+            description: "Partition values (JSON string)",
+            schema: { type: "string" }
+          }
+        ],
+        responses: {
+          200: {
+            description: "Successful response",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "array",
+                      items: schema
+                    },
+                    pagination: {
+                      type: "object",
+                      properties: {
+                        total: { type: "integer" },
+                        page: { type: "integer" },
+                        pageSize: { type: "integer" },
+                        pageCount: { type: "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            headers: {
+              "X-Total-Count": {
+                description: "Total number of records",
+                schema: { type: "integer" }
+              },
+              "X-Page-Count": {
+                description: "Total number of pages",
+                schema: { type: "integer" }
+              }
+            }
+          }
+        },
+        security: security.length > 0 ? security : void 0
+      }
+    };
+  }
+  if (methods.includes("GET")) {
+    paths[`${basePath}/{id}`] = {
+      get: {
+        tags: [resourceName],
+        summary: `Get ${resourceName} by ID`,
+        description: `Retrieve a single ${resourceName} by its ID`,
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            description: `${resourceName} ID`,
+            schema: { type: "string" }
+          }
+        ],
+        responses: {
+          200: {
+            description: "Successful response",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: schema
+                  }
+                }
+              }
+            }
+          },
+          404: {
+            description: "Resource not found",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" }
+              }
+            }
+          }
+        },
+        security: security.length > 0 ? security : void 0
+      }
+    };
+  }
+  if (methods.includes("POST")) {
+    if (!paths[basePath]) paths[basePath] = {};
+    paths[basePath].post = {
+      tags: [resourceName],
+      summary: `Create ${resourceName}`,
+      description: `Create a new ${resourceName}`,
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema
+          }
+        }
+      },
+      responses: {
+        201: {
+          description: "Resource created successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          },
+          headers: {
+            Location: {
+              description: "URL of the created resource",
+              schema: { type: "string" }
+            }
+          }
+        },
+        400: {
+          description: "Validation error",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ValidationError" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("PUT")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].put = {
+      tags: [resourceName],
+      summary: `Update ${resourceName} (full)`,
+      description: `Fully update a ${resourceName}`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: "Resource updated successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("PATCH")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].patch = {
+      tags: [resourceName],
+      summary: `Update ${resourceName} (partial)`,
+      description: `Partially update a ${resourceName}`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              ...schema,
+              required: void 0
+              // Partial updates don't require all fields
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: "Resource updated successfully",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: schema
+                }
+              }
+            }
+          }
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  if (methods.includes("DELETE")) {
+    if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
+    paths[`${basePath}/{id}`].delete = {
+      tags: [resourceName],
+      summary: `Delete ${resourceName}`,
+      description: `Delete a ${resourceName} by ID`,
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" }
+        }
+      ],
+      responses: {
+        204: {
+          description: "Resource deleted successfully"
+        },
+        404: {
+          description: "Resource not found",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    };
+  }
+  paths[`${basePath}/count`] = {
+    get: {
+      tags: [resourceName],
+      summary: `Count ${resourceName}`,
+      description: `Get the total count of ${resourceName}`,
+      responses: {
+        200: {
+          description: "Successful response",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      count: { type: "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    }
+  };
+  paths[`${basePath}/query`] = {
+    post: {
+      tags: [resourceName],
+      summary: `Query ${resourceName}`,
+      description: `Query ${resourceName} with filters`,
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                filter: {
+                  type: "object",
+                  description: "Filter criteria"
+                },
+                options: {
+                  type: "object",
+                  properties: {
+                    limit: { type: "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        200: {
+          description: "Successful response",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "array",
+                    items: schema
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      security: security.length > 0 ? security : void 0
+    }
+  };
+  return paths;
+}
+function generateOpenAPISpec(database, config = {}) {
+  const {
+    title = "s3db.js API",
+    version = "1.0.0",
+    description = "Auto-generated REST API documentation for s3db.js resources",
+    serverUrl = "http://localhost:3000",
+    auth = {},
+    resources: resourceConfigs = {}
+  } = config;
+  const spec = {
+    openapi: "3.0.0",
+    info: {
+      title,
+      version,
+      description,
+      contact: {
+        name: "s3db.js",
+        url: "https://github.com/forattini-dev/s3db.js"
+      }
+    },
+    servers: [
+      {
+        url: serverUrl,
+        description: "API Server"
+      }
+    ],
+    paths: {},
+    components: {
+      schemas: {
+        Error: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: false },
+            error: {
+              type: "object",
+              properties: {
+                message: { type: "string" },
+                code: { type: "string" },
+                details: { type: "object" }
+              }
+            }
+          }
+        },
+        ValidationError: {
+          type: "object",
+          properties: {
+            success: { type: "boolean", example: false },
+            error: {
+              type: "object",
+              properties: {
+                message: { type: "string", example: "Validation failed" },
+                code: { type: "string", example: "VALIDATION_ERROR" },
+                details: {
+                  type: "object",
+                  properties: {
+                    errors: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          field: { type: "string" },
+                          message: { type: "string" },
+                          expected: { type: "string" },
+                          actual: {}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      securitySchemes: {}
+    },
+    tags: []
+  };
+  if (auth.jwt?.enabled) {
+    spec.components.securitySchemes.bearerAuth = {
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+      description: "JWT authentication"
+    };
+  }
+  if (auth.apiKey?.enabled) {
+    spec.components.securitySchemes.apiKeyAuth = {
+      type: "apiKey",
+      in: "header",
+      name: auth.apiKey.headerName || "X-API-Key",
+      description: "API Key authentication"
+    };
+  }
+  if (auth.basic?.enabled) {
+    spec.components.securitySchemes.basicAuth = {
+      type: "http",
+      scheme: "basic",
+      description: "HTTP Basic authentication"
+    };
+  }
+  const resources = database.resources;
+  for (const [name, resource] of Object.entries(resources)) {
+    if (name.startsWith("plg_") && !resourceConfigs[name]) {
+      continue;
+    }
+    const config2 = resourceConfigs[name] || {
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      auth: false
+    };
+    const version2 = resource.config?.currentVersion || resource.version || "v0";
+    const paths = generateResourcePaths(resource, version2, config2);
+    Object.assign(spec.paths, paths);
+    spec.tags.push({
+      name,
+      description: `Operations for ${name} resource`
+    });
+    spec.components.schemas[name] = generateResourceSchema(resource);
+  }
+  if (auth.jwt?.enabled || auth.apiKey?.enabled || auth.basic?.enabled) {
+    spec.paths["/auth/login"] = {
+      post: {
+        tags: ["Authentication"],
+        summary: "Login",
+        description: "Authenticate with username and password",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  username: { type: "string" },
+                  password: { type: "string", format: "password" }
+                },
+                required: ["username", "password"]
+              }
+            }
+          }
+        },
+        responses: {
+          200: {
+            description: "Login successful",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        token: { type: "string" },
+                        user: { type: "object" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          401: {
+            description: "Invalid credentials",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Error" }
+              }
+            }
+          }
+        }
+      }
+    };
+    spec.paths["/auth/register"] = {
+      post: {
+        tags: ["Authentication"],
+        summary: "Register",
+        description: "Register a new user",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  username: { type: "string", minLength: 3 },
+                  password: { type: "string", format: "password", minLength: 8 },
+                  email: { type: "string", format: "email" }
+                },
+                required: ["username", "password"]
+              }
+            }
+          }
+        },
+        responses: {
+          201: {
+            description: "User registered successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean", example: true },
+                    data: {
+                      type: "object",
+                      properties: {
+                        token: { type: "string" },
+                        user: { type: "object" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    spec.tags.push({
+      name: "Authentication",
+      description: "Authentication endpoints"
+    });
+  }
+  spec.paths["/health"] = {
+    get: {
+      tags: ["System"],
+      summary: "Health Check",
+      description: "Check API health status",
+      responses: {
+        200: {
+          description: "API is healthy",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "object",
+                    properties: {
+                      status: { type: "string", example: "ok" },
+                      uptime: { type: "number" },
+                      timestamp: { type: "string", format: "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  spec.tags.push({
+    name: "System",
+    description: "System endpoints"
+  });
+  return spec;
+}
+
+class ApiServer {
+  /**
+   * Create API server
+   * @param {Object} options - Server options
+   * @param {number} options.port - Server port
+   * @param {string} options.host - Server host
+   * @param {Object} options.database - s3db.js database instance
+   * @param {Object} options.resources - Resource configuration
+   * @param {Array} options.middlewares - Global middlewares
+   */
+  constructor(options = {}) {
+    this.options = {
+      port: options.port || 3e3,
+      host: options.host || "0.0.0.0",
+      database: options.database,
+      resources: options.resources || {},
+      middlewares: options.middlewares || [],
+      verbose: options.verbose || false,
+      auth: options.auth || {},
+      docsEnabled: options.docsEnabled !== false,
+      // Enable /docs by default
+      apiInfo: {
+        title: options.apiTitle || "s3db.js API",
+        version: options.apiVersion || "1.0.0",
+        description: options.apiDescription || "Auto-generated REST API for s3db.js resources"
+      }
+    };
+    this.app = new hono.Hono();
+    this.server = null;
+    this.isRunning = false;
+    this.openAPISpec = null;
+    this._setupRoutes();
+  }
+  /**
+   * Setup all routes
+   * @private
+   */
+  _setupRoutes() {
+    this.options.middlewares.forEach((middleware) => {
+      this.app.use("*", middleware);
+    });
+    this.app.get("/health", (c) => {
+      const response = success({
+        status: "ok",
+        uptime: process.uptime(),
+        timestamp: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return c.json(response);
+    });
+    this.app.get("/", (c) => {
+      const resources = Object.keys(this.options.database.resources).filter((name) => !name.startsWith("plg_")).map((name) => {
+        const resource = this.options.database.resources[name];
+        const version = resource.config?.currentVersion || resource.version || "v0";
+        return {
+          name,
+          version,
+          endpoints: {
+            list: `/${version}/${name}`,
+            get: `/${version}/${name}/:id`,
+            create: `/${version}/${name}`,
+            update: `/${version}/${name}/:id`,
+            delete: `/${version}/${name}/:id`,
+            count: `/${version}/${name}/count`,
+            query: `/${version}/${name}/query`
+          }
+        };
+      });
+      const response = success({
+        message: "s3db.js API",
+        version: "1.0.0",
+        resources,
+        documentation: this.options.docsEnabled ? "/docs" : void 0
+      });
+      return c.json(response);
+    });
+    if (this.options.docsEnabled) {
+      this.app.get("/openapi.json", (c) => {
+        if (!this.openAPISpec) {
+          this.openAPISpec = this._generateOpenAPISpec();
+        }
+        return c.json(this.openAPISpec);
+      });
+      this.app.get("/docs", swaggerUi.swaggerUI({
+        url: "/openapi.json"
+      }));
+    }
+    this._setupResourceRoutes();
+    this.app.onError((err, c) => {
+      return errorHandler(err, c);
+    });
+    this.app.notFound((c) => {
+      const response = error("Route not found", {
+        status: 404,
+        code: "NOT_FOUND",
+        details: {
+          path: c.req.path,
+          method: c.req.method
+        }
+      });
+      return c.json(response, 404);
+    });
+  }
+  /**
+   * Setup routes for all resources
+   * @private
+   */
+  _setupResourceRoutes() {
+    const { database, resources: resourceConfigs } = this.options;
+    const resources = database.resources;
+    for (const [name, resource] of Object.entries(resources)) {
+      if (name.startsWith("plg_") && !resourceConfigs[name]) {
+        continue;
+      }
+      const config = resourceConfigs[name] || {
+        methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]};
+      const version = resource.config?.currentVersion || resource.version || "v0";
+      const resourceApp = createResourceRoutes(resource, version, {
+        methods: config.methods,
+        customMiddleware: config.customMiddleware || [],
+        enableValidation: config.validation !== false
+      });
+      this.app.route(`/${version}/${name}`, resourceApp);
+      const countApp = createCountRoute(resource);
+      this.app.route(`/${version}/${name}/count`, countApp);
+      const queryApp = createQueryRoute(resource);
+      this.app.route(`/${version}/${name}/query`, queryApp);
+      if (this.options.verbose) {
+        console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
+      }
+    }
+  }
+  /**
+   * Start the server
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this.isRunning) {
+      console.warn("[API Plugin] Server is already running");
+      return;
+    }
+    const { port, host } = this.options;
+    return new Promise((resolve, reject) => {
+      try {
+        this.server = nodeServer.serve({
+          fetch: this.app.fetch,
+          port,
+          hostname: host
+        }, (info) => {
+          this.isRunning = true;
+          console.log(`[API Plugin] Server listening on http://${info.address}:${info.port}`);
+          resolve();
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+  /**
+   * Stop the server
+   * @returns {Promise<void>}
+   */
+  async stop() {
+    if (!this.isRunning) {
+      console.warn("[API Plugin] Server is not running");
+      return;
+    }
+    if (this.server && typeof this.server.close === "function") {
+      await new Promise((resolve) => {
+        this.server.close(() => {
+          this.isRunning = false;
+          console.log("[API Plugin] Server stopped");
+          resolve();
+        });
+      });
+    } else {
+      this.isRunning = false;
+      console.log("[API Plugin] Server stopped");
+    }
+  }
+  /**
+   * Get server info
+   * @returns {Object} Server information
+   */
+  getInfo() {
+    return {
+      isRunning: this.isRunning,
+      port: this.options.port,
+      host: this.options.host,
+      resources: Object.keys(this.options.database.resources).length
+    };
+  }
+  /**
+   * Get Hono app instance
+   * @returns {Hono} Hono app
+   */
+  getApp() {
+    return this.app;
+  }
+  /**
+   * Generate OpenAPI specification
+   * @private
+   * @returns {Object} OpenAPI spec
+   */
+  _generateOpenAPISpec() {
+    const { port, host, database, resources, auth, apiInfo } = this.options;
+    return generateOpenAPISpec(database, {
+      title: apiInfo.title,
+      version: apiInfo.version,
+      description: apiInfo.description,
+      serverUrl: `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`,
+      auth,
+      resources
+    });
+  }
+}
+
+const PLUGIN_DEPENDENCIES = {
+  "postgresql-replicator": {
+    name: "PostgreSQL Replicator",
+    dependencies: {
+      "pg": {
+        version: "^8.0.0",
+        description: "PostgreSQL client for Node.js",
+        installCommand: "pnpm add pg"
+      }
+    }
+  },
+  "bigquery-replicator": {
+    name: "BigQuery Replicator",
+    dependencies: {
+      "@google-cloud/bigquery": {
+        version: "^7.0.0",
+        description: "Google Cloud BigQuery SDK",
+        installCommand: "pnpm add @google-cloud/bigquery"
+      }
+    }
+  },
+  "sqs-replicator": {
+    name: "SQS Replicator",
+    dependencies: {
+      "@aws-sdk/client-sqs": {
+        version: "^3.0.0",
+        description: "AWS SDK for SQS",
+        installCommand: "pnpm add @aws-sdk/client-sqs"
+      }
+    }
+  },
+  "sqs-consumer": {
+    name: "SQS Queue Consumer",
+    dependencies: {
+      "@aws-sdk/client-sqs": {
+        version: "^3.0.0",
+        description: "AWS SDK for SQS",
+        installCommand: "pnpm add @aws-sdk/client-sqs"
+      }
+    }
+  },
+  "rabbitmq-consumer": {
+    name: "RabbitMQ Queue Consumer",
+    dependencies: {
+      "amqplib": {
+        version: "^0.10.0",
+        description: "AMQP 0-9-1 library for RabbitMQ",
+        installCommand: "pnpm add amqplib"
+      }
+    }
+  },
+  "tfstate-plugin": {
+    name: "Terraform State Plugin",
+    dependencies: {
+      "node-cron": {
+        version: "^4.0.0",
+        description: "Cron job scheduler for auto-sync functionality",
+        installCommand: "pnpm add node-cron"
+      }
+    }
+  },
+  "api-plugin": {
+    name: "API Plugin",
+    dependencies: {
+      "hono": {
+        version: "^4.0.0",
+        description: "Ultra-light HTTP server framework",
+        installCommand: "pnpm add hono"
+      },
+      "@hono/node-server": {
+        version: "^1.0.0",
+        description: "Node.js adapter for Hono",
+        installCommand: "pnpm add @hono/node-server"
+      },
+      "@hono/swagger-ui": {
+        version: "^0.4.0",
+        description: "Swagger UI integration for Hono",
+        installCommand: "pnpm add @hono/swagger-ui"
+      }
+    }
+  }
+};
+function isVersionCompatible(actual, required) {
+  if (!actual || !required) return false;
+  const cleanRequired = required.replace(/^[\^~]/, "");
+  const actualMajor = parseInt(actual.split(".")[0], 10);
+  const requiredMajor = parseInt(cleanRequired.split(".")[0], 10);
+  if (required.startsWith("^")) {
+    return actualMajor === requiredMajor;
+  }
+  if (required.startsWith("~")) {
+    const actualMinor = parseInt(actual.split(".")[1] || "0", 10);
+    const requiredMinor = parseInt(cleanRequired.split(".")[1] || "0", 10);
+    return actualMajor === requiredMajor && actualMinor >= requiredMinor;
+  }
+  return actualMajor >= requiredMajor;
+}
+async function tryLoadPackage(packageName) {
+  try {
+    const pkg = await import(packageName);
+    let version = null;
+    try {
+      const pkgJson = await import(`${packageName}/package.json`, { assert: { type: 'json' } });
+      version = pkgJson.default?.version || pkgJson.version || null;
+    } catch (e) {
+      version = "unknown";
+    }
+    return { installed: true, version, error: null };
+  } catch (error) {
+    return { installed: false, version: null, error };
+  }
+}
+async function requirePluginDependency(pluginId, options = {}) {
+  const {
+    throwOnError = true,
+    checkVersions = true
+  } = options;
+  const pluginDef = PLUGIN_DEPENDENCIES[pluginId];
+  if (!pluginDef) {
+    const error = new Error(
+      `Unknown plugin identifier: ${pluginId}. Available plugins: ${Object.keys(PLUGIN_DEPENDENCIES).join(", ")}`
+    );
+    if (throwOnError) throw error;
+    return { valid: false, missing: [], incompatible: [], messages: [error.message] };
+  }
+  const missing = [];
+  const incompatible = [];
+  const messages = [];
+  for (const [pkgName, pkgInfo] of Object.entries(pluginDef.dependencies)) {
+    const { installed, version, error } = await tryLoadPackage(pkgName);
+    if (!installed) {
+      missing.push(pkgName);
+      messages.push(
+        `\u274C Missing dependency: ${pkgName}
+   Description: ${pkgInfo.description}
+   Required: ${pkgInfo.version}
+   Install: ${pkgInfo.installCommand}`
+      );
+      continue;
+    }
+    if (checkVersions && version && version !== "unknown") {
+      const compatible = isVersionCompatible(version, pkgInfo.version);
+      if (!compatible) {
+        incompatible.push(pkgName);
+        messages.push(
+          `\u26A0\uFE0F  Incompatible version: ${pkgName}
+   Installed: ${version}
+   Required: ${pkgInfo.version}
+   Update: ${pkgInfo.installCommand}`
+        );
+      } else {
+        messages.push(
+          `\u2705 ${pkgName}@${version} (compatible with ${pkgInfo.version})`
+        );
+      }
+    } else {
+      messages.push(
+        `\u2705 ${pkgName}@${version || "unknown"} (installed)`
+      );
+    }
+  }
+  const valid = missing.length === 0 && incompatible.length === 0;
+  if (!valid && throwOnError) {
+    const errorMsg = [
+      `
+${pluginDef.name} - Missing dependencies detected!
+`,
+      `Plugin ID: ${pluginId}`,
+      "",
+      ...messages,
+      "",
+      "Quick fix - Run all install commands:",
+      Object.values(pluginDef.dependencies).map((dep) => `  ${dep.installCommand}`).join("\n"),
+      "",
+      "Or install all peer dependencies at once:",
+      `  pnpm add ${Object.keys(pluginDef.dependencies).join(" ")}`
+    ].join("\n");
+    throw new Error(errorMsg);
+  }
+  return { valid, missing, incompatible, messages };
+}
+
+class ApiPlugin extends Plugin {
+  /**
+   * Create API Plugin instance
+   * @param {Object} options - Plugin configuration
+   */
+  constructor(options = {}) {
+    super(options);
+    this.config = {
+      // Server configuration
+      port: options.port || 3e3,
+      host: options.host || "0.0.0.0",
+      verbose: options.verbose || false,
+      // API Documentation
+      docsEnabled: options.docsEnabled !== false,
+      // Enable /docs by default
+      apiTitle: options.apiTitle || "s3db.js API",
+      apiVersion: options.apiVersion || "1.0.0",
+      apiDescription: options.apiDescription || "Auto-generated REST API for s3db.js resources",
+      // Authentication configuration
+      auth: {
+        jwt: {
+          enabled: options.auth?.jwt?.enabled || false,
+          secret: options.auth?.jwt?.secret || null,
+          expiresIn: options.auth?.jwt?.expiresIn || "7d"
+        },
+        apiKey: {
+          enabled: options.auth?.apiKey?.enabled || false,
+          headerName: options.auth?.apiKey?.headerName || "X-API-Key"
+        },
+        basic: {
+          enabled: options.auth?.basic?.enabled || false,
+          realm: options.auth?.basic?.realm || "API Access"
+        }
+      },
+      // Resource configuration
+      resources: options.resources || {},
+      // CORS configuration
+      cors: {
+        enabled: options.cors?.enabled || false,
+        origin: options.cors?.origin || "*",
+        methods: options.cors?.methods || ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowedHeaders: options.cors?.allowedHeaders || ["Content-Type", "Authorization", "X-API-Key"],
+        exposedHeaders: options.cors?.exposedHeaders || ["X-Total-Count", "X-Page-Count"],
+        credentials: options.cors?.credentials !== false,
+        maxAge: options.cors?.maxAge || 86400
+      },
+      // Rate limiting configuration
+      rateLimit: {
+        enabled: options.rateLimit?.enabled || false,
+        windowMs: options.rateLimit?.windowMs || 6e4,
+        // 1 minute
+        maxRequests: options.rateLimit?.maxRequests || 100,
+        keyGenerator: options.rateLimit?.keyGenerator || null
+      },
+      // Logging configuration
+      logging: {
+        enabled: options.logging?.enabled || false,
+        format: options.logging?.format || ":method :path :status :response-time ms",
+        verbose: options.logging?.verbose || false
+      },
+      // Compression configuration
+      compression: {
+        enabled: options.compression?.enabled || false,
+        threshold: options.compression?.threshold || 1024,
+        // 1KB
+        level: options.compression?.level || 6
+      },
+      // Validation configuration
+      validation: {
+        enabled: options.validation?.enabled !== false,
+        validateOnInsert: options.validation?.validateOnInsert !== false,
+        validateOnUpdate: options.validation?.validateOnUpdate !== false,
+        returnValidationErrors: options.validation?.returnValidationErrors !== false
+      },
+      // Custom global middlewares
+      middlewares: options.middlewares || []
+    };
+    this.server = null;
+    this.usersResource = null;
+  }
+  /**
+   * Validate plugin dependencies
+   * @private
+   */
+  async _validateDependencies() {
+    await requirePluginDependency("api-plugin", {
+      throwOnError: true,
+      checkVersions: true
+    });
+  }
+  /**
+   * Install plugin
+   */
+  async onInstall() {
+    if (this.config.verbose) {
+      console.log("[API Plugin] Installing...");
+    }
+    try {
+      await this._validateDependencies();
+    } catch (err) {
+      console.error("[API Plugin] Dependency validation failed:", err.message);
+      throw err;
+    }
+    const authEnabled = this.config.auth.jwt.enabled || this.config.auth.apiKey.enabled || this.config.auth.basic.enabled;
+    if (authEnabled) {
+      await this._createUsersResource();
+    }
+    await this._setupMiddlewares();
+    if (this.config.verbose) {
+      console.log("[API Plugin] Installed successfully");
+    }
+  }
+  /**
+   * Create users resource for authentication
+   * @private
+   */
+  async _createUsersResource() {
+    const [ok, err, resource] = await tryFn(
+      () => this.database.createResource({
+        name: "plg_users",
+        attributes: {
+          id: "string|required",
+          username: "string|required|minlength:3",
+          email: "string|optional|email",
+          password: "secret|required|minlength:8",
+          apiKey: "string|optional",
+          jwtSecret: "string|optional",
+          role: "string|default:user",
+          active: "boolean|default:true",
+          createdAt: "string|optional",
+          lastLoginAt: "string|optional",
+          metadata: "json|optional"
+        },
+        behavior: "body-overflow",
+        timestamps: true,
+        createdBy: "ApiPlugin"
+      })
+    );
+    if (ok) {
+      this.usersResource = resource;
+      if (this.config.verbose) {
+        console.log("[API Plugin] Created plg_users resource for authentication");
+      }
+    } else if (this.database.resources.plg_users) {
+      this.usersResource = this.database.resources.plg_users;
+      if (this.config.verbose) {
+        console.log("[API Plugin] Using existing plg_users resource");
+      }
+    } else {
+      throw err;
+    }
+  }
+  /**
+   * Setup middlewares
+   * @private
+   */
+  async _setupMiddlewares() {
+    const middlewares = [];
+    middlewares.push(async (c, next) => {
+      c.set("requestId", crypto.randomUUID());
+      c.set("verbose", this.config.verbose);
+      await next();
+    });
+    if (this.config.cors.enabled) {
+      const corsMiddleware = await this._createCorsMiddleware();
+      middlewares.push(corsMiddleware);
+    }
+    if (this.config.rateLimit.enabled) {
+      const rateLimitMiddleware = await this._createRateLimitMiddleware();
+      middlewares.push(rateLimitMiddleware);
+    }
+    if (this.config.logging.enabled) {
+      const loggingMiddleware = await this._createLoggingMiddleware();
+      middlewares.push(loggingMiddleware);
+    }
+    if (this.config.compression.enabled) {
+      const compressionMiddleware = await this._createCompressionMiddleware();
+      middlewares.push(compressionMiddleware);
+    }
+    middlewares.push(...this.config.middlewares);
+    this.compiledMiddlewares = middlewares;
+  }
+  /**
+   * Create CORS middleware (placeholder)
+   * @private
+   */
+  async _createCorsMiddleware() {
+    return async (c, next) => {
+      const { origin, methods, allowedHeaders, exposedHeaders, credentials, maxAge } = this.config.cors;
+      c.header("Access-Control-Allow-Origin", origin);
+      c.header("Access-Control-Allow-Methods", methods.join(", "));
+      c.header("Access-Control-Allow-Headers", allowedHeaders.join(", "));
+      c.header("Access-Control-Expose-Headers", exposedHeaders.join(", "));
+      if (credentials) {
+        c.header("Access-Control-Allow-Credentials", "true");
+      }
+      c.header("Access-Control-Max-Age", maxAge.toString());
+      if (c.req.method === "OPTIONS") {
+        return c.body(null, 204);
+      }
+      await next();
+    };
+  }
+  /**
+   * Create rate limiting middleware (placeholder)
+   * @private
+   */
+  async _createRateLimitMiddleware() {
+    const requests = /* @__PURE__ */ new Map();
+    const { windowMs, maxRequests, keyGenerator } = this.config.rateLimit;
+    return async (c, next) => {
+      const key = keyGenerator ? keyGenerator(c) : c.req.header("x-forwarded-for") || c.req.header("cf-connecting-ip") || "unknown";
+      if (!requests.has(key)) {
+        requests.set(key, { count: 0, resetAt: Date.now() + windowMs });
+      }
+      const record = requests.get(key);
+      if (Date.now() > record.resetAt) {
+        record.count = 0;
+        record.resetAt = Date.now() + windowMs;
+      }
+      if (record.count >= maxRequests) {
+        const retryAfter = Math.ceil((record.resetAt - Date.now()) / 1e3);
+        c.header("Retry-After", retryAfter.toString());
+        c.header("X-RateLimit-Limit", maxRequests.toString());
+        c.header("X-RateLimit-Remaining", "0");
+        c.header("X-RateLimit-Reset", record.resetAt.toString());
+        return c.json({
+          success: false,
+          error: {
+            message: "Rate limit exceeded",
+            code: "RATE_LIMIT_EXCEEDED",
+            details: { retryAfter }
+          }
+        }, 429);
+      }
+      record.count++;
+      c.header("X-RateLimit-Limit", maxRequests.toString());
+      c.header("X-RateLimit-Remaining", (maxRequests - record.count).toString());
+      c.header("X-RateLimit-Reset", record.resetAt.toString());
+      await next();
+    };
+  }
+  /**
+   * Create logging middleware (placeholder)
+   * @private
+   */
+  async _createLoggingMiddleware() {
+    return async (c, next) => {
+      const start = Date.now();
+      const method = c.req.method;
+      const path = c.req.path;
+      const requestId = c.get("requestId");
+      await next();
+      const duration = Date.now() - start;
+      const status = c.res.status;
+      const user = c.get("user")?.username || "anonymous";
+      console.log(`[API Plugin] ${requestId} - ${method} ${path} ${status} ${duration}ms - ${user}`);
+    };
+  }
+  /**
+   * Create compression middleware (placeholder)
+   * @private
+   */
+  async _createCompressionMiddleware() {
+    return async (c, next) => {
+      await next();
+      const acceptEncoding = c.req.header("accept-encoding") || "";
+      if (acceptEncoding.includes("gzip")) {
+        c.header("Content-Encoding", "gzip");
+      } else if (acceptEncoding.includes("deflate")) {
+        c.header("Content-Encoding", "deflate");
+      }
+    };
+  }
+  /**
+   * Start plugin
+   */
+  async onStart() {
+    if (this.config.verbose) {
+      console.log("[API Plugin] Starting server...");
+    }
+    this.server = new ApiServer({
+      port: this.config.port,
+      host: this.config.host,
+      database: this.database,
+      resources: this.config.resources,
+      middlewares: this.compiledMiddlewares,
+      verbose: this.config.verbose,
+      auth: this.config.auth,
+      docsEnabled: this.config.docsEnabled !== false,
+      apiTitle: this.config.apiTitle,
+      apiVersion: this.config.apiVersion,
+      apiDescription: this.config.apiDescription
+    });
+    await this.server.start();
+    this.emit("plugin.started", {
+      port: this.config.port,
+      host: this.config.host
+    });
+  }
+  /**
+   * Stop plugin
+   */
+  async onStop() {
+    if (this.config.verbose) {
+      console.log("[API Plugin] Stopping server...");
+    }
+    if (this.server) {
+      await this.server.stop();
+      this.server = null;
+    }
+    this.emit("plugin.stopped");
+  }
+  /**
+   * Uninstall plugin
+   */
+  async onUninstall(options = {}) {
+    const { purgeData = false } = options;
+    await this.onStop();
+    if (purgeData && this.usersResource) {
+      const [ok] = await tryFn(() => this.database.deleteResource("plg_users"));
+      if (ok && this.config.verbose) {
+        console.log("[API Plugin] Deleted plg_users resource");
+      }
+    }
+    if (this.config.verbose) {
+      console.log("[API Plugin] Uninstalled successfully");
+    }
+  }
+  /**
+   * Get server information
+   * @returns {Object} Server info
+   */
+  getServerInfo() {
+    return this.server ? this.server.getInfo() : { isRunning: false };
+  }
+  /**
+   * Get Hono app instance (for advanced usage)
+   * @returns {Hono|null} Hono app
+   */
+  getApp() {
+    return this.server ? this.server.getApp() : null;
+  }
+}
+
 class AuditPlugin extends Plugin {
   constructor(options = {}) {
     super(options);
@@ -3159,7 +5008,7 @@ class FilesystemBackupDriver extends BaseBackupDriver {
       `${backupId}.backup`
     );
     const [readOk, readErr] = await tryFn(async () => {
-      const hash = crypto.createHash("sha256");
+      const hash = crypto$1.createHash("sha256");
       const stream = fs.createReadStream(backupPath);
       await promises$1.pipeline(stream, hash);
       const actualChecksum = hash.digest("hex");
@@ -3416,7 +5265,7 @@ class S3BackupDriver extends BaseBackupDriver {
       });
       const etag = headResponse.ETag?.replace(/"/g, "");
       if (etag && !etag.includes("-")) {
-        const expectedMd5 = crypto.createHash("md5").update(expectedChecksum).digest("hex");
+        const expectedMd5 = crypto$1.createHash("md5").update(expectedChecksum).digest("hex");
         return etag === expectedMd5;
       } else {
         const [streamOk, , stream] = await tryFn(
@@ -3426,7 +5275,7 @@ class S3BackupDriver extends BaseBackupDriver {
           })
         );
         if (!streamOk) return false;
-        const hash = crypto.createHash("sha256");
+        const hash = crypto$1.createHash("sha256");
         for await (const chunk of stream) {
           hash.update(chunk);
         }
@@ -3814,6 +5663,93 @@ function validateBackupConfig(driver, config = {}) {
   return true;
 }
 
+class StreamingExporter {
+  constructor(options = {}) {
+    this.encoding = options.encoding || "utf8";
+    this.compress = options.compress !== false;
+    this.batchSize = options.batchSize || 100;
+    this.onProgress = options.onProgress || null;
+  }
+  /**
+   * Export single resource to JSONL file
+   *
+   * @param {Resource} resource - S3DB resource
+   * @param {string} outputPath - Output file path
+   * @param {string} type - Export type ('full' or 'incremental')
+   * @param {Date} sinceTimestamp - For incremental backups
+   * @returns {Promise<{recordCount: number, bytesWritten: number}>}
+   */
+  async exportResource(resource, outputPath, type = "full", sinceTimestamp = null) {
+    let recordCount = 0;
+    let bytesWritten = 0;
+    const writeStream = fs.createWriteStream(outputPath);
+    let outputStream = writeStream;
+    if (this.compress) {
+      const gzipStream = zlib.createGzip();
+      gzipStream.pipe(writeStream);
+      outputStream = gzipStream;
+    }
+    try {
+      let records;
+      if (type === "incremental" && sinceTimestamp) {
+        records = await resource.list({
+          filter: { updatedAt: { ">": sinceTimestamp.toISOString() } }
+        });
+      } else {
+        records = await resource.list();
+      }
+      for (const record of records) {
+        const line = JSON.stringify(record) + "\n";
+        const canWrite = outputStream.write(line, this.encoding);
+        recordCount++;
+        bytesWritten += Buffer.byteLength(line, this.encoding);
+        if (this.onProgress && recordCount % 1e3 === 0) {
+          this.onProgress({
+            resourceName: resource.name,
+            recordCount,
+            bytesWritten
+          });
+        }
+        if (!canWrite) {
+          await new Promise((resolve) => outputStream.once("drain", resolve));
+        }
+      }
+      outputStream.end();
+      await new Promise((resolve, reject) => {
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
+      return { recordCount, bytesWritten };
+    } catch (error) {
+      outputStream.destroy();
+      throw error;
+    }
+  }
+  /**
+   * Export multiple resources
+   *
+   * @param {Object} resources - Map of resource name -> resource
+   * @param {string} outputDir - Output directory
+   * @param {string} type - Export type
+   * @param {Date} sinceTimestamp - For incremental
+   * @returns {Promise<Map<string, {recordCount, bytesWritten}>>}
+   */
+  async exportResources(resources, outputDir, type = "full", sinceTimestamp = null) {
+    const results = /* @__PURE__ */ new Map();
+    for (const [resourceName, resource] of Object.entries(resources)) {
+      const ext = this.compress ? ".jsonl.gz" : ".jsonl";
+      const outputPath = `${outputDir}/${resourceName}${ext}`;
+      const stats = await this.exportResource(resource, outputPath, type, sinceTimestamp);
+      results.set(resourceName, {
+        ...stats,
+        filePath: outputPath,
+        compressed: this.compress
+      });
+    }
+    return results;
+  }
+}
+
 class BackupPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -4037,6 +5973,37 @@ class BackupPlugin extends Plugin {
   }
   async _exportResources(resourceNames, tempDir, type) {
     const exportedFiles = [];
+    const resourceStats = /* @__PURE__ */ new Map();
+    const exporter = new StreamingExporter({
+      compress: true,
+      // Always use gzip for backups
+      onProgress: this.config.verbose ? (stats) => {
+        if (stats.recordCount % 1e4 === 0) {
+          console.log(`[BackupPlugin] Exported ${stats.recordCount} records from '${stats.resourceName}'`);
+        }
+      } : null
+    });
+    let sinceTimestamp = null;
+    if (type === "incremental") {
+      const [lastBackupOk, , lastBackups] = await tryFn(
+        () => this.database.resource(this.config.backupMetadataResource).list({
+          filter: {
+            status: "completed",
+            type: { $in: ["full", "incremental"] }
+          },
+          sort: { timestamp: -1 },
+          limit: 1
+        })
+      );
+      if (lastBackupOk && lastBackups && lastBackups.length > 0) {
+        sinceTimestamp = new Date(lastBackups[0].timestamp);
+      } else {
+        sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1e3);
+      }
+      if (this.config.verbose) {
+        console.log(`[BackupPlugin] Incremental backup since ${sinceTimestamp.toISOString()}`);
+      }
+    }
     for (const resourceName of resourceNames) {
       const resource = this.database.resources[resourceName];
       if (!resource) {
@@ -4045,48 +6012,62 @@ class BackupPlugin extends Plugin {
         }
         continue;
       }
-      const exportPath = path$1.join(tempDir, `${resourceName}.json`);
-      let records;
-      if (type === "incremental") {
-        const [lastBackupOk, , lastBackups] = await tryFn(
-          () => this.database.resource(this.config.backupMetadataResource).list({
-            filter: {
-              status: "completed",
-              type: { $in: ["full", "incremental"] }
-            },
-            sort: { timestamp: -1 },
-            limit: 1
-          })
-        );
-        let sinceTimestamp;
-        if (lastBackupOk && lastBackups && lastBackups.length > 0) {
-          sinceTimestamp = new Date(lastBackups[0].timestamp);
-        } else {
-          sinceTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1e3);
-        }
-        if (this.config.verbose) {
-          console.log(`[BackupPlugin] Incremental backup for '${resourceName}' since ${sinceTimestamp.toISOString()}`);
-        }
-        records = await resource.list({
-          filter: { updatedAt: { ">": sinceTimestamp.toISOString() } }
+      const exportPath = path$1.join(tempDir, `${resourceName}.jsonl.gz`);
+      try {
+        const stats = await exporter.exportResource(resource, exportPath, type, sinceTimestamp);
+        exportedFiles.push(exportPath);
+        resourceStats.set(resourceName, {
+          ...stats,
+          definition: resource.config
         });
-      } else {
-        records = await resource.list();
-      }
-      const exportData = {
-        resourceName,
-        definition: resource.config,
-        records,
-        exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        type
-      };
-      await promises.writeFile(exportPath, JSON.stringify(exportData, null, 2));
-      exportedFiles.push(exportPath);
-      if (this.config.verbose) {
-        console.log(`[BackupPlugin] Exported ${records.length} records from '${resourceName}'`);
+        if (this.config.verbose) {
+          console.log(
+            `[BackupPlugin] Exported ${stats.recordCount} records from '${resourceName}' (${(stats.bytesWritten / 1024 / 1024).toFixed(2)} MB compressed)`
+          );
+        }
+      } catch (error) {
+        if (this.config.verbose) {
+          console.error(`[BackupPlugin] Error exporting '${resourceName}': ${error.message}`);
+        }
+        throw error;
       }
     }
+    await this._generateMetadataFile(tempDir, resourceStats, type);
+    exportedFiles.push(path$1.join(tempDir, "s3db.json"));
     return exportedFiles;
+  }
+  /**
+   * Generate s3db.json metadata file
+   */
+  async _generateMetadataFile(tempDir, resourceStats, type) {
+    const metadata = {
+      version: "1.0",
+      backupType: type,
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      database: {
+        bucket: this.database.bucket,
+        region: this.database.region
+      },
+      resources: {}
+    };
+    for (const [resourceName, stats] of resourceStats.entries()) {
+      metadata.resources[resourceName] = {
+        name: resourceName,
+        attributes: stats.definition.attributes || {},
+        partitions: stats.definition.partitions || {},
+        timestamps: stats.definition.timestamps || false,
+        recordCount: stats.recordCount,
+        exportFile: `${resourceName}.jsonl.gz`,
+        compression: "gzip",
+        format: "jsonl",
+        bytesWritten: stats.bytesWritten
+      };
+    }
+    const metadataPath = path$1.join(tempDir, "s3db.json");
+    await promises.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    if (this.config.verbose) {
+      console.log(`[BackupPlugin] Generated s3db.json metadata`);
+    }
   }
   async _createArchive(files, targetPath, compressionType) {
     const archive = {
@@ -4116,7 +6097,7 @@ class BackupPlugin extends Plugin {
       await promises.writeFile(targetPath, archiveJson, "utf8");
     } else {
       const output = fs.createWriteStream(targetPath);
-      const gzip = zlib.createGzip({ level: 6 });
+      const gzip = zlib$1.createGzip({ level: 6 });
       await promises$1.pipeline(
         async function* () {
           yield Buffer.from(archiveJson, "utf8");
@@ -4130,7 +6111,7 @@ class BackupPlugin extends Plugin {
   }
   async _generateChecksum(filePath) {
     const [ok, err, result] = await tryFn(async () => {
-      const hash = crypto.createHash("sha256");
+      const hash = crypto$1.createHash("sha256");
       const stream = fs.createReadStream(filePath);
       await promises$1.pipeline(stream, hash);
       return hash.digest("hex");
@@ -4204,7 +6185,7 @@ class BackupPlugin extends Plugin {
       let archiveData = "";
       if (this.config.compression !== "none") {
         const input = fs.createReadStream(backupPath);
-        const gunzip = zlib.createGunzip();
+        const gunzip = zlib$1.createGunzip();
         const chunks = [];
         await new Promise((resolve, reject) => {
           input.pipe(gunzip).on("data", (chunk) => chunks.push(chunk)).on("end", resolve).on("error", reject);
@@ -4543,207 +6524,14 @@ class Cache extends EventEmitter {
   }
 }
 
-class ResourceIdsReader extends EventEmitter {
-  constructor({ resource }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.stream = new web.ReadableStream({
-      highWaterMark: this.client.parallelism * 3,
-      start: this._start.bind(this),
-      pull: this._pull.bind(this),
-      cancel: this._cancel.bind(this)
-    });
-  }
-  build() {
-    return this.stream.getReader();
-  }
-  async _start(controller) {
-    this.controller = controller;
-    this.continuationToken = null;
-    this.closeNextIteration = false;
-  }
-  async _pull(controller) {
-    if (this.closeNextIteration) {
-      controller.close();
-      return;
-    }
-    const response = await this.client.listObjects({
-      prefix: `resource=${this.resource.name}`,
-      continuationToken: this.continuationToken
-    });
-    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
-    this.continuationToken = response.NextContinuationToken;
-    this.enqueue(keys);
-    if (!response.IsTruncated) this.closeNextIteration = true;
-  }
-  enqueue(ids) {
-    ids.forEach((key) => {
-      this.controller.enqueue(key);
-      this.emit("id", key);
-    });
-  }
-  _cancel(reason) {
-  }
-}
-
-class ResourceIdsPageReader extends ResourceIdsReader {
-  enqueue(ids) {
-    this.controller.enqueue(ids);
-    this.emit("page", ids);
-  }
-}
-
-class ResourceReader extends EventEmitter {
-  constructor({ resource, batchSize = 10, concurrency = 5 }) {
-    super();
-    if (!resource) {
-      throw new StreamError("Resource is required for ResourceReader", {
-        operation: "constructor",
-        resource: resource?.name,
-        suggestion: "Pass a valid Resource instance when creating ResourceReader"
-      });
-    }
-    this.resource = resource;
-    this.client = resource.client;
-    this.batchSize = batchSize;
-    this.concurrency = concurrency;
-    this.input = new ResourceIdsPageReader({ resource: this.resource });
-    this.transform = new require$$3.Transform({
-      objectMode: true,
-      transform: this._transform.bind(this)
-    });
-    this.input.on("data", (chunk) => {
-      this.transform.write(chunk);
-    });
-    this.input.on("end", () => {
-      this.transform.end();
-    });
-    this.input.on("error", (error) => {
-      this.emit("error", error);
-    });
-    this.transform.on("data", (data) => {
-      this.emit("data", data);
-    });
-    this.transform.on("end", () => {
-      this.emit("end");
-    });
-    this.transform.on("error", (error) => {
-      this.emit("error", error);
-    });
-  }
-  build() {
-    return this;
-  }
-  async _transform(chunk, encoding, callback) {
-    const [ok, err] = await tryFn(async () => {
-      await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
-        this.emit("error", error, content);
-      }).process(async (id) => {
-        const data = await this.resource.get(id);
-        this.push(data);
-        return data;
-      });
-    });
-    callback(err);
-  }
-  resume() {
-    this.input.resume();
-  }
-}
-
-class ResourceWriter extends EventEmitter {
-  constructor({ resource, batchSize = 10, concurrency = 5 }) {
-    super();
-    this.resource = resource;
-    this.client = resource.client;
-    this.batchSize = batchSize;
-    this.concurrency = concurrency;
-    this.buffer = [];
-    this.writing = false;
-    this.writable = new require$$3.Writable({
-      objectMode: true,
-      write: this._write.bind(this)
-    });
-    this.writable.on("finish", () => {
-      this.emit("finish");
-    });
-    this.writable.on("error", (error) => {
-      this.emit("error", error);
-    });
-  }
-  build() {
-    return this;
-  }
-  write(chunk) {
-    this.buffer.push(chunk);
-    this._maybeWrite().catch((error) => {
-      this.emit("error", error);
-    });
-    return true;
-  }
-  end() {
-    this.ended = true;
-    this._maybeWrite().catch((error) => {
-      this.emit("error", error);
-    });
-  }
-  async _maybeWrite() {
-    if (this.writing) return;
-    if (this.buffer.length === 0 && !this.ended) return;
-    this.writing = true;
-    while (this.buffer.length > 0) {
-      const batch = this.buffer.splice(0, this.batchSize);
-      const [ok, err] = await tryFn(async () => {
-        await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
-          this.emit("error", error, content);
-        }).process(async (item) => {
-          const [ok2, err2, result] = await tryFn(async () => {
-            const res = await this.resource.insert(item);
-            return res;
-          });
-          if (!ok2) {
-            this.emit("error", err2, item);
-            return null;
-          }
-          return result;
-        });
-      });
-      if (!ok) {
-        this.emit("error", err);
-      }
-    }
-    this.writing = false;
-    if (this.ended) {
-      this.writable.emit("finish");
-    }
-  }
-  async _write(chunk, encoding, callback) {
-    callback();
-  }
-}
-
-function streamToString(stream) {
-  return new Promise((resolve, reject) => {
-    if (!stream) {
-      return reject(new StreamError("Stream is undefined", {
-        operation: "streamToString",
-        suggestion: "Ensure a valid stream is passed to streamToString()"
-      }));
-    }
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-  });
-}
-
 class S3Cache extends Cache {
   constructor({
     client,
     keyPrefix = "cache",
     ttl = 0,
-    prefix = void 0
+    prefix = void 0,
+    enableCompression = true,
+    compressionThreshold = 1024
   }) {
     super();
     this.client = client;
@@ -4751,56 +6539,86 @@ class S3Cache extends Cache {
     this.config.ttl = ttl;
     this.config.client = client;
     this.config.prefix = prefix !== void 0 ? prefix : keyPrefix + (keyPrefix.endsWith("/") ? "" : "/");
+    this.config.enableCompression = enableCompression;
+    this.config.compressionThreshold = compressionThreshold;
+    this.storage = new PluginStorage(client, "cache");
+  }
+  /**
+   * Compress data if enabled and above threshold
+   * @private
+   */
+  _compressData(data) {
+    const jsonString = JSON.stringify(data);
+    if (!this.config.enableCompression || jsonString.length < this.config.compressionThreshold) {
+      return {
+        data: jsonString,
+        compressed: false,
+        originalSize: jsonString.length
+      };
+    }
+    const compressed = zlib$1.gzipSync(jsonString).toString("base64");
+    return {
+      data: compressed,
+      compressed: true,
+      originalSize: jsonString.length,
+      compressedSize: compressed.length,
+      compressionRatio: (compressed.length / jsonString.length).toFixed(2)
+    };
+  }
+  /**
+   * Decompress data if needed
+   * @private
+   */
+  _decompressData(storedData) {
+    if (!storedData || !storedData.compressed) {
+      return storedData && storedData.data ? JSON.parse(storedData.data) : null;
+    }
+    const buffer = Buffer.from(storedData.data, "base64");
+    const decompressed = zlib$1.unzipSync(buffer).toString();
+    return JSON.parse(decompressed);
   }
   async _set(key, data) {
-    let body = JSON.stringify(data);
-    const lengthSerialized = body.length;
-    body = zlib.gzipSync(body).toString("base64");
-    return this.client.putObject({
-      key: path$1.join(this.keyPrefix, key),
-      body,
-      contentEncoding: "gzip",
-      contentType: "application/gzip",
-      metadata: {
-        compressor: "zlib",
-        compressed: "true",
-        "client-id": this.client.id,
-        "length-serialized": String(lengthSerialized),
-        "length-compressed": String(body.length),
-        "compression-gain": (body.length / lengthSerialized).toFixed(2)
+    const compressed = this._compressData(data);
+    return this.storage.set(
+      this.storage.getPluginKey(null, this.keyPrefix, key),
+      compressed,
+      {
+        ttl: this.config.ttl,
+        behavior: "body-only",
+        // Compressed data is already optimized, skip metadata encoding
+        contentType: compressed.compressed ? "application/gzip" : "application/json"
       }
-    });
+    );
   }
   async _get(key) {
-    const [ok, err, result] = await tryFn(async () => {
-      const { Body } = await this.client.getObject(path$1.join(this.keyPrefix, key));
-      let content = await streamToString(Body);
-      content = Buffer.from(content, "base64");
-      content = zlib.unzipSync(content).toString();
-      return JSON.parse(content);
-    });
-    if (ok) return result;
-    if (err.name === "NoSuchKey" || err.name === "NotFound") return null;
-    throw err;
+    const storedData = await this.storage.get(
+      this.storage.getPluginKey(null, this.keyPrefix, key)
+    );
+    if (!storedData) return null;
+    return this._decompressData(storedData);
   }
   async _del(key) {
-    await this.client.deleteObject(path$1.join(this.keyPrefix, key));
+    await this.storage.delete(
+      this.storage.getPluginKey(null, this.keyPrefix, key)
+    );
     return true;
   }
   async _clear() {
-    const keys = await this.client.getAllKeys({
-      prefix: this.keyPrefix
-    });
-    await this.client.deleteObjects(keys);
+    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
+    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
+    for (const key of allKeys) {
+      await this.storage.delete(key);
+    }
   }
   async size() {
     const keys = await this.keys();
     return keys.length;
   }
   async keys() {
-    const allKeys = await this.client.getAllKeys({ prefix: this.keyPrefix });
-    const prefix = this.keyPrefix.endsWith("/") ? this.keyPrefix : this.keyPrefix + "/";
-    return allKeys.map((k) => k.startsWith(prefix) ? k.slice(prefix.length) : k);
+    const pluginPrefix = `plugin=cache/${this.keyPrefix}`;
+    const allKeys = await this.client.getAllKeys({ prefix: pluginPrefix });
+    const prefixToRemove = `plugin=cache/${this.keyPrefix}/`;
+    return allKeys.map((k) => k.startsWith(prefixToRemove) ? k.slice(prefixToRemove.length) : k);
   }
 }
 
@@ -4850,7 +6668,7 @@ class MemoryCache extends Cache {
     if (this.enableCompression) {
       try {
         if (originalSize >= this.compressionThreshold) {
-          const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, "utf8"));
+          const compressedBuffer = zlib$1.gzipSync(Buffer.from(serialized, "utf8"));
           finalData = {
             __compressed: true,
             __data: compressedBuffer.toString("base64"),
@@ -4922,7 +6740,7 @@ class MemoryCache extends Cache {
     if (rawData && typeof rawData === "object" && rawData.__compressed) {
       try {
         const compressedBuffer = Buffer.from(rawData.__data, "base64");
-        const decompressed = zlib.gunzipSync(compressedBuffer).toString("utf8");
+        const decompressed = zlib$1.gunzipSync(compressedBuffer).toString("utf8");
         return JSON.parse(decompressed);
       } catch (error) {
         console.warn(`[MemoryCache] Decompression failed for key '${key}':`, error.message);
@@ -5140,7 +6958,7 @@ class FilesystemCache extends Cache {
       let compressed = false;
       let finalData = serialized;
       if (this.enableCompression && originalSize >= this.compressionThreshold) {
-        const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, this.encoding));
+        const compressedBuffer = zlib$1.gzipSync(Buffer.from(serialized, this.encoding));
         finalData = compressedBuffer.toString("base64");
         compressed = true;
       }
@@ -5246,7 +7064,7 @@ class FilesystemCache extends Cache {
         if (isCompressed || this.enableCompression && content.match(/^[A-Za-z0-9+/=]+$/)) {
           try {
             const compressedBuffer = Buffer.from(content, "base64");
-            finalContent = zlib.gunzipSync(compressedBuffer).toString(this.encoding);
+            finalContent = zlib$1.gunzipSync(compressedBuffer).toString(this.encoding);
           } catch (decompressError) {
             finalContent = content;
           }
@@ -5889,6 +7707,14 @@ class CachePlugin extends Plugin {
       // Logging
       verbose: options.verbose || false
     };
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      writes: 0,
+      deletes: 0,
+      errors: 0,
+      startTime: Date.now()
+    };
   }
   async onInstall() {
     if (this.config.driver && typeof this.config.driver === "object") {
@@ -6056,9 +7882,17 @@ class CachePlugin extends Plugin {
             partition,
             partitionValues
           }));
-          if (ok && result !== null && result !== void 0) return result;
-          if (!ok && err.name !== "NoSuchKey") throw err;
+          if (ok && result !== null && result !== void 0) {
+            this.stats.hits++;
+            return result;
+          }
+          if (!ok && err.name !== "NoSuchKey") {
+            this.stats.errors++;
+            throw err;
+          }
+          this.stats.misses++;
           const freshResult = await next();
+          this.stats.writes++;
           await resource.cache._set(key, freshResult, {
             resource: resource.name,
             action: method,
@@ -6068,9 +7902,17 @@ class CachePlugin extends Plugin {
           return freshResult;
         } else {
           const [ok, err, result] = await tryFn(() => resource.cache.get(key));
-          if (ok && result !== null && result !== void 0) return result;
-          if (!ok && err.name !== "NoSuchKey") throw err;
+          if (ok && result !== null && result !== void 0) {
+            this.stats.hits++;
+            return result;
+          }
+          if (!ok && err.name !== "NoSuchKey") {
+            this.stats.errors++;
+            throw err;
+          }
+          this.stats.misses++;
           const freshResult = await next();
+          this.stats.writes++;
           await resource.cache.set(key, freshResult);
           return freshResult;
         }
@@ -6166,6 +8008,7 @@ class CachePlugin extends Plugin {
     for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
       const [ok, err] = await tryFn(() => cache.clear(key));
       if (ok) {
+        this.stats.deletes++;
         return [true, null];
       }
       lastError = err;
@@ -6200,7 +8043,7 @@ class CachePlugin extends Plugin {
   }
   hashParams(params) {
     const serialized = jsonStableStringify(params) || "empty";
-    return crypto.createHash("md5").update(serialized).digest("hex").substring(0, 16);
+    return crypto$1.createHash("md5").update(serialized).digest("hex").substring(0, 16);
   }
   // Utility methods
   async getCacheStats() {
@@ -6308,6 +8151,68 @@ class CachePlugin extends Plugin {
       `Monitor cache hit rates for partition efficiency`
     ];
     return analysis;
+  }
+  /**
+   * Get cache statistics including hit/miss rates
+   * @returns {Object} Stats object with hits, misses, writes, deletes, errors, and calculated metrics
+   */
+  getStats() {
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? this.stats.hits / total * 100 : 0;
+    const missRate = total > 0 ? this.stats.misses / total * 100 : 0;
+    const uptime = Date.now() - this.stats.startTime;
+    const uptimeSeconds = Math.floor(uptime / 1e3);
+    return {
+      // Raw counters
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      writes: this.stats.writes,
+      deletes: this.stats.deletes,
+      errors: this.stats.errors,
+      // Calculated metrics
+      total,
+      hitRate: hitRate.toFixed(2) + "%",
+      missRate: missRate.toFixed(2) + "%",
+      hitRateDecimal: hitRate / 100,
+      missRateDecimal: missRate / 100,
+      // Uptime
+      uptime: uptimeSeconds,
+      uptimeFormatted: this._formatUptime(uptimeSeconds),
+      startTime: new Date(this.stats.startTime).toISOString(),
+      // Rates per second
+      hitsPerSecond: uptimeSeconds > 0 ? (this.stats.hits / uptimeSeconds).toFixed(2) : 0,
+      missesPerSecond: uptimeSeconds > 0 ? (this.stats.misses / uptimeSeconds).toFixed(2) : 0,
+      writesPerSecond: uptimeSeconds > 0 ? (this.stats.writes / uptimeSeconds).toFixed(2) : 0
+    };
+  }
+  /**
+   * Reset cache statistics
+   */
+  resetStats() {
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      writes: 0,
+      deletes: 0,
+      errors: 0,
+      startTime: Date.now()
+    };
+  }
+  /**
+   * Format uptime in human-readable format
+   * @private
+   */
+  _formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor(seconds % 86400 / 3600);
+    const minutes = Math.floor(seconds % 3600 / 60);
+    const secs = seconds % 60;
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+    return parts.join(" ");
   }
 }
 
@@ -10509,158 +12414,6 @@ class MetricsPlugin extends Plugin {
   }
 }
 
-const PLUGIN_DEPENDENCIES = {
-  "postgresql-replicator": {
-    name: "PostgreSQL Replicator",
-    dependencies: {
-      "pg": {
-        version: "^8.0.0",
-        description: "PostgreSQL client for Node.js",
-        installCommand: "pnpm add pg"
-      }
-    }
-  },
-  "bigquery-replicator": {
-    name: "BigQuery Replicator",
-    dependencies: {
-      "@google-cloud/bigquery": {
-        version: "^7.0.0",
-        description: "Google Cloud BigQuery SDK",
-        installCommand: "pnpm add @google-cloud/bigquery"
-      }
-    }
-  },
-  "sqs-replicator": {
-    name: "SQS Replicator",
-    dependencies: {
-      "@aws-sdk/client-sqs": {
-        version: "^3.0.0",
-        description: "AWS SDK for SQS",
-        installCommand: "pnpm add @aws-sdk/client-sqs"
-      }
-    }
-  },
-  "sqs-consumer": {
-    name: "SQS Queue Consumer",
-    dependencies: {
-      "@aws-sdk/client-sqs": {
-        version: "^3.0.0",
-        description: "AWS SDK for SQS",
-        installCommand: "pnpm add @aws-sdk/client-sqs"
-      }
-    }
-  },
-  "rabbitmq-consumer": {
-    name: "RabbitMQ Queue Consumer",
-    dependencies: {
-      "amqplib": {
-        version: "^0.10.0",
-        description: "AMQP 0-9-1 library for RabbitMQ",
-        installCommand: "pnpm add amqplib"
-      }
-    }
-  }
-};
-function isVersionCompatible(actual, required) {
-  if (!actual || !required) return false;
-  const cleanRequired = required.replace(/^[\^~]/, "");
-  const actualMajor = parseInt(actual.split(".")[0], 10);
-  const requiredMajor = parseInt(cleanRequired.split(".")[0], 10);
-  if (required.startsWith("^")) {
-    return actualMajor === requiredMajor;
-  }
-  if (required.startsWith("~")) {
-    const actualMinor = parseInt(actual.split(".")[1] || "0", 10);
-    const requiredMinor = parseInt(cleanRequired.split(".")[1] || "0", 10);
-    return actualMajor === requiredMajor && actualMinor >= requiredMinor;
-  }
-  return actualMajor >= requiredMajor;
-}
-async function tryLoadPackage(packageName) {
-  try {
-    const pkg = await import(packageName);
-    let version = null;
-    try {
-      const pkgJson = await import(`${packageName}/package.json`, { assert: { type: 'json' } });
-      version = pkgJson.default?.version || pkgJson.version || null;
-    } catch (e) {
-      version = "unknown";
-    }
-    return { installed: true, version, error: null };
-  } catch (error) {
-    return { installed: false, version: null, error };
-  }
-}
-async function requirePluginDependency(pluginId, options = {}) {
-  const {
-    throwOnError = true,
-    checkVersions = true
-  } = options;
-  const pluginDef = PLUGIN_DEPENDENCIES[pluginId];
-  if (!pluginDef) {
-    const error = new Error(
-      `Unknown plugin identifier: ${pluginId}. Available plugins: ${Object.keys(PLUGIN_DEPENDENCIES).join(", ")}`
-    );
-    if (throwOnError) throw error;
-    return { valid: false, missing: [], incompatible: [], messages: [error.message] };
-  }
-  const missing = [];
-  const incompatible = [];
-  const messages = [];
-  for (const [pkgName, pkgInfo] of Object.entries(pluginDef.dependencies)) {
-    const { installed, version, error } = await tryLoadPackage(pkgName);
-    if (!installed) {
-      missing.push(pkgName);
-      messages.push(
-        `\u274C Missing dependency: ${pkgName}
-   Description: ${pkgInfo.description}
-   Required: ${pkgInfo.version}
-   Install: ${pkgInfo.installCommand}`
-      );
-      continue;
-    }
-    if (checkVersions && version && version !== "unknown") {
-      const compatible = isVersionCompatible(version, pkgInfo.version);
-      if (!compatible) {
-        incompatible.push(pkgName);
-        messages.push(
-          `\u26A0\uFE0F  Incompatible version: ${pkgName}
-   Installed: ${version}
-   Required: ${pkgInfo.version}
-   Update: ${pkgInfo.installCommand}`
-        );
-      } else {
-        messages.push(
-          `\u2705 ${pkgName}@${version} (compatible with ${pkgInfo.version})`
-        );
-      }
-    } else {
-      messages.push(
-        `\u2705 ${pkgName}@${version || "unknown"} (installed)`
-      );
-    }
-  }
-  const valid = missing.length === 0 && incompatible.length === 0;
-  if (!valid && throwOnError) {
-    const errorMsg = [
-      `
-${pluginDef.name} - Missing dependencies detected!
-`,
-      `Plugin ID: ${pluginId}`,
-      "",
-      ...messages,
-      "",
-      "Quick fix - Run all install commands:",
-      Object.values(pluginDef.dependencies).map((dep) => `  ${dep.installCommand}`).join("\n"),
-      "",
-      "Or install all peer dependencies at once:",
-      `  pnpm add ${Object.keys(pluginDef.dependencies).join(" ")}`
-    ].join("\n");
-    throw new Error(errorMsg);
-  }
-  return { valid, missing, incompatible, messages };
-}
-
 class SqsConsumer {
   constructor({ queueUrl, onMessage, onError, poolingInterval = 5e3, maxMessages = 10, region = "us-east-1", credentials, endpoint, driver = "sqs" }) {
     this.driver = driver;
@@ -14307,6 +16060,201 @@ class Schema {
   }
 }
 
+class ResourceIdsReader extends EventEmitter {
+  constructor({ resource }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.stream = new web.ReadableStream({
+      highWaterMark: this.client.parallelism * 3,
+      start: this._start.bind(this),
+      pull: this._pull.bind(this),
+      cancel: this._cancel.bind(this)
+    });
+  }
+  build() {
+    return this.stream.getReader();
+  }
+  async _start(controller) {
+    this.controller = controller;
+    this.continuationToken = null;
+    this.closeNextIteration = false;
+  }
+  async _pull(controller) {
+    if (this.closeNextIteration) {
+      controller.close();
+      return;
+    }
+    const response = await this.client.listObjects({
+      prefix: `resource=${this.resource.name}`,
+      continuationToken: this.continuationToken
+    });
+    const keys = response?.Contents.map((x) => x.Key).map((x) => x.replace(this.client.config.keyPrefix, "")).map((x) => x.startsWith("/") ? x.replace(`/`, "") : x).map((x) => x.replace(`resource=${this.resource.name}/id=`, ""));
+    this.continuationToken = response.NextContinuationToken;
+    this.enqueue(keys);
+    if (!response.IsTruncated) this.closeNextIteration = true;
+  }
+  enqueue(ids) {
+    ids.forEach((key) => {
+      this.controller.enqueue(key);
+      this.emit("id", key);
+    });
+  }
+  _cancel(reason) {
+  }
+}
+
+class ResourceIdsPageReader extends ResourceIdsReader {
+  enqueue(ids) {
+    this.controller.enqueue(ids);
+    this.emit("page", ids);
+  }
+}
+
+class ResourceReader extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    if (!resource) {
+      throw new StreamError("Resource is required for ResourceReader", {
+        operation: "constructor",
+        resource: resource?.name,
+        suggestion: "Pass a valid Resource instance when creating ResourceReader"
+      });
+    }
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.input = new ResourceIdsPageReader({ resource: this.resource });
+    this.transform = new require$$3.Transform({
+      objectMode: true,
+      transform: this._transform.bind(this)
+    });
+    this.input.on("data", (chunk) => {
+      this.transform.write(chunk);
+    });
+    this.input.on("end", () => {
+      this.transform.end();
+    });
+    this.input.on("error", (error) => {
+      this.emit("error", error);
+    });
+    this.transform.on("data", (data) => {
+      this.emit("data", data);
+    });
+    this.transform.on("end", () => {
+      this.emit("end");
+    });
+    this.transform.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  async _transform(chunk, encoding, callback) {
+    const [ok, err] = await tryFn(async () => {
+      await promisePool.PromisePool.for(chunk).withConcurrency(this.concurrency).handleError(async (error, content) => {
+        this.emit("error", error, content);
+      }).process(async (id) => {
+        const data = await this.resource.get(id);
+        this.push(data);
+        return data;
+      });
+    });
+    callback(err);
+  }
+  resume() {
+    this.input.resume();
+  }
+}
+
+class ResourceWriter extends EventEmitter {
+  constructor({ resource, batchSize = 10, concurrency = 5 }) {
+    super();
+    this.resource = resource;
+    this.client = resource.client;
+    this.batchSize = batchSize;
+    this.concurrency = concurrency;
+    this.buffer = [];
+    this.writing = false;
+    this.writable = new require$$3.Writable({
+      objectMode: true,
+      write: this._write.bind(this)
+    });
+    this.writable.on("finish", () => {
+      this.emit("finish");
+    });
+    this.writable.on("error", (error) => {
+      this.emit("error", error);
+    });
+  }
+  build() {
+    return this;
+  }
+  write(chunk) {
+    this.buffer.push(chunk);
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
+    return true;
+  }
+  end() {
+    this.ended = true;
+    this._maybeWrite().catch((error) => {
+      this.emit("error", error);
+    });
+  }
+  async _maybeWrite() {
+    if (this.writing) return;
+    if (this.buffer.length === 0 && !this.ended) return;
+    this.writing = true;
+    while (this.buffer.length > 0) {
+      const batch = this.buffer.splice(0, this.batchSize);
+      const [ok, err] = await tryFn(async () => {
+        await promisePool.PromisePool.for(batch).withConcurrency(this.concurrency).handleError(async (error, content) => {
+          this.emit("error", error, content);
+        }).process(async (item) => {
+          const [ok2, err2, result] = await tryFn(async () => {
+            const res = await this.resource.insert(item);
+            return res;
+          });
+          if (!ok2) {
+            this.emit("error", err2, item);
+            return null;
+          }
+          return result;
+        });
+      });
+      if (!ok) {
+        this.emit("error", err);
+      }
+    }
+    this.writing = false;
+    if (this.ended) {
+      this.writable.emit("finish");
+    }
+  }
+  async _write(chunk, encoding, callback) {
+    callback();
+  }
+}
+
+function streamToString(stream) {
+  return new Promise((resolve, reject) => {
+    if (!stream) {
+      return reject(new StreamError("Stream is undefined", {
+        operation: "streamToString",
+        suggestion: "Ensure a valid stream is passed to streamToString()"
+      }));
+    }
+    const chunks = [];
+    stream.on("data", (chunk) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+  });
+}
+
 const S3_METADATA_LIMIT_BYTES = 2047;
 async function handleInsert$4({ resource, data, mappedData, originalData }) {
   const totalSize = calculateTotalSize(mappedData);
@@ -16619,7 +18567,7 @@ ${errorDetails}`,
       behavior: this.behavior
     };
     const stableString = jsonStableStringify(definition);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Extract version from S3 key
@@ -17529,7 +19477,7 @@ class Database extends EventEmitter {
       partitions: definition.partitions || {}
     };
     const stableString = jsonStableStringify(hashObj);
-    return `sha256:${crypto.createHash("sha256").update(stableString).digest("hex")}`;
+    return `sha256:${crypto$1.createHash("sha256").update(stableString).digest("hex")}`;
   }
   /**
    * Get the next version number for a resource
@@ -19464,1249 +21412,12 @@ class WebhookReplicator extends BaseReplicator {
   }
 }
 
-class BaseOutputDriver {
-  /**
-   * Write data to file
-   * @param {string} filePath - File path
-   * @param {string|Buffer} data - Data to write
-   * @param {Object} options - Write options
-   * @returns {Promise<void>}
-   */
-  async write(filePath, data, options = {}) {
-    throw new Error("write() must be implemented by subclass");
-  }
-  /**
-   * Append data to file
-   * @param {string} filePath - File path
-   * @param {string|Buffer} data - Data to append
-   * @param {Object} options - Append options
-   * @returns {Promise<void>}
-   */
-  async append(filePath, data, options = {}) {
-    throw new Error("append() must be implemented by subclass");
-  }
-  /**
-   * Read file
-   * @param {string} filePath - File path
-   * @returns {Promise<string|Buffer>}
-   */
-  async read(filePath) {
-    throw new Error("read() must be implemented by subclass");
-  }
-  /**
-   * Check if file exists
-   * @param {string} filePath - File path
-   * @returns {Promise<boolean>}
-   */
-  async exists(filePath) {
-    throw new Error("exists() must be implemented by subclass");
-  }
-  /**
-   * Delete file
-   * @param {string} filePath - File path
-   * @returns {Promise<void>}
-   */
-  async delete(filePath) {
-    throw new Error("delete() must be implemented by subclass");
-  }
-  /**
-   * List files
-   * @param {string} prefix - Path prefix
-   * @returns {Promise<string[]>}
-   */
-  async list(prefix = "") {
-    throw new Error("list() must be implemented by subclass");
-  }
-  /**
-   * Get file size
-   * @param {string} filePath - File path
-   * @returns {Promise<number>} Size in bytes
-   */
-  async size(filePath) {
-    throw new Error("size() must be implemented by subclass");
-  }
-}
-class S3OutputDriver extends BaseOutputDriver {
-  /**
-   * @param {Object} config
-   * @param {PluginStorage} config.pluginStorage - PluginStorage instance (for default S3)
-   * @param {Client} config.client - S3 Client instance (for custom S3)
-   * @param {string} config.basePath - Base path for files
-   */
-  constructor(config = {}) {
-    super();
-    if (!config.pluginStorage && !config.client) {
-      throw new Error("S3OutputDriver requires either pluginStorage or client");
-    }
-    this.pluginStorage = config.pluginStorage;
-    this.client = config.client;
-    this.basePath = config.basePath || "";
-  }
-  _getFullPath(filePath) {
-    return this.basePath ? `${this.basePath}/${filePath}` : filePath;
-  }
-  async write(filePath, data, options = {}) {
-    const fullPath = this._getFullPath(filePath);
-    if (this.pluginStorage) {
-      await this.pluginStorage.set(
-        this.pluginStorage.getPluginKey(null, fullPath),
-        { content: data },
-        { behavior: "body-only", ...options }
-      );
-    } else {
-      await this.client.putObject({
-        key: fullPath,
-        body: typeof data === "string" ? data : JSON.stringify(data),
-        contentType: options.contentType || "application/octet-stream"
-      });
-    }
-  }
-  async append(filePath, data, options = {}) {
-    this._getFullPath(filePath);
-    const [existsOk, existsErr, existing] = await tryFn(() => this.read(filePath));
-    const existingData = existsOk ? existing : "";
-    const newData = existingData + data;
-    await this.write(filePath, newData, options);
-  }
-  async read(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    if (this.pluginStorage) {
-      const data = await this.pluginStorage.get(
-        this.pluginStorage.getPluginKey(null, fullPath)
-      );
-      return data?.content || null;
-    } else {
-      const [ok, err, response] = await tryFn(() => this.client.getObject(fullPath));
-      if (!ok) {
-        if (err.name === "NoSuchKey") return null;
-        throw err;
-      }
-      return await response.Body.transformToString();
-    }
-  }
-  async exists(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    if (this.pluginStorage) {
-      return await this.pluginStorage.has(
-        this.pluginStorage.getPluginKey(null, fullPath)
-      );
-    } else {
-      return await this.client.exists(fullPath);
-    }
-  }
-  async delete(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    if (this.pluginStorage) {
-      await this.pluginStorage.delete(
-        this.pluginStorage.getPluginKey(null, fullPath)
-      );
-    } else {
-      await this.client.deleteObject(fullPath);
-    }
-  }
-  async list(prefix = "") {
-    const fullPrefix = this._getFullPath(prefix);
-    if (this.pluginStorage) {
-      return await this.pluginStorage.list(fullPrefix);
-    } else {
-      const response = await this.client.listObjects({ prefix: fullPrefix });
-      return response.Contents?.map((item) => item.Key) || [];
-    }
-  }
-  async size(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    if (this.pluginStorage) {
-      const data = await this.read(filePath);
-      if (!data) return 0;
-      return Buffer.byteLength(data, "utf8");
-    } else {
-      const response = await this.client.headObject(fullPath);
-      return response.ContentLength || 0;
-    }
-  }
-}
-class FilesystemOutputDriver extends BaseOutputDriver {
-  /**
-   * @param {Object} config
-   * @param {string} config.basePath - Base directory path
-   */
-  constructor(config = {}) {
-    super();
-    if (!config.basePath) {
-      throw new Error("FilesystemOutputDriver requires basePath");
-    }
-    this.basePath = config.basePath;
-  }
-  _getFullPath(filePath) {
-    return path__namespace.join(this.basePath, filePath);
-  }
-  _ensureDirectory(filePath) {
-    const dir = path__namespace.dirname(filePath);
-    if (!fs__namespace.existsSync(dir)) {
-      fs__namespace.mkdirSync(dir, { recursive: true });
-    }
-  }
-  async write(filePath, data, options = {}) {
-    const fullPath = this._getFullPath(filePath);
-    this._ensureDirectory(fullPath);
-    await fs__namespace.promises.writeFile(
-      fullPath,
-      data,
-      { encoding: options.encoding || "utf8" }
-    );
-  }
-  async append(filePath, data, options = {}) {
-    const fullPath = this._getFullPath(filePath);
-    this._ensureDirectory(fullPath);
-    await fs__namespace.promises.appendFile(
-      fullPath,
-      data,
-      { encoding: options.encoding || "utf8" }
-    );
-  }
-  async read(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    const [ok, err, data] = await tryFn(
-      () => fs__namespace.promises.readFile(fullPath, { encoding: "utf8" })
-    );
-    if (!ok) {
-      if (err.code === "ENOENT") return null;
-      throw err;
-    }
-    return data;
-  }
-  async exists(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    return fs__namespace.existsSync(fullPath);
-  }
-  async delete(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    if (await this.exists(filePath)) {
-      await fs__namespace.promises.unlink(fullPath);
-    }
-  }
-  async list(prefix = "") {
-    const fullPath = this._getFullPath(prefix);
-    const [ok, err, files] = await tryFn(async () => {
-      if (!fs__namespace.existsSync(fullPath)) return [];
-      const entries = await fs__namespace.promises.readdir(fullPath, { withFileTypes: true });
-      return entries.filter((entry) => entry.isFile()).map((entry) => path__namespace.join(prefix, entry.name));
-    });
-    return ok ? files : [];
-  }
-  async size(filePath) {
-    const fullPath = this._getFullPath(filePath);
-    const [ok, err, stats] = await tryFn(
-      () => fs__namespace.promises.stat(fullPath)
-    );
-    if (!ok) {
-      if (err.code === "ENOENT") return 0;
-      throw err;
-    }
-    return stats.size;
-  }
-}
-class OutputDriverFactory {
-  /**
-   * Create output driver from configuration
-   *
-   * @param {Object} config - Driver configuration
-   * @param {string} config.driver - Driver type ('s3', 'filesystem')
-   * @param {string} config.path - Base path
-   * @param {string} config.connectionString - S3 connection string (for custom S3)
-   * @param {PluginStorage} config.pluginStorage - PluginStorage instance (for default S3)
-   * @returns {BaseOutputDriver}
-   *
-   * @example
-   * // S3 with PluginStorage (default)
-   * OutputDriverFactory.create({
-   *   driver: 's3',
-   *   path: 'exports',
-   *   pluginStorage: storage
-   * });
-   *
-   * // S3 with custom connection
-   * OutputDriverFactory.create({
-   *   driver: 's3',
-   *   connectionString: 's3://...',
-   *   path: 'exports'
-   * });
-   *
-   * // Filesystem
-   * OutputDriverFactory.create({
-   *   driver: 'filesystem',
-   *   path: './exports'
-   * });
-   */
-  static create(config = {}) {
-    const { driver = "s3", path: basePath, connectionString, pluginStorage } = config;
-    switch (driver) {
-      case "s3": {
-        if (connectionString) {
-          const client = new Client({ connectionString });
-          return new S3OutputDriver({ client, basePath });
-        } else if (pluginStorage) {
-          return new S3OutputDriver({ pluginStorage, basePath });
-        } else {
-          throw new Error("S3 driver requires either connectionString or pluginStorage");
-        }
-      }
-      case "filesystem": {
-        if (!basePath) {
-          throw new Error("Filesystem driver requires path");
-        }
-        return new FilesystemOutputDriver({ basePath });
-      }
-      default:
-        throw new Error(`Unknown output driver: ${driver}. Available: s3, filesystem`);
-    }
-  }
-}
-
-class CsvReplicator extends BaseReplicator {
-  constructor(config = {}) {
-    super(config);
-    this.outputConfig = config.output || { driver: "s3", path: "exports" };
-    this.delimiter = config.delimiter || ",";
-    this.mode = config.mode || "append";
-    this.includeHeaders = config.includeHeaders !== false;
-    this.rotateBy = config.rotateBy || null;
-    this.rotateSize = config.rotateSize || 100 * 1024 * 1024;
-    this.encoding = config.encoding || "utf8";
-    this.writtenHeaders = /* @__PURE__ */ new Set();
-    this.outputDriver = null;
-    this.stats = {
-      recordsWritten: 0,
-      filesCreated: 0,
-      bytesWritten: 0,
-      errors: 0
-    };
-  }
-  /**
-   * Initialize replicator
-   */
-  async initialize(database) {
-    await super.initialize(database);
-    this.outputDriver = OutputDriverFactory.create({
-      ...this.outputConfig,
-      pluginStorage: this.pluginStorage
-      // Pass PluginStorage for default S3
-    });
-    if (this.verbose) {
-      console.log(`[CsvReplicator] Initialized with ${this.outputConfig.driver} output`);
-      if (this.outputConfig.connectionString) {
-        console.log(`[CsvReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
-      }
-    }
-  }
-  /**
-   * Replicate a single record
-   */
-  async replicate(resourceName, operation, data, id) {
-    if (operation === "delete") {
-      return {
-        success: true,
-        skipped: true,
-        reason: "CSV format does not support delete operations"
-      };
-    }
-    try {
-      const filePath = this._getFilePath(resourceName);
-      if (!this.writtenHeaders.has(filePath)) {
-        await this._writeHeader(filePath, data);
-        this.writtenHeaders.add(filePath);
-      }
-      const csvLine = this._recordToCsvLine(data);
-      await this.outputDriver.append(filePath, csvLine + "\n", {
-        encoding: this.encoding
-      });
-      this.stats.recordsWritten++;
-      this.stats.bytesWritten += Buffer.byteLength(csvLine, this.encoding);
-      if (this.rotateBy === "size") {
-        await this._checkRotation(resourceName, filePath);
-      }
-      return {
-        success: true,
-        resourceName,
-        id,
-        operation,
-        filePath,
-        stats: { ...this.stats }
-      };
-    } catch (error) {
-      this.stats.errors++;
-      throw new ReplicationError(
-        `Failed to replicate to CSV: ${error.message}`,
-        {
-          driver: "csv",
-          resourceName,
-          operation,
-          id,
-          outputDriver: this.outputConfig.driver,
-          original: error,
-          suggestion: "Check output driver configuration and permissions"
-        }
-      );
-    }
-  }
-  /**
-   * Get file path for resource
-   */
-  _getFilePath(resourceName) {
-    if (this.rotateBy === "date") {
-      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      return `${resourceName}_${date}.csv`;
-    } else if (this.rotateBy === "size") {
-      return `${resourceName}.csv`;
-    } else {
-      return `${resourceName}.csv`;
-    }
-  }
-  /**
-   * Write CSV header
-   */
-  async _writeHeader(filePath, data) {
-    if (!this.includeHeaders) return;
-    const columns = Object.keys(data).sort();
-    const header = columns.join(this.delimiter);
-    const exists = await this.outputDriver.exists(filePath);
-    if (!exists || this.mode === "overwrite") {
-      await this.outputDriver.write(filePath, header + "\n", {
-        encoding: this.encoding
-      });
-      this.stats.filesCreated++;
-    }
-  }
-  /**
-   * Convert record to CSV line
-   */
-  _recordToCsvLine(data) {
-    const columns = Object.keys(data).sort();
-    const values = columns.map((col) => {
-      const value = data[col];
-      return this._escapeCsvField(value);
-    });
-    return values.join(this.delimiter);
-  }
-  /**
-   * Escape CSV field value
-   */
-  _escapeCsvField(value) {
-    if (value === null || value === void 0) {
-      return "";
-    }
-    let str = String(value);
-    const needsQuoting = str.includes(this.delimiter) || str.includes("\n") || str.includes("\r") || str.includes('"');
-    if (needsQuoting) {
-      str = str.replace(/"/g, '""');
-      return `"${str}"`;
-    }
-    return str;
-  }
-  /**
-   * Check if file needs rotation
-   */
-  async _checkRotation(resourceName, filePath) {
-    const size = await this.outputDriver.size(filePath);
-    if (size >= this.rotateSize) {
-      const timestamp = Date.now();
-      const newPath = `${resourceName}_${timestamp}.csv`;
-      const content = await this.outputDriver.read(filePath);
-      if (content) {
-        await this.outputDriver.write(newPath, content, {
-          encoding: this.encoding
-        });
-      }
-      await this.outputDriver.delete(filePath);
-      this.writtenHeaders.delete(filePath);
-      if (this.verbose) {
-        console.log(`[CsvReplicator] Rotated ${filePath} \u2192 ${newPath} (${size} bytes)`);
-      }
-    }
-  }
-  /**
-   * Get replicator statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      outputDriver: this.outputConfig.driver,
-      outputPath: this.outputConfig.path
-    };
-  }
-  /**
-   * Cleanup on uninstall
-   */
-  async uninstall(database) {
-    if (this.verbose) {
-      console.log("[CsvReplicator] Cleaning up...");
-    }
-    await super.uninstall(database);
-  }
-}
-
-class JsonlReplicator extends BaseReplicator {
-  constructor(config = {}) {
-    super(config);
-    this.outputConfig = config.output || { driver: "s3", path: "exports" };
-    this.mode = config.mode || "append";
-    this.rotateBy = config.rotateBy || null;
-    this.rotateSize = config.rotateSize || 100 * 1024 * 1024;
-    this.compress = config.compress || false;
-    this.encoding = config.encoding || "utf8";
-    this.outputDriver = null;
-    this.stats = {
-      recordsWritten: 0,
-      filesCreated: 0,
-      bytesWritten: 0,
-      errors: 0
-    };
-  }
-  async initialize(database) {
-    await super.initialize(database);
-    this.outputDriver = OutputDriverFactory.create({
-      ...this.outputConfig,
-      pluginStorage: this.pluginStorage
-    });
-    if (this.verbose) {
-      console.log(`[JsonlReplicator] Initialized with ${this.outputConfig.driver} output`);
-      if (this.compress) {
-        console.log("[JsonlReplicator] Compression enabled");
-      }
-    }
-  }
-  async replicate(resourceName, operation, data, id) {
-    if (operation === "delete") {
-      return {
-        success: true,
-        skipped: true,
-        reason: "JSONL format does not support delete operations"
-      };
-    }
-    try {
-      const filePath = this._getFilePath(resourceName);
-      const jsonLine = JSON.stringify(data) + "\n";
-      await this.outputDriver.append(filePath, jsonLine, {
-        encoding: this.encoding
-      });
-      this.stats.recordsWritten++;
-      this.stats.bytesWritten += Buffer.byteLength(jsonLine, this.encoding);
-      if (this.rotateBy === "size") {
-        await this._checkRotation(resourceName, filePath);
-      }
-      return {
-        success: true,
-        resourceName,
-        id,
-        operation,
-        filePath,
-        stats: { ...this.stats }
-      };
-    } catch (error) {
-      this.stats.errors++;
-      throw new ReplicationError(
-        `Failed to replicate to JSONL: ${error.message}`,
-        {
-          driver: "jsonl",
-          resourceName,
-          operation,
-          id,
-          outputDriver: this.outputConfig.driver,
-          original: error,
-          suggestion: "Check output driver configuration and permissions"
-        }
-      );
-    }
-  }
-  _getFilePath(resourceName) {
-    const ext = this.compress ? ".jsonl.gz" : ".jsonl";
-    if (this.rotateBy === "date") {
-      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      return `${resourceName}_${date}${ext}`;
-    } else if (this.rotateBy === "size") {
-      return `${resourceName}${ext}`;
-    } else {
-      return `${resourceName}${ext}`;
-    }
-  }
-  async _checkRotation(resourceName, filePath) {
-    const size = await this.outputDriver.size(filePath);
-    if (size >= this.rotateSize) {
-      const timestamp = Date.now();
-      const ext = this.compress ? ".jsonl.gz" : ".jsonl";
-      const newPath = `${resourceName}_${timestamp}${ext}`;
-      const content = await this.outputDriver.read(filePath);
-      if (content) {
-        await this.outputDriver.write(newPath, content, {
-          encoding: this.encoding
-        });
-      }
-      await this.outputDriver.delete(filePath);
-      if (this.verbose) {
-        console.log(`[JsonlReplicator] Rotated ${filePath} \u2192 ${newPath} (${size} bytes)`);
-      }
-    }
-  }
-  getStats() {
-    return {
-      ...this.stats,
-      outputDriver: this.outputConfig.driver,
-      outputPath: this.outputConfig.path
-    };
-  }
-  async uninstall(database) {
-    if (this.verbose) {
-      console.log("[JsonlReplicator] Cleaning up...");
-    }
-    await super.uninstall(database);
-  }
-}
-
-class ParquetReplicator extends BaseReplicator {
-  constructor(config = {}) {
-    super(config);
-    this.outputConfig = config.output || { driver: "s3", path: "exports" };
-    this.compression = config.compression || "snappy";
-    this.rowGroupSize = config.rowGroupSize || 5e3;
-    this.pageSize = config.pageSize || 8192;
-    this.mode = config.mode || "append";
-    this.rotateBy = config.rotateBy || null;
-    this.outputDriver = null;
-    this.tempDir = path__namespace.join(os__namespace.tmpdir(), "s3db-parquet");
-    this.buffers = /* @__PURE__ */ new Map();
-    this.stats = {
-      recordsWritten: 0,
-      filesCreated: 0,
-      bytesWritten: 0,
-      errors: 0
-    };
-    this.parquetjs = null;
-    this.parquetAvailable = false;
-  }
-  /**
-   * Initialize replicator
-   */
-  async initialize(database) {
-    await super.initialize(database);
-    try {
-      this.parquetjs = await import('parquetjs');
-      this.parquetAvailable = true;
-    } catch (error) {
-      throw new ReplicationError(
-        'Parquet replicator requires the "parquetjs" package. Install it with: npm install parquetjs',
-        {
-          operation: "initialize",
-          replicatorClass: this.name,
-          suggestion: "Run: npm install parquetjs",
-          originalError: error
-        }
-      );
-    }
-    this.outputDriver = OutputDriverFactory.create({
-      ...this.outputConfig,
-      pluginStorage: this.pluginStorage
-    });
-    if (!fs__namespace.existsSync(this.tempDir)) {
-      fs__namespace.mkdirSync(this.tempDir, { recursive: true });
-    }
-    if (this.verbose) {
-      console.log(`[ParquetReplicator] Initialized with ${this.outputConfig.driver} output`);
-      console.log(`[ParquetReplicator] Compression: ${this.compression}`);
-      if (this.outputConfig.connectionString) {
-        console.log(`[ParquetReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
-      }
-    }
-    this.emit("initialized", {
-      replicator: this.name,
-      outputDriver: this.outputConfig.driver,
-      compression: this.compression
-    });
-  }
-  /**
-   * Get file path for resource
-   */
-  _getFilePath(resourceName) {
-    if (this.rotateBy === "date") {
-      const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-      return `${resourceName}_${date}.parquet`;
-    } else if (this.rotateBy === "size") {
-      return `${resourceName}.parquet`;
-    } else {
-      return `${resourceName}.parquet`;
-    }
-  }
-  /**
-   * Get temporary file path for parquet generation
-   */
-  _getTempFilePath(resourceName) {
-    const timestamp = Date.now();
-    return path__namespace.join(this.tempDir, `${resourceName}_${timestamp}.parquet`);
-  }
-  /**
-   * Infer Parquet schema from S3DB data
-   */
-  _inferSchema(data) {
-    const schema = {};
-    for (const [key, value] of Object.entries(data)) {
-      const type = typeof value;
-      if (type === "string") {
-        schema[key] = { type: "UTF8" };
-      } else if (type === "number") {
-        if (Number.isInteger(value)) {
-          schema[key] = { type: "INT64" };
-        } else {
-          schema[key] = { type: "DOUBLE" };
-        }
-      } else if (type === "boolean") {
-        schema[key] = { type: "BOOLEAN" };
-      } else if (Array.isArray(value)) {
-        schema[key] = { type: "JSON" };
-      } else if (type === "object" && value !== null) {
-        schema[key] = { type: "JSON" };
-      } else {
-        schema[key] = { type: "UTF8", optional: true };
-      }
-    }
-    return schema;
-  }
-  /**
-   * Prepare data for Parquet (convert complex types to JSON strings)
-   */
-  _prepareData(data) {
-    const prepared = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (typeof value === "object" && value !== null) {
-        prepared[key] = JSON.stringify(value);
-      } else {
-        prepared[key] = value;
-      }
-    }
-    return prepared;
-  }
-  /**
-   * Write buffered records to Parquet file
-   */
-  async _flushBuffer(resourceName) {
-    if (!this.parquetAvailable) {
-      throw new ReplicationError("Parquet library not available", {
-        operation: "_flushBuffer",
-        replicatorClass: this.name
-      });
-    }
-    const buffer = this.buffers.get(resourceName);
-    if (!buffer || buffer.length === 0) {
-      return { success: true, recordsWritten: 0 };
-    }
-    let tempFilePath = null;
-    try {
-      const filePath = this._getFilePath(resourceName);
-      tempFilePath = this._getTempFilePath(resourceName);
-      const schema = this._inferSchema(buffer[0]);
-      const parquetSchema = new this.parquetjs.ParquetSchema(schema);
-      const writer = await this.parquetjs.ParquetWriter.openFile(parquetSchema, tempFilePath, {
-        compression: this.compression.toUpperCase(),
-        rowGroupSize: this.rowGroupSize,
-        pageSize: this.pageSize
-      });
-      for (const record of buffer) {
-        const prepared = this._prepareData(record);
-        await writer.appendRow(prepared);
-      }
-      await writer.close();
-      const fileContent = await fs__namespace.promises.readFile(tempFilePath);
-      if (this.mode === "append") {
-        const existing = await this.outputDriver.read(filePath);
-        if (existing) {
-          if (this.verbose) {
-            console.log(`[ParquetReplicator] Warning: Overwriting ${filePath} (Parquet doesn't support append)`);
-          }
-        }
-      }
-      await this.outputDriver.write(filePath, fileContent);
-      const recordsWritten = buffer.length;
-      this.stats.recordsWritten += recordsWritten;
-      this.stats.filesCreated++;
-      this.stats.bytesWritten += fileContent.length;
-      this.buffers.set(resourceName, []);
-      if (fs__namespace.existsSync(tempFilePath)) {
-        await fs__namespace.promises.unlink(tempFilePath);
-      }
-      return {
-        success: true,
-        resourceName,
-        recordsWritten,
-        filePath
-      };
-    } catch (error) {
-      this.stats.errors++;
-      this.emit("error", {
-        replicator: this.name,
-        resourceName,
-        error: error.message
-      });
-      if (tempFilePath && fs__namespace.existsSync(tempFilePath)) {
-        try {
-          await fs__namespace.promises.unlink(tempFilePath);
-        } catch (unlinkError) {
-        }
-      }
-      throw new ReplicationError(`Failed to write Parquet: ${error.message}`, {
-        operation: "_flushBuffer",
-        replicatorClass: this.name,
-        resourceName,
-        originalError: error
-      });
-    }
-  }
-  /**
-   * Write record to Parquet (buffered)
-   */
-  async replicate(resourceName, operation, data, id) {
-    if (operation === "delete") {
-      return { success: true, skipped: true, reason: "Parquet format does not support deletes" };
-    }
-    if (!this.buffers.has(resourceName)) {
-      this.buffers.set(resourceName, []);
-    }
-    this.buffers.get(resourceName).push(data);
-    if (this.buffers.get(resourceName).length >= this.rowGroupSize) {
-      await this._flushBuffer(resourceName);
-    }
-    return {
-      success: true,
-      resourceName,
-      id,
-      operation,
-      buffered: true
-    };
-  }
-  /**
-   * Write batch of records to Parquet
-   */
-  async replicateBatch(resourceName, records) {
-    if (!records || records.length === 0) {
-      return {
-        success: true,
-        recordsWritten: 0
-      };
-    }
-    if (!this.buffers.has(resourceName)) {
-      this.buffers.set(resourceName, []);
-    }
-    const buffer = this.buffers.get(resourceName);
-    for (const record of records) {
-      if (record.operation !== "delete") {
-        buffer.push(record.data);
-      }
-    }
-    const result = await this._flushBuffer(resourceName);
-    return result;
-  }
-  /**
-   * Test connection (check if output driver is accessible and parquetjs is available)
-   */
-  async testConnection() {
-    if (!this.parquetAvailable) {
-      throw new ReplicationError("Parquet library not available. Install with: npm install parquetjs", {
-        operation: "testConnection",
-        replicatorClass: this.name
-      });
-    }
-    try {
-      const testFile = ".test.parquet";
-      await this.outputDriver.write(testFile, "test");
-      await this.outputDriver.delete(testFile);
-      return true;
-    } catch (error) {
-      throw new ReplicationError(`Output driver not accessible: ${error.message}`, {
-        operation: "testConnection",
-        replicatorClass: this.name,
-        outputDriver: this.outputConfig.driver
-      });
-    }
-  }
-  /**
-   * Get replicator statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      outputDriver: this.outputConfig.driver,
-      outputPath: this.outputConfig.path
-    };
-  }
-  /**
-   * Get status
-   */
-  async getStatus() {
-    return {
-      ...await super.getStatus(),
-      connected: this.parquetAvailable,
-      outputDriver: this.outputConfig.driver,
-      parquetAvailable: this.parquetAvailable,
-      stats: this.stats
-    };
-  }
-  /**
-   * Close and flush all buffers
-   */
-  async close() {
-    for (const resourceName of this.buffers.keys()) {
-      await this._flushBuffer(resourceName);
-    }
-    this.buffers.clear();
-  }
-}
-
-class ExcelReplicator extends BaseReplicator {
-  constructor(config = {}) {
-    super(config);
-    this.outputConfig = config.output || { driver: "s3", path: "exports" };
-    this.filename = config.filename || "export.xlsx";
-    this.mode = config.mode || "append";
-    this.sheetPerResource = config.sheetPerResource !== false;
-    this.freezeHeaders = config.freezeHeaders !== false;
-    this.autoFilter = config.autoFilter !== false;
-    this.autoFitColumns = config.autoFitColumns !== false;
-    this.maxRowsPerSheet = config.maxRowsPerSheet || 1048576;
-    this.formatCurrency = config.formatCurrency || false;
-    this.outputDriver = null;
-    this.tempDir = path__namespace.join(os__namespace.tmpdir(), "s3db-excel");
-    this.buffers = /* @__PURE__ */ new Map();
-    this.workbooks = /* @__PURE__ */ new Map();
-    this.stats = {
-      recordsWritten: 0,
-      filesCreated: 0,
-      sheetsCreated: 0,
-      bytesWritten: 0,
-      errors: 0
-    };
-    this.ExcelJS = null;
-    this.excelAvailable = false;
-  }
-  /**
-   * Initialize replicator
-   */
-  async initialize(database) {
-    await super.initialize(database);
-    try {
-      const module = await import('exceljs');
-      this.ExcelJS = module.default || module;
-      this.excelAvailable = true;
-    } catch (error) {
-      throw new ReplicationError(
-        'Excel replicator requires the "exceljs" package. Install it with: npm install exceljs',
-        {
-          operation: "initialize",
-          replicatorClass: this.name,
-          suggestion: "Run: npm install exceljs",
-          originalError: error
-        }
-      );
-    }
-    this.outputDriver = OutputDriverFactory.create({
-      ...this.outputConfig,
-      pluginStorage: this.pluginStorage
-    });
-    if (!fs__namespace.existsSync(this.tempDir)) {
-      fs__namespace.mkdirSync(this.tempDir, { recursive: true });
-    }
-    if (this.verbose) {
-      console.log(`[ExcelReplicator] Initialized with ${this.outputConfig.driver} output`);
-      console.log(`[ExcelReplicator] Filename: ${this.filename}`);
-      if (this.outputConfig.connectionString) {
-        console.log(`[ExcelReplicator] Using custom S3: ${this.outputConfig.connectionString.split("@")[1]}`);
-      }
-    }
-    this.emit("initialized", {
-      replicator: this.name,
-      outputDriver: this.outputConfig.driver,
-      filename: this.filename
-    });
-  }
-  /**
-   * Get file path
-   */
-  _getFilePath() {
-    const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-    const baseFilename = this.filename.replace(".xlsx", "");
-    return `${baseFilename}_${date}.xlsx`;
-  }
-  /**
-   * Get temporary file path for Excel generation
-   */
-  _getTempFilePath() {
-    const timestamp = Date.now();
-    const baseFilename = this.filename.replace(".xlsx", "");
-    return path__namespace.join(this.tempDir, `${baseFilename}_${timestamp}.xlsx`);
-  }
-  /**
-   * Get or create workbook
-   */
-  async _getWorkbook(filePath) {
-    if (this.workbooks.has(filePath)) {
-      return this.workbooks.get(filePath);
-    }
-    const workbook = new this.ExcelJS.Workbook();
-    workbook.creator = "S3DB Replicator";
-    workbook.created = /* @__PURE__ */ new Date();
-    this.workbooks.set(filePath, workbook);
-    this.stats.filesCreated++;
-    return workbook;
-  }
-  /**
-   * Get or create worksheet
-   */
-  _getWorksheet(workbook, resourceName) {
-    let worksheet = workbook.getWorksheet(resourceName);
-    if (!worksheet) {
-      worksheet = workbook.addWorksheet(resourceName, {
-        views: this.freezeHeaders ? [{ state: "frozen", ySplit: 1 }] : []
-      });
-      this.stats.sheetsCreated++;
-    }
-    return worksheet;
-  }
-  /**
-   * Setup worksheet headers
-   */
-  _setupHeaders(worksheet, columns) {
-    worksheet.addRow(columns);
-    const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFE0E0E0" }
-    };
-    if (this.autoFilter) {
-      worksheet.autoFilter = {
-        from: { row: 1, column: 1 },
-        to: { row: 1, column: columns.length }
-      };
-    }
-    if (this.autoFitColumns) {
-      worksheet.columns = columns.map((col) => ({
-        header: col,
-        key: col,
-        width: Math.max(col.length + 2, 10)
-      }));
-    }
-  }
-  /**
-   * Format cell value based on type
-   */
-  _formatCellValue(value) {
-    if (value === null || value === void 0) {
-      return "";
-    }
-    const type = typeof value;
-    if (type === "object") {
-      if (value instanceof Date) {
-        return value;
-      }
-      if (Array.isArray(value)) {
-        return JSON.stringify(value);
-      }
-      return JSON.stringify(value);
-    }
-    return value;
-  }
-  /**
-   * Add row to worksheet
-   */
-  _addRow(worksheet, data, columns) {
-    const rowData = columns.map((col) => this._formatCellValue(data[col]));
-    worksheet.addRow(rowData);
-  }
-  /**
-   * Write buffered records to Excel
-   */
-  async _flushBuffer(resourceName) {
-    if (!this.excelAvailable) {
-      throw new ReplicationError("Excel library not available", {
-        operation: "_flushBuffer",
-        replicatorClass: this.name
-      });
-    }
-    const buffer = this.buffers.get(resourceName);
-    if (!buffer || buffer.length === 0) {
-      return { success: true, recordsWritten: 0 };
-    }
-    let tempFilePath = null;
-    try {
-      const filePath = this._getFilePath();
-      tempFilePath = this._getTempFilePath();
-      const workbook = await this._getWorkbook(tempFilePath);
-      const worksheet = this._getWorksheet(workbook, resourceName);
-      const columnsSet = /* @__PURE__ */ new Set();
-      for (const record of buffer) {
-        Object.keys(record).forEach((col) => columnsSet.add(col));
-      }
-      const columns = Array.from(columnsSet).sort();
-      if (worksheet.rowCount === 0) {
-        this._setupHeaders(worksheet, columns);
-      }
-      for (const record of buffer) {
-        if (worksheet.rowCount >= this.maxRowsPerSheet) {
-          this.emit("warning", {
-            replicator: this.name,
-            resourceName,
-            message: `Reached max rows per sheet (${this.maxRowsPerSheet})`
-          });
-          break;
-        }
-        this._addRow(worksheet, record, columns);
-      }
-      await workbook.xlsx.writeFile(tempFilePath);
-      const fileContent = await fs__namespace.promises.readFile(tempFilePath);
-      await this.outputDriver.write(filePath, fileContent);
-      const recordsWritten = buffer.length;
-      this.stats.recordsWritten += recordsWritten;
-      this.stats.bytesWritten += fileContent.length;
-      this.buffers.set(resourceName, []);
-      this.workbooks.delete(tempFilePath);
-      if (fs__namespace.existsSync(tempFilePath)) {
-        await fs__namespace.promises.unlink(tempFilePath);
-      }
-      return {
-        success: true,
-        resourceName,
-        recordsWritten,
-        filePath
-      };
-    } catch (error) {
-      this.stats.errors++;
-      this.emit("error", {
-        replicator: this.name,
-        resourceName,
-        error: error.message
-      });
-      if (tempFilePath && fs__namespace.existsSync(tempFilePath)) {
-        try {
-          await fs__namespace.promises.unlink(tempFilePath);
-        } catch (unlinkError) {
-        }
-      }
-      throw new ReplicationError(`Failed to write Excel: ${error.message}`, {
-        operation: "_flushBuffer",
-        replicatorClass: this.name,
-        resourceName,
-        originalError: error
-      });
-    }
-  }
-  /**
-   * Write record to Excel (buffered)
-   */
-  async replicate(resourceName, operation, data, id) {
-    if (operation === "delete") {
-      return { success: true, skipped: true, reason: "Excel format does not support deletes" };
-    }
-    if (!this.buffers.has(resourceName)) {
-      this.buffers.set(resourceName, []);
-    }
-    this.buffers.get(resourceName).push(data);
-    if (this.buffers.get(resourceName).length >= 1e3) {
-      await this._flushBuffer(resourceName);
-    }
-    return {
-      success: true,
-      resourceName,
-      id,
-      operation,
-      buffered: true
-    };
-  }
-  /**
-   * Write batch of records to Excel
-   */
-  async replicateBatch(resourceName, records) {
-    if (!records || records.length === 0) {
-      return {
-        success: true,
-        recordsWritten: 0
-      };
-    }
-    if (!this.buffers.has(resourceName)) {
-      this.buffers.set(resourceName, []);
-    }
-    const buffer = this.buffers.get(resourceName);
-    for (const record of records) {
-      if (record.operation !== "delete") {
-        buffer.push(record.data);
-      }
-    }
-    const result = await this._flushBuffer(resourceName);
-    return result;
-  }
-  /**
-   * Test connection (check if output driver is accessible and exceljs is available)
-   */
-  async testConnection() {
-    if (!this.excelAvailable) {
-      throw new ReplicationError("Excel library not available. Install with: npm install exceljs", {
-        operation: "testConnection",
-        replicatorClass: this.name
-      });
-    }
-    try {
-      const testFile = ".test.xlsx";
-      await this.outputDriver.write(testFile, "test");
-      await this.outputDriver.delete(testFile);
-      return true;
-    } catch (error) {
-      throw new ReplicationError(`Output driver not accessible: ${error.message}`, {
-        operation: "testConnection",
-        replicatorClass: this.name,
-        outputDriver: this.outputConfig.driver
-      });
-    }
-  }
-  /**
-   * Get replicator statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      outputDriver: this.outputConfig.driver,
-      outputPath: this.outputConfig.path
-    };
-  }
-  /**
-   * Get status
-   */
-  async getStatus() {
-    return {
-      ...await super.getStatus(),
-      connected: this.excelAvailable,
-      outputDriver: this.outputConfig.driver,
-      excelAvailable: this.excelAvailable,
-      stats: this.stats
-    };
-  }
-  /**
-   * Close and flush all buffers
-   */
-  async close() {
-    for (const resourceName of this.buffers.keys()) {
-      await this._flushBuffer(resourceName);
-    }
-    this.buffers.clear();
-    this.workbooks.clear();
-  }
-}
-
 const REPLICATOR_DRIVERS = {
   s3db: S3dbReplicator,
   sqs: SqsReplicator,
   bigquery: BigqueryReplicator,
   postgres: PostgresReplicator,
-  webhook: WebhookReplicator,
-  csv: CsvReplicator,
-  jsonl: JsonlReplicator,
-  parquet: ParquetReplicator,
-  excel: ExcelReplicator
+  webhook: WebhookReplicator
 };
 function createReplicator(driver, config = {}, resources = [], client = null) {
   const ReplicatorClass = REPLICATOR_DRIVERS[driver];
@@ -22851,1410 +23562,6 @@ class StateMachinePlugin extends Plugin {
     this.removeAllListeners();
   }
 }
-
-function getDefaultExportFromCjs (x) {
-	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
-}
-
-var nodeCron = {};
-
-var inlineScheduledTask = {};
-
-var runner = {};
-
-var createId = {};
-
-var hasRequiredCreateId;
-
-function requireCreateId () {
-	if (hasRequiredCreateId) return createId;
-	hasRequiredCreateId = 1;
-	var __importDefault = (createId && createId.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(createId, "__esModule", { value: true });
-	createId.createID = createID;
-	const node_crypto_1 = __importDefault(require$$0);
-	function createID(prefix = '', length = 16) {
-	    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	    const values = node_crypto_1.default.randomBytes(length);
-	    const id = Array.from(values, v => charset[v % charset.length]).join('');
-	    return prefix ? `${prefix}-${id}` : id;
-	}
-	
-	return createId;
-}
-
-var logger = {};
-
-var hasRequiredLogger;
-
-function requireLogger () {
-	if (hasRequiredLogger) return logger;
-	hasRequiredLogger = 1;
-	Object.defineProperty(logger, "__esModule", { value: true });
-	const levelColors = {
-	    INFO: '\x1b[36m',
-	    WARN: '\x1b[33m',
-	    ERROR: '\x1b[31m',
-	    DEBUG: '\x1b[35m',
-	};
-	const GREEN = '\x1b[32m';
-	const RESET = '\x1b[0m';
-	function log(level, message, extra) {
-	    const timestamp = new Date().toISOString();
-	    const color = levelColors[level] ?? '';
-	    const prefix = `[${timestamp}] [PID: ${process.pid}] ${GREEN}[NODE-CRON]${GREEN} ${color}[${level}]${RESET}`;
-	    const output = `${prefix} ${message}`;
-	    switch (level) {
-	        case 'ERROR':
-	            console.error(output, extra ?? '');
-	            break;
-	        case 'DEBUG':
-	            console.debug(output, extra ?? '');
-	            break;
-	        case 'WARN':
-	            console.warn(output);
-	            break;
-	        case 'INFO':
-	        default:
-	            console.info(output);
-	            break;
-	    }
-	}
-	const logger$1 = {
-	    info(message) {
-	        log('INFO', message);
-	    },
-	    warn(message) {
-	        log('WARN', message);
-	    },
-	    error(message, err) {
-	        if (message instanceof Error) {
-	            log('ERROR', message.message, message);
-	        }
-	        else {
-	            log('ERROR', message, err);
-	        }
-	    },
-	    debug(message, err) {
-	        if (message instanceof Error) {
-	            log('DEBUG', message.message, message);
-	        }
-	        else {
-	            log('DEBUG', message, err);
-	        }
-	    },
-	};
-	logger.default = logger$1;
-	
-	return logger;
-}
-
-var trackedPromise = {};
-
-var hasRequiredTrackedPromise;
-
-function requireTrackedPromise () {
-	if (hasRequiredTrackedPromise) return trackedPromise;
-	hasRequiredTrackedPromise = 1;
-	Object.defineProperty(trackedPromise, "__esModule", { value: true });
-	trackedPromise.TrackedPromise = void 0;
-	class TrackedPromise {
-	    promise;
-	    error;
-	    state;
-	    value;
-	    constructor(executor) {
-	        this.state = 'pending';
-	        this.promise = new Promise((resolve, reject) => {
-	            executor((value) => {
-	                this.state = 'fulfilled';
-	                this.value = value;
-	                resolve(value);
-	            }, (error) => {
-	                this.state = 'rejected';
-	                this.error = error;
-	                reject(error);
-	            });
-	        });
-	    }
-	    getPromise() {
-	        return this.promise;
-	    }
-	    getState() {
-	        return this.state;
-	    }
-	    isPending() {
-	        return this.state === 'pending';
-	    }
-	    isFulfilled() {
-	        return this.state === 'fulfilled';
-	    }
-	    isRejected() {
-	        return this.state === 'rejected';
-	    }
-	    getValue() {
-	        return this.value;
-	    }
-	    getError() {
-	        return this.error;
-	    }
-	    then(onfulfilled, onrejected) {
-	        return this.promise.then(onfulfilled, onrejected);
-	    }
-	    catch(onrejected) {
-	        return this.promise.catch(onrejected);
-	    }
-	    finally(onfinally) {
-	        return this.promise.finally(onfinally);
-	    }
-	}
-	trackedPromise.TrackedPromise = TrackedPromise;
-	
-	return trackedPromise;
-}
-
-var hasRequiredRunner;
-
-function requireRunner () {
-	if (hasRequiredRunner) return runner;
-	hasRequiredRunner = 1;
-	var __importDefault = (runner && runner.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(runner, "__esModule", { value: true });
-	runner.Runner = void 0;
-	const create_id_1 = requireCreateId();
-	const logger_1 = __importDefault(requireLogger());
-	const tracked_promise_1 = requireTrackedPromise();
-	function emptyOnFn() { }
-	function emptyHookFn() { return true; }
-	function defaultOnError(date, error) {
-	    logger_1.default.error('Task failed with error!', error);
-	}
-	class Runner {
-	    timeMatcher;
-	    onMatch;
-	    noOverlap;
-	    maxExecutions;
-	    maxRandomDelay;
-	    runCount;
-	    running;
-	    heartBeatTimeout;
-	    onMissedExecution;
-	    onOverlap;
-	    onError;
-	    beforeRun;
-	    onFinished;
-	    onMaxExecutions;
-	    constructor(timeMatcher, onMatch, options) {
-	        this.timeMatcher = timeMatcher;
-	        this.onMatch = onMatch;
-	        this.noOverlap = options == undefined || options.noOverlap === undefined ? false : options.noOverlap;
-	        this.maxExecutions = options?.maxExecutions;
-	        this.maxRandomDelay = options?.maxRandomDelay || 0;
-	        this.onMissedExecution = options?.onMissedExecution || emptyOnFn;
-	        this.onOverlap = options?.onOverlap || emptyOnFn;
-	        this.onError = options?.onError || defaultOnError;
-	        this.onFinished = options?.onFinished || emptyHookFn;
-	        this.beforeRun = options?.beforeRun || emptyHookFn;
-	        this.onMaxExecutions = options?.onMaxExecutions || emptyOnFn;
-	        this.runCount = 0;
-	        this.running = false;
-	    }
-	    start() {
-	        this.running = true;
-	        let lastExecution;
-	        let expectedNextExecution;
-	        const scheduleNextHeartBeat = (currentDate) => {
-	            if (this.running) {
-	                clearTimeout(this.heartBeatTimeout);
-	                this.heartBeatTimeout = setTimeout(heartBeat, getDelay(this.timeMatcher, currentDate));
-	            }
-	        };
-	        const runTask = (date) => {
-	            return new Promise(async (resolve) => {
-	                const execution = {
-	                    id: (0, create_id_1.createID)('exec'),
-	                    reason: 'scheduled'
-	                };
-	                const shouldExecute = await this.beforeRun(date, execution);
-	                const randomDelay = Math.floor(Math.random() * this.maxRandomDelay);
-	                if (shouldExecute) {
-	                    setTimeout(async () => {
-	                        try {
-	                            this.runCount++;
-	                            execution.startedAt = new Date();
-	                            const result = await this.onMatch(date, execution);
-	                            execution.finishedAt = new Date();
-	                            execution.result = result;
-	                            this.onFinished(date, execution);
-	                            if (this.maxExecutions && this.runCount >= this.maxExecutions) {
-	                                this.onMaxExecutions(date);
-	                                this.stop();
-	                            }
-	                        }
-	                        catch (error) {
-	                            execution.finishedAt = new Date();
-	                            execution.error = error;
-	                            this.onError(date, error, execution);
-	                        }
-	                        resolve(true);
-	                    }, randomDelay);
-	                }
-	            });
-	        };
-	        const checkAndRun = (date) => {
-	            return new tracked_promise_1.TrackedPromise(async (resolve, reject) => {
-	                try {
-	                    if (this.timeMatcher.match(date)) {
-	                        await runTask(date);
-	                    }
-	                    resolve(true);
-	                }
-	                catch (err) {
-	                    reject(err);
-	                }
-	            });
-	        };
-	        const heartBeat = async () => {
-	            const currentDate = nowWithoutMs();
-	            if (expectedNextExecution && expectedNextExecution.getTime() < currentDate.getTime()) {
-	                while (expectedNextExecution.getTime() < currentDate.getTime()) {
-	                    logger_1.default.warn(`missed execution at ${expectedNextExecution}! Possible blocking IO or high CPU user at the same process used by node-cron.`);
-	                    expectedNextExecution = this.timeMatcher.getNextMatch(expectedNextExecution);
-	                    runAsync(this.onMissedExecution, expectedNextExecution, defaultOnError);
-	                }
-	            }
-	            if (lastExecution && lastExecution.getState() === 'pending') {
-	                runAsync(this.onOverlap, currentDate, defaultOnError);
-	                if (this.noOverlap) {
-	                    logger_1.default.warn('task still running, new execution blocked by overlap prevention!');
-	                    expectedNextExecution = this.timeMatcher.getNextMatch(currentDate);
-	                    scheduleNextHeartBeat(currentDate);
-	                    return;
-	                }
-	            }
-	            lastExecution = checkAndRun(currentDate);
-	            expectedNextExecution = this.timeMatcher.getNextMatch(currentDate);
-	            scheduleNextHeartBeat(currentDate);
-	        };
-	        this.heartBeatTimeout = setTimeout(() => {
-	            heartBeat();
-	        }, getDelay(this.timeMatcher, nowWithoutMs()));
-	    }
-	    nextRun() {
-	        return this.timeMatcher.getNextMatch(new Date());
-	    }
-	    stop() {
-	        this.running = false;
-	        if (this.heartBeatTimeout) {
-	            clearTimeout(this.heartBeatTimeout);
-	            this.heartBeatTimeout = undefined;
-	        }
-	    }
-	    isStarted() {
-	        return !!this.heartBeatTimeout && this.running;
-	    }
-	    isStopped() {
-	        return !this.isStarted();
-	    }
-	    async execute() {
-	        const date = new Date();
-	        const execution = {
-	            id: (0, create_id_1.createID)('exec'),
-	            reason: 'invoked'
-	        };
-	        try {
-	            const shouldExecute = await this.beforeRun(date, execution);
-	            if (shouldExecute) {
-	                this.runCount++;
-	                execution.startedAt = new Date();
-	                const result = await this.onMatch(date, execution);
-	                execution.finishedAt = new Date();
-	                execution.result = result;
-	                this.onFinished(date, execution);
-	            }
-	        }
-	        catch (error) {
-	            execution.finishedAt = new Date();
-	            execution.error = error;
-	            this.onError(date, error, execution);
-	        }
-	    }
-	}
-	runner.Runner = Runner;
-	async function runAsync(fn, date, onError) {
-	    try {
-	        await fn(date);
-	    }
-	    catch (error) {
-	        onError(date, error);
-	    }
-	}
-	function getDelay(timeMatcher, currentDate) {
-	    const maxDelay = 86400000;
-	    const nextRun = timeMatcher.getNextMatch(currentDate);
-	    const now = new Date();
-	    const delay = nextRun.getTime() - now.getTime();
-	    if (delay > maxDelay) {
-	        return maxDelay;
-	    }
-	    return Math.max(0, delay);
-	}
-	function nowWithoutMs() {
-	    const date = new Date();
-	    date.setMilliseconds(0);
-	    return date;
-	}
-	
-	return runner;
-}
-
-var timeMatcher = {};
-
-var convertion = {};
-
-var monthNamesConversion = {};
-
-var hasRequiredMonthNamesConversion;
-
-function requireMonthNamesConversion () {
-	if (hasRequiredMonthNamesConversion) return monthNamesConversion;
-	hasRequiredMonthNamesConversion = 1;
-	Object.defineProperty(monthNamesConversion, "__esModule", { value: true });
-	monthNamesConversion.default = (() => {
-	    const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
-	        'august', 'september', 'october', 'november', 'december'];
-	    const shortMonths = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug',
-	        'sep', 'oct', 'nov', 'dec'];
-	    function convertMonthName(expression, items) {
-	        for (let i = 0; i < items.length; i++) {
-	            expression = expression.replace(new RegExp(items[i], 'gi'), i + 1);
-	        }
-	        return expression;
-	    }
-	    function interprete(monthExpression) {
-	        monthExpression = convertMonthName(monthExpression, months);
-	        monthExpression = convertMonthName(monthExpression, shortMonths);
-	        return monthExpression;
-	    }
-	    return interprete;
-	})();
-	
-	return monthNamesConversion;
-}
-
-var weekDayNamesConversion = {};
-
-var hasRequiredWeekDayNamesConversion;
-
-function requireWeekDayNamesConversion () {
-	if (hasRequiredWeekDayNamesConversion) return weekDayNamesConversion;
-	hasRequiredWeekDayNamesConversion = 1;
-	Object.defineProperty(weekDayNamesConversion, "__esModule", { value: true });
-	weekDayNamesConversion.default = (() => {
-	    const weekDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday',
-	        'friday', 'saturday'];
-	    const shortWeekDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-	    function convertWeekDayName(expression, items) {
-	        for (let i = 0; i < items.length; i++) {
-	            expression = expression.replace(new RegExp(items[i], 'gi'), i);
-	        }
-	        return expression;
-	    }
-	    function convertWeekDays(expression) {
-	        expression = expression.replace('7', '0');
-	        expression = convertWeekDayName(expression, weekDays);
-	        return convertWeekDayName(expression, shortWeekDays);
-	    }
-	    return convertWeekDays;
-	})();
-	
-	return weekDayNamesConversion;
-}
-
-var asteriskToRangeConversion = {};
-
-var hasRequiredAsteriskToRangeConversion;
-
-function requireAsteriskToRangeConversion () {
-	if (hasRequiredAsteriskToRangeConversion) return asteriskToRangeConversion;
-	hasRequiredAsteriskToRangeConversion = 1;
-	Object.defineProperty(asteriskToRangeConversion, "__esModule", { value: true });
-	asteriskToRangeConversion.default = (() => {
-	    function convertAsterisk(expression, replecement) {
-	        if (expression.indexOf('*') !== -1) {
-	            return expression.replace('*', replecement);
-	        }
-	        return expression;
-	    }
-	    function convertAsterisksToRanges(expressions) {
-	        expressions[0] = convertAsterisk(expressions[0], '0-59');
-	        expressions[1] = convertAsterisk(expressions[1], '0-59');
-	        expressions[2] = convertAsterisk(expressions[2], '0-23');
-	        expressions[3] = convertAsterisk(expressions[3], '1-31');
-	        expressions[4] = convertAsterisk(expressions[4], '1-12');
-	        expressions[5] = convertAsterisk(expressions[5], '0-6');
-	        return expressions;
-	    }
-	    return convertAsterisksToRanges;
-	})();
-	
-	return asteriskToRangeConversion;
-}
-
-var rangeConversion = {};
-
-var hasRequiredRangeConversion;
-
-function requireRangeConversion () {
-	if (hasRequiredRangeConversion) return rangeConversion;
-	hasRequiredRangeConversion = 1;
-	Object.defineProperty(rangeConversion, "__esModule", { value: true });
-	rangeConversion.default = (() => {
-	    function replaceWithRange(expression, text, init, end, stepTxt) {
-	        const step = parseInt(stepTxt);
-	        const numbers = [];
-	        let last = parseInt(end);
-	        let first = parseInt(init);
-	        if (first > last) {
-	            last = parseInt(init);
-	            first = parseInt(end);
-	        }
-	        for (let i = first; i <= last; i += step) {
-	            numbers.push(i);
-	        }
-	        return expression.replace(new RegExp(text, 'i'), numbers.join());
-	    }
-	    function convertRange(expression) {
-	        const rangeRegEx = /(\d+)-(\d+)(\/(\d+)|)/;
-	        let match = rangeRegEx.exec(expression);
-	        while (match !== null && match.length > 0) {
-	            expression = replaceWithRange(expression, match[0], match[1], match[2], match[4] || '1');
-	            match = rangeRegEx.exec(expression);
-	        }
-	        return expression;
-	    }
-	    function convertAllRanges(expressions) {
-	        for (let i = 0; i < expressions.length; i++) {
-	            expressions[i] = convertRange(expressions[i]);
-	        }
-	        return expressions;
-	    }
-	    return convertAllRanges;
-	})();
-	
-	return rangeConversion;
-}
-
-var hasRequiredConvertion;
-
-function requireConvertion () {
-	if (hasRequiredConvertion) return convertion;
-	hasRequiredConvertion = 1;
-	var __importDefault = (convertion && convertion.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(convertion, "__esModule", { value: true });
-	const month_names_conversion_1 = __importDefault(requireMonthNamesConversion());
-	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
-	const asterisk_to_range_conversion_1 = __importDefault(requireAsteriskToRangeConversion());
-	const range_conversion_1 = __importDefault(requireRangeConversion());
-	convertion.default = (() => {
-	    function appendSeccondExpression(expressions) {
-	        if (expressions.length === 5) {
-	            return ['0'].concat(expressions);
-	        }
-	        return expressions;
-	    }
-	    function removeSpaces(str) {
-	        return str.replace(/\s{2,}/g, ' ').trim();
-	    }
-	    function normalizeIntegers(expressions) {
-	        for (let i = 0; i < expressions.length; i++) {
-	            const numbers = expressions[i].split(',');
-	            for (let j = 0; j < numbers.length; j++) {
-	                numbers[j] = parseInt(numbers[j]);
-	            }
-	            expressions[i] = numbers;
-	        }
-	        return expressions;
-	    }
-	    function interprete(expression) {
-	        let expressions = removeSpaces(`${expression}`).split(' ');
-	        expressions = appendSeccondExpression(expressions);
-	        expressions[4] = (0, month_names_conversion_1.default)(expressions[4]);
-	        expressions[5] = (0, week_day_names_conversion_1.default)(expressions[5]);
-	        expressions = (0, asterisk_to_range_conversion_1.default)(expressions);
-	        expressions = (0, range_conversion_1.default)(expressions);
-	        expressions = normalizeIntegers(expressions);
-	        return expressions;
-	    }
-	    return interprete;
-	})();
-	
-	return convertion;
-}
-
-var localizedTime = {};
-
-var hasRequiredLocalizedTime;
-
-function requireLocalizedTime () {
-	if (hasRequiredLocalizedTime) return localizedTime;
-	hasRequiredLocalizedTime = 1;
-	Object.defineProperty(localizedTime, "__esModule", { value: true });
-	localizedTime.LocalizedTime = void 0;
-	class LocalizedTime {
-	    timestamp;
-	    parts;
-	    timezone;
-	    constructor(date, timezone) {
-	        this.timestamp = date.getTime();
-	        this.timezone = timezone;
-	        this.parts = buildDateParts(date, timezone);
-	    }
-	    toDate() {
-	        return new Date(this.timestamp);
-	    }
-	    toISO() {
-	        const gmt = this.parts.gmt.replace(/^GMT/, '');
-	        const offset = gmt ? gmt : 'Z';
-	        const pad = (n) => String(n).padStart(2, '0');
-	        return `${this.parts.year}-${pad(this.parts.month)}-${pad(this.parts.day)}`
-	            + `T${pad(this.parts.hour)}:${pad(this.parts.minute)}:${pad(this.parts.second)}`
-	            + `.${String(this.parts.milisecond).padStart(3, '0')}`
-	            + offset;
-	    }
-	    getParts() {
-	        return this.parts;
-	    }
-	    set(field, value) {
-	        this.parts[field] = value;
-	        const newDate = new Date(this.toISO());
-	        this.timestamp = newDate.getTime();
-	        this.parts = buildDateParts(newDate, this.timezone);
-	    }
-	}
-	localizedTime.LocalizedTime = LocalizedTime;
-	function buildDateParts(date, timezone) {
-	    const dftOptions = {
-	        year: 'numeric',
-	        month: '2-digit',
-	        day: '2-digit',
-	        hour: '2-digit',
-	        minute: '2-digit',
-	        second: '2-digit',
-	        weekday: 'short',
-	        hour12: false
-	    };
-	    if (timezone) {
-	        dftOptions.timeZone = timezone;
-	    }
-	    const dateFormat = new Intl.DateTimeFormat('en-US', dftOptions);
-	    const parts = dateFormat.formatToParts(date).filter(part => {
-	        return part.type !== 'literal';
-	    }).reduce((acc, part) => {
-	        acc[part.type] = part.value;
-	        return acc;
-	    }, {});
-	    return {
-	        day: parseInt(parts.day),
-	        month: parseInt(parts.month),
-	        year: parseInt(parts.year),
-	        hour: parts.hour === '24' ? 0 : parseInt(parts.hour),
-	        minute: parseInt(parts.minute),
-	        second: parseInt(parts.second),
-	        milisecond: date.getMilliseconds(),
-	        weekday: parts.weekday,
-	        gmt: getTimezoneGMT(date, timezone)
-	    };
-	}
-	function getTimezoneGMT(date, timezone) {
-	    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
-	    const tzDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
-	    let offsetInMinutes = (utcDate.getTime() - tzDate.getTime()) / 60000;
-	    const sign = offsetInMinutes <= 0 ? '+' : '-';
-	    offsetInMinutes = Math.abs(offsetInMinutes);
-	    if (offsetInMinutes === 0)
-	        return 'Z';
-	    const hours = Math.floor(offsetInMinutes / 60).toString().padStart(2, '0');
-	    const minutes = Math.floor(offsetInMinutes % 60).toString().padStart(2, '0');
-	    return `GMT${sign}${hours}:${minutes}`;
-	}
-	
-	return localizedTime;
-}
-
-var matcherWalker = {};
-
-var hasRequiredMatcherWalker;
-
-function requireMatcherWalker () {
-	if (hasRequiredMatcherWalker) return matcherWalker;
-	hasRequiredMatcherWalker = 1;
-	var __importDefault = (matcherWalker && matcherWalker.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(matcherWalker, "__esModule", { value: true });
-	matcherWalker.MatcherWalker = void 0;
-	const convertion_1 = __importDefault(requireConvertion());
-	const localized_time_1 = requireLocalizedTime();
-	const time_matcher_1 = requireTimeMatcher();
-	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
-	class MatcherWalker {
-	    cronExpression;
-	    baseDate;
-	    pattern;
-	    expressions;
-	    timeMatcher;
-	    timezone;
-	    constructor(cronExpression, baseDate, timezone) {
-	        this.cronExpression = cronExpression;
-	        this.baseDate = baseDate;
-	        this.timeMatcher = new time_matcher_1.TimeMatcher(cronExpression, timezone);
-	        this.timezone = timezone;
-	        this.expressions = (0, convertion_1.default)(cronExpression);
-	    }
-	    isMatching() {
-	        return this.timeMatcher.match(this.baseDate);
-	    }
-	    matchNext() {
-	        const findNextDateIgnoringWeekday = () => {
-	            const baseDate = new Date(this.baseDate.getTime());
-	            baseDate.setMilliseconds(0);
-	            const localTime = new localized_time_1.LocalizedTime(baseDate, this.timezone);
-	            const dateParts = localTime.getParts();
-	            const date = new localized_time_1.LocalizedTime(localTime.toDate(), this.timezone);
-	            const seconds = this.expressions[0];
-	            const nextSecond = availableValue(seconds, dateParts.second);
-	            if (nextSecond) {
-	                date.set('second', nextSecond);
-	                if (this.timeMatcher.match(date.toDate())) {
-	                    return date;
-	                }
-	            }
-	            date.set('second', seconds[0]);
-	            const minutes = this.expressions[1];
-	            const nextMinute = availableValue(minutes, dateParts.minute);
-	            if (nextMinute) {
-	                date.set('minute', nextMinute);
-	                if (this.timeMatcher.match(date.toDate())) {
-	                    return date;
-	                }
-	            }
-	            date.set('minute', minutes[0]);
-	            const hours = this.expressions[2];
-	            const nextHour = availableValue(hours, dateParts.hour);
-	            if (nextHour) {
-	                date.set('hour', nextHour);
-	                if (this.timeMatcher.match(date.toDate())) {
-	                    return date;
-	                }
-	            }
-	            date.set('hour', hours[0]);
-	            const days = this.expressions[3];
-	            const nextDay = availableValue(days, dateParts.day);
-	            if (nextDay) {
-	                date.set('day', nextDay);
-	                if (this.timeMatcher.match(date.toDate())) {
-	                    return date;
-	                }
-	            }
-	            date.set('day', days[0]);
-	            const months = this.expressions[4];
-	            const nextMonth = availableValue(months, dateParts.month);
-	            if (nextMonth) {
-	                date.set('month', nextMonth);
-	                if (this.timeMatcher.match(date.toDate())) {
-	                    return date;
-	                }
-	            }
-	            date.set('year', date.getParts().year + 1);
-	            date.set('month', months[0]);
-	            return date;
-	        };
-	        const date = findNextDateIgnoringWeekday();
-	        const weekdays = this.expressions[5];
-	        let currentWeekday = parseInt((0, week_day_names_conversion_1.default)(date.getParts().weekday));
-	        while (!(weekdays.indexOf(currentWeekday) > -1)) {
-	            date.set('year', date.getParts().year + 1);
-	            currentWeekday = parseInt((0, week_day_names_conversion_1.default)(date.getParts().weekday));
-	        }
-	        return date;
-	    }
-	}
-	matcherWalker.MatcherWalker = MatcherWalker;
-	function availableValue(values, currentValue) {
-	    const availableValues = values.sort((a, b) => a - b).filter(s => s > currentValue);
-	    if (availableValues.length > 0)
-	        return availableValues[0];
-	    return false;
-	}
-	
-	return matcherWalker;
-}
-
-var hasRequiredTimeMatcher;
-
-function requireTimeMatcher () {
-	if (hasRequiredTimeMatcher) return timeMatcher;
-	hasRequiredTimeMatcher = 1;
-	var __importDefault = (timeMatcher && timeMatcher.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(timeMatcher, "__esModule", { value: true });
-	timeMatcher.TimeMatcher = void 0;
-	const index_1 = __importDefault(requireConvertion());
-	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
-	const localized_time_1 = requireLocalizedTime();
-	const matcher_walker_1 = requireMatcherWalker();
-	function matchValue(allowedValues, value) {
-	    return allowedValues.indexOf(value) !== -1;
-	}
-	class TimeMatcher {
-	    timezone;
-	    pattern;
-	    expressions;
-	    constructor(pattern, timezone) {
-	        this.timezone = timezone;
-	        this.pattern = pattern;
-	        this.expressions = (0, index_1.default)(pattern);
-	    }
-	    match(date) {
-	        const localizedTime = new localized_time_1.LocalizedTime(date, this.timezone);
-	        const parts = localizedTime.getParts();
-	        const runOnSecond = matchValue(this.expressions[0], parts.second);
-	        const runOnMinute = matchValue(this.expressions[1], parts.minute);
-	        const runOnHour = matchValue(this.expressions[2], parts.hour);
-	        const runOnDay = matchValue(this.expressions[3], parts.day);
-	        const runOnMonth = matchValue(this.expressions[4], parts.month);
-	        const runOnWeekDay = matchValue(this.expressions[5], parseInt((0, week_day_names_conversion_1.default)(parts.weekday)));
-	        return runOnSecond && runOnMinute && runOnHour && runOnDay && runOnMonth && runOnWeekDay;
-	    }
-	    getNextMatch(date) {
-	        const walker = new matcher_walker_1.MatcherWalker(this.pattern, date, this.timezone);
-	        const next = walker.matchNext();
-	        return next.toDate();
-	    }
-	}
-	timeMatcher.TimeMatcher = TimeMatcher;
-	
-	return timeMatcher;
-}
-
-var stateMachine = {};
-
-var hasRequiredStateMachine;
-
-function requireStateMachine () {
-	if (hasRequiredStateMachine) return stateMachine;
-	hasRequiredStateMachine = 1;
-	Object.defineProperty(stateMachine, "__esModule", { value: true });
-	stateMachine.StateMachine = void 0;
-	const allowedTransitions = {
-	    'stopped': ['stopped', 'idle', 'destroyed'],
-	    'idle': ['idle', 'running', 'stopped', 'destroyed'],
-	    'running': ['running', 'idle', 'stopped', 'destroyed'],
-	    'destroyed': ['destroyed']
-	};
-	class StateMachine {
-	    state;
-	    constructor(initial = 'stopped') {
-	        this.state = initial;
-	    }
-	    changeState(state) {
-	        if (allowedTransitions[this.state].includes(state)) {
-	            this.state = state;
-	        }
-	        else {
-	            throw new Error(`invalid transition from ${this.state} to ${state}`);
-	        }
-	    }
-	}
-	stateMachine.StateMachine = StateMachine;
-	
-	return stateMachine;
-}
-
-var hasRequiredInlineScheduledTask;
-
-function requireInlineScheduledTask () {
-	if (hasRequiredInlineScheduledTask) return inlineScheduledTask;
-	hasRequiredInlineScheduledTask = 1;
-	var __importDefault = (inlineScheduledTask && inlineScheduledTask.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(inlineScheduledTask, "__esModule", { value: true });
-	inlineScheduledTask.InlineScheduledTask = void 0;
-	const events_1 = __importDefault(EventEmitter);
-	const runner_1 = requireRunner();
-	const time_matcher_1 = requireTimeMatcher();
-	const create_id_1 = requireCreateId();
-	const state_machine_1 = requireStateMachine();
-	const logger_1 = __importDefault(requireLogger());
-	const localized_time_1 = requireLocalizedTime();
-	class TaskEmitter extends events_1.default {
-	}
-	class InlineScheduledTask {
-	    emitter;
-	    cronExpression;
-	    timeMatcher;
-	    runner;
-	    id;
-	    name;
-	    stateMachine;
-	    timezone;
-	    constructor(cronExpression, taskFn, options) {
-	        this.emitter = new TaskEmitter();
-	        this.cronExpression = cronExpression;
-	        this.id = (0, create_id_1.createID)('task', 12);
-	        this.name = options?.name || this.id;
-	        this.timezone = options?.timezone;
-	        this.timeMatcher = new time_matcher_1.TimeMatcher(cronExpression, options?.timezone);
-	        this.stateMachine = new state_machine_1.StateMachine();
-	        const runnerOptions = {
-	            timezone: options?.timezone,
-	            noOverlap: options?.noOverlap,
-	            maxExecutions: options?.maxExecutions,
-	            maxRandomDelay: options?.maxRandomDelay,
-	            beforeRun: (date, execution) => {
-	                if (execution.reason === 'scheduled') {
-	                    this.changeState('running');
-	                }
-	                this.emitter.emit('execution:started', this.createContext(date, execution));
-	                return true;
-	            },
-	            onFinished: (date, execution) => {
-	                if (execution.reason === 'scheduled') {
-	                    this.changeState('idle');
-	                }
-	                this.emitter.emit('execution:finished', this.createContext(date, execution));
-	                return true;
-	            },
-	            onError: (date, error, execution) => {
-	                logger_1.default.error(error);
-	                this.emitter.emit('execution:failed', this.createContext(date, execution));
-	                this.changeState('idle');
-	            },
-	            onOverlap: (date) => {
-	                this.emitter.emit('execution:overlap', this.createContext(date));
-	            },
-	            onMissedExecution: (date) => {
-	                this.emitter.emit('execution:missed', this.createContext(date));
-	            },
-	            onMaxExecutions: (date) => {
-	                this.emitter.emit('execution:maxReached', this.createContext(date));
-	                this.destroy();
-	            }
-	        };
-	        this.runner = new runner_1.Runner(this.timeMatcher, (date, execution) => {
-	            return taskFn(this.createContext(date, execution));
-	        }, runnerOptions);
-	    }
-	    getNextRun() {
-	        if (this.stateMachine.state !== 'stopped') {
-	            return this.runner.nextRun();
-	        }
-	        return null;
-	    }
-	    changeState(state) {
-	        if (this.runner.isStarted()) {
-	            this.stateMachine.changeState(state);
-	        }
-	    }
-	    start() {
-	        if (this.runner.isStopped()) {
-	            this.runner.start();
-	            this.stateMachine.changeState('idle');
-	            this.emitter.emit('task:started', this.createContext(new Date()));
-	        }
-	    }
-	    stop() {
-	        if (this.runner.isStarted()) {
-	            this.runner.stop();
-	            this.stateMachine.changeState('stopped');
-	            this.emitter.emit('task:stopped', this.createContext(new Date()));
-	        }
-	    }
-	    getStatus() {
-	        return this.stateMachine.state;
-	    }
-	    destroy() {
-	        if (this.stateMachine.state === 'destroyed')
-	            return;
-	        this.stop();
-	        this.stateMachine.changeState('destroyed');
-	        this.emitter.emit('task:destroyed', this.createContext(new Date()));
-	    }
-	    execute() {
-	        return new Promise((resolve, reject) => {
-	            const onFail = (context) => {
-	                this.off('execution:finished', onFail);
-	                reject(context.execution?.error);
-	            };
-	            const onFinished = (context) => {
-	                this.off('execution:failed', onFail);
-	                resolve(context.execution?.result);
-	            };
-	            this.once('execution:finished', onFinished);
-	            this.once('execution:failed', onFail);
-	            this.runner.execute();
-	        });
-	    }
-	    on(event, fun) {
-	        this.emitter.on(event, fun);
-	    }
-	    off(event, fun) {
-	        this.emitter.off(event, fun);
-	    }
-	    once(event, fun) {
-	        this.emitter.once(event, fun);
-	    }
-	    createContext(executionDate, execution) {
-	        const localTime = new localized_time_1.LocalizedTime(executionDate, this.timezone);
-	        const ctx = {
-	            date: localTime.toDate(),
-	            dateLocalIso: localTime.toISO(),
-	            triggeredAt: new Date(),
-	            task: this,
-	            execution: execution
-	        };
-	        return ctx;
-	    }
-	}
-	inlineScheduledTask.InlineScheduledTask = InlineScheduledTask;
-	
-	return inlineScheduledTask;
-}
-
-var taskRegistry = {};
-
-var hasRequiredTaskRegistry;
-
-function requireTaskRegistry () {
-	if (hasRequiredTaskRegistry) return taskRegistry;
-	hasRequiredTaskRegistry = 1;
-	Object.defineProperty(taskRegistry, "__esModule", { value: true });
-	taskRegistry.TaskRegistry = void 0;
-	const tasks = new Map();
-	class TaskRegistry {
-	    add(task) {
-	        if (this.has(task.id)) {
-	            throw Error(`task ${task.id} already registred!`);
-	        }
-	        tasks.set(task.id, task);
-	        task.on('task:destroyed', () => {
-	            this.remove(task);
-	        });
-	    }
-	    get(taskId) {
-	        return tasks.get(taskId);
-	    }
-	    remove(task) {
-	        if (this.has(task.id)) {
-	            task?.destroy();
-	            tasks.delete(task.id);
-	        }
-	    }
-	    all() {
-	        return tasks;
-	    }
-	    has(taskId) {
-	        return tasks.has(taskId);
-	    }
-	    killAll() {
-	        tasks.forEach(id => this.remove(id));
-	    }
-	}
-	taskRegistry.TaskRegistry = TaskRegistry;
-	
-	return taskRegistry;
-}
-
-var patternValidation = {};
-
-var hasRequiredPatternValidation;
-
-function requirePatternValidation () {
-	if (hasRequiredPatternValidation) return patternValidation;
-	hasRequiredPatternValidation = 1;
-	var __importDefault = (patternValidation && patternValidation.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(patternValidation, "__esModule", { value: true });
-	const index_1 = __importDefault(requireConvertion());
-	const validationRegex = /^(?:\d+|\*|\*\/\d+)$/;
-	function isValidExpression(expression, min, max) {
-	    const options = expression;
-	    for (const option of options) {
-	        const optionAsInt = parseInt(option, 10);
-	        if ((!Number.isNaN(optionAsInt) &&
-	            (optionAsInt < min || optionAsInt > max)) ||
-	            !validationRegex.test(option))
-	            return false;
-	    }
-	    return true;
-	}
-	function isInvalidSecond(expression) {
-	    return !isValidExpression(expression, 0, 59);
-	}
-	function isInvalidMinute(expression) {
-	    return !isValidExpression(expression, 0, 59);
-	}
-	function isInvalidHour(expression) {
-	    return !isValidExpression(expression, 0, 23);
-	}
-	function isInvalidDayOfMonth(expression) {
-	    return !isValidExpression(expression, 1, 31);
-	}
-	function isInvalidMonth(expression) {
-	    return !isValidExpression(expression, 1, 12);
-	}
-	function isInvalidWeekDay(expression) {
-	    return !isValidExpression(expression, 0, 7);
-	}
-	function validateFields(patterns, executablePatterns) {
-	    if (isInvalidSecond(executablePatterns[0]))
-	        throw new Error(`${patterns[0]} is a invalid expression for second`);
-	    if (isInvalidMinute(executablePatterns[1]))
-	        throw new Error(`${patterns[1]} is a invalid expression for minute`);
-	    if (isInvalidHour(executablePatterns[2]))
-	        throw new Error(`${patterns[2]} is a invalid expression for hour`);
-	    if (isInvalidDayOfMonth(executablePatterns[3]))
-	        throw new Error(`${patterns[3]} is a invalid expression for day of month`);
-	    if (isInvalidMonth(executablePatterns[4]))
-	        throw new Error(`${patterns[4]} is a invalid expression for month`);
-	    if (isInvalidWeekDay(executablePatterns[5]))
-	        throw new Error(`${patterns[5]} is a invalid expression for week day`);
-	}
-	function validate(pattern) {
-	    if (typeof pattern !== 'string')
-	        throw new TypeError('pattern must be a string!');
-	    const patterns = pattern.split(' ');
-	    const executablePatterns = (0, index_1.default)(pattern);
-	    if (patterns.length === 5)
-	        patterns.unshift('0');
-	    validateFields(patterns, executablePatterns);
-	}
-	patternValidation.default = validate;
-	
-	return patternValidation;
-}
-
-var backgroundScheduledTask = {};
-
-var hasRequiredBackgroundScheduledTask;
-
-function requireBackgroundScheduledTask () {
-	if (hasRequiredBackgroundScheduledTask) return backgroundScheduledTask;
-	hasRequiredBackgroundScheduledTask = 1;
-	var __importDefault = (backgroundScheduledTask && backgroundScheduledTask.__importDefault) || function (mod) {
-	    return (mod && mod.__esModule) ? mod : { "default": mod };
-	};
-	Object.defineProperty(backgroundScheduledTask, "__esModule", { value: true });
-	const path_1 = path$1;
-	const child_process_1 = require$$1;
-	const create_id_1 = requireCreateId();
-	const stream_1 = require$$3;
-	const state_machine_1 = requireStateMachine();
-	const localized_time_1 = requireLocalizedTime();
-	const logger_1 = __importDefault(requireLogger());
-	const time_matcher_1 = requireTimeMatcher();
-	const daemonPath = (0, path_1.resolve)(__dirname, 'daemon.js');
-	class TaskEmitter extends stream_1.EventEmitter {
-	}
-	class BackgroundScheduledTask {
-	    emitter;
-	    id;
-	    name;
-	    cronExpression;
-	    taskPath;
-	    options;
-	    forkProcess;
-	    stateMachine;
-	    constructor(cronExpression, taskPath, options) {
-	        this.cronExpression = cronExpression;
-	        this.taskPath = taskPath;
-	        this.options = options;
-	        this.id = (0, create_id_1.createID)('task');
-	        this.name = options?.name || this.id;
-	        this.emitter = new TaskEmitter();
-	        this.stateMachine = new state_machine_1.StateMachine('stopped');
-	        this.on('task:stopped', () => {
-	            this.forkProcess?.kill();
-	            this.forkProcess = undefined;
-	            this.stateMachine.changeState('stopped');
-	        });
-	        this.on('task:destroyed', () => {
-	            this.forkProcess?.kill();
-	            this.forkProcess = undefined;
-	            this.stateMachine.changeState('destroyed');
-	        });
-	    }
-	    getNextRun() {
-	        if (this.stateMachine.state !== 'stopped') {
-	            const timeMatcher = new time_matcher_1.TimeMatcher(this.cronExpression, this.options?.timezone);
-	            return timeMatcher.getNextMatch(new Date());
-	        }
-	        return null;
-	    }
-	    start() {
-	        return new Promise((resolve, reject) => {
-	            if (this.forkProcess) {
-	                return resolve(undefined);
-	            }
-	            const timeout = setTimeout(() => {
-	                reject(new Error('Start operation timed out'));
-	            }, 5000);
-	            try {
-	                this.forkProcess = (0, child_process_1.fork)(daemonPath);
-	                this.forkProcess.on('error', (err) => {
-	                    clearTimeout(timeout);
-	                    reject(new Error(`Error on daemon: ${err.message}`));
-	                });
-	                this.forkProcess.on('exit', (code, signal) => {
-	                    if (code !== 0 && signal !== 'SIGTERM') {
-	                        const erro = new Error(`node-cron daemon exited with code ${code || signal}`);
-	                        logger_1.default.error(erro);
-	                        clearTimeout(timeout);
-	                        reject(erro);
-	                    }
-	                });
-	                this.forkProcess.on('message', (message) => {
-	                    if (message.jsonError) {
-	                        if (message.context?.execution) {
-	                            message.context.execution.error = deserializeError(message.jsonError);
-	                            delete message.jsonError;
-	                        }
-	                    }
-	                    if (message.context?.task?.state) {
-	                        this.stateMachine.changeState(message.context?.task?.state);
-	                    }
-	                    if (message.context) {
-	                        const execution = message.context?.execution;
-	                        delete execution?.hasError;
-	                        const context = this.createContext(new Date(message.context.date), execution);
-	                        this.emitter.emit(message.event, context);
-	                    }
-	                });
-	                this.once('task:started', () => {
-	                    this.stateMachine.changeState('idle');
-	                    clearTimeout(timeout);
-	                    resolve(undefined);
-	                });
-	                this.forkProcess.send({
-	                    command: 'task:start',
-	                    path: this.taskPath,
-	                    cron: this.cronExpression,
-	                    options: this.options
-	                });
-	            }
-	            catch (error) {
-	                reject(error);
-	            }
-	        });
-	    }
-	    stop() {
-	        return new Promise((resolve, reject) => {
-	            if (!this.forkProcess) {
-	                return resolve(undefined);
-	            }
-	            const timeoutId = setTimeout(() => {
-	                clearTimeout(timeoutId);
-	                reject(new Error('Stop operation timed out'));
-	            }, 5000);
-	            const cleanupAndResolve = () => {
-	                clearTimeout(timeoutId);
-	                this.off('task:stopped', onStopped);
-	                this.forkProcess = undefined;
-	                resolve(undefined);
-	            };
-	            const onStopped = () => {
-	                cleanupAndResolve();
-	            };
-	            this.once('task:stopped', onStopped);
-	            this.forkProcess.send({
-	                command: 'task:stop'
-	            });
-	        });
-	    }
-	    getStatus() {
-	        return this.stateMachine.state;
-	    }
-	    destroy() {
-	        return new Promise((resolve, reject) => {
-	            if (!this.forkProcess) {
-	                return resolve(undefined);
-	            }
-	            const timeoutId = setTimeout(() => {
-	                clearTimeout(timeoutId);
-	                reject(new Error('Destroy operation timed out'));
-	            }, 5000);
-	            const onDestroy = () => {
-	                clearTimeout(timeoutId);
-	                this.off('task:destroyed', onDestroy);
-	                resolve(undefined);
-	            };
-	            this.once('task:destroyed', onDestroy);
-	            this.forkProcess.send({
-	                command: 'task:destroy'
-	            });
-	        });
-	    }
-	    execute() {
-	        return new Promise((resolve, reject) => {
-	            if (!this.forkProcess) {
-	                return reject(new Error('Cannot execute background task because it hasn\'t been started yet. Please initialize the task using the start() method before attempting to execute it.'));
-	            }
-	            const timeoutId = setTimeout(() => {
-	                cleanupListeners();
-	                reject(new Error('Execution timeout exceeded'));
-	            }, 5000);
-	            const cleanupListeners = () => {
-	                clearTimeout(timeoutId);
-	                this.off('execution:finished', onFinished);
-	                this.off('execution:failed', onFail);
-	            };
-	            const onFinished = (context) => {
-	                cleanupListeners();
-	                resolve(context.execution?.result);
-	            };
-	            const onFail = (context) => {
-	                cleanupListeners();
-	                reject(context.execution?.error || new Error('Execution failed without specific error'));
-	            };
-	            this.once('execution:finished', onFinished);
-	            this.once('execution:failed', onFail);
-	            this.forkProcess.send({
-	                command: 'task:execute'
-	            });
-	        });
-	    }
-	    on(event, fun) {
-	        this.emitter.on(event, fun);
-	    }
-	    off(event, fun) {
-	        this.emitter.off(event, fun);
-	    }
-	    once(event, fun) {
-	        this.emitter.once(event, fun);
-	    }
-	    createContext(executionDate, execution) {
-	        const localTime = new localized_time_1.LocalizedTime(executionDate, this.options?.timezone);
-	        const ctx = {
-	            date: localTime.toDate(),
-	            dateLocalIso: localTime.toISO(),
-	            triggeredAt: new Date(),
-	            task: this,
-	            execution: execution
-	        };
-	        return ctx;
-	    }
-	}
-	function deserializeError(str) {
-	    const data = JSON.parse(str);
-	    const Err = globalThis[data.name] || Error;
-	    const err = new Err(data.message);
-	    if (data.stack) {
-	        err.stack = data.stack;
-	    }
-	    Object.keys(data).forEach(key => {
-	        if (!['name', 'message', 'stack'].includes(key)) {
-	            err[key] = data[key];
-	        }
-	    });
-	    return err;
-	}
-	backgroundScheduledTask.default = BackgroundScheduledTask;
-	
-	return backgroundScheduledTask;
-}
-
-var hasRequiredNodeCron;
-
-function requireNodeCron () {
-	if (hasRequiredNodeCron) return nodeCron;
-	hasRequiredNodeCron = 1;
-	(function (exports) {
-		var __importDefault = (nodeCron && nodeCron.__importDefault) || function (mod) {
-		    return (mod && mod.__esModule) ? mod : { "default": mod };
-		};
-		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.nodeCron = exports.getTask = exports.getTasks = void 0;
-		exports.schedule = schedule;
-		exports.createTask = createTask;
-		exports.solvePath = solvePath;
-		exports.validate = validate;
-		const inline_scheduled_task_1 = requireInlineScheduledTask();
-		const task_registry_1 = requireTaskRegistry();
-		const pattern_validation_1 = __importDefault(requirePatternValidation());
-		const background_scheduled_task_1 = __importDefault(requireBackgroundScheduledTask());
-		const path_1 = __importDefault(path$1);
-		const url_1 = require$$5;
-		const registry = new task_registry_1.TaskRegistry();
-		function schedule(expression, func, options) {
-		    const task = createTask(expression, func, options);
-		    task.start();
-		    return task;
-		}
-		function createTask(expression, func, options) {
-		    let task;
-		    if (func instanceof Function) {
-		        task = new inline_scheduled_task_1.InlineScheduledTask(expression, func, options);
-		    }
-		    else {
-		        const taskPath = solvePath(func);
-		        task = new background_scheduled_task_1.default(expression, taskPath, options);
-		    }
-		    registry.add(task);
-		    return task;
-		}
-		function solvePath(filePath) {
-		    if (path_1.default.isAbsolute(filePath))
-		        return (0, url_1.pathToFileURL)(filePath).href;
-		    if (filePath.startsWith('file://'))
-		        return filePath;
-		    const stackLines = new Error().stack?.split('\n');
-		    if (stackLines) {
-		        stackLines?.shift();
-		        const callerLine = stackLines?.find((line) => { return line.indexOf(__filename) === -1; });
-		        const match = callerLine?.match(/(file:\/\/)?(((\/?)(\w:))?([/\\].+)):\d+:\d+/);
-		        if (match) {
-		            const dir = `${match[5] ?? ""}${path_1.default.dirname(match[6])}`;
-		            return (0, url_1.pathToFileURL)(path_1.default.resolve(dir, filePath)).href;
-		        }
-		    }
-		    throw new Error(`Could not locate task file ${filePath}`);
-		}
-		function validate(expression) {
-		    try {
-		        (0, pattern_validation_1.default)(expression);
-		        return true;
-		    }
-		    catch (e) {
-		        return false;
-		    }
-		}
-		exports.getTasks = registry.all;
-		exports.getTask = registry.get;
-		exports.nodeCron = {
-		    schedule,
-		    createTask,
-		    validate,
-		    getTasks: exports.getTasks,
-		    getTask: exports.getTask,
-		};
-		exports.default = exports.nodeCron;
-		
-	} (nodeCron));
-	return nodeCron;
-}
-
-var nodeCronExports = requireNodeCron();
-var cron = /*@__PURE__*/getDefaultExportFromCjs(nodeCronExports);
 
 class TfStateError extends Error {
   constructor(message, context = {}) {
@@ -32749,6 +32056,122 @@ class TfStatePlugin extends Plugin {
     }
   }
   /**
+   * Import multiple Terraform/OpenTofu states from local filesystem using glob pattern
+   * @param {string} pattern - Glob pattern for matching state files
+   * @param {Object} options - Optional parallelism settings
+   * @returns {Promise<Object>} Consolidated import result with statistics
+   *
+   * @example
+   * await plugin.importStatesGlob('./terraform/ ** /*.tfstate');
+   * await plugin.importStatesGlob('./environments/ * /terraform.tfstate', { parallelism: 10 });
+   */
+  async importStatesGlob(pattern, options = {}) {
+    const startTime = Date.now();
+    const parallelism = options.parallelism || 5;
+    if (this.verbose) {
+      console.log(`[TfStatePlugin] Finding local files matching: ${pattern}`);
+    }
+    try {
+      const matchingFiles = await this._findFilesGlob(pattern);
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Found ${matchingFiles.length} matching files`);
+      }
+      if (matchingFiles.length === 0) {
+        return {
+          filesProcessed: 0,
+          totalResourcesExtracted: 0,
+          totalResourcesInserted: 0,
+          files: [],
+          duration: Date.now() - startTime
+        };
+      }
+      const results = [];
+      const files = [];
+      for (let i = 0; i < matchingFiles.length; i += parallelism) {
+        const batch = matchingFiles.slice(i, i + parallelism);
+        const batchPromises = batch.map(async (filePath) => {
+          try {
+            const result = await this.importState(filePath);
+            return { success: true, file: filePath, result };
+          } catch (error) {
+            if (this.verbose) {
+              console.error(`[TfStatePlugin] Failed to import ${filePath}:`, error.message);
+            }
+            return { success: false, file: filePath, error: error.message };
+          }
+        });
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+      const successful = results.filter((r) => r.success);
+      const failed = results.filter((r) => !r.success);
+      successful.forEach((r) => {
+        if (!r.result.skipped) {
+          files.push({
+            file: r.file,
+            serial: r.result.serial,
+            resourcesExtracted: r.result.resourcesExtracted,
+            resourcesInserted: r.result.resourcesInserted
+          });
+        }
+      });
+      const totalResourcesExtracted = successful.filter((r) => !r.result.skipped).reduce((sum, r) => sum + (r.result.resourcesExtracted || 0), 0);
+      const totalResourcesInserted = successful.filter((r) => !r.result.skipped).reduce((sum, r) => sum + (r.result.resourcesInserted || 0), 0);
+      const duration = Date.now() - startTime;
+      const consolidatedResult = {
+        filesProcessed: successful.length,
+        filesFailed: failed.length,
+        totalResourcesExtracted,
+        totalResourcesInserted,
+        files,
+        failedFiles: failed.map((f) => ({ file: f.file, error: f.error })),
+        duration
+      };
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Glob import completed:`, consolidatedResult);
+      }
+      this.emit("globImportCompleted", consolidatedResult);
+      return consolidatedResult;
+    } catch (error) {
+      this.stats.errors++;
+      if (this.verbose) {
+        console.error(`[TfStatePlugin] Glob import failed:`, error);
+      }
+      throw error;
+    }
+  }
+  /**
+   * Find files matching glob pattern
+   * @private
+   */
+  async _findFilesGlob(pattern) {
+    const files = [];
+    const baseMatch = pattern.match(/^([^*?[\]]+)/);
+    const baseDir = baseMatch ? baseMatch[1] : ".";
+    pattern.slice(baseDir.length);
+    const findFiles = async (dir) => {
+      try {
+        const entries = await promises.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path$1.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            await findFiles(fullPath);
+          } else if (entry.isFile() && entry.name.endsWith(".tfstate")) {
+            if (this._matchesGlobPattern(fullPath, pattern)) {
+              files.push(fullPath);
+            }
+          }
+        }
+      } catch (error) {
+        if (error.code !== "EACCES" && error.code !== "EPERM") {
+          throw error;
+        }
+      }
+    };
+    await findFiles(baseDir);
+    return files;
+  }
+  /**
    * Import Terraform/OpenTofu state from remote S3 bucket
    * @param {string} bucket - S3 bucket name
    * @param {string} key - S3 object key (path to .tfstate file)
@@ -33261,31 +32684,22 @@ class TfStatePlugin extends Plugin {
   }
   /**
    * Calculate diff between current and previous state
-   * Uses partition optimization for efficient lookup
+   * Finds previous state by sourceFile and serial number
    * @private
    */
   async _calculateDiff(currentState, sourceFile, currentStateFileId) {
     if (!this.diffsResource) return null;
-    const partitionName = this._findPartitionByField(this.stateFilesResource, "sourceFile");
-    let previousStateFiles;
-    if (partitionName) {
-      this.stats.partitionQueriesOptimized++;
-      const allFromSource = await this.stateFilesResource.list({
-        partition: partitionName,
-        partitionValues: { sourceFile }
-      });
-      previousStateFiles = allFromSource.filter((sf) => sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
-      if (this.verbose && previousStateFiles.length > 0) {
+    const allStateFiles = await this.stateFilesResource.list({ limit: 1e4 });
+    const previousStateFiles = allStateFiles.filter((sf) => sf.sourceFile === sourceFile && sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Diff calculation: found ${previousStateFiles.length} previous states for sourceFile=${sourceFile}, serial < ${currentState.serial}`
+      );
+      if (previousStateFiles.length > 0) {
         console.log(
-          `[TfStatePlugin] Found previous state using partition ${partitionName}: serial ${previousStateFiles[0].serial}`
+          `[TfStatePlugin] Using previous state: serial ${previousStateFiles[0].serial}`
         );
       }
-    } else {
-      if (this.verbose) {
-        console.log("[TfStatePlugin] No partition found for sourceFile, using full scan with filter");
-      }
-      const allStateFiles = await this.stateFilesResource.list({ limit: 1e4 });
-      previousStateFiles = allStateFiles.filter((sf) => sf.sourceFile === sourceFile && sf.serial < currentState.serial).sort((a, b) => b.serial - a.serial).slice(0, 1);
     }
     if (previousStateFiles.length === 0) {
       return { added: [], modified: [], deleted: [], isFirst: true };
@@ -33370,7 +32784,7 @@ class TfStatePlugin extends Plugin {
         });
       }
     }
-    return { added, modified, deleted };
+    return { added, modified, deleted, oldSerial, newSerial };
   }
   /**
    * Compute changes between old and new attributes
@@ -33433,7 +32847,7 @@ class TfStatePlugin extends Plugin {
    */
   _calculateSHA256(state) {
     const stateString = JSON.stringify(state);
-    return crypto.createHash("sha256").update(stateString).digest("hex");
+    return crypto$1.createHash("sha256").update(stateString).digest("hex");
   }
   /**
    * Insert resources into database with controlled parallelism
@@ -33482,6 +32896,12 @@ class TfStatePlugin extends Plugin {
     if (this.verbose) {
       console.log(`[TfStatePlugin] Setting up cron monitoring: ${this.monitorCron}`);
     }
+    await requirePluginDependency("tfstate-plugin");
+    const [ok, err, cronModule] = await tryFn(() => Promise.resolve().then(function () { return nodeCron$1; }));
+    if (!ok) {
+      throw new TfStateError(`Failed to import node-cron: ${err.message}`);
+    }
+    const cron = cronModule.default;
     if (!cron.validate(this.monitorCron)) {
       throw new TfStateError(`Invalid cron expression: ${this.monitorCron}`);
     }
@@ -35016,6 +34436,1415 @@ class VectorPlugin extends Plugin {
   }
 }
 
+function getDefaultExportFromCjs (x) {
+	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
+}
+
+var nodeCron$2 = {};
+
+var inlineScheduledTask = {};
+
+var runner = {};
+
+var createId = {};
+
+var hasRequiredCreateId;
+
+function requireCreateId () {
+	if (hasRequiredCreateId) return createId;
+	hasRequiredCreateId = 1;
+	var __importDefault = (createId && createId.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(createId, "__esModule", { value: true });
+	createId.createID = createID;
+	const node_crypto_1 = __importDefault(require$$0);
+	function createID(prefix = '', length = 16) {
+	    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	    const values = node_crypto_1.default.randomBytes(length);
+	    const id = Array.from(values, v => charset[v % charset.length]).join('');
+	    return prefix ? `${prefix}-${id}` : id;
+	}
+	
+	return createId;
+}
+
+var logger = {};
+
+var hasRequiredLogger;
+
+function requireLogger () {
+	if (hasRequiredLogger) return logger;
+	hasRequiredLogger = 1;
+	Object.defineProperty(logger, "__esModule", { value: true });
+	const levelColors = {
+	    INFO: '\x1b[36m',
+	    WARN: '\x1b[33m',
+	    ERROR: '\x1b[31m',
+	    DEBUG: '\x1b[35m',
+	};
+	const GREEN = '\x1b[32m';
+	const RESET = '\x1b[0m';
+	function log(level, message, extra) {
+	    const timestamp = new Date().toISOString();
+	    const color = levelColors[level] ?? '';
+	    const prefix = `[${timestamp}] [PID: ${process.pid}] ${GREEN}[NODE-CRON]${GREEN} ${color}[${level}]${RESET}`;
+	    const output = `${prefix} ${message}`;
+	    switch (level) {
+	        case 'ERROR':
+	            console.error(output, extra ?? '');
+	            break;
+	        case 'DEBUG':
+	            console.debug(output, extra ?? '');
+	            break;
+	        case 'WARN':
+	            console.warn(output);
+	            break;
+	        case 'INFO':
+	        default:
+	            console.info(output);
+	            break;
+	    }
+	}
+	const logger$1 = {
+	    info(message) {
+	        log('INFO', message);
+	    },
+	    warn(message) {
+	        log('WARN', message);
+	    },
+	    error(message, err) {
+	        if (message instanceof Error) {
+	            log('ERROR', message.message, message);
+	        }
+	        else {
+	            log('ERROR', message, err);
+	        }
+	    },
+	    debug(message, err) {
+	        if (message instanceof Error) {
+	            log('DEBUG', message.message, message);
+	        }
+	        else {
+	            log('DEBUG', message, err);
+	        }
+	    },
+	};
+	logger.default = logger$1;
+	
+	return logger;
+}
+
+var trackedPromise = {};
+
+var hasRequiredTrackedPromise;
+
+function requireTrackedPromise () {
+	if (hasRequiredTrackedPromise) return trackedPromise;
+	hasRequiredTrackedPromise = 1;
+	Object.defineProperty(trackedPromise, "__esModule", { value: true });
+	trackedPromise.TrackedPromise = void 0;
+	class TrackedPromise {
+	    promise;
+	    error;
+	    state;
+	    value;
+	    constructor(executor) {
+	        this.state = 'pending';
+	        this.promise = new Promise((resolve, reject) => {
+	            executor((value) => {
+	                this.state = 'fulfilled';
+	                this.value = value;
+	                resolve(value);
+	            }, (error) => {
+	                this.state = 'rejected';
+	                this.error = error;
+	                reject(error);
+	            });
+	        });
+	    }
+	    getPromise() {
+	        return this.promise;
+	    }
+	    getState() {
+	        return this.state;
+	    }
+	    isPending() {
+	        return this.state === 'pending';
+	    }
+	    isFulfilled() {
+	        return this.state === 'fulfilled';
+	    }
+	    isRejected() {
+	        return this.state === 'rejected';
+	    }
+	    getValue() {
+	        return this.value;
+	    }
+	    getError() {
+	        return this.error;
+	    }
+	    then(onfulfilled, onrejected) {
+	        return this.promise.then(onfulfilled, onrejected);
+	    }
+	    catch(onrejected) {
+	        return this.promise.catch(onrejected);
+	    }
+	    finally(onfinally) {
+	        return this.promise.finally(onfinally);
+	    }
+	}
+	trackedPromise.TrackedPromise = TrackedPromise;
+	
+	return trackedPromise;
+}
+
+var hasRequiredRunner;
+
+function requireRunner () {
+	if (hasRequiredRunner) return runner;
+	hasRequiredRunner = 1;
+	var __importDefault = (runner && runner.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(runner, "__esModule", { value: true });
+	runner.Runner = void 0;
+	const create_id_1 = requireCreateId();
+	const logger_1 = __importDefault(requireLogger());
+	const tracked_promise_1 = requireTrackedPromise();
+	function emptyOnFn() { }
+	function emptyHookFn() { return true; }
+	function defaultOnError(date, error) {
+	    logger_1.default.error('Task failed with error!', error);
+	}
+	class Runner {
+	    timeMatcher;
+	    onMatch;
+	    noOverlap;
+	    maxExecutions;
+	    maxRandomDelay;
+	    runCount;
+	    running;
+	    heartBeatTimeout;
+	    onMissedExecution;
+	    onOverlap;
+	    onError;
+	    beforeRun;
+	    onFinished;
+	    onMaxExecutions;
+	    constructor(timeMatcher, onMatch, options) {
+	        this.timeMatcher = timeMatcher;
+	        this.onMatch = onMatch;
+	        this.noOverlap = options == undefined || options.noOverlap === undefined ? false : options.noOverlap;
+	        this.maxExecutions = options?.maxExecutions;
+	        this.maxRandomDelay = options?.maxRandomDelay || 0;
+	        this.onMissedExecution = options?.onMissedExecution || emptyOnFn;
+	        this.onOverlap = options?.onOverlap || emptyOnFn;
+	        this.onError = options?.onError || defaultOnError;
+	        this.onFinished = options?.onFinished || emptyHookFn;
+	        this.beforeRun = options?.beforeRun || emptyHookFn;
+	        this.onMaxExecutions = options?.onMaxExecutions || emptyOnFn;
+	        this.runCount = 0;
+	        this.running = false;
+	    }
+	    start() {
+	        this.running = true;
+	        let lastExecution;
+	        let expectedNextExecution;
+	        const scheduleNextHeartBeat = (currentDate) => {
+	            if (this.running) {
+	                clearTimeout(this.heartBeatTimeout);
+	                this.heartBeatTimeout = setTimeout(heartBeat, getDelay(this.timeMatcher, currentDate));
+	            }
+	        };
+	        const runTask = (date) => {
+	            return new Promise(async (resolve) => {
+	                const execution = {
+	                    id: (0, create_id_1.createID)('exec'),
+	                    reason: 'scheduled'
+	                };
+	                const shouldExecute = await this.beforeRun(date, execution);
+	                const randomDelay = Math.floor(Math.random() * this.maxRandomDelay);
+	                if (shouldExecute) {
+	                    setTimeout(async () => {
+	                        try {
+	                            this.runCount++;
+	                            execution.startedAt = new Date();
+	                            const result = await this.onMatch(date, execution);
+	                            execution.finishedAt = new Date();
+	                            execution.result = result;
+	                            this.onFinished(date, execution);
+	                            if (this.maxExecutions && this.runCount >= this.maxExecutions) {
+	                                this.onMaxExecutions(date);
+	                                this.stop();
+	                            }
+	                        }
+	                        catch (error) {
+	                            execution.finishedAt = new Date();
+	                            execution.error = error;
+	                            this.onError(date, error, execution);
+	                        }
+	                        resolve(true);
+	                    }, randomDelay);
+	                }
+	            });
+	        };
+	        const checkAndRun = (date) => {
+	            return new tracked_promise_1.TrackedPromise(async (resolve, reject) => {
+	                try {
+	                    if (this.timeMatcher.match(date)) {
+	                        await runTask(date);
+	                    }
+	                    resolve(true);
+	                }
+	                catch (err) {
+	                    reject(err);
+	                }
+	            });
+	        };
+	        const heartBeat = async () => {
+	            const currentDate = nowWithoutMs();
+	            if (expectedNextExecution && expectedNextExecution.getTime() < currentDate.getTime()) {
+	                while (expectedNextExecution.getTime() < currentDate.getTime()) {
+	                    logger_1.default.warn(`missed execution at ${expectedNextExecution}! Possible blocking IO or high CPU user at the same process used by node-cron.`);
+	                    expectedNextExecution = this.timeMatcher.getNextMatch(expectedNextExecution);
+	                    runAsync(this.onMissedExecution, expectedNextExecution, defaultOnError);
+	                }
+	            }
+	            if (lastExecution && lastExecution.getState() === 'pending') {
+	                runAsync(this.onOverlap, currentDate, defaultOnError);
+	                if (this.noOverlap) {
+	                    logger_1.default.warn('task still running, new execution blocked by overlap prevention!');
+	                    expectedNextExecution = this.timeMatcher.getNextMatch(currentDate);
+	                    scheduleNextHeartBeat(currentDate);
+	                    return;
+	                }
+	            }
+	            lastExecution = checkAndRun(currentDate);
+	            expectedNextExecution = this.timeMatcher.getNextMatch(currentDate);
+	            scheduleNextHeartBeat(currentDate);
+	        };
+	        this.heartBeatTimeout = setTimeout(() => {
+	            heartBeat();
+	        }, getDelay(this.timeMatcher, nowWithoutMs()));
+	    }
+	    nextRun() {
+	        return this.timeMatcher.getNextMatch(new Date());
+	    }
+	    stop() {
+	        this.running = false;
+	        if (this.heartBeatTimeout) {
+	            clearTimeout(this.heartBeatTimeout);
+	            this.heartBeatTimeout = undefined;
+	        }
+	    }
+	    isStarted() {
+	        return !!this.heartBeatTimeout && this.running;
+	    }
+	    isStopped() {
+	        return !this.isStarted();
+	    }
+	    async execute() {
+	        const date = new Date();
+	        const execution = {
+	            id: (0, create_id_1.createID)('exec'),
+	            reason: 'invoked'
+	        };
+	        try {
+	            const shouldExecute = await this.beforeRun(date, execution);
+	            if (shouldExecute) {
+	                this.runCount++;
+	                execution.startedAt = new Date();
+	                const result = await this.onMatch(date, execution);
+	                execution.finishedAt = new Date();
+	                execution.result = result;
+	                this.onFinished(date, execution);
+	            }
+	        }
+	        catch (error) {
+	            execution.finishedAt = new Date();
+	            execution.error = error;
+	            this.onError(date, error, execution);
+	        }
+	    }
+	}
+	runner.Runner = Runner;
+	async function runAsync(fn, date, onError) {
+	    try {
+	        await fn(date);
+	    }
+	    catch (error) {
+	        onError(date, error);
+	    }
+	}
+	function getDelay(timeMatcher, currentDate) {
+	    const maxDelay = 86400000;
+	    const nextRun = timeMatcher.getNextMatch(currentDate);
+	    const now = new Date();
+	    const delay = nextRun.getTime() - now.getTime();
+	    if (delay > maxDelay) {
+	        return maxDelay;
+	    }
+	    return Math.max(0, delay);
+	}
+	function nowWithoutMs() {
+	    const date = new Date();
+	    date.setMilliseconds(0);
+	    return date;
+	}
+	
+	return runner;
+}
+
+var timeMatcher = {};
+
+var convertion = {};
+
+var monthNamesConversion = {};
+
+var hasRequiredMonthNamesConversion;
+
+function requireMonthNamesConversion () {
+	if (hasRequiredMonthNamesConversion) return monthNamesConversion;
+	hasRequiredMonthNamesConversion = 1;
+	Object.defineProperty(monthNamesConversion, "__esModule", { value: true });
+	monthNamesConversion.default = (() => {
+	    const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
+	        'august', 'september', 'october', 'november', 'december'];
+	    const shortMonths = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug',
+	        'sep', 'oct', 'nov', 'dec'];
+	    function convertMonthName(expression, items) {
+	        for (let i = 0; i < items.length; i++) {
+	            expression = expression.replace(new RegExp(items[i], 'gi'), i + 1);
+	        }
+	        return expression;
+	    }
+	    function interprete(monthExpression) {
+	        monthExpression = convertMonthName(monthExpression, months);
+	        monthExpression = convertMonthName(monthExpression, shortMonths);
+	        return monthExpression;
+	    }
+	    return interprete;
+	})();
+	
+	return monthNamesConversion;
+}
+
+var weekDayNamesConversion = {};
+
+var hasRequiredWeekDayNamesConversion;
+
+function requireWeekDayNamesConversion () {
+	if (hasRequiredWeekDayNamesConversion) return weekDayNamesConversion;
+	hasRequiredWeekDayNamesConversion = 1;
+	Object.defineProperty(weekDayNamesConversion, "__esModule", { value: true });
+	weekDayNamesConversion.default = (() => {
+	    const weekDays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday',
+	        'friday', 'saturday'];
+	    const shortWeekDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+	    function convertWeekDayName(expression, items) {
+	        for (let i = 0; i < items.length; i++) {
+	            expression = expression.replace(new RegExp(items[i], 'gi'), i);
+	        }
+	        return expression;
+	    }
+	    function convertWeekDays(expression) {
+	        expression = expression.replace('7', '0');
+	        expression = convertWeekDayName(expression, weekDays);
+	        return convertWeekDayName(expression, shortWeekDays);
+	    }
+	    return convertWeekDays;
+	})();
+	
+	return weekDayNamesConversion;
+}
+
+var asteriskToRangeConversion = {};
+
+var hasRequiredAsteriskToRangeConversion;
+
+function requireAsteriskToRangeConversion () {
+	if (hasRequiredAsteriskToRangeConversion) return asteriskToRangeConversion;
+	hasRequiredAsteriskToRangeConversion = 1;
+	Object.defineProperty(asteriskToRangeConversion, "__esModule", { value: true });
+	asteriskToRangeConversion.default = (() => {
+	    function convertAsterisk(expression, replecement) {
+	        if (expression.indexOf('*') !== -1) {
+	            return expression.replace('*', replecement);
+	        }
+	        return expression;
+	    }
+	    function convertAsterisksToRanges(expressions) {
+	        expressions[0] = convertAsterisk(expressions[0], '0-59');
+	        expressions[1] = convertAsterisk(expressions[1], '0-59');
+	        expressions[2] = convertAsterisk(expressions[2], '0-23');
+	        expressions[3] = convertAsterisk(expressions[3], '1-31');
+	        expressions[4] = convertAsterisk(expressions[4], '1-12');
+	        expressions[5] = convertAsterisk(expressions[5], '0-6');
+	        return expressions;
+	    }
+	    return convertAsterisksToRanges;
+	})();
+	
+	return asteriskToRangeConversion;
+}
+
+var rangeConversion = {};
+
+var hasRequiredRangeConversion;
+
+function requireRangeConversion () {
+	if (hasRequiredRangeConversion) return rangeConversion;
+	hasRequiredRangeConversion = 1;
+	Object.defineProperty(rangeConversion, "__esModule", { value: true });
+	rangeConversion.default = (() => {
+	    function replaceWithRange(expression, text, init, end, stepTxt) {
+	        const step = parseInt(stepTxt);
+	        const numbers = [];
+	        let last = parseInt(end);
+	        let first = parseInt(init);
+	        if (first > last) {
+	            last = parseInt(init);
+	            first = parseInt(end);
+	        }
+	        for (let i = first; i <= last; i += step) {
+	            numbers.push(i);
+	        }
+	        return expression.replace(new RegExp(text, 'i'), numbers.join());
+	    }
+	    function convertRange(expression) {
+	        const rangeRegEx = /(\d+)-(\d+)(\/(\d+)|)/;
+	        let match = rangeRegEx.exec(expression);
+	        while (match !== null && match.length > 0) {
+	            expression = replaceWithRange(expression, match[0], match[1], match[2], match[4] || '1');
+	            match = rangeRegEx.exec(expression);
+	        }
+	        return expression;
+	    }
+	    function convertAllRanges(expressions) {
+	        for (let i = 0; i < expressions.length; i++) {
+	            expressions[i] = convertRange(expressions[i]);
+	        }
+	        return expressions;
+	    }
+	    return convertAllRanges;
+	})();
+	
+	return rangeConversion;
+}
+
+var hasRequiredConvertion;
+
+function requireConvertion () {
+	if (hasRequiredConvertion) return convertion;
+	hasRequiredConvertion = 1;
+	var __importDefault = (convertion && convertion.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(convertion, "__esModule", { value: true });
+	const month_names_conversion_1 = __importDefault(requireMonthNamesConversion());
+	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
+	const asterisk_to_range_conversion_1 = __importDefault(requireAsteriskToRangeConversion());
+	const range_conversion_1 = __importDefault(requireRangeConversion());
+	convertion.default = (() => {
+	    function appendSeccondExpression(expressions) {
+	        if (expressions.length === 5) {
+	            return ['0'].concat(expressions);
+	        }
+	        return expressions;
+	    }
+	    function removeSpaces(str) {
+	        return str.replace(/\s{2,}/g, ' ').trim();
+	    }
+	    function normalizeIntegers(expressions) {
+	        for (let i = 0; i < expressions.length; i++) {
+	            const numbers = expressions[i].split(',');
+	            for (let j = 0; j < numbers.length; j++) {
+	                numbers[j] = parseInt(numbers[j]);
+	            }
+	            expressions[i] = numbers;
+	        }
+	        return expressions;
+	    }
+	    function interprete(expression) {
+	        let expressions = removeSpaces(`${expression}`).split(' ');
+	        expressions = appendSeccondExpression(expressions);
+	        expressions[4] = (0, month_names_conversion_1.default)(expressions[4]);
+	        expressions[5] = (0, week_day_names_conversion_1.default)(expressions[5]);
+	        expressions = (0, asterisk_to_range_conversion_1.default)(expressions);
+	        expressions = (0, range_conversion_1.default)(expressions);
+	        expressions = normalizeIntegers(expressions);
+	        return expressions;
+	    }
+	    return interprete;
+	})();
+	
+	return convertion;
+}
+
+var localizedTime = {};
+
+var hasRequiredLocalizedTime;
+
+function requireLocalizedTime () {
+	if (hasRequiredLocalizedTime) return localizedTime;
+	hasRequiredLocalizedTime = 1;
+	Object.defineProperty(localizedTime, "__esModule", { value: true });
+	localizedTime.LocalizedTime = void 0;
+	class LocalizedTime {
+	    timestamp;
+	    parts;
+	    timezone;
+	    constructor(date, timezone) {
+	        this.timestamp = date.getTime();
+	        this.timezone = timezone;
+	        this.parts = buildDateParts(date, timezone);
+	    }
+	    toDate() {
+	        return new Date(this.timestamp);
+	    }
+	    toISO() {
+	        const gmt = this.parts.gmt.replace(/^GMT/, '');
+	        const offset = gmt ? gmt : 'Z';
+	        const pad = (n) => String(n).padStart(2, '0');
+	        return `${this.parts.year}-${pad(this.parts.month)}-${pad(this.parts.day)}`
+	            + `T${pad(this.parts.hour)}:${pad(this.parts.minute)}:${pad(this.parts.second)}`
+	            + `.${String(this.parts.milisecond).padStart(3, '0')}`
+	            + offset;
+	    }
+	    getParts() {
+	        return this.parts;
+	    }
+	    set(field, value) {
+	        this.parts[field] = value;
+	        const newDate = new Date(this.toISO());
+	        this.timestamp = newDate.getTime();
+	        this.parts = buildDateParts(newDate, this.timezone);
+	    }
+	}
+	localizedTime.LocalizedTime = LocalizedTime;
+	function buildDateParts(date, timezone) {
+	    const dftOptions = {
+	        year: 'numeric',
+	        month: '2-digit',
+	        day: '2-digit',
+	        hour: '2-digit',
+	        minute: '2-digit',
+	        second: '2-digit',
+	        weekday: 'short',
+	        hour12: false
+	    };
+	    if (timezone) {
+	        dftOptions.timeZone = timezone;
+	    }
+	    const dateFormat = new Intl.DateTimeFormat('en-US', dftOptions);
+	    const parts = dateFormat.formatToParts(date).filter(part => {
+	        return part.type !== 'literal';
+	    }).reduce((acc, part) => {
+	        acc[part.type] = part.value;
+	        return acc;
+	    }, {});
+	    return {
+	        day: parseInt(parts.day),
+	        month: parseInt(parts.month),
+	        year: parseInt(parts.year),
+	        hour: parts.hour === '24' ? 0 : parseInt(parts.hour),
+	        minute: parseInt(parts.minute),
+	        second: parseInt(parts.second),
+	        milisecond: date.getMilliseconds(),
+	        weekday: parts.weekday,
+	        gmt: getTimezoneGMT(date, timezone)
+	    };
+	}
+	function getTimezoneGMT(date, timezone) {
+	    const utcDate = new Date(date.toLocaleString('en-US', { timeZone: 'UTC' }));
+	    const tzDate = new Date(date.toLocaleString('en-US', { timeZone: timezone }));
+	    let offsetInMinutes = (utcDate.getTime() - tzDate.getTime()) / 60000;
+	    const sign = offsetInMinutes <= 0 ? '+' : '-';
+	    offsetInMinutes = Math.abs(offsetInMinutes);
+	    if (offsetInMinutes === 0)
+	        return 'Z';
+	    const hours = Math.floor(offsetInMinutes / 60).toString().padStart(2, '0');
+	    const minutes = Math.floor(offsetInMinutes % 60).toString().padStart(2, '0');
+	    return `GMT${sign}${hours}:${minutes}`;
+	}
+	
+	return localizedTime;
+}
+
+var matcherWalker = {};
+
+var hasRequiredMatcherWalker;
+
+function requireMatcherWalker () {
+	if (hasRequiredMatcherWalker) return matcherWalker;
+	hasRequiredMatcherWalker = 1;
+	var __importDefault = (matcherWalker && matcherWalker.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(matcherWalker, "__esModule", { value: true });
+	matcherWalker.MatcherWalker = void 0;
+	const convertion_1 = __importDefault(requireConvertion());
+	const localized_time_1 = requireLocalizedTime();
+	const time_matcher_1 = requireTimeMatcher();
+	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
+	class MatcherWalker {
+	    cronExpression;
+	    baseDate;
+	    pattern;
+	    expressions;
+	    timeMatcher;
+	    timezone;
+	    constructor(cronExpression, baseDate, timezone) {
+	        this.cronExpression = cronExpression;
+	        this.baseDate = baseDate;
+	        this.timeMatcher = new time_matcher_1.TimeMatcher(cronExpression, timezone);
+	        this.timezone = timezone;
+	        this.expressions = (0, convertion_1.default)(cronExpression);
+	    }
+	    isMatching() {
+	        return this.timeMatcher.match(this.baseDate);
+	    }
+	    matchNext() {
+	        const findNextDateIgnoringWeekday = () => {
+	            const baseDate = new Date(this.baseDate.getTime());
+	            baseDate.setMilliseconds(0);
+	            const localTime = new localized_time_1.LocalizedTime(baseDate, this.timezone);
+	            const dateParts = localTime.getParts();
+	            const date = new localized_time_1.LocalizedTime(localTime.toDate(), this.timezone);
+	            const seconds = this.expressions[0];
+	            const nextSecond = availableValue(seconds, dateParts.second);
+	            if (nextSecond) {
+	                date.set('second', nextSecond);
+	                if (this.timeMatcher.match(date.toDate())) {
+	                    return date;
+	                }
+	            }
+	            date.set('second', seconds[0]);
+	            const minutes = this.expressions[1];
+	            const nextMinute = availableValue(minutes, dateParts.minute);
+	            if (nextMinute) {
+	                date.set('minute', nextMinute);
+	                if (this.timeMatcher.match(date.toDate())) {
+	                    return date;
+	                }
+	            }
+	            date.set('minute', minutes[0]);
+	            const hours = this.expressions[2];
+	            const nextHour = availableValue(hours, dateParts.hour);
+	            if (nextHour) {
+	                date.set('hour', nextHour);
+	                if (this.timeMatcher.match(date.toDate())) {
+	                    return date;
+	                }
+	            }
+	            date.set('hour', hours[0]);
+	            const days = this.expressions[3];
+	            const nextDay = availableValue(days, dateParts.day);
+	            if (nextDay) {
+	                date.set('day', nextDay);
+	                if (this.timeMatcher.match(date.toDate())) {
+	                    return date;
+	                }
+	            }
+	            date.set('day', days[0]);
+	            const months = this.expressions[4];
+	            const nextMonth = availableValue(months, dateParts.month);
+	            if (nextMonth) {
+	                date.set('month', nextMonth);
+	                if (this.timeMatcher.match(date.toDate())) {
+	                    return date;
+	                }
+	            }
+	            date.set('year', date.getParts().year + 1);
+	            date.set('month', months[0]);
+	            return date;
+	        };
+	        const date = findNextDateIgnoringWeekday();
+	        const weekdays = this.expressions[5];
+	        let currentWeekday = parseInt((0, week_day_names_conversion_1.default)(date.getParts().weekday));
+	        while (!(weekdays.indexOf(currentWeekday) > -1)) {
+	            date.set('year', date.getParts().year + 1);
+	            currentWeekday = parseInt((0, week_day_names_conversion_1.default)(date.getParts().weekday));
+	        }
+	        return date;
+	    }
+	}
+	matcherWalker.MatcherWalker = MatcherWalker;
+	function availableValue(values, currentValue) {
+	    const availableValues = values.sort((a, b) => a - b).filter(s => s > currentValue);
+	    if (availableValues.length > 0)
+	        return availableValues[0];
+	    return false;
+	}
+	
+	return matcherWalker;
+}
+
+var hasRequiredTimeMatcher;
+
+function requireTimeMatcher () {
+	if (hasRequiredTimeMatcher) return timeMatcher;
+	hasRequiredTimeMatcher = 1;
+	var __importDefault = (timeMatcher && timeMatcher.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(timeMatcher, "__esModule", { value: true });
+	timeMatcher.TimeMatcher = void 0;
+	const index_1 = __importDefault(requireConvertion());
+	const week_day_names_conversion_1 = __importDefault(requireWeekDayNamesConversion());
+	const localized_time_1 = requireLocalizedTime();
+	const matcher_walker_1 = requireMatcherWalker();
+	function matchValue(allowedValues, value) {
+	    return allowedValues.indexOf(value) !== -1;
+	}
+	class TimeMatcher {
+	    timezone;
+	    pattern;
+	    expressions;
+	    constructor(pattern, timezone) {
+	        this.timezone = timezone;
+	        this.pattern = pattern;
+	        this.expressions = (0, index_1.default)(pattern);
+	    }
+	    match(date) {
+	        const localizedTime = new localized_time_1.LocalizedTime(date, this.timezone);
+	        const parts = localizedTime.getParts();
+	        const runOnSecond = matchValue(this.expressions[0], parts.second);
+	        const runOnMinute = matchValue(this.expressions[1], parts.minute);
+	        const runOnHour = matchValue(this.expressions[2], parts.hour);
+	        const runOnDay = matchValue(this.expressions[3], parts.day);
+	        const runOnMonth = matchValue(this.expressions[4], parts.month);
+	        const runOnWeekDay = matchValue(this.expressions[5], parseInt((0, week_day_names_conversion_1.default)(parts.weekday)));
+	        return runOnSecond && runOnMinute && runOnHour && runOnDay && runOnMonth && runOnWeekDay;
+	    }
+	    getNextMatch(date) {
+	        const walker = new matcher_walker_1.MatcherWalker(this.pattern, date, this.timezone);
+	        const next = walker.matchNext();
+	        return next.toDate();
+	    }
+	}
+	timeMatcher.TimeMatcher = TimeMatcher;
+	
+	return timeMatcher;
+}
+
+var stateMachine = {};
+
+var hasRequiredStateMachine;
+
+function requireStateMachine () {
+	if (hasRequiredStateMachine) return stateMachine;
+	hasRequiredStateMachine = 1;
+	Object.defineProperty(stateMachine, "__esModule", { value: true });
+	stateMachine.StateMachine = void 0;
+	const allowedTransitions = {
+	    'stopped': ['stopped', 'idle', 'destroyed'],
+	    'idle': ['idle', 'running', 'stopped', 'destroyed'],
+	    'running': ['running', 'idle', 'stopped', 'destroyed'],
+	    'destroyed': ['destroyed']
+	};
+	class StateMachine {
+	    state;
+	    constructor(initial = 'stopped') {
+	        this.state = initial;
+	    }
+	    changeState(state) {
+	        if (allowedTransitions[this.state].includes(state)) {
+	            this.state = state;
+	        }
+	        else {
+	            throw new Error(`invalid transition from ${this.state} to ${state}`);
+	        }
+	    }
+	}
+	stateMachine.StateMachine = StateMachine;
+	
+	return stateMachine;
+}
+
+var hasRequiredInlineScheduledTask;
+
+function requireInlineScheduledTask () {
+	if (hasRequiredInlineScheduledTask) return inlineScheduledTask;
+	hasRequiredInlineScheduledTask = 1;
+	var __importDefault = (inlineScheduledTask && inlineScheduledTask.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(inlineScheduledTask, "__esModule", { value: true });
+	inlineScheduledTask.InlineScheduledTask = void 0;
+	const events_1 = __importDefault(EventEmitter);
+	const runner_1 = requireRunner();
+	const time_matcher_1 = requireTimeMatcher();
+	const create_id_1 = requireCreateId();
+	const state_machine_1 = requireStateMachine();
+	const logger_1 = __importDefault(requireLogger());
+	const localized_time_1 = requireLocalizedTime();
+	class TaskEmitter extends events_1.default {
+	}
+	class InlineScheduledTask {
+	    emitter;
+	    cronExpression;
+	    timeMatcher;
+	    runner;
+	    id;
+	    name;
+	    stateMachine;
+	    timezone;
+	    constructor(cronExpression, taskFn, options) {
+	        this.emitter = new TaskEmitter();
+	        this.cronExpression = cronExpression;
+	        this.id = (0, create_id_1.createID)('task', 12);
+	        this.name = options?.name || this.id;
+	        this.timezone = options?.timezone;
+	        this.timeMatcher = new time_matcher_1.TimeMatcher(cronExpression, options?.timezone);
+	        this.stateMachine = new state_machine_1.StateMachine();
+	        const runnerOptions = {
+	            timezone: options?.timezone,
+	            noOverlap: options?.noOverlap,
+	            maxExecutions: options?.maxExecutions,
+	            maxRandomDelay: options?.maxRandomDelay,
+	            beforeRun: (date, execution) => {
+	                if (execution.reason === 'scheduled') {
+	                    this.changeState('running');
+	                }
+	                this.emitter.emit('execution:started', this.createContext(date, execution));
+	                return true;
+	            },
+	            onFinished: (date, execution) => {
+	                if (execution.reason === 'scheduled') {
+	                    this.changeState('idle');
+	                }
+	                this.emitter.emit('execution:finished', this.createContext(date, execution));
+	                return true;
+	            },
+	            onError: (date, error, execution) => {
+	                logger_1.default.error(error);
+	                this.emitter.emit('execution:failed', this.createContext(date, execution));
+	                this.changeState('idle');
+	            },
+	            onOverlap: (date) => {
+	                this.emitter.emit('execution:overlap', this.createContext(date));
+	            },
+	            onMissedExecution: (date) => {
+	                this.emitter.emit('execution:missed', this.createContext(date));
+	            },
+	            onMaxExecutions: (date) => {
+	                this.emitter.emit('execution:maxReached', this.createContext(date));
+	                this.destroy();
+	            }
+	        };
+	        this.runner = new runner_1.Runner(this.timeMatcher, (date, execution) => {
+	            return taskFn(this.createContext(date, execution));
+	        }, runnerOptions);
+	    }
+	    getNextRun() {
+	        if (this.stateMachine.state !== 'stopped') {
+	            return this.runner.nextRun();
+	        }
+	        return null;
+	    }
+	    changeState(state) {
+	        if (this.runner.isStarted()) {
+	            this.stateMachine.changeState(state);
+	        }
+	    }
+	    start() {
+	        if (this.runner.isStopped()) {
+	            this.runner.start();
+	            this.stateMachine.changeState('idle');
+	            this.emitter.emit('task:started', this.createContext(new Date()));
+	        }
+	    }
+	    stop() {
+	        if (this.runner.isStarted()) {
+	            this.runner.stop();
+	            this.stateMachine.changeState('stopped');
+	            this.emitter.emit('task:stopped', this.createContext(new Date()));
+	        }
+	    }
+	    getStatus() {
+	        return this.stateMachine.state;
+	    }
+	    destroy() {
+	        if (this.stateMachine.state === 'destroyed')
+	            return;
+	        this.stop();
+	        this.stateMachine.changeState('destroyed');
+	        this.emitter.emit('task:destroyed', this.createContext(new Date()));
+	    }
+	    execute() {
+	        return new Promise((resolve, reject) => {
+	            const onFail = (context) => {
+	                this.off('execution:finished', onFail);
+	                reject(context.execution?.error);
+	            };
+	            const onFinished = (context) => {
+	                this.off('execution:failed', onFail);
+	                resolve(context.execution?.result);
+	            };
+	            this.once('execution:finished', onFinished);
+	            this.once('execution:failed', onFail);
+	            this.runner.execute();
+	        });
+	    }
+	    on(event, fun) {
+	        this.emitter.on(event, fun);
+	    }
+	    off(event, fun) {
+	        this.emitter.off(event, fun);
+	    }
+	    once(event, fun) {
+	        this.emitter.once(event, fun);
+	    }
+	    createContext(executionDate, execution) {
+	        const localTime = new localized_time_1.LocalizedTime(executionDate, this.timezone);
+	        const ctx = {
+	            date: localTime.toDate(),
+	            dateLocalIso: localTime.toISO(),
+	            triggeredAt: new Date(),
+	            task: this,
+	            execution: execution
+	        };
+	        return ctx;
+	    }
+	}
+	inlineScheduledTask.InlineScheduledTask = InlineScheduledTask;
+	
+	return inlineScheduledTask;
+}
+
+var taskRegistry = {};
+
+var hasRequiredTaskRegistry;
+
+function requireTaskRegistry () {
+	if (hasRequiredTaskRegistry) return taskRegistry;
+	hasRequiredTaskRegistry = 1;
+	Object.defineProperty(taskRegistry, "__esModule", { value: true });
+	taskRegistry.TaskRegistry = void 0;
+	const tasks = new Map();
+	class TaskRegistry {
+	    add(task) {
+	        if (this.has(task.id)) {
+	            throw Error(`task ${task.id} already registred!`);
+	        }
+	        tasks.set(task.id, task);
+	        task.on('task:destroyed', () => {
+	            this.remove(task);
+	        });
+	    }
+	    get(taskId) {
+	        return tasks.get(taskId);
+	    }
+	    remove(task) {
+	        if (this.has(task.id)) {
+	            task?.destroy();
+	            tasks.delete(task.id);
+	        }
+	    }
+	    all() {
+	        return tasks;
+	    }
+	    has(taskId) {
+	        return tasks.has(taskId);
+	    }
+	    killAll() {
+	        tasks.forEach(id => this.remove(id));
+	    }
+	}
+	taskRegistry.TaskRegistry = TaskRegistry;
+	
+	return taskRegistry;
+}
+
+var patternValidation = {};
+
+var hasRequiredPatternValidation;
+
+function requirePatternValidation () {
+	if (hasRequiredPatternValidation) return patternValidation;
+	hasRequiredPatternValidation = 1;
+	var __importDefault = (patternValidation && patternValidation.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(patternValidation, "__esModule", { value: true });
+	const index_1 = __importDefault(requireConvertion());
+	const validationRegex = /^(?:\d+|\*|\*\/\d+)$/;
+	function isValidExpression(expression, min, max) {
+	    const options = expression;
+	    for (const option of options) {
+	        const optionAsInt = parseInt(option, 10);
+	        if ((!Number.isNaN(optionAsInt) &&
+	            (optionAsInt < min || optionAsInt > max)) ||
+	            !validationRegex.test(option))
+	            return false;
+	    }
+	    return true;
+	}
+	function isInvalidSecond(expression) {
+	    return !isValidExpression(expression, 0, 59);
+	}
+	function isInvalidMinute(expression) {
+	    return !isValidExpression(expression, 0, 59);
+	}
+	function isInvalidHour(expression) {
+	    return !isValidExpression(expression, 0, 23);
+	}
+	function isInvalidDayOfMonth(expression) {
+	    return !isValidExpression(expression, 1, 31);
+	}
+	function isInvalidMonth(expression) {
+	    return !isValidExpression(expression, 1, 12);
+	}
+	function isInvalidWeekDay(expression) {
+	    return !isValidExpression(expression, 0, 7);
+	}
+	function validateFields(patterns, executablePatterns) {
+	    if (isInvalidSecond(executablePatterns[0]))
+	        throw new Error(`${patterns[0]} is a invalid expression for second`);
+	    if (isInvalidMinute(executablePatterns[1]))
+	        throw new Error(`${patterns[1]} is a invalid expression for minute`);
+	    if (isInvalidHour(executablePatterns[2]))
+	        throw new Error(`${patterns[2]} is a invalid expression for hour`);
+	    if (isInvalidDayOfMonth(executablePatterns[3]))
+	        throw new Error(`${patterns[3]} is a invalid expression for day of month`);
+	    if (isInvalidMonth(executablePatterns[4]))
+	        throw new Error(`${patterns[4]} is a invalid expression for month`);
+	    if (isInvalidWeekDay(executablePatterns[5]))
+	        throw new Error(`${patterns[5]} is a invalid expression for week day`);
+	}
+	function validate(pattern) {
+	    if (typeof pattern !== 'string')
+	        throw new TypeError('pattern must be a string!');
+	    const patterns = pattern.split(' ');
+	    const executablePatterns = (0, index_1.default)(pattern);
+	    if (patterns.length === 5)
+	        patterns.unshift('0');
+	    validateFields(patterns, executablePatterns);
+	}
+	patternValidation.default = validate;
+	
+	return patternValidation;
+}
+
+var backgroundScheduledTask = {};
+
+var hasRequiredBackgroundScheduledTask;
+
+function requireBackgroundScheduledTask () {
+	if (hasRequiredBackgroundScheduledTask) return backgroundScheduledTask;
+	hasRequiredBackgroundScheduledTask = 1;
+	var __importDefault = (backgroundScheduledTask && backgroundScheduledTask.__importDefault) || function (mod) {
+	    return (mod && mod.__esModule) ? mod : { "default": mod };
+	};
+	Object.defineProperty(backgroundScheduledTask, "__esModule", { value: true });
+	const path_1 = path$1;
+	const child_process_1 = require$$1;
+	const create_id_1 = requireCreateId();
+	const stream_1 = require$$3;
+	const state_machine_1 = requireStateMachine();
+	const localized_time_1 = requireLocalizedTime();
+	const logger_1 = __importDefault(requireLogger());
+	const time_matcher_1 = requireTimeMatcher();
+	const daemonPath = (0, path_1.resolve)(__dirname, 'daemon.js');
+	class TaskEmitter extends stream_1.EventEmitter {
+	}
+	class BackgroundScheduledTask {
+	    emitter;
+	    id;
+	    name;
+	    cronExpression;
+	    taskPath;
+	    options;
+	    forkProcess;
+	    stateMachine;
+	    constructor(cronExpression, taskPath, options) {
+	        this.cronExpression = cronExpression;
+	        this.taskPath = taskPath;
+	        this.options = options;
+	        this.id = (0, create_id_1.createID)('task');
+	        this.name = options?.name || this.id;
+	        this.emitter = new TaskEmitter();
+	        this.stateMachine = new state_machine_1.StateMachine('stopped');
+	        this.on('task:stopped', () => {
+	            this.forkProcess?.kill();
+	            this.forkProcess = undefined;
+	            this.stateMachine.changeState('stopped');
+	        });
+	        this.on('task:destroyed', () => {
+	            this.forkProcess?.kill();
+	            this.forkProcess = undefined;
+	            this.stateMachine.changeState('destroyed');
+	        });
+	    }
+	    getNextRun() {
+	        if (this.stateMachine.state !== 'stopped') {
+	            const timeMatcher = new time_matcher_1.TimeMatcher(this.cronExpression, this.options?.timezone);
+	            return timeMatcher.getNextMatch(new Date());
+	        }
+	        return null;
+	    }
+	    start() {
+	        return new Promise((resolve, reject) => {
+	            if (this.forkProcess) {
+	                return resolve(undefined);
+	            }
+	            const timeout = setTimeout(() => {
+	                reject(new Error('Start operation timed out'));
+	            }, 5000);
+	            try {
+	                this.forkProcess = (0, child_process_1.fork)(daemonPath);
+	                this.forkProcess.on('error', (err) => {
+	                    clearTimeout(timeout);
+	                    reject(new Error(`Error on daemon: ${err.message}`));
+	                });
+	                this.forkProcess.on('exit', (code, signal) => {
+	                    if (code !== 0 && signal !== 'SIGTERM') {
+	                        const erro = new Error(`node-cron daemon exited with code ${code || signal}`);
+	                        logger_1.default.error(erro);
+	                        clearTimeout(timeout);
+	                        reject(erro);
+	                    }
+	                });
+	                this.forkProcess.on('message', (message) => {
+	                    if (message.jsonError) {
+	                        if (message.context?.execution) {
+	                            message.context.execution.error = deserializeError(message.jsonError);
+	                            delete message.jsonError;
+	                        }
+	                    }
+	                    if (message.context?.task?.state) {
+	                        this.stateMachine.changeState(message.context?.task?.state);
+	                    }
+	                    if (message.context) {
+	                        const execution = message.context?.execution;
+	                        delete execution?.hasError;
+	                        const context = this.createContext(new Date(message.context.date), execution);
+	                        this.emitter.emit(message.event, context);
+	                    }
+	                });
+	                this.once('task:started', () => {
+	                    this.stateMachine.changeState('idle');
+	                    clearTimeout(timeout);
+	                    resolve(undefined);
+	                });
+	                this.forkProcess.send({
+	                    command: 'task:start',
+	                    path: this.taskPath,
+	                    cron: this.cronExpression,
+	                    options: this.options
+	                });
+	            }
+	            catch (error) {
+	                reject(error);
+	            }
+	        });
+	    }
+	    stop() {
+	        return new Promise((resolve, reject) => {
+	            if (!this.forkProcess) {
+	                return resolve(undefined);
+	            }
+	            const timeoutId = setTimeout(() => {
+	                clearTimeout(timeoutId);
+	                reject(new Error('Stop operation timed out'));
+	            }, 5000);
+	            const cleanupAndResolve = () => {
+	                clearTimeout(timeoutId);
+	                this.off('task:stopped', onStopped);
+	                this.forkProcess = undefined;
+	                resolve(undefined);
+	            };
+	            const onStopped = () => {
+	                cleanupAndResolve();
+	            };
+	            this.once('task:stopped', onStopped);
+	            this.forkProcess.send({
+	                command: 'task:stop'
+	            });
+	        });
+	    }
+	    getStatus() {
+	        return this.stateMachine.state;
+	    }
+	    destroy() {
+	        return new Promise((resolve, reject) => {
+	            if (!this.forkProcess) {
+	                return resolve(undefined);
+	            }
+	            const timeoutId = setTimeout(() => {
+	                clearTimeout(timeoutId);
+	                reject(new Error('Destroy operation timed out'));
+	            }, 5000);
+	            const onDestroy = () => {
+	                clearTimeout(timeoutId);
+	                this.off('task:destroyed', onDestroy);
+	                resolve(undefined);
+	            };
+	            this.once('task:destroyed', onDestroy);
+	            this.forkProcess.send({
+	                command: 'task:destroy'
+	            });
+	        });
+	    }
+	    execute() {
+	        return new Promise((resolve, reject) => {
+	            if (!this.forkProcess) {
+	                return reject(new Error('Cannot execute background task because it hasn\'t been started yet. Please initialize the task using the start() method before attempting to execute it.'));
+	            }
+	            const timeoutId = setTimeout(() => {
+	                cleanupListeners();
+	                reject(new Error('Execution timeout exceeded'));
+	            }, 5000);
+	            const cleanupListeners = () => {
+	                clearTimeout(timeoutId);
+	                this.off('execution:finished', onFinished);
+	                this.off('execution:failed', onFail);
+	            };
+	            const onFinished = (context) => {
+	                cleanupListeners();
+	                resolve(context.execution?.result);
+	            };
+	            const onFail = (context) => {
+	                cleanupListeners();
+	                reject(context.execution?.error || new Error('Execution failed without specific error'));
+	            };
+	            this.once('execution:finished', onFinished);
+	            this.once('execution:failed', onFail);
+	            this.forkProcess.send({
+	                command: 'task:execute'
+	            });
+	        });
+	    }
+	    on(event, fun) {
+	        this.emitter.on(event, fun);
+	    }
+	    off(event, fun) {
+	        this.emitter.off(event, fun);
+	    }
+	    once(event, fun) {
+	        this.emitter.once(event, fun);
+	    }
+	    createContext(executionDate, execution) {
+	        const localTime = new localized_time_1.LocalizedTime(executionDate, this.options?.timezone);
+	        const ctx = {
+	            date: localTime.toDate(),
+	            dateLocalIso: localTime.toISO(),
+	            triggeredAt: new Date(),
+	            task: this,
+	            execution: execution
+	        };
+	        return ctx;
+	    }
+	}
+	function deserializeError(str) {
+	    const data = JSON.parse(str);
+	    const Err = globalThis[data.name] || Error;
+	    const err = new Err(data.message);
+	    if (data.stack) {
+	        err.stack = data.stack;
+	    }
+	    Object.keys(data).forEach(key => {
+	        if (!['name', 'message', 'stack'].includes(key)) {
+	            err[key] = data[key];
+	        }
+	    });
+	    return err;
+	}
+	backgroundScheduledTask.default = BackgroundScheduledTask;
+	
+	return backgroundScheduledTask;
+}
+
+var hasRequiredNodeCron;
+
+function requireNodeCron () {
+	if (hasRequiredNodeCron) return nodeCron$2;
+	hasRequiredNodeCron = 1;
+	(function (exports) {
+		var __importDefault = (nodeCron$2 && nodeCron$2.__importDefault) || function (mod) {
+		    return (mod && mod.__esModule) ? mod : { "default": mod };
+		};
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.nodeCron = exports.getTask = exports.getTasks = void 0;
+		exports.schedule = schedule;
+		exports.createTask = createTask;
+		exports.solvePath = solvePath;
+		exports.validate = validate;
+		const inline_scheduled_task_1 = requireInlineScheduledTask();
+		const task_registry_1 = requireTaskRegistry();
+		const pattern_validation_1 = __importDefault(requirePatternValidation());
+		const background_scheduled_task_1 = __importDefault(requireBackgroundScheduledTask());
+		const path_1 = __importDefault(path$1);
+		const url_1 = require$$5;
+		const registry = new task_registry_1.TaskRegistry();
+		function schedule(expression, func, options) {
+		    const task = createTask(expression, func, options);
+		    task.start();
+		    return task;
+		}
+		function createTask(expression, func, options) {
+		    let task;
+		    if (func instanceof Function) {
+		        task = new inline_scheduled_task_1.InlineScheduledTask(expression, func, options);
+		    }
+		    else {
+		        const taskPath = solvePath(func);
+		        task = new background_scheduled_task_1.default(expression, taskPath, options);
+		    }
+		    registry.add(task);
+		    return task;
+		}
+		function solvePath(filePath) {
+		    if (path_1.default.isAbsolute(filePath))
+		        return (0, url_1.pathToFileURL)(filePath).href;
+		    if (filePath.startsWith('file://'))
+		        return filePath;
+		    const stackLines = new Error().stack?.split('\n');
+		    if (stackLines) {
+		        stackLines?.shift();
+		        const callerLine = stackLines?.find((line) => { return line.indexOf(__filename) === -1; });
+		        const match = callerLine?.match(/(file:\/\/)?(((\/?)(\w:))?([/\\].+)):\d+:\d+/);
+		        if (match) {
+		            const dir = `${match[5] ?? ""}${path_1.default.dirname(match[6])}`;
+		            return (0, url_1.pathToFileURL)(path_1.default.resolve(dir, filePath)).href;
+		        }
+		    }
+		    throw new Error(`Could not locate task file ${filePath}`);
+		}
+		function validate(expression) {
+		    try {
+		        (0, pattern_validation_1.default)(expression);
+		        return true;
+		    }
+		    catch (e) {
+		        return false;
+		    }
+		}
+		exports.getTasks = registry.all;
+		exports.getTask = registry.get;
+		exports.nodeCron = {
+		    schedule,
+		    createTask,
+		    validate,
+		    getTasks: exports.getTasks,
+		    getTask: exports.getTask,
+		};
+		exports.default = exports.nodeCron;
+		
+	} (nodeCron$2));
+	return nodeCron$2;
+}
+
+var nodeCronExports = requireNodeCron();
+var nodeCron = /*@__PURE__*/getDefaultExportFromCjs(nodeCronExports);
+
+var nodeCron$1 = /*#__PURE__*/_mergeNamespaces({
+  __proto__: null,
+  default: nodeCron
+}, [nodeCronExports]);
+
 function silhouetteScore(vectors, assignments, centroids, distanceFn = euclideanDistance) {
   const k = centroids.length;
   const n = vectors.length;
@@ -35234,6 +36063,7 @@ var metrics = /*#__PURE__*/Object.freeze({
 
 exports.AVAILABLE_BEHAVIORS = AVAILABLE_BEHAVIORS;
 exports.AnalyticsNotEnabledError = AnalyticsNotEnabledError;
+exports.ApiPlugin = ApiPlugin;
 exports.AuditPlugin = AuditPlugin;
 exports.AuthenticationError = AuthenticationError;
 exports.BACKUP_DRIVERS = BACKUP_DRIVERS;
@@ -35251,19 +36081,16 @@ exports.ConnectionString = ConnectionString;
 exports.ConnectionStringError = ConnectionStringError;
 exports.CostsPlugin = CostsPlugin;
 exports.CryptoError = CryptoError;
-exports.CsvReplicator = CsvReplicator;
 exports.DEFAULT_BEHAVIOR = DEFAULT_BEHAVIOR;
 exports.Database = Database;
 exports.DatabaseError = DatabaseError;
 exports.EncryptionError = EncryptionError;
 exports.ErrorMap = ErrorMap;
 exports.EventualConsistencyPlugin = EventualConsistencyPlugin;
-exports.ExcelReplicator = ExcelReplicator;
 exports.FilesystemBackupDriver = FilesystemBackupDriver;
 exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
-exports.JsonlReplicator = JsonlReplicator;
 exports.MemoryCache = MemoryCache;
 exports.MetadataLimitError = MetadataLimitError;
 exports.MetricsPlugin = MetricsPlugin;
@@ -35272,7 +36099,6 @@ exports.MultiBackupDriver = MultiBackupDriver;
 exports.NoSuchBucket = NoSuchBucket;
 exports.NoSuchKey = NoSuchKey;
 exports.NotFound = NotFound;
-exports.ParquetReplicator = ParquetReplicator;
 exports.PartitionAwareFilesystemCache = PartitionAwareFilesystemCache;
 exports.PartitionDriverError = PartitionDriverError;
 exports.PartitionError = PartitionError;

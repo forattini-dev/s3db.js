@@ -126,6 +126,16 @@ export class CachePlugin extends Plugin {
       // Logging
       verbose: options.verbose || false
     };
+
+    // Initialize stats tracking
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      writes: 0,
+      deletes: 0,
+      errors: 0,
+      startTime: Date.now()
+    };
   }
 
   async onInstall() {
@@ -332,30 +342,46 @@ export class CachePlugin extends Plugin {
             partition,
             partitionValues
           }));
-          
-          if (ok && result !== null && result !== undefined) return result;
-          if (!ok && err.name !== 'NoSuchKey') throw err;
-          
+
+          if (ok && result !== null && result !== undefined) {
+            this.stats.hits++;
+            return result;
+          }
+          if (!ok && err.name !== 'NoSuchKey') {
+            this.stats.errors++;
+            throw err;
+          }
+
           // Not cached, call next
+          this.stats.misses++;
           const freshResult = await next();
-          
+
           // Store with partition context
+          this.stats.writes++;
           await resource.cache._set(key, freshResult, {
             resource: resource.name,
             action: method,
             partition,
             partitionValues
           });
-          
+
           return freshResult;
         } else {
           // Standard cache behavior
           const [ok, err, result] = await tryFn(() => resource.cache.get(key));
-          if (ok && result !== null && result !== undefined) return result;
-          if (!ok && err.name !== 'NoSuchKey') throw err;
-          
+          if (ok && result !== null && result !== undefined) {
+            this.stats.hits++;
+            return result;
+          }
+          if (!ok && err.name !== 'NoSuchKey') {
+            this.stats.errors++;
+            throw err;
+          }
+
           // Not cached, call next
+          this.stats.misses++;
           const freshResult = await next();
+          this.stats.writes++;
           await resource.cache.set(key, freshResult);
           return freshResult;
         }
@@ -476,6 +502,7 @@ export class CachePlugin extends Plugin {
       const [ok, err] = await tryFn(() => cache.clear(key));
 
       if (ok) {
+        this.stats.deletes++;
         return [true, null];
       }
 
@@ -681,6 +708,77 @@ export class CachePlugin extends Plugin {
     ];
 
     return analysis;
+  }
+
+  /**
+   * Get cache statistics including hit/miss rates
+   * @returns {Object} Stats object with hits, misses, writes, deletes, errors, and calculated metrics
+   */
+  getStats() {
+    const total = this.stats.hits + this.stats.misses;
+    const hitRate = total > 0 ? (this.stats.hits / total) * 100 : 0;
+    const missRate = total > 0 ? (this.stats.misses / total) * 100 : 0;
+    const uptime = Date.now() - this.stats.startTime;
+    const uptimeSeconds = Math.floor(uptime / 1000);
+
+    return {
+      // Raw counters
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      writes: this.stats.writes,
+      deletes: this.stats.deletes,
+      errors: this.stats.errors,
+
+      // Calculated metrics
+      total,
+      hitRate: hitRate.toFixed(2) + '%',
+      missRate: missRate.toFixed(2) + '%',
+      hitRateDecimal: hitRate / 100,
+      missRateDecimal: missRate / 100,
+
+      // Uptime
+      uptime: uptimeSeconds,
+      uptimeFormatted: this._formatUptime(uptimeSeconds),
+      startTime: new Date(this.stats.startTime).toISOString(),
+
+      // Rates per second
+      hitsPerSecond: uptimeSeconds > 0 ? (this.stats.hits / uptimeSeconds).toFixed(2) : 0,
+      missesPerSecond: uptimeSeconds > 0 ? (this.stats.misses / uptimeSeconds).toFixed(2) : 0,
+      writesPerSecond: uptimeSeconds > 0 ? (this.stats.writes / uptimeSeconds).toFixed(2) : 0
+    };
+  }
+
+  /**
+   * Reset cache statistics
+   */
+  resetStats() {
+    this.stats = {
+      hits: 0,
+      misses: 0,
+      writes: 0,
+      deletes: 0,
+      errors: 0,
+      startTime: Date.now()
+    };
+  }
+
+  /**
+   * Format uptime in human-readable format
+   * @private
+   */
+  _formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+    return parts.join(' ');
   }
 }
 
