@@ -1461,6 +1461,21 @@ R: JSONL (JSON Lines) comprimido com gzip (.jsonl.gz) + arquivo s3db.json com me
 **P: Como funciona o streaming?**
 R: O BackupPlugin escreve os records um por um sem carregar o dataset inteiro na memória, usando apenas ~10KB de RAM constante independente do tamanho do banco.
 
+**P: Como restaurar um backup?**
+R: Use o **ImporterPlugin** para restaurar backups JSONL.gz:
+```javascript
+const importer = new ImporterPlugin({
+  resource: 'users',
+  format: 'jsonl',
+  filePath: './backups/full-2025-10-21T02-00-00-abc123/users.jsonl.gz',
+  batchSize: 1000,
+  parallelism: 10
+});
+await db.usePlugin(importer);
+await importer.import();  // ✅ Backup restored in ~12 seconds for 1M records
+```
+📚 Veja [ImporterPlugin docs](./importer.md) para mais detalhes sobre import/restore.
+
 ### Configuração
 
 **P: Como configurar backup para filesystem?**
