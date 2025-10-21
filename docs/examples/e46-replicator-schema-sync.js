@@ -182,9 +182,43 @@ async function example() {
   }
 
   // ========================================
-  // Example 5: MySQL with schema sync
+  // Example 5: BigQuery with schema sync (PRINCIPAL!)
   // ========================================
-  console.log('📘 Example 5: MySQL/MariaDB schema sync');
+  console.log('📘 Example 5: BigQuery schema sync (Main Driver)');
+  console.log('─'.repeat(60));
+
+  const bigqueryReplicator = new ReplicatorPlugin({
+    replicators: [{
+      driver: 'bigquery',
+      config: {
+        projectId: 'my-gcp-project',
+        datasetId: 'analytics',
+        credentials: {}, // Service account credentials
+        schemaSync: {
+          enabled: true,
+          strategy: 'alter',
+          autoCreateTable: true,
+          autoCreateColumns: true
+        }
+      },
+      resources: {
+        users: 'users_table'
+      }
+    }]
+  });
+
+  try {
+    await db.usePlugin(bigqueryReplicator);
+    console.log('✅ BigQuery table created/synced successfully');
+    console.log('   Schema format: BigQuery native (STRING, INT64, FLOAT64, JSON, etc)\n');
+  } catch (err) {
+    console.log(`❌ Error: ${err.message}\n`);
+  }
+
+  // ========================================
+  // Example 6: MySQL with schema sync
+  // ========================================
+  console.log('📘 Example 6: MySQL/MariaDB schema sync');
   console.log('─'.repeat(60));
 
   const mysqlReplicator = new ReplicatorPlugin({
@@ -280,21 +314,22 @@ async function example() {
   // Type mapping reference
   // ========================================
   console.log('📋 Type Mapping Reference');
-  console.log('─'.repeat(60));
-  console.log('S3DB Type        → PostgreSQL      → MySQL/MariaDB');
-  console.log('─'.repeat(60));
-  console.log('string           → TEXT            → TEXT');
-  console.log('string|max:255   → VARCHAR(255)    → VARCHAR(255)');
-  console.log('number           → DOUBLE          → DOUBLE');
-  console.log('boolean          → BOOLEAN         → TINYINT(1)');
-  console.log('object/json      → JSONB           → JSON');
-  console.log('array            → JSONB           → JSON');
-  console.log('embedding:1536   → JSONB           → JSON');
-  console.log('ip4              → INET            → VARCHAR(15)');
-  console.log('ip6              → INET            → VARCHAR(45)');
-  console.log('secret           → TEXT            → TEXT');
-  console.log('uuid             → UUID            → CHAR(36)');
-  console.log('date/datetime    → TIMESTAMPTZ     → DATETIME');
+  console.log('─'.repeat(80));
+  console.log('S3DB Type        → PostgreSQL      → MySQL/MariaDB   → BigQuery');
+  console.log('─'.repeat(80));
+  console.log('string           → TEXT            → TEXT            → STRING');
+  console.log('string|max:255   → VARCHAR(255)    → VARCHAR(255)    → STRING');
+  console.log('number           → DOUBLE          → DOUBLE          → FLOAT64 / INT64');
+  console.log('boolean          → BOOLEAN         → TINYINT(1)      → BOOL');
+  console.log('object/json      → JSONB           → JSON            → JSON');
+  console.log('array            → JSONB           → JSON            → JSON');
+  console.log('embedding:1536   → JSONB           → JSON            → JSON');
+  console.log('ip4              → INET            → VARCHAR(15)     → STRING');
+  console.log('ip6              → INET            → VARCHAR(45)     → STRING');
+  console.log('secret           → TEXT            → TEXT            → STRING');
+  console.log('uuid             → UUID            → CHAR(36)        → STRING');
+  console.log('date             → DATE            → DATE            → DATE');
+  console.log('datetime         → TIMESTAMPTZ     → DATETIME        → TIMESTAMP');
   console.log();
 
   console.log('✅ Example completed!\n');

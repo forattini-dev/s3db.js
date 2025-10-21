@@ -35,6 +35,28 @@ console.log(s3db.client.costs.requests.get); // 1 (vs 1000 without cache)
 
 ---
 
+## 📑 Table of Contents
+
+1. [⚡ TLDR](#-tldr)
+2. [⚡ Quickstart](#-quickstart)
+3. [Usage Journey](#usage-journey)
+   - [Level 1: Basic Memory Caching](#level-1-basic-memory-caching)
+   - [Level 2: Add Memory Limits](#level-2-add-memory-limits)
+   - [Level 3: Enable Compression](#level-3-enable-compression)
+   - [Level 4: Add Statistics & Monitoring](#level-4-add-statistics--monitoring)
+   - [Level 5: Production - Persistent Cache](#level-5-production---persistent-cache)
+   - [Level 6: Multi-Server - Shared S3 Cache](#level-6-multi-server---shared-s3-cache)
+   - [Level 7: Production Optimization](#level-7-production-optimization)
+4. [📊 Configuration Reference](#-configuration-reference)
+5. [📚 Configuration Examples](#-configuration-examples)
+6. [🔧 API Reference](#-api-reference)
+7. [✅ Best Practices](#-best-practices)
+8. [💰 Measuring Real Cost Savings with Costs Plugin](#-measuring-real-cost-savings-with-costs-plugin)
+9. [🔗 See Also](#-see-also)
+10. [🚨 Error Handling](#-error-handling)
+
+---
+
 ## ⚡ Quickstart
 
 ```javascript

@@ -103,7 +103,7 @@ new BackupPlugin({
 
 **Automatically create and sync SQL database tables** based on your S3DB resource schemas. No manual DDL required!
 
-**Supported databases:** PostgreSQL, MySQL, MariaDB
+**Supported databases:** PostgreSQL, MySQL, MariaDB, **BigQuery**
 
 ### Quick Example
 
@@ -166,20 +166,21 @@ new ReplicatorPlugin({
 
 ### Type Mapping
 
-| S3DB Type | PostgreSQL | MySQL/MariaDB |
-|-----------|------------|---------------|
-| `string` | `TEXT` | `TEXT` |
-| `string\|maxlength:255` | `VARCHAR(255)` | `VARCHAR(255)` |
-| `number` | `DOUBLE PRECISION` | `DOUBLE` |
-| `boolean` | `BOOLEAN` | `TINYINT(1)` |
-| `object` / `json` | `JSONB` | `JSON` |
-| `array` | `JSONB` | `JSON` |
-| `embedding:1536` | `JSONB` | `JSON` |
-| `ip4` | `INET` | `VARCHAR(15)` |
-| `ip6` | `INET` | `VARCHAR(45)` |
-| `secret` | `TEXT` | `TEXT` |
-| `uuid` | `UUID` | `CHAR(36)` |
-| `date` / `datetime` | `TIMESTAMPTZ` | `DATETIME` |
+| S3DB Type | PostgreSQL | MySQL/MariaDB | BigQuery |
+|-----------|------------|---------------|----------|
+| `string` | `TEXT` | `TEXT` | `STRING` |
+| `string\|maxlength:255` | `VARCHAR(255)` | `VARCHAR(255)` | `STRING` |
+| `number` | `DOUBLE PRECISION` | `DOUBLE` | `FLOAT64` / `INT64` |
+| `boolean` | `BOOLEAN` | `TINYINT(1)` | `BOOL` |
+| `object` / `json` | `JSONB` | `JSON` | `JSON` |
+| `array` | `JSONB` | `JSON` | `JSON` |
+| `embedding:1536` | `JSONB` | `JSON` | `JSON` |
+| `ip4` | `INET` | `VARCHAR(15)` | `STRING` |
+| `ip6` | `INET` | `VARCHAR(45)` | `STRING` |
+| `secret` | `TEXT` | `TEXT` | `STRING` |
+| `uuid` | `UUID` | `CHAR(36)` | `STRING` |
+| `date` | `DATE` | `DATE` | `DATE` |
+| `datetime` | `TIMESTAMPTZ` | `DATETIME` | `TIMESTAMP` |
 
 ### Events
 

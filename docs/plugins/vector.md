@@ -1,6 +1,55 @@
 # VectorPlugin
 
-Store, search, and cluster vector embeddings with advanced similarity algorithms and automatic K-selection for optimal clustering.
+## ⚡ TL;DR
+
+**Store, search, and cluster** vector embeddings with **automatic compression** (77% savings), **multiple distance metrics**, and **intelligent K-means clustering**.
+
+```javascript
+import { Database, VectorPlugin } from 's3db';
+
+const db = new Database('s3://key:secret@bucket');
+const vectorPlugin = new VectorPlugin({ dimensions: 1536 });
+await vectorPlugin.install(db);
+
+// Create resource with clean embedding notation (auto-compression!)
+const products = await db.createResource({
+  name: 'products',
+  attributes: {
+    name: 'string|required',
+    vector: 'embedding:1536'  // 77% compression built-in!
+  }
+});
+
+// Store vectors (use OpenAI, Anthropic, Cohere, etc. externally for generation)
+await products.insert({
+  name: 'Laptop Pro',
+  vector: [0.1, 0.2, ... ]  // 1536 dimensions from your embedding provider
+});
+
+// Find similar items (KNN search)
+const similar = await vectorPlugin.findSimilar('products', 'vector', queryVector, { k: 5 });
+console.log(`Found ${similar.length} similar items`);
+
+// Auto-detect optimal clusters
+const optimalK = await vectorPlugin.findOptimalK('products', 'vector', { minK: 2, maxK: 10 });
+console.log(`Optimal clusters: ${optimalK.bestK} (score: ${optimalK.bestScore})`);
+```
+
+**Key Features:**
+- ✅ **Clean syntax**: `embedding:1536` notation with auto-compression (77% savings)
+- ✅ **Multiple distance metrics**: Cosine, Euclidean, Manhattan
+- ✅ **KNN search**: Find k-nearest neighbors with configurable thresholds
+- ✅ **K-means clustering**: K-means++ initialization for better convergence
+- ✅ **Optimal K selection**: 5 evaluation metrics (Silhouette, Davies-Bouldin, Calinski-Harabasz, Gap, Stability)
+- ✅ **Auto-validation**: Dimension checking and storage warnings
+- ✅ **Events & Monitoring**: Progress tracking and comprehensive metrics
+
+**Storage:**
+- OpenAI text-embedding-3-small/large (1536): ~2.3KB with compression (✅ fits with body-overflow)
+- Sentence Transformers (384): ~620 bytes (✅ fits in metadata)
+- Small models (128): ~207 bytes (✅ fits in metadata)
+
+---
 
 ## Table of Contents
 
@@ -2114,6 +2163,157 @@ async function migrateEmbeddings(oldVersion, newVersion) {
   }
 }
 ```
+
+---
+
+## ❓ FAQ
+
+### For Developers
+
+**Q: Does VectorPlugin generate embeddings?**
+**A:** No! VectorPlugin stores and searches pre-computed vectors. You must generate embeddings externally using:
+- OpenAI (text-embedding-3-small, text-embedding-3-large)
+- Anthropic (via Voyage AI partnership)
+- Cohere (embed-english-v3.0, embed-multilingual-v3.0)
+- Google Vertex AI (textembedding-gecko)
+- Open source models (Sentence Transformers, all-MiniLM-L6-v2, etc.)
+
+**Q: What's the best embedding model to use?**
+**A:** Depends on your use case:
+- **Semantic search**: OpenAI text-embedding-3-large (1536D, high accuracy)
+- **Budget-conscious**: OpenAI text-embedding-3-small (1536D, 80% of large quality)
+- **Real-time/low-latency**: Sentence Transformers all-MiniLM-L6-v2 (384D, fast)
+- **Multilingual**: Cohere embed-multilingual-v3.0 (1024D, 100+ languages)
+- **Anthropic users**: Voyage AI voyage-2 (1024D, Anthropic partnership)
+
+See [Model Comparison Table](#model-comparison-table) for detailed benchmarks.
+
+**Q: How do I handle large vectors that exceed S3's 2KB metadata limit?**
+**A:** Use the `embedding:XXX` notation which automatically applies 77% compression with fixed-point encoding:
+```javascript
+attributes: {
+  vector: 'embedding:1536'  // Auto-compressed, ~2.3KB (fits with body-overflow)
+}
+```
+
+For even larger vectors, set behavior to `body-overflow`:
+```javascript
+await db.createResource({
+  name: 'products',
+  attributes: { vector: 'embedding:3072' },  // Large model
+  behavior: 'body-overflow'  // Stores in S3 object body
+});
+```
+
+**Q: Can I use multiple embedding models in the same resource?**
+**A:** Yes! Store metadata about which model generated each vector:
+```javascript
+await products.insert({
+  name: 'Product 1',
+  vector: embedding,
+  vectorModel: 'text-embedding-3-large',
+  vectorVersion: '2024-01',
+  vectorDimensions: 1536
+});
+
+// Query by model when searching
+const results = await vectorPlugin.findSimilar('products', 'vector', queryVector, {
+  filter: { vectorModel: 'text-embedding-3-large' }
+});
+```
+
+**Q: How do I choose the optimal number of clusters (K)?**
+**A:** Use `findOptimalK()` with multiple evaluation metrics:
+```javascript
+const optimalK = await vectorPlugin.findOptimalK('products', 'vector', {
+  minK: 2,
+  maxK: 15,
+  methods: ['silhouette', 'davies-bouldin', 'gap']  // 5 methods available
+});
+console.log(`Best K: ${optimalK.bestK} (score: ${optimalK.bestScore})`);
+```
+
+The plugin automatically evaluates multiple K values and returns the optimal one based on consensus across metrics.
+
+**Q: What distance metric should I use?**
+**A:**
+- **Cosine**: Best for normalized vectors, focuses on direction (most common for embeddings)
+- **Euclidean**: Best for spatial data, considers magnitude
+- **Manhattan**: Best for high-dimensional sparse vectors, robust to outliers
+
+Most embedding providers normalize vectors, so **cosine** is the recommended default.
+
+### For AI Agents
+
+**Q: What problem does this plugin solve?**
+**A:** Enables semantic search, similarity analysis, and clustering of pre-computed vector embeddings stored in S3DB with automatic compression, multiple distance metrics, and intelligent K-means clustering.
+
+**Q: What are the minimum required parameters?**
+**A:** None! Can be initialized with `new VectorPlugin()` and all defaults will work:
+- `dimensions`: 1536 (OpenAI default)
+- `distanceMetric`: 'cosine'
+- `autoDetectVectorField`: true (auto-finds `embedding:XXX` fields)
+
+**Q: What are the default values for all configurations?**
+**A:**
+```javascript
+{
+  dimensions: 1536,              // OpenAI text-embedding-3-small/large
+  distanceMetric: 'cosine',      // Best for normalized embeddings
+  storageThreshold: 1500,        // Warn if vectors exceed 1.5KB
+  autoFixBehavior: false,        // Don't auto-change resource behavior
+  autoDetectVectorField: true,   // Auto-detect embedding:XXX fields
+  emitEvents: true,              // Enable event emission
+  verboseEvents: false,          // Don't emit detailed progress
+  eventThrottle: 100             // Throttle progress events (ms)
+}
+```
+
+**Q: What events does this plugin emit?**
+**A:**
+- `vector:search:start` - Search started
+- `vector:search:complete` - Search completed with results
+- `vector:cluster:start` - Clustering started
+- `vector:cluster:progress` - Clustering iteration progress
+- `vector:cluster:complete` - Clustering completed
+- `vector:optimalK:start` - Optimal K search started
+- `vector:optimalK:progress` - K evaluation progress
+- `vector:optimalK:complete` - Optimal K found
+
+Enable `verboseEvents: true` for detailed progress tracking.
+
+**Q: How do I debug issues with this plugin?**
+**A:** Enable verbose events and listen to all emitted events:
+```javascript
+const vectorPlugin = new VectorPlugin({
+  verboseEvents: true,
+  eventThrottle: 0  // No throttling for debugging
+});
+
+db.on('vector:*', (data) => {
+  console.log('Vector event:', data);
+});
+```
+
+**Q: What are the supported distance metrics?**
+**A:**
+- **cosine**: `1 - (dot(a, b) / (norm(a) * norm(b)))` - Range: [0, 2], 0 = identical
+- **euclidean**: `sqrt(sum((a[i] - b[i])^2))` - Range: [0, ∞], 0 = identical
+- **manhattan**: `sum(abs(a[i] - b[i]))` - Range: [0, ∞], 0 = identical
+
+All metrics return **lower values for more similar vectors**.
+
+**Q: Can I use this plugin without OpenAI?**
+**A:** Yes! VectorPlugin is provider-agnostic. It only stores and searches vectors. You can use:
+- Google Vertex AI
+- Cohere
+- Anthropic (via Voyage AI)
+- Open source models (Sentence Transformers, BERT, etc.)
+- Any embedding provider that outputs numeric vectors
+
+Just ensure the dimensions match what you configure in the plugin.
+
+---
 
 ## More Examples
 
