@@ -22,7 +22,7 @@ export class Resource extends AsyncEventEmitter {
    * @param {Object} config - Resource configuration
    * @param {string} config.name - Resource name
    * @param {Object} config.client - S3 client instance
-   * @param {string} [config.version='v0'] - Resource version
+   * @param {string} [config.version='v1'] - Resource version
    * @param {Object} [config.attributes={}] - Resource attributes schema
    * @param {string} [config.behavior='user-managed'] - Resource behavior strategy
    * @param {string} [config.passphrase='secret'] - Encryption passphrase
@@ -2292,7 +2292,7 @@ export class Resource extends AsyncEventEmitter {
 
   /**
    * Get schema for a specific version
-   * @param {string} version - Version string (e.g., 'v0', 'v1')
+   * @param {string} version - Version string (e.g., 'v1', 'v2')
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {

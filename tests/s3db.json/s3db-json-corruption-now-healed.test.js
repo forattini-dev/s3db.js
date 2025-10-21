@@ -166,9 +166,9 @@ describe('S3DB JSON Corruption - Now Successfully Healed', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 hooks: {
@@ -202,9 +202,9 @@ describe('S3DB JSON Corruption - Now Successfully Healed', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { 
                   name: "string",

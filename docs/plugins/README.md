@@ -426,6 +426,70 @@ new SomePlugin({
 
 ---
 
+## 📦 Plugin Dependencies
+
+### Lightweight Core Approach
+
+s3db.js uses a **lightweight core** approach - plugin-specific dependencies are **not bundled** with the main package. This keeps the core package small (~500KB) and lets you install only what you need.
+
+### How It Works
+
+1. **Automatic Validation** - When you use a plugin, s3db.js validates its dependencies at runtime
+2. **Clear Error Messages** - If a dependency is missing, you get a helpful error with install commands
+3. **Version Checking** - Ensures installed packages meet minimum version requirements
+4. **Optional Dependencies** - All plugin dependencies are marked as `peerDependencies` (optional)
+
+### Dependency Matrix
+
+| Plugin | Required Package | Version | Install Command |
+|--------|-----------------|---------|-----------------|
+| PostgreSQL Replicator | `pg` | `^8.0.0` | `pnpm add pg` |
+| BigQuery Replicator | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
+| SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
+| RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+| Terraform State Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
+
+### Installation Example
+
+```bash
+# Install only what you need
+pnpm add pg                      # For PostgreSQL replication
+pnpm add @google-cloud/bigquery  # For BigQuery replication
+pnpm add @aws-sdk/client-sqs     # For SQS
+pnpm add amqplib                 # For RabbitMQ
+```
+
+### Error Messages
+
+If you forget to install a dependency, you'll get a clear error:
+
+```bash
+Error: PostgreSQL Replicator - Missing dependencies detected!
+
+❌ Missing dependency: pg
+   Description: PostgreSQL client for Node.js
+   Required: ^8.0.0
+   Install: pnpm add pg
+
+Quick fix - Run all install commands:
+  pnpm add pg
+```
+
+### Checking Dependencies Programmatically
+
+```javascript
+import { getPluginDependencyReport } from 's3db.js/plugins/concerns/plugin-dependencies';
+
+// Get a full report of all plugin dependencies
+const report = await getPluginDependencyReport();
+console.log(report);
+```
+
+**See also:** [Plugin Dependency Validation Example](../examples/e46-plugin-dependency-validation.js)
+
+---
+
 ## 📦 Getting Started
 
 ### Basic Plugin Usage

@@ -80,7 +80,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
       // Resource should be healed - currentVersion should be changed to v0
       expect(Object.keys(database.resources)).toHaveLength(1);
       expect(database.resources.invitations).toBeDefined();
-      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v0');
+      expect(database.savedMetadata.resources.invitations.currentVersion).toBe('v1');
     });
 
     test('should heal null hooks by filtering them out', async () => {
@@ -105,9 +105,9 @@ describe('S3DB JSON Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "minimal": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
@@ -139,9 +139,9 @@ describe('S3DB JSON Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 behavior: "user-managed"
@@ -172,9 +172,9 @@ describe('S3DB JSON Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 behavior: "user-managed",
@@ -262,9 +262,9 @@ describe('S3DB JSON Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "valid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test1",
                 attributes: { name: "string" },
                 behavior: "user-managed"
@@ -274,7 +274,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
           "invalid_version": {
             currentVersion: "v999",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test2",
                 attributes: { name: "string" },
                 behavior: "user-managed"
@@ -282,7 +282,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
             }
           },
           "no_versions": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {}
           }
         }
@@ -299,7 +299,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
       expect(database.resources.valid).toBeDefined();
       // invalid_version should be healed - currentVersion changed from v999 to v0
       expect(database.resources.invalid_version).toBeDefined();
-      expect(database.savedMetadata.resources.invalid_version.currentVersion).toBe('v0');
+      expect(database.savedMetadata.resources.invalid_version.currentVersion).toBe('v1');
       // no_versions should be removed since it has no valid versions
       expect(database.resources.no_versions).toBeUndefined();
     });
@@ -310,18 +310,18 @@ describe('S3DB JSON Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "no_hash": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 attributes: { name: "string" },
                 behavior: "user-managed"
               }
             }
           },
           "no_attributes": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 behavior: "user-managed"
               }

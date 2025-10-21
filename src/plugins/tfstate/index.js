@@ -241,12 +241,13 @@
  * ```
  */
 
-import { readFile, watch } from 'fs/promises';
+import { readFile, watch, readdir } from 'fs/promises';
 import { existsSync } from 'fs';
+import { join, sep } from 'path';
 import { createHash } from 'crypto';
-import cron from 'node-cron';
 import { Plugin } from '../plugin.class.js';
 import tryFn from '../../concerns/try-fn.js';
+import requirePluginDependency from '../concerns/plugin-dependencies.js';
 import { idGenerator } from '../../concerns/id.js';
 import {
   TfStateError,
@@ -289,6 +290,9 @@ export class TfStatePlugin extends Plugin {
       this.trackDiffs = diffs.enabled !== undefined ? diffs.enabled : true;
       this.diffsLookback = diffs.lookback || 10; // How many previous states to compare
 
+      // Partition configuration
+      this.asyncPartitions = config.asyncPartitions !== undefined ? config.asyncPartitions : true;
+
       // Legacy fields for backward compatibility
       this.autoSync = false;
       this.watchPaths = [];
@@ -308,6 +312,7 @@ export class TfStatePlugin extends Plugin {
       this.filters = config.filters || {};
       this.trackDiffs = config.trackDiffs !== undefined ? config.trackDiffs : true;
       this.diffsLookback = 10;
+      this.asyncPartitions = config.asyncPartitions !== undefined ? config.asyncPartitions : true;
       this.verbose = config.verbose || false;
       this.monitorEnabled = false;
       this.monitorCron = '*/5 * * * *';
@@ -371,25 +376,48 @@ export class TfStatePlugin extends Plugin {
       }
     }
 
+    // Resource 0: Terraform Lineages (Master tracking resource)
+    // NEW: Tracks unique Terraform state lineages for efficient diff tracking
+    this.lineagesName = 'plg_tfstate_lineages';
+    this.lineagesResource = await this.database.createResource({
+      name: this.lineagesName,
+      attributes: {
+        id: 'string|required',           // = lineage UUID from Terraform state
+        latestSerial: 'number',           // Track latest for quick access
+        latestStateId: 'string',          // FK to stateFilesResource
+        totalStates: 'number',            // Counter
+        firstImportedAt: 'number',
+        lastImportedAt: 'number',
+        metadata: 'json'                  // Custom tags, project info, etc.
+      },
+      timestamps: true,
+      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
+      partitions: {},                     // No partitions - simple tracking resource
+      createdBy: 'TfStatePlugin'
+    });
+
     // Resource 1: Terraform State Files Metadata
     // Dedicated to tracking state file metadata with SHA256 hash for deduplication
     this.stateFilesResource = await this.database.createResource({
       name: this.stateFilesName,
       attributes: {
         id: 'string|required',
-        sourceFile: 'string|required', // Full path or s3:// URI
+        lineageId: 'string|required',     // NEW: FK to lineages (= lineage UUID)
+        sourceFile: 'string|required',    // Full path or s3:// URI
         serial: 'number|required',
-        lineage: 'string',
+        lineage: 'string|required',       // Denormalized for queries
         terraformVersion: 'string',
         stateVersion: 'number|required',
         resourceCount: 'number',
-        sha256Hash: 'string|required', // SHA256 hash for deduplication
+        sha256Hash: 'string|required',    // SHA256 hash for deduplication
         importedAt: 'number|required'
       },
       timestamps: true,
-      asyncPartitions: false, // Sync partitions for immediate query availability
+      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
       partitions: {
-        bySourceFile: { fields: { sourceFile: 'string' } },
+        byLineage: { fields: { lineageId: 'string' } },                        // NEW: Primary lookup
+        byLineageSerial: { fields: { lineageId: 'string', serial: 'number' } }, // NEW: Composite key
+        bySourceFile: { fields: { sourceFile: 'string' } },                    // Legacy support
         bySerial: { fields: { serial: 'number' } },
         bySha256: { fields: { sha256Hash: 'string' } }
       },
@@ -402,7 +430,8 @@ export class TfStatePlugin extends Plugin {
       name: this.resourceName,
       attributes: {
         id: 'string|required',
-        stateFileId: 'string|required', // Foreign key to terraform_state_files
+        stateFileId: 'string|required',   // FK to stateFilesResource
+        lineageId: 'string|required',     // NEW: FK to lineages
         // Denormalized fields for fast queries
         stateSerial: 'number|required',
         sourceFile: 'string|required',
@@ -417,13 +446,16 @@ export class TfStatePlugin extends Plugin {
         importedAt: 'number|required'
       },
       timestamps: true,
-      asyncPartitions: false, // Sync partitions for immediate query availability
+      asyncPartitions: this.asyncPartitions,  // Configurable async partitions
       partitions: {
+        byLineageSerial: { fields: { lineageId: 'string', stateSerial: 'number' } }, // NEW: Efficient diff queries
+        byLineage: { fields: { lineageId: 'string' } },                               // NEW: All resources for lineage
         byType: { fields: { resourceType: 'string' } },
         byProvider: { fields: { providerName: 'string' } },
         bySerial: { fields: { stateSerial: 'number' } },
-        bySourceFile: { fields: { sourceFile: 'string' } },
-        byProviderAndType: { fields: { providerName: 'string', resourceType: 'string' } }
+        bySourceFile: { fields: { sourceFile: 'string' } },                           // Legacy support
+        byProviderAndType: { fields: { providerName: 'string', resourceType: 'string' } },
+        byLineageType: { fields: { lineageId: 'string', resourceType: 'string' } }   // NEW: Type queries per lineage
       },
       createdBy: 'TfStatePlugin'
     });
@@ -435,9 +467,11 @@ export class TfStatePlugin extends Plugin {
         name: this.diffsName,
         attributes: {
           id: 'string|required',
-          sourceFile: 'string|required',
+          lineageId: 'string|required',     // NEW: FK to lineages
           oldSerial: 'number|required',
           newSerial: 'number|required',
+          oldStateId: 'string',              // NEW: FK to stateFilesResource
+          newStateId: 'string|required',     // NEW: FK to stateFilesResource
           calculatedAt: 'number|required',
           // Summary statistics
           summary: {
@@ -458,10 +492,12 @@ export class TfStatePlugin extends Plugin {
             }
           }
         },
+        behavior: 'body-only',              // Force all data to body for reliable nested object handling
         timestamps: true,
-        asyncPartitions: false, // Sync partitions for immediate query availability
+        asyncPartitions: this.asyncPartitions,  // Configurable async partitions
         partitions: {
-          bySourceFile: { fields: { sourceFile: 'string' } },
+          byLineage: { fields: { lineageId: 'string' } },                               // NEW: All diffs for lineage
+          byLineageNewSerial: { fields: { lineageId: 'string', newSerial: 'number' } }, // NEW: Specific version lookup
           byNewSerial: { fields: { newSerial: 'number' } },
           byOldSerial: { fields: { oldSerial: 'number' } }
         },
@@ -470,7 +506,7 @@ export class TfStatePlugin extends Plugin {
     }
 
     if (this.verbose) {
-      const resourcesCreated = [this.stateFilesName, this.resourceName];
+      const resourcesCreated = [this.lineagesName, this.stateFilesName, this.resourceName];
       if (this.trackDiffs) resourcesCreated.push(this.diffsName);
       console.log(`[TfStatePlugin] Created resources: ${resourcesCreated.join(', ')}`);
     }
@@ -551,6 +587,160 @@ export class TfStatePlugin extends Plugin {
     if (this.verbose) {
       console.log('[TfStatePlugin] Stopped');
     }
+  }
+
+  /**
+   * Import multiple Terraform/OpenTofu states from local filesystem using glob pattern
+   * @param {string} pattern - Glob pattern for matching state files
+   * @param {Object} options - Optional parallelism settings
+   * @returns {Promise<Object>} Consolidated import result with statistics
+   *
+   * @example
+   * await plugin.importStatesGlob('./terraform/ ** /*.tfstate');
+   * await plugin.importStatesGlob('./environments/ * /terraform.tfstate', { parallelism: 10 });
+   */
+  async importStatesGlob(pattern, options = {}) {
+    const startTime = Date.now();
+    const parallelism = options.parallelism || 5;
+
+    if (this.verbose) {
+      console.log(`[TfStatePlugin] Finding local files matching: ${pattern}`);
+    }
+
+    try {
+      // Find all matching files
+      const matchingFiles = await this._findFilesGlob(pattern);
+
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Found ${matchingFiles.length} matching files`);
+      }
+
+      if (matchingFiles.length === 0) {
+        return {
+          filesProcessed: 0,
+          totalResourcesExtracted: 0,
+          totalResourcesInserted: 0,
+          files: [],
+          duration: Date.now() - startTime
+        };
+      }
+
+      // Import states with controlled parallelism
+      const results = [];
+      const files = [];
+
+      for (let i = 0; i < matchingFiles.length; i += parallelism) {
+        const batch = matchingFiles.slice(i, i + parallelism);
+
+        const batchPromises = batch.map(async (filePath) => {
+          try {
+            const result = await this.importState(filePath);
+            return { success: true, file: filePath, result };
+          } catch (error) {
+            if (this.verbose) {
+              console.error(`[TfStatePlugin] Failed to import ${filePath}:`, error.message);
+            }
+            return { success: false, file: filePath, error: error.message };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+      }
+
+      // Consolidate statistics
+      const successful = results.filter(r => r.success);
+      const failed = results.filter(r => !r.success);
+
+      successful.forEach(r => {
+        if (!r.result.skipped) {
+          files.push({
+            file: r.file,
+            serial: r.result.serial,
+            resourcesExtracted: r.result.resourcesExtracted,
+            resourcesInserted: r.result.resourcesInserted
+          });
+        }
+      });
+
+      const totalResourcesExtracted = successful
+        .filter(r => !r.result.skipped)
+        .reduce((sum, r) => sum + (r.result.resourcesExtracted || 0), 0);
+      const totalResourcesInserted = successful
+        .filter(r => !r.result.skipped)
+        .reduce((sum, r) => sum + (r.result.resourcesInserted || 0), 0);
+
+      const duration = Date.now() - startTime;
+
+      const consolidatedResult = {
+        filesProcessed: successful.length,
+        filesFailed: failed.length,
+        totalResourcesExtracted,
+        totalResourcesInserted,
+        files,
+        failedFiles: failed.map(f => ({ file: f.file, error: f.error })),
+        duration
+      };
+
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Glob import completed:`, consolidatedResult);
+      }
+
+      this.emit('globImportCompleted', consolidatedResult);
+
+      return consolidatedResult;
+    } catch (error) {
+      this.stats.errors++;
+      if (this.verbose) {
+        console.error(`[TfStatePlugin] Glob import failed:`, error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Find files matching glob pattern
+   * @private
+   */
+  async _findFilesGlob(pattern) {
+    const files = [];
+
+    // Extract base directory from pattern (everything before first wildcard)
+    const baseMatch = pattern.match(/^([^*?[\]]+)/);
+    const baseDir = baseMatch ? baseMatch[1] : '.';
+
+    // Extract the pattern part (everything after base)
+    const patternPart = pattern.slice(baseDir.length);
+
+    // Recursively find all .tfstate files in the directory
+    const findFiles = async (dir) => {
+      try {
+        const entries = await readdir(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          const fullPath = join(dir, entry.name);
+
+          if (entry.isDirectory()) {
+            // Recurse into subdirectories
+            await findFiles(fullPath);
+          } else if (entry.isFile() && entry.name.endsWith('.tfstate')) {
+            // Check if file matches the pattern
+            if (this._matchesGlobPattern(fullPath, pattern)) {
+              files.push(fullPath);
+            }
+          }
+        }
+      } catch (error) {
+        // Ignore permission errors and continue
+        if (error.code !== 'EACCES' && error.code !== 'EPERM') {
+          throw error;
+        }
+      }
+    };
+
+    await findFiles(baseDir);
+
+    return files;
   }
 
   /**
@@ -688,7 +878,7 @@ export class TfStatePlugin extends Plugin {
 
       // Update statistics
       this.stats.statesProcessed++;
-      this.stats.resourcesExtracted += resources.length;
+      this.stats.resourcesExtracted += (resources.totalExtracted || resources.length);
       this.stats.resourcesInserted += inserted.length;
       this.stats.lastProcessedSerial = state.serial;
       if (diff && !diff.isFirst) this.stats.diffsCalculated++;
@@ -699,7 +889,7 @@ export class TfStatePlugin extends Plugin {
         serial: state.serial,
         lineage: state.lineage,
         terraformVersion: state.terraform_version,
-        resourcesExtracted: resources.length,
+        resourcesExtracted: (resources.totalExtracted || resources.length),
         resourcesInserted: inserted.length,
         stateFileId,
         sha256Hash,
@@ -859,16 +1049,95 @@ export class TfStatePlugin extends Plugin {
    * @private
    */
   _matchesGlobPattern(key, pattern) {
-    // Convert glob pattern to regex
-    const regexPattern = pattern
-      .replace(/\*\*/g, '__DOUBLE_STAR__')
-      .replace(/\*/g, '[^/]*')
-      .replace(/__DOUBLE_STAR__/g, '.*')
-      .replace(/\?/g, '.')
-      .replace(/\[([^\]]+)\]/g, '[$1]');
+    // First, temporarily replace glob wildcards with placeholders
+    let regexPattern = pattern
+      .replace(/\*\*/g, '\x00\x00')  // ** → double null
+      .replace(/\*/g, '\x00')         // * → single null
+      .replace(/\?/g, '\x01');        // ? → SOH
+
+    // Now escape special regex characters (but NOT the placeholders or [])
+    // We keep [] as-is since they're valid in both glob and regex
+    regexPattern = regexPattern
+      .replace(/[.+^${}()|\\]/g, '\\$&');
+
+    // Convert glob patterns to regex
+    regexPattern = regexPattern
+      .replace(/\x00\x00/g, '__DOUBLE_STAR__')  // Restore ** as placeholder
+      .replace(/\x00/g, '[^/]*')                 // * → match anything except /
+      .replace(/\x01/g, '.');                    // ? → match any single char
+
+    // Handle ** properly
+    // **/ matches zero or more directories
+    regexPattern = regexPattern.replace(/__DOUBLE_STAR__\//g, '(?:.*/)?');
+    regexPattern = regexPattern.replace(/__DOUBLE_STAR__/g, '.*');
 
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(key);
+  }
+
+  /**
+   * Ensure lineage record exists and is up-to-date
+   * Creates or updates the lineage tracking record
+   * @private
+   */
+  async _ensureLineage(lineageUuid, stateMeta) {
+    if (!lineageUuid) {
+      throw new TfStateError('Lineage UUID is required for state tracking');
+    }
+
+    // Try to get existing lineage record
+    const [getOk, getErr, existingLineage] = await tryFn(async () => {
+      return await this.lineagesResource.get(lineageUuid);
+    });
+
+    const currentTime = Date.now();
+
+    if (existingLineage) {
+      // Update existing lineage record
+      const updates = {
+        lastImportedAt: currentTime
+      };
+
+      // Update latest serial if this is newer
+      if (stateMeta.serial > (existingLineage.latestSerial || 0)) {
+        updates.latestSerial = stateMeta.serial;
+        updates.latestStateId = stateMeta.stateFileId;
+      }
+
+      // Increment total states counter
+      if (existingLineage.totalStates !== undefined) {
+        updates.totalStates = existingLineage.totalStates + 1;
+      } else {
+        updates.totalStates = 1;
+      }
+
+      await this.lineagesResource.update(lineageUuid, updates);
+
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Updated lineage: ${lineageUuid} (serial ${stateMeta.serial})`);
+      }
+
+      return { ...existingLineage, ...updates };
+    } else {
+      // Create new lineage record
+      const lineageRecord = {
+        id: lineageUuid,
+        latestSerial: stateMeta.serial,
+        latestStateId: stateMeta.stateFileId,
+        totalStates: 1,
+        firstImportedAt: currentTime,
+        lastImportedAt: currentTime,
+        metadata: {}
+      };
+
+      await this.lineagesResource.insert(lineageRecord);
+
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] Created new lineage: ${lineageUuid}`);
+      }
+
+      return lineageRecord;
+    }
   }
 
   /**
@@ -914,12 +1183,22 @@ export class TfStatePlugin extends Plugin {
 
     const currentTime = Date.now();
 
-    // Create state file record
+    // Extract lineage UUID (required for lineage-based tracking)
+    const lineageUuid = state.lineage;
+    if (!lineageUuid) {
+      throw new TfStateError('State file missing lineage field - cannot track state progression', {
+        filePath,
+        serial: state.serial
+      });
+    }
+
+    // Create state file record with lineageId
     const stateFileRecord = {
       id: idGenerator(),
+      lineageId: lineageUuid,           // NEW: FK to lineages
       sourceFile: filePath,
       serial: state.serial,
-      lineage: state.lineage,
+      lineage: state.lineage,           // Denormalized for queries
       terraformVersion: state.terraform_version,
       stateVersion: state.version,
       resourceCount: (state.resources || []).length,
@@ -939,30 +1218,36 @@ export class TfStatePlugin extends Plugin {
 
     const stateFileId = stateFileResult.id;
 
-    // Extract resources with stateFileId
-    const resources = await this._extractResources(state, filePath, stateFileId);
+    // Ensure lineage record exists and is updated
+    await this._ensureLineage(lineageUuid, {
+      serial: state.serial,
+      stateFileId
+    });
 
-    // Calculate diff if enabled
+    // Extract resources with stateFileId and lineageId
+    const resources = await this._extractResources(state, filePath, stateFileId, lineageUuid);
+
+    // Insert resources BEFORE diff calculation so they're available for querying
+    const inserted = await this._insertResources(resources);
+
+    // Calculate diff if enabled (using lineage-based tracking)
     let diff = null;
     let diffRecord = null;
     if (this.trackDiffs) {
-      diff = await this._calculateDiff(state, filePath, stateFileId);
+      diff = await this._calculateDiff(state, lineageUuid, stateFileId);
 
       // Save diff to diffsResource
       if (diff && !diff.isFirst) {
-        diffRecord = await this._saveDiff(diff, filePath, stateFileId);
+        diffRecord = await this._saveDiff(diff, lineageUuid, stateFileId);
       }
     }
-
-    // Insert resources
-    const inserted = await this._insertResources(resources);
 
     // Update last processed serial
     this.lastProcessedSerial = state.serial;
 
     // Update statistics
     this.stats.statesProcessed++;
-    this.stats.resourcesExtracted += resources.length;
+    this.stats.resourcesExtracted += (resources.totalExtracted || resources.length);
     this.stats.resourcesInserted += inserted.length;
     this.stats.lastProcessedSerial = state.serial;
     if (diff && !diff.isFirst) this.stats.diffsCalculated++;
@@ -973,7 +1258,7 @@ export class TfStatePlugin extends Plugin {
       serial: state.serial,
       lineage: state.lineage,
       terraformVersion: state.terraform_version,
-      resourcesExtracted: resources.length,
+      resourcesExtracted: (resources.totalExtracted || resources.length),
       resourcesInserted: inserted.length,
       stateFileId,
       sha256Hash,
@@ -1061,8 +1346,9 @@ export class TfStatePlugin extends Plugin {
    * Extract resources from Terraform state
    * @private
    */
-  async _extractResources(state, filePath, stateFileId) {
+  async _extractResources(state, filePath, stateFileId, lineageId) {
     const resources = [];
+    let totalExtracted = 0;
     const stateSerial = state.serial;
     const stateVersion = state.version;
     const importedAt = Date.now();
@@ -1076,14 +1362,17 @@ export class TfStatePlugin extends Plugin {
         const instances = resource.instances || [resource];
 
         for (const instance of instances) {
+          totalExtracted++; // Count all extracted resources before filtering
+
           const extracted = this._extractResourceInstance(
             resource,
             instance,
             stateSerial,
             stateVersion,
             importedAt,
-            filePath, // Pass source file path
-            stateFileId // Pass state file ID (foreign key)
+            filePath,    // Pass source file path
+            stateFileId, // Pass state file ID (foreign key)
+            lineageId    // NEW: Pass lineage ID (foreign key)
           );
 
           // Apply filters
@@ -1102,6 +1391,9 @@ export class TfStatePlugin extends Plugin {
       }
     }
 
+    // Store total extracted count as metadata on the returned array
+    resources.totalExtracted = totalExtracted;
+
     return resources;
   }
 
@@ -1109,7 +1401,7 @@ export class TfStatePlugin extends Plugin {
    * Extract single resource instance
    * @private
    */
-  _extractResourceInstance(resource, instance, stateSerial, stateVersion, importedAt, sourceFile, stateFileId) {
+  _extractResourceInstance(resource, instance, stateSerial, stateVersion, importedAt, sourceFile, stateFileId, lineageId) {
     const resourceType = resource.type;
     const resourceName = resource.name;
     const mode = resource.mode || 'managed';
@@ -1130,9 +1422,10 @@ export class TfStatePlugin extends Plugin {
 
     return {
       id: idGenerator(),
-      stateFileId, // Foreign key to terraform_state_files
-      stateSerial, // Denormalized for fast queries
-      sourceFile: sourceFile || null, // Denormalized for fast queries
+      stateFileId,        // Foreign key to state_files
+      lineageId,          // NEW: Foreign key to lineages
+      stateSerial,        // Denormalized for fast queries
+      sourceFile: sourceFile || null, // Denormalized for informational purposes
       resourceType,
       resourceName,
       resourceAddress,
@@ -1227,9 +1520,12 @@ export class TfStatePlugin extends Plugin {
    */
   _matchesPattern(address, pattern) {
     // Convert pattern to regex (simple wildcard support)
+    // Handle .* as wildcard sequence, escape other dots
     const regexPattern = pattern
-      .replace(/\./g, '\\.')
-      .replace(/\*/g, '.*');
+      .replace(/\.\*/g, '___WILDCARD___')  // Protect .* wildcards
+      .replace(/\*/g, '[^.]*')             // * matches anything except dots
+      .replace(/\./g, '\\.')               // Escape remaining literal dots
+      .replace(/___WILDCARD___/g, '.*');   // Restore .* wildcards
 
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(address);
@@ -1237,113 +1533,116 @@ export class TfStatePlugin extends Plugin {
 
   /**
    * Calculate diff between current and previous state
-   * Uses partition optimization for efficient lookup
+   * NEW: Uses lineage-based tracking for O(1) lookup
    * @private
    */
-  async _calculateDiff(currentState, sourceFile, currentStateFileId) {
+  async _calculateDiff(currentState, lineageId, currentStateFileId) {
     if (!this.diffsResource) return null;
 
-    // Get previous state file for the same source - use partition if available
-    const partitionName = this._findPartitionByField(this.stateFilesResource, 'sourceFile');
-    let previousStateFiles;
+    const currentSerial = currentState.serial;
 
-    if (partitionName) {
-      // Efficient: Use partition query + filter (O(1) partition + O(n) filter within partition)
-      this.stats.partitionQueriesOptimized++;
-      const allFromSource = await this.stateFilesResource.list({
-        partition: partitionName,
-        partitionValues: { sourceFile }
-      });
+    // O(1) lookup: Direct partition query for previous state
+    // NEW: Uses byLineageSerial partition for efficient lookup
+    const previousStateFiles = await this.stateFilesResource.listPartition({
+      partition: 'byLineageSerial',
+      partitionValues: { lineageId, serial: currentSerial - 1 }
+    });
 
-      // Filter by serial < currentState.serial and sort by serial descending
-      previousStateFiles = allFromSource
-        .filter(sf => sf.serial < currentState.serial)
-        .sort((a, b) => b.serial - a.serial) // Descending
-        .slice(0, 1); // limit: 1
-
-      if (this.verbose && previousStateFiles.length > 0) {
-        console.log(
-          `[TfStatePlugin] Found previous state using partition ${partitionName}: serial ${previousStateFiles[0].serial}`
-        );
-      }
-    } else {
-      // Fallback: Load all and filter (query() doesn't support $lt operator)
-      if (this.verbose) {
-        console.log('[TfStatePlugin] No partition found for sourceFile, using full scan with filter');
-      }
-      const allStateFiles = await this.stateFilesResource.list({ limit: 10000 });
-      previousStateFiles = allStateFiles
-        .filter(sf => sf.sourceFile === sourceFile && sf.serial < currentState.serial)
-        .sort((a, b) => b.serial - a.serial)
-        .slice(0, 1);
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Diff calculation (lineage-based): found ${previousStateFiles.length} previous states for lineage=${lineageId}, serial=${currentSerial - 1}`
+      );
     }
 
     if (previousStateFiles.length === 0) {
-      // First state for this source, no diff
-      return { added: [], modified: [], deleted: [], isFirst: true };
+      // First state for this lineage, no diff
+      if (this.verbose) {
+        console.log(`[TfStatePlugin] First state for lineage ${lineageId}, no previous state`);
+      }
+      return {
+        added: [],
+        modified: [],
+        deleted: [],
+        isFirst: true,
+        oldSerial: null,
+        newSerial: currentSerial,
+        oldStateId: null,
+        newStateId: currentStateFileId,
+        lineageId
+      };
     }
 
     const previousStateFile = previousStateFiles[0];
     const previousSerial = previousStateFile.serial;
+    const previousStateFileId = previousStateFile.id;
+
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Using previous state: serial ${previousSerial} (id: ${previousStateFileId})`
+      );
+    }
 
     const [ok, err, diff] = await tryFn(async () => {
-      return await this._computeDiff(previousSerial, currentState.serial);
+      return await this._computeDiff(previousSerial, currentSerial, lineageId);
     });
 
     if (!ok) {
-      throw new StateDiffError(previousSerial, currentState.serial, err);
+      throw new StateDiffError(previousSerial, currentSerial, err);
     }
 
     // Add metadata to diff
     diff.oldSerial = previousSerial;
-    diff.newSerial = currentState.serial;
-    diff.sourceFile = sourceFile;
+    diff.newSerial = currentSerial;
+    diff.oldStateId = previousStateFileId;
+    diff.newStateId = currentStateFileId;
+    diff.lineageId = lineageId;
 
     return diff;
   }
 
   /**
    * Compute diff between two state serials
-   * Uses partition optimization for efficient resource lookup
+   * NEW: Uses lineage-based partition for efficient resource lookup
    * @private
    */
-  async _computeDiff(oldSerial, newSerial) {
-    // Get resources from both states - use partition if available for O(1) lookup
-    const partitionName = this._findPartitionByField(this.resource, 'stateSerial');
+  async _computeDiff(oldSerial, newSerial, lineageId) {
+    // NEW: Use lineage-based partition for O(1) lookup
+    const partitionName = 'byLineageSerial';
 
     let oldResources, newResources;
 
-    if (partitionName) {
-      // Efficient: Use partition queries (O(1) per serial)
-      this.stats.partitionQueriesOptimized += 2;
-      [oldResources, newResources] = await Promise.all([
-        this.resource.list({
-          partition: partitionName,
-          partitionValues: { stateSerial: oldSerial }
-        }),
-        this.resource.list({
-          partition: partitionName,
-          partitionValues: { stateSerial: newSerial }
-        })
-      ]);
+    // Efficient: Use lineage-based partition queries (O(1) per serial)
+    this.stats.partitionQueriesOptimized += 2;
+    [oldResources, newResources] = await Promise.all([
+      this.resource.listPartition({
+        partition: partitionName,
+        partitionValues: { lineageId, stateSerial: oldSerial }
+      }),
+      this.resource.listPartition({
+        partition: partitionName,
+        partitionValues: { lineageId, stateSerial: newSerial }
+      })
+    ]);
 
-      if (this.verbose) {
-        console.log(
-          `[TfStatePlugin] Diff computation using partition ${partitionName}: ${oldResources.length + newResources.length} resources`
-        );
-      }
-    } else {
-      // Fallback: Use query() without partitions (full scan)
-      if (this.verbose) {
-        console.log('[TfStatePlugin] No partition found for stateSerial, using full scan');
-      }
-      [oldResources, newResources] = await Promise.all([
-        this.resource.query({ stateSerial: oldSerial }),
-        this.resource.query({ stateSerial: newSerial })
-      ]);
+    if (this.verbose) {
+      console.log(
+        `[TfStatePlugin] Diff computation using lineage partition: ${oldResources.length} old + ${newResources.length} new resources`
+      );
     }
 
-    // Create maps for easier lookup
+    // Fallback removed - lineage-based partitions are always available
+    if (oldResources.length === 0 && newResources.length === 0) {
+      if (this.verbose) {
+        console.log('[TfStatePlugin] No resources found for either serial');
+      }
+      return {
+        added: [],
+        modified: [],
+        deleted: []
+      };
+    }
+
+    // Create maps for easier lookup by resourceAddress
     const oldMap = new Map(oldResources.map(r => [r.resourceAddress, r]));
     const newMap = new Map(newResources.map(r => [r.resourceAddress, r]));
 
@@ -1384,7 +1683,7 @@ export class TfStatePlugin extends Plugin {
       }
     }
 
-    return { added, modified, deleted };
+    return { added, modified, deleted, oldSerial, newSerial };
   }
 
   /**
@@ -1413,14 +1712,17 @@ export class TfStatePlugin extends Plugin {
 
   /**
    * Save diff to diffsResource
+   * NEW: Includes lineage-based fields for efficient querying
    * @private
    */
-  async _saveDiff(diff, sourceFile, newStateFileId) {
+  async _saveDiff(diff, lineageId, newStateFileId) {
     const diffRecord = {
       id: idGenerator(),
-      sourceFile: diff.sourceFile || sourceFile,
+      lineageId: diff.lineageId || lineageId,     // NEW: FK to lineages
       oldSerial: diff.oldSerial,
       newSerial: diff.newSerial,
+      oldStateId: diff.oldStateId,                 // NEW: FK to state_files
+      newStateId: diff.newStateId || newStateFileId, // NEW: FK to state_files
       calculatedAt: Date.now(),
       summary: {
         addedCount: diff.added.length,
@@ -1518,6 +1820,16 @@ export class TfStatePlugin extends Plugin {
     if (this.verbose) {
       console.log(`[TfStatePlugin] Setting up cron monitoring: ${this.monitorCron}`);
     }
+
+    // Validate plugin dependencies are installed
+    await requirePluginDependency('tfstate-plugin');
+
+    // Dynamically import node-cron
+    const [ok, err, cronModule] = await tryFn(() => import('node-cron'));
+    if (!ok) {
+      throw new TfStateError(`Failed to import node-cron: ${err.message}`);
+    }
+    const cron = cronModule.default;
 
     // Validate cron expression
     if (!cron.validate(this.monitorCron)) {
@@ -1660,18 +1972,18 @@ export class TfStatePlugin extends Plugin {
 
             // Update stats
             this.stats.statesProcessed++;
-            this.stats.resourcesExtracted += resources.length;
+            this.stats.resourcesExtracted += (resources.totalExtracted || resources.length);
             this.stats.resourcesInserted += inserted.length;
             this.stats.lastProcessedSerial = state.serial;
 
             if (this.verbose) {
-              console.log(`[TfStatePlugin] Processed ${fileMetadata.path}: ${resources.length} resources`);
+              console.log(`[TfStatePlugin] Processed ${fileMetadata.path}: ${resources.totalExtracted || resources.length} resources`);
             }
 
             this.emit('stateFileProcessed', {
               path: fileMetadata.path,
               serial: state.serial,
-              resourcesExtracted: resources.length,
+              resourcesExtracted: (resources.totalExtracted || resources.length),
               resourcesInserted: inserted.length
             });
           }

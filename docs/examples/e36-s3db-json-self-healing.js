@@ -26,9 +26,9 @@ async function demonstrateSelfHealing() {
     "s3dbVersion": "8.0.2",
     "resources": {
       "users": {
-        "currentVersion": "v0",
+        "currentVersion": "v1",
         "versions": {
-          "v0": {
+          "v1": {
             "hash": "sha256:abc123",
             "attributes": { "name": "string" },
           }
@@ -59,9 +59,9 @@ async function demonstrateSelfHealing() {
     "s3dbVersion": "8.0.2",
     "resources": {
       "products": {
-        "currentVersion": "v0",
+        "currentVersion": "v1",
         "versions": {
-          "v0": {
+          "v1": {
             "hash": "sha256:def456",
             "attributes": { "name": "string", "price": "number"`;
 
@@ -86,7 +86,7 @@ async function demonstrateSelfHealing() {
       "orders": {
         // Missing currentVersion
         versions: {
-          "v0": {
+          "v1": {
             hash: "sha256:ghi789",
             attributes: { status: "string" }
           },
@@ -123,7 +123,7 @@ async function demonstrateSelfHealing() {
       "inventory": {
         currentVersion: "v999", // Non-existent version
         versions: {
-          "v0": {
+          "v1": {
             hash: "sha256:mno345",
             attributes: { item: "string", quantity: "number" }
           },
@@ -157,9 +157,9 @@ async function demonstrateSelfHealing() {
     s3dbVersion: "8.0.2",
     resources: {
       "notifications": {
-        currentVersion: "v0",
+        currentVersion: "v1",
         versions: {
-          "v0": {
+          "v1": {
             hash: "sha256:stu901",
             attributes: { message: "string", sent: "boolean" },
             hooks: {

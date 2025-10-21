@@ -40,9 +40,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         "s3dbVersion": "8.0.2",
         "resources": {
           "test": {
-            "currentVersion": "v0",
+            "currentVersion": "v1",
             "versions": {
-              "v0": {
+              "v1": {
                 "hash": "sha256:test",
                 "attributes": { "name": "string" },
               }
@@ -70,9 +70,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         "s3dbVersion": "8.0.2",
         "resources": {
           "test": {
-            "currentVersion": "v0",
+            "currentVersion": "v1",
             "versions": {
-              "v0": {
+              "v1": {
                 "hash": "sha256:test",
                 "attributes": { "name": "string" }`;
       
@@ -116,9 +116,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       const incompleteMetadata = {
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
@@ -165,7 +165,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         resources: {
           "test": {
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
@@ -183,7 +183,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       await database.connect();
       
       expect(database.savedMetadata.resources.test).toBeDefined();
-      expect(database.savedMetadata.resources.test.currentVersion).toBe("v0");
+      expect(database.savedMetadata.resources.test.currentVersion).toBe("v1");
     });
 
     test('should heal resource with non-existent currentVersion', async () => {
@@ -194,7 +194,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
           "test": {
             currentVersion: "v999", // doesn't exist
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               },
@@ -217,7 +217,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
       
       expect(database.savedMetadata.resources.test).toBeDefined();
       // Should fall back to first available version
-      expect(['v0', 'v1']).toContain(database.savedMetadata.resources.test.currentVersion);
+      expect(['v1', 'v1']).toContain(database.savedMetadata.resources.test.currentVersion);
     });
 
     test('should remove resource with no valid versions', async () => {
@@ -226,13 +226,13 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "invalid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {} // empty versions
           },
           "valid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
@@ -259,18 +259,18 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "invalid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test"
                 // missing attributes
               }
             }
           },
           "valid": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" }
               }
@@ -299,9 +299,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 hooks: {
@@ -333,9 +333,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 hooks: {
@@ -369,9 +369,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         s3dbVersion: "8.0.2",
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 hooks: "completely_invalid"
@@ -407,9 +407,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         "s3dbVersion": "8.0.2",
         "resources": {
           "test": {
-            "currentVersion": "v0",
+            "currentVersion": "v1",
             "versions": {
-              "v0": {
+              "v1": {
                 "hash": "sha256:test",
                 "attributes": { "name": "string" },
               }
@@ -440,7 +440,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
         lastUpdated: new Date().toISOString(),
         resources: {
           "test": {
-            currentVersion: "v0",
+            currentVersion: "v1",
             partitions: {
               byVersion: {
                 fields: {
@@ -449,7 +449,7 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
               }
             },
             versions: {
-              "v0": {
+              "v1": {
                 hash: "sha256:test",
                 attributes: { name: "string" },
                 behavior: "user-managed"

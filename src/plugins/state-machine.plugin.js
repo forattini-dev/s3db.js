@@ -100,7 +100,7 @@ import { StateMachineError } from "./state-machine.errors.js";
 export class StateMachinePlugin extends Plugin {
   constructor(options = {}) {
     super();
-    
+
     this.config = {
       stateMachines: options.stateMachines || {},
       actions: options.actions || {},
@@ -110,12 +110,16 @@ export class StateMachinePlugin extends Plugin {
       stateResource: options.stateResource || 'plg_entity_states',
       retryAttempts: options.retryAttempts || 3,
       retryDelay: options.retryDelay || 100,
-      verbose: options.verbose || false
+      verbose: options.verbose || false,
+      // Distributed lock configuration (prevents concurrent transitions)
+      workerId: options.workerId || 'default',
+      lockTimeout: options.lockTimeout || 1000, // Wait up to 1s for lock
+      lockTTL: options.lockTTL || 5 // Lock expires after 5s (prevent deadlock)
     };
 
     this.database = null;
     this.machines = new Map();
-    
+
     this._validateConfiguration();
   }
 
@@ -227,78 +231,86 @@ export class StateMachinePlugin extends Plugin {
         suggestion: 'Check machine ID or use getMachines() to list available machines'
       });
     }
-    
-    const currentState = await this.getState(machineId, entityId);
-    const stateConfig = machine.config.states[currentState];
 
-    if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
-      throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
-        operation: 'send',
-        machineId,
-        entityId,
-        event,
-        currentState,
-        validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
-        suggestion: 'Use getValidEvents() to check which events are valid for the current state'
-      });
-    }
-    
-    const targetState = stateConfig.on[event];
-    
-    // Check guards
-    if (stateConfig.guards && stateConfig.guards[event]) {
-      const guardName = stateConfig.guards[event];
-      const guard = this.config.guards[guardName];
-      
-      if (guard) {
-        const [guardOk, guardErr, guardResult] = await tryFn(() =>
-          guard(context, event, { database: this.database, machineId, entityId })
-        );
+    // Acquire distributed lock to prevent concurrent transitions
+    const lockName = await this._acquireTransitionLock(machineId, entityId);
 
-        if (!guardOk || !guardResult) {
-          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
-            operation: 'send',
-            machineId,
-            entityId,
-            event,
-            currentState,
-            guardName,
-            guardError: guardErr?.message || 'Guard returned false',
-            suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
-          });
+    try {
+      const currentState = await this.getState(machineId, entityId);
+      const stateConfig = machine.config.states[currentState];
+
+      if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
+        throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
+          operation: 'send',
+          machineId,
+          entityId,
+          event,
+          currentState,
+          validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
+          suggestion: 'Use getValidEvents() to check which events are valid for the current state'
+        });
+      }
+
+      const targetState = stateConfig.on[event];
+
+      // Check guards
+      if (stateConfig.guards && stateConfig.guards[event]) {
+        const guardName = stateConfig.guards[event];
+        const guard = this.config.guards[guardName];
+
+        if (guard) {
+          const [guardOk, guardErr, guardResult] = await tryFn(() =>
+            guard(context, event, { database: this.database, machineId, entityId })
+          );
+
+          if (!guardOk || !guardResult) {
+            throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
+              operation: 'send',
+              machineId,
+              entityId,
+              event,
+              currentState,
+              guardName,
+              guardError: guardErr?.message || 'Guard returned false',
+              suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
+            });
+          }
         }
       }
+
+      // Execute exit action for current state
+      if (stateConfig.exit) {
+        await this._executeAction(stateConfig.exit, context, event, machineId, entityId);
+      }
+
+      // Execute the transition
+      await this._transition(machineId, entityId, currentState, targetState, event, context);
+
+      // Execute entry action for target state
+      const targetStateConfig = machine.config.states[targetState];
+      if (targetStateConfig && targetStateConfig.entry) {
+        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
+      }
+
+      this.emit('transition', {
+        machineId,
+        entityId,
+        from: currentState,
+        to: targetState,
+        event,
+        context
+      });
+
+      return {
+        from: currentState,
+        to: targetState,
+        event,
+        timestamp: new Date().toISOString()
+      };
+    } finally {
+      // Always release lock, even if transition fails
+      await this._releaseTransitionLock(lockName);
     }
-    
-    // Execute exit action for current state
-    if (stateConfig.exit) {
-      await this._executeAction(stateConfig.exit, context, event, machineId, entityId);
-    }
-    
-    // Execute the transition
-    await this._transition(machineId, entityId, currentState, targetState, event, context);
-    
-    // Execute entry action for target state
-    const targetStateConfig = machine.config.states[targetState];
-    if (targetStateConfig && targetStateConfig.entry) {
-      await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
-    }
-    
-    this.emit('transition', {
-      machineId,
-      entityId,
-      from: currentState,
-      to: targetState,
-      event,
-      context
-    });
-    
-    return {
-      from: currentState,
-      to: targetState,
-      event,
-      timestamp: new Date().toISOString()
-    };
   }
 
   async _executeAction(actionName, context, event, machineId, entityId) {
@@ -396,6 +408,48 @@ export class StateMachinePlugin extends Plugin {
           console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
         }
       }
+    }
+  }
+
+  /**
+   * Acquire distributed lock for transition
+   * Prevents concurrent transitions for the same entity
+   * @private
+   */
+  async _acquireTransitionLock(machineId, entityId) {
+    const storage = this.getStorage();
+    const lockName = `transition-${machineId}-${entityId}`;
+
+    const lock = await storage.acquireLock(lockName, {
+      ttl: this.config.lockTTL,
+      timeout: this.config.lockTimeout,
+      workerId: this.config.workerId
+    });
+
+    if (!lock) {
+      throw new StateMachineError('Could not acquire transition lock - concurrent transition in progress', {
+        operation: 'send',
+        machineId,
+        entityId,
+        lockTimeout: this.config.lockTimeout,
+        workerId: this.config.workerId,
+        suggestion: 'Wait for current transition to complete or increase lockTimeout'
+      });
+    }
+
+    return lockName;
+  }
+
+  /**
+   * Release distributed lock for transition
+   * @private
+   */
+  async _releaseTransitionLock(lockName) {
+    const storage = this.getStorage();
+    const [ok, err] = await tryFn(() => storage.releaseLock(lockName));
+
+    if (!ok && this.config.verbose) {
+      console.warn(`[StateMachinePlugin] Failed to release lock '${lockName}':`, err.message);
     }
   }
 
