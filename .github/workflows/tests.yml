@@ -16,21 +16,6 @@ jobs:
         node-version: [20, 22, 23]
       fail-fast: false
 
-    services:
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9000:9000
-          - 9001:9001
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin123
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -49,10 +34,20 @@ jobs:
       - name: 📥 Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: ⏳ Wait for MinIO & Create Bucket
+      - name: 🚀 Start MinIO & Create Bucket
         run: |
-          echo "Waiting for MinIO..."
-          timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
+          echo "Starting MinIO..."
+          docker run -d \
+            --name minio \
+            -p 9000:9000 \
+            -p 9001:9001 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            minio/minio:latest \
+            server /data --console-address :9001
+
+          echo "Waiting for MinIO to be ready..."
+          timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live 2>/dev/null; do sleep 2; done'
           echo "✅ MinIO ready!"
 
           echo "Creating s3db bucket..."
