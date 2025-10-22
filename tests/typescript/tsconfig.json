@@ -32,6 +32,8 @@
     "../../dist-ts",
     "../../coverage",
     "../../tests/**/*.test.js",
-    "../../examples"
+    "../../examples",
+    "../../dist/**/*",
+    "./runtime-test.ts"
   ]
 } 
