@@ -337,12 +337,12 @@ describe('Resource Existence Methods', () => {
   describe('Hash consistency and stability', () => {
     test('should generate consistent hashes for same definition', () => {
       const definition1 = {
-        name: 'test-resource',
+        name: 'hash-test-consistent',
         attributes: { name: 'string|required', email: 'string|required' }
       };
 
       const definition2 = {
-        name: 'test-resource',
+        name: 'hash-test-consistent',
         attributes: { name: 'string|required', email: 'string|required' }
       };
 
@@ -355,17 +355,17 @@ describe('Resource Existence Methods', () => {
     test('should generate different hashes for different definitions', async () => {
       // Create the first resource
       await database.createResource({
-        name: 'test-resource',
+        name: 'hash-test-different',
         attributes: { name: 'string|required' }
       });
 
       const definition1 = {
-        name: 'test-resource',
+        name: 'hash-test-different',
         attributes: { name: 'string|required' }
       };
 
       const definition2 = {
-        name: 'test-resource',
+        name: 'hash-test-different',
         attributes: { name: 'string|required', email: 'string|required' }
       };
 
@@ -377,7 +377,7 @@ describe('Resource Existence Methods', () => {
 
     test('should handle attribute order changes', () => {
       const definition1 = {
-        name: 'test-resource',
+        name: 'hash-test-order',
         attributes: {
           name: 'string|required',
           email: 'string|required',
@@ -386,7 +386,7 @@ describe('Resource Existence Methods', () => {
       };
 
       const definition2 = {
-        name: 'test-resource',
+        name: 'hash-test-order',
         attributes: {
           age: 'number|optional',
           email: 'string|required',
