@@ -1290,21 +1290,24 @@ export class Resource extends AsyncEventEmitter {
 
     const behavior = this.behavior;
 
-    // ✅ Optimization: HEAD + COPY for metadata-only behaviors
-    if (behavior === 'enforce-limits' || behavior === 'truncate-data') {
+    // Check if fields contain dot notation (nested fields)
+    const hasNestedFields = Object.keys(fields).some(key => key.includes('.'));
+
+    // ✅ Optimization: HEAD + COPY for metadata-only behaviors WITHOUT nested fields
+    if ((behavior === 'enforce-limits' || behavior === 'truncate-data') && !hasNestedFields) {
       return await this._patchViaCopyObject(id, fields, options);
     }
 
-    // ⚠️ Fallback: GET + merge + PUT for behaviors with body
-    if (this.config.verbose) {
-      console.warn(`[Resource.patch] Fallback to update() - behavior '${behavior}' uses body storage`);
-    }
+    // ⚠️ Fallback: GET + merge + PUT for:
+    // - Behaviors with body storage
+    // - Nested field updates (need full object merge)
     return await this.update(id, fields, options);
   }
 
   /**
    * Internal helper: Optimized patch using HeadObject + CopyObject
    * Only works for metadata-only behaviors (enforce-limits, truncate-data)
+   * Only for simple field updates (no nested fields with dot notation)
    * @private
    */
   async _patchViaCopyObject(id, fields, options = {}) {
@@ -1313,34 +1316,28 @@ export class Resource extends AsyncEventEmitter {
     // Build S3 key
     const key = this.getResourceKey(id);
 
-    // Step 1: HeadObject to get current metadata
+    // Step 1: HEAD to get current metadata (optimization: no body transfer)
     const headResponse = await this.client.headObject(key);
     const currentMetadata = headResponse.Metadata || {};
 
-    // Step 2: Get current data
-    // For enforce-limits/truncate-data, ALL data is in metadata
-    // Simply unmap the metadata to get the full object
-    const currentData = await this.schema.unmapper(currentMetadata);
-    currentData.id = id;  // Ensure ID is present
+    // Step 2: Decode metadata to user format
+    let currentData = await this.schema.unmapper(currentMetadata);
 
-    // Step 3: Merge with new fields
+    // Ensure ID is present
+    if (!currentData.id) {
+      currentData.id = id;
+    }
+
+    // Step 3: Merge with new fields (simple merge, no nested fields)
     const fieldsClone = cloneDeep(fields);
-    const mergedData = cloneDeep(currentData);
+    let mergedData = cloneDeep(currentData);
 
     for (const [key, value] of Object.entries(fieldsClone)) {
-      if (key.includes('.')) {
-        // Handle nested fields (e.g., 'profile.name')
-        let ref = mergedData;
-        const parts = key.split('.');
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (typeof ref[parts[i]] !== 'object' || ref[parts[i]] === null) {
-            ref[parts[i]] = {};
-          }
-          ref = ref[parts[i]];
-        }
-        ref[parts[parts.length - 1]] = value;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Merge objects
+        mergedData[key] = merge({}, mergedData[key], value);
       } else {
-        mergedData[key] = value;
+        mergedData[key] = cloneDeep(value);
       }
     }
 
