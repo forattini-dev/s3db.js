@@ -37,6 +37,11 @@ import { ApiServer } from './server.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 
+/**
+ * API Plugin class
+ * @class
+ * @extends Plugin
+ */
 export class ApiPlugin extends Plugin {
   /**
    * Create API Plugin instance
