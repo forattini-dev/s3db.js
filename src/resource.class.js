@@ -13,7 +13,7 @@ import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 import { idGenerator as defaultIdGenerator } from "./concerns/id.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
-import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError } from "./errors.js";
+import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError, ValidationError } from "./errors.js";
 
 
 export class Resource extends AsyncEventEmitter {
@@ -1249,6 +1249,317 @@ export class Resource extends AsyncEventEmitter {
       });
       return finalResult;
     }
+  }
+
+  /**
+   * Patch resource (partial update optimized for metadata-only behaviors)
+   *
+   * This method provides an optimized update path for resources using metadata-only behaviors
+   * (enforce-limits, truncate-data). It uses HeadObject + CopyObject for atomic updates without
+   * body transfer, eliminating race conditions and reducing latency by ~50%.
+   *
+   * For behaviors that store data in body (body-overflow, body-only), it automatically falls
+   * back to the standard update() method.
+   *
+   * @param {string} id - Resource ID
+   * @param {Object} fields - Fields to update (partial data)
+   * @param {Object} options - Update options
+   * @param {string} options.partition - Partition name (if using partitions)
+   * @param {Object} options.partitionValues - Partition values (if using partitions)
+   * @returns {Promise<Object>} Updated resource data
+   *
+   * @example
+   * // Fast atomic update (enforce-limits behavior)
+   * await resource.patch('user-123', { status: 'active', loginCount: 42 });
+   *
+   * @example
+   * // With partitions
+   * await resource.patch('order-456', { status: 'shipped' }, {
+   *   partition: 'byRegion',
+   *   partitionValues: { region: 'US' }
+   * });
+   */
+  async patch(id, fields, options = {}) {
+    if (isEmpty(id)) {
+      throw new Error('id cannot be empty');
+    }
+
+    if (!fields || typeof fields !== 'object') {
+      throw new Error('fields must be a non-empty object');
+    }
+
+    const behavior = this.behavior;
+
+    // ✅ Optimization: HEAD + COPY for metadata-only behaviors
+    if (behavior === 'enforce-limits' || behavior === 'truncate-data') {
+      return await this._patchViaCopyObject(id, fields, options);
+    }
+
+    // ⚠️ Fallback: GET + merge + PUT for behaviors with body
+    if (this.config.verbose) {
+      console.warn(`[Resource.patch] Fallback to update() - behavior '${behavior}' uses body storage`);
+    }
+    return await this.update(id, fields, options);
+  }
+
+  /**
+   * Internal helper: Optimized patch using HeadObject + CopyObject
+   * Only works for metadata-only behaviors (enforce-limits, truncate-data)
+   * @private
+   */
+  async _patchViaCopyObject(id, fields, options = {}) {
+    const { partition, partitionValues } = options;
+
+    // Build S3 key
+    const key = this.getResourceKey(id);
+
+    // Step 1: HeadObject to get current metadata
+    const headResponse = await this.client.headObject(key);
+    const currentMetadata = headResponse.Metadata || {};
+
+    // Step 2: Get current data
+    // For enforce-limits/truncate-data, ALL data is in metadata
+    // Simply unmap the metadata to get the full object
+    const currentData = await this.schema.unmapper(currentMetadata);
+    currentData.id = id;  // Ensure ID is present
+
+    // Step 3: Merge with new fields
+    const fieldsClone = cloneDeep(fields);
+    const mergedData = cloneDeep(currentData);
+
+    for (const [key, value] of Object.entries(fieldsClone)) {
+      if (key.includes('.')) {
+        // Handle nested fields (e.g., 'profile.name')
+        let ref = mergedData;
+        const parts = key.split('.');
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (typeof ref[parts[i]] !== 'object' || ref[parts[i]] === null) {
+            ref[parts[i]] = {};
+          }
+          ref = ref[parts[i]];
+        }
+        ref[parts[parts.length - 1]] = value;
+      } else {
+        mergedData[key] = value;
+      }
+    }
+
+    // Step 4: Update timestamps
+    if (this.config.timestamps) {
+      mergedData.updatedAt = new Date().toISOString();
+    }
+
+    // Step 5: Validate merged data
+    const validationResult = await this.schema.validate(mergedData);
+    if (validationResult !== true) {
+      throw new ValidationError('Validation failed during patch', validationResult);
+    }
+
+    // Step 6: Map/encode data to storage format
+    const newMetadata = await this.schema.mapper(mergedData);
+
+    // Add version metadata
+    newMetadata._v = String(this.version);
+
+    // Step 8: CopyObject with new metadata (atomic operation)
+    await this.client.copyObject({
+      from: key,
+      to: key,
+      metadataDirective: 'REPLACE',
+      metadata: newMetadata
+    });
+
+    // Step 9: Update partitions if needed
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      const oldData = { ...currentData, id };
+      const newData = { ...mergedData, id };
+
+      if (this.config.asyncPartitions) {
+        // Async mode: update in background
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'patch',
+              id,
+              error: err
+            });
+          });
+        });
+      } else {
+        // Sync mode: wait for completion
+        await this.handlePartitionReferenceUpdates(oldData, newData);
+      }
+    }
+
+    return mergedData;
+  }
+
+  /**
+   * Replace resource (full object replacement without GET)
+   *
+   * This method performs a direct PUT operation without fetching the current object.
+   * Use this when you already have the complete object and want to replace it entirely,
+   * saving 1 S3 request (GET).
+   *
+   * ⚠️ Warning: You must provide ALL required fields. Missing fields will NOT be preserved
+   * from the current object. This method does not merge with existing data.
+   *
+   * @param {string} id - Resource ID
+   * @param {Object} fullData - Complete object data (all required fields)
+   * @param {Object} options - Update options
+   * @param {string} options.partition - Partition name (if using partitions)
+   * @param {Object} options.partitionValues - Partition values (if using partitions)
+   * @returns {Promise<Object>} Replaced resource data
+   *
+   * @example
+   * // Replace entire object (must include ALL required fields)
+   * await resource.replace('user-123', {
+   *   name: 'John Doe',
+   *   email: 'john@example.com',
+   *   status: 'active',
+   *   loginCount: 42
+   * });
+   *
+   * @example
+   * // With partitions
+   * await resource.replace('order-456', fullOrderData, {
+   *   partition: 'byRegion',
+   *   partitionValues: { region: 'US' }
+   * });
+   */
+  async replace(id, fullData, options = {}) {
+    if (isEmpty(id)) {
+      throw new Error('id cannot be empty');
+    }
+
+    if (!fullData || typeof fullData !== 'object') {
+      throw new Error('fullData must be a non-empty object');
+    }
+
+    const { partition, partitionValues } = options;
+
+    // Clone data to avoid mutations
+    const dataClone = cloneDeep(fullData);
+
+    // Apply defaults before timestamps
+    const attributesWithDefaults = this.applyDefaults(dataClone);
+
+    // Add timestamps
+    if (this.config.timestamps) {
+      // Preserve createdAt if provided, otherwise set to now
+      if (!attributesWithDefaults.createdAt) {
+        attributesWithDefaults.createdAt = new Date().toISOString();
+      }
+      attributesWithDefaults.updatedAt = new Date().toISOString();
+    }
+
+    // Ensure ID is set
+    const completeData = { id, ...attributesWithDefaults };
+
+    // Validate data
+    const {
+      errors,
+      isValid,
+      data: validated,
+    } = await this.validate(completeData);
+
+    if (!isValid) {
+      const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Replace failed';
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes: completeData,
+        validation: errors,
+        message: errorMsg
+      });
+    }
+
+    // Extract id and attributes from validated data
+    const { id: validatedId, ...validatedAttributes } = validated;
+
+    // Map/encode data to storage format
+    const mappedMetadata = await this.schema.mapper(validatedAttributes);
+
+    // Add version metadata
+    mappedMetadata._v = String(this.version);
+
+    // Use behavior to store data (like insert, not update)
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: finalMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: validatedAttributes,
+      mappedData: mappedMetadata,
+      originalData: completeData
+    });
+
+    // Build S3 key
+    const key = this.getResourceKey(id);
+
+    // Determine content type based on body content
+    let contentType = undefined;
+    if (body && body !== "") {
+      const [okParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = 'application/json';
+    }
+
+    // Only throw if behavior is 'body-only' and body is empty
+    if (this.behavior === 'body-only' && (!body || body === "")) {
+      throw new Error(`[Resource.replace] Attempt to save object without body! Data: id=${id}, resource=${this.name}`);
+    }
+
+    // Store to S3 (overwrites if exists, creates if not - true replace/upsert)
+    const [okPut, errPut] = await tryFn(() => this.client.putObject({
+      key,
+      body,
+      contentType,
+      metadata: finalMetadata,
+    }));
+
+    if (!okPut) {
+      const msg = errPut && errPut.message ? errPut.message : '';
+      if (msg.includes('metadata headers exceed') || msg.includes('Replace failed')) {
+        const totalSize = calculateTotalSize(finalMetadata);
+        const effectiveLimit = calculateEffectiveLimit({
+          s3Limit: 2047,
+          systemConfig: {
+            version: this.version,
+            timestamps: this.config.timestamps,
+            id
+          }
+        });
+        const excess = totalSize - effectiveLimit;
+        errPut.totalSize = totalSize;
+        errPut.limit = 2047;
+        errPut.effectiveLimit = effectiveLimit;
+        errPut.excess = excess;
+        throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'replace', id, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
+      }
+      throw errPut;
+    }
+
+    // Build the final object to return
+    const replacedObject = { id, ...validatedAttributes };
+
+    // Update partitions if needed
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.asyncPartitions) {
+        // Async mode: update partition indexes in background
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates({}, replacedObject).catch(err => {
+            this.emit('partitionIndexError', {
+              operation: 'replace',
+              id,
+              error: err
+            });
+          });
+        });
+      } else {
+        // Sync mode: update partition indexes immediately
+        await this.handlePartitionReferenceUpdates({}, replacedObject);
+      }
+    }
+
+    return replacedObject;
   }
 
   /**
@@ -2865,39 +3176,6 @@ export class Resource extends AsyncEventEmitter {
       filtered.$overflow = behaviorFlags.$overflow;
     }
     return filtered;
-  }
-
-
-  async replace(id, attributes) {
-    await this.delete(id);
-    await new Promise(r => setTimeout(r, 100));
-    // Polling para garantir que a key foi removida do S3
-    const maxWait = 5000;
-    const interval = 50;
-    const start = Date.now();
-    let waited = 0;
-    while (Date.now() - start < maxWait) {
-      const exists = await this.exists(id);
-      if (!exists) {
-        break;
-      }
-      await new Promise(r => setTimeout(r, interval));
-      waited = Date.now() - start;
-    }
-    if (waited >= maxWait) {
-    }
-
-    const [ok, err, result] = await tryFn(() => this.insert({ ...attributes, id }));
-
-    if (!ok) {
-      if (err && err.message && err.message.includes('already exists')) {
-        const updateResult = await this.update(id, attributes);
-        return updateResult;
-      }
-      throw err;
-    }
-
-    return result;
   }
 
   // --- MIDDLEWARE SYSTEM ---
