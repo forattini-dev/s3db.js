@@ -12,6 +12,10 @@ import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
 
+/**
+ * API Server class
+ * @class
+ */
 export class ApiServer {
   /**
    * Create API server
