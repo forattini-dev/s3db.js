@@ -11,9 +11,11 @@ describe('EventualConsistencyPlugin Analytics', () => {
   let database;
   let wallets;
   let plugin;
+  let testId = 0;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('eventual-consistency-analytics');
+    // Add unique test ID to prevent S3 prefix collisions
+    database = await createDatabaseForTest(`eventual-consistency-analytics-${++testId}`);
 
     // Create wallets resource
     wallets = await database.createResource({

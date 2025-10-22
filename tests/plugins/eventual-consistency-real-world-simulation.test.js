@@ -12,9 +12,11 @@ import { createDatabaseForTest } from '../config.js';
 describe('EventualConsistency - Real World Simulation (mrt-shortner)', () => {
   let database;
   let urls;
+  let testId = 0;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('eventual-consistency-simulation');
+    // Add unique test ID to prevent S3 prefix collisions
+    database = await createDatabaseForTest(`eventual-consistency-simulation-${++testId}`);
   });
 
   afterEach(async () => {
