@@ -18,18 +18,19 @@ jobs:
 
     services:
       minio:
-        image: bitnami/minio:latest
+        image: minio/minio:latest
         ports:
           - 9000:9000
+          - 9001:9001
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin123
-          MINIO_DEFAULT_BUCKETS: s3db
         options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          server /data --console-address :9001
 
     steps:
       - name: 📥 Checkout
@@ -49,11 +50,20 @@ jobs:
       - name: 📥 Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: ⏳ Wait for MinIO
+      - name: ⏳ Wait for MinIO & Create Bucket
         run: |
           echo "Waiting for MinIO..."
           timeout 60s bash -c 'until curl -f http://localhost:9000/minio/health/live; do sleep 2; done'
           echo "✅ MinIO ready!"
+
+          echo "Creating s3db bucket..."
+          docker run --rm --network="host" \
+            -e AWS_ACCESS_KEY_ID=minioadmin \
+            -e AWS_SECRET_ACCESS_KEY=minioadmin123 \
+            amazon/aws-cli \
+            --endpoint-url http://localhost:9000 \
+            s3 mb s3://s3db || echo "Bucket already exists"
+          echo "✅ Bucket ready!"
 
       - name: 🏗️ Build
         run: pnpm run build
