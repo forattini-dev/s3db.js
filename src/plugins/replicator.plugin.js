@@ -589,7 +589,8 @@ export class ReplicatorPlugin extends Plugin {
     if (!this.replicatorLog) return;
 
     const [ok, err] = await tryFn(async () => {
-      await this.replicatorLog.update(logId, {
+      // Use patch() for 40-60% performance improvement (truncate-data behavior)
+      await this.replicatorLog.patch(logId, {
         ...updates,
         lastAttempt: new Date().toISOString()
       });

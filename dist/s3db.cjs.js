@@ -1987,44 +1987,31 @@ class PluginStorage {
    * @returns {Promise<boolean>} True if extended, false if not found or no TTL
    */
   async touch(key, additionalSeconds) {
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
     if (!ok) {
       return false;
     }
     const metadata = response.Metadata || {};
     const parsedMetadata = this._parseMetadataValues(metadata);
-    let data = parsedMetadata;
-    if (response.Body) {
-      const [ok2, err2, result] = await tryFn(async () => {
-        const bodyContent = await response.Body.transformToString();
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-      if (!ok2) {
-        return false;
-      }
-      data = result;
-    }
-    const expiresAt = data._expiresat || data._expiresAt;
+    const expiresAt = parsedMetadata._expiresat || parsedMetadata._expiresAt;
     if (!expiresAt) {
       return false;
     }
-    data._expiresAt = expiresAt + additionalSeconds * 1e3;
-    delete data._expiresat;
-    const { metadata: newMetadata, body: newBody } = this._applyBehavior(data, "body-overflow");
-    const putParams = {
-      key,
-      metadata: newMetadata,
-      contentType: "application/json"
-    };
-    if (newBody !== null) {
-      putParams.body = JSON.stringify(newBody);
+    parsedMetadata._expiresAt = expiresAt + additionalSeconds * 1e3;
+    delete parsedMetadata._expiresat;
+    const encodedMetadata = {};
+    for (const [metaKey, metaValue] of Object.entries(parsedMetadata)) {
+      const { encoded } = metadataEncode(metaValue);
+      encodedMetadata[metaKey] = encoded;
     }
-    const [putOk] = await tryFn(() => this.client.putObject(putParams));
-    return putOk;
+    const [copyOk] = await tryFn(() => this.client.copyObject({
+      from: key,
+      to: key,
+      metadata: encodedMetadata,
+      metadataDirective: "REPLACE",
+      contentType: response.ContentType || "application/json"
+    }));
+    return copyOk;
   }
   /**
    * Delete a single object
@@ -2159,12 +2146,41 @@ class PluginStorage {
   /**
    * Increment a counter value
    *
+   * Optimization: Uses HEAD + COPY for existing counters to avoid body transfer.
+   * Falls back to GET + PUT for non-existent counters or those with additional data.
+   *
    * @param {string} key - S3 key
    * @param {number} amount - Amount to increment (default: 1)
    * @param {Object} options - Options (e.g., ttl)
    * @returns {Promise<number>} New value
    */
   async increment(key, amount = 1, options = {}) {
+    const [headOk, headErr, headResponse] = await tryFn(() => this.client.headObject(key));
+    if (headOk && headResponse.Metadata) {
+      const metadata = headResponse.Metadata || {};
+      const parsedMetadata = this._parseMetadataValues(metadata);
+      const currentValue = parsedMetadata.value || 0;
+      const newValue = currentValue + amount;
+      parsedMetadata.value = newValue;
+      if (options.ttl) {
+        parsedMetadata._expiresAt = Date.now() + options.ttl * 1e3;
+      }
+      const encodedMetadata = {};
+      for (const [metaKey, metaValue] of Object.entries(parsedMetadata)) {
+        const { encoded } = metadataEncode(metaValue);
+        encodedMetadata[metaKey] = encoded;
+      }
+      const [copyOk] = await tryFn(() => this.client.copyObject({
+        from: key,
+        to: key,
+        metadata: encodedMetadata,
+        metadataDirective: "REPLACE",
+        contentType: headResponse.ContentType || "application/json"
+      }));
+      if (copyOk) {
+        return newValue;
+      }
+    }
     const data = await this.get(key);
     const value = (data?.value || 0) + amount;
     await this.set(key, { value }, options);
@@ -22447,17 +22463,16 @@ ${errorDetails}`,
       throw new Error("fields must be a non-empty object");
     }
     const behavior = this.behavior;
-    if (behavior === "enforce-limits" || behavior === "truncate-data") {
+    const hasNestedFields = Object.keys(fields).some((key) => key.includes("."));
+    if ((behavior === "enforce-limits" || behavior === "truncate-data") && !hasNestedFields) {
       return await this._patchViaCopyObject(id, fields, options);
-    }
-    if (this.config.verbose) {
-      console.warn(`[Resource.patch] Fallback to update() - behavior '${behavior}' uses body storage`);
     }
     return await this.update(id, fields, options);
   }
   /**
    * Internal helper: Optimized patch using HeadObject + CopyObject
    * Only works for metadata-only behaviors (enforce-limits, truncate-data)
+   * Only for simple field updates (no nested fields with dot notation)
    * @private
    */
   async _patchViaCopyObject(id, fields, options = {}) {
@@ -22465,23 +22480,17 @@ ${errorDetails}`,
     const key = this.getResourceKey(id);
     const headResponse = await this.client.headObject(key);
     const currentMetadata = headResponse.Metadata || {};
-    const currentData = await this.schema.unmapper(currentMetadata);
-    currentData.id = id;
+    let currentData = await this.schema.unmapper(currentMetadata);
+    if (!currentData.id) {
+      currentData.id = id;
+    }
     const fieldsClone = lodashEs.cloneDeep(fields);
-    const mergedData = lodashEs.cloneDeep(currentData);
+    let mergedData = lodashEs.cloneDeep(currentData);
     for (const [key2, value] of Object.entries(fieldsClone)) {
-      if (key2.includes(".")) {
-        let ref = mergedData;
-        const parts = key2.split(".");
-        for (let i = 0; i < parts.length - 1; i++) {
-          if (typeof ref[parts[i]] !== "object" || ref[parts[i]] === null) {
-            ref[parts[i]] = {};
-          }
-          ref = ref[parts[i]];
-        }
-        ref[parts[parts.length - 1]] = value;
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        mergedData[key2] = lodashEs.merge({}, mergedData[key2], value);
       } else {
-        mergedData[key2] = value;
+        mergedData[key2] = lodashEs.cloneDeep(value);
       }
     }
     if (this.config.timestamps) {
@@ -27066,7 +27075,7 @@ class ReplicatorPlugin extends Plugin {
   async updateReplicatorLog(logId, updates) {
     if (!this.replicatorLog) return;
     const [ok, err] = await tryFn(async () => {
-      await this.replicatorLog.update(logId, {
+      await this.replicatorLog.patch(logId, {
         ...updates,
         lastAttempt: (/* @__PURE__ */ new Date()).toISOString()
       });

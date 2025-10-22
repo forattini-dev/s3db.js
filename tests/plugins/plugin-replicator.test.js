@@ -592,14 +592,14 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     });
 
     const mockLogResource = {
-      update: jest.fn().mockResolvedValue({ id: 'log-1' })
+      patch: jest.fn().mockResolvedValue({ id: 'log-1' })
     };
 
     plugin.replicatorLog = mockLogResource;
 
     await plugin.updateReplicatorLog('log-1', { status: 'success' });
 
-    expect(mockLogResource.update).toHaveBeenCalledWith('log-1', expect.objectContaining({
+    expect(mockLogResource.patch).toHaveBeenCalledWith('log-1', expect.objectContaining({
       status: 'success',
       lastAttempt: expect.any(String)
     }));
@@ -946,7 +946,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     });
 
     const mockLogResource = {
-      update: jest.fn().mockRejectedValue(new Error('Update failed'))
+      patch: jest.fn().mockRejectedValue(new Error('Update failed'))
     };
 
     plugin.replicatorLog = mockLogResource;
