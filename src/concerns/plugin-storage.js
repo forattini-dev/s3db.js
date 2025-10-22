@@ -456,7 +456,9 @@ export class PluginStorage {
    * @returns {Promise<boolean>} True if extended, false if not found or no TTL
    */
   async touch(key, additionalSeconds) {
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+    // Optimization: Use HEAD + COPY instead of GET + PUT for metadata-only updates
+    // This avoids transferring the body when only updating the TTL
+    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
 
     if (!ok) {
       return false;
@@ -465,50 +467,34 @@ export class PluginStorage {
     const metadata = response.Metadata || {};
     const parsedMetadata = this._parseMetadataValues(metadata);
 
-    let data = parsedMetadata;
-
-    if (response.Body) {
-      const [ok, err, result] = await tryFn(async () => {
-        const bodyContent = await response.Body.transformToString();
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-
-      if (!ok) {
-        return false; // Parse error
-      }
-
-      data = result;
-    }
-
     // S3 lowercases metadata keys
-    const expiresAt = data._expiresat || data._expiresAt;
+    const expiresAt = parsedMetadata._expiresat || parsedMetadata._expiresAt;
     if (!expiresAt) {
       return false; // No TTL to extend
     }
 
     // Extend TTL - use the standard field name (will be lowercased by S3)
-    data._expiresAt = expiresAt + (additionalSeconds * 1000);
-    delete data._expiresat; // Remove lowercased version
+    parsedMetadata._expiresAt = expiresAt + (additionalSeconds * 1000);
+    delete parsedMetadata._expiresat; // Remove lowercased version
 
-    // Save back (reuse same behavior)
-    const { metadata: newMetadata, body: newBody } = this._applyBehavior(data, 'body-overflow');
-
-    const putParams = {
-      key,
-      metadata: newMetadata,
-      contentType: 'application/json'
-    };
-
-    if (newBody !== null) {
-      putParams.body = JSON.stringify(newBody);
+    // Encode metadata for S3
+    const encodedMetadata = {};
+    for (const [metaKey, metaValue] of Object.entries(parsedMetadata)) {
+      const { encoded } = metadataEncode(metaValue);
+      encodedMetadata[metaKey] = encoded;
     }
 
-    const [putOk] = await tryFn(() => this.client.putObject(putParams));
-    return putOk;
+    // Use COPY with MetadataDirective: REPLACE to update metadata atomically
+    // This preserves the body without re-transferring it
+    const [copyOk] = await tryFn(() => this.client.copyObject({
+      from: key,
+      to: key,
+      metadata: encodedMetadata,
+      metadataDirective: 'REPLACE',
+      contentType: response.ContentType || 'application/json'
+    }));
+
+    return copyOk;
   }
 
   /**
@@ -675,12 +661,56 @@ export class PluginStorage {
   /**
    * Increment a counter value
    *
+   * Optimization: Uses HEAD + COPY for existing counters to avoid body transfer.
+   * Falls back to GET + PUT for non-existent counters or those with additional data.
+   *
    * @param {string} key - S3 key
    * @param {number} amount - Amount to increment (default: 1)
    * @param {Object} options - Options (e.g., ttl)
    * @returns {Promise<number>} New value
    */
   async increment(key, amount = 1, options = {}) {
+    // Try optimized path first: HEAD + COPY for existing counters
+    const [headOk, headErr, headResponse] = await tryFn(() => this.client.headObject(key));
+
+    if (headOk && headResponse.Metadata) {
+      // Counter exists, use optimized HEAD + COPY
+      const metadata = headResponse.Metadata || {};
+      const parsedMetadata = this._parseMetadataValues(metadata);
+
+      const currentValue = parsedMetadata.value || 0;
+      const newValue = currentValue + amount;
+
+      // Update only the value field
+      parsedMetadata.value = newValue;
+
+      // Handle TTL if specified
+      if (options.ttl) {
+        parsedMetadata._expiresAt = Date.now() + (options.ttl * 1000);
+      }
+
+      // Encode metadata
+      const encodedMetadata = {};
+      for (const [metaKey, metaValue] of Object.entries(parsedMetadata)) {
+        const { encoded } = metadataEncode(metaValue);
+        encodedMetadata[metaKey] = encoded;
+      }
+
+      // Atomic update via COPY
+      const [copyOk] = await tryFn(() => this.client.copyObject({
+        from: key,
+        to: key,
+        metadata: encodedMetadata,
+        metadataDirective: 'REPLACE',
+        contentType: headResponse.ContentType || 'application/json'
+      }));
+
+      if (copyOk) {
+        return newValue;
+      }
+    }
+
+    // Fallback: counter doesn't exist or has body data, use traditional path
     const data = await this.get(key);
     const value = (data?.value || 0) + amount;
     await this.set(key, { value }, options);
