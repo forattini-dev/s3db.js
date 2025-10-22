@@ -352,6 +352,7 @@ describe('Resource patch() and replace() Methods', () => {
         },
         behavior: 'enforce-limits',
         timestamps: true,
+        asyncPartitions: false,  // Use sync mode for this test
         partitions: {
           byRegion: { fields: { region: 'string' } }
         }
@@ -383,7 +384,8 @@ describe('Resource patch() and replace() Methods', () => {
         partition: 'byRegion',
         partitionValues: { region: 'US' }
       });
-      expect(oldPartitionList.data.find(u => u.id === id)).toBeUndefined();
+      // listPartition returns array directly, not {data: [...]}
+      expect(oldPartitionList.find(u => u.id === id)).toBeUndefined();
     });
   });
 
@@ -570,6 +572,7 @@ describe('Resource patch() and replace() Methods', () => {
         },
         behavior: 'enforce-limits',
         timestamps: true,
+        asyncPartitions: false,  // Use sync mode for this test
         partitions: {
           byCategory: { fields: { category: 'string' } }
         }
