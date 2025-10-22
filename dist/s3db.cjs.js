@@ -19199,7 +19199,8 @@ class Client extends EventEmitter {
     if (metadata && typeof metadata === "object") {
       const encodedMetadata = {};
       for (const [key, value] of Object.entries(metadata)) {
-        encodedMetadata[key] = metadataEncode(value);
+        const { encoded } = metadataEncode(value);
+        encodedMetadata[key] = encoded;
       }
       options.Metadata = encodedMetadata;
     }
@@ -22465,6 +22466,7 @@ ${errorDetails}`,
     const headResponse = await this.client.headObject(key);
     const currentMetadata = headResponse.Metadata || {};
     const currentData = await this.schema.unmapper(currentMetadata);
+    currentData.id = id;
     const fieldsClone = lodashEs.cloneDeep(fields);
     const mergedData = lodashEs.cloneDeep(currentData);
     for (const [key2, value] of Object.entries(fieldsClone)) {
@@ -22489,43 +22491,32 @@ ${errorDetails}`,
     if (validationResult !== true) {
       throw new ValidationError("Validation failed during patch", validationResult);
     }
-    const mappedData = this.schema.map(mergedData);
-    const newMetadata = await this.schema.mapper(mappedData);
+    const newMetadata = await this.schema.mapper(mergedData);
+    newMetadata._v = String(this.version);
     await this.client.copyObject({
       from: key,
       to: key,
       metadataDirective: "REPLACE",
       metadata: newMetadata
     });
-    if (this.config.partitions) {
-      const partitionUpdates = [];
-      for (const [partitionName, partitionDef] of Object.entries(this.config.partitions)) {
-        const partitionFields = partitionDef.fields || {};
-        const currentPartitionValues = {};
-        const newPartitionValues = {};
-        let partitionChanged = false;
-        for (const fieldName of Object.keys(partitionFields)) {
-          currentPartitionValues[fieldName] = currentData[fieldName];
-          newPartitionValues[fieldName] = mappedData[fieldName];
-          if (currentPartitionValues[fieldName] !== newPartitionValues[fieldName]) {
-            partitionChanged = true;
-          }
-        }
-        if (partitionChanged) {
-          partitionUpdates.push(
-            this._updatePartitionIndex(id, partitionName, currentPartitionValues, newPartitionValues)
-          );
-        }
-      }
-      if (this.config.asyncPartitions && partitionUpdates.length > 0) {
-        Promise.all(partitionUpdates).catch((err) => {
-          this.emit("error", err);
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      const oldData = { ...currentData, id };
+      const newData = { ...mergedData, id };
+      if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates(oldData, newData).catch((err) => {
+            this.emit("partitionIndexError", {
+              operation: "patch",
+              id,
+              error: err
+            });
+          });
         });
-      } else if (partitionUpdates.length > 0) {
-        await Promise.all(partitionUpdates);
+      } else {
+        await this.handlePartitionReferenceUpdates(oldData, newData);
       }
     }
-    return mappedData;
+    return mergedData;
   }
   /**
    * Replace resource (full object replacement without GET)
@@ -22569,41 +22560,92 @@ ${errorDetails}`,
     }
     const { partition, partitionValues } = options;
     const dataClone = lodashEs.cloneDeep(fullData);
-    dataClone.id = id;
+    const attributesWithDefaults = this.applyDefaults(dataClone);
     if (this.config.timestamps) {
-      if (!dataClone.createdAt) {
-        dataClone.createdAt = (/* @__PURE__ */ new Date()).toISOString();
+      if (!attributesWithDefaults.createdAt) {
+        attributesWithDefaults.createdAt = (/* @__PURE__ */ new Date()).toISOString();
       }
-      dataClone.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      attributesWithDefaults.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
-    const validationResult = await this.schema.validate(dataClone);
-    if (validationResult !== true) {
-      throw new ValidationError("Validation failed during replace", validationResult);
+    const completeData = { id, ...attributesWithDefaults };
+    const {
+      errors,
+      isValid,
+      data: validated
+    } = await this.validate(completeData);
+    if (!isValid) {
+      const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Replace failed";
+      throw new InvalidResourceItem({
+        bucket: this.client.config.bucket,
+        resourceName: this.name,
+        attributes: completeData,
+        validation: errors,
+        message: errorMsg
+      });
     }
-    const mappedData = this.schema.map(dataClone);
+    const { id: validatedId, ...validatedAttributes } = validated;
+    const mappedMetadata = await this.schema.mapper(validatedAttributes);
+    mappedMetadata._v = String(this.version);
+    const behaviorImpl = getBehavior(this.behavior);
+    const { mappedData: finalMetadata, body } = await behaviorImpl.handleInsert({
+      resource: this,
+      data: validatedAttributes,
+      mappedData: mappedMetadata,
+      originalData: completeData
+    });
     const key = this.getResourceKey(id);
-    await this.behavior.store(this.client, key, mappedData, this.schema);
-    if (this.config.partitions) {
-      const partitionUpdates = [];
-      for (const [partitionName, partitionDef] of Object.entries(this.config.partitions)) {
-        const partitionFields = partitionDef.fields || {};
-        const partitionValues2 = {};
-        for (const fieldName of Object.keys(partitionFields)) {
-          partitionValues2[fieldName] = mappedData[fieldName];
-        }
-        partitionUpdates.push(
-          this._indexPartition(id, partitionName, partitionValues2)
-        );
-      }
-      if (this.config.asyncPartitions && partitionUpdates.length > 0) {
-        Promise.all(partitionUpdates).catch((err) => {
-          this.emit("error", err);
+    let contentType = void 0;
+    if (body && body !== "") {
+      const [okParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
+      if (okParse) contentType = "application/json";
+    }
+    if (this.behavior === "body-only" && (!body || body === "")) {
+      throw new Error(`[Resource.replace] Attempt to save object without body! Data: id=${id}, resource=${this.name}`);
+    }
+    const [okPut, errPut] = await tryFn(() => this.client.putObject({
+      key,
+      body,
+      contentType,
+      metadata: finalMetadata
+    }));
+    if (!okPut) {
+      const msg = errPut && errPut.message ? errPut.message : "";
+      if (msg.includes("metadata headers exceed") || msg.includes("Replace failed")) {
+        const totalSize = calculateTotalSize(finalMetadata);
+        const effectiveLimit = calculateEffectiveLimit({
+          s3Limit: 2047,
+          systemConfig: {
+            version: this.version,
+            timestamps: this.config.timestamps,
+            id
+          }
         });
-      } else if (partitionUpdates.length > 0) {
-        await Promise.all(partitionUpdates);
+        const excess = totalSize - effectiveLimit;
+        errPut.totalSize = totalSize;
+        errPut.limit = 2047;
+        errPut.effectiveLimit = effectiveLimit;
+        errPut.excess = excess;
+        throw new ResourceError("metadata headers exceed", { resourceName: this.name, operation: "replace", id, totalSize, effectiveLimit, excess, suggestion: "Reduce metadata size or number of fields." });
+      }
+      throw errPut;
+    }
+    const replacedObject = { id, ...validatedAttributes };
+    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+      if (this.config.asyncPartitions) {
+        setImmediate(() => {
+          this.handlePartitionReferenceUpdates({}, replacedObject).catch((err) => {
+            this.emit("partitionIndexError", {
+              operation: "replace",
+              id,
+              error: err
+            });
+          });
+        });
+      } else {
+        await this.handlePartitionReferenceUpdates({}, replacedObject);
       }
     }
-    return mappedData;
+    return replacedObject;
   }
   /**
    * Update with conditional check (If-Match ETag)
@@ -23952,29 +23994,6 @@ ${errorDetails}`,
       filtered.$overflow = behaviorFlags.$overflow;
     }
     return filtered;
-  }
-  async replace(id, attributes) {
-    await this.delete(id);
-    await new Promise((r) => setTimeout(r, 100));
-    const maxWait = 5e3;
-    const interval = 50;
-    const start = Date.now();
-    while (Date.now() - start < maxWait) {
-      const exists = await this.exists(id);
-      if (!exists) {
-        break;
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
-    const [ok, err, result] = await tryFn(() => this.insert({ ...attributes, id }));
-    if (!ok) {
-      if (err && err.message && err.message.includes("already exists")) {
-        const updateResult = await this.update(id, attributes);
-        return updateResult;
-      }
-      throw err;
-    }
-    return result;
   }
   // --- MIDDLEWARE SYSTEM ---
   _initMiddleware() {

@@ -203,7 +203,21 @@ export class Client extends EventEmitter {
       Key: keyPrefix ? path.join(keyPrefix, key) : key,
     };
 
-    const [ok, err, response] = await tryFn(() => this.sendCommand(new HeadObjectCommand(options)));
+    const [ok, err, response] = await tryFn(async () => {
+      const res = await this.sendCommand(new HeadObjectCommand(options));
+
+      // Smart decode metadata values (same as getObject)
+      if (res.Metadata) {
+        const decodedMetadata = {};
+        for (const [key, value] of Object.entries(res.Metadata)) {
+          decodedMetadata[key] = metadataDecode(value);
+        }
+        res.Metadata = decodedMetadata;
+      }
+
+      return res;
+    });
+
     this.emit('headObject', err || response, { key });
 
     if (!ok) {
@@ -218,15 +232,36 @@ export class Client extends EventEmitter {
     return response;
   }
 
-  async copyObject({ from, to }) {
+  async copyObject({ from, to, metadata, metadataDirective, contentType }) {
+    const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
     const options = {
       Bucket: this.config.bucket,
-      Key: this.config.keyPrefix ? path.join(this.config.keyPrefix, to) : to,
-      CopySource: path.join(this.config.bucket, this.config.keyPrefix ? path.join(this.config.keyPrefix, from) : from),
+      Key: keyPrefix ? path.join(keyPrefix, to) : to,
+      CopySource: path.join(this.config.bucket, keyPrefix ? path.join(keyPrefix, from) : from),
     };
 
+    // Add metadata directive if specified
+    if (metadataDirective) {
+      options.MetadataDirective = metadataDirective; // 'COPY' or 'REPLACE'
+    }
+
+    // Add metadata if specified (and encode values)
+    if (metadata && typeof metadata === 'object') {
+      const encodedMetadata = {};
+      for (const [key, value] of Object.entries(metadata)) {
+        const { encoded } = metadataEncode(value);
+        encodedMetadata[key] = encoded;
+      }
+      options.Metadata = encodedMetadata;
+    }
+
+    // Add content type if specified
+    if (contentType) {
+      options.ContentType = contentType;
+    }
+
     const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
-    this.emit('copyObject', err || response, { from, to });
+    this.emit('copyObject', err || response, { from, to, metadataDirective });
 
     if (!ok) {
       throw mapAwsError(err, {
