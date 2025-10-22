@@ -723,6 +723,8 @@ declare module 's3db.js' {
     get(id: string): Promise<any>;
     exists(id: string): Promise<boolean>;
     update(id: string, attributes: any): Promise<any>;
+    patch(id: string, fields: any, options?: { partition?: string; partitionValues?: Record<string, any> }): Promise<any>;
+    replace(id: string, fullData: any, options?: { partition?: string; partitionValues?: Record<string, any> }): Promise<any>;
     upsert(data: any): Promise<any>;
     delete(id: string): Promise<void>;
     deleteMany(ids: string[]): Promise<void>;
@@ -841,7 +843,13 @@ declare module 's3db.js' {
     }): Promise<any>;
     getObject(key: string): Promise<any>;
     headObject(key: string): Promise<any>;
-    copyObject(options: { from: string; to: string }): Promise<any>;
+    copyObject(options: {
+      from: string;
+      to: string;
+      metadata?: Record<string, any>;
+      metadataDirective?: 'COPY' | 'REPLACE';
+      contentType?: string;
+    }): Promise<any>;
     exists(key: string): Promise<boolean>;
     deleteObject(key: string): Promise<any>;
     deleteObjects(keys: string[]): Promise<{ deleted: any[]; notFound: any[] }>;
