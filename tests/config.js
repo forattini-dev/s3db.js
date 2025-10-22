@@ -16,8 +16,11 @@ import { idGenerator } from '#src/concerns/id.js';
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const s3Prefix = (testName = idGenerator(5)) => join('day=' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + idGenerator(4));
-const sqsName = (testName = idGenerator(5)) => ['day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + idGenerator(4)].join('-').replace(/-/g,'_')
+// Global counter to ensure unique S3 prefixes even when tests run in same millisecond (CI environments)
+let prefixCounter = 0;
+
+const s3Prefix = (testName = idGenerator(5)) => join('day=' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + (++prefixCounter) + '-' + idGenerator(4));
+const sqsName = (testName = idGenerator(5)) => ['day_' + new Date().toISOString().substring(0, 10), testName + '-' + Date.now() + '-' + (++prefixCounter) + '-' + idGenerator(4)].join('-').replace(/-/g,'_')
 
 export function createClientForTest(testName, options = {}) {
   if (!options.connectionString) {
