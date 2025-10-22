@@ -225,22 +225,22 @@ describe('Resource Existence Methods', () => {
   describe('Integration with createResource', () => {
     test('createResource should not create unnecessary versions when hash is same', async () => {
       const attributes = { name: 'string|required' };
-      
+
       // Create resource first time
       await database.createResource({
-        name: 'test-resource',
+        name: 'version-test-same',
         attributes
       });
 
-      const initialVersion = database.resources['test-resource'].version;
+      const initialVersion = database.resources['version-test-same'].version;
 
       // Call createResource again with same attributes
       await database.createResource({
-        name: 'test-resource',
+        name: 'version-test-same',
         attributes
       });
 
-      const finalVersion = database.resources['test-resource'].version;
+      const finalVersion = database.resources['version-test-same'].version;
 
       // Version should remain the same since hash didn't change
       expect(finalVersion).toBe(initialVersion);
@@ -248,24 +248,24 @@ describe('Resource Existence Methods', () => {
 
     test('createResource should create new version when hash changes', async () => {
       const originalAttributes = { name: 'string|required' };
-      
+
       // Create resource first time
       await database.createResource({
-        name: 'test-resource',
+        name: 'version-test-change',
         attributes: originalAttributes
       });
 
-      const initialVersion = database.resources['test-resource'].version;
+      const initialVersion = database.resources['version-test-change'].version;
 
       const modifiedAttributes = { name: 'string|required', email: 'string|required' };
-      
+
       // Call createResource with different attributes
       await database.createResource({
-        name: 'test-resource',
+        name: 'version-test-change',
         attributes: modifiedAttributes
       });
 
-      const finalVersion = database.resources['test-resource'].version;
+      const finalVersion = database.resources['version-test-change'].version;
 
       // Version should be different since hash changed
       expect(finalVersion).not.toBe(initialVersion);
