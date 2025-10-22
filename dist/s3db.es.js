@@ -27,7 +27,7 @@ import { realpath, readlink, readdir as readdir$1, lstat } from 'node:fs/promise
 import { EventEmitter as EventEmitter$1 } from 'node:events';
 import Stream from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
-import require$$0 from 'node:crypto';
+import { createRequire } from 'node:module';
 import require$$1 from 'child_process';
 import require$$5 from 'url';
 
@@ -39784,6 +39784,9 @@ var runner = {};
 
 var createId = {};
 
+const require = createRequire(import.meta.url);
+function __require() { return require("node:crypto"); }
+
 var hasRequiredCreateId;
 
 function requireCreateId () {
@@ -39794,7 +39797,7 @@ function requireCreateId () {
 	};
 	Object.defineProperty(createId, "__esModule", { value: true });
 	createId.createID = createID;
-	const node_crypto_1 = __importDefault(require$$0);
+	const node_crypto_1 = __importDefault(__require());
 	function createID(prefix = '', length = 16) {
 	    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 	    const values = node_crypto_1.default.randomBytes(length);

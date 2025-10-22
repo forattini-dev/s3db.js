@@ -31,10 +31,11 @@ var promises$2 = require('node:fs/promises');
 var node_events = require('node:events');
 var Stream = require('node:stream');
 var node_string_decoder = require('node:string_decoder');
-var require$$0 = require('node:crypto');
+var node_module = require('node:module');
 var require$$1 = require('child_process');
 var require$$5 = require('url');
 
+var _documentCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
 function _interopNamespaceDefault(e) {
   var n = Object.create(null);
   if (e) {
@@ -39807,6 +39808,9 @@ var runner = {};
 
 var createId = {};
 
+const require$1 = node_module.createRequire((typeof document === 'undefined' ? require('u' + 'rl').pathToFileURL(__filename).href : (_documentCurrentScript && _documentCurrentScript.tagName.toUpperCase() === 'SCRIPT' && _documentCurrentScript.src || new URL('s3db.cjs.js', document.baseURI).href)));
+function __require() { return require$1("node:crypto"); }
+
 var hasRequiredCreateId;
 
 function requireCreateId () {
@@ -39817,7 +39821,7 @@ function requireCreateId () {
 	};
 	Object.defineProperty(createId, "__esModule", { value: true });
 	createId.createID = createID;
-	const node_crypto_1 = __importDefault(require$$0);
+	const node_crypto_1 = __importDefault(__require());
 	function createID(prefix = '', length = 16) {
 	    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 	    const values = node_crypto_1.default.randomBytes(length);
