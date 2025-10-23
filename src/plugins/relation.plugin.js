@@ -276,7 +276,7 @@ import {
  * });
  * ```
  */
-class RelationPlugin extends Plugin {
+export class RelationPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
@@ -1374,5 +1374,4 @@ class RelationPlugin extends Plugin {
   }
 }
 
-export { RelationPlugin };
 export default RelationPlugin;

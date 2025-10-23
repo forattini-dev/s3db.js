@@ -128,7 +128,7 @@ function getExpiredCohorts(granularity, count) {
   return cohorts;
 }
 
-class TTLPlugin extends Plugin {
+export class TTLPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
