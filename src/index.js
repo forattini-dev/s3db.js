@@ -13,20 +13,26 @@ export { Validator } from './validator.class.js'
 export { ConnectionString } from './connection-string.class.js'
 
 // stream classes
-export { 
-  ResourceReader, 
-  ResourceWriter, 
-  ResourceIdsReader, 
+export {
+  ResourceReader,
+  ResourceWriter,
+  ResourceIdsReader,
   ResourceIdsPageReader,
   streamToString
 } from './stream/index.js'
 
+// typescript generation
+export { generateTypes, printTypes } from './concerns/typescript-generator.js'
+
+// testing utilities
+export { Factory, Seeder } from './testing/index.js'
+
 // behaviors
-export { 
-  behaviors, 
-  getBehavior, 
-  AVAILABLE_BEHAVIORS, 
-  DEFAULT_BEHAVIOR 
+export {
+  behaviors,
+  getBehavior,
+  AVAILABLE_BEHAVIORS,
+  DEFAULT_BEHAVIOR
 } from './behaviors/index.js'
 
 // default

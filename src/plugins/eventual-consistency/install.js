@@ -100,7 +100,7 @@ export async function completeFieldSetup(handler, database, config, plugin) {
         operation: 'string|required',
         timestamp: 'string|required',
         cohortDate: 'string|required',
-        cohortHour: 'string|optional',  // ✅ FIX BUG #2: Changed from required to optional for migration compatibility
+        cohortHour: 'string|required',
         cohortWeek: 'string|optional',
         cohortMonth: 'string|optional',
         source: 'string|optional',

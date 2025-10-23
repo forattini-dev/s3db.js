@@ -62,7 +62,7 @@ import { StateMachineError } from "./state-machine.errors.js";
  *   
  *   actions: {
  *     onConfirmed: async (context, event, machine) => {
- *       await machine.this.database.resource('inventory').update(context.productId, {
+ *       await machine.this.database.resources['inventory'].update(context.productId, {
  *         quantity: { $decrement: context.quantity }
  *       });
  *       await machine.sendNotification(context.customerEmail, 'order_confirmed');
@@ -74,7 +74,7 @@ import { StateMachineError } from "./state-machine.errors.js";
  *   
  *   guards: {
  *     canShip: async (context, event, machine) => {
- *       const inventory = await machine.this.database.resource('inventory').get(context.productId);
+ *       const inventory = await machine.this.database.resources['inventory'].get(context.productId);
  *       return inventory.quantity >= context.quantity;
  *     }
  *   },
@@ -352,7 +352,7 @@ export class StateMachinePlugin extends Plugin {
 
       for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
         const [ok, err] = await tryFn(() =>
-          this.database.resource(this.config.transitionLogResource).insert({
+          this.database.resources[this.config.transitionLogResource].insert({
             id: transitionId,
             machineId,
             entityId,
@@ -395,13 +395,13 @@ export class StateMachinePlugin extends Plugin {
 
       // Try update first (most common case), fallback to insert if doesn't exist
       const [updateOk] = await tryFn(() =>
-        this.database.resource(this.config.stateResource).update(stateId, stateData)
+        this.database.resources[this.config.stateResource].update(stateId, stateData)
       );
 
       if (!updateOk) {
         // Record doesn't exist, insert it
         const [insertOk, insertErr] = await tryFn(() =>
-          this.database.resource(this.config.stateResource).insert({ id: stateId, ...stateData })
+          this.database.resources[this.config.stateResource].insert({ id: stateId, ...stateData })
         );
 
         if (!insertOk && this.config.verbose) {
@@ -476,7 +476,7 @@ export class StateMachinePlugin extends Plugin {
     if (this.config.persistTransitions) {
       const stateId = `${machineId}_${entityId}`;
       const [ok, err, stateRecord] = await tryFn(() => 
-        this.database.resource(this.config.stateResource).get(stateId)
+        this.database.resources[this.config.stateResource].get(stateId)
       );
       
       if (ok && stateRecord) {
@@ -530,7 +530,7 @@ export class StateMachinePlugin extends Plugin {
     const { limit = 50, offset = 0 } = options;
 
     const [ok, err, transitions] = await tryFn(() =>
-      this.database.resource(this.config.transitionLogResource).query({
+      this.database.resources[this.config.transitionLogResource].query({
         machineId,
         entityId
       }, {
@@ -581,7 +581,7 @@ export class StateMachinePlugin extends Plugin {
 
       // Try to insert, ignore if already exists (idempotent)
       const [ok, err] = await tryFn(() =>
-        this.database.resource(this.config.stateResource).insert({
+        this.database.resources[this.config.stateResource].insert({
           id: stateId,
           machineId,
           entityId,
@@ -682,10 +682,6 @@ export class StateMachinePlugin extends Plugin {
 
   async stop() {
     this.machines.clear();
-  }
-
-  async cleanup() {
-    await this.stop();
     this.removeAllListeners();
   }
 }

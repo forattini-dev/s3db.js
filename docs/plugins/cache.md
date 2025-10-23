@@ -69,7 +69,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 
 // First call hits S3
 console.time('First call');
@@ -297,7 +297,7 @@ new CachePlugin({
   }
 })
 
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.list();  // Cached
 
 // Check stats
@@ -324,7 +324,7 @@ new CachePlugin({
   }
 })
 
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.list();  // Cached with memory protection
 
 // Monitor memory usage
@@ -355,7 +355,7 @@ new CachePlugin({
 // On 32GB system = ~3.2GB cache limit
 // Automatically adapts to container memory!
 
-const products = s3db.resource('products');
+const products = s3db.resources.products;
 await products.list();  // Cached
 
 // Check system memory stats
@@ -383,7 +383,7 @@ new CachePlugin({
   }
 })
 
-const products = s3db.resource('products');
+const products = s3db.resources.products;
 await products.count();  // Cached to disk
 
 // Cache persists across restarts
@@ -404,7 +404,7 @@ new CachePlugin({
 })
 
 // Cache shared across all servers
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.list();  // Cached in S3
 
 console.log('Cache shared across all application instances');
@@ -423,7 +423,7 @@ new CachePlugin({
   }
 })
 
-const orders = s3db.resource('orders');
+const orders = s3db.resources.orders;
 await orders.list();  // Large results compressed
 
 console.log('Large cached values are compressed automatically');
@@ -436,7 +436,7 @@ Take control of caching behavior:
 ```javascript
 new CachePlugin({ driver: 'memory' })
 
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 
 // Manual cache operations
 await users.cache.set('my-key', { data: 'value' });
@@ -460,7 +460,7 @@ console.log('Manual cache control enabled');
 When CachePlugin is installed, resources gain these methods:
 
 ```javascript
-const resource = s3db.resource('users');
+const resource = s3db.resources.users;
 
 // Get cached value
 const value = await resource.cache.get(key);
@@ -546,7 +546,7 @@ const s3db = new S3db({
 });
 
 await s3db.connect();
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 
 // Scenario: 10,000 read operations
 console.log('=== Without Cache ===');

@@ -54,7 +54,7 @@ const schedulerPlugin = new SchedulerPlugin({
       schedule: '0 * * * *',     // Every hour at minute 0
       action: async (db) => {
         const now = Date.now();
-        const sessions = db.resource('sessions');
+        const sessions = db.resources.sessions;
 
         // Find expired sessions
         const expired = await sessions.query({
@@ -80,7 +80,7 @@ const schedulerPlugin = new SchedulerPlugin({
       schedule: '0 8 * * *',     // Every day at 8am
       timezone: 'America/New_York',
       action: async (db) => {
-        const sessions = db.resource('sessions');
+        const sessions = db.resources.sessions;
         const count = await sessions.count();
 
         console.log(`Daily Report: ${count} total sessions`);
@@ -202,12 +202,12 @@ const s3db = new S3db({
           schedule: '0 3 * * *', // 3 AM daily
           description: 'Clean up expired sessions',
           action: async (database, context) => {
-            const expired = await database.resource('sessions').list({
+            const expired = await database.resources.sessions.list({
               where: { expiresAt: { $lt: new Date() } }
             });
             
             for (const session of expired) {
-              await database.resource('sessions').delete(session.id);
+              await database.resources.sessions.delete(session.id);
             }
             
             return { deleted: expired.length };
@@ -227,7 +227,7 @@ const s3db = new S3db({
               uptime: process.uptime()
             };
             
-            await database.resource('metrics').insert({
+            await database.resources.metrics.insert({
               id: `metrics_${Date.now()}`,
               ...metrics
             });
@@ -344,33 +344,33 @@ const maintenanceScheduler = new SchedulerPlugin({
         };
         
         // Clean up expired sessions
-        const expiredSessions = await database.resource('sessions').list({
+        const expiredSessions = await database.resources.sessions.list({
           filter: item => item.expires_at && new Date(item.expires_at) < new Date()
         });
         
         for (const session of expiredSessions) {
-          await database.resource('sessions').delete(session.id);
+          await database.resources.sessions.delete(session.id);
           results.sessions++;
         }
         
         // Clean up temporary files older than 24 hours
         const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const oldTempFiles = await database.resource('temp_files').list({
+        const oldTempFiles = await database.resources.temp_files.list({
           filter: item => new Date(item.created_at) < dayAgo
         });
         
         for (const file of oldTempFiles) {
-          await database.resource('temp_files').delete(file.id);
+          await database.resources.temp_files.delete(file.id);
           results.temp_files++;
         }
         
         // Clean up cache entries
-        const expiredCache = await database.resource('cache_entries').list({
+        const expiredCache = await database.resources.cache_entries.list({
           filter: item => item.ttl && Date.now() > item.created_at + item.ttl
         });
         
         for (const entry of expiredCache) {
-          await database.resource('cache_entries').delete(entry.id);
+          await database.resources.cache_entries.delete(entry.id);
           results.cache_entries++;
         }
         
@@ -395,7 +395,7 @@ const maintenanceScheduler = new SchedulerPlugin({
         const resources = await database.listResources();
         
         for (const resourceName of resources) {
-          const resource = database.resource(resourceName);
+          const resource = database.resources[resourceName];
           
           // Analyze resource usage
           const count = await resource.count();
@@ -440,7 +440,7 @@ const maintenanceScheduler = new SchedulerPlugin({
           const resources = await database.listResources();
           
           for (const resourceName of resources) {
-            const resource = database.resource(resourceName);
+            const resource = database.resources[resourceName];
             const count = await resource.count();
             metrics.database[resourceName] = { count };
           }
@@ -449,7 +449,7 @@ const maintenanceScheduler = new SchedulerPlugin({
         }
         
         // Store metrics
-        await database.resource('system_metrics').insert({
+        await database.resources.system_metrics.insert({
           id: `metrics_${Date.now()}`,
           ...metrics
         });
@@ -478,7 +478,7 @@ const businessScheduler = new SchedulerPlugin({
         const reportDate = new Date().toISOString().split('T')[0];
         
         // Sales report
-        const orders = await database.resource('orders').list({
+        const orders = await database.resources.orders.list({
           filter: item => item.created_at?.startsWith(reportDate)
         });
         
@@ -491,7 +491,7 @@ const businessScheduler = new SchedulerPlugin({
         };
         
         // User activity report
-        const activeUsers = await database.resource('user_sessions').list({
+        const activeUsers = await database.resources.user_sessions.list({
           filter: item => item.last_activity?.startsWith(reportDate)
         });
         
@@ -502,7 +502,7 @@ const businessScheduler = new SchedulerPlugin({
         };
         
         // Store reports
-        await database.resource('daily_reports').insert({
+        await database.resources.daily_reports.insert({
           id: `report_${reportDate}`,
           type: 'daily_summary',
           generated_at: new Date().toISOString(),
@@ -529,14 +529,14 @@ const businessScheduler = new SchedulerPlugin({
         };
         
         // Get active subscriptions
-        const subscriptions = await database.resource('subscriptions').list({
+        const subscriptions = await database.resources.subscriptions.list({
           filter: item => item.status === 'active' && item.billing_cycle === 'monthly'
         });
         
         for (const subscription of subscriptions) {
           try {
             // Check if already billed this month
-            const existingBill = await database.resource('billing_records').list({
+            const existingBill = await database.resources.billing_records.list({
               filter: item => 
                 item.subscription_id === subscription.id &&
                 item.billing_period === billingMonth
@@ -557,14 +557,14 @@ const businessScheduler = new SchedulerPlugin({
               created_at: new Date().toISOString()
             };
             
-            await database.resource('billing_records').insert(billingRecord);
+            await database.resources.billing_records.insert(billingRecord);
             
             // Here you would integrate with payment processor
             // For now, we'll just mark as processed
             billingRecord.status = 'processed';
             billingRecord.processed_at = new Date().toISOString();
             
-            await database.resource('billing_records').update(billingRecord.id, billingRecord);
+            await database.resources.billing_records.update(billingRecord.id, billingRecord);
             
             results.processed++;
             results.total_amount += subscription.price;
@@ -587,7 +587,7 @@ const businessScheduler = new SchedulerPlugin({
         const results = { sent: 0, failed: 0 };
         
         // Get users who need reminders
-        const users = await database.resource('users').list({
+        const users = await database.resources.users.list({
           filter: item => 
             item.email_preferences?.weekly_reminders !== false &&
             item.status === 'active'
@@ -596,7 +596,7 @@ const businessScheduler = new SchedulerPlugin({
         for (const user of users) {
           try {
             // Check recent activity
-            const recentActivity = await database.resource('user_activity').list({
+            const recentActivity = await database.resources.user_activity.list({
               filter: item => 
                 item.user_id === user.id &&
                 new Date(item.timestamp) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -607,7 +607,7 @@ const businessScheduler = new SchedulerPlugin({
               console.log(`Sending weekly reminder to ${user.email}`);
               
               // Log the reminder
-              await database.resource('email_log').insert({
+              await database.resources.email_log.insert({
                 id: `reminder_${user.id}_${Date.now()}`,
                 user_id: user.id,
                 email: user.email,
@@ -841,7 +841,7 @@ action: async (database, context) => {
   // database: S3db instance
   // context: Job context data including jobName, startTime, etc.
   
-  const results = await database.resource('users').count();
+  const results = await database.resources.users.count();
   
   // Return data that will be logged in job history
   return { user_count: results };
@@ -891,7 +891,7 @@ jobs: {
     description: 'Backup only if data has changed',
     action: async (database, context) => {
       // Check if backup is needed
-      const lastBackup = await database.resource('backup_history').list({
+      const lastBackup = await database.resources.backup_history.list({
         limit: 1,
         sort: { created_at: -1 }
       });
@@ -899,7 +899,7 @@ jobs: {
       const lastBackupTime = lastBackup[0]?.created_at || '1970-01-01';
       
       // Check for changes since last backup
-      const changes = await database.resource('audit_log').list({
+      const changes = await database.resources.audit_log.list({
         filter: item => item.timestamp > lastBackupTime
       });
       
@@ -912,7 +912,7 @@ jobs: {
       const backupId = `backup_${Date.now()}`;
       // ... backup logic ...
       
-      await database.resource('backup_history').insert({
+      await database.resources.backup_history.insert({
         id: backupId,
         changes_count: changes.length,
         created_at: new Date().toISOString()
@@ -1037,14 +1037,14 @@ jobs: {
       // Adjust cleanup based on resource usage
       if (cleanupLevel === 'aggressive') {
         // Aggressive cleanup
-        const allTemp = await database.resource('temp_data').list();
+        const allTemp = await database.resources.temp_data.list();
         for (const item of allTemp) {
-          await database.resource('temp_data').delete(item.id);
+          await database.resources.temp_data.delete(item.id);
           results.cleaned++;
         }
       } else if (cleanupLevel === 'moderate') {
         // Moderate cleanup - only old temp data
-        const oldTemp = await database.resource('temp_data').list({
+        const oldTemp = await database.resources.temp_data.list({
           filter: item => {
             const age = Date.now() - new Date(item.created_at).getTime();
             return age > 60 * 60 * 1000; // Older than 1 hour
@@ -1052,7 +1052,7 @@ jobs: {
         });
         
         for (const item of oldTemp) {
-          await database.resource('temp_data').delete(item.id);
+          await database.resources.temp_data.delete(item.id);
           results.cleaned++;
         }
       }
@@ -1098,7 +1098,7 @@ action: async (database, context) => {
       throw error; // Will trigger retry
     } else {
       // Log permanent failure and don't retry
-      await database.resource('job_errors').insert({
+      await database.resources.job_errors.insert({
         job_name: context.jobName,
         error: error.message,
         timestamp: new Date().toISOString(),
@@ -1124,7 +1124,7 @@ action: async (database, context) => {
     const duration = Date.now() - startTime;
     
     // Log performance metrics
-    await database.resource('job_metrics').insert({
+    await database.resources.job_metrics.insert({
       job_name: context.jobName,
       duration,
       memory_used: process.memoryUsage().heapUsed,
@@ -1136,7 +1136,7 @@ action: async (database, context) => {
   } catch (error) {
     const duration = Date.now() - startTime;
     
-    await database.resource('job_metrics').insert({
+    await database.resources.job_metrics.insert({
       job_name: context.jobName,
       duration,
       success: false,

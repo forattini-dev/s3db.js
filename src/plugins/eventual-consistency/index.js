@@ -183,7 +183,6 @@ export class EventualConsistencyPlugin extends Plugin {
    * @private
    */
   async _syncModeConsolidate(handler, id, field) {
-    // Temporarily set config for legacy methods
     const oldResource = this.config.resource;
     const oldField = this.config.field;
     const oldTransactionResource = this.transactionResource;

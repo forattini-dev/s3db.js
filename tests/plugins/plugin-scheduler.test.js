@@ -497,14 +497,14 @@ describe('SchedulerPlugin', () => {
         createdAt: new Date().toISOString().slice(0, 10)
       };
       
-      await database.resource(plugin.config.jobHistoryResource).insert(testRecord);
-      
+      await database.resources[plugin.config.jobHistoryResource].insert(testRecord);
+
       // Verify direct insertion worked
-      const directRecords = await database.resource(plugin.config.jobHistoryResource).list();
+      const directRecords = await database.resources[plugin.config.jobHistoryResource].list();
       expect(directRecords).toHaveLength(1);
-      
+
       // Clear the test record
-      await database.resource(plugin.config.jobHistoryResource).delete('test_123');
+      await database.resources[plugin.config.jobHistoryResource].delete('test_123');
       
       // Now test actual job execution
       await plugin.runJob('test_job');
@@ -768,16 +768,17 @@ describe('SchedulerPlugin', () => {
 
     it('should handle history query errors gracefully', async () => {
       // Mock database error
-      const originalResource = plugin.database.resource;
-      plugin.database.resource = jest.fn().mockReturnValue({
+      const resourceName = plugin.config.jobHistoryResource;
+      const originalResource = plugin.database.resources[resourceName];
+      plugin.database.resources[resourceName] = {
         list: jest.fn().mockRejectedValue(new Error('Database error'))
-      });
-      
+      };
+
       const history = await plugin.getJobHistory('test_job');
       expect(history).toEqual([]);
-      
+
       // Restore original
-      plugin.database.resource = originalResource;
+      plugin.database.resources[resourceName] = originalResource;
     });
   });
 
@@ -1156,7 +1157,7 @@ describe('SchedulerPlugin', () => {
     it('should cleanup successfully', async () => {
       const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
       
-      await plugin.cleanup();
+      await plugin.stop();
       
       expect(plugin.jobs.size).toBe(0);
       expect(plugin.statistics.size).toBe(0);

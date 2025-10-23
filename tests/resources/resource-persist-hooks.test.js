@@ -91,7 +91,7 @@ describe("Resource Hook Persistence", () => {
     
     await newDb.connect();
 
-    const restoredResource = newDb.resource("persisted_users");
+    const restoredResource = newDb.resources.persisted_users;
     
     // Test that restored hooks work
     await expect(restoredResource.insert({ name: "X", email: "x@test.com" }))
@@ -165,7 +165,7 @@ describe("Resource Hook Persistence", () => {
     });
 
     // Hooks should still work in current session
-    const resource = db.resource("non_persisted");
+    const resource = db.resources.non_persisted;
     const result = await resource.insert({ name: "test" });
     expect(result.name).toBe("test");
 
@@ -237,7 +237,7 @@ describe("Resource Hook Persistence", () => {
     
     await newDb.connect();
 
-    const resource = newDb.resource("named_hooks");
+    const resource = newDb.resources.named_hooks;
     const result = await resource.insert({ name: "test" });
     expect(result.name).toBe("test");
 

@@ -61,5 +61,6 @@ export default {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/tests/typescript/',
+    '/docs/', // Exclude docs/examples (uses Node native test runner)
   ],
 };

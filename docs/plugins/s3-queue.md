@@ -1919,7 +1919,7 @@ const queue = new S3QueuePlugin({
 });
 
 // Check 3: Are messages visible?
-const queueEntries = await db.resource('tasks_queue').list();
+const queueEntries = await db.resources.tasks_queue.list();
 console.log(queueEntries.map(e => ({
   id: e.id,
   status: e.status,
@@ -1954,7 +1954,7 @@ const queue = new S3QueuePlugin({
 });
 
 // Check 3: Verify ETag support
-const queueEntry = await db.resource('tasks_queue').get('entry-1');
+const queueEntry = await db.resources.tasks_queue.get('entry-1');
 console.log('Has ETag:', !!queueEntry._etag);
 ```
 
@@ -1993,14 +1993,14 @@ onMessage: async (task) => {
 }
 
 // Solution: Reset stuck messages
-const queueEntries = await db.resource('tasks_queue').list();
+const queueEntries = await db.resources.tasks_queue.list();
 const stuck = queueEntries.filter(e =>
   e.status === 'processing' &&
   Date.now() - e.claimedAt > 300000 // Stuck for 5+ minutes
 );
 
 for (const entry of stuck) {
-  await db.resource('tasks_queue').update(entry.id, {
+  await db.resources.tasks_queue.update(entry.id, {
     status: 'pending',
     visibleAt: 0,
     claimedBy: null
@@ -2053,7 +2053,7 @@ onMessage: async (task) => {
 
 ```javascript
 // Analyze dead letters
-const deadLetters = await db.resource('failed_tasks').list();
+const deadLetters = await db.resources.failed_tasks.list();
 
 // Group by error type
 const errorGroups = deadLetters.reduce((acc, dl) => {
@@ -2074,7 +2074,7 @@ for (const dl of deadLetters) {
   await tasks.enqueue(dl.data);
 
   // Delete from dead letter
-  await db.resource('failed_tasks').delete(dl.id);
+  await db.resources.failed_tasks.delete(dl.id);
 }
 ```
 
