@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
-  <em>18 production-ready plugins • Zero core modifications • Infinite possibilities</em>
+  <em>19 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
 ---
@@ -28,6 +28,7 @@
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
 | **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
 | **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
+| **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
 | **[🏗️ Terraform State](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
 
 **💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
