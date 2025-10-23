@@ -95,6 +95,7 @@
     "@smithy/node-http-handler": "^4.4.2",
     "@supercharge/promise-pool": "^3.2.0",
     "dotenv": "^17.2.3",
+    "express": "^5.1.0",
     "fastest-validator": "^1.19.1",
     "flat": "^6.0.1",
     "glob": "^11.0.3",

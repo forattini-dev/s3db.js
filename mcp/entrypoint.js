@@ -2,7 +2,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { S3db, CachePlugin, CostsPlugin } from '../dist/s3db.es.js';
 import { FilesystemCache } from '../src/plugins/cache/filesystem-cache.class.js';
@@ -10,6 +10,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
+import express from 'express';
 
 // Load environment variables
 config();
@@ -1109,69 +1110,102 @@ class S3dbMCPServer {
   }
 
   setupTransport() {
-    const transport = process.argv.includes('--transport=sse') || process.env.MCP_TRANSPORT === 'sse'
-      ? new SSEServerTransport('/sse', process.env.MCP_SERVER_HOST || '0.0.0.0', parseInt(process.env.MCP_SERVER_PORT || '17500'))
-      : new StdioServerTransport();
+    const useHttp = process.argv.includes('--transport=http') || process.env.MCP_TRANSPORT === 'http';
 
-    this.server.connect(transport);
-    
-    // SSE specific setup
-    if (transport instanceof SSEServerTransport) {
-      const host = process.env.MCP_SERVER_HOST || '0.0.0.0';
-      const port = process.env.MCP_SERVER_PORT || '17500';
-      
-      console.log(`S3DB MCP Server running on http://${host}:${port}/sse`);
-      
-      // Add health check endpoint for SSE transport
-      this.setupHealthCheck(host, port);
+    if (useHttp) {
+      // Setup Express server for Streamable HTTP transport
+      this.setupHttpTransport();
+    } else {
+      // Use stdio transport (default)
+      const transport = new StdioServerTransport();
+      this.server.connect(transport);
     }
   }
 
-  setupHealthCheck(host, port) {
-    import('http').then(({ createServer }) => {
-      const healthServer = createServer((req, res) => {
-        if (req.url === '/health') {
-          const healthStatus = {
-            status: 'healthy',
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime(),
-            version: SERVER_VERSION,
-            database: {
-              connected: database ? database.isConnected() : false,
-              bucket: database?.bucket || null,
-              keyPrefix: database?.keyPrefix || null,
-              resourceCount: database ? Object.keys(database.resources || {}).length : 0
+  setupHttpTransport() {
+    const host = process.env.MCP_SERVER_HOST || '0.0.0.0';
+    const port = parseInt(process.env.MCP_SERVER_PORT || '17500');
+
+    const app = express();
+    app.use(express.json());
+
+    // Enable CORS for browser-based clients
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id');
+      res.header('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+      next();
+    });
+
+    // Streamable HTTP endpoint (stateless mode - recommended)
+    app.post('/mcp', async (req, res) => {
+      try {
+        // Create a new transport for each request to prevent request ID collisions
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+          enableJsonResponse: true
+        });
+
+        res.on('close', () => {
+          transport.close();
+        });
+
+        await this.server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        console.error('Error handling MCP request:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal server error'
             },
-            memory: process.memoryUsage(),
-            environment: {
-              nodeVersion: process.version,
-              platform: process.platform,
-              transport: 'sse'
-            }
-          };
-
-          res.writeHead(200, {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET',
-            'Access-Control-Allow-Headers': 'Content-Type'
+            id: null
           });
-          res.end(JSON.stringify(healthStatus, null, 2));
-        } else {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Not Found');
         }
-      });
+      }
+    });
 
-      // Listen on a different port for health checks to avoid conflicts
-      const healthPort = parseInt(port) + 1;
-      healthServer.listen(healthPort, host, () => {
-        console.log(`Health check endpoint: http://${host}:${healthPort}/health`);
-      });
-    }).catch(err => {
-      console.warn('Could not setup health check endpoint:', err.message);
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      const healthStatus = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: SERVER_VERSION,
+        database: {
+          connected: database ? database.isConnected() : false,
+          bucket: database?.bucket || null,
+          keyPrefix: database?.keyPrefix || null,
+          resourceCount: database ? Object.keys(database.resources || {}).length : 0
+        },
+        memory: process.memoryUsage(),
+        environment: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          transport: 'streamable-http'
+        }
+      };
+
+      res.json(healthStatus);
+    });
+
+    // Start Express server
+    app.listen(port, host, () => {
+      console.log(`S3DB MCP Server running on http://${host}:${port}/mcp`);
+      console.log(`Health check endpoint: http://${host}:${port}/health`);
+    }).on('error', error => {
+      console.error('Server error:', error);
+      process.exit(1);
     });
   }
+
 
   // 📖 DOCUMENTATION TOOLS HANDLERS
 
@@ -2718,8 +2752,8 @@ async function main() {
 
   console.log(`S3DB MCP Server v${SERVER_VERSION} started`);
   console.log(`Transport: ${args.transport}`);
-  if (args.transport === 'sse') {
-    console.log(`URL: http://${args.host}:${args.port}/sse`);
+  if (args.transport === 'http') {
+    console.log(`URL: http://${args.host}:${args.port}/mcp`);
   }
 }
 

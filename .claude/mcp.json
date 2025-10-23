@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "s3db": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "s3db-mcp",
+        "--transport=stdio"
+      ],
+      "env": {
+        "S3DB_CONNECTION_STRING": "http://minioadmin:minioadmin123@localhost:9000/mcp-test",
+        "S3DB_CACHE_ENABLED": "true",
+        "S3DB_CACHE_DRIVER": "memory",
+        "S3DB_CACHE_MAX_SIZE": "1000",
+        "S3DB_CACHE_TTL": "300000",
+        "S3DB_VERBOSE": "false",
+        "S3DB_COSTS_ENABLED": "true"
+      }
+    }
+  }
+}

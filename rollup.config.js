@@ -96,7 +96,7 @@ export default {
   external: [
     // Core dependencies (bundled with package)
     '@aws-sdk/client-s3',
-    '@smithy/node-http-handler', 
+    '@smithy/node-http-handler',
     '@supercharge/promise-pool',
     'fastest-validator',
     'json-stable-stringify',
@@ -104,11 +104,17 @@ export default {
     'lodash-es',
     'nanoid',
     'dotenv',
-    // Peer dependencies (user installs)
+    // Peer dependencies (user installs - optional)
     '@aws-sdk/client-sqs',
     '@google-cloud/bigquery',
+    '@hono/node-server',
+    '@hono/swagger-ui',
+    '@libsql/client',
+    '@planetscale/database',
     'amqplib',
-    'pg', 
+    'hono',
+    'node-cron',
+    'pg',
     'uuid',
     // Node.js built-ins
     'crypto',

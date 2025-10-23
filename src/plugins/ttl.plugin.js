@@ -3,99 +3,138 @@ import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 
 /**
- * TTLPlugin - Time-To-Live Auto-Cleanup System
+ * TTLPlugin - Time-To-Live Auto-Cleanup System v2
  *
  * Automatically removes or archives expired records based on configurable TTL rules.
- * Supports multiple expiration strategies including soft delete, hard delete, archiving,
- * and custom callbacks.
+ * Uses partition-based indexing for O(1) cleanup performance.
  *
  * === Features ===
- * - Periodic scanning for expired records
+ * - Partition-based expiration index (O(1) cleanup)
+ * - Multiple granularity intervals (minute, hour, day, week)
+ * - Zero full scans
+ * - Automatic granularity detection
+ * - Simple API (just TTL in most cases)
  * - Multiple expiration strategies (soft-delete, hard-delete, archive, callback)
- * - Efficient batch processing
- * - Event monitoring and statistics
- * - Resource-specific TTL configuration
- * - Custom expiration field support (createdAt, expiresAt, etc)
  *
  * === Configuration Example ===
  *
  * new TTLPlugin({
- *   checkInterval: 300000,  // Check every 5 minutes (default)
- *   batchSize: 100,         // Process 100 records at a time
- *   verbose: true,          // Enable logging
- *
  *   resources: {
- *     sessions: {
- *       ttl: 86400,              // 24 hours in seconds
- *       field: 'expiresAt',      // Field to check expiration
- *       onExpire: 'soft-delete',  // Strategy: soft-delete, hard-delete, archive, callback
- *       deleteField: 'deletedAt' // Field to mark as deleted (soft-delete only)
+ *     // Simple: just TTL (uses createdAt automatically)
+ *     cache: {
+ *       ttl: 300,                // 5 minutes
+ *       onExpire: 'hard-delete'
  *     },
  *
- *     temp_uploads: {
+ *     // Custom: TTL relative to specific field
+ *     resetTokens: {
  *       ttl: 3600,               // 1 hour
- *       field: 'createdAt',
- *       onExpire: 'hard-delete'  // Permanently delete from S3
+ *       field: 'sentAt',         // TTL relative to this field
+ *       onExpire: 'hard-delete'
  *     },
  *
- *     old_orders: {
- *       ttl: 2592000,            // 30 days
- *       field: 'createdAt',
- *       onExpire: 'archive',
- *       archiveResource: 'archive_orders'  // Copy to this resource before deleting
- *     },
- *
- *     custom_cleanup: {
- *       ttl: 7200,               // 2 hours
- *       field: 'expiresAt',
- *       onExpire: 'callback',
- *       callback: async (record, resource) => {
- *         // Custom cleanup logic
- *         console.log(`Cleaning up ${record.id}`);
- *         await someCustomCleanup(record);
- *         return true; // Return true to delete, false to keep
- *       }
+ *     // Absolute: no TTL, uses field directly
+ *     subscriptions: {
+ *       field: 'endsAt',         // Absolute expiration date
+ *       onExpire: 'soft-delete'
  *     }
  *   }
  * })
- *
- * === Expiration Strategies ===
- *
- * 1. soft-delete: Marks record as deleted without removing from S3
- *    - Adds/updates deleteField (default: 'deletedAt') with current timestamp
- *    - Record remains in database but marked as deleted
- *    - Useful for maintaining history and allowing undelete
- *
- * 2. hard-delete: Permanently removes record from S3
- *    - Uses resource.delete() to remove the record
- *    - Cannot be recovered
- *    - Frees up S3 storage immediately
- *
- * 3. archive: Copies record to another resource before deleting
- *    - Inserts record into archiveResource
- *    - Then performs hard-delete on original
- *    - Preserves data while keeping main resource clean
- *
- * 4. callback: Custom logic via callback function
- *    - Executes callback(record, resource)
- *    - Callback returns true to delete, false to keep
- *    - Allows complex conditional logic
- *
- * === Events ===
- *
- * - recordExpired: Emitted for each expired record
- * - batchExpired: Emitted after processing a batch
- * - scanCompleted: Emitted after completing a full scan
- * - cleanupError: Emitted when cleanup fails
  */
+
+// Granularity configurations
+const GRANULARITIES = {
+  minute: {
+    threshold: 3600,        // TTL < 1 hour
+    interval: 10000,        // Check every 10 seconds
+    cohortsToCheck: 3,      // Check last 3 minutes
+    cohortFormat: (date) => date.toISOString().substring(0, 16)  // '2024-10-25T14:30'
+  },
+  hour: {
+    threshold: 86400,       // TTL < 24 hours
+    interval: 600000,       // Check every 10 minutes
+    cohortsToCheck: 2,      // Check last 2 hours
+    cohortFormat: (date) => date.toISOString().substring(0, 13)  // '2024-10-25T14'
+  },
+  day: {
+    threshold: 2592000,     // TTL < 30 days
+    interval: 3600000,      // Check every 1 hour
+    cohortsToCheck: 2,      // Check last 2 days
+    cohortFormat: (date) => date.toISOString().substring(0, 10)  // '2024-10-25'
+  },
+  week: {
+    threshold: Infinity,    // TTL >= 30 days
+    interval: 86400000,     // Check every 24 hours
+    cohortsToCheck: 2,      // Check last 2 weeks
+    cohortFormat: (date) => {
+      const year = date.getUTCFullYear();
+      const week = getWeekNumber(date);
+      return `${year}-W${String(week).padStart(2, '0')}`;  // '2024-W43'
+    }
+  }
+};
+
+/**
+ * Get ISO week number
+ */
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+/**
+ * Detect granularity based on TTL
+ */
+function detectGranularity(ttl) {
+  if (!ttl) return 'day';  // Default for absolute expiration
+  if (ttl < GRANULARITIES.minute.threshold) return 'minute';
+  if (ttl < GRANULARITIES.hour.threshold) return 'hour';
+  if (ttl < GRANULARITIES.day.threshold) return 'day';
+  return 'week';
+}
+
+/**
+ * Get list of expired cohorts to check
+ */
+function getExpiredCohorts(granularity, count) {
+  const config = GRANULARITIES[granularity];
+  const cohorts = [];
+  const now = new Date();
+
+  for (let i = 0; i < count; i++) {
+    let checkDate;
+
+    switch(granularity) {
+      case 'minute':
+        checkDate = new Date(now.getTime() - (i * 60000));
+        break;
+      case 'hour':
+        checkDate = new Date(now.getTime() - (i * 3600000));
+        break;
+      case 'day':
+        checkDate = new Date(now.getTime() - (i * 86400000));
+        break;
+      case 'week':
+        checkDate = new Date(now.getTime() - (i * 604800000));
+        break;
+    }
+
+    cohorts.push(config.cohortFormat(checkDate));
+  }
+
+  return cohorts;
+}
+
 class TTLPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
-    this.checkInterval = config.checkInterval || 300000; // 5 minutes default
-    this.batchSize = config.batchSize || 100;
     this.verbose = config.verbose !== undefined ? config.verbose : false;
     this.resources = config.resources || {};
+    this.batchSize = config.batchSize || 100;
 
     // Statistics
     this.stats = {
@@ -110,9 +149,12 @@ class TTLPlugin extends Plugin {
       lastScanDuration: 0
     };
 
-    // Interval handle
-    this.intervalHandle = null;
+    // Interval handles
+    this.intervals = [];
     this.isRunning = false;
+
+    // Expiration index (plugin storage)
+    this.expirationIndex = null;
   }
 
   /**
@@ -126,20 +168,24 @@ class TTLPlugin extends Plugin {
       this._validateResourceConfig(resourceName, config);
     }
 
-    // Start interval
-    if (this.checkInterval > 0) {
-      this._startInterval();
+    // Create expiration index (plugin storage)
+    await this._createExpirationIndex();
+
+    // Setup hooks for each configured resource (skip if resource doesn't exist)
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._setupResourceHooks(resourceName, config);
     }
+
+    // Start interval-based cleanup
+    this._startIntervals();
 
     if (this.verbose) {
       console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
-      console.log(`[TTLPlugin] Check interval: ${this.checkInterval}ms`);
     }
 
     this.emit('installed', {
       plugin: 'TTLPlugin',
-      resources: Object.keys(this.resources),
-      checkInterval: this.checkInterval
+      resources: Object.keys(this.resources)
     });
   }
 
@@ -147,12 +193,11 @@ class TTLPlugin extends Plugin {
    * Validate resource configuration
    */
   _validateResourceConfig(resourceName, config) {
-    if (!config.ttl || typeof config.ttl !== 'number') {
-      throw new Error(`[TTLPlugin] Resource "${resourceName}" must have a numeric "ttl" value`);
-    }
-
-    if (!config.field || typeof config.field !== 'string') {
-      throw new Error(`[TTLPlugin] Resource "${resourceName}" must have a "field" string`);
+    // Must have either ttl or field
+    if (!config.ttl && !config.field) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
+      );
     }
 
     const validStrategies = ['soft-delete', 'hard-delete', 'archive', 'callback'];
@@ -164,7 +209,7 @@ class TTLPlugin extends Plugin {
     }
 
     if (config.onExpire === 'soft-delete' && !config.deleteField) {
-      config.deleteField = 'deletedAt'; // Default
+      config.deleteField = 'deletedat';  // Default (lowercase for S3 metadata)
     }
 
     if (config.onExpire === 'archive' && !config.archiveResource) {
@@ -178,254 +223,355 @@ class TTLPlugin extends Plugin {
         `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
       );
     }
-  }
 
-  /**
-   * Start the cleanup interval
-   */
-  _startInterval() {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
+    // Set default field if not specified
+    if (!config.field) {
+      config.field = '_createdAt';  // Use internal createdAt timestamp
     }
 
-    this.intervalHandle = setInterval(async () => {
-      await this.runCleanup();
-    }, this.checkInterval);
-
-    if (this.verbose) {
-      console.log(`[TTLPlugin] Started cleanup interval: every ${this.checkInterval}ms`);
-    }
-  }
-
-  /**
-   * Stop the cleanup interval
-   */
-  _stopInterval() {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-
-      if (this.verbose) {
-        console.log('[TTLPlugin] Stopped cleanup interval');
+    // Validate timestamp field availability
+    if (config.field === '_createdAt' && this.database) {
+      const resource = this.database.resources[resourceName];
+      if (resource && resource.config && resource.config.timestamps === false) {
+        console.warn(
+          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" ` +
+          `but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
+        );
       }
     }
+
+    // Detect granularity
+    config.granularity = detectGranularity(config.ttl);
   }
 
   /**
-   * Run cleanup for all configured resources
+   * Create expiration index (plugin resource)
    */
-  async runCleanup() {
-    if (this.isRunning) {
+  async _createExpirationIndex() {
+    this.expirationIndex = await this.database.createResource({
+      name: 'plg_ttl_expiration_index',
+      attributes: {
+        resourceName: 'string|required',
+        recordId: 'string|required',
+        expiresAtCohort: 'string|required',
+        expiresAtTimestamp: 'number|required',  // Exact expiration timestamp for precise checking
+        granularity: 'string|required',
+        createdAt: 'number'
+      },
+      partitions: {
+        byExpiresAtCohort: {
+          fields: { expiresAtCohort: 'string' }
+        }
+      },
+      asyncPartitions: false  // Sync partitions for deterministic behavior
+    });
+
+    if (this.verbose) {
+      console.log('[TTLPlugin] Created expiration index with partition');
+    }
+  }
+
+  /**
+   * Setup hooks for a resource
+   */
+  _setupResourceHooks(resourceName, config) {
+    // Check if resource exists BEFORE calling database.resource()
+    // because database.resource() returns Promise.reject() for non-existent resources
+    if (!this.database.resources[resourceName]) {
       if (this.verbose) {
-        console.log('[TTLPlugin] Cleanup already running, skipping this cycle');
+        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
       }
       return;
     }
 
-    this.isRunning = true;
-    const startTime = Date.now();
+    const resource = this.database.resource(resourceName);
 
-    try {
-      this.stats.totalScans++;
-
+    // Verify methods exist before adding middleware
+    if (typeof resource.insert !== 'function' || typeof resource.delete !== 'function') {
       if (this.verbose) {
-        console.log(`[TTLPlugin] Starting cleanup scan #${this.stats.totalScans}`);
+        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
       }
+      return;
+    }
 
-      const results = [];
+    // Hook: After insert - add to expiration index
+    this.addMiddleware(resource, 'insert', async (next, data, options) => {
+      const result = await next(data, options);
+      await this._addToIndex(resourceName, result, config);
+      return result;
+    });
 
-      for (const [resourceName, config] of Object.entries(this.resources)) {
-        const result = await this._cleanupResource(resourceName, config);
-        results.push(result);
-      }
+    // Hook: After delete - remove from expiration index
+    this.addMiddleware(resource, 'delete', async (next, id, options) => {
+      const result = await next(id, options);
+      await this._removeFromIndex(resourceName, id);
+      return result;
+    });
 
-      const totalExpired = results.reduce((sum, r) => sum + r.expired, 0);
-      const totalProcessed = results.reduce((sum, r) => sum + r.processed, 0);
-      const totalErrors = results.reduce((sum, r) => sum + r.errors, 0);
-
-      this.stats.lastScanAt = new Date().toISOString();
-      this.stats.lastScanDuration = Date.now() - startTime;
-      this.stats.totalExpired += totalExpired;
-      this.stats.totalErrors += totalErrors;
-
-      if (this.verbose) {
-        console.log(
-          `[TTLPlugin] Scan #${this.stats.totalScans} completed in ${this.stats.lastScanDuration}ms - ` +
-          `Expired: ${totalExpired}, Processed: ${totalProcessed}, Errors: ${totalErrors}`
-        );
-      }
-
-      this.emit('scanCompleted', {
-        scan: this.stats.totalScans,
-        duration: this.stats.lastScanDuration,
-        totalExpired,
-        totalProcessed,
-        totalErrors,
-        results
-      });
-
-    } catch (error) {
-      this.stats.totalErrors++;
-
-      if (this.verbose) {
-        console.error(`[TTLPlugin] Cleanup scan failed:`, error.message);
-      }
-
-      this.emit('cleanupError', {
-        error: error.message,
-        scan: this.stats.totalScans
-      });
-    } finally {
-      this.isRunning = false;
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
     }
   }
 
   /**
-   * Cleanup a specific resource
+   * Add record to expiration index
    */
-  async _cleanupResource(resourceName, config) {
-    const [ok, err, result] = await tryFn(async () => {
-      const resource = this.database.resource(resourceName);
-      if (!resource) {
-        throw new Error(`Resource "${resourceName}" not found`);
+  async _addToIndex(resourceName, record, config) {
+    try {
+      // Calculate base timestamp
+      let baseTime = record[config.field];
+
+      // Fallback: If using _createdAt but it doesn't exist (timestamps not enabled),
+      // use current time. This means TTL starts from NOW, not record creation.
+      // A warning is shown during plugin installation if this occurs.
+      if (!baseTime && config.field === '_createdAt') {
+        baseTime = Date.now();
+      }
+
+      if (!baseTime) {
+        if (this.verbose) {
+          console.warn(
+            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
+          );
+        }
+        return;
       }
 
       // Calculate expiration timestamp
-      const expirationTime = Date.now() - (config.ttl * 1000);
-      const expirationDate = new Date(expirationTime);
+      const baseTimestamp = typeof baseTime === 'number' ? baseTime : new Date(baseTime).getTime();
+      const expiresAt = config.ttl
+        ? new Date(baseTimestamp + config.ttl * 1000)
+        : new Date(baseTimestamp);
+
+      // Calculate cohort
+      const cohortConfig = GRANULARITIES[config.granularity];
+      const cohort = cohortConfig.cohortFormat(expiresAt);
+
+      // Add to index with deterministic ID for O(1) removal and idempotency
+      // Using fixed ID means: same record = same index entry (no duplicates)
+      // and we can delete directly without querying (O(1) instead of O(n))
+      const indexId = `${resourceName}:${record.id}`;
+
+      await this.expirationIndex.insert({
+        id: indexId,
+        resourceName,
+        recordId: record.id,
+        expiresAtCohort: cohort,
+        expiresAtTimestamp: expiresAt.getTime(),  // Store exact timestamp for precise checking
+        granularity: config.granularity,
+        createdAt: Date.now()
+      });
 
       if (this.verbose) {
         console.log(
-          `[TTLPlugin] Checking ${resourceName} for records expired before ${expirationDate.toISOString()}`
+          `[TTLPlugin] Added ${resourceName}:${record.id} to index ` +
+          `(cohort: ${cohort}, granularity: ${config.granularity})`
         );
       }
-
-      // List expired records
-      // Note: This is a simple implementation. For better performance with large datasets,
-      // consider using partitions by date
-      const allRecords = await resource.list({ limit: 10000 }); // Limit for safety
-      const expiredRecords = allRecords.filter(record => {
-        if (!record[config.field]) return false;
-
-        const fieldValue = record[config.field];
-        let timestamp;
-
-        // Handle different field formats
-        if (typeof fieldValue === 'number') {
-          timestamp = fieldValue;
-        } else if (typeof fieldValue === 'string') {
-          timestamp = new Date(fieldValue).getTime();
-        } else if (fieldValue instanceof Date) {
-          timestamp = fieldValue.getTime();
-        } else {
-          return false;
-        }
-
-        return timestamp < expirationTime;
-      });
-
-      if (expiredRecords.length === 0) {
-        if (this.verbose) {
-          console.log(`[TTLPlugin] No expired records found in ${resourceName}`);
-        }
-        return { expired: 0, processed: 0, errors: 0 };
-      }
-
-      if (this.verbose) {
-        console.log(`[TTLPlugin] Found ${expiredRecords.length} expired records in ${resourceName}`);
-      }
-
-      // Process in batches
-      let processed = 0;
-      let errors = 0;
-
-      for (let i = 0; i < expiredRecords.length; i += this.batchSize) {
-        const batch = expiredRecords.slice(i, i + this.batchSize);
-
-        for (const record of batch) {
-          const [processOk, processErr] = await tryFn(async () => {
-            await this._processExpiredRecord(resourceName, resource, record, config);
-          });
-
-          if (processOk) {
-            processed++;
-          } else {
-            errors++;
-            if (this.verbose) {
-              console.error(
-                `[TTLPlugin] Failed to process record ${record.id} in ${resourceName}:`,
-                processErr.message
-              );
-            }
-          }
-        }
-
-        this.emit('batchExpired', {
-          resource: resourceName,
-          batchSize: batch.length,
-          processed,
-          errors
-        });
-      }
-
-      return {
-        expired: expiredRecords.length,
-        processed,
-        errors
-      };
-    });
-
-    if (!ok) {
-      if (this.verbose) {
-        console.error(`[TTLPlugin] Error cleaning up ${resourceName}:`, err.message);
-      }
-
-      this.emit('cleanupError', {
-        resource: resourceName,
-        error: err.message
-      });
-
-      return { expired: 0, processed: 0, errors: 1 };
+    } catch (error) {
+      console.error(`[TTLPlugin] Error adding to index:`, error);
+      this.stats.totalErrors++;
     }
-
-    return result;
   }
 
   /**
-   * Process a single expired record based on strategy
+   * Remove record from expiration index (O(1) using deterministic ID)
    */
-  async _processExpiredRecord(resourceName, resource, record, config) {
-    this.emit('recordExpired', {
-      resource: resourceName,
-      recordId: record.id,
-      strategy: config.onExpire
-    });
+  async _removeFromIndex(resourceName, recordId) {
+    try {
+      // Use deterministic ID for O(1) direct delete (no query needed!)
+      const indexId = `${resourceName}:${recordId}`;
 
-    switch (config.onExpire) {
-      case 'soft-delete':
-        await this._softDelete(resource, record, config);
-        this.stats.totalSoftDeleted++;
-        break;
+      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
 
-      case 'hard-delete':
-        await this._hardDelete(resource, record);
-        this.stats.totalDeleted++;
-        break;
+      if (this.verbose && ok) {
+        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
+      }
 
-      case 'archive':
-        await this._archive(resourceName, resource, record, config);
-        this.stats.totalArchived++;
-        this.stats.totalDeleted++;
-        break;
+      // Ignore "not found" errors - record might not have been indexed
+      if (!ok && err?.code !== 'NoSuchKey') {
+        throw err;
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error removing from index:`, error);
+    }
+  }
 
-      case 'callback':
-        const shouldDelete = await config.callback(record, resource);
-        this.stats.totalCallbacks++;
-        if (shouldDelete) {
+  /**
+   * Start interval-based cleanup for each granularity
+   */
+  _startIntervals() {
+    // Group resources by granularity
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+
+    // Create interval for each active granularity
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length === 0) continue;
+
+      const granularityConfig = GRANULARITIES[granularity];
+      const handle = setInterval(
+        () => this._cleanupGranularity(granularity, resources),
+        granularityConfig.interval
+      );
+
+      this.intervals.push(handle);
+
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) ` +
+          `for ${resources.length} resources`
+        );
+      }
+    }
+
+    this.isRunning = true;
+  }
+
+  /**
+   * Stop all intervals
+   */
+  _stopIntervals() {
+    for (const handle of this.intervals) {
+      clearInterval(handle);
+    }
+    this.intervals = [];
+    this.isRunning = false;
+
+    if (this.verbose) {
+      console.log('[TTLPlugin] Stopped all intervals');
+    }
+  }
+
+  /**
+   * Cleanup expired records for a specific granularity
+   */
+  async _cleanupGranularity(granularity, resources) {
+    const startTime = Date.now();
+    this.stats.totalScans++;
+
+    try {
+      const granularityConfig = GRANULARITIES[granularity];
+      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
+
+      if (this.verbose) {
+        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
+      }
+
+      for (const cohort of cohorts) {
+        // Query partition (O(1)!)
+        const expired = await this.expirationIndex.listPartition({
+          partition: 'byExpiresAtCohort',
+          partitionValues: { expiresAtCohort: cohort }
+        });
+
+        // Filter by resources in this granularity
+        const resourceNames = new Set(resources.map(r => r.name));
+        const filtered = expired.filter(e => resourceNames.has(e.resourceName));
+
+        if (this.verbose && filtered.length > 0) {
+          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
+        }
+
+        // Process in batches
+        for (let i = 0; i < filtered.length; i += this.batchSize) {
+          const batch = filtered.slice(i, i + this.batchSize);
+
+          for (const entry of batch) {
+            const config = this.resources[entry.resourceName];
+            await this._processExpiredEntry(entry, config);
+          }
+        }
+      }
+
+      this.stats.lastScanAt = new Date().toISOString();
+      this.stats.lastScanDuration = Date.now() - startTime;
+
+      this.emit('scanCompleted', {
+        granularity,
+        duration: this.stats.lastScanDuration,
+        cohorts
+      });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
+      this.stats.totalErrors++;
+      this.emit('cleanupError', { granularity, error });
+    }
+  }
+
+  /**
+   * Process a single expired index entry
+   */
+  async _processExpiredEntry(entry, config) {
+    try {
+      // Check if resource exists before calling database.resource()
+      if (!this.database.resources[entry.resourceName]) {
+        if (this.verbose) {
+          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
+        }
+        return;
+      }
+
+      const resource = this.database.resource(entry.resourceName);
+
+      // Get the actual record
+      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
+      if (!ok || !record) {
+        // Record already deleted, cleanup index
+        await this.expirationIndex.delete(entry.id);
+        return;
+      }
+
+      // Check if record has actually expired using the timestamp from the index
+      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
+        // Not expired yet, skip
+        return;
+      }
+
+      // Process based on strategy
+      switch (config.onExpire) {
+        case 'soft-delete':
+          await this._softDelete(resource, record, config);
+          this.stats.totalSoftDeleted++;
+          break;
+
+        case 'hard-delete':
           await this._hardDelete(resource, record);
           this.stats.totalDeleted++;
-        }
-        break;
+          break;
+
+        case 'archive':
+          await this._archive(resource, record, config);
+          this.stats.totalArchived++;
+          this.stats.totalDeleted++;
+          break;
+
+        case 'callback':
+          const shouldDelete = await config.callback(record, resource);
+          this.stats.totalCallbacks++;
+          if (shouldDelete) {
+            await this._hardDelete(resource, record);
+            this.stats.totalDeleted++;
+          }
+          break;
+      }
+
+      // Remove from index
+      await this.expirationIndex.delete(entry.id);
+
+      this.stats.totalExpired++;
+      this.emit('recordExpired', { resource: entry.resourceName, record });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      this.stats.totalErrors++;
     }
   }
 
@@ -433,10 +579,13 @@ class TTLPlugin extends Plugin {
    * Soft delete: Mark record as deleted
    */
   async _softDelete(resource, record, config) {
-    const deleteField = config.deleteField || 'deletedAt';
-    await resource.update(record.id, {
-      [deleteField]: new Date().toISOString()
-    });
+    const deleteField = config.deleteField || 'deletedat';
+    const updates = {
+      [deleteField]: new Date().toISOString(),
+      isdeleted: 'true'  // Add isdeleted field for partition compatibility
+    };
+
+    await resource.update(record.id, updates);
 
     if (this.verbose) {
       console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
@@ -450,43 +599,87 @@ class TTLPlugin extends Plugin {
     await resource.delete(record.id);
 
     if (this.verbose) {
-      console.log(`[TTLPlugin] Hard-deleted record ${record.id} from ${resource.name}`);
+      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
     }
   }
 
   /**
    * Archive: Copy to another resource then delete
    */
-  async _archive(resourceName, resource, record, config) {
-    const archiveResource = this.database.resource(config.archiveResource);
-    if (!archiveResource) {
-      throw new Error(
-        `Archive resource "${config.archiveResource}" not found for resource "${resourceName}"`
-      );
+  async _archive(resource, record, config) {
+    // Check if archive resource exists
+    if (!this.database.resources[config.archiveResource]) {
+      throw new Error(`Archive resource "${config.archiveResource}" not found`);
     }
 
-    // Copy to archive
-    const archiveData = {
-      ...record,
-      _archivedAt: new Date().toISOString(),
-      _archivedFrom: resourceName,
-      _originalId: record.id
-    };
+    const archiveResource = this.database.resource(config.archiveResource);
 
-    // Generate new ID for archive if needed
+    // Copy only user data fields (not system fields like _etag, _lastModified, etc.)
+    const archiveData = {};
+    for (const [key, value] of Object.entries(record)) {
+      // Skip system fields (those starting with _) unless they're user-defined
+      if (!key.startsWith('_')) {
+        archiveData[key] = value;
+      }
+    }
+
+    // Add archive metadata (not using _ prefix to avoid system field conflicts)
+    archiveData.archivedAt = new Date().toISOString();
+    archiveData.archivedFrom = resource.name;
+    archiveData.originalId = record.id;
+
+    // Use original ID if configured
     if (!config.keepOriginalId) {
-      archiveData.id = idGenerator();
+      delete archiveData.id;
     }
 
     await archiveResource.insert(archiveData);
 
-    // Delete from original
-    await this._hardDelete(resource, record);
+    // Delete original
+    await resource.delete(record.id);
 
     if (this.verbose) {
-      console.log(
-        `[TTLPlugin] Archived record ${record.id} from ${resourceName} to ${config.archiveResource}`
-      );
+      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
+    }
+  }
+
+  /**
+   * Manual cleanup of a specific resource
+   */
+  async cleanupResource(resourceName) {
+    const config = this.resources[resourceName];
+    if (!config) {
+      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
+    }
+
+    const granularity = config.granularity;
+    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
+
+    return {
+      resource: resourceName,
+      granularity
+    };
+  }
+
+  /**
+   * Manual cleanup of all resources
+   */
+  async runCleanup() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length > 0) {
+        await this._cleanupGranularity(granularity, resources);
+      }
     }
   }
 
@@ -496,40 +689,22 @@ class TTLPlugin extends Plugin {
   getStats() {
     return {
       ...this.stats,
+      resources: Object.keys(this.resources).length,
       isRunning: this.isRunning,
-      checkInterval: this.checkInterval,
-      resources: Object.keys(this.resources).length
+      intervals: this.intervals.length
     };
-  }
-
-  /**
-   * Manually trigger cleanup for a specific resource
-   */
-  async cleanupResource(resourceName) {
-    const config = this.resources[resourceName];
-    if (!config) {
-      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
-    }
-
-    return await this._cleanupResource(resourceName, config);
   }
 
   /**
    * Uninstall the plugin
    */
   async uninstall() {
-    this._stopInterval();
+    this._stopIntervals();
+    await super.uninstall();
 
     if (this.verbose) {
       console.log('[TTLPlugin] Uninstalled');
     }
-
-    this.emit('uninstalled', {
-      plugin: 'TTLPlugin',
-      stats: this.stats
-    });
-
-    await super.uninstall();
   }
 }
 
