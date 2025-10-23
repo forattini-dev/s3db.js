@@ -10645,6 +10645,605 @@ class FullTextPlugin extends Plugin {
   }
 }
 
+class GeoPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.resources = config.resources || {};
+    this.verbose = config.verbose !== void 0 ? config.verbose : false;
+    this.base32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+  }
+  /**
+   * Install the plugin
+   */
+  async install(database) {
+    await super.install(database);
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      await this._setupResource(resourceName, config);
+    }
+    this.database.addHook("afterCreateResource", async (context) => {
+      const { resource, config: resourceConfig } = context;
+      const geoConfig = this.resources[resource.name];
+      if (geoConfig) {
+        await this._setupResource(resource.name, geoConfig);
+      }
+    });
+    if (this.verbose) {
+      console.log(`[GeoPlugin] Installed with ${Object.keys(this.resources).length} resources`);
+    }
+    this.emit("installed", {
+      plugin: "GeoPlugin",
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Setup a resource with geo capabilities
+   */
+  async _setupResource(resourceName, config) {
+    if (!this.database.resources[resourceName]) {
+      if (this.verbose) {
+        console.warn(`[GeoPlugin] Resource "${resourceName}" not found, will setup when created`);
+      }
+      return;
+    }
+    const resource = this.database.resources[resourceName];
+    if (!resource || typeof resource.addHook !== "function") {
+      if (this.verbose) {
+        console.warn(`[GeoPlugin] Resource "${resourceName}" not found or invalid`);
+      }
+      return;
+    }
+    if (!config.latField || !config.lonField) {
+      throw new Error(
+        `[GeoPlugin] Resource "${resourceName}" must have "latField" and "lonField" configured`
+      );
+    }
+    if (!config.precision || config.precision < 1 || config.precision > 12) {
+      config.precision = 5;
+    }
+    resource._geoConfig = config;
+    const latField = resource.attributes[config.latField];
+    const lonField = resource.attributes[config.lonField];
+    const isLatOptional = typeof latField === "object" && latField.optional === true;
+    const isLonOptional = typeof lonField === "object" && lonField.optional === true;
+    const areCoordinatesOptional = isLatOptional || isLonOptional;
+    const geohashType = areCoordinatesOptional ? "string|optional" : "string";
+    let needsUpdate = false;
+    const newAttributes = { ...resource.attributes };
+    if (config.addGeohash && !newAttributes.geohash) {
+      newAttributes.geohash = geohashType;
+      needsUpdate = true;
+    }
+    if (!newAttributes._geohash) {
+      newAttributes._geohash = geohashType;
+      needsUpdate = true;
+    }
+    if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+      for (const zoom of config.zoomLevels) {
+        const fieldName = `_geohash_zoom${zoom}`;
+        if (!newAttributes[fieldName]) {
+          newAttributes[fieldName] = geohashType;
+          needsUpdate = true;
+        }
+      }
+    }
+    if (needsUpdate) {
+      resource.updateAttributes(newAttributes);
+      if (this.database.uploadMetadataFile) {
+        await this.database.uploadMetadataFile();
+      }
+    }
+    if (config.usePartitions) {
+      await this._setupPartitions(resource, config);
+    }
+    this._addHooks(resource, config);
+    this._addHelperMethods(resource, config);
+    if (this.verbose) {
+      console.log(
+        `[GeoPlugin] Setup resource "${resourceName}" with precision ${config.precision} (~${this._getPrecisionDistance(config.precision)}km cells)` + (config.usePartitions ? " [Partitions enabled]" : "")
+      );
+    }
+  }
+  /**
+   * Setup geohash partitions for efficient spatial queries
+   * Creates multiple zoom-level partitions if zoomLevels configured
+   */
+  async _setupPartitions(resource, config) {
+    const updatedConfig = { ...resource.config };
+    updatedConfig.partitions = updatedConfig.partitions || {};
+    let partitionsCreated = 0;
+    if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+      for (const zoom of config.zoomLevels) {
+        const partitionName = `byGeohashZoom${zoom}`;
+        const fieldName = `_geohash_zoom${zoom}`;
+        if (!updatedConfig.partitions[partitionName]) {
+          updatedConfig.partitions[partitionName] = {
+            fields: {
+              [fieldName]: "string"
+            }
+          };
+          partitionsCreated++;
+          if (this.verbose) {
+            console.log(
+              `[GeoPlugin] Created ${partitionName} partition for "${resource.name}" (precision ${zoom}, ~${this._getPrecisionDistance(zoom)}km cells)`
+            );
+          }
+        }
+      }
+    } else {
+      const hasGeohashPartition = resource.config.partitions && resource.config.partitions.byGeohash;
+      if (!hasGeohashPartition) {
+        updatedConfig.partitions.byGeohash = {
+          fields: {
+            _geohash: "string"
+          }
+        };
+        partitionsCreated++;
+        if (this.verbose) {
+          console.log(`[GeoPlugin] Created byGeohash partition for "${resource.name}"`);
+        }
+      }
+    }
+    if (partitionsCreated > 0) {
+      resource.config = updatedConfig;
+      resource.setupPartitionHooks();
+      if (this.database.uploadMetadataFile) {
+        await this.database.uploadMetadataFile();
+      }
+    }
+  }
+  /**
+   * Add hooks to automatically calculate geohash at all zoom levels
+   */
+  _addHooks(resource, config) {
+    const calculateGeohash = async (data) => {
+      const lat = data[config.latField];
+      const lon = data[config.lonField];
+      if (lat !== void 0 && lon !== void 0) {
+        const geohash = this.encodeGeohash(lat, lon, config.precision);
+        if (config.addGeohash) {
+          data.geohash = geohash;
+        }
+        data._geohash = geohash;
+        if (config.zoomLevels && Array.isArray(config.zoomLevels)) {
+          for (const zoom of config.zoomLevels) {
+            const zoomGeohash = this.encodeGeohash(lat, lon, zoom);
+            data[`_geohash_zoom${zoom}`] = zoomGeohash;
+          }
+        }
+      }
+      return data;
+    };
+    resource.addHook("beforeInsert", calculateGeohash);
+    resource.addHook("beforeUpdate", calculateGeohash);
+  }
+  /**
+   * Add helper methods to resource
+   */
+  _addHelperMethods(resource, config) {
+    const plugin = this;
+    resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
+      if (lat === void 0 || lon === void 0) {
+        throw new Error("lat and lon are required for findNearby");
+      }
+      const longitude = lon;
+      let allRecords = [];
+      if (config.usePartitions) {
+        let partitionName, fieldName, precision;
+        if (config.zoomLevels && config.zoomLevels.length > 0) {
+          const optimalZoom = plugin._selectOptimalZoom(config.zoomLevels, radius);
+          partitionName = `byGeohashZoom${optimalZoom}`;
+          fieldName = `_geohash_zoom${optimalZoom}`;
+          precision = optimalZoom;
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) for ${radius}km radius query`
+            );
+          }
+        } else {
+          partitionName = "byGeohash";
+          fieldName = "_geohash";
+          precision = config.precision;
+        }
+        if (this.config.partitions?.[partitionName]) {
+          const centerGeohash = plugin.encodeGeohash(lat, longitude, precision);
+          const neighbors = plugin.getNeighbors(centerGeohash);
+          const geohashesToSearch = [centerGeohash, ...neighbors];
+          const partitionResults = await Promise.all(
+            geohashesToSearch.map(async (geohash) => {
+              const [ok, err, records] = await tryFn(async () => {
+                return await this.listPartition({
+                  partition: partitionName,
+                  partitionValues: { [fieldName]: geohash },
+                  limit: limit * 2
+                });
+              });
+              return ok ? records : [];
+            })
+          );
+          allRecords = partitionResults.flat();
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, found ${allRecords.length} candidates`
+            );
+          }
+        } else {
+          allRecords = await this.list({ limit: limit * 10 });
+        }
+      } else {
+        allRecords = await this.list({ limit: limit * 10 });
+      }
+      const withDistances = allRecords.map((record) => {
+        const recordLat = record[config.latField];
+        const recordLon = record[config.lonField];
+        if (recordLat === void 0 || recordLon === void 0) {
+          return null;
+        }
+        const distance = plugin.calculateDistance(lat, longitude, recordLat, recordLon);
+        return {
+          ...record,
+          _distance: distance
+        };
+      }).filter((record) => record !== null && record._distance <= radius).sort((a, b) => a._distance - b._distance).slice(0, limit);
+      return withDistances;
+    };
+    resource.findInBounds = async function({ north, south, east, west, limit = 100 }) {
+      if (north === void 0 || south === void 0 || east === void 0 || west === void 0) {
+        throw new Error("north, south, east, west are required for findInBounds");
+      }
+      let allRecords = [];
+      if (config.usePartitions) {
+        let partitionName, precision;
+        if (config.zoomLevels && config.zoomLevels.length > 0) {
+          const centerLat = (north + south) / 2;
+          const centerLon = (east + west) / 2;
+          const latRadius = plugin.calculateDistance(centerLat, centerLon, north, centerLon);
+          const lonRadius = plugin.calculateDistance(centerLat, centerLon, centerLat, east);
+          const approximateRadius = Math.max(latRadius, lonRadius);
+          const optimalZoom = plugin._selectOptimalZoom(config.zoomLevels, approximateRadius);
+          partitionName = `byGeohashZoom${optimalZoom}`;
+          precision = optimalZoom;
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) for ${approximateRadius.toFixed(1)}km bounding box`
+            );
+          }
+        } else {
+          partitionName = "byGeohash";
+          precision = config.precision;
+        }
+        if (this.config.partitions?.[partitionName]) {
+          const geohashesToSearch = plugin._getGeohashesInBounds({
+            north,
+            south,
+            east,
+            west,
+            precision
+          });
+          const partitionResults = await Promise.all(
+            geohashesToSearch.map(async (geohash) => {
+              const [ok, err, records] = await tryFn(async () => {
+                const fieldName = config.zoomLevels ? `_geohash_zoom${precision}` : "_geohash";
+                return await this.listPartition({
+                  partition: partitionName,
+                  partitionValues: { [fieldName]: geohash },
+                  limit: limit * 2
+                });
+              });
+              return ok ? records : [];
+            })
+          );
+          allRecords = partitionResults.flat();
+          if (plugin.verbose) {
+            console.log(
+              `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, found ${allRecords.length} candidates`
+            );
+          }
+        } else {
+          allRecords = await this.list({ limit: limit * 10 });
+        }
+      } else {
+        allRecords = await this.list({ limit: limit * 10 });
+      }
+      const inBounds = allRecords.filter((record) => {
+        const lat = record[config.latField];
+        const lon = record[config.lonField];
+        if (lat === void 0 || lon === void 0) {
+          return false;
+        }
+        return lat <= north && lat >= south && lon <= east && lon >= west;
+      }).slice(0, limit);
+      return inBounds;
+    };
+    resource.getDistance = async function(id1, id2) {
+      let record1, record2;
+      try {
+        [record1, record2] = await Promise.all([
+          this.get(id1),
+          this.get(id2)
+        ]);
+      } catch (err) {
+        if (err.name === "NoSuchKey" || err.message?.includes("No such key")) {
+          throw new Error("One or both records not found");
+        }
+        throw err;
+      }
+      if (!record1 || !record2) {
+        throw new Error("One or both records not found");
+      }
+      const lat1 = record1[config.latField];
+      const lon1 = record1[config.lonField];
+      const lat2 = record2[config.latField];
+      const lon2 = record2[config.lonField];
+      if (lat1 === void 0 || lon1 === void 0 || lat2 === void 0 || lon2 === void 0) {
+        throw new Error("One or both records missing coordinates");
+      }
+      const distance = plugin.calculateDistance(lat1, lon1, lat2, lon2);
+      return {
+        distance,
+        unit: "km",
+        from: id1,
+        to: id2
+      };
+    };
+  }
+  /**
+   * Encode coordinates to geohash
+   * @param {number} latitude - Latitude (-90 to 90)
+   * @param {number} longitude - Longitude (-180 to 180)
+   * @param {number} precision - Number of characters in geohash
+   * @returns {string} Geohash string
+   */
+  encodeGeohash(latitude, longitude, precision = 5) {
+    let idx = 0;
+    let bit = 0;
+    let evenBit = true;
+    let geohash = "";
+    let latMin = -90;
+    let latMax = 90;
+    let lonMin = -180;
+    let lonMax = 180;
+    while (geohash.length < precision) {
+      if (evenBit) {
+        const lonMid = (lonMin + lonMax) / 2;
+        if (longitude > lonMid) {
+          idx |= 1 << 4 - bit;
+          lonMin = lonMid;
+        } else {
+          lonMax = lonMid;
+        }
+      } else {
+        const latMid = (latMin + latMax) / 2;
+        if (latitude > latMid) {
+          idx |= 1 << 4 - bit;
+          latMin = latMid;
+        } else {
+          latMax = latMid;
+        }
+      }
+      evenBit = !evenBit;
+      if (bit < 4) {
+        bit++;
+      } else {
+        geohash += this.base32[idx];
+        bit = 0;
+        idx = 0;
+      }
+    }
+    return geohash;
+  }
+  /**
+   * Decode geohash to coordinates
+   * @param {string} geohash - Geohash string
+   * @returns {Object} { latitude, longitude, error }
+   */
+  decodeGeohash(geohash) {
+    let evenBit = true;
+    let latMin = -90;
+    let latMax = 90;
+    let lonMin = -180;
+    let lonMax = 180;
+    for (let i = 0; i < geohash.length; i++) {
+      const chr = geohash[i];
+      const idx = this.base32.indexOf(chr);
+      if (idx === -1) {
+        throw new Error(`Invalid geohash character: ${chr}`);
+      }
+      for (let n = 4; n >= 0; n--) {
+        const bitN = idx >> n & 1;
+        if (evenBit) {
+          const lonMid = (lonMin + lonMax) / 2;
+          if (bitN === 1) {
+            lonMin = lonMid;
+          } else {
+            lonMax = lonMid;
+          }
+        } else {
+          const latMid = (latMin + latMax) / 2;
+          if (bitN === 1) {
+            latMin = latMid;
+          } else {
+            latMax = latMid;
+          }
+        }
+        evenBit = !evenBit;
+      }
+    }
+    const latitude = (latMin + latMax) / 2;
+    const longitude = (lonMin + lonMax) / 2;
+    return {
+      latitude,
+      longitude,
+      error: {
+        latitude: latMax - latMin,
+        longitude: lonMax - lonMin
+      }
+    };
+  }
+  /**
+   * Calculate distance between two coordinates using Haversine formula
+   * @param {number} lat1 - Latitude of point 1
+   * @param {number} lon1 - Longitude of point 1
+   * @param {number} lat2 - Latitude of point 2
+   * @param {number} lon2 - Longitude of point 2
+   * @returns {number} Distance in kilometers
+   */
+  calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = this._toRadians(lat2 - lat1);
+    const dLon = this._toRadians(lon2 - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(this._toRadians(lat1)) * Math.cos(this._toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+  /**
+   * Get geohash neighbors (8 surrounding cells)
+   * @param {string} geohash - Center geohash
+   * @returns {Array<string>} Array of 8 neighboring geohashes
+   */
+  getNeighbors(geohash) {
+    const decoded = this.decodeGeohash(geohash);
+    const { latitude, longitude, error } = decoded;
+    const latStep = error.latitude;
+    const lonStep = error.longitude;
+    const neighbors = [];
+    const directions = [
+      [-latStep, -lonStep],
+      // SW
+      [-latStep, 0],
+      // S
+      [-latStep, lonStep],
+      // SE
+      [0, -lonStep],
+      // W
+      [0, lonStep],
+      // E
+      [latStep, -lonStep],
+      // NW
+      [latStep, 0],
+      // N
+      [latStep, lonStep]
+      // NE
+    ];
+    for (const [latDelta, lonDelta] of directions) {
+      const neighborHash = this.encodeGeohash(
+        latitude + latDelta,
+        longitude + lonDelta,
+        geohash.length
+      );
+      neighbors.push(neighborHash);
+    }
+    return neighbors;
+  }
+  /**
+   * Get all geohashes that cover a bounding box
+   * @param {Object} bounds - Bounding box { north, south, east, west, precision }
+   * @returns {Array<string>} Array of unique geohashes covering the area
+   */
+  _getGeohashesInBounds({ north, south, east, west, precision }) {
+    const geohashes = /* @__PURE__ */ new Set();
+    const cellSize = this._getPrecisionDistance(precision);
+    const latStep = cellSize / 111;
+    const lonStep = cellSize / (111 * Math.cos(this._toRadians((north + south) / 2)));
+    for (let lat = south; lat <= north; lat += latStep) {
+      for (let lon = west; lon <= east; lon += lonStep) {
+        const geohash = this.encodeGeohash(lat, lon, precision);
+        geohashes.add(geohash);
+      }
+    }
+    const corners = [
+      [north, west],
+      [north, east],
+      [south, west],
+      [south, east],
+      [(north + south) / 2, west],
+      [(north + south) / 2, east],
+      [north, (east + west) / 2],
+      [south, (east + west) / 2]
+    ];
+    for (const [lat, lon] of corners) {
+      const geohash = this.encodeGeohash(lat, lon, precision);
+      geohashes.add(geohash);
+    }
+    return Array.from(geohashes);
+  }
+  /**
+   * Convert degrees to radians
+   */
+  _toRadians(degrees) {
+    return degrees * (Math.PI / 180);
+  }
+  /**
+   * Get approximate cell size for precision level
+   */
+  _getPrecisionDistance(precision) {
+    const distances = {
+      1: 5e3,
+      2: 1250,
+      3: 156,
+      4: 39,
+      5: 4.9,
+      6: 1.2,
+      7: 0.15,
+      8: 0.038,
+      9: 47e-4,
+      10: 12e-4,
+      11: 15e-5,
+      12: 37e-6
+    };
+    return distances[precision] || 5;
+  }
+  /**
+   * Select optimal zoom level based on search radius
+   * @param {Array<number>} zoomLevels - Available zoom levels
+   * @param {number} radiusKm - Search radius in kilometers
+   * @returns {number} Optimal zoom precision
+   */
+  _selectOptimalZoom(zoomLevels, radiusKm) {
+    if (!zoomLevels || zoomLevels.length === 0) {
+      return null;
+    }
+    const targetCellSize = radiusKm / 2.5;
+    let bestZoom = zoomLevels[0];
+    let bestDiff = Math.abs(this._getPrecisionDistance(bestZoom) - targetCellSize);
+    for (const zoom of zoomLevels) {
+      const cellSize = this._getPrecisionDistance(zoom);
+      const diff = Math.abs(cellSize - targetCellSize);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestZoom = zoom;
+      }
+    }
+    return bestZoom;
+  }
+  /**
+   * Get plugin statistics
+   */
+  getStats() {
+    return {
+      resources: Object.keys(this.resources).length,
+      configurations: Object.entries(this.resources).map(([name, config]) => ({
+        resource: name,
+        latField: config.latField,
+        lonField: config.lonField,
+        precision: config.precision,
+        cellSize: `~${this._getPrecisionDistance(config.precision)}km`
+      }))
+    };
+  }
+  /**
+   * Uninstall the plugin
+   */
+  async uninstall() {
+    if (this.verbose) {
+      console.log("[GeoPlugin] Uninstalled");
+    }
+    this.emit("uninstalled", {
+      plugin: "GeoPlugin"
+    });
+    await super.uninstall();
+  }
+}
+
 class MetricsPlugin extends Plugin {
   constructor(options = {}) {
     super();
@@ -35369,6 +35968,532 @@ class TfStatePlugin extends Plugin {
   }
 }
 
+const GRANULARITIES = {
+  minute: {
+    threshold: 3600,
+    // TTL < 1 hour
+    interval: 1e4,
+    // Check every 10 seconds
+    cohortsToCheck: 3,
+    // Check last 3 minutes
+    cohortFormat: (date) => date.toISOString().substring(0, 16)
+    // '2024-10-25T14:30'
+  },
+  hour: {
+    threshold: 86400,
+    // TTL < 24 hours
+    interval: 6e5,
+    // Check every 10 minutes
+    cohortsToCheck: 2,
+    // Check last 2 hours
+    cohortFormat: (date) => date.toISOString().substring(0, 13)
+    // '2024-10-25T14'
+  },
+  day: {
+    threshold: 2592e3,
+    // TTL < 30 days
+    interval: 36e5,
+    // Check every 1 hour
+    cohortsToCheck: 2,
+    // Check last 2 days
+    cohortFormat: (date) => date.toISOString().substring(0, 10)
+    // '2024-10-25'
+  },
+  week: {
+    threshold: Infinity,
+    // TTL >= 30 days
+    interval: 864e5,
+    // Check every 24 hours
+    cohortsToCheck: 2,
+    // Check last 2 weeks
+    cohortFormat: (date) => {
+      const year = date.getUTCFullYear();
+      const week = getWeekNumber(date);
+      return `${year}-W${String(week).padStart(2, "0")}`;
+    }
+  }
+};
+function getWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 864e5 + 1) / 7);
+}
+function detectGranularity(ttl) {
+  if (!ttl) return "day";
+  if (ttl < GRANULARITIES.minute.threshold) return "minute";
+  if (ttl < GRANULARITIES.hour.threshold) return "hour";
+  if (ttl < GRANULARITIES.day.threshold) return "day";
+  return "week";
+}
+function getExpiredCohorts(granularity, count) {
+  const config = GRANULARITIES[granularity];
+  const cohorts = [];
+  const now = /* @__PURE__ */ new Date();
+  for (let i = 0; i < count; i++) {
+    let checkDate;
+    switch (granularity) {
+      case "minute":
+        checkDate = new Date(now.getTime() - i * 6e4);
+        break;
+      case "hour":
+        checkDate = new Date(now.getTime() - i * 36e5);
+        break;
+      case "day":
+        checkDate = new Date(now.getTime() - i * 864e5);
+        break;
+      case "week":
+        checkDate = new Date(now.getTime() - i * 6048e5);
+        break;
+    }
+    cohorts.push(config.cohortFormat(checkDate));
+  }
+  return cohorts;
+}
+class TTLPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.verbose = config.verbose !== void 0 ? config.verbose : false;
+    this.resources = config.resources || {};
+    this.batchSize = config.batchSize || 100;
+    this.stats = {
+      totalScans: 0,
+      totalExpired: 0,
+      totalDeleted: 0,
+      totalArchived: 0,
+      totalSoftDeleted: 0,
+      totalCallbacks: 0,
+      totalErrors: 0,
+      lastScanAt: null,
+      lastScanDuration: 0
+    };
+    this.intervals = [];
+    this.isRunning = false;
+    this.expirationIndex = null;
+  }
+  /**
+   * Install the plugin
+   */
+  async install(database) {
+    await super.install(database);
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._validateResourceConfig(resourceName, config);
+    }
+    await this._createExpirationIndex();
+    for (const [resourceName, config] of Object.entries(this.resources)) {
+      this._setupResourceHooks(resourceName, config);
+    }
+    this._startIntervals();
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Installed with ${Object.keys(this.resources).length} resources`);
+    }
+    this.emit("installed", {
+      plugin: "TTLPlugin",
+      resources: Object.keys(this.resources)
+    });
+  }
+  /**
+   * Validate resource configuration
+   */
+  _validateResourceConfig(resourceName, config) {
+    if (!config.ttl && !config.field) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" must have either "ttl" (seconds) or "field" (timestamp field name)`
+      );
+    }
+    const validStrategies = ["soft-delete", "hard-delete", "archive", "callback"];
+    if (!config.onExpire || !validStrategies.includes(config.onExpire)) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" must have an "onExpire" value. Valid options: ${validStrategies.join(", ")}`
+      );
+    }
+    if (config.onExpire === "soft-delete" && !config.deleteField) {
+      config.deleteField = "deletedat";
+    }
+    if (config.onExpire === "archive" && !config.archiveResource) {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" with onExpire="archive" must have an "archiveResource" specified`
+      );
+    }
+    if (config.onExpire === "callback" && typeof config.callback !== "function") {
+      throw new Error(
+        `[TTLPlugin] Resource "${resourceName}" with onExpire="callback" must have a "callback" function`
+      );
+    }
+    if (!config.field) {
+      config.field = "_createdAt";
+    }
+    if (config.field === "_createdAt" && this.database) {
+      const resource = this.database.resources[resourceName];
+      if (resource && resource.config && resource.config.timestamps === false) {
+        console.warn(
+          `[TTLPlugin] WARNING: Resource "${resourceName}" uses TTL with field "_createdAt" but timestamps are disabled. TTL will be calculated from indexing time, not creation time.`
+        );
+      }
+    }
+    config.granularity = detectGranularity(config.ttl);
+  }
+  /**
+   * Create expiration index (plugin resource)
+   */
+  async _createExpirationIndex() {
+    this.expirationIndex = await this.database.createResource({
+      name: "plg_ttl_expiration_index",
+      attributes: {
+        resourceName: "string|required",
+        recordId: "string|required",
+        expiresAtCohort: "string|required",
+        expiresAtTimestamp: "number|required",
+        // Exact expiration timestamp for precise checking
+        granularity: "string|required",
+        createdAt: "number"
+      },
+      partitions: {
+        byExpiresAtCohort: {
+          fields: { expiresAtCohort: "string" }
+        }
+      },
+      asyncPartitions: false
+      // Sync partitions for deterministic behavior
+    });
+    if (this.verbose) {
+      console.log("[TTLPlugin] Created expiration index with partition");
+    }
+  }
+  /**
+   * Setup hooks for a resource
+   */
+  _setupResourceHooks(resourceName, config) {
+    if (!this.database.resources[resourceName]) {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" not found, skipping hooks`);
+      }
+      return;
+    }
+    const resource = this.database.resources[resourceName];
+    if (typeof resource.insert !== "function" || typeof resource.delete !== "function") {
+      if (this.verbose) {
+        console.warn(`[TTLPlugin] Resource "${resourceName}" missing insert/delete methods, skipping hooks`);
+      }
+      return;
+    }
+    this.addMiddleware(resource, "insert", async (next, data, options) => {
+      const result = await next(data, options);
+      await this._addToIndex(resourceName, result, config);
+      return result;
+    });
+    this.addMiddleware(resource, "delete", async (next, id, options) => {
+      const result = await next(id, options);
+      await this._removeFromIndex(resourceName, id);
+      return result;
+    });
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Setup hooks for resource "${resourceName}"`);
+    }
+  }
+  /**
+   * Add record to expiration index
+   */
+  async _addToIndex(resourceName, record, config) {
+    try {
+      let baseTime = record[config.field];
+      if (!baseTime && config.field === "_createdAt") {
+        baseTime = Date.now();
+      }
+      if (!baseTime) {
+        if (this.verbose) {
+          console.warn(
+            `[TTLPlugin] Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
+          );
+        }
+        return;
+      }
+      const baseTimestamp = typeof baseTime === "number" ? baseTime : new Date(baseTime).getTime();
+      const expiresAt = config.ttl ? new Date(baseTimestamp + config.ttl * 1e3) : new Date(baseTimestamp);
+      const cohortConfig = GRANULARITIES[config.granularity];
+      const cohort = cohortConfig.cohortFormat(expiresAt);
+      const indexId = `${resourceName}:${record.id}`;
+      await this.expirationIndex.insert({
+        id: indexId,
+        resourceName,
+        recordId: record.id,
+        expiresAtCohort: cohort,
+        expiresAtTimestamp: expiresAt.getTime(),
+        // Store exact timestamp for precise checking
+        granularity: config.granularity,
+        createdAt: Date.now()
+      });
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
+        );
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error adding to index:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Remove record from expiration index (O(1) using deterministic ID)
+   */
+  async _removeFromIndex(resourceName, recordId) {
+    try {
+      const indexId = `${resourceName}:${recordId}`;
+      const [ok, err] = await tryFn(() => this.expirationIndex.delete(indexId));
+      if (this.verbose && ok) {
+        console.log(`[TTLPlugin] Removed index entry for ${resourceName}:${recordId}`);
+      }
+      if (!ok && err?.code !== "NoSuchKey") {
+        throw err;
+      }
+    } catch (error) {
+      console.error(`[TTLPlugin] Error removing from index:`, error);
+    }
+  }
+  /**
+   * Start interval-based cleanup for each granularity
+   */
+  _startIntervals() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length === 0) continue;
+      const granularityConfig = GRANULARITIES[granularity];
+      const handle = setInterval(
+        () => this._cleanupGranularity(granularity, resources),
+        granularityConfig.interval
+      );
+      this.intervals.push(handle);
+      if (this.verbose) {
+        console.log(
+          `[TTLPlugin] Started ${granularity} interval (${granularityConfig.interval}ms) for ${resources.length} resources`
+        );
+      }
+    }
+    this.isRunning = true;
+  }
+  /**
+   * Stop all intervals
+   */
+  _stopIntervals() {
+    for (const handle of this.intervals) {
+      clearInterval(handle);
+    }
+    this.intervals = [];
+    this.isRunning = false;
+    if (this.verbose) {
+      console.log("[TTLPlugin] Stopped all intervals");
+    }
+  }
+  /**
+   * Cleanup expired records for a specific granularity
+   */
+  async _cleanupGranularity(granularity, resources) {
+    const startTime = Date.now();
+    this.stats.totalScans++;
+    try {
+      const granularityConfig = GRANULARITIES[granularity];
+      const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
+      if (this.verbose) {
+        console.log(`[TTLPlugin] Cleaning ${granularity} granularity, checking cohorts:`, cohorts);
+      }
+      for (const cohort of cohorts) {
+        const expired = await this.expirationIndex.listPartition({
+          partition: "byExpiresAtCohort",
+          partitionValues: { expiresAtCohort: cohort }
+        });
+        const resourceNames = new Set(resources.map((r) => r.name));
+        const filtered = expired.filter((e) => resourceNames.has(e.resourceName));
+        if (this.verbose && filtered.length > 0) {
+          console.log(`[TTLPlugin] Found ${filtered.length} expired records in cohort ${cohort}`);
+        }
+        for (let i = 0; i < filtered.length; i += this.batchSize) {
+          const batch = filtered.slice(i, i + this.batchSize);
+          for (const entry of batch) {
+            const config = this.resources[entry.resourceName];
+            await this._processExpiredEntry(entry, config);
+          }
+        }
+      }
+      this.stats.lastScanAt = (/* @__PURE__ */ new Date()).toISOString();
+      this.stats.lastScanDuration = Date.now() - startTime;
+      this.emit("scanCompleted", {
+        granularity,
+        duration: this.stats.lastScanDuration,
+        cohorts
+      });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error in ${granularity} cleanup:`, error);
+      this.stats.totalErrors++;
+      this.emit("cleanupError", { granularity, error });
+    }
+  }
+  /**
+   * Process a single expired index entry
+   */
+  async _processExpiredEntry(entry, config) {
+    try {
+      if (!this.database.resources[entry.resourceName]) {
+        if (this.verbose) {
+          console.warn(`[TTLPlugin] Resource "${entry.resourceName}" not found during cleanup, skipping`);
+        }
+        return;
+      }
+      const resource = this.database.resources[entry.resourceName];
+      const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
+      if (!ok || !record) {
+        await this.expirationIndex.delete(entry.id);
+        return;
+      }
+      if (entry.expiresAtTimestamp && Date.now() < entry.expiresAtTimestamp) {
+        return;
+      }
+      switch (config.onExpire) {
+        case "soft-delete":
+          await this._softDelete(resource, record, config);
+          this.stats.totalSoftDeleted++;
+          break;
+        case "hard-delete":
+          await this._hardDelete(resource, record);
+          this.stats.totalDeleted++;
+          break;
+        case "archive":
+          await this._archive(resource, record, config);
+          this.stats.totalArchived++;
+          this.stats.totalDeleted++;
+          break;
+        case "callback":
+          const shouldDelete = await config.callback(record, resource);
+          this.stats.totalCallbacks++;
+          if (shouldDelete) {
+            await this._hardDelete(resource, record);
+            this.stats.totalDeleted++;
+          }
+          break;
+      }
+      await this.expirationIndex.delete(entry.id);
+      this.stats.totalExpired++;
+      this.emit("recordExpired", { resource: entry.resourceName, record });
+    } catch (error) {
+      console.error(`[TTLPlugin] Error processing expired entry:`, error);
+      this.stats.totalErrors++;
+    }
+  }
+  /**
+   * Soft delete: Mark record as deleted
+   */
+  async _softDelete(resource, record, config) {
+    const deleteField = config.deleteField || "deletedat";
+    const updates = {
+      [deleteField]: (/* @__PURE__ */ new Date()).toISOString(),
+      isdeleted: "true"
+      // Add isdeleted field for partition compatibility
+    };
+    await resource.update(record.id, updates);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Soft-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Hard delete: Remove record from S3
+   */
+  async _hardDelete(resource, record) {
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Hard-deleted record ${record.id} in ${resource.name}`);
+    }
+  }
+  /**
+   * Archive: Copy to another resource then delete
+   */
+  async _archive(resource, record, config) {
+    if (!this.database.resources[config.archiveResource]) {
+      throw new Error(`Archive resource "${config.archiveResource}" not found`);
+    }
+    const archiveResource = this.database.resources[config.archiveResource];
+    const archiveData = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (!key.startsWith("_")) {
+        archiveData[key] = value;
+      }
+    }
+    archiveData.archivedAt = (/* @__PURE__ */ new Date()).toISOString();
+    archiveData.archivedFrom = resource.name;
+    archiveData.originalId = record.id;
+    if (!config.keepOriginalId) {
+      delete archiveData.id;
+    }
+    await archiveResource.insert(archiveData);
+    await resource.delete(record.id);
+    if (this.verbose) {
+      console.log(`[TTLPlugin] Archived record ${record.id} from ${resource.name} to ${config.archiveResource}`);
+    }
+  }
+  /**
+   * Manual cleanup of a specific resource
+   */
+  async cleanupResource(resourceName) {
+    const config = this.resources[resourceName];
+    if (!config) {
+      throw new Error(`Resource "${resourceName}" not configured in TTLPlugin`);
+    }
+    const granularity = config.granularity;
+    await this._cleanupGranularity(granularity, [{ name: resourceName, config }]);
+    return {
+      resource: resourceName,
+      granularity
+    };
+  }
+  /**
+   * Manual cleanup of all resources
+   */
+  async runCleanup() {
+    const byGranularity = {
+      minute: [],
+      hour: [],
+      day: [],
+      week: []
+    };
+    for (const [name, config] of Object.entries(this.resources)) {
+      byGranularity[config.granularity].push({ name, config });
+    }
+    for (const [granularity, resources] of Object.entries(byGranularity)) {
+      if (resources.length > 0) {
+        await this._cleanupGranularity(granularity, resources);
+      }
+    }
+  }
+  /**
+   * Get plugin statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      resources: Object.keys(this.resources).length,
+      isRunning: this.isRunning,
+      intervals: this.intervals.length
+    };
+  }
+  /**
+   * Uninstall the plugin
+   */
+  async uninstall() {
+    this._stopIntervals();
+    await super.uninstall();
+    if (this.verbose) {
+      console.log("[TTLPlugin] Uninstalled");
+    }
+  }
+}
+
 function cosineDistance(a, b) {
   if (a.length !== b.length) {
     throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`);
@@ -37170,6 +38295,7 @@ exports.Factory = Factory;
 exports.FilesystemBackupDriver = FilesystemBackupDriver;
 exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
+exports.GeoPlugin = GeoPlugin;
 exports.InvalidResourceItem = InvalidResourceItem;
 exports.MemoryCache = MemoryCache;
 exports.MetadataLimitError = MetadataLimitError;
@@ -37217,6 +38343,7 @@ exports.SqsConsumer = SqsConsumer;
 exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;
 exports.StreamError = StreamError;
+exports.TTLPlugin = TTLPlugin;
 exports.TfStatePlugin = TfStatePlugin;
 exports.TursoReplicator = TursoReplicator;
 exports.UnknownError = UnknownError;

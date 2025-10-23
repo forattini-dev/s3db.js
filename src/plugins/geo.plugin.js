@@ -73,7 +73,7 @@ import tryFn from "../concerns/try-fn.js";
  *
  * resource.getDistance(id1, id2)  // Returns distance in km
  */
-class GeoPlugin extends Plugin {
+export class GeoPlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
