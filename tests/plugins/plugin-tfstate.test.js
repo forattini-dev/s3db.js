@@ -36,7 +36,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
     }
   });
 
-  // Helper: Create example Terraform state file
+  // Helper: Create example Tfstate file
   function createExampleStateFile(serial, resources, options = {}) {
     const state = {
       version: options.version || 4,
@@ -68,7 +68,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
       expect(error.name).toBe('InvalidStateFileError');
       expect(error.filePath).toBe('/path/to/state.tfstate');
       expect(error.reason).toBe('missing version field');
-      expect(error.message).toContain('Invalid Terraform state file');
+      expect(error.message).toContain('Invalid Tfstate file');
     });
 
     test('should create UnsupportedStateVersionError', () => {
@@ -136,9 +136,15 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
 
     test('should create plugin with custom configuration', () => {
       const plugin = new TfStatePlugin({
-        resourceName: 'custom_resources',
-        stateHistoryName: 'custom_history',
-        trackDiffs: false,
+        driver: 's3',
+        resources: {
+          resources: 'custom_resources',
+          stateFiles: 'custom_states',
+          diffs: 'custom_history'
+        },
+        diffs: {
+          enabled: false
+        },
         autoSync: true,
         verbose: true,
         filters: {
@@ -147,7 +153,7 @@ describe('TfStatePlugin - Comprehensive Tests', () => {
         }
       });
       expect(plugin.resourceName).toBe('custom_resources');
-      expect(plugin.stateHistoryName).toBe('custom_history');
+      expect(plugin.diffsName).toBe('custom_history');
       expect(plugin.trackDiffs).toBe(false);
       expect(plugin.autoSync).toBe(true);
       expect(plugin.verbose).toBe(true);

@@ -740,6 +740,6 @@ Verificar que partitions são rápidas:
 
 ## 📚 References
 
-- [Terraform State Format](https://www.terraform.io/internals/json-format)
+- [Tfstate Format](https://www.terraform.io/internals/json-format)
 - [s3db Partitioning Guide](../../docs/partitioning.md)
 - [Plugin Development](../../docs/plugins.md)

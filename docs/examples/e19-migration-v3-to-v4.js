@@ -171,7 +171,7 @@ async function validateMigration(v4db, resourceName, originalCount) {
   console.log(`🔍 Validating migration for ${resourceName}`);
   
   try {
-    const resource = v4db.resource(resourceName);
+    const resource = v4db.resources[resourceName];
     const newCount = await resource.count();
     
     if (newCount === originalCount) {

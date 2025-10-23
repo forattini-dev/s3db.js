@@ -8,7 +8,7 @@ async function main() {
   // Add costs plugin
   s3db.use(CostsPlugin);
   
-  const total = await s3db.resource("leads").count();
+  const total = await s3db.resources.leads.count();
 
   console.log(`reading ${total} leads.`);
   console.log(`parallelism of ${ENV.PARALLELISM} requests.\n`);
@@ -38,7 +38,7 @@ async function main() {
     options
   );
 
-  const stream = s3db.resource("leads").readable();
+  const stream = s3db.resources.leads.readable();
 
   console.time("reading");
 

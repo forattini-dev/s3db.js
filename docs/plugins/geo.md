@@ -319,7 +319,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 // Use geospatial features
-const stores = s3db.resource('stores');
+const stores = s3db.resources.stores;
 await stores.insert({
   id: 'store-1',
   name: 'Downtown Store',

@@ -134,11 +134,24 @@ export class PluginStorage {
   }
 
   /**
-   * Alias for set() to maintain backward compatibility
-   * @deprecated Use set() instead
+   * Batch set multiple items
+   *
+   * @param {Array<{key: string, data: Object, options?: Object}>} items - Items to save
+   * @returns {Promise<Array<{ok: boolean, key: string, error?: Error}>>} Results
    */
-  async put(key, data, options = {}) {
-    return this.set(key, data, options);
+  async batchSet(items) {
+    const results = [];
+
+    for (const item of items) {
+      try {
+        await this.set(item.key, item.data, item.options || {});
+        results.push({ ok: true, key: item.key });
+      } catch (error) {
+        results.push({ ok: false, key: item.key, error });
+      }
+    }
+
+    return results;
   }
 
   /**

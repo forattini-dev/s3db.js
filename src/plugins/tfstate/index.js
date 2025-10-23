@@ -8,7 +8,7 @@
  * OpenTofu maintains backward compatibility with Terraform's state file format, so this plugin works seamlessly with both.
  *
  * === 🚀 Key Features ===
- * ✅ **Multi-version support**: Terraform state v3 and v4
+ * ✅ **Multi-version support**: Tfstate v3 and v4
  * ✅ **Multiple sources**: Local files, S3 buckets, remote backends
  * ✅ **SHA256 deduplication**: Prevent duplicate state imports automatically
  * ✅ **Historical tracking**: Full audit trail of infrastructure changes
@@ -16,7 +16,7 @@
  * ✅ **Batch import**: Process multiple state files with controlled parallelism
  * ✅ **Resource filtering**: Include/exclude resources by type or pattern
  * ✅ **Auto-sync**: File watching and cron-based monitoring (optional)
- * ✅ **Export capability**: Convert back to Terraform state format
+ * ✅ **Export capability**: Convert back to Tfstate format
  * ✅ **Automatic partition optimization**: 10-100x faster queries with zero configuration
  *
  * === ⚡ Performance Optimizations (Auto-Applied) ===
@@ -266,59 +266,36 @@ export class TfStatePlugin extends Plugin {
   constructor(config = {}) {
     super(config);
 
-    // Detect new config format (driver-based) vs legacy
-    const isNewFormat = config.driver !== undefined;
+    // Driver-based configuration
+    this.driverType = config.driver || null;
+    this.driverConfig = config.config || {};
 
-    if (isNewFormat) {
-      // New driver-based configuration
-      this.driverType = config.driver || 's3';
-      this.driverConfig = config.config || {};
+    // Resource names
+    const resources = config.resources || {};
+    this.resourceName = resources.resources || config.resourceName || 'plg_tfstate_resources';
+    this.stateFilesName = resources.stateFiles || config.stateFilesName || 'plg_tfstate_state_files';
+    this.diffsName = resources.diffs || config.diffsName || 'plg_tfstate_state_diffs';
 
-      // Resource names
-      const resources = config.resources || {};
-      this.resourceName = resources.resources || 'plg_tfstate_resources';
-      this.stateFilesName = resources.stateFiles || 'plg_tfstate_state_files';
-      this.diffsName = resources.diffs || 'plg_tfstate_state_diffs';
+    // Monitoring configuration
+    const monitor = config.monitor || {};
+    this.monitorEnabled = monitor.enabled || false;
+    this.monitorCron = monitor.cron || '*/5 * * * *';
 
-      // Monitoring configuration
-      const monitor = config.monitor || {};
-      this.monitorEnabled = monitor.enabled || false;
-      this.monitorCron = monitor.cron || '*/5 * * * *'; // Default: every 5 minutes
+    // Diff configuration
+    const diffs = config.diffs || {};
+    this.trackDiffs = diffs.enabled !== undefined ? diffs.enabled : (config.trackDiffs !== undefined ? config.trackDiffs : true);
+    this.diffsLookback = diffs.lookback || 10;
 
-      // Diff configuration
-      const diffs = config.diffs || {};
-      this.trackDiffs = diffs.enabled !== undefined ? diffs.enabled : true;
-      this.diffsLookback = diffs.lookback || 10; // How many previous states to compare
+    // Partition configuration
+    this.asyncPartitions = config.asyncPartitions !== undefined ? config.asyncPartitions : true;
 
-      // Partition configuration
-      this.asyncPartitions = config.asyncPartitions !== undefined ? config.asyncPartitions : true;
+    // Other config
+    this.autoSync = config.autoSync || false;
+    this.watchPaths = config.watchPaths || [];
+    this.filters = config.filters || {};
+    this.verbose = config.verbose || false;
 
-      // Legacy fields for backward compatibility
-      this.autoSync = false;
-      this.watchPaths = [];
-      this.filters = config.filters || {};
-      this.verbose = config.verbose || false;
-    } else {
-      // Legacy configuration (backward compatible)
-      this.driverType = null; // Will use legacy methods
-      this.driverConfig = {};
-      this.resourceName = config.resourceName || 'plg_tfstate_resources';
-      this.stateFilesName = config.stateFilesName || 'plg_tfstate_state_files';
-      // Support both 'diffsName' and 'stateHistoryName' (legacy) for backward compatibility
-      this.diffsName = config.diffsName || config.stateHistoryName || 'plg_tfstate_state_diffs';
-      this.stateHistoryName = this.diffsName; // Alias for backward compatibility
-      this.autoSync = config.autoSync || false;
-      this.watchPaths = Array.isArray(config.watchPaths) ? config.watchPaths : [];
-      this.filters = config.filters || {};
-      this.trackDiffs = config.trackDiffs !== undefined ? config.trackDiffs : true;
-      this.diffsLookback = 10;
-      this.asyncPartitions = config.asyncPartitions !== undefined ? config.asyncPartitions : true;
-      this.verbose = config.verbose || false;
-      this.monitorEnabled = false;
-      this.monitorCron = '*/5 * * * *';
-    }
-
-    // Supported Terraform state versions
+    // Supported Tfstate versions
     this.supportedVersions = [3, 4];
 
     // Internal state
@@ -377,12 +354,12 @@ export class TfStatePlugin extends Plugin {
     }
 
     // Resource 0: Terraform Lineages (Master tracking resource)
-    // NEW: Tracks unique Terraform state lineages for efficient diff tracking
+    // NEW: Tracks unique Tfstate lineages for efficient diff tracking
     this.lineagesName = 'plg_tfstate_lineages';
     this.lineagesResource = await this.database.createResource({
       name: this.lineagesName,
       attributes: {
-        id: 'string|required',           // = lineage UUID from Terraform state
+        id: 'string|required',           // = lineage UUID from Tfstate
         latestSerial: 'number',           // Track latest for quick access
         latestStateId: 'string',          // FK to stateFilesResource
         totalStates: 'number',            // Counter
@@ -396,7 +373,7 @@ export class TfStatePlugin extends Plugin {
       createdBy: 'TfStatePlugin'
     });
 
-    // Resource 1: Terraform State Files Metadata
+    // Resource 1: Tfstate Files Metadata
     // Dedicated to tracking state file metadata with SHA256 hash for deduplication
     this.stateFilesResource = await this.database.createResource({
       name: this.stateFilesName,
@@ -460,7 +437,7 @@ export class TfStatePlugin extends Plugin {
       createdBy: 'TfStatePlugin'
     });
 
-    // Resource 3: Terraform State Diffs
+    // Resource 3: Tfstate Diffs
     // Track changes between state versions (if diff tracking enabled)
     if (this.trackDiffs) {
       this.diffsResource = await this.database.createResource({
@@ -511,12 +488,10 @@ export class TfStatePlugin extends Plugin {
       console.log(`[TfStatePlugin] Created resources: ${resourcesCreated.join(', ')}`);
     }
 
-    // Setup file watchers if autoSync is enabled (legacy mode)
     if (this.autoSync && this.watchPaths.length > 0) {
       await this._setupFileWatchers();
     }
 
-    // Setup cron monitoring if enabled (new driver mode)
     if (this.monitorEnabled && this.driver) {
       await this._setupCronMonitoring();
     }
@@ -556,7 +531,6 @@ export class TfStatePlugin extends Plugin {
       }
     }
 
-    // Stop all file watchers (legacy mode)
     for (const watcher of this.watchers) {
       try {
         // fs.promises.watch returns an AsyncIterator with a return() method
@@ -1281,7 +1255,7 @@ export class TfStatePlugin extends Plugin {
   }
 
   /**
-   * Read and parse Terraform state file
+   * Read and parse Tfstate file
    * @private
    */
   async _readStateFile(filePath) {
@@ -1327,7 +1301,7 @@ export class TfStatePlugin extends Plugin {
   }
 
   /**
-   * Validate Terraform state version
+   * Validate Tfstate version
    * @private
    */
   _validateStateVersion(state) {
@@ -1343,7 +1317,7 @@ export class TfStatePlugin extends Plugin {
   }
 
   /**
-   * Extract resources from Terraform state
+   * Extract resources from Tfstate
    * @private
    */
   async _extractResources(state, filePath, stateFileId, lineageId) {
@@ -2065,14 +2039,14 @@ export class TfStatePlugin extends Plugin {
   }
 
   /**
-   * Export resources to Terraform state format
+   * Export resources to Tfstate format
    * @param {Object} options - Export options
    * @param {number} options.serial - Specific serial to export (default: latest)
    * @param {string[]} options.resourceTypes - Filter by resource types
    * @param {string} options.terraformVersion - Terraform version for output (default: '1.5.0')
    * @param {string} options.lineage - State lineage (default: auto-generated)
    * @param {Object} options.outputs - Terraform outputs to include
-   * @returns {Promise<Object>} Terraform state object
+   * @returns {Promise<Object>} Tfstate object
    *
    * @example
    * // Export latest state

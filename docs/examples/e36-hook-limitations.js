@@ -55,7 +55,7 @@ async function demonstrateHookLimitations() {
     });
 
     // Works on the first connection
-    const resource1 = db.resource('users_with_external_vars');
+    const resource1 = db.resources.users_with_external_vars;
     await resource1.insert({ name: 'Admin', email: ADMIN_EMAIL });
     console.log('✅ Worked on the first connection');
 
@@ -81,7 +81,7 @@ async function demonstrateHookLimitations() {
   await db2.connect();
 
   try {
-    const resource2 = db2.resource('users_with_external_vars');
+    const resource2 = db2.resources.users_with_external_vars;
     await resource2.insert({ name: 'Test', email: 'test@company.com' });
     console.log('❌ This should not work without the external variables');
   } catch (error) {
@@ -153,7 +153,7 @@ async function demonstrateHookLimitations() {
 
   await db4.connect();
 
-  const resource4 = db4.resource('users_self_contained');
+  const resource4 = db4.resources.users_self_contained;
   
   try {
     const adminUser = await resource4.insert({ 
@@ -220,7 +220,7 @@ async function demonstrateHookLimitations() {
           
           // This code fails after reconnection
           try {
-            const maxUsers = this.database.resource('config');
+            const maxUsers = this.database.resources.config;
             console.log('Checking user limit...');
           } catch (error) {
             console.log('❌ Cross-reference failed:', error.message);

@@ -605,7 +605,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     }));
   });
 
-  test('cleanup handles errors gracefully', async () => {
+  test('stop handles errors gracefully', async () => {
     const plugin = new ReplicatorPlugin({
       verbose: true,
       replicators: [{ driver: 's3db', config: { connectionString: 's3://test' }, resources: { users: 'users' } }]
@@ -613,18 +613,18 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     const mockReplicator = {
       name: 'test-replicator',
-      cleanup: jest.fn().mockRejectedValue(new Error('Cleanup failed'))
+      stop: jest.fn().mockRejectedValue(new Error('Stop failed'))
     };
 
     plugin.replicators = [mockReplicator];
 
     const eventSpy = jest.spyOn(plugin, 'emit');
 
-    await plugin.cleanup();
+    await plugin.stop();
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator_cleanup_error', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('replicator_stop_error', expect.objectContaining({
       replicator: 'test-replicator',
-      error: 'Cleanup failed'
+      error: 'Stop failed'
     }));
 
     expect(plugin.replicators).toEqual([]);
@@ -1116,7 +1116,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     expect(plugin.eventHandlers.has('users')).toBe(true);
 
     // Cleanup
-    await plugin.cleanup();
+    await plugin.stop();
 
     // Verify listeners were removed
     expect(mockResource.off).toHaveBeenCalledTimes(3);

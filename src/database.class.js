@@ -18,19 +18,47 @@ export class Database extends EventEmitter {
     this.version = "1";
     // Version is injected during build, fallback to "latest" for development
     this.s3dbVersion = (() => {
-      const [ok, err, version] = tryFn(() => (typeof __PACKAGE_VERSION__ !== 'undefined' && __PACKAGE_VERSION__ !== '__PACKAGE_VERSION__' 
-        ? __PACKAGE_VERSION__ 
+      const [ok, err, version] = tryFn(() => (typeof __PACKAGE_VERSION__ !== 'undefined' && __PACKAGE_VERSION__ !== '__PACKAGE_VERSION__'
+        ? __PACKAGE_VERSION__
         : "latest"));
       return ok ? version : "latest";
     })();
-    this.resources = {};
+
+    // Create Proxy for resources to enable property access (db.resources.users)
+    this._resourcesMap = {};
+    this.resources = new Proxy(this._resourcesMap, {
+      get: (target, prop) => {
+        // Allow standard Object methods
+        if (typeof prop === 'symbol' || prop === 'constructor' || prop === 'toJSON') {
+          return target[prop];
+        }
+
+        // Return resource if exists
+        if (target[prop]) {
+          return target[prop];
+        }
+
+        // Return undefined for non-existent resources (enables optional chaining)
+        return undefined;
+      },
+
+      // Support Object.keys(), Object.entries(), etc.
+      ownKeys: (target) => {
+        return Object.keys(target);
+      },
+
+      getOwnPropertyDescriptor: (target, prop) => {
+        return Object.getOwnPropertyDescriptor(target, prop);
+      }
+    });
+
     this.savedMetadata = null; // Store loaded metadata for versioning
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || []; // Keep the original array for backward compatibility
-    this.pluginRegistry = {}; // Initialize plugins registry as separate object
-    this.pluginList = options.plugins || []; // Keep the list for backward compatibility
+    this.pluginList = options.plugins || [];
+    this.pluginRegistry = {};
+    this.plugins = this.pluginRegistry; // Alias for plugin registry
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
@@ -181,7 +209,7 @@ export class Database extends EventEmitter {
           restoredIdSize = versionData.idSize || 22;
         }
 
-        this.resources[name] = new Resource({
+        this._resourcesMap[name] = new Resource({
           name,
           client: this.client,
           database: this, // ensure reference
@@ -259,7 +287,7 @@ export class Database extends EventEmitter {
     
     // Check for deleted resources
     for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
-      if (!this.resources[name]) {
+      if (!this._resourcesMap[name]) {
         const currentVersion = savedResource.currentVersion || 'v1';
         const versionData = savedResource.versions?.[currentVersion];
         changes.push({
@@ -894,7 +922,7 @@ export class Database extends EventEmitter {
    * @returns {boolean} True if resource exists, false otherwise
    */
   resourceExists(name) {
-    return !!this.resources[name];
+    return !!this._resourcesMap[name];
   }
 
   /**
@@ -903,17 +931,16 @@ export class Database extends EventEmitter {
    * @param {string} config.name - Resource name
    * @param {Object} config.attributes - Resource attributes
    * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = 'user-managed', partitions = {}, options = {} }) {
-    if (!this.resources[name]) {
+  resourceExistsWithSameHash({ name, attributes, behavior = 'user-managed', partitions = {} }) {
+    if (!this._resourcesMap[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
 
-    const existingResource = this.resources[name];
+    const existingResource = this._resourcesMap[name];
     const existingHash = this.generateDefinitionHash(existingResource.export());
-    
+
     // Create a mock resource to calculate the new hash
     const mockResource = new Resource({
       name,
@@ -923,8 +950,7 @@ export class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
-      versioningEnabled: this.versioningEnabled,
-      ...options
+      versioningEnabled: this.versioningEnabled
     });
     
     const newHash = this.generateDefinitionHash(mockResource.export());
@@ -955,13 +981,67 @@ export class Database extends EventEmitter {
    * @param {string} [config.createdBy='user'] - Who created this resource ('user', 'plugin', or plugin name)
    * @returns {Promise<Resource>} The created or updated resource
    */
-  async createResource({ name, attributes, behavior = 'user-managed', hooks, ...config }) {
-    if (this.resources[name]) {
-      const existingResource = this.resources[name];
+  /**
+   * Normalize partitions config from array or object format
+   * @param {Array|Object} partitions - Partitions config
+   * @param {Object} attributes - Resource attributes
+   * @returns {Object} Normalized partitions object
+   * @private
+   */
+  _normalizePartitions(partitions, attributes) {
+    // If already an object, return as-is
+    if (!Array.isArray(partitions)) {
+      return partitions || {};
+    }
+
+    // Transform array into object with auto-generated names
+    const normalized = {};
+
+    for (const fieldName of partitions) {
+      if (typeof fieldName !== 'string') {
+        throw new Error(`Partition field must be a string, got ${typeof fieldName}`);
+      }
+
+      if (!attributes[fieldName]) {
+        throw new Error(`Partition field '${fieldName}' not found in attributes`);
+      }
+
+      // Generate partition name: byFieldName (capitalize first letter)
+      const partitionName = `by${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
+
+      // Extract field type from attributes
+      const fieldDef = attributes[fieldName];
+      let fieldType = 'string'; // default
+
+      if (typeof fieldDef === 'string') {
+        // String format: "string|required" -> extract "string"
+        fieldType = fieldDef.split('|')[0].trim();
+      } else if (typeof fieldDef === 'object' && fieldDef.type) {
+        // Object format: { type: 'string', required: true }
+        fieldType = fieldDef.type;
+      }
+
+      normalized[partitionName] = {
+        fields: {
+          [fieldName]: fieldType
+        }
+      };
+    }
+
+    return normalized;
+  }
+
+  async createResource({ name, attributes, behavior = 'user-managed', hooks, middlewares, ...config }) {
+    // Normalize partitions (support array shorthand)
+    const normalizedPartitions = this._normalizePartitions(config.partitions, attributes);
+
+    if (this._resourcesMap[name]) {
+      const existingResource = this._resourcesMap[name];
       // Update configuration
       Object.assign(existingResource.config, {
         cache: this.cache,
         ...config,
+        partitions: normalizedPartitions
       });
       if (behavior) {
         existingResource.behavior = behavior;
@@ -981,6 +1061,11 @@ export class Database extends EventEmitter {
           }
         }
       }
+      // Apply middlewares if provided
+      if (middlewares) {
+        this._applyMiddlewares(existingResource, middlewares);
+      }
+
       // Only upload metadata if hash actually changed
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata = this.savedMetadata?.resources?.[name];
@@ -1005,7 +1090,7 @@ export class Database extends EventEmitter {
       observers: [this],
       cache: config.cache !== undefined ? config.cache : this.cache,
       timestamps: config.timestamps !== undefined ? config.timestamps : false,
-      partitions: config.partitions || {},
+      partitions: normalizedPartitions,
       paranoid: config.paranoid !== undefined ? config.paranoid : true,
       allNestedObjectsOptional: config.allNestedObjectsOptional !== undefined ? config.allNestedObjectsOptional : true,
       autoDecrypt: config.autoDecrypt !== undefined ? config.autoDecrypt : true,
@@ -1021,18 +1106,76 @@ export class Database extends EventEmitter {
       createdBy: config.createdBy || 'user'
     });
     resource.database = this;
-    this.resources[name] = resource;
+    this._resourcesMap[name] = resource;
+
+    // Apply middlewares if provided
+    if (middlewares) {
+      this._applyMiddlewares(resource, middlewares);
+    }
+
     await this.uploadMetadataFile();
     this.emit("s3db.resourceCreated", name);
     return resource;
   }
 
-  resource(name) {
-    if (!this.resources[name]) {
-      return Promise.reject(`resource ${name} does not exist`);
+  /**
+   * Apply middlewares to a resource
+   * @param {Resource} resource - Resource instance
+   * @param {Array|Object} middlewares - Middlewares config
+   * @private
+   */
+  _applyMiddlewares(resource, middlewares) {
+    // Format 1: Array of functions (applies to all methods)
+    if (Array.isArray(middlewares)) {
+      // Apply to all middleware-supported methods
+      const methods = resource._middlewareMethods || [
+        'get', 'list', 'listIds', 'getAll', 'count', 'page',
+        'insert', 'update', 'delete', 'deleteMany', 'exists', 'getMany',
+        'content', 'hasContent', 'query', 'getFromPartition', 'setContent',
+        'deleteContent', 'replace', 'patch'
+      ];
+
+      for (const method of methods) {
+        for (const middleware of middlewares) {
+          if (typeof middleware === 'function') {
+            resource.useMiddleware(method, middleware);
+          }
+        }
+      }
+      return;
     }
 
-    return this.resources[name];
+    // Format 2: Object with method-specific middlewares
+    if (typeof middlewares === 'object' && middlewares !== null) {
+      for (const [method, fns] of Object.entries(middlewares)) {
+        if (method === '*') {
+          // Apply to all methods
+          const methods = resource._middlewareMethods || [
+            'get', 'list', 'listIds', 'getAll', 'count', 'page',
+            'insert', 'update', 'delete', 'deleteMany', 'exists', 'getMany',
+            'content', 'hasContent', 'query', 'getFromPartition', 'setContent',
+            'deleteContent', 'replace', 'patch'
+          ];
+
+          const middlewareArray = Array.isArray(fns) ? fns : [fns];
+          for (const targetMethod of methods) {
+            for (const middleware of middlewareArray) {
+              if (typeof middleware === 'function') {
+                resource.useMiddleware(targetMethod, middleware);
+              }
+            }
+          }
+        } else {
+          // Apply to specific method
+          const middlewareArray = Array.isArray(fns) ? fns : [fns];
+          for (const middleware of middlewareArray) {
+            if (typeof middleware === 'function') {
+              resource.useMiddleware(method, middleware);
+            }
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -1049,14 +1192,14 @@ export class Database extends EventEmitter {
    * @returns {Resource} Resource instance
    */
   async getResource(name) {
-    if (!this.resources[name]) {
+    if (!this._resourcesMap[name]) {
       throw new ResourceNotFound({
         bucket: this.client.config.bucket,
         resourceName: name,
         id: name
       });
     }
-    return this.resources[name];
+    return this._resourcesMap[name];
   }
 
   /**
@@ -1120,7 +1263,7 @@ export class Database extends EventEmitter {
           });
         }
         // Instead of reassigning, clear in place
-        Object.keys(this.resources).forEach(k => delete this.resources[k]);
+        Object.keys(this.resources).forEach(k => delete this._resourcesMap[k]);
       }
 
       // 3. Remove all listeners from the client

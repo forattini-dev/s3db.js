@@ -50,7 +50,7 @@ const db = new S3db({
 await db.connect();
 
 // 2. Use your database normally
-const users = db.resource('users');
+const users = db.resources.users;
 await users.insert({ name: 'John', email: 'john@example.com' });
 await users.list();
 
@@ -145,7 +145,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 // Use your database normally
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.insert({ name: 'John', email: 'john@example.com' });
 await users.list();
 
@@ -315,7 +315,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-const products = s3db.resource('products');
+const products = s3db.resources.products;
 
 // Perform operations and track costs
 await products.insert({ name: 'Widget A', price: 19.99 });
@@ -406,7 +406,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 const monitor = new CostMonitor(s3db);
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 
 // Bulk operations with cost tracking
 monitor.checkpoint('Initial state');
@@ -461,7 +461,7 @@ function checkCostThresholds(costs) {
 }
 
 // Perform operations with monitoring
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.insertMany([
   { name: 'User 1', email: 'user1@example.com' },
   { name: 'User 2', email: 'user2@example.com' }
@@ -502,7 +502,7 @@ await CostsPlugin.setup(s3db, {
   considerFreeTier: true  // Enable 100GB/month free data transfer OUT
 });
 
-const products = s3db.resource('products');
+const products = s3db.resources.products;
 
 // Perform operations that trigger storage and data transfer costs
 for (let i = 0; i < 100; i++) {
@@ -1047,7 +1047,7 @@ function exportCostData(s3db, format = 'json') {
 ```javascript
 // Compare different approaches and their costs
 async function compareApproaches(s3db) {
-  const users = s3db.resource('users');
+  const users = s3db.resources.users;
   
   // Reset cost tracking
   Object.keys(s3db.client.costs.requests).forEach(key => {

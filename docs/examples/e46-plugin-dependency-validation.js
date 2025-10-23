@@ -51,7 +51,7 @@ async function example2_checkWithoutThrowing() {
     throwOnError: false  // Don't throw, just return validation result
   });
 
-  console.log('Valid:', result.valid);
+  console.log('Valid:', result.isValid);
   console.log('Missing:', result.missing);
   console.log('Incompatible:', result.incompatible);
   console.log('\nMessages:');
@@ -77,10 +77,10 @@ async function example3_checkMultiplePlugins() {
 
   for (const [pluginId, result] of results.entries()) {
     const pluginDef = PLUGIN_DEPENDENCIES[pluginId];
-    const status = result.valid ? '✅' : '❌';
+    const status = result.isValid ? '✅' : '❌';
     console.log(`${status} ${pluginDef.name}`);
 
-    if (!result.valid) {
+    if (!result.isValid) {
       console.log(`   Missing: ${result.missing.join(', ')}`);
       console.log(`   Incompatible: ${result.incompatible.join(', ')}`);
     }
@@ -110,7 +110,7 @@ async function example5_skipVersionCheck() {
     checkVersions: false  // Only check if package is installed, ignore version
   });
 
-  console.log('Plugin installed:', result.valid || result.missing.length === 0);
+  console.log('Plugin installed:', result.isValid || result.missing.length === 0);
   result.messages.forEach(msg => console.log(msg));
 }
 
@@ -127,7 +127,7 @@ async function example6_conditionalPluginLoading() {
   for (const pluginId of Object.keys(PLUGIN_DEPENDENCIES)) {
     const result = await requirePluginDependency(pluginId, { throwOnError: false });
 
-    if (result.valid) {
+    if (result.isValid) {
       availablePlugins.push(pluginId);
       console.log(`✅ ${PLUGIN_DEPENDENCIES[pluginId].name} is available`);
     } else {

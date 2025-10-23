@@ -237,7 +237,7 @@ describe('Database Constructor and Edge Cases', () => {
     expect(db.resources).toEqual({});
     expect(db.verbose).toBe(false);
     expect(db.parallelism).toBe(10);
-    expect(db.plugins).toEqual([]);
+    expect(db.pluginList).toEqual([]);
     expect(db.passphrase).toBe('secret');
   });
 
@@ -256,7 +256,7 @@ describe('Database Constructor and Edge Cases', () => {
 
     expect(db.verbose).toBe(true);
     expect(db.parallelism).toBe(5);
-    expect(db.plugins).toEqual([mockPlugin]);
+    expect(db.pluginList).toEqual([mockPlugin]);
     expect(db.cache).toEqual({ type: 'memory' });
     expect(db.passphrase).toBe('custom-secret');
     expect(db.client).toBe(mockClient);
@@ -673,8 +673,8 @@ describe('Database Resource Methods', () => {
     database = await createDatabaseForTest('suite=classes/database-methods');
   });
 
-  test('should reject non-existent resource', async () => {
-    await expect(database.resource('non-existent')).rejects.toBe('resource non-existent does not exist');
+  test('should return undefined for non-existent resource', () => {
+    expect(database.resources['non-existent']).toBeUndefined();
   });
 
   test('should return existing resource', async () => {
@@ -683,7 +683,7 @@ describe('Database Resource Methods', () => {
       attributes: { name: 'string|required' }
     });
 
-    const resource = await database.resource('test-resource');
+    const resource = database.resources['test-resource'];
     expect(resource.name).toBe('test-resource');
   });
 

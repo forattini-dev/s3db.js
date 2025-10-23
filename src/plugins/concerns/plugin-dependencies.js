@@ -16,81 +16,97 @@
 export const PLUGIN_DEPENDENCIES = {
   'postgresql-replicator': {
     name: 'PostgreSQL Replicator',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md',
     dependencies: {
       'pg': {
         version: '^8.0.0',
         description: 'PostgreSQL client for Node.js',
-        installCommand: 'pnpm add pg'
+        installCommand: 'pnpm add pg',
+        npmUrl: 'https://www.npmjs.com/package/pg'
       }
     }
   },
   'bigquery-replicator': {
     name: 'BigQuery Replicator',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md',
     dependencies: {
       '@google-cloud/bigquery': {
         version: '^7.0.0',
         description: 'Google Cloud BigQuery SDK',
-        installCommand: 'pnpm add @google-cloud/bigquery'
+        installCommand: 'pnpm add @google-cloud/bigquery',
+        npmUrl: 'https://www.npmjs.com/package/@google-cloud/bigquery'
       }
     }
   },
   'sqs-replicator': {
     name: 'SQS Replicator',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md',
     dependencies: {
       '@aws-sdk/client-sqs': {
         version: '^3.0.0',
         description: 'AWS SDK for SQS',
-        installCommand: 'pnpm add @aws-sdk/client-sqs'
+        installCommand: 'pnpm add @aws-sdk/client-sqs',
+        npmUrl: 'https://www.npmjs.com/package/@aws-sdk/client-sqs'
       }
     }
   },
   'sqs-consumer': {
     name: 'SQS Queue Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
     dependencies: {
       '@aws-sdk/client-sqs': {
         version: '^3.0.0',
         description: 'AWS SDK for SQS',
-        installCommand: 'pnpm add @aws-sdk/client-sqs'
+        installCommand: 'pnpm add @aws-sdk/client-sqs',
+        npmUrl: 'https://www.npmjs.com/package/@aws-sdk/client-sqs'
       }
     }
   },
   'rabbitmq-consumer': {
     name: 'RabbitMQ Queue Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
     dependencies: {
       'amqplib': {
         version: '^0.10.0',
         description: 'AMQP 0-9-1 library for RabbitMQ',
-        installCommand: 'pnpm add amqplib'
+        installCommand: 'pnpm add amqplib',
+        npmUrl: 'https://www.npmjs.com/package/amqplib'
       }
     }
   },
   'tfstate-plugin': {
-    name: 'Terraform State Plugin',
+    name: 'Tfstate Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/tfstate.md',
     dependencies: {
       'node-cron': {
         version: '^4.0.0',
         description: 'Cron job scheduler for auto-sync functionality',
-        installCommand: 'pnpm add node-cron'
+        installCommand: 'pnpm add node-cron',
+        npmUrl: 'https://www.npmjs.com/package/node-cron'
       }
     }
   },
   'api-plugin': {
     name: 'API Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/api.md',
     dependencies: {
       'hono': {
         version: '^4.0.0',
         description: 'Ultra-light HTTP server framework',
-        installCommand: 'pnpm add hono'
+        installCommand: 'pnpm add hono',
+        npmUrl: 'https://www.npmjs.com/package/hono'
       },
       '@hono/node-server': {
         version: '^1.0.0',
         description: 'Node.js adapter for Hono',
-        installCommand: 'pnpm add @hono/node-server'
+        installCommand: 'pnpm add @hono/node-server',
+        npmUrl: 'https://www.npmjs.com/package/@hono/node-server'
       },
       '@hono/swagger-ui': {
         version: '^0.4.0',
         description: 'Swagger UI integration for Hono',
-        installCommand: 'pnpm add @hono/swagger-ui'
+        installCommand: 'pnpm add @hono/swagger-ui',
+        npmUrl: 'https://www.npmjs.com/package/@hono/swagger-ui'
       }
     }
   }
@@ -229,22 +245,60 @@ export async function requirePluginDependency(pluginId, options = {}) {
 
   // Throw comprehensive error if validation failed
   if (!valid && throwOnError) {
+    const depCount = Object.keys(pluginDef.dependencies).length;
+    const missingCount = missing.length;
+    const incompatCount = incompatible.length;
+
     const errorMsg = [
-      `\n${pluginDef.name} - Missing dependencies detected!\n`,
-      `Plugin ID: ${pluginId}`,
       '',
+      '╔══════════════════════════════════════════════════════════════════════╗',
+      `║  ❌ ${pluginDef.name} - Missing Dependencies  ║`,
+      '╚══════════════════════════════════════════════════════════════════════╝',
+      '',
+      `📦 Plugin: ${pluginId}`,
+      `📊 Status: ${depCount - missingCount - incompatCount}/${depCount} dependencies satisfied`,
+      '',
+      '🔍 Dependency Status:',
+      '─────────────────────────────────────────────────────────────────────',
       ...messages,
       '',
-      'Quick fix - Run all install commands:',
-      Object.values(pluginDef.dependencies)
-        .map(dep => `  ${dep.installCommand}`)
-        .join('\n'),
+      '🚀 Quick Fix - Install Missing Dependencies:',
+      '─────────────────────────────────────────────────────────────────────',
       '',
-      'Or install all peer dependencies at once:',
-      `  pnpm add ${Object.keys(pluginDef.dependencies).join(' ')}`
+      '  Option 1: Install individually',
+      ...Object.entries(pluginDef.dependencies)
+        .filter(([pkg]) => missing.includes(pkg) || incompatible.includes(pkg))
+        .map(([pkg, info]) => `    ${info.installCommand}`),
+      '',
+      '  Option 2: Install all at once',
+      `    pnpm add ${Object.keys(pluginDef.dependencies).join(' ')}`,
+      '',
+      '📚 Documentation:',
+      `    ${pluginDef.docsUrl}`,
+      '',
+      '💡 Troubleshooting:',
+      '  • If packages are installed but not detected, try:',
+      '    1. Delete node_modules and reinstall: rm -rf node_modules && pnpm install',
+      '    2. Check Node.js version: node --version (requires Node 18+)',
+      '    3. Verify pnpm version: pnpm --version (requires pnpm 8+)',
+      '',
+      '  • Still having issues? Check:',
+      '    - Package.json has correct dependencies listed',
+      '    - No conflicting versions in pnpm-lock.yaml',
+      '    - File permissions (especially in node_modules/)',
+      '',
+      '═══════════════════════════════════════════════════════════════════════',
+      ''
     ].join('\n');
 
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg);
+    error.pluginId = pluginId;
+    error.pluginName = pluginDef.name;
+    error.missing = missing;
+    error.incompatible = incompatible;
+    error.docsUrl = pluginDef.docsUrl;
+
+    throw error;
   }
 
   return { valid, missing, incompatible, messages };

@@ -94,7 +94,7 @@ async function demonstratePersistHooks() {
   });
 
   await db2.connect();
-  const restoredUsersResource = db2.resource('users');
+  const restoredUsersResource = db2.resources.users;
 
   console.log('\n4. Testing restored hooks with invalid email...');
   validationLog.length = 0;

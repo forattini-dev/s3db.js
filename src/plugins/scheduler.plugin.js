@@ -30,11 +30,11 @@ import { SchedulerError } from "./scheduler.errors.js";
  *       schedule: '0 3 * * *',
  *       description: 'Clean up expired records',
  *       action: async (database, context) => {
- *         const expired = await this.database.resource('sessions')
+ *         const expired = await this.database.resources['sessions')
  *           .list({ where: { expiresAt: { $lt: new Date() } } });
  *         
  *         for (const record of expired) {
- *           await this.database.resource('sessions').delete(record.id);
+ *           await this.database.resources['sessions').delete(record.id);
  *         }
  *         
  *         return { deleted: expired.length };
@@ -49,8 +49,8 @@ import { SchedulerError } from "./scheduler.errors.js";
  *       schedule: '0 9 * * MON',
  *       description: 'Generate weekly analytics report',
  *       action: async (database, context) => {
- *         const users = await this.database.resource('users').count();
- *         const orders = await this.database.resource('orders').count({
+ *         const users = await this.database.resources['users').count();
+ *         const orders = await this.database.resources['orders').count({
  *           where: { 
  *             createdAt: { 
  *               $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) 
@@ -65,7 +65,7 @@ import { SchedulerError } from "./scheduler.errors.js";
  *           createdAt: new Date().toISOString()
  *         };
  *         
- *         await this.database.resource('reports').insert(report);
+ *         await this.database.resources['reports').insert(report);
  *         return report;
  *       }
  *     },
@@ -107,7 +107,7 @@ import { SchedulerError } from "./scheduler.errors.js";
  *         const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
  *         
  *         // Aggregate metrics from the last hour
- *         const events = await this.database.resource('events').list({
+ *         const events = await this.database.resources['events').list({
  *           where: { 
  *             timestamp: { 
  *               $gte: hourAgo.getTime(),
@@ -121,7 +121,7 @@ import { SchedulerError } from "./scheduler.errors.js";
  *           return acc;
  *         }, {});
  *         
- *         await this.database.resource('hourly_metrics').insert({
+ *         await this.database.resources['hourly_metrics').insert({
  *           hour: hourAgo.toISOString().slice(0, 13),
  *           metrics: aggregated,
  *           total: events.length,
@@ -577,7 +577,7 @@ export class SchedulerPlugin extends Plugin {
 
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {
     const [ok, err] = await tryFn(() => 
-      this.database.resource(this.config.jobHistoryResource).insert({
+      this.database.resources[this.config.jobHistoryResource].insert({
         id: executionId,
         jobName,
         status,
@@ -741,7 +741,7 @@ export class SchedulerPlugin extends Plugin {
 
     // Use query() to leverage partitions instead of list() + filter
     const [ok, err, history] = await tryFn(() =>
-      this.database.resource(this.config.jobHistoryResource).query(queryParams)
+      this.database.resources[this.config.jobHistoryResource].query(queryParams)
     );
 
     if (!ok) {
@@ -914,10 +914,8 @@ export class SchedulerPlugin extends Plugin {
     if (this._isTestEnvironment()) {
       this.activeJobs.clear();
     }
-  }
 
-  async cleanup() {
-    await this.stop();
+    // Cleanup resources
     this.jobs.clear();
     this.statistics.clear();
     this.activeJobs.clear();

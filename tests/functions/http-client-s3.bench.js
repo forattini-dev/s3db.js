@@ -76,7 +76,7 @@ async function benchmarkBasicOperations(db, configName, operations = 10) {
       }
     });
   }
-  const resource = db.resource('basic-benchmark');
+  const resource = db.resources.basic-benchmark;
   
   // Preparar dados de teste
   const testData = Array.from({ length: operations }, (_, i) => ({
@@ -175,7 +175,7 @@ async function benchmarkBulkOperations(db, configName) {
       }
     });
   }
-  const resource = db.resource('bulk-benchmark');
+  const resource = db.resources.bulk-benchmark;
   
   const totalElements = 500; // Aumentado para 500 elementos
   const pageSize = 50; // Páginas de 50 elementos

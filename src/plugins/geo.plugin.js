@@ -127,7 +127,7 @@ class GeoPlugin extends Plugin {
       return;
     }
 
-    const resource = this.database.resource(resourceName);
+    const resource = this.database.resources[resourceName];
     if (!resource || typeof resource.addHook !== 'function') {
       if (this.verbose) {
         console.warn(`[GeoPlugin] Resource "${resourceName}" not found or invalid`);
@@ -325,13 +325,12 @@ class GeoPlugin extends Plugin {
      * Find nearby locations within radius
      * Automatically selects optimal zoom level if multi-zoom enabled
      */
-    resource.findNearby = async function({ lat, lon, lng, radius = 10, limit = 100 }) {
-      // Support both 'lon' and 'lng' for backward compatibility
-      const longitude = lon !== undefined ? lon : lng;
-
-      if (lat === undefined || longitude === undefined) {
+    resource.findNearby = async function({ lat, lon, radius = 10, limit = 100 }) {
+      if (lat === undefined || lon === undefined) {
         throw new Error('lat and lon are required for findNearby');
       }
+
+      const longitude = lon; // Alias for internal use
 
       let allRecords = [];
 

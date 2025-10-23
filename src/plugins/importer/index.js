@@ -739,7 +739,7 @@ export class ImporterPlugin extends Plugin {
   async onInstall() {
     // Get resource - database.resource() returns a rejected Promise if not found
     try {
-      this.resource = this.database.resource(this.resourceName);
+      this.resource = this.database.resources[this.resourceName];
       // If resource() returns a Promise, await it
       if (this.resource && typeof this.resource.then === 'function') {
         this.resource = await this.resource;

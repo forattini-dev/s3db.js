@@ -27,7 +27,7 @@ describe('CLI Backup & Restore Commands', () => {
 
   afterEach(async () => {
     if (backupPlugin) {
-      await backupPlugin.cleanup();
+      await backupPlugin.stop();
     }
     if (database) {
       await database.disconnect();

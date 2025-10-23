@@ -83,7 +83,7 @@ describe('Resource Journey - Real Integration Tests', () => {
       ageGroup: 'adult'
     };
 
-    const validationResult = await resource.validate(validData);
+    const validationResult = await resource.validate(validData, { includeId: true });
     expect(validationResult.isValid).toBe(true);
     expect(validationResult.data).toBeDefined();
 
@@ -187,7 +187,7 @@ describe('Resource Journey - Real Integration Tests', () => {
       tags: ['computer', 'portable']
     };
 
-    const validationResult = await resource.validate(validData);
+    const validationResult = await resource.validate(validData, { includeId: true });
     expect(validationResult.isValid).toBe(true);
 
     // 7. Test real insert with updated attributes
@@ -475,7 +475,7 @@ describe('Resource Journey - Real Integration Tests', () => {
       metadata: { key: 'value' }
     };
 
-    const validationResult = await resource.validate(testData);
+    const validationResult = await resource.validate(testData, { includeId: true });
     expect(validationResult.isValid).toBe(true);
 
     // 4. Test real insert with complex data

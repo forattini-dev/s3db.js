@@ -284,7 +284,7 @@ class TTLPlugin extends Plugin {
       return;
     }
 
-    const resource = this.database.resource(resourceName);
+    const resource = this.database.resources[resourceName];
 
     // Verify methods exist before adding middleware
     if (typeof resource.insert !== 'function' || typeof resource.delete !== 'function') {
@@ -520,7 +520,7 @@ class TTLPlugin extends Plugin {
         return;
       }
 
-      const resource = this.database.resource(entry.resourceName);
+      const resource = this.database.resources[entry.resourceName];
 
       // Get the actual record
       const [ok, err, record] = await tryFn(() => resource.get(entry.recordId));
@@ -612,7 +612,7 @@ class TTLPlugin extends Plugin {
       throw new Error(`Archive resource "${config.archiveResource}" not found`);
     }
 
-    const archiveResource = this.database.resource(config.archiveResource);
+    const archiveResource = this.database.resources[config.archiveResource];
 
     // Copy only user data fields (not system fields like _etag, _lastModified, etc.)
     const archiveData = {};

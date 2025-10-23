@@ -286,9 +286,7 @@ export async function consolidateRecord(
 
         if (!hasSetInApplied) {
           // No 'set' operation in applied transactions means we're missing the base value
-          // This can only happen if:
-          // 1. Record had an initial value before first transaction
-          // 2. First consolidation didn't create an anchor transaction (legacy behavior)
+          // This can happen if record had an initial value before first transaction
           // Solution: Get the current record value and create an anchor transaction now
           const recordValue = recordExists[config.field] || 0;
 
@@ -525,7 +523,6 @@ export async function consolidateRecord(
       updateResult = result[2];
     }
 
-    // For backward compatibility, return the value of the main field
     const consolidatedValue = consolidatedValues[config.field] ||
                              (record ? lodash.get(record, config.field, 0) : 0);
 
@@ -610,13 +607,10 @@ export async function consolidateRecord(
 
       const { results, errors } = await PromisePool
         .for(transactionsToUpdate)
-        .withConcurrency(markAppliedConcurrency) // ✅ Configurável e maior!
+        .withConcurrency(markAppliedConcurrency)
         .process(async (txn) => {
-          // ✅ FIX BUG #3: Ensure cohort fields exist before marking as applied
-          // This handles legacy transactions missing cohortHour, cohortDate, etc.
           const txnWithCohorts = ensureCohortHour(txn, config.cohort.timezone, false);
 
-          // Build update data with applied flag
           const updateData = { applied: true };
 
           // Add missing cohort fields if they were calculated
@@ -631,11 +625,6 @@ export async function consolidateRecord(
           }
           if (txnWithCohorts.cohortMonth && !txn.cohortMonth) {
             updateData.cohortMonth = txnWithCohorts.cohortMonth;
-          }
-
-          // Handle null value field (legacy data might have null)
-          if (txn.value === null || txn.value === undefined) {
-            updateData.value = 1; // Default to 1 for backward compatibility
           }
 
           const [ok, err] = await tryFn(() =>

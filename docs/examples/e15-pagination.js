@@ -9,15 +9,21 @@ const config = {
 
 async function paginationDebugExample() {
   console.log("Testing pagination with debug info...");
-  
+
   const db = await setupDatabase();
-  const users = db.resource("users", {
-    attributes: {
-      name: "string",
-      email: "string",
-      age: "number|optional"
-    }
-  });
+
+  // Create resource if it doesn't exist
+  if (!db.resources.users) {
+    await db.createResource({
+      name: "users",
+      attributes: {
+        name: "string",
+        email: "string",
+        age: "number|optional"
+      }
+    });
+  }
+  const users = db.resources.users;
 
   try {
     // Test page method with debug info
