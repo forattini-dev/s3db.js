@@ -1,1165 +1,289 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+AI guidance for working with s3db.js codebase.
 
-## Quick Reference Tables
+## Core Reference
 
-### Core Classes & Methods
+### Classes & Methods
 
-| Term | Location | Usage Example | Notes |
-|------|----------|---------------|-------|
-| `Database` | `src/database.class.js` | `new Database({ bucketName, region, credentials })` | Main entry point |
-| `Resource` | `src/resource.class.js` | `await db.createResource({ name, attributes })` | Represents a data collection |
-| `Client` | `src/client.class.js` | `new Client({ connectionString })` | Low-level S3 operations |
-| `Schema` | `src/schema.class.js` | `new Schema({ attributes })` | Field validation & mapping |
-| `insert()` | `resource.class.js:717` | `await resource.insert({ name: 'John' })` | Create new record |
-| `update()` | `resource.class.js:884` | `await resource.update(id, { name: 'Jane' })` | Update existing (GET + merge + PUT) |
-| `patch()` | `resource.class.js:1282` | `await resource.patch(id, { name: 'Jane' })` | Optimized partial update (HEAD + COPY or fallback to update) |
-| `replace()` | `resource.class.js:1432` | `await resource.replace(id, fullData)` | Full replacement (PUT only, no GET) |
-| `get()` | `resource.class.js:1144` | `await resource.get(id)` | Fetch single record |
-| `list()` | `resource.class.js:1384` | `await resource.list({ limit: 100 })` | Fetch multiple records |
-| `query()` | `resource.class.js:1616` | `await resource.query({ status: 'active' })` | Filter records |
-| `count()` | `resource.class.js:1507` | `await resource.count({ partition: 'byRegion' })` | Count records |
+| Term | Location | Usage | Notes |
+|------|----------|-------|-------|
+| `Database` | `src/database.class.js` | `new Database({ bucketName, region })` | Main entry |
+| `Resource` | `src/resource.class.js` | `await db.createResource({ name, attributes })` | Data collection |
+| `insert()` | `resource.class.js:717` | `await resource.insert({ name: 'John' })` | Create |
+| `update()` | `resource.class.js:884` | `await resource.update(id, { name: 'Jane' })` | GET+PUT merge |
+| `patch()` | `resource.class.js:1282` | `await resource.patch(id, { name: 'Jane' })` | HEAD+COPY (40-60% faster) |
+| `replace()` | `resource.class.js:1432` | `await resource.replace(id, fullData)` | PUT only (30-40% faster) |
+| `get()` | `resource.class.js:1144` | `await resource.get(id)` | Fetch |
+| `list()` | `resource.class.js:1384` | `await resource.list({ limit: 100 })` | Fetch multiple |
+| `query()` | `resource.class.js:1616` | `await resource.query({ status: 'active' })` | Filter |
 
-### Behaviors (2KB Metadata Handling)
+### Behaviors (2KB Metadata)
 
-| Behavior | File | When to Use | Example |
-|----------|------|-------------|---------|
-| `body-overflow` | `src/behaviors/body-overflow.js` | Default, automatic overflow | `behavior: 'body-overflow'` |
-| `body-only` | `src/behaviors/body-only.js` | Large data (>2KB), max 5TB | `behavior: 'body-only'` |
-| `truncate-data` | `src/behaviors/truncate-data.js` | Accept data loss for speed | `behavior: 'truncate-data'` |
-| `enforce-limits` | `src/behaviors/enforce-limits.js` | Production, strict validation | `behavior: 'enforce-limits'` |
-| `user-managed` | `src/behaviors/user-managed.js` | Custom handling via events | `behavior: 'user-managed'` |
+| Behavior | Use Case |
+|----------|----------|
+| `body-overflow` | Default, auto overflow to body |
+| `body-only` | Large data (>2KB) |
+| `truncate-data` | Accept data loss for speed |
+| `enforce-limits` | Production, strict validation |
+| `user-managed` | Custom handling via events |
+
+### Field Types
+
+| Type | Example | Notes |
+|------|---------|-------|
+| `string` | `name: 'string\|required'` | Basic string |
+| `number` | `age: 'number\|min:0'` | Integer/float |
+| `secret` | `password: 'secret\|required'` | AES-256-GCM encrypted |
+| `embedding:N` | `vector: 'embedding:1536'` | 77% compression |
+| `ip4` | `ip: 'ip4'` | 47% compression |
+| `ip6` | `ip: 'ip6'` | 44% compression |
+| `array` | `tags: 'array\|items:string'` | Arrays |
+| `object` | `profile: { type: 'object', props: {...} }` | Nested |
 
 ### Partitioning
 
-| Term | Location | Usage Example | Notes |
-|------|----------|---------------|-------|
-| Partition config | Resource options | `partitions: { byRegion: { fields: { region: 'string' } } }` | Define partitions |
-| `getFromPartition()` | `resource.class.js:2297` | `await resource.getFromPartition({ id, partitionName, partitionValues })` | Get from specific partition |
-| `listPartition()` | `resource.class.js:1419` | `await resource.listPartition({ partition: 'byRegion', partitionValues: { region: 'US' } })` | List partition records |
-| Async partitions | Resource options | `asyncPartitions: true` | 70-100% faster writes (default) |
-| `findOrphanedPartitions()` | `resource.class.js:550` | `const orphaned = resource.findOrphanedPartitions()` | Detect missing field refs |
-| `removeOrphanedPartitions()` | `resource.class.js:596` | `resource.removeOrphanedPartitions({ dryRun: true })` | Clean up broken partitions |
+| Function | Location | Usage |
+|----------|----------|-------|
+| Config | Resource options | `partitions: { byRegion: { fields: { region: 'string' } } }` |
+| `getFromPartition()` | `resource.class.js:2297` | Get from specific partition |
+| `listPartition()` | `resource.class.js:1419` | List partition records |
+| `findOrphanedPartitions()` | `resource.class.js:550` | Detect missing field refs |
+| `removeOrphanedPartitions()` | `resource.class.js:596` | Clean up broken partitions |
+
+**Orphaned Partitions**: When partition references deleted field → blocks ALL operations. Fix:
+```javascript
+const resource = await db.getResource('users', { strictValidation: false });
+resource.removeOrphanedPartitions();
+await db.uploadMetadataFile();
+```
 
 ### Plugins
 
-| Plugin | File | Usage Example | Purpose |
-|--------|------|---------------|---------|
-| `CachePlugin` | `src/plugins/cache.plugin.js` | `db.usePlugin(new CachePlugin({ driver: 'memory', ttl: 3600 }))` | Cache reads (memory/S3/filesystem) |
-| `AuditPlugin` | `src/plugins/audit.plugin.js` | `db.usePlugin(new AuditPlugin({ trackOperations: ['insert', 'update'] }))` | Track all changes |
-| `ReplicatorPlugin` | `src/plugins/replicator.plugin.js` | `db.usePlugin(new ReplicatorPlugin({ replicators: [...] }))` | Sync to PostgreSQL/BigQuery/SQS |
-| `MetricsPlugin` | `src/plugins/metrics.plugin.js` | `db.usePlugin(new MetricsPlugin({ trackLatency: true }))` | Performance monitoring |
-| `CostsPlugin` | `src/plugins/costs.plugin.js` | `db.usePlugin(new CostsPlugin())` | AWS cost tracking |
-| `EventualConsistencyPlugin` | `src/plugins/eventual-consistency/` | `db.usePlugin(new EventualConsistencyPlugin({ resources: { users: ['balance'] } }))` | Eventually consistent counters |
+| Plugin | Purpose |
+|--------|---------|
+| `TTLPlugin` | Auto-cleanup expired records (O(1) partition-based) |
+| `CachePlugin` | Cache reads (memory/S3/filesystem) |
+| `AuditPlugin` | Track all changes |
+| `ReplicatorPlugin` | Sync to PostgreSQL/BigQuery/SQS |
+| `MetricsPlugin` | Performance monitoring |
+| `CostsPlugin` | AWS cost tracking |
+| `EventualConsistencyPlugin` | Eventually consistent counters |
 
-### Field Types & Validation
+**TTL v2 Architecture**: Uses plugin storage with partition on `expiresAtCohort` for O(1) cleanup. Auto-detects granularity (minute/hour/day/week) and runs multiple intervals. Zero full scans.
 
-| Type | Notation | Example | Notes |
-|------|----------|---------|-------|
-| String | `string` | `name: 'string\|required'` | Basic string |
-| Number | `number` | `age: 'number\|min:0\|max:120'` | Integer or float |
-| Boolean | `boolean` | `active: 'boolean'` | true/false |
-| Secret | `secret` | `password: 'secret\|required'` | Auto-encrypted (AES-256-GCM) |
-| Embedding | `embedding:N` | `vector: 'embedding:1536'` | Vector embeddings, 77% compression |
-| IPv4 Address | `ip4` | `ipAddress: 'ip4'` | IPv4 addresses, 47% compression |
-| IPv6 Address | `ip6` | `ipAddress: 'ip6'` | IPv6 addresses, 44% compression |
-| Array | `array` | `tags: 'array\|items:string'` | Arrays of any type |
-| Object | `object` | `profile: { type: 'object', props: {...} }` | Nested objects |
-| JSON | `json` | `metadata: 'json'` | Free-form JSON |
+**Performance**: Use `patch()` for metadata-only behaviors (`enforce-limits`, `truncate-data`) in plugin internal resources for 40-60% faster updates.
 
-### Utilities & Helpers
+### Utilities
 
-| Function | Location | Usage Example | Purpose |
-|----------|----------|---------------|---------|
-| `tryFn()` | `src/concerns/try-fn.js` | `const [ok, err, data] = await tryFn(() => ...)` | Safe async error handling |
-| `calculateTotalSize()` | `src/concerns/calculator.js:125` | `const bytes = calculateTotalSize(mappedObject)` | UTF-8 byte calculation |
-| `encrypt()` / `decrypt()` | `src/concerns/crypto.js` | `const encrypted = await encrypt(data, passphrase)` | AES-256-GCM encryption |
-| `mapAwsError()` | `src/errors.js:190` | `const mapped = mapAwsError(err, { bucket, key })` | AWS error translator |
-| `idGenerator()` | `src/concerns/id.js` | `const id = idGenerator()` | Generate nanoid (22 chars) |
-| Base62 encode/decode | `src/concerns/base62.js` | `const encoded = encode(12345)` | Number compression |
-| `encodeIPv4()` / `decodeIPv4()` | `src/concerns/ip.js` | `const encoded = encodeIPv4('192.168.1.1')` | IPv4 binary encoding (47% savings) |
-| `encodeIPv6()` / `decodeIPv6()` | `src/concerns/ip.js` | `const encoded = encodeIPv6('2001:db8::1')` | IPv6 binary encoding (44% savings) |
-| `isValidIPv4()` / `isValidIPv6()` | `src/concerns/ip.js` | `const valid = isValidIPv4('192.168.1.1')` | IP address validation |
-| `requirePluginDependency()` | `src/plugins/concerns/plugin-dependencies.js` | `await requirePluginDependency('postgresql-replicator')` | Validate plugin dependencies at runtime |
+| Function | Location | Purpose |
+|----------|----------|---------|
+| `tryFn()` | `src/concerns/try-fn.js` | `[ok, err, data]` error handling |
+| `calculateTotalSize()` | `src/concerns/calculator.js:125` | UTF-8 byte count |
+| `encrypt()/decrypt()` | `src/concerns/crypto.js` | AES-256-GCM |
+| `mapAwsError()` | `src/errors.js:190` | AWS error translator |
+| `idGenerator()` | `src/concerns/id.js` | nanoid (22 chars) |
+| `requirePluginDependency()` | `src/plugins/concerns/plugin-dependencies.js` | Validate plugin deps |
 
 ### Streams
 
-| Class | File | Usage Example | Purpose |
-|-------|------|---------------|---------|
-| `ResourceReader` | `src/stream/resource-reader.class.js` | `new ResourceReader({ resource, batchSize: 100 })` | Read records as stream |
-| `ResourceWriter` | `src/stream/resource-writer.class.js` | `new ResourceWriter({ resource })` | Write records via stream |
-| `ResourceIdsReader` | `src/stream/resource-ids-reader.class.js` | `new ResourceIdsReader({ resource })` | Stream record IDs only |
+| Class | File | Purpose |
+|-------|------|---------|
+| `ResourceReader` | `src/stream/resource-reader.class.js` | Read as stream |
+| `ResourceWriter` | `src/stream/resource-writer.class.js` | Write via stream |
+| `ResourceIdsReader` | `src/stream/resource-ids-reader.class.js` | Stream IDs only |
 
-### Testing & Examples
+## Critical Concepts
 
-| Category | Location | Examples | Notes |
-|----------|----------|----------|-------|
-| Unit tests | `tests/` | `pnpm test:js` | Jest with ESM modules |
-| TypeScript tests | `tests/typescript/` | `pnpm test:ts` | Type validation |
-| Plugin tests | `tests/plugins/` | `pnpm test:plugins` | All plugin tests |
-| Basic examples | `docs/examples/e01-e07` | Bulk insert, streams, CSV export | CRUD operations |
-| Advanced examples | `docs/examples/e08-e17` | Partitions, versioning, hooks | Complex features |
-| Plugin examples | `docs/examples/e18-e33` | Replicators, caching, queue consumers | Plugin usage |
-| Vector examples | `docs/examples/e41-e43` | RAG chatbot, embeddings | AI/ML integration |
-| Maintenance | `docs/examples/e44` | Orphaned partitions recovery | Data recovery |
-| Plugin dependencies | `docs/examples/e46` | Validate plugin dependencies | Dependency management |
+### S3 Metadata Limit (2KB)
+- **Problem**: S3 metadata max 2047 bytes
+- **Solution**: Behaviors handle overflow automatically
+- **Calculation**: `src/concerns/calculator.js` - precise UTF-8 byte counting
 
-### Error Classes
-
-| Error | File | When Thrown | Recovery |
-|-------|------|-------------|----------|
-| `PartitionError` | `src/errors.js:93` | Partition field missing | Use `findOrphanedPartitions()` |
-| `ValidationError` | `src/errors.js:71` | Schema validation fails | Check attribute rules |
-| `ResourceNotFound` | `src/errors.js:102` | Resource doesn't exist | Create resource first |
-| `NoSuchKey` | `src/errors.js:128` | S3 object not found | Check ID exists |
-| `NoSuchBucket` | `src/errors.js:137` | S3 bucket missing | Create bucket or check name |
-| `CryptoError` | `src/errors.js:154` | Encryption/decryption fails | Check passphrase |
-
-### Configuration Options
-
-| Option | Level | Example | Default | Notes |
-|--------|-------|---------|---------|-------|
-| `behavior` | Resource | `behavior: 'body-overflow'` | `'body-overflow'` | Metadata handling strategy |
-| `timestamps` | Resource | `timestamps: true` | `false` | Add createdAt/updatedAt |
-| `paranoid` | Resource | `paranoid: true` | `true` | Prevent destructive deletes |
-| `strictValidation` | Resource | `strictValidation: false` | `true` | Partition field validation |
-| `asyncPartitions` | Resource | `asyncPartitions: true` | `true` | Async partition indexing |
-| `parallelism` | Database/Resource | `parallelism: 20` | `10` | Concurrent operations |
-| `versioningEnabled` | Database/Resource | `versioningEnabled: true` | `false` | Schema versioning |
-| `autoDecrypt` | Resource | `autoDecrypt: true` | `true` | Auto-decrypt secret fields |
-
-## Critical S3 Limitations & Solutions
-
-### 2KB Metadata Limit
-**Problem**: S3 metadata max 2047 bytes total.
-**Solution**: 5 behaviors in `src/behaviors/`:
-- `body-overflow`: Sorts fields by size, fills metadata with smallest first, overflows to body
-- `body-only`: Metadata only has `_v` field, everything in body (5TB limit)
-- `truncate-data`: Truncates last fitting field to maximize retention
-- `enforce-limits`: Throws errors when exceeding limits (production)
-- `user-managed`: Emits `exceedsLimit` events, fallback to body
-
-**Size Calculation**: `src/concerns/calculator.js`
-- Precise UTF-8 byte counting with surrogate pairs
-- `calculateEffectiveLimit()` accounts for system overhead (`_v`, timestamps)
-- `S3_METADATA_LIMIT_BYTES = 2047`
-
-### Self-Healing JSON System
+### Self-Healing JSON
 **Location**: `database.class.js::_attemptJsonRecovery()`
-**Layers**:
-1. JSON parsing fixes (trailing commas, missing quotes, incomplete braces)
-2. Metadata structure validation (adds missing fields)
-3. Resource healing (fixes invalid version references, removes null hooks)
-4. Timestamped backups of corrupted files
+- Fixes JSON parsing errors (trailing commas, missing quotes)
+- Validates metadata structure
+- Heals resources (invalid version refs, null hooks)
+- Creates timestamped backups
 
-**Recovery Strategy**:
-```javascript
-// Changes non-existent currentVersion to first available
-if (!versions[currentVersion]) {
-  resource.currentVersion = Object.keys(versions)[0];
-}
-```
-
-## Architecture Decisions
-
-### Partitioning
+### Partitioning Architecture
 **Key Structure**: `resource=users/partition=byRegion/region=US/id=user123`
-**Features**:
-- Field-consistent ordering (alphabetical regardless of input order)
-- Multi-field support with automatic sorting
-- Partition-aware caching (`PartitionAwareFilesystemCache`)
-- O(1) partition lookups vs O(n) full scans
-- **Async partition indexing (v9.3.0+)**: Default `asyncPartitions: true` for 70-100% faster writes
-- **Parallel operations**: All partition operations use `Promise.all()` for concurrent execution
-- **Automatic partition migration on update (v9.2.2+)**: When updating a partitioned field, records automatically move between partitions to maintain consistency
+- Field-consistent ordering (alphabetical)
+- O(1) lookups vs O(n) scans
+- Async indexing: `asyncPartitions: true` (70-100% faster writes)
+- Auto-migration when partition fields change
 
-#### Orphaned Partitions Problem & Recovery
-**Problem**: Partitions can reference fields that no longer exist in the schema, causing validation errors and blocking all operations.
+### Update Methods Comparison
 
-**When it happens**:
-1. A partition is created for a specific field (e.g., `region`)
-2. The field is later removed from the schema via `updateAttributes()`
-3. With `strictValidation: true` (default), the partition validation throws:
-   ```
-   PartitionError: Partition 'byRegion' uses field 'region' which does not
-   exist in resource attributes. Available fields: name, email, status.
-   ```
-4. **ALL resource operations become blocked** (insert, update, query, etc.)
+| Method | Requests | Merge | Speed | Use Case |
+|--------|----------|-------|-------|----------|
+| `update()` | GET+PUT (2) | Yes | Baseline | Default |
+| `patch()` | HEAD+COPY (2)* | Yes | 40-60% faster* | Partial updates |
+| `replace()` | PUT (1) | No | 30-40% faster | Full replacement |
 
-**Detection** (`src/resource.class.js:550`):
+\* patch() uses HEAD+COPY only for metadata-only behaviors with simple fields. Falls back to update() for body behaviors.
+
+**Method Selection**:
 ```javascript
-// Find all partitions with missing field references
-const orphaned = resource.findOrphanedPartitions();
-// Returns: {
-//   byRegion: {
-//     missingFields: ['region'],
-//     definition: { fields: { region: 'string' } },
-//     allFields: ['region']
-//   }
-// }
+// Default - merges data
+await resource.update(id, { status: 'active' });
+
+// Performance - 40-60% faster for metadata-only behaviors
+await resource.patch(id, { loginCount: 5 });
+
+// Maximum speed - 30-40% faster, no merge
+await resource.replace(id, completeObject);
 ```
 
-**Recovery Workflow** (`src/resource.class.js:596`, see `docs/examples/e44-orphaned-partitions-recovery.js`):
-```javascript
-// Step 1: Load resource with validation disabled (bypass blocking)
-const resource = await database.getResource('users', {
-  strictValidation: false
-});
-
-// Step 2: Detect orphaned partitions
-const orphaned = resource.findOrphanedPartitions();
-console.log('Orphaned:', Object.keys(orphaned)); // ['byRegion']
-
-// Step 3: Preview removal (dry run)
-const toRemove = resource.removeOrphanedPartitions({ dryRun: true });
-console.log('Would remove:', Object.keys(toRemove));
-
-// Step 4: Actually remove orphaned partitions
-resource.removeOrphanedPartitions();
-// Emits: 'orphanedPartitionsRemoved' event with details
-
-// Step 5: Persist changes to S3
-await database.uploadMetadataFile();
-
-// Step 6: Re-enable strict validation
-resource.strictValidation = true;
-```
-
-**Prevention** (enforced by default):
-```javascript
-// strictValidation: true (default) prevents orphaned partitions at creation time
-await database.createResource({
-  name: 'products',
-  attributes: {
-    name: 'string'
-    // category field missing!
-  },
-  options: {
-    strictValidation: true, // Default - validation happens in constructor
-    partitions: {
-      byCategory: { fields: { category: 'string' } } // ❌ Will throw immediately
-    }
-  }
-});
-// Error: Partition 'byCategory' uses field 'category' which does not exist
-```
-
-**Best Practice - Check Before Removing Fields**:
-```javascript
-// Before removing a field, check if any partitions depend on it
-const fieldToRemove = 'status';
-const partitionsUsingField = Object.entries(resource.config.partitions || {})
-  .filter(([name, def]) => def.fields && fieldToRemove in def.fields)
-  .map(([name]) => name);
-
-if (partitionsUsingField.length > 0) {
-  console.warn(`Warning: These partitions use '${fieldToRemove}':`, partitionsUsingField);
-  // Option 1: Remove partitions first
-  partitionsUsingField.forEach(name => delete resource.config.partitions[name]);
-  await database.uploadMetadataFile();
-
-  // Option 2: Keep the field in schema
-  // Option 3: Re-design partitions
-}
-```
-
-**Location**:
-- Core logic: `src/resource.class.js:483-620`
-- TypeScript definitions: `src/s3db.d.ts:766-767`
-- Tests: `tests/resources/orphaned-partitions.test.js`
-- Complete example: `docs/examples/e44-orphaned-partitions-recovery.js`
-
-**Key Points**:
-- Orphaned partitions **completely block resource operations** with strict validation
-- `findOrphanedPartitions()` detects the issue
-- `removeOrphanedPartitions()` fixes it (with optional `dryRun` preview)
-- Always `uploadMetadataFile()` after removal to persist changes
-- Prevention is automatic with `strictValidation: true` (default)
+**Known Limitation**: Both `update()` and `patch()` lose sibling fields with dot notation (e.g., `{ 'profile.bio': 'New' }`). Workaround: update entire nested object.
 
 ### Plugin System
 **Base**: `src/plugins/plugin.class.js`
-**Interception Methods**:
-1. Method wrapping: Result transformation
-2. Middleware: Request interception with `next()` pattern
-3. Hooks: Pre/post operation logic
+**Methods**: Method wrapping, middleware (`next()`), hooks (pre/post)
 
-**Plugin Types**:
-- `cache`: Memory/filesystem/S3 drivers with TTL/LRU/FIFO
-- `audit`: Change tracking with audit logs
-- `replicator`: Sync to PostgreSQL/BigQuery/SQS/S3DB
-- `queue-consumer`: Process RabbitMQ/SQS messages
-- `costs`: AWS API cost tracking
-- `metrics`: Performance monitoring
-- `fulltext`: Text search
+**Plugin Dependencies** (`src/plugins/concerns/plugin-dependencies.js`):
+- Runtime validation for external packages
+- Keeps core package lightweight (~500KB)
+- Auto-validates on plugin `initialize()`
 
-#### Plugin Performance Optimization
+**Resource Tracking**: `createdBy` field tracks origin ('user' vs plugin name)
+- CachePlugin auto-skips plugin-created resources
+- Prevents caching transient plugin data
 
-**When to use patch() vs update() in plugins**:
-
-Plugins that create internal resources should carefully choose update methods based on the resource's behavior to maximize performance.
-
-**Optimization Decision Tree**:
-```javascript
-// 1. Check resource behavior
-const resourceBehavior = await resource.getBehavior(); // or from config
-
-// 2. Choose method based on behavior and operation
-if (resourceBehavior === 'enforce-limits' || resourceBehavior === 'truncate-data') {
-  // Metadata-only behaviors: Use patch() for 40-60% performance gain
-  await resource.patch(id, { status: 'completed', attempts: 5 });
-} else if (resourceBehavior === 'body-overflow' || resourceBehavior === 'body-only') {
-  // Body behaviors: Use update() (patch() would fall back anyway)
-  await resource.update(id, { status: 'completed', attempts: 5 });
-}
-
-// 3. For complete object replacement, use replace()
-if (hasCompleteObject) {
-  await resource.replace(id, completeObject); // 30-40% faster
-}
-```
-
-**Plugin Internal Resources - Best Practices**:
-
-| Plugin | Resource Type | Recommended Behavior | Update Method |
-|--------|---------------|----------------------|---------------|
-| `ReplicatorPlugin` | Replication logs | `truncate-data` | `patch()` ✅ |
-| `AuditPlugin` | Audit logs | `body-overflow` | `update()` |
-| `EventualConsistencyPlugin` | Transactions | `body-overflow` | `update()` |
-| `EventualConsistencyPlugin` | Analytics | `body-overflow` | `update()` |
-| `S3QueuePlugin` | Failed messages | `body-overflow` | `update()` |
-
-**PluginStorage Optimizations**:
-
-The `PluginStorage` class (`src/concerns/plugin-storage.js`) uses direct S3 client operations and implements HEAD + COPY optimizations for metadata-only operations:
-
-```javascript
-// Optimized operations (use HEAD + COPY):
-await pluginStorage.touch(key, additionalSeconds);    // Extend TTL without body transfer
-await pluginStorage.increment(key, amount, options);  // Counter updates via metadata
-await pluginStorage.decrement(key, amount, options);  // Counter updates via metadata
-
-// Traditional operations (use GET + PUT):
-await pluginStorage.get(key);      // Full data retrieval
-await pluginStorage.set(key, data); // Full data write
-```
-
-**Implementation Pattern**:
-```javascript
-// ✅ GOOD: ReplicatorPlugin using patch() (truncate-data behavior)
-async _updateLog(logId, updates) {
-  await this.replicatorLog.patch(logId, {
-    ...updates,
-    lastAttempt: new Date().toISOString()
-  });
-}
-
-// ✅ GOOD: PluginStorage touch() using HEAD + COPY
-async touch(key, additionalSeconds) {
-  // 1. HEAD to get current metadata (no body)
-  const response = await this.client.headObject(key);
-
-  // 2. Update TTL in metadata
-  const metadata = this._parseMetadataValues(response.Metadata);
-  metadata._expiresAt = metadata._expiresAt + (additionalSeconds * 1000);
-
-  // 3. COPY with metadata update (atomic, no body transfer)
-  await this.client.copyObject({
-    from: key,
-    to: key,
-    metadata: this._encodeMetadata(metadata),
-    metadataDirective: 'REPLACE'
-  });
-}
-
-// ❌ AVOID: Using update() for metadata-only behaviors
-async _updateLog(logId, updates) {
-  // Inefficient: GET + PUT when HEAD + COPY would work
-  await this.replicatorLog.update(logId, updates);
-}
-```
-
-**Event Emission for CostsPlugin**:
-
-All S3 operations emit events that CostsPlugin tracks automatically:
-- `HeadObjectCommand` → `$0.0004/1k requests` (tracked via `command.response`)
-- `CopyObjectCommand` → `$0.005/1k requests` (tracked via `command.response`)
-- `GetObjectCommand` → `$0.0004/1k requests` (tracked via `command.response`)
-- `PutObjectCommand` → `$0.005/1k requests` (tracked via `command.response`)
-
-**Performance Impact**:
-```javascript
-// Example: ReplicatorPlugin log updates (100 iterations)
-// BEFORE (update):  1000ms
-// AFTER (patch):     550ms (45% faster) ⚡
-
-// Example: PluginStorage touch() (1000 iterations)
-// BEFORE (GET + PUT):     5000ms
-// AFTER (HEAD + COPY):    2800ms (44% faster) ⚡
-```
-
-**Optimization Checklist for Plugin Authors**:
-
-1. ✅ Check internal resource behavior (`enforce-limits`/`truncate-data` → use `patch()`)
-2. ✅ Use `replace()` for complete object replacements (upsert operations)
-3. ✅ Implement HEAD + COPY for direct client metadata-only operations
-4. ✅ Verify event emission for cost tracking (automatically handled by `sendCommand()`)
-5. ✅ Add fallbacks for edge cases (e.g., non-existent objects, body data)
-6. ✅ Document optimization choices in plugin comments
-
-**Reference Implementations**:
-- `src/plugins/replicator.plugin.js:592` - patch() usage
-- `src/concerns/plugin-storage.js:458` - touch() with HEAD + COPY
-- `src/concerns/plugin-storage.js:661` - increment() with HEAD + COPY + fallback
-
-### Plugin Dependency Management
-**Location**: `src/plugins/concerns/plugin-dependencies.js`
-**Purpose**: Validate plugin dependencies at runtime to keep core package lightweight
-
-**Key Functions**:
-```javascript
-// Validate single plugin (throws on error)
-await requirePluginDependency('postgresql-replicator');
-
-// Check without throwing
-const result = await requirePluginDependency('bigquery-replicator', {
-  throwOnError: false
-});
-
-// Check multiple plugins
-const results = await checkPluginDependencies([
-  'postgresql-replicator',
-  'sqs-replicator'
-]);
-
-// Get comprehensive report
-const report = await getPluginDependencyReport();
-```
-
-**Dependency Registry** (`PLUGIN_DEPENDENCIES`):
-| Plugin ID | Package | Version | Install Command |
-|-----------|---------|---------|-----------------|
-| `postgresql-replicator` | `pg` | `^8.0.0` | `pnpm add pg` |
-| `bigquery-replicator` | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
-| `sqs-replicator` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
-| `sqs-consumer` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
-| `rabbitmq-consumer` | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
-| `tfstate-plugin` | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
-
-**Integration**: All plugins with external dependencies automatically validate on `initialize()` or `start()`
-
-**Benefits**:
-- ✅ Core package stays lightweight (~500KB)
-- ✅ Users only install dependencies they need
-- ✅ Clear error messages with install commands
-- ✅ Version compatibility checking
-- ✅ Graceful degradation for missing dependencies
-
-**Example**: See `docs/examples/e46-plugin-dependency-validation.js`
-
-### Resource Origin Tracking (createdBy)
-**Purpose**: Track who created a resource to enable plugin-aware behavior
-**Location**: `database.class.js::uploadMetadataFile()`, `resource.class.js::constructor()`
-
-**Metadata Structure**:
-```javascript
-{
-  resources: {
-    users: {
-      createdBy: 'user', // User-created resource
-      currentVersion: 'v1',
-      versions: { ... }
-    },
-    users_transactions_balance: {
-      createdBy: 'EventualConsistencyPlugin', // Plugin-created resource
-      currentVersion: 'v1',
-      versions: { ... }
-    }
-  }
-}
-```
-
-**Values**:
-- `'user'`: Default, created programmatically by application code
-- `'plugin'`: Generic plugin-created resource
-- `'EventualConsistencyPlugin'`, `'AuditPlugin'`, etc.: Specific plugin name
-
-**Usage**:
-```javascript
-// Create user resource
-const users = await database.createResource({
-  name: 'users',
-  attributes: { ... },
-  createdBy: 'user' // Optional, defaults to 'user'
-});
-
-// Plugin creates internal resources
-const transactions = await database.createResource({
-  name: 'users_transactions',
-  attributes: { ... },
-  createdBy: 'EventualConsistencyPlugin' // Marked as plugin-created
-});
-```
-
-**Cache Behavior**: CachePlugin automatically skips plugin-created resources unless explicitly included
-```javascript
-// CachePlugin.shouldCacheResource() checks createdBy
-if (resourceMetadata?.createdBy && resourceMetadata.createdBy !== 'user' && !this.config.include) {
-  return false; // Skip plugin resources
-}
-```
-
-**Benefits**:
-- Prevents caching of transient plugin data (transactions, locks, analytics)
-- Enables plugin-specific behavior (e.g., monitoring, replication filters)
-- Self-documenting resource ownership in metadata
-- Forward-compatible for future plugin ecosystem features
-
-### Advanced Metadata Encoding
-**Implementation**: Schema hooks system (`src/schema.class.js`, `src/concerns/`)
-**Optimizations**:
+### Advanced Encoding
+**Optimizations** (`src/schema.class.js`, `src/concerns/`):
 - ISO timestamps → Unix Base62 (67% savings)
 - UUIDs → Binary Base64 (33% savings)
 - Dictionary encoding for common values (95% savings)
-- Hex strings → Base64 (33% savings)
-- Large numbers → Base62 (40-46% savings)
-- IPv4 addresses → Binary Base64 (47% savings) - `src/concerns/ip.js`
-- IPv6 addresses → Binary Base64 (44% savings) - `src/concerns/ip.js`
-- Vector embeddings → Fixed-point Base62 (77% savings) - `src/concerns/base62.js`
-- UTF-8 byte calculation memory cache (2-3x faster)
+- IPv4/IPv6 → Binary Base64 (44-47% savings)
+- Vector embeddings → Fixed-point Base62 (77% savings)
 
-**Dictionary**: 34 common values mapped to single bytes
-- Statuses: `active`, `inactive`, `pending`, etc.
-- Booleans: `true`, `false`, `yes`, `no`
-- HTTP methods: `GET`, `POST`, `PUT`, `DELETE`
-- Null values: `null`, `undefined`, `none`
+**Dictionary**: 34 common values → single bytes (`active`, `true`, `GET`, etc.)
 
 ### Encryption
-**Algorithm**: AES-256-GCM with PBKDF2 key derivation
-**Implementation**: `src/concerns/crypto.js`
-- 100,000 iterations for key derivation
-- Random 16-byte salt + 12-byte IV
-- Base64 encoding for storage
+- **Algorithm**: AES-256-GCM with PBKDF2
+- **Location**: `src/concerns/crypto.js`
+- 100k iterations, random salt+IV, Base64 encoding
 - Automatic for `secret` field types
-- Cross-platform (Node.js webcrypto / browser crypto)
-
-### Versioning System
-**Metadata Structure**:
-```javascript
-{
-  currentVersion: "v1",
-  versions: {
-    v0: { hash: "sha256:...", attributes: {...} },
-    v1: { hash: "sha256:...", attributes: {...} }
-  }
-}
-```
-**Detection**: Hash-based using `jsonStableStringify`
-**Events**: `resourceDefinitionsChanged` on schema changes
-
-### Hook Persistence
-**Serialization**: Functions to strings with `__s3db_serialized_function` marker
-**Deserialization**: `new Function('return ' + code)()` (not eval)
-**Limitations**:
-- Loses closure variables
-- No external dependencies
-- Pure functions only
-- Failed deserializations filtered silently
-
-### Stream Processing
-**Classes**: `src/stream/`
-- `ResourceReader`: Parallel fetching with PromisePool
-- `ResourceWriter`: Bulk writes with backpressure
-- `ResourceIdsReader`: Paginated ID streaming
-
-**Features**:
-- Configurable batch size and concurrency
-- Object mode Transform streams
-- Error recovery per item
-- Partition-aware streaming
 
 ### Error Handling
-**Utility**: `tryFn()` returns `[ok, err, data]` tuple
-**AWS Mapping**: `mapAwsError()` with actionable suggestions
-**Custom Errors**: Rich context preservation (bucket, key, suggestion)
-**Recovery**:
-- Graceful degradation
-- Exponential backoff retries
-- Circuit breaker pattern
-- Fallback strategies
-
-### Connection Strings
-**Formats**:
-```
-s3://KEY:SECRET@bucket?region=us-east-1
-http://KEY:SECRET@localhost:9000/bucket  # MinIO
-https://KEY:SECRET@nyc3.digitaloceanspaces.com/bucket  # DO Spaces
-```
-**Features**:
-- URL-safe credential encoding
-- Path-style vs virtual-hosted detection
-- Subpath/prefix support
-- Query parameter parsing
-
-## Commands
-
-### Development
-```bash
-pnpm install         # Installs everything (includes all plugin dependencies as devDependencies)
-pnpm run build       # Rollup build
-pnpm run dev         # Watch mode
-```
-
-### Testing
-```bash
-# All plugin dependencies are already installed as devDependencies
-pnpm test                   # All tests
-pnpm test:js               # JavaScript only
-pnpm test:ts               # TypeScript only
-pnpm test:plugins          # Plugin tests
-pnpm test:cache            # Cache tests
-pnpm test:audit            # Audit (memory intensive)
-
-# Single test
-node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/path/to/test.js
-```
-
-## Performance Optimizations
-
-### Caching Strategy
-- **S3Cache**: Compression + encryption, configurable storage class
-- **MemoryCache**: LRU/FIFO eviction, memory limits, compression, statistics tracking
-- **FilesystemCache**: Atomic writes, directory organization
-- **PartitionAwareFilesystemCache**: Hierarchical invalidation
-
-**MemoryCache Features**:
-- **Memory Limits**: `maxMemoryBytes` or `maxMemoryPercent` prevents exhaustion (enforces byte-level limits)
-- **Percentage-based Limits**: Use `maxMemoryPercent` for dynamic limits based on system memory (ideal for containers/cloud)
-- **Item Limits**: `maxSize` limits number of cached items
-- **Compression**: Optional gzip compression to reduce memory usage
-- **Statistics**: `getMemoryStats()` provides current/max/available memory, system memory info, eviction counts
-- **Auto-eviction**: Automatically removes oldest items when limits are exceeded
-
-**Example Configurations**:
 ```javascript
-// Absolute memory limit (good for fixed environments)
-new CachePlugin({
-  driver: 'memory',
-  maxSize: 5000, // Max 5000 items
-  ttl: 1800000, // 30 minutes
-  config: {
-    maxMemoryBytes: 512 * 1024 * 1024, // 512MB hard limit
-    enableCompression: true,
-    compressionThreshold: 1024 // Compress items > 1KB
-  }
-})
-
-// Percentage-based limit (good for containers/cloud)
-new CachePlugin({
-  driver: 'memory',
-  ttl: 1800000, // 30 minutes
-  config: {
-    maxMemoryPercent: 0.1, // Use max 10% of system memory (0.1 = 10%)
-    enableCompression: true
-  }
-})
-// On 16GB system = ~1.6GB limit
-// On 32GB system = ~3.2GB limit
-
-// Monitor memory usage
-const stats = cachePlugin.driver.getMemoryStats();
-console.log(`Memory: ${stats.memoryUsage.current} / ${stats.memoryUsage.max}`);
-console.log(`Usage: ${stats.memoryUsagePercent}%`);
-console.log(`System: ${stats.systemMemory.total} (cache: ${stats.systemMemory.cachePercent})`);
-console.log(`Evicted: ${stats.evictedDueToMemory}`);
+const [ok, err, data] = await tryFn(async () => resource.insert(data));
+if (!ok) {
+  const mapped = mapAwsError(err, { bucket, key }); // Actionable suggestions
+}
 ```
 
-**Cache Keys**: Deterministic generation including resource/version/partition/params
-
-### Batch Operations
-- `PromisePool` for controlled concurrency (default 10)
-- Connection pooling via `@smithy/node-http-handler`
-- Chunk processing to prevent memory overflow
-- Parallel partition operations
-
-### Query Optimization
-- Partition keys enable O(1) lookups
-- Stream processing for large result sets
-- Pagination with continuation tokens
-- Selective field retrieval with behaviors
-
-## Critical Patterns
+## Patterns
 
 ### Resource Creation
 ```javascript
-database.createResource({
+await database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required|email',
-    password: 'secret|required',      // Auto-encrypted
-    embedding: 'embedding:1536',      // Vector embedding (77% compression)
-    profile: {                        // Nested object
-      type: 'object',
-      props: { name: 'string' }
-    }
+    password: 'secret|required',
+    vector: 'embedding:1536',
+    ip: 'ip4'
   },
-  behavior: 'body-overflow',     // Handle large data
-  timestamps: true,               // createdAt/updatedAt
-  paranoid: true,                // Soft deletes
-  asyncPartitions: true,         // Fast async indexing (default)
-  partitions: {
-    byRegion: { fields: { region: 'string' } }
-  },
-  hooks: {
-    beforeInsert: [async (data) => data]
+  behavior: 'body-overflow',
+  timestamps: true,
+  asyncPartitions: true,
+  partitions: { byRegion: { fields: { region: 'string' } } }
+})
+```
+
+### Connection Strings
+```
+s3://KEY:SECRET@bucket?region=us-east-1
+http://KEY:SECRET@localhost:9000/bucket  # MinIO
+```
+
+### Caching
+```javascript
+new CachePlugin({
+  driver: 'memory',
+  ttl: 1800000,
+  config: {
+    maxMemoryPercent: 0.1, // 10% of system memory
+    enableCompression: true
   }
 })
 ```
 
-#### Custom Type Notations
+## Commands
 
-**Embedding Type** - Shorthand for vector embeddings with automatic fixed-point encoding:
-```javascript
-// Shorthand notation (recommended)
-attributes: {
-  vector: 'embedding:1536'        // OpenAI text-embedding-3-small/3-large
-}
-
-// Alternative pipe notation
-attributes: {
-  vector: 'embedding|length:768'  // Common BERT dimension
-}
-
-// Object notation (for additional options)
-attributes: {
-  vector: {
-    type: 'array',
-    items: 'number',
-    length: 1536,
-    empty: false
-  }
-}
-
-// All forms automatically apply fixed-point encoding (77% compression)
-// Common dimensions: 256, 384, 512, 768, 1024, 1536, 2048, 3072
-```
-
-**Secret Type** - Auto-encrypted fields:
-```javascript
-attributes: {
-  password: 'secret|required',           // AES-256-GCM encryption
-  apiKey: 'secret|min:32',              // Encrypted with validation
-  token: 'secretAny',                   // Any type, encrypted
-  pin: 'secretNumber'                   // Number type, encrypted
-}
-```
-
-**IP Address Types** - Compact binary encoding for IPv4 and IPv6:
-```javascript
-// IPv4 addresses (11-15 chars → 8 chars Base64, ~47% savings)
-attributes: {
-  ipv4: 'ip4',                          // Basic IPv4
-  requiredIP: 'ip4|required',           // Required IPv4
-  clientIP: { type: 'ip4', required: true }  // Object notation
-}
-
-// IPv6 addresses (up to 39 chars → 24 chars Base64, ~44% savings)
-attributes: {
-  ipv6: 'ip6',                          // Basic IPv6
-  serverIP: 'ip6|optional',             // Optional IPv6
-  gatewayIP: { type: 'ip6' }            // Object notation
-}
-
-// Mixed IP types
-attributes: {
-  clientIPv4: 'ip4',
-  clientIPv6: 'ip6',
-  timestamp: 'number',
-  userAgent: 'string'
-}
-
-// Automatic encoding/decoding
-const data = { ipv4: '192.168.1.1', ipv6: '2001:db8::1' };
-await resource.insert(data);
-// Stored as: { ipv4: 'wKgBAQ==', ipv6: 'IAENuAAAAAAAAAAAAAAAAQ==' }
-
-const record = await resource.get(id);
-// Retrieved as: { ipv4: '192.168.1.1', ipv6: '2001:db8::1' }
-
-// Encoding details:
-// - IPv4: 4 bytes → Base64 (8 characters with padding)
-// - IPv6: 16 bytes → Base64 (24 characters with padding)
-// - Invalid IPs are preserved as-is (no encoding)
-// - Null/undefined values are preserved
-// - IPv6 addresses are automatically compressed on decode
-```
-
-### Error Recovery Pattern
-```javascript
-const [ok, err, result] = await tryFn(async () => {
-  return await resource.insert(data);
-});
-if (!ok) {
-  const mappedError = mapAwsError(err, { bucket, key });
-  // Handle with suggestions
-}
-```
-
-### Stream Pattern
-```javascript
-const reader = new ResourceReader({
-  resource,
-  batchSize: 100,
-  concurrency: 5
-});
-reader.pipe(transformStream).pipe(writeStream);
-```
-
-## Update Methods: update() vs patch() vs replace()
-
-**Added in v9.4.0**: New optimized update methods for performance-critical operations.
-
-### Method Comparison
-
-| Method | S3 Requests | Merge Behavior | Performance | Use Case |
-|--------|-------------|----------------|-------------|----------|
-| `update()` | GET + PUT (2) | Merges with existing data | Baseline | Default, complex merges |
-| `patch()` | HEAD + COPY (2)* | Merges with existing data | 40-60% faster* | Partial updates, metadata-only |
-| `replace()` | PUT only (1) | No merge, full replacement | 30-40% faster | Complete object replacement |
-
-\* patch() uses HEAD + COPY only for metadata-only behaviors (enforce-limits, truncate-data) with simple fields. Falls back to update() for body behaviors or nested field updates.
-
-### update() - Traditional Merge Update
-
-**Location**: `resource.class.js:884`
-
-**How it works**:
-1. GET current object from S3 (metadata + body)
-2. Merge provided fields with current data
-3. Validate merged data
-4. PUT updated object to S3
-5. Update partition indexes
-
-**Use when**:
-- Default choice for most updates
-- Need to preserve unspecified fields
-- Working with nested objects or complex merges
-- Works with all behaviors
-
-**Example**:
-```javascript
-// Only updates loginCount and status, preserves name, email, bio
-const updated = await resource.update('user-123', {
-  loginCount: 5,
-  status: 'premium'
-});
-// Result: { id, name, email, status: 'premium', loginCount: 5, bio }
-```
-
-### patch() - Optimized Partial Update
-
-**Location**: `resource.class.js:1282`
-
-**How it works**:
-
-**For metadata-only behaviors (enforce-limits, truncate-data) with simple fields**:
-1. HEAD to get current metadata only (no body transfer)
-2. Merge provided fields with current metadata
-3. Validate merged data
-4. COPY object with MetadataDirective: REPLACE (atomic metadata update)
-5. Update partition indexes
-
-**For body behaviors or nested fields**:
-- Automatically falls back to update() to maintain data consistency
-
-**Use when**:
-- Updating a few fields on metadata-only behaviors
-- Need 40-60% performance boost for simple updates
-- Want automatic optimization with safe fallbacks
-- Same guarantees as update() (partitions, validation, events)
-
-**Example**:
-```javascript
-// Optimized: Uses HEAD + COPY (no body transfer)
-const patched = await resource.patch('user-123', {
-  loginCount: 10
-});
-// Result: { id, name, email, status, loginCount: 10, bio }
-// 40-60% faster than update() for metadata-only behaviors
-```
-
-**Optimization Conditions**:
-- ✅ Behavior: `enforce-limits` or `truncate-data`
-- ✅ Simple field updates (no dot notation)
-- ❌ Falls back to update() for:
-  - `body-overflow` or `body-only` behaviors
-  - Nested field updates with dot notation (e.g., `'profile.bio'`)
-
-### replace() - Full Object Replacement
-
-**Location**: `resource.class.js:1432`
-
-**How it works**:
-1. Validate provided data (no GET)
-2. Apply defaults and timestamps
-3. PUT complete object to S3
-4. Update partition indexes
-
-**Use when**:
-- Have the complete object already
-- Want maximum performance (30-40% faster, 1 request vs 2)
-- True upsert behavior (creates if missing, replaces if exists)
-- Don't need to preserve any existing fields
-
-**⚠️ WARNING**: You must provide ALL required fields. Missing fields will NOT be preserved from the current object.
-
-**Example**:
-```javascript
-// Replaces entire object (no merge)
-const replaced = await resource.replace('user-123', {
-  name: 'Alice Smith',
-  email: 'alice.smith@example.com',
-  status: 'active',
-  loginCount: 0,
-  bio: 'Senior engineer'
-});
-// Result: Exactly what you provided (previous data discarded)
-// 30-40% faster than update() (no GET operation)
-```
-
-### Method Selection Guide
-
-```javascript
-// ✅ Use update() - Default choice
-await resource.update(id, { status: 'active' });
-// - Merges with existing data
-// - Works with all behaviors
-// - Handles complex updates
-
-// ✅ Use patch() - Performance optimization
-await resource.patch(id, { loginCount: 5 });
-// - 40-60% faster for metadata-only behaviors
-// - Automatic fallback to update() when needed
-// - Same guarantees as update()
-
-// ✅ Use replace() - Maximum performance
-await resource.replace(id, completeObject);
-// - 30-40% faster (1 request vs 2)
-// - True upsert (creates or replaces)
-// - Must provide all required fields
-
-// ❌ Avoid patch() with dot notation (known limitation)
-// await resource.patch(id, { 'profile.bio': 'New' }); // Loses sibling fields!
-// Instead, update entire object:
-await resource.patch(id, { profile: { bio: 'New', age: 30 } });
-```
-
-### Known Limitations
-
-**Nested Field Updates with Dot Notation**:
-- The schema system doesn't properly handle dot notation for nested objects
-- Example: `patch(id, { 'profile.bio': 'New' })` loses sibling fields like `profile.age`
-- **Affects both `update()` and `patch()` methods** (schema system limitation)
-- **Workaround**: Update the entire nested object instead:
-
-```javascript
-// ❌ DON'T: Dot notation loses sibling fields
-await resource.patch('user-1', {
-  'settings.theme': 'dark'
-});
-// Result: settings = { theme: 'dark' } (notifications, language lost!)
-
-// ✅ DO: Update entire nested object
-await resource.patch('user-1', {
-  settings: {
-    theme: 'dark',        // Changed
-    notifications: true,  // Preserved
-    language: 'en'        // Preserved
-  }
-});
-```
-
-### Performance Benchmarks
-
-Based on 100 iterations with metadata-only behavior (enforce-limits):
-
-```
-update():  1000ms (baseline)
-patch():    550ms (45% faster) ⚡
-replace():  650ms (35% faster) 🚀
-```
-
-**Why patch() is faster**:
-- HEAD retrieves metadata only (no body transfer)
-- COPY updates metadata atomically (no body transfer)
-- No body parsing or encoding overhead
-
-**Why replace() is faster**:
-- Skips GET operation entirely
-- Direct PUT with provided data
-- Ideal for upsert operations
-
-### Example Code
-
-See `docs/examples/e50-patch-replace-update.js` for comprehensive examples including:
-- Basic usage of all three methods
-- Behavior differences
-- Partition updates
-- Performance comparisons
-- Error handling
-- Method selection guide
-
-## Constraints & Workarounds
-
-### S3 Limitations
-- 2KB metadata → behavioral patterns
-- No transactions → eventual consistency
-- No indexes → partition strategy
-- Rate limits → batching + backoff
-
-### JavaScript Limitations
-- Function serialization → pure functions only
-- Memory limits → streaming API
-- Async complexity → tryFn pattern
-
-### Security Considerations
-- Hook deserialization uses Function constructor
-- Credentials in connection strings need encoding
-- Field-level encryption for sensitive data
-- Paranoid mode for destructive operations
-
-## MCP Server
-**Location**: `mcp/entrypoint.js`
-**Transports**: SSE, stdio
-**Usage**: `npx s3db-mcp --transport=sse`
-**Port**: 17500 (default)
-
-### MCP Documentation Assistant (NEW)
-**Similar to**: NX MCP's `nx_docs` tool
-**Purpose**: Help AI agents learn about s3db.js features on demand
-**Tools**:
-- `s3dbQueryDocs(query, maxResults?)`: Search documentation with natural language
-- `s3dbListTopics()`: Browse all available topics by category
-
-**Example Usage**:
-```javascript
-// AI agents can ask questions in natural language
-await agent.callTool('s3dbQueryDocs', {
-  query: 'How do I use the CachePlugin?'
-});
-
-await agent.callTool('s3dbQueryDocs', {
-  query: 'What is the best partitioning strategy?'
-});
-
-// Browse all available topics
-await agent.callTool('s3dbListTopics');
-```
-
-**Coverage**: Searches across all docs including CLAUDE.md, README.md, plugins, benchmarks, examples
-**Benefits**: Self-service docs for AI agents, reduces integration time by 60-80%
-**Example**: See `docs/examples/e45-mcp-documentation-assistant.js`
-
-## CLI & Standalone Binaries
-
-### s3db CLI
-**Location**: `bin/s3db-cli.js` (ES modules), `bin/s3db-cli-standalone.js` (CommonJS)
-**Commands**:
 ```bash
-s3db list                            # List all resources
-s3db query <resource>                # Query records
-s3db insert <resource> -d '<json>'   # Insert data
-s3db get <resource> <id>             # Get by ID
-s3db delete <resource> <id>          # Delete record
-s3db count <resource>                # Count records
-```
+# Development
+pnpm install && pnpm run build
 
-**Connection**: Via `--connection` or `S3DB_CONNECTION` env var
-**Features**: Colored output, progress spinners, table formatting
-
-### Building Standalone Binaries
-**Script**: `build-binaries.sh` or `pnpm run build:binaries`
-**Process**:
-1. Bundle with esbuild (includes ALL dependencies)
-2. Compile with pkg to native executables
-3. Output to `bin/standalone/`
-
-**Created Binaries**:
-- `s3db-linux-x64` (~47MB)
-- `s3db-macos-x64` (~52MB) - Needs codesigning
-- `s3db-macos-arm64` (~45MB) - Needs codesigning
-- `s3db-win-x64.exe` (~39MB)
-- `s3db-mcp-linux-x64` (~47MB)
-- `s3db-mcp-macos-x64` (~52MB)
-- `s3db-mcp-macos-arm64` (~45MB)
-- `s3db-mcp-win-x64.exe` (~39MB)
-
-**CommonJS Compatibility**: 
-- Created `server-standalone.js` for MCP to avoid `import.meta.url` issues
-- Uses `__dirname` instead of `fileURLToPath(import.meta.url)`
-- Bundles include AWS SDK, all CLI tools (chalk, ora, commander)
-
-### NPM Distribution
-**Best Practices**:
-- Don't include binaries in NPM package (too large)
-- Binaries available via GitHub releases
-- NPM package includes source + dist builds only
-
-## Testing Infrastructure
-
-### Test Coverage
-**Target**: 90% minimum coverage for all files
-**Current**: ~89.8% overall coverage
-**Commands**:
-```bash
+# Testing
 pnpm test                   # All tests
 pnpm test:js               # JavaScript only
-pnpm test:ts               # TypeScript only
 pnpm test:plugins          # Plugin tests
-pnpm test:cache            # Cache tests
-pnpm test:audit            # Audit (memory intensive)
+pnpm test:js-coverage      # Coverage report
 
-# Coverage report
-pnpm test:js-coverage
-
-# Single test file
-node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/path/to/test.js
+# CLI
+s3db list                           # List resources
+s3db query <resource>               # Query records
+s3db insert <resource> -d '<json>'  # Insert
 ```
 
-### Test Infrastructure
-- Jest with ESM (`--experimental-vm-modules`)
-- LocalStack for S3 simulation
-- Coverage reports in `coverage/`
-- TypeScript validation in `tests/typescript/`
-- Max workers: 1 (prevents race conditions)
-- Vitest support via `vitest.config.js`
+## File Locations
 
-### Key Test Files
-- `tests/functions/advanced-metadata-encoding.test.js` - Encoding optimizations
-- `tests/concerns/calculator.test.js` - UTF-8 byte calculations
-- `tests/s3db.json/` - Self-healing JSON tests
-- `tests/plugins/` - All plugin functionality
-- `tests/resources/` - Resource CRUD operations
+### Tests & Examples
+- **Tests**: `tests/` (Jest ESM, LocalStack)
+- **Examples**: `docs/examples/eXX-description.js`
+  - `e01-e07`: Basic CRUD
+  - `e08-e17`: Advanced features
+  - `e18-e33`: Plugins
+  - `e41-e43`: Vectors/RAG
+  - `e44`: Orphaned partitions recovery
+  - `e50`: patch/replace/update comparison
 
-## Examples Directory
+### Key Files
+- **Calculator**: `src/concerns/calculator.js` (UTF-8 byte counting)
+- **Crypto**: `src/concerns/crypto.js` (AES-256-GCM)
+- **IP Encoding**: `src/concerns/ip.js` (IPv4/IPv6)
+- **Base62**: `src/concerns/base62.js` (number/vector compression)
+- **Errors**: `src/errors.js` (custom error classes)
+- **Plugin Storage**: `src/concerns/plugin-storage.js` (HEAD+COPY optimizations)
 
-**Location**: `docs/examples/` (NOT `examples/`)
-**Naming Convention**: `eXX-description.js` (e.g., `e41-vector-rag-chatbot.js`)
-**Purpose**: Production-ready examples for documentation and developer reference
+## MCP Server
 
-**Categories**:
-- Basic CRUD: `e01-e07` (bulk insert, streams, CSV/ZIP export, JWT, resource creation)
-- Advanced Features: `e08-e17` (behaviors, partitioning, schema validation, versioning, hooks, pagination, error handling)
-- Plugins: `e18-e33` (costs, replicators, queue consumers, middleware, caching)
-- HTTP & Optimization: `e34-e37` (HTTP client benchmarks, cache drivers, self-healing)
-- Testing: `e38-e40` (isolated plugins, partial schemas, mock database)
-- Vectors: `e41-e43` (RAG chatbot, provider integrations, benchmarks)
-- Maintenance: `e44` (orphaned partitions recovery)
-- Performance: `e50` (patch, replace, update comparison)
+**Location**: `mcp/entrypoint.js`
 
-**When Adding Examples**:
-1. Always save to `docs/examples/` directory
-2. Use next available `eXX` number
-3. Include comprehensive comments and error handling
-4. Demonstrate production-ready patterns
-5. Show both basic and advanced usage
+**Transports**:
+- **stdio** (default): `node mcp/entrypoint.js` - For local integration (Claude Desktop, etc.)
+- **Streamable HTTP**: `node mcp/entrypoint.js --transport=http` - For remote access
+  - URL: `http://0.0.0.0:17500/mcp`
+  - Health: `http://0.0.0.0:17500/health`
+  - Custom port/host: `--port=3000 --host=localhost`
+
+**Features**:
+- 41+ tools available (dbConnect, resourceInsert, query, etc.)
+- Documentation search: `s3dbQueryDocs(query)`, `s3dbListTopics()`
+- CORS enabled for browser clients
+- Stateless mode (no session management)
+
+## CLI Binaries
+
+**Build**: `pnpm run build:binaries` → `bin/standalone/`
+- Linux/macOS/Windows executables (~40-50MB)
+- Includes all dependencies (AWS SDK, CLI tools)
+- CommonJS compatible (`server-standalone.js`)
+
+## Constraints
+
+### S3 Limitations
+- 2KB metadata → use behaviors
+- No transactions → eventual consistency
+- No indexes → use partitions
+- Rate limits → batching + backoff
+
+### Security
+- Hook deserialization uses `Function` constructor (not eval)
+- Field-level encryption for `secret` types
+- Paranoid mode prevents destructive deletes
+- Credentials need URL encoding in connection strings

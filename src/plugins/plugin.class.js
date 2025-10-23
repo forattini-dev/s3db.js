@@ -176,6 +176,11 @@ export class Plugin extends EventEmitter {
    * - Pode modificar argumentos/resultados.
    */
   addMiddleware(resource, methodName, middleware) {
+    // Safety check: verify method exists
+    if (typeof resource[methodName] !== 'function') {
+      throw new Error(`Cannot add middleware to "${methodName}": method does not exist on resource "${resource.name || 'unknown'}"`);
+    }
+
     if (!resource._pluginMiddlewares) {
       resource._pluginMiddlewares = {};
     }
