@@ -88,7 +88,7 @@ describe('Index Files - Export Tests', () => {
     expect(typeof plugins.Plugin).toBe('function');
     expect(typeof plugins.AuditPlugin).toBe('function');
     expect(typeof plugins.CachePlugin).toBe('function');
-    expect(typeof plugins.CostsPlugin).toBe('object');
+    expect(typeof plugins.CostsPlugin).toBe('function'); // Now a class
     expect(typeof plugins.FullTextPlugin).toBe('function');
     expect(typeof plugins.MetricsPlugin).toBe('function');
     expect(typeof plugins.ReplicatorPlugin).toBe('function');

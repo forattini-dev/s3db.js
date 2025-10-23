@@ -6976,18 +6976,13 @@ class CachePlugin extends Plugin {
   }
 }
 
-const CostsPlugin = {
-  async setup(db, options = {}) {
-    if (!db || !db.client) {
-      return;
-    }
-    this.client = db.client;
-    this.options = {
-      considerFreeTier: false,
-      // Flag to consider AWS free tier in calculations
-      region: "us-east-1",
-      // AWS region for pricing (future use)
-      ...options
+class CostsPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+    this.config = {
+      considerFreeTier: config.considerFreeTier !== void 0 ? config.considerFreeTier : false,
+      region: config.region || "us-east-1",
+      ...config
     };
     this.map = {
       PutObjectCommand: "put",
@@ -7081,14 +7076,20 @@ const CostsPlugin = {
         // Data transfer out cost
       }
     };
+  }
+  async onInstall() {
+    if (!this.database || !this.database.client) {
+      return;
+    }
+    this.client = this.database.client;
     this.client.costs = JSON.parse(JSON.stringify(this.costs));
-  },
-  async start() {
+  }
+  async onStart() {
     if (this.client) {
       this.client.on("command.response", (name, response, input) => this.addRequest(name, this.map[name], response, input));
       this.client.on("command.error", (name, response, input) => this.addRequest(name, this.map[name], response, input));
     }
-  },
+  }
   addRequest(name, method, response = {}, input = {}) {
     if (!method) return;
     this.costs.requests.totalEvents++;
@@ -7128,7 +7129,7 @@ const CostsPlugin = {
       this.client.costs.requests.subtotal += requestCost;
     }
     this.updateTotal();
-  },
+  }
   trackStorage(bytes) {
     this.costs.storage.totalBytes += bytes;
     this.costs.storage.totalGB = this.costs.storage.totalBytes / (1024 * 1024 * 1024);
@@ -7139,7 +7140,7 @@ const CostsPlugin = {
       this.client.costs.storage.subtotal = this.calculateStorageCost(this.client.costs.storage);
     }
     this.updateTotal();
-  },
+  }
   trackDataTransferIn(bytes) {
     this.costs.dataTransfer.inBytes += bytes;
     this.costs.dataTransfer.inGB = this.costs.dataTransfer.inBytes / (1024 * 1024 * 1024);
@@ -7148,7 +7149,7 @@ const CostsPlugin = {
       this.client.costs.dataTransfer.inGB = this.client.costs.dataTransfer.inBytes / (1024 * 1024 * 1024);
     }
     this.updateTotal();
-  },
+  }
   trackDataTransferOut(bytes) {
     this.costs.dataTransfer.outBytes += bytes;
     this.costs.dataTransfer.outGB = this.costs.dataTransfer.outBytes / (1024 * 1024 * 1024);
@@ -7159,7 +7160,7 @@ const CostsPlugin = {
       this.client.costs.dataTransfer.subtotal = this.calculateDataTransferCost(this.client.costs.dataTransfer);
     }
     this.updateTotal();
-  },
+  }
   calculateStorageCost(storage) {
     const totalGB = storage.totalGB;
     let cost = 0;
@@ -7178,11 +7179,11 @@ const CostsPlugin = {
       }
     }
     return cost;
-  },
+  }
   calculateDataTransferCost(dataTransfer) {
     let totalGB = dataTransfer.outGB;
     let cost = 0;
-    if (this.options && this.options.considerFreeTier) {
+    if (this.config && this.config.considerFreeTier) {
       const freeTierRemaining = dataTransfer.freeTierGB - dataTransfer.freeTierUsed;
       if (freeTierRemaining > 0 && totalGB > 0) {
         const gbToDeduct = Math.min(totalGB, freeTierRemaining);
@@ -7205,14 +7206,14 @@ const CostsPlugin = {
       }
     }
     return cost;
-  },
+  }
   updateTotal() {
     this.costs.total = this.costs.requests.subtotal + this.costs.storage.subtotal + this.costs.dataTransfer.subtotal;
     if (this.client && this.client.costs) {
       this.client.costs.total = this.client.costs.requests.subtotal + this.client.costs.storage.subtotal + this.client.costs.dataTransfer.subtotal;
     }
   }
-};
+}
 
 function createConfig(options, detectedTimezone) {
   const consolidation = options.consolidation || {};

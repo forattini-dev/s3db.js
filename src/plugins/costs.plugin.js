@@ -1,15 +1,14 @@
-export const CostsPlugin = {
-  async setup (db, options = {}) {
-    if (!db || !db.client) {
-      return; // Handle null/invalid database gracefully
-    }
+import { Plugin } from './plugin.class.js';
 
-    this.client = db.client
-    this.options = {
-      considerFreeTier: false,  // Flag to consider AWS free tier in calculations
-      region: 'us-east-1',      // AWS region for pricing (future use)
-      ...options
-    }
+export class CostsPlugin extends Plugin {
+  constructor(config = {}) {
+    super(config);
+
+    this.config = {
+      considerFreeTier: config.considerFreeTier !== undefined ? config.considerFreeTier : false,
+      region: config.region || 'us-east-1',
+      ...config
+    };
 
     this.map = {
       PutObjectCommand: 'put',
@@ -19,7 +18,7 @@ export const CostsPlugin = {
       DeleteObjectCommand: 'delete',
       DeleteObjectsCommand: 'delete',
       ListObjectsV2Command: 'list',
-    }
+    };
 
     this.costs = {
       total: 0,
@@ -97,19 +96,26 @@ export const CostsPlugin = {
         currentTier: 0,
         subtotal: 0  // Data transfer out cost
       }
+    };
+  }
+
+  async onInstall() {
+    if (!this.database || !this.database.client) {
+      return; // Handle null/invalid database gracefully
     }
 
+    this.client = this.database.client;
     this.client.costs = JSON.parse(JSON.stringify(this.costs));
-  },
-  
-  async start () {
+  }
+
+  async onStart() {
     if (this.client) {
       this.client.on("command.response", (name, response, input) => this.addRequest(name, this.map[name], response, input));
       this.client.on("command.error", (name, response, input) => this.addRequest(name, this.map[name], response, input));
     }
-  },
+  }
 
-  addRequest (name, method, response = {}, input = {}) {
+  addRequest(name, method, response = {}, input = {}) {
     if (!method) return; // Skip if no mapping found
 
     // Track request counts
@@ -167,9 +173,9 @@ export const CostsPlugin = {
 
     // Update total cost (must be after mirroring request counters)
     this.updateTotal();
-  },
+  }
 
-  trackStorage (bytes) {
+  trackStorage(bytes) {
     this.costs.storage.totalBytes += bytes;
     this.costs.storage.totalGB = this.costs.storage.totalBytes / (1024 * 1024 * 1024);
     this.costs.storage.subtotal = this.calculateStorageCost(this.costs.storage);
@@ -183,9 +189,9 @@ export const CostsPlugin = {
 
     // Update total cost
     this.updateTotal();
-  },
+  }
 
-  trackDataTransferIn (bytes) {
+  trackDataTransferIn(bytes) {
     this.costs.dataTransfer.inBytes += bytes;
     this.costs.dataTransfer.inGB = this.costs.dataTransfer.inBytes / (1024 * 1024 * 1024);
     // inCost is always $0
@@ -198,9 +204,9 @@ export const CostsPlugin = {
 
     // Update total cost
     this.updateTotal();
-  },
+  }
 
-  trackDataTransferOut (bytes) {
+  trackDataTransferOut(bytes) {
     this.costs.dataTransfer.outBytes += bytes;
     this.costs.dataTransfer.outGB = this.costs.dataTransfer.outBytes / (1024 * 1024 * 1024);
     this.costs.dataTransfer.subtotal = this.calculateDataTransferCost(this.costs.dataTransfer);
@@ -214,9 +220,9 @@ export const CostsPlugin = {
 
     // Update total cost
     this.updateTotal();
-  },
+  }
 
-  calculateStorageCost (storage) {
+  calculateStorageCost(storage) {
     const totalGB = storage.totalGB;
     let cost = 0;
     let remaining = totalGB;
@@ -239,14 +245,14 @@ export const CostsPlugin = {
     }
 
     return cost;
-  },
+  }
 
-  calculateDataTransferCost (dataTransfer) {
+  calculateDataTransferCost(dataTransfer) {
     let totalGB = dataTransfer.outGB;
     let cost = 0;
 
     // Apply free tier if enabled
-    if (this.options && this.options.considerFreeTier) {
+    if (this.config && this.config.considerFreeTier) {
       const freeTierRemaining = dataTransfer.freeTierGB - dataTransfer.freeTierUsed;
 
       if (freeTierRemaining > 0 && totalGB > 0) {
@@ -276,9 +282,9 @@ export const CostsPlugin = {
     }
 
     return cost;
-  },
+  }
 
-  updateTotal () {
+  updateTotal() {
     this.costs.total =
       this.costs.requests.subtotal +
       this.costs.storage.subtotal +
@@ -291,7 +297,7 @@ export const CostsPlugin = {
         this.client.costs.storage.subtotal +
         this.client.costs.dataTransfer.subtotal;
     }
-  },
+  }
 }
 
-export default CostsPlugin
+export default CostsPlugin;
