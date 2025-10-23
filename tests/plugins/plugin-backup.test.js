@@ -72,7 +72,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
   afterEach(async () => {
     if (plugin) {
-      await plugin.cleanup();
+      await plugin.stop();
     }
     if (database) {
       await database.disconnect();
@@ -368,7 +368,7 @@ describe('BackupPlugin (New Driver API)', () => {
       expect(result).toBeDefined();
       expect(result.size).toBeGreaterThan(0);
       
-      await emptyPlugin.cleanup();
+      await emptyPlugin.stop();
       await emptyDb.disconnect();
     });
 
@@ -407,7 +407,7 @@ describe('BackupPlugin (New Driver API)', () => {
     it('should cleanup successfully', async () => {
       const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
       
-      await plugin.cleanup();
+      await plugin.stop();
       
       // cleanup() calls stop(), which should clear active backups
       expect(plugin.activeBackups.size).toBe(0);
@@ -467,7 +467,7 @@ describe('BackupPlugin (New Driver API)', () => {
       expect(result.driverInfo.length).toBe(2);
       expect(result.driverInfo.every(info => info.status === 'success')).toBe(true);
       
-      await multiPlugin.cleanup();
+      await multiPlugin.stop();
     });
 
     it('should work with multi driver strategy "any"', async () => {
@@ -499,7 +499,7 @@ describe('BackupPlugin (New Driver API)', () => {
       expect(Array.isArray(result.driverInfo)).toBe(true);
       expect(result.driverInfo.some(info => info.status === 'success')).toBe(true);
       
-      await multiPlugin.cleanup();
+      await multiPlugin.stop();
     });
   });
 });

@@ -381,7 +381,7 @@ describe('GeoPlugin - findNearby Method', () => {
       attributes: {
         name: 'string',
         lat: 'number', // Optional
-        lng: 'number', // Optional
+        lon: 'number', // Optional
         _geohash: 'string' // Optional - internal field
       }
     });
@@ -390,7 +390,7 @@ describe('GeoPlugin - findNearby Method', () => {
       resources: {
         restaurants: {
           latField: 'lat',
-          lonField: 'lng',
+          lonField: 'lon',
           precision: 6
         }
       }
@@ -399,10 +399,10 @@ describe('GeoPlugin - findNearby Method', () => {
     await plugin.install(database);
 
     // Insert test data around São Paulo
-    await restaurants.insert({ id: 'r1', name: 'Restaurant 1', lat: -23.5505, lng: -46.6333 }); // Center
-    await restaurants.insert({ id: 'r2', name: 'Restaurant 2', lat: -23.5605, lng: -46.6433 }); // ~2km away
-    await restaurants.insert({ id: 'r3', name: 'Restaurant 3', lat: -23.5705, lng: -46.6533 }); // ~4km away
-    await restaurants.insert({ id: 'r4', name: 'Restaurant 4', lat: -22.9068, lng: -43.1729 }); // Rio (~360km)
+    await restaurants.insert({ id: 'r1', name: 'Restaurant 1', lat: -23.5505, lon: -46.6333 }); // Center
+    await restaurants.insert({ id: 'r2', name: 'Restaurant 2', lat: -23.5605, lon: -46.6433 }); // ~2km away
+    await restaurants.insert({ id: 'r3', name: 'Restaurant 3', lat: -23.5705, lon: -46.6533 }); // ~4km away
+    await restaurants.insert({ id: 'r4', name: 'Restaurant 4', lat: -22.9068, lon: -43.1729 }); // Rio (~360km)
   });
 
   afterAll(async () => {
@@ -413,7 +413,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should find restaurants within 5km', async () => {
     const nearby = await restaurants.findNearby({
       lat: -23.5505,
-      lng: -46.6333,
+      lon: -46.6333,
       radius: 5,
       limit: 10
     });
@@ -425,7 +425,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should sort by distance', async () => {
     const nearby = await restaurants.findNearby({
       lat: -23.5505,
-      lng: -46.6333,
+      lon: -46.6333,
       radius: 10,
       limit: 10
     });
@@ -438,7 +438,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should respect limit parameter', async () => {
     const nearby = await restaurants.findNearby({
       lat: -23.5505,
-      lng: -46.6333,
+      lon: -46.6333,
       radius: 10,
       limit: 2
     });
@@ -449,7 +449,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should include distance in results', async () => {
     const nearby = await restaurants.findNearby({
       lat: -23.5505,
-      lng: -46.6333,
+      lon: -46.6333,
       radius: 5
     });
 
@@ -469,7 +469,7 @@ describe('GeoPlugin - findNearby Method', () => {
   test('should use default radius and limit', async () => {
     const nearby = await restaurants.findNearby({
       lat: -23.5505,
-      lng: -46.6333
+      lon: -46.6333
     });
 
     // Default radius is 10km, default limit is 100
@@ -677,7 +677,7 @@ describe('GeoPlugin - Statistics and Monitoring', () => {
         },
         restaurants: {
           latField: 'lat',
-          lonField: 'lng',
+          lonField: 'lon',
           precision: 6
         }
       }

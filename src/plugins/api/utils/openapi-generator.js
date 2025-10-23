@@ -100,6 +100,12 @@ function generateResourceSchema(resource) {
 
   const attributes = resource.config?.attributes || resource.attributes || {};
 
+  // Extract resource description (supports both string and object format)
+  const resourceDescription = resource.config?.description;
+  const attributeDescriptions = typeof resourceDescription === 'object'
+    ? (resourceDescription.attributes || {})
+    : {};
+
   // Add system-generated id field (always present in responses)
   properties.id = {
     type: 'string',
@@ -114,7 +120,7 @@ function generateResourceSchema(resource) {
       const baseType = mapFieldTypeToOpenAPI(fieldDef.type);
       properties[fieldName] = {
         ...baseType,
-        description: fieldDef.description || undefined
+        description: fieldDef.description || attributeDescriptions[fieldName] || undefined
       };
 
       if (fieldDef.required) {
@@ -142,7 +148,8 @@ function generateResourceSchema(resource) {
 
       properties[fieldName] = {
         ...baseType,
-        ...rules
+        ...rules,
+        description: attributeDescriptions[fieldName] || undefined
       };
 
       if (rules.required) {
@@ -788,6 +795,113 @@ The response includes pagination metadata in the \`pagination\` object with tota
 }
 
 /**
+ * Generate OpenAPI paths for relational routes
+ * @param {Object} resource - Source s3db.js Resource instance
+ * @param {string} relationName - Name of the relation
+ * @param {Object} relationConfig - Relation configuration
+ * @param {string} version - Resource version
+ * @param {Object} relatedSchema - OpenAPI schema for related resource
+ * @returns {Object} OpenAPI paths for relation
+ */
+function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema) {
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}/{id}/${relationName}`;
+  const relatedResourceName = relationConfig.resource;
+  const isToMany = relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany';
+
+  const paths = {};
+
+  paths[basePath] = {
+    get: {
+      tags: [resourceName],
+      summary: `Get ${relationName} of ${resourceName}`,
+      description: `Retrieve ${relationName} (${relationConfig.type}) associated with this ${resourceName}. ` +
+                   `This endpoint uses the RelationPlugin to efficiently load related data` +
+                   (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : '.'),
+      parameters: [
+        {
+          name: 'id',
+          in: 'path',
+          required: true,
+          description: `${resourceName} ID`,
+          schema: { type: 'string' }
+        },
+        ...(isToMany ? [
+          {
+            name: 'limit',
+            in: 'query',
+            description: 'Maximum number of items to return',
+            schema: { type: 'integer', default: 100, minimum: 1, maximum: 1000 }
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            description: 'Number of items to skip',
+            schema: { type: 'integer', default: 0, minimum: 0 }
+          }
+        ] : [])
+      ],
+      responses: {
+        200: {
+          description: 'Successful response',
+          content: {
+            'application/json': {
+              schema: isToMany ? {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: true },
+                  data: {
+                    type: 'array',
+                    items: relatedSchema
+                  },
+                  pagination: {
+                    type: 'object',
+                    properties: {
+                      total: { type: 'integer' },
+                      page: { type: 'integer' },
+                      pageSize: { type: 'integer' },
+                      pageCount: { type: 'integer' }
+                    }
+                  }
+                }
+              } : {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean', example: true },
+                  data: relatedSchema
+                }
+              }
+            }
+          },
+          ...(isToMany ? {
+            headers: {
+              'X-Total-Count': {
+                description: 'Total number of related records',
+                schema: { type: 'integer' }
+              },
+              'X-Page-Count': {
+                description: 'Total number of pages',
+                schema: { type: 'integer' }
+              }
+            }
+          } : {})
+        },
+        404: {
+          description: `${resourceName} not found` + (isToMany ? '' : ' or no related resource exists'),
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/Error' }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  return paths;
+}
+
+/**
  * Generate complete OpenAPI 3.0 specification
  * @param {Object} database - s3db.js Database instance
  * @param {Object} config - API configuration
@@ -803,12 +917,42 @@ export function generateOpenAPISpec(database, config = {}) {
     resources: resourceConfigs = {}
   } = config;
 
+  // Build resources table for description
+  const resourcesTableRows = [];
+  for (const [name, resource] of Object.entries(database.resources)) {
+    // Skip plugin resources unless explicitly configured
+    if (name.startsWith('plg_') && !resourceConfigs[name]) {
+      continue;
+    }
+
+    const version = resource.config?.currentVersion || resource.version || 'v1';
+    const resourceDescription = resource.config?.description;
+    const descText = typeof resourceDescription === 'object'
+      ? resourceDescription.resource
+      : resourceDescription || 'No description';
+
+    resourcesTableRows.push(`| ${name} | ${descText} | \`/${version}/${name}\` |`);
+  }
+
+  // Build enhanced description with resources table
+  const enhancedDescription = `${description}
+
+## Available Resources
+
+| Resource | Description | Base Path |
+|----------|-------------|-----------|
+${resourcesTableRows.join('\n')}
+
+---
+
+For detailed information about each endpoint, see the sections below.`;
+
   const spec = {
     openapi: '3.1.0',
     info: {
       title,
       version,
-      description,
+      description: enhancedDescription,
       contact: {
         name: 's3db.js',
         url: 'https://github.com/forattini-dev/s3db.js'
@@ -903,6 +1047,9 @@ export function generateOpenAPISpec(database, config = {}) {
   // Generate paths for each resource
   const resources = database.resources;
 
+  // Detect RelationPlugin
+  const relationsPlugin = database.plugins?.relation || database.plugins?.RelationPlugin || null;
+
   for (const [name, resource] of Object.entries(resources)) {
     // Skip plugin resources unless explicitly configured
     if (name.startsWith('plg_') && !resourceConfigs[name]) {
@@ -924,14 +1071,57 @@ export function generateOpenAPISpec(database, config = {}) {
     // Merge paths
     Object.assign(spec.paths, paths);
 
-    // Add tag
+    // Add tag with description support
+    const resourceDescription = resource.config?.description;
+    const tagDescription = typeof resourceDescription === 'object'
+      ? resourceDescription.resource
+      : resourceDescription || `Operations for ${name} resource`;
+
     spec.tags.push({
       name: name,
-      description: `Operations for ${name} resource`
+      description: tagDescription
     });
 
     // Add schema to components
     spec.components.schemas[name] = generateResourceSchema(resource);
+
+    // Generate relational paths if RelationPlugin is active
+    if (relationsPlugin && relationsPlugin.relations && relationsPlugin.relations[name]) {
+      const relationsDef = relationsPlugin.relations[name];
+
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        // Skip belongsTo relations (not useful as REST endpoints)
+        if (relationConfig.type === 'belongsTo') {
+          continue;
+        }
+
+        // Check if relation should be exposed (default: yes)
+        const exposeRelation = config?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+
+        // Get related resource schema
+        const relatedResource = database.resources[relationConfig.resource];
+        if (!relatedResource) {
+          continue;
+        }
+
+        const relatedSchema = generateResourceSchema(relatedResource);
+
+        // Generate relational paths
+        const relationalPaths = generateRelationalPaths(
+          resource,
+          relationName,
+          relationConfig,
+          version,
+          relatedSchema
+        );
+
+        // Merge relational paths
+        Object.assign(spec.paths, relationalPaths);
+      }
+    }
   }
 
   // Add authentication endpoints if enabled

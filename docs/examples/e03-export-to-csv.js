@@ -7,7 +7,7 @@ import { Transform } from 'stream';
 async function main() {
   const s3db = await setupDatabase();
   
-  const total = await s3db.resource("leads").count();
+  const total = await s3db.resources.leads.count();
 
   const barData = new ProgressBar(
     "reading-data  :current/:total (:percent)  [:bar]  :rate/bps  :etas (:elapseds)",
@@ -20,7 +20,7 @@ async function main() {
 
   const filename = __dirname + "/tmp/leads." + Date.now() + ".csv";
 
-  const stream = await s3db.resource("leads").readable();
+  const stream = await s3db.resources.leads.readable();
   const streamWrite = fs.createWriteStream(filename);
 
   const transformer = new Transform({

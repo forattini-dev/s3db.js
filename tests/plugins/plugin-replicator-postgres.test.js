@@ -5,8 +5,8 @@ describe('Postgres Replicator Tests', () => {
   let replicator;
   
   afterEach(async () => {
-    if (replicator && typeof replicator.cleanup === 'function') {
-      await replicator.cleanup();
+    if (replicator && typeof replicator.stop === 'function') {
+      await replicator.stop();
     }
   });
 

@@ -163,12 +163,13 @@ describe('PluginStorage - TTL Features', () => {
     });
   });
 
-  describe('Backward Compatibility', () => {
-    test('should support put() as alias for set()', async () => {
-      await storage.put('config', { enabled: true });
-
-      const data = await storage.get('config');
-      expect(data).toEqual({ enabled: true });
-    });
-  });
+  // v13: Backward compatibility removed
+  // describe('Backward Compatibility', () => {
+  //   test('should support put() as alias for set()', async () => {
+  //     await storage.put('config', { enabled: true });
+  //
+  //     const data = await storage.get('config');
+  //     expect(data).toEqual({ enabled: true });
+  //   });
+  // });
 });

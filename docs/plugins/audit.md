@@ -77,13 +77,13 @@ const s3db = new S3db({
 await s3db.connect();
 
 // All operations are now automatically logged
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.insert({ id: 'user-1', name: 'John', email: 'john@example.com' });
 await users.update('user-1', { name: 'John Doe' });
 await users.delete('user-1');
 
 // Check audit logs
-const audits = s3db.resource('plg_audits');
+const audits = s3db.resources.plg_audits;
 const logs = await audits.list();
 
 console.log(`Tracked ${logs.length} operations:`, logs.map(l =>
@@ -110,7 +110,7 @@ await users.update('id', { name: 'Jane' });  // Logged
 await users.delete('id');  // Logged
 
 // Step 3: Query audit history
-const audits = db.resource('plg_audits');
+const audits = db.resources.plg_audits;
 const userChanges = await audits.query({ resourceName: 'users' });
 ```
 
@@ -267,7 +267,7 @@ new AuditPlugin({
 })
 
 // Setup retention policy
-const audits = db.resource('plg_audits');
+const audits = db.resources.plg_audits;
 
 // HIPAA: Keep 7 years
 const retention = 7 * 365 * 24 * 60 * 60 * 1000;
@@ -381,7 +381,7 @@ new AuditPlugin({
   }
 })
 
-const audits = s3db.resource('plg_audits');
+const audits = s3db.resources.plg_audits;
 const logs = await audits.list();
 
 console.log('User activity:', logs.map(l =>
@@ -408,7 +408,7 @@ new AuditPlugin({
 //   _truncatedAt: '2024-01-15T10:30:00.000Z'
 // }
 
-const audits = s3db.resource('plg_audits');
+const audits = s3db.resources.plg_audits;
 const truncated = (await audits.list()).filter(l =>
   l.newData?.includes('_truncated')
 );
@@ -421,7 +421,7 @@ console.log(`${truncated.length} logs were truncated`);
 Find specific operations:
 
 ```javascript
-const audits = s3db.resource('plg_audits');
+const audits = s3db.resources.plg_audits;
 
 // Get all changes to a specific record
 const userHistory = await audits.list({
@@ -522,7 +522,7 @@ new AuditPlugin({
 
 ```javascript
 // Use filters instead of loading all logs
-const audits = s3db.resource('plg_audits');
+const audits = s3db.resources.plg_audits;
 const recent = await audits.list({
   filter: log => new Date(log.timestamp) > new Date(Date.now() - 86400000)
 });

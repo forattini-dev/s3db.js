@@ -333,7 +333,7 @@ export class BackupPlugin extends Plugin {
     };
     
     const [ok] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).insert(metadata)
+      this.database.resources[this.config.backupMetadataResource].insert(metadata)
     );
     
     return metadata;
@@ -341,7 +341,7 @@ export class BackupPlugin extends Plugin {
 
   async _updateBackupMetadata(backupId, updates) {
     const [ok] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).update(backupId, updates)
+      this.database.resources[this.config.backupMetadataResource].update(backupId, updates)
     );
   }
 
@@ -387,7 +387,7 @@ export class BackupPlugin extends Plugin {
     let sinceTimestamp = null;
     if (type === 'incremental') {
       const [lastBackupOk, , lastBackups] = await tryFn(() =>
-        this.database.resource(this.config.backupMetadataResource).list({
+        this.database.resources[this.config.backupMetadataResource].list({
           filter: {
             status: 'completed',
             type: { $in: ['full', 'incremental'] }
@@ -802,7 +802,7 @@ export class BackupPlugin extends Plugin {
       
       // Merge with metadata from database
       const [metaOk, , metadataRecords] = await tryFn(() => 
-        this.database.resource(this.config.backupMetadataResource).list({
+        this.database.resources[this.config.backupMetadataResource].list({
           limit: options.limit || 50,
           sort: { timestamp: -1 }
         })
@@ -836,7 +836,7 @@ export class BackupPlugin extends Plugin {
    */
   async getBackupStatus(backupId) {
     const [ok, , backup] = await tryFn(() => 
-      this.database.resource(this.config.backupMetadataResource).get(backupId)
+      this.database.resources[this.config.backupMetadataResource].get(backupId)
     );
     
     return ok ? backup : null;
@@ -846,7 +846,7 @@ export class BackupPlugin extends Plugin {
     try {
       // Get all completed backups sorted by timestamp
       const [listOk, , allBackups] = await tryFn(() =>
-        this.database.resource(this.config.backupMetadataResource).list({
+        this.database.resources[this.config.backupMetadataResource].list({
           filter: { status: 'completed' },
           sort: { timestamp: -1 }
         })
@@ -938,7 +938,7 @@ export class BackupPlugin extends Plugin {
           await this.driver.delete(backup.id, backup.driverInfo);
 
           // Delete metadata
-          await this.database.resource(this.config.backupMetadataResource).delete(backup.id);
+          await this.database.resources[this.config.backupMetadataResource].delete(backup.id);
 
           if (this.config.verbose) {
             console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
@@ -981,13 +981,6 @@ export class BackupPlugin extends Plugin {
     if (this.driver) {
       await this.driver.cleanup();
     }
-  }
-
-  /**
-   * Cleanup plugin resources (alias for stop for backward compatibility)
-   */
-  async cleanup() {
-    await this.stop();
   }
 }
 

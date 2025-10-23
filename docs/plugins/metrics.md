@@ -164,7 +164,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 // Use your database normally - metrics are collected automatically
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.insert({ name: 'John', email: 'john@example.com' });
 await users.list();
 await users.count();
@@ -257,7 +257,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-const orders = s3db.resource('orders');
+const orders = s3db.resources.orders;
 
 // Simulate various operations
 console.log('Performing operations...');
@@ -686,7 +686,7 @@ class PerformanceBenchmark {
 
 // Usage
 const benchmark = new PerformanceBenchmark(s3db.plugins.metrics);
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 
 // Benchmark individual inserts
 await benchmark.runBenchmark('individual-inserts', async (i) => {

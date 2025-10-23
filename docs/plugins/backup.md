@@ -1245,7 +1245,7 @@ const testRestore = async () => {
     });
     
     // Verify data
-    const testUsers = testDb.resource('users');
+    const testUsers = testDb.resources.users;
     const count = await testUsers.count();
     
     console.log(`✅ Restore test successful: ${count} users restored`);

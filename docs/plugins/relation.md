@@ -135,7 +135,7 @@ await db.usePlugin(relationPlugin);
 // 3. Use relations!
 
 // Eager loading - load relations upfront (2 queries total)
-const user = await db.resource('users').get('u1', {
+const user = await db.resources.users.get('u1', {
   include: ['posts', 'profile']
 });
 
@@ -144,12 +144,12 @@ console.log(`Bio: ${user.profile.bio}`);
 console.log(`Posts: ${user.posts.length}`);
 
 // Lazy loading - load on demand
-const user2 = await db.resource('users').get('u2');
+const user2 = await db.resources.users.get('u2');
 const posts = await user2.posts();  // ← Dynamic method, uses partition automatically
 const profile = await user2.profile();
 
 // Nested relations - load relations of relations
-const user3 = await db.resource('users').get('u3', {
+const user3 = await db.resources.users.get('u3', {
   include: {
     posts: {
       include: ['author']  // Load posts and their authors
@@ -158,7 +158,7 @@ const user3 = await db.resource('users').get('u3', {
 });
 
 // Batch loading - N+1 prevention (only 2 queries, not 101!)
-const users = await db.resource('users').list({
+const users = await db.resources.users.list({
   limit: 100,
   include: ['posts']  // Plugin batches the post queries
 });

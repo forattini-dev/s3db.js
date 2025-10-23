@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { swaggerUI } from '@hono/swagger-ui';
-import { createResourceRoutes } from './routes/resource-routes.js';
+import { createResourceRoutes, createRelationalRoutes } from './routes/resource-routes.js';
 import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
 import { generateOpenAPISpec } from './utils/openapi-generator.js';
@@ -50,6 +50,11 @@ export class ApiServer {
     this.server = null;
     this.isRunning = false;
     this.openAPISpec = null;
+
+    // Detect if RelationPlugin is installed
+    this.relationsPlugin = this.options.database?.plugins?.relation ||
+                          this.options.database?.plugins?.RelationPlugin ||
+                          null;
 
     this._setupRoutes();
   }
@@ -165,12 +170,10 @@ export class ApiServer {
 
       // API Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
-        // Swagger UI (legacy, less pretty)
         this.app.get('/docs', swaggerUI({
           url: '/openapi.json'
         }));
       } else {
-        // Redoc (modern, beautiful design!)
         this.app.get('/docs', (c) => {
           return c.html(`<!DOCTYPE html>
 <html lang="en">
@@ -196,6 +199,11 @@ export class ApiServer {
 
     // Setup resource routes
     this._setupResourceRoutes();
+
+    // Setup relational routes if RelationPlugin is active
+    if (this.relationsPlugin) {
+      this._setupRelationalRoutes();
+    }
 
     // Global error handler
     this.app.onError((err, c) => {
@@ -253,6 +261,74 @@ export class ApiServer {
 
       if (this.options.verbose) {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
+      }
+    }
+  }
+
+  /**
+   * Setup relational routes (when RelationPlugin is active)
+   * @private
+   */
+  _setupRelationalRoutes() {
+    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
+      return;
+    }
+
+    const { database } = this.options;
+    const relations = this.relationsPlugin.relations;
+
+    if (this.options.verbose) {
+      console.log('[API Plugin] Setting up relational routes...');
+    }
+
+    for (const [resourceName, relationsDef] of Object.entries(relations)) {
+      const resource = database.resources[resourceName];
+      if (!resource) {
+        if (this.options.verbose) {
+          console.warn(`[API Plugin] Resource '${resourceName}' not found for relational routes`);
+        }
+        continue;
+      }
+
+      // Skip plugin resources unless explicitly included
+      if (resourceName.startsWith('plg_') && !this.options.resources[resourceName]) {
+        continue;
+      }
+
+      const version = resource.config?.currentVersion || resource.version || 'v1';
+
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        // Only create routes for relations that should be exposed via API
+        // Skip belongsTo relations (they're just reverse lookups, not useful as endpoints)
+        if (relationConfig.type === 'belongsTo') {
+          continue;
+        }
+
+        // Check if relation should be exposed (default: yes, unless explicitly disabled)
+        const resourceConfig = this.options.resources[resourceName];
+        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
+
+        if (!exposeRelation) {
+          continue;
+        }
+
+        // Create relational routes
+        const relationalApp = createRelationalRoutes(
+          resource,
+          relationName,
+          relationConfig,
+          version
+        );
+
+        // Mount relational routes at /{version}/{resource}/:id/{relation}
+        this.app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
+
+        if (this.options.verbose) {
+          console.log(
+            `[API Plugin] Mounted relational route: /${version}/${resourceName}/:id/${relationName} ` +
+            `(${relationConfig.type} -> ${relationConfig.resource})`
+          );
+        }
       }
     }
   }

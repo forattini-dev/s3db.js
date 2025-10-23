@@ -276,7 +276,7 @@ const s3db = new S3db({
       },
       guards: {
         canShip: async (context, event, machine) => {
-          const inventory = await machine.database.resource('inventory').get(context.productId);
+          const inventory = await machine.database.resources.inventory.get(context.productId);
           return inventory && inventory.quantity >= context.quantity;
         }
       }
@@ -287,7 +287,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 // Use state machine with your resources
-const orders = s3db.resource('orders');
+const orders = s3db.resources.orders;
 await orders.insert({
   id: 'order-123',
   productId: 'prod-456',
@@ -481,7 +481,7 @@ const orderStateMachine = new StateMachinePlugin({
       console.log(`Payment received for order ${context.id}`);
       
       // Update order with payment info
-      await machine.database.resource('orders').update(context.id, {
+      await machine.database.resources.orders.update(context.id, {
         payment_received_at: new Date().toISOString(),
         payment_amount: event.amount,
         payment_method: event.method
@@ -504,7 +504,7 @@ const orderStateMachine = new StateMachinePlugin({
       const items = context.items || [];
       
       for (const item of items) {
-        const inventory = await machine.database.resource('inventory').get(item.product_id);
+        const inventory = await machine.database.resources.inventory.get(item.product_id);
         if (!inventory || inventory.quantity < item.quantity) {
           return false;
         }
@@ -516,7 +516,7 @@ const orderStateMachine = new StateMachinePlugin({
 });
 
 // Usage
-const orders = s3db.resource('orders');
+const orders = s3db.resources.orders;
 
 // Create new order
 await orders.insert({
@@ -603,7 +603,7 @@ const userOnboardingMachine = {
     
     profileCompletionBonus: async (context, event, machine) => {
       // Award bonus for completing profile
-      await machine.database.resource('user_rewards').insert({
+      await machine.database.resources.user_rewards.insert({
         user_id: context.id,
         type: 'profile_completion',
         points: 100,
@@ -617,7 +617,7 @@ const userOnboardingMachine = {
       // Set up personalized experience based on preferences
       const preferences = event.preferences || {};
       
-      await machine.database.resource('user_preferences').insert({
+      await machine.database.resources.user_preferences.insert({
         user_id: context.id,
         ...preferences,
         created_at: new Date().toISOString()
@@ -685,7 +685,7 @@ const approvalWorkflowMachine = {
   actions: {
     notifySubmission: async (context, event, machine) => {
       // Notify approvers of new submission
-      const approvers = await machine.database.resource('approvers').list({
+      const approvers = await machine.database.resources.approvers.list({
         where: { department: context.department, active: true }
       });
       
@@ -702,7 +702,7 @@ const approvalWorkflowMachine = {
       console.log(`Processing approved request ${context.id}`);
       
       // Update request with approval info
-      await machine.database.resource('requests').update(context.id, {
+      await machine.database.resources.requests.update(context.id, {
         approved_by: event.approver_id,
         approved_at: new Date().toISOString(),
         approval_comments: event.comments
@@ -714,7 +714,7 @@ const approvalWorkflowMachine = {
   
   guards: {
     hasApprovalAuthority: async (context, event, machine) => {
-      const approver = await machine.database.resource('approvers').get(event.approver_id);
+      const approver = await machine.database.resources.approvers.get(event.approver_id);
       return approver && 
              approver.active && 
              approver.department === context.department &&
@@ -826,7 +826,7 @@ actions: {
     // machine: State machine instance with database access
     
     // Perform actions
-    await machine.database.resource('logs').insert({
+    await machine.database.resources.logs.insert({
       action: 'state_transition',
       record_id: context.id,
       timestamp: new Date().toISOString()
@@ -846,7 +846,7 @@ Guard functions return boolean values to allow/prevent transitions:
 guards: {
   myGuard: async (context, event, machine) => {
     // Check conditions
-    const user = await machine.database.resource('users').get(event.user_id);
+    const user = await machine.database.resources.users.get(event.user_id);
     return user && user.role === 'admin';
   }
 }
@@ -1042,7 +1042,7 @@ actions: {
 ```javascript
 guards: {
   canApprove: async (context, event, machine) => {
-    const user = await machine.database.resource('users').get(event.user_id);
+    const user = await machine.database.resources.users.get(event.user_id);
     const request = context;
     
     // Multiple validation rules
@@ -1058,7 +1058,7 @@ guards: {
     const items = context.items || [];
     
     for (const item of items) {
-      const inventory = await machine.database.resource('inventory').get(item.product_id);
+      const inventory = await machine.database.resources.inventory.get(item.product_id);
       if (!inventory || inventory.available_quantity < item.quantity) {
         return false;
       }
@@ -1075,7 +1075,7 @@ guards: {
 actions: {
   logTransition: async (context, event, machine) => {
     // Log every state transition for audit purposes
-    await machine.database.resource('state_transitions').insert({
+    await machine.database.resources.state_transitions.insert({
       id: `transition_${Date.now()}`,
       resource_type: 'order',
       resource_id: context.id,
@@ -1102,7 +1102,7 @@ actions: {
 // Implement optimistic locking for concurrent updates
 actions: {
   safeStateUpdate: async (context, event, machine) => {
-    const currentRecord = await machine.database.resource('orders').get(context.id);
+    const currentRecord = await machine.database.resources.orders.get(context.id);
     
     // Check if state has changed since we started
     if (currentRecord._state !== context._state) {
@@ -1110,7 +1110,7 @@ actions: {
     }
     
     // Proceed with update using version check
-    await machine.database.resource('orders').update(context.id, {
+    await machine.database.resources.orders.update(context.id, {
       status_updated_at: new Date().toISOString(),
       updated_by: event.user_id
     }, {
@@ -1188,7 +1188,7 @@ new StateMachinePlugin({
 actions: {
   onStateChange: async (context, event, machine) => {
     // Update entity record with new state
-    await machine.database.resource('orders').update(context.id, {
+    await machine.database.resources.orders.update(context.id, {
       status: event.to,
       status_updated_at: new Date().toISOString(),
       status_updated_by: event.userId || 'system',
@@ -1196,7 +1196,7 @@ actions: {
     });
 
     // Store detailed transition in audit log
-    await machine.database.resource('state_transitions').insert({
+    await machine.database.resources.state_transitions.insert({
       id: `transition_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       entity_type: 'order',
       entity_id: context.id,
@@ -1218,7 +1218,7 @@ actions: {
 
 // Read state consistently
 async function getOrderWithState(orderId) {
-  const order = await db.resource('orders').get(orderId);
+  const order = await db.resources.orders.get(orderId);
   const currentState = await stateMachine.getState(orderId);
 
   // Verify consistency between database and state machine
@@ -1229,7 +1229,7 @@ async function getOrderWithState(orderId) {
     await stateMachine.setState(orderId, order.status);
 
     // Option 2: Trust state machine
-    // await db.resource('orders').update(orderId, { status: currentState });
+    // await db.resources.orders.update(orderId, { status: currentState });
   }
 
   return { ...order, _state: currentState };
@@ -1237,7 +1237,7 @@ async function getOrderWithState(orderId) {
 
 // Handle state restoration on startup
 async function restoreStateMachineState(orderId) {
-  const order = await db.resource('orders').get(orderId);
+  const order = await db.resources.orders.get(orderId);
 
   // Initialize state machine with database state
   await stateMachine.initializeEntity(orderId, {
@@ -1310,7 +1310,7 @@ if (currentState === 'confirmed') {
 // Define guard with clear error messages
 guards: {
   canShip: async (context, event, machine) => {
-    const inventory = await machine.database.resource('inventory').get(context.productId);
+    const inventory = await machine.database.resources.inventory.get(context.productId);
 
     if (!inventory) {
       throw new Error('Product not found in inventory');
@@ -1378,7 +1378,7 @@ actions: {
       console.error(`Payment failed for order ${context.id}:`, paymentError);
 
       // Record failure in database
-      await machine.database.resource('payment_failures').insert({
+      await machine.database.resources.payment_failures.insert({
         order_id: context.id,
         error: paymentError.message,
         timestamp: new Date().toISOString()
@@ -1453,7 +1453,7 @@ async function safeStateTransition(machineId, entityId, event, eventData) {
     console.error(`Transition failed from ${beforeState}:`, error);
 
     // Log failed transition
-    await database.resource('failed_transitions').insert({
+    await database.resources.failed_transitions.insert({
       machine_id: machineId,
       entity_id: entityId,
       from_state: beforeState,
@@ -1556,7 +1556,7 @@ const circuitBreaker = new GuardCircuitBreaker();
 guards: {
   checkInventory: async (context, event, machine) => {
     return circuitBreaker.execute('checkInventory', async () => {
-      const inventory = await machine.database.resource('inventory').get(context.productId);
+      const inventory = await machine.database.resources.inventory.get(context.productId);
       return inventory && inventory.quantity >= context.quantity;
     });
   }
@@ -1761,7 +1761,7 @@ guards: {
 
     if (!result) {
       // Log failed guard check
-      await machine.database.resource('guard_failures').insert({
+      await machine.database.resources.guard_failures.insert({
         machine: 'order_processing',
         guard: 'canShip',
         entity_id: context.id,
@@ -1789,7 +1789,7 @@ actions: {
       const duration = Date.now() - startTime;
 
       // Log performance metrics
-      await machine.database.resource('transition_metrics').insert({
+      await machine.database.resources.transition_metrics.insert({
         machine: 'order_processing',
         entity_id: context.id,
         transition: `${event.from} → ${event.to}`,
@@ -1801,7 +1801,7 @@ actions: {
       const duration = Date.now() - startTime;
 
       // Log failed transitions
-      await machine.database.resource('transition_metrics').insert({
+      await machine.database.resources.transition_metrics.insert({
         machine: 'order_processing',
         entity_id: context.id,
         transition: `${event.from} → ${event.to}`,
@@ -1823,7 +1823,7 @@ R: Use optimistic locking:
 actions: {
   safeTransition: async (context, event, machine) => {
     // Get current record with version
-    const record = await machine.database.resource('orders').get(context.id);
+    const record = await machine.database.resources.orders.get(context.id);
 
     // Check state hasn't changed
     if (record._state !== context._state) {
@@ -1831,7 +1831,7 @@ actions: {
     }
 
     // Update with version check (optimistic lock)
-    await machine.database.resource('orders').update(context.id, {
+    await machine.database.resources.orders.update(context.id, {
       _state: event.to,
       updated_at: new Date().toISOString()
     }, {
@@ -1858,7 +1858,7 @@ actions: {
       rollbackActions.push(() => refundPayment(paymentId));
 
       // Step 3: Update order status
-      await machine.database.resource('orders').update(context.id, {
+      await machine.database.resources.orders.update(context.id, {
         _state: 'paid',
         payment_id: paymentId
       });

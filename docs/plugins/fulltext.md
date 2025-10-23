@@ -207,7 +207,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-const articles = s3db.resource('articles');
+const articles = s3db.resources.articles;
 
 // Insert data (automatically indexed)
 await articles.insert({
@@ -279,7 +279,7 @@ const s3db = new S3db({
 
 await s3db.connect();
 
-const products = s3db.resource('products');
+const products = s3db.resources.products;
 
 // Add products with searchable content
 await products.insertMany([
@@ -1150,7 +1150,7 @@ R: Verifique:
 **P: Como debugar índices?**
 R: Consulte diretamente o recurso de índices:
 ```javascript
-const indexes = await database.resource('plg_fulltext_indexes').list();
+const indexes = await database.resources.plg_fulltext_indexes.list();
 console.log(indexes);
 ```
 

@@ -13,14 +13,14 @@
  * 6. Query resources by type, attributes, and source file
  * 7. Calculate diffs between state versions
  * 8. Monitor infrastructure with auto-sync
- * 9. Export resources back to Terraform state format (bidirectional conversion)
+ * 9. Export resources back to Tfstate format (bidirectional conversion)
  * 10. Round-trip conversion: Terraform → s3db → Terraform
  */
 
 import { Database, TfStatePlugin } from '../../src/index.js';
 import { writeFileSync } from 'fs';
 
-// Helper: Create example Terraform state file
+// Helper: Create example Tfstate file
 function createExampleStateFile(serial, resources) {
   const state = {
     version: 4,
@@ -38,7 +38,7 @@ function createExampleStateFile(serial, resources) {
 
 async function main() {
   console.log('========================================');
-  console.log('Terraform State Tracking Example');
+  console.log('Tfstate Tracking Example');
   console.log('========================================\n');
 
   // Create database
@@ -66,9 +66,9 @@ async function main() {
   console.log('\n✅ TfStatePlugin installed\n');
 
   // ========================================
-  // 1. Create Initial Terraform State
+  // 1. Create Initial Tfstate
   // ========================================
-  console.log('📝 Creating initial Terraform state (serial 1)...\n');
+  console.log('📝 Creating initial Tfstate (serial 1)...\n');
 
   const stateFile1 = createExampleStateFile(1, [
     {
@@ -155,7 +155,7 @@ async function main() {
   // ========================================
   // 3. Create Updated State (Serial 2)
   // ========================================
-  console.log('\n📝 Creating updated Terraform state (serial 2)...\n');
+  console.log('\n📝 Creating updated Tfstate (serial 2)...\n');
   console.log('Changes:');
   console.log('  - Modified EC2 instance type: t2.micro → t2.small');
   console.log('  - Added new DynamoDB table');
@@ -563,10 +563,10 @@ async function main() {
   }
 
   // ========================================
-  // 11. Export Resources Back to Terraform State
+  // 11. Export Resources Back to Tfstate
   // ========================================
-  console.log('\n📤 Exporting Resources Back to Terraform State...\n');
-  console.log('This demonstrates converting s3db resources back to Terraform state files.\n');
+  console.log('\n📤 Exporting Resources Back to Tfstate...\n');
+  console.log('This demonstrates converting s3db resources back to Tfstate files.\n');
 
   // Example 1: Export latest state
   console.log('Example 1: Export latest state to object');
@@ -676,7 +676,7 @@ async function main() {
   console.log('  ✓ Compatible with both Terraform and OpenTofu state files');
   console.log('  ✓ Import state files from local filesystem or remote S3 buckets');
   console.log('  ✓ Bulk import multiple state files using glob patterns (*, **, ?, [])');
-  console.log('  ✓ Export resources back to Terraform state format (bidirectional conversion)');
+  console.log('  ✓ Export resources back to Tfstate format (bidirectional conversion)');
   console.log('  ✓ Track source file for each resource with sourceFile field');
   console.log('  ✓ Track infrastructure changes over time with diff tracking');
   console.log('  ✓ Query resources by type, attributes, state serial, and source file');

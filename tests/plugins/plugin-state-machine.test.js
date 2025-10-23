@@ -601,7 +601,7 @@ describe('StateMachinePlugin', () => {
       await plugin.send('order_processing', 'order1', 'CONFIRM');
       
       // Check state resource
-      const stateRecord = await database.resource(plugin.config.stateResource)
+      const stateRecord = await database.resources[plugin.config.stateResource]
         .get('order_processing_order1');
       
       expect(stateRecord).toBeDefined();
@@ -615,7 +615,7 @@ describe('StateMachinePlugin', () => {
       await plugin.send('order_processing', 'order1', 'CONFIRM', { test: 'data' });
       
       // Check transition log
-      const transitions = await database.resource(plugin.config.transitionLogResource)
+      const transitions = await database.resources[plugin.config.transitionLogResource]
         .list({
           where: { machineId: 'order_processing', entityId: 'order1' }
         });
@@ -685,7 +685,7 @@ describe('StateMachinePlugin', () => {
     it('should cleanup successfully', async () => {
       const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
 
-      await plugin.cleanup();
+      await plugin.stop();
 
       expect(plugin.machines.size).toBe(0);
       expect(removeListenersSpy).toHaveBeenCalled();

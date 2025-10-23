@@ -58,7 +58,7 @@ describe('CLI Backup & Restore API Tests', () => {
 
   afterEach(async () => {
     if (backupPlugin) {
-      await backupPlugin.cleanup();
+      await backupPlugin.stop();
     }
     if (database) {
       await database.disconnect();

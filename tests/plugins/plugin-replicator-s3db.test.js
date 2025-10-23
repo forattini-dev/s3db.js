@@ -77,8 +77,8 @@ describe('S3dbReplicator - Comprehensive Integration Tests', () => {
   afterEach(async () => {
     // Reduced wait time
     await new Promise(resolve => setTimeout(resolve, 200));
-    if (plugin && typeof plugin.cleanup === 'function') {
-      await plugin.cleanup();
+    if (plugin && typeof plugin.stop === 'function') {
+      await plugin.stop();
       plugin = null;
     }
   });

@@ -464,24 +464,7 @@ export function metadataDecode(value) {
     }
   }
 
-  // No prefix - return as is (backwards compatibility)
-  // Try to detect if it's base64 without prefix (legacy)
-  // OPTIMIZATION: Quick reject before expensive regex
-  const len = value.length;
-  if (len > 0 && len % 4 === 0) { // Base64 is always multiple of 4
-    if (/^[A-Za-z0-9+/]+=*$/.test(value)) {
-      try {
-        const decoded = Buffer.from(value, 'base64').toString('utf8');
-        // Verify it's valid UTF-8 with special chars
-        if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, 'utf8').toString('base64') === value) {
-          return decoded;
-        }
-      } catch {
-        // Not base64, return as is
-      }
-    }
-  }
-
+  // No prefix - return as is
   return value;
 }
 
@@ -490,9 +473,6 @@ export function metadataDecode(value) {
  * @param {string} value - Value to calculate size for
  * @returns {Object} Size information
  */
-// Backwards compatibility exports
-export { metadataEncode as smartEncode, metadataDecode as smartDecode };
-
 export function calculateEncodedSize(value) {
   const analysis = analyzeString(value);
   const originalSize = Buffer.byteLength(value, 'utf8');

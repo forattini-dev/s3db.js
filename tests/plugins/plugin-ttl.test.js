@@ -904,8 +904,8 @@ describe('TTLPlugin v2 - Multiple Granularities', () => {
   });
 
   test('should cleanup all granularities with runCleanup', async () => {
-    const shortLived = db.resource('short_lived');
-    const mediumLived = db.resource('medium_lived');
+    const shortLived = db.resources.short_lived;
+    const mediumLived = db.resources.medium_lived;
 
     await shortLived.insert({ id: 'short-1' });
     await mediumLived.insert({ id: 'medium-1' });

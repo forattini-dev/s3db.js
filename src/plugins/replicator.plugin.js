@@ -306,18 +306,6 @@ export class ReplicatorPlugin extends Plugin {
     // Plugin is ready
   }
 
-  async stop() {
-    // Stop all replicators
-    for (const replicator of this.replicators || []) {
-      if (replicator && typeof replicator.cleanup === 'function') {
-        await replicator.cleanup();
-      }
-    }
-    
-    // Remove database hooks
-    this.removeDatabaseHooks();
-  }
-
   installDatabaseHooks() {
     // Store hook reference for later removal
     this._afterCreateResourceHook = (resource) => {
@@ -730,21 +718,21 @@ export class ReplicatorPlugin extends Plugin {
     this.emit('replicator.sync.completed', { replicatorId, stats: this.stats });
   }
 
-  async cleanup() {
+  async stop() {
     const [ok, error] = await tryFn(async () => {
       if (this.replicators && this.replicators.length > 0) {
         const cleanupPromises = this.replicators.map(async (replicator) => {
           const [replicatorOk, replicatorError] = await tryFn(async () => {
-            if (replicator && typeof replicator.cleanup === 'function') {
-              await replicator.cleanup();
+            if (replicator && typeof replicator.stop === 'function') {
+              await replicator.stop();
             }
           });
-          
+
           if (!replicatorOk) {
             if (this.config.verbose) {
-              console.warn(`[ReplicatorPlugin] Failed to cleanup replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
+              console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
             }
-            this.emit('replicator_cleanup_error', {
+            this.emit('replicator_stop_error', {
               replicator: replicator.name || replicator.id || 'unknown',
               driver: replicator.driver || 'unknown',
               error: replicatorError.message
@@ -754,7 +742,10 @@ export class ReplicatorPlugin extends Plugin {
         
         await Promise.allSettled(cleanupPromises);
       }
-      
+
+      // Remove database hooks
+      this.removeDatabaseHooks();
+
       // Remove event listeners from resources to prevent memory leaks
       if (this.database && this.database.resources) {
         for (const resourceName of this.eventListenersInstalled) {
@@ -779,9 +770,9 @@ export class ReplicatorPlugin extends Plugin {
     
     if (!ok) {
       if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to cleanup plugin: ${error.message}`);
+        console.warn(`[ReplicatorPlugin] Failed to stop plugin: ${error.message}`);
       }
-      this.emit('replicator_plugin_cleanup_error', {
+      this.emit('replicator_plugin_stop_error', {
         error: error.message
       });
     }

@@ -40,7 +40,7 @@ describe('Backup Integration (Simple)', () => {
 
   afterAll(async () => {
     if (backupPlugin) {
-      await backupPlugin.cleanup();
+      await backupPlugin.stop();
     }
     if (database) {
       await database.disconnect();

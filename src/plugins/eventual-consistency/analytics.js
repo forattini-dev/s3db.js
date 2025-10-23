@@ -559,8 +559,6 @@ async function getAnalyticsForRecord(resourceName, field, recordId, options, han
     return [];
   }
 
-  // ✅ FIX BUG #2: Ensure all transactions have cohortHour calculated
-  // This handles legacy data that may be missing cohortHour
   allTransactions = ensureCohortHours(allTransactions, handler.config?.cohort?.timezone || 'UTC', false);
 
   // Filter transactions by temporal range

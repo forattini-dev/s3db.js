@@ -20,7 +20,7 @@ export class TfStateError extends Error {
  */
 export class InvalidStateFileError extends TfStateError {
   constructor(filePath, reason, context = {}) {
-    super(`Invalid Terraform state file "${filePath}": ${reason}`, context);
+    super(`Invalid Tfstate file "${filePath}": ${reason}`, context);
     this.name = 'InvalidStateFileError';
     this.filePath = filePath;
     this.reason = reason;
@@ -33,7 +33,7 @@ export class InvalidStateFileError extends TfStateError {
 export class UnsupportedStateVersionError extends TfStateError {
   constructor(version, supportedVersions, context = {}) {
     super(
-      `Terraform state version ${version} is not supported. Supported versions: ${supportedVersions.join(', ')}`,
+      `Tfstate version ${version} is not supported. Supported versions: ${supportedVersions.join(', ')}`,
       context
     );
     this.name = 'UnsupportedStateVersionError';
@@ -47,7 +47,7 @@ export class UnsupportedStateVersionError extends TfStateError {
  */
 export class StateFileNotFoundError extends TfStateError {
   constructor(filePath, context = {}) {
-    super(`Terraform state file not found: ${filePath}`, context);
+    super(`Tfstate file not found: ${filePath}`, context);
     this.name = 'StateFileNotFoundError';
     this.filePath = filePath;
   }

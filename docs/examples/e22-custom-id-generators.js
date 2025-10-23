@@ -21,7 +21,7 @@ const main = async () => {
       idGenerator: uuidv4 // Pass the uuid function directly
     });
 
-    const uuidUsers = s3db.resource('uuid-users');
+    const uuidUsers = s3db.resources.uuid-users;
 
     const user1 = await uuidUsers.insert({
       name: 'John UUID',
@@ -42,7 +42,7 @@ const main = async () => {
       idGenerator: uuidv1 // Pass the uuid v1 function
     });
 
-    const uuidv1Users = s3db.resource('uuidv1-users');
+    const uuidv1Users = s3db.resources.uuidv1-users;
 
     const user2 = await uuidv1Users.insert({
       name: 'Jane UUID v1',
@@ -63,7 +63,7 @@ const main = async () => {
       idSize: 8 // Generate 8-character IDs
     });
 
-    const shortIdUsers = s3db.resource('short-id-users');
+    const shortIdUsers = s3db.resources.short-id-users;
 
     const user3 = await shortIdUsers.insert({
       name: 'Bob Short ID',
@@ -84,7 +84,7 @@ const main = async () => {
       idSize: 32 // Generate 32-character IDs
     });
 
-    const longIdUsers = s3db.resource('long-id-users');
+    const longIdUsers = s3db.resources.long-id-users;
 
     const user4 = await longIdUsers.insert({
       name: 'Alice Long ID',
@@ -105,7 +105,7 @@ const main = async () => {
       idGenerator: () => `user_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`
     });
 
-    const timestampUsers = s3db.resource('timestamp-users');
+    const timestampUsers = s3db.resources.timestamp-users;
 
     const user5 = await timestampUsers.insert({
       name: 'Tim Timestamp',
@@ -126,7 +126,7 @@ const main = async () => {
       idGenerator: () => `CUSTOM_${Math.random().toString(36).substr(2, 10).toUpperCase()}`
     });
 
-    const prefixUsers = s3db.resource('prefix-users');
+    const prefixUsers = s3db.resources.prefix-users;
 
     const user6 = await prefixUsers.insert({
       name: 'Pat Prefix',
@@ -147,7 +147,7 @@ const main = async () => {
       idGenerator: 16 // Same as idSize: 16
     });
 
-    const numberSizeUsers = s3db.resource('number-size-users');
+    const numberSizeUsers = s3db.resources.number-size-users;
 
     const user7 = await numberSizeUsers.insert({
       name: 'Num Size',
@@ -168,7 +168,7 @@ const main = async () => {
       // No idGenerator or idSize specified - uses default 22 characters
     });
 
-    const defaultUsers = s3db.resource('default-users');
+    const defaultUsers = s3db.resources.default-users;
 
     const user8 = await defaultUsers.insert({
       name: 'Default User',

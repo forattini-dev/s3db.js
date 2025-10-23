@@ -416,7 +416,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _setupResourceRelations(resourceName, relationsDef) {
-    const resource = this.database.resource(resourceName);
+    const resource = this.database.resources[resourceName];
     if (!resource) {
       if (this.verbose) {
         console.warn(`[RelationPlugin] Resource "${resourceName}" not found, will setup when created`);
@@ -572,7 +572,7 @@ class RelationPlugin extends Plugin {
         for (const record of records) {
           const relatedData = record[relationName];
           if (relatedData) {
-            const relatedResource = this.database.resource(config.resource);
+            const relatedResource = this.database.resources[config.resource];
             const relatedArray = Array.isArray(relatedData) ? relatedData : [relatedData];
 
             if (relatedArray.length > 0) {
@@ -635,7 +635,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadHasOne(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -689,7 +689,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadHasMany(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -751,7 +751,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadBelongsTo(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -818,7 +818,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadBelongsToMany(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -826,7 +826,7 @@ class RelationPlugin extends Plugin {
       });
     }
 
-    const junctionResource = this.database.resource(config.through);
+    const junctionResource = this.database.resources[config.through];
     if (!junctionResource) {
       throw new JunctionTableNotFoundError(config.through, {
         sourceResource: sourceResource.name,
@@ -1077,7 +1077,7 @@ class RelationPlugin extends Plugin {
   async _cascadeDelete(record, resource, relationName, config) {
     this.stats.cascadeOperations++;
 
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: resource.name,
@@ -1087,7 +1087,7 @@ class RelationPlugin extends Plugin {
 
     // Track deleted records for rollback (if transactions enabled)
     const deletedRecords = [];
-    const junctionResource = config.type === 'belongsToMany' ? this.database.resource(config.through) : null;
+    const junctionResource = config.type === 'belongsToMany' ? this.database.resources[config.through] : null;
 
     try {
       if (config.type === 'hasMany') {
@@ -1156,7 +1156,7 @@ class RelationPlugin extends Plugin {
         }
       } else if (config.type === 'belongsToMany') {
         // Delete junction table entries - use partition if available
-        const junctionResource = this.database.resource(config.through);
+        const junctionResource = this.database.resources[config.through];
         if (junctionResource) {
           let junctionRecords;
           const partitionName = this._findPartitionByField(junctionResource, config.foreignKey);
@@ -1240,7 +1240,7 @@ class RelationPlugin extends Plugin {
   async _cascadeUpdate(record, changes, resource, relationName, config) {
     this.stats.cascadeOperations++;
 
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       return;
     }

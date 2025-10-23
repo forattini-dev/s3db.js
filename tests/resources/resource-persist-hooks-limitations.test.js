@@ -49,7 +49,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
 
     // Works in original session
-    const resource1 = originalDb.resource("users_external_refs");
+    const resource1 = originalDb.resources.users_external_refs;
     const result1 = await resource1.insert({ 
       name: "Admin", 
       email: "admin@company.com" 
@@ -76,7 +76,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
     await newDb.connect();
 
-    const resource2 = newDb.resource("users_external_refs");
+    const resource2 = newDb.resources.users_external_refs;
     
     // External variables are undefined now, hook should throw ReferenceError
     await expect(resource2.insert({ 
@@ -131,7 +131,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
     await newDb.connect();
 
-    const resource = newDb.resource("users_self_contained");
+    const resource = newDb.resources.users_self_contained;
     
     // Self-contained hook should work perfectly
     const adminUser = await resource.insert({ 
@@ -184,7 +184,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
 
     // Works in original session (closure is intact)
-    const resource1 = originalDb.resource("users_with_closure");
+    const resource1 = originalDb.resources.users_with_closure;
     await expect(resource1.insert({ 
       name: "Invalid", 
       email: "invalid-email" 
@@ -201,7 +201,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
     await newDb.connect();
 
-    const resource2 = newDb.resource("users_with_closure");
+    const resource2 = newDb.resources.users_with_closure;
     
     // Closure variable 'config' is undefined, so validation logic fails silently
     // or throws ReferenceError depending on implementation
@@ -261,7 +261,7 @@ describe("Resource Hook Persistence - Limitations", () => {
     });
     await newDb.connect();
 
-    const resource = newDb.resource("demo_hooks");
+    const resource = newDb.resources.demo_hooks;
     
     // The hook handles the error gracefully
     const result = await resource.insert({ 

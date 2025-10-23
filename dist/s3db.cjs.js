@@ -232,8 +232,6 @@ function calculateUTF8Bytes(str) {
 function clearUTF8Memory() {
   utf8BytesMemory.clear();
 }
-const clearUTF8Memo = clearUTF8Memory;
-const clearUTF8Cache = clearUTF8Memory;
 function calculateAttributeNamesSize(mappedObject) {
   let totalSize = 0;
   for (const key of Object.keys(mappedObject)) {
@@ -1627,18 +1625,6 @@ function metadataDecode(value) {
       }
     }
   }
-  const len = value.length;
-  if (len > 0 && len % 4 === 0) {
-    if (/^[A-Za-z0-9+/]+=*$/.test(value)) {
-      try {
-        const decoded = Buffer.from(value, "base64").toString("utf8");
-        if (/[^\x00-\x7F]/.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === value) {
-          return decoded;
-        }
-      } catch {
-      }
-    }
-  }
   return value;
 }
 
@@ -1725,11 +1711,22 @@ class PluginStorage {
     }
   }
   /**
-   * Alias for set() to maintain backward compatibility
-   * @deprecated Use set() instead
+   * Batch set multiple items
+   *
+   * @param {Array<{key: string, data: Object, options?: Object}>} items - Items to save
+   * @returns {Promise<Array<{ok: boolean, key: string, error?: Error}>>} Results
    */
-  async put(key, data, options = {}) {
-    return this.set(key, data, options);
+  async batchSet(items) {
+    const results = [];
+    for (const item of items) {
+      try {
+        await this.set(item.key, item.data, item.options || {});
+        results.push({ ok: true, key: item.key });
+      } catch (error) {
+        results.push({ ok: false, key: item.key, error });
+      }
+    }
+    return results;
   }
   /**
    * Get data with automatic metadata decoding and TTL check
@@ -2844,6 +2841,57 @@ function createResourceRoutes(resource, version, config = {}) {
   }
   return app;
 }
+function createRelationalRoutes(sourceResource, relationName, relationConfig, version) {
+  const app = new hono.Hono();
+  const resourceName = sourceResource.name;
+  const relatedResourceName = relationConfig.resource;
+  app.get("/:id", asyncHandler(async (c) => {
+    const id = c.req.param("id");
+    const query = c.req.query();
+    const source = await sourceResource.get(id);
+    if (!source) {
+      const response = notFound(resourceName, id);
+      return c.json(response, response._status);
+    }
+    const result = await sourceResource.get(id, {
+      include: [relationName]
+    });
+    const relatedData = result[relationName];
+    if (!relatedData) {
+      if (relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany") {
+        const response = list([], {
+          total: 0,
+          page: 1,
+          pageSize: 100,
+          pageCount: 0
+        });
+        return c.json(response, response._status);
+      } else {
+        const response = notFound(relatedResourceName, "related resource");
+        return c.json(response, response._status);
+      }
+    }
+    if (relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany") {
+      const items = Array.isArray(relatedData) ? relatedData : [relatedData];
+      const limit = parseInt(query.limit) || 100;
+      const offset = parseInt(query.offset) || 0;
+      const paginatedItems = items.slice(offset, offset + limit);
+      const response = list(paginatedItems, {
+        total: items.length,
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit,
+        pageCount: Math.ceil(items.length / limit)
+      });
+      c.header("X-Total-Count", items.length.toString());
+      c.header("X-Page-Count", Math.ceil(items.length / limit).toString());
+      return c.json(response, response._status);
+    } else {
+      const response = success(relatedData);
+      return c.json(response, response._status);
+    }
+  }));
+  return app;
+}
 
 function mapFieldTypeToOpenAPI(fieldType) {
   const type = fieldType.split("|")[0].trim();
@@ -2914,6 +2962,8 @@ function generateResourceSchema(resource) {
   const properties = {};
   const required = [];
   const attributes = resource.config?.attributes || resource.attributes || {};
+  const resourceDescription = resource.config?.description;
+  const attributeDescriptions = typeof resourceDescription === "object" ? resourceDescription.attributes || {} : {};
   properties.id = {
     type: "string",
     description: "Unique identifier for the resource",
@@ -2925,7 +2975,7 @@ function generateResourceSchema(resource) {
       const baseType = mapFieldTypeToOpenAPI(fieldDef.type);
       properties[fieldName] = {
         ...baseType,
-        description: fieldDef.description || void 0
+        description: fieldDef.description || attributeDescriptions[fieldName] || void 0
       };
       if (fieldDef.required) {
         required.push(fieldName);
@@ -2945,7 +2995,8 @@ function generateResourceSchema(resource) {
       const rules = extractValidationRules(fieldDef);
       properties[fieldName] = {
         ...baseType,
-        ...rules
+        ...rules,
+        description: attributeDescriptions[fieldName] || void 0
       };
       if (rules.required) {
         required.push(fieldName);
@@ -3527,6 +3578,98 @@ The response includes pagination metadata in the \`pagination\` object with tota
   }
   return paths;
 }
+function generateRelationalPaths(resource, relationName, relationConfig, version, relatedSchema) {
+  const resourceName = resource.name;
+  const basePath = `/${version}/${resourceName}/{id}/${relationName}`;
+  relationConfig.resource;
+  const isToMany = relationConfig.type === "hasMany" || relationConfig.type === "belongsToMany";
+  const paths = {};
+  paths[basePath] = {
+    get: {
+      tags: [resourceName],
+      summary: `Get ${relationName} of ${resourceName}`,
+      description: `Retrieve ${relationName} (${relationConfig.type}) associated with this ${resourceName}. This endpoint uses the RelationPlugin to efficiently load related data` + (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : "."),
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: `${resourceName} ID`,
+          schema: { type: "string" }
+        },
+        ...isToMany ? [
+          {
+            name: "limit",
+            in: "query",
+            description: "Maximum number of items to return",
+            schema: { type: "integer", default: 100, minimum: 1, maximum: 1e3 }
+          },
+          {
+            name: "offset",
+            in: "query",
+            description: "Number of items to skip",
+            schema: { type: "integer", default: 0, minimum: 0 }
+          }
+        ] : []
+      ],
+      responses: {
+        200: {
+          description: "Successful response",
+          content: {
+            "application/json": {
+              schema: isToMany ? {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: {
+                    type: "array",
+                    items: relatedSchema
+                  },
+                  pagination: {
+                    type: "object",
+                    properties: {
+                      total: { type: "integer" },
+                      page: { type: "integer" },
+                      pageSize: { type: "integer" },
+                      pageCount: { type: "integer" }
+                    }
+                  }
+                }
+              } : {
+                type: "object",
+                properties: {
+                  success: { type: "boolean", example: true },
+                  data: relatedSchema
+                }
+              }
+            }
+          },
+          ...isToMany ? {
+            headers: {
+              "X-Total-Count": {
+                description: "Total number of related records",
+                schema: { type: "integer" }
+              },
+              "X-Page-Count": {
+                description: "Total number of pages",
+                schema: { type: "integer" }
+              }
+            }
+          } : {}
+        },
+        404: {
+          description: `${resourceName} not found` + (isToMany ? "" : " or no related resource exists"),
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Error" }
+            }
+          }
+        }
+      }
+    }
+  };
+  return paths;
+}
 function generateOpenAPISpec(database, config = {}) {
   const {
     title = "s3db.js API",
@@ -3536,12 +3679,33 @@ function generateOpenAPISpec(database, config = {}) {
     auth = {},
     resources: resourceConfigs = {}
   } = config;
+  const resourcesTableRows = [];
+  for (const [name, resource] of Object.entries(database.resources)) {
+    if (name.startsWith("plg_") && !resourceConfigs[name]) {
+      continue;
+    }
+    const version2 = resource.config?.currentVersion || resource.version || "v1";
+    const resourceDescription = resource.config?.description;
+    const descText = typeof resourceDescription === "object" ? resourceDescription.resource : resourceDescription || "No description";
+    resourcesTableRows.push(`| ${name} | ${descText} | \`/${version2}/${name}\` |`);
+  }
+  const enhancedDescription = `${description}
+
+## Available Resources
+
+| Resource | Description | Base Path |
+|----------|-------------|-----------|
+${resourcesTableRows.join("\n")}
+
+---
+
+For detailed information about each endpoint, see the sections below.`;
   const spec = {
     openapi: "3.1.0",
     info: {
       title,
       version,
-      description,
+      description: enhancedDescription,
       contact: {
         name: "s3db.js",
         url: "https://github.com/forattini-dev/s3db.js"
@@ -3629,6 +3793,7 @@ function generateOpenAPISpec(database, config = {}) {
     };
   }
   const resources = database.resources;
+  const relationsPlugin = database.plugins?.relation || database.plugins?.RelationPlugin || null;
   for (const [name, resource] of Object.entries(resources)) {
     if (name.startsWith("plg_") && !resourceConfigs[name]) {
       continue;
@@ -3640,11 +3805,38 @@ function generateOpenAPISpec(database, config = {}) {
     const version2 = resource.config?.currentVersion || resource.version || "v1";
     const paths = generateResourcePaths(resource, version2, config2);
     Object.assign(spec.paths, paths);
+    const resourceDescription = resource.config?.description;
+    const tagDescription = typeof resourceDescription === "object" ? resourceDescription.resource : resourceDescription || `Operations for ${name} resource`;
     spec.tags.push({
       name,
-      description: `Operations for ${name} resource`
+      description: tagDescription
     });
     spec.components.schemas[name] = generateResourceSchema(resource);
+    if (relationsPlugin && relationsPlugin.relations && relationsPlugin.relations[name]) {
+      const relationsDef = relationsPlugin.relations[name];
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        if (relationConfig.type === "belongsTo") {
+          continue;
+        }
+        const exposeRelation = config2?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+        const relatedResource = database.resources[relationConfig.resource];
+        if (!relatedResource) {
+          continue;
+        }
+        const relatedSchema = generateResourceSchema(relatedResource);
+        const relationalPaths = generateRelationalPaths(
+          resource,
+          relationName,
+          relationConfig,
+          version2,
+          relatedSchema
+        );
+        Object.assign(spec.paths, relationalPaths);
+      }
+    }
   }
   if (auth.jwt?.enabled || auth.apiKey?.enabled || auth.basic?.enabled) {
     spec.paths["/auth/login"] = {
@@ -3958,6 +4150,7 @@ class ApiServer {
     this.server = null;
     this.isRunning = false;
     this.openAPISpec = null;
+    this.relationsPlugin = this.options.database?.plugins?.relation || this.options.database?.plugins?.RelationPlugin || null;
     this._setupRoutes();
   }
   /**
@@ -4068,6 +4261,9 @@ class ApiServer {
       }
     }
     this._setupResourceRoutes();
+    if (this.relationsPlugin) {
+      this._setupRelationalRoutes();
+    }
     this.app.onError((err, c) => {
       return errorHandler(err, c);
     });
@@ -4105,6 +4301,53 @@ class ApiServer {
       this.app.route(`/${version}/${name}`, resourceApp);
       if (this.options.verbose) {
         console.log(`[API Plugin] Mounted routes for resource '${name}' at /${version}/${name}`);
+      }
+    }
+  }
+  /**
+   * Setup relational routes (when RelationPlugin is active)
+   * @private
+   */
+  _setupRelationalRoutes() {
+    if (!this.relationsPlugin || !this.relationsPlugin.relations) {
+      return;
+    }
+    const { database } = this.options;
+    const relations = this.relationsPlugin.relations;
+    if (this.options.verbose) {
+      console.log("[API Plugin] Setting up relational routes...");
+    }
+    for (const [resourceName, relationsDef] of Object.entries(relations)) {
+      const resource = database.resources[resourceName];
+      if (!resource) {
+        if (this.options.verbose) {
+          console.warn(`[API Plugin] Resource '${resourceName}' not found for relational routes`);
+        }
+        continue;
+      }
+      if (resourceName.startsWith("plg_") && !this.options.resources[resourceName]) {
+        continue;
+      }
+      const version = resource.config?.currentVersion || resource.version || "v1";
+      for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
+        if (relationConfig.type === "belongsTo") {
+          continue;
+        }
+        const resourceConfig = this.options.resources[resourceName];
+        const exposeRelation = resourceConfig?.relations?.[relationName]?.expose !== false;
+        if (!exposeRelation) {
+          continue;
+        }
+        const relationalApp = createRelationalRoutes(
+          resource,
+          relationName,
+          relationConfig);
+        this.app.route(`/${version}/${resourceName}/:id/${relationName}`, relationalApp);
+        if (this.options.verbose) {
+          console.log(
+            `[API Plugin] Mounted relational route: /${version}/${resourceName}/:id/${relationName} (${relationConfig.type} -> ${relationConfig.resource})`
+          );
+        }
       }
     }
   }
@@ -4196,81 +4439,97 @@ class ApiServer {
 const PLUGIN_DEPENDENCIES = {
   "postgresql-replicator": {
     name: "PostgreSQL Replicator",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md",
     dependencies: {
       "pg": {
         version: "^8.0.0",
         description: "PostgreSQL client for Node.js",
-        installCommand: "pnpm add pg"
+        installCommand: "pnpm add pg",
+        npmUrl: "https://www.npmjs.com/package/pg"
       }
     }
   },
   "bigquery-replicator": {
     name: "BigQuery Replicator",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md",
     dependencies: {
       "@google-cloud/bigquery": {
         version: "^7.0.0",
         description: "Google Cloud BigQuery SDK",
-        installCommand: "pnpm add @google-cloud/bigquery"
+        installCommand: "pnpm add @google-cloud/bigquery",
+        npmUrl: "https://www.npmjs.com/package/@google-cloud/bigquery"
       }
     }
   },
   "sqs-replicator": {
     name: "SQS Replicator",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/replicator.md",
     dependencies: {
       "@aws-sdk/client-sqs": {
         version: "^3.0.0",
         description: "AWS SDK for SQS",
-        installCommand: "pnpm add @aws-sdk/client-sqs"
+        installCommand: "pnpm add @aws-sdk/client-sqs",
+        npmUrl: "https://www.npmjs.com/package/@aws-sdk/client-sqs"
       }
     }
   },
   "sqs-consumer": {
     name: "SQS Queue Consumer",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md",
     dependencies: {
       "@aws-sdk/client-sqs": {
         version: "^3.0.0",
         description: "AWS SDK for SQS",
-        installCommand: "pnpm add @aws-sdk/client-sqs"
+        installCommand: "pnpm add @aws-sdk/client-sqs",
+        npmUrl: "https://www.npmjs.com/package/@aws-sdk/client-sqs"
       }
     }
   },
   "rabbitmq-consumer": {
     name: "RabbitMQ Queue Consumer",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md",
     dependencies: {
       "amqplib": {
         version: "^0.10.0",
         description: "AMQP 0-9-1 library for RabbitMQ",
-        installCommand: "pnpm add amqplib"
+        installCommand: "pnpm add amqplib",
+        npmUrl: "https://www.npmjs.com/package/amqplib"
       }
     }
   },
   "tfstate-plugin": {
-    name: "Terraform State Plugin",
+    name: "Tfstate Plugin",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/tfstate.md",
     dependencies: {
       "node-cron": {
         version: "^4.0.0",
         description: "Cron job scheduler for auto-sync functionality",
-        installCommand: "pnpm add node-cron"
+        installCommand: "pnpm add node-cron",
+        npmUrl: "https://www.npmjs.com/package/node-cron"
       }
     }
   },
   "api-plugin": {
     name: "API Plugin",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/api.md",
     dependencies: {
       "hono": {
         version: "^4.0.0",
         description: "Ultra-light HTTP server framework",
-        installCommand: "pnpm add hono"
+        installCommand: "pnpm add hono",
+        npmUrl: "https://www.npmjs.com/package/hono"
       },
       "@hono/node-server": {
         version: "^1.0.0",
         description: "Node.js adapter for Hono",
-        installCommand: "pnpm add @hono/node-server"
+        installCommand: "pnpm add @hono/node-server",
+        npmUrl: "https://www.npmjs.com/package/@hono/node-server"
       },
       "@hono/swagger-ui": {
         version: "^0.4.0",
         description: "Swagger UI integration for Hono",
-        installCommand: "pnpm add @hono/swagger-ui"
+        installCommand: "pnpm add @hono/swagger-ui",
+        npmUrl: "https://www.npmjs.com/package/@hono/swagger-ui"
       }
     }
   }
@@ -4356,21 +4615,55 @@ async function requirePluginDependency(pluginId, options = {}) {
   }
   const valid = missing.length === 0 && incompatible.length === 0;
   if (!valid && throwOnError) {
+    const depCount = Object.keys(pluginDef.dependencies).length;
+    const missingCount = missing.length;
+    const incompatCount = incompatible.length;
     const errorMsg = [
-      `
-${pluginDef.name} - Missing dependencies detected!
-`,
-      `Plugin ID: ${pluginId}`,
       "",
+      "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557",
+      `\u2551  \u274C ${pluginDef.name} - Missing Dependencies  \u2551`,
+      "\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D",
+      "",
+      `\u{1F4E6} Plugin: ${pluginId}`,
+      `\u{1F4CA} Status: ${depCount - missingCount - incompatCount}/${depCount} dependencies satisfied`,
+      "",
+      "\u{1F50D} Dependency Status:",
+      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
       ...messages,
       "",
-      "Quick fix - Run all install commands:",
-      Object.values(pluginDef.dependencies).map((dep) => `  ${dep.installCommand}`).join("\n"),
+      "\u{1F680} Quick Fix - Install Missing Dependencies:",
+      "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
       "",
-      "Or install all peer dependencies at once:",
-      `  pnpm add ${Object.keys(pluginDef.dependencies).join(" ")}`
+      "  Option 1: Install individually",
+      ...Object.entries(pluginDef.dependencies).filter(([pkg]) => missing.includes(pkg) || incompatible.includes(pkg)).map(([pkg, info]) => `    ${info.installCommand}`),
+      "",
+      "  Option 2: Install all at once",
+      `    pnpm add ${Object.keys(pluginDef.dependencies).join(" ")}`,
+      "",
+      "\u{1F4DA} Documentation:",
+      `    ${pluginDef.docsUrl}`,
+      "",
+      "\u{1F4A1} Troubleshooting:",
+      "  \u2022 If packages are installed but not detected, try:",
+      "    1. Delete node_modules and reinstall: rm -rf node_modules && pnpm install",
+      "    2. Check Node.js version: node --version (requires Node 18+)",
+      "    3. Verify pnpm version: pnpm --version (requires pnpm 8+)",
+      "",
+      "  \u2022 Still having issues? Check:",
+      "    - Package.json has correct dependencies listed",
+      "    - No conflicting versions in pnpm-lock.yaml",
+      "    - File permissions (especially in node_modules/)",
+      "",
+      "\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550",
+      ""
     ].join("\n");
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg);
+    error.pluginId = pluginId;
+    error.pluginName = pluginDef.name;
+    error.missing = missing;
+    error.incompatible = incompatible;
+    error.docsUrl = pluginDef.docsUrl;
+    throw error;
   }
   return { valid, missing, incompatible, messages };
 }
@@ -4387,7 +4680,6 @@ class ApiPlugin extends Plugin {
       port: options.port || 3e3,
       host: options.host || "0.0.0.0",
       verbose: options.verbose || false,
-      // API Documentation (supports both new and legacy formats)
       docs: {
         enabled: options.docs?.enabled !== false && options.docsEnabled !== false,
         // Enable by default
@@ -5766,8 +6058,6 @@ class MultiBackupDriver extends BaseBackupDriver {
       strategy: "all",
       // 'all', 'any', 'priority'
       concurrency: 3,
-      requireAll: true,
-      // For backward compatibility
       ...config
     });
     this.drivers = [];
@@ -6404,13 +6694,13 @@ class BackupPlugin extends Plugin {
       createdAt: now.toISOString().slice(0, 10)
     };
     const [ok] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).insert(metadata)
+      () => this.database.resources[this.config.backupMetadataResource].insert(metadata)
     );
     return metadata;
   }
   async _updateBackupMetadata(backupId, updates) {
     const [ok] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).update(backupId, updates)
+      () => this.database.resources[this.config.backupMetadataResource].update(backupId, updates)
     );
   }
   async _createBackupManifest(type, options) {
@@ -6445,7 +6735,7 @@ class BackupPlugin extends Plugin {
     let sinceTimestamp = null;
     if (type === "incremental") {
       const [lastBackupOk, , lastBackups] = await tryFn(
-        () => this.database.resource(this.config.backupMetadataResource).list({
+        () => this.database.resources[this.config.backupMetadataResource].list({
           filter: {
             status: "completed",
             type: { $in: ["full", "incremental"] }
@@ -6753,7 +7043,7 @@ class BackupPlugin extends Plugin {
     try {
       const driverBackups = await this.driver.list(options);
       const [metaOk, , metadataRecords] = await tryFn(
-        () => this.database.resource(this.config.backupMetadataResource).list({
+        () => this.database.resources[this.config.backupMetadataResource].list({
           limit: options.limit || 50,
           sort: { timestamp: -1 }
         })
@@ -6781,14 +7071,14 @@ class BackupPlugin extends Plugin {
    */
   async getBackupStatus(backupId) {
     const [ok, , backup] = await tryFn(
-      () => this.database.resource(this.config.backupMetadataResource).get(backupId)
+      () => this.database.resources[this.config.backupMetadataResource].get(backupId)
     );
     return ok ? backup : null;
   }
   async _cleanupOldBackups() {
     try {
       const [listOk, , allBackups] = await tryFn(
-        () => this.database.resource(this.config.backupMetadataResource).list({
+        () => this.database.resources[this.config.backupMetadataResource].list({
           filter: { status: "completed" },
           sort: { timestamp: -1 }
         })
@@ -6855,7 +7145,7 @@ class BackupPlugin extends Plugin {
       for (const backup of backupsToDelete) {
         try {
           await this.driver.delete(backup.id, backup.driverInfo);
-          await this.database.resource(this.config.backupMetadataResource).delete(backup.id);
+          await this.database.resources[this.config.backupMetadataResource].delete(backup.id);
           if (this.config.verbose) {
             console.log(`[BackupPlugin] Deleted old backup: ${backup.id}`);
           }
@@ -6890,12 +7180,6 @@ class BackupPlugin extends Plugin {
     if (this.driver) {
       await this.driver.cleanup();
     }
-  }
-  /**
-   * Cleanup plugin resources (alias for stop for backward compatibility)
-   */
-  async cleanup() {
-    await this.stop();
   }
 }
 
@@ -9792,9 +10076,6 @@ async function consolidateRecord(originalId, transactionResource, targetResource
         if (txnWithCohorts.cohortMonth && !txn.cohortMonth) {
           updateData.cohortMonth = txnWithCohorts.cohortMonth;
         }
-        if (txn.value === null || txn.value === void 0) {
-          updateData.value = 1;
-        }
         const [ok2, err2] = await tryFn(
           () => transactionResource.update(txn.id, updateData)
         );
@@ -11118,8 +11399,7 @@ async function completeFieldSetup(handler, database, config, plugin) {
         operation: "string|required",
         timestamp: "string|required",
         cohortDate: "string|required",
-        cohortHour: "string|optional",
-        // ✅ FIX BUG #2: Changed from required to optional for migration compatibility
+        cohortHour: "string|required",
         cohortWeek: "string|optional",
         cohortMonth: "string|optional",
         source: "string|optional",
@@ -13453,7 +13733,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _setupResourceRelations(resourceName, relationsDef) {
-    const resource = this.database.resource(resourceName);
+    const resource = this.database.resources[resourceName];
     if (!resource) {
       if (this.verbose) {
         console.warn(`[RelationPlugin] Resource "${resourceName}" not found, will setup when created`);
@@ -13564,7 +13844,7 @@ class RelationPlugin extends Plugin {
         for (const record of records) {
           const relatedData = record[relationName];
           if (relatedData) {
-            const relatedResource = this.database.resource(config.resource);
+            const relatedResource = this.database.resources[config.resource];
             const relatedArray = Array.isArray(relatedData) ? relatedData : [relatedData];
             if (relatedArray.length > 0) {
               await this._eagerLoad(relatedArray, nestedIncludes, relatedResource);
@@ -13615,7 +13895,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadHasOne(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -13654,7 +13934,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadHasMany(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -13700,7 +13980,7 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadBelongsTo(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
@@ -13750,14 +14030,14 @@ class RelationPlugin extends Plugin {
    * @private
    */
   async _loadBelongsToMany(records, relationName, config, sourceResource) {
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: sourceResource.name,
         relation: relationName
       });
     }
-    const junctionResource = this.database.resource(config.through);
+    const junctionResource = this.database.resources[config.through];
     if (!junctionResource) {
       throw new JunctionTableNotFoundError(config.through, {
         sourceResource: sourceResource.name,
@@ -13941,7 +14221,7 @@ class RelationPlugin extends Plugin {
    */
   async _cascadeDelete(record, resource, relationName, config) {
     this.stats.cascadeOperations++;
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       throw new RelatedResourceNotFoundError(config.resource, {
         sourceResource: resource.name,
@@ -13949,7 +14229,7 @@ class RelationPlugin extends Plugin {
       });
     }
     const deletedRecords = [];
-    config.type === "belongsToMany" ? this.database.resource(config.through) : null;
+    config.type === "belongsToMany" ? this.database.resources[config.through] : null;
     try {
       if (config.type === "hasMany") {
         let relatedRecords;
@@ -14000,7 +14280,7 @@ class RelationPlugin extends Plugin {
           await relatedResource.delete(relatedRecords[0].id);
         }
       } else if (config.type === "belongsToMany") {
-        const junctionResource2 = this.database.resource(config.through);
+        const junctionResource2 = this.database.resources[config.through];
         if (junctionResource2) {
           let junctionRecords;
           const partitionName = this._findPartitionByField(junctionResource2, config.foreignKey);
@@ -14068,7 +14348,7 @@ class RelationPlugin extends Plugin {
    */
   async _cascadeUpdate(record, changes, resource, relationName, config) {
     this.stats.cascadeOperations++;
-    const relatedResource = this.database.resource(config.resource);
+    const relatedResource = this.database.resources[config.resource];
     if (!relatedResource) {
       return;
     }
@@ -19353,12 +19633,42 @@ ${errorDetails}`,
       createdBy
     };
     this.hooks = {
+      // Insert hooks
       beforeInsert: [],
       afterInsert: [],
+      // Update hooks
       beforeUpdate: [],
       afterUpdate: [],
+      // Delete hooks
       beforeDelete: [],
-      afterDelete: []
+      afterDelete: [],
+      // Get hooks
+      beforeGet: [],
+      afterGet: [],
+      // List hooks
+      beforeList: [],
+      afterList: [],
+      // Query hooks
+      beforeQuery: [],
+      afterQuery: [],
+      // Patch hooks
+      beforePatch: [],
+      afterPatch: [],
+      // Replace hooks
+      beforeReplace: [],
+      afterReplace: [],
+      // Exists hooks
+      beforeExists: [],
+      afterExists: [],
+      // Count hooks
+      beforeCount: [],
+      afterCount: [],
+      // GetMany hooks
+      beforeGetMany: [],
+      afterGetMany: [],
+      // DeleteMany hooks
+      beforeDeleteMany: [],
+      afterDeleteMany: []
     };
     this.attributes = attributes || {};
     this.map = config.map;
@@ -19420,19 +19730,6 @@ ${errorDetails}`,
       return "custom_function";
     }
     return idSize;
-  }
-  /**
-   * Get resource options (for backward compatibility with tests)
-   */
-  get options() {
-    return {
-      timestamps: this.config.timestamps,
-      partitions: this.config.partitions || {},
-      cache: this.config.cache,
-      autoDecrypt: this.config.autoDecrypt,
-      paranoid: this.config.paranoid,
-      allNestedObjectsOptional: this.config.allNestedObjectsOptional
-    };
   }
   export() {
     const exported = this.schema.export();
@@ -19560,19 +19857,71 @@ ${errorDetails}`,
       return data;
     });
   }
-  async validate(data) {
+  /**
+   * Validate data against resource schema without saving
+   * @param {Object} data - Data to validate
+   * @param {Object} options - Validation options
+   * @param {boolean} options.throwOnError - Throw error if validation fails (default: false)
+   * @param {boolean} options.includeId - Include ID validation (default: false)
+   * @param {boolean} options.mutateOriginal - Allow mutation of original data (default: false)
+   * @returns {Promise<{valid: boolean, isValid: boolean, errors: Array, data: Object, original: Object}>} Validation result
+   * @example
+   * // Validate before insert
+   * const result = await resource.validate({
+   *   name: 'John Doe',
+   *   email: 'invalid-email' // Will fail email validation
+   * });
+   *
+   * if (!result.valid) {
+   *   console.log('Validation errors:', result.errors);
+   *   // [{ field: 'email', message: '...', ... }]
+   * }
+   *
+   * // Throw on error
+   * try {
+   *   await resource.validate({ email: 'bad' }, { throwOnError: true });
+   * } catch (err) {
+   *   console.log('Validation failed:', err.message);
+   * }
+   */
+  async validate(data, options = {}) {
+    const {
+      throwOnError = false,
+      includeId = false,
+      mutateOriginal = false
+    } = options;
+    const dataToValidate = mutateOriginal ? data : lodashEs.cloneDeep(data);
+    if (!includeId && dataToValidate.id) {
+      delete dataToValidate.id;
+    }
     const result = {
       original: lodashEs.cloneDeep(data),
       isValid: false,
-      errors: []
+      errors: [],
+      data: dataToValidate
     };
-    const check = await this.schema.validate(data, { mutateOriginal: false });
-    if (check === true) {
-      result.isValid = true;
-    } else {
-      result.errors = check;
+    try {
+      const check = await this.schema.validate(dataToValidate, { mutateOriginal });
+      if (check === true) {
+        result.isValid = true;
+      } else {
+        result.errors = Array.isArray(check) ? check : [check];
+        result.isValid = false;
+        if (throwOnError) {
+          const error = new Error("Validation failed");
+          error.validationErrors = result.errors;
+          error.invalidData = data;
+          throw error;
+        }
+      }
+    } catch (err) {
+      if (!throwOnError) {
+        result.errors = [{ message: err.message, error: err }];
+        result.isValid = false;
+      } else {
+        throw err;
+      }
     }
-    result.data = data;
     return result;
   }
   /**
@@ -19837,12 +20186,12 @@ ${errorDetails}`,
     const exists = await this.exists(id$1);
     if (exists) throw new Error(`Resource with id '${id$1}' already exists`);
     this.getResourceKey(id$1 || "(auto)");
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       attributes.createdAt = (/* @__PURE__ */ new Date()).toISOString();
       attributes.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     }
     const attributesWithDefaults = this.applyDefaults(attributes);
-    const completeData = { id: id$1, ...attributesWithDefaults };
+    const completeData = id$1 !== void 0 ? { id: id$1, ...attributesWithDefaults } : { ...attributesWithDefaults };
     const preProcessedData = await this.executeHooks("beforeInsert", completeData);
     const extraProps = Object.keys(preProcessedData).filter(
       (k) => !(k in completeData) || preProcessedData[k] !== completeData[k]
@@ -19853,7 +20202,7 @@ ${errorDetails}`,
       errors,
       isValid,
       data: validated
-    } = await this.validate(preProcessedData);
+    } = await this.validate(preProcessedData, { includeId: true });
     if (!isValid) {
       const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Insert failed";
       throw new InvalidResourceItem({
@@ -19957,6 +20306,7 @@ ${errorDetails}`,
   async get(id) {
     if (lodashEs.isObject(id)) throw new Error(`id cannot be an object`);
     if (lodashEs.isEmpty(id)) throw new Error("id cannot be empty");
+    await this.executeHooks("beforeGet", { id });
     const key = this.getResourceKey(id);
     const [ok, err, request] = await tryFn(() => this.client.getObject(key));
     if (!ok) {
@@ -20005,17 +20355,67 @@ ${errorDetails}`,
     if (objectVersion !== this.version) {
       data = await this.applyVersionMapping(data, objectVersion, this.version);
     }
+    data = await this.executeHooks("afterGet", data);
     this.emit("get", data);
     const value = data;
     return value;
+  }
+  /**
+   * Retrieve a resource object by ID, or return null if not found
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object|null>} The resource object or null if not found
+   * @example
+   * const user = await resource.getOrNull('user-123');
+   * if (user) {
+   *   console.log('Found user:', user.name);
+   * } else {
+   *   console.log('User not found');
+   * }
+   */
+  async getOrNull(id) {
+    const [ok, err, data] = await tryFn(() => this.get(id));
+    if (!ok && err && (err.name === "NoSuchKey" || err.message?.includes("NoSuchKey"))) {
+      return null;
+    }
+    if (!ok) {
+      throw err;
+    }
+    return data;
+  }
+  /**
+   * Retrieve a resource object by ID, or throw ResourceNotFoundError if not found
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} The resource object
+   * @throws {ResourceError} If resource does not exist
+   * @example
+   * // Throws error if user doesn't exist (no need for null check)
+   * const user = await resource.getOrThrow('user-123');
+   * console.log('User name:', user.name); // Safe to access
+   */
+  async getOrThrow(id) {
+    const [ok, err, data] = await tryFn(() => this.get(id));
+    if (!ok && err && (err.name === "NoSuchKey" || err.message?.includes("NoSuchKey"))) {
+      throw new ResourceError(`Resource '${this.name}' with id '${id}' not found`, {
+        resourceName: this.name,
+        operation: "getOrThrow",
+        id,
+        code: "RESOURCE_NOT_FOUND"
+      });
+    }
+    if (!ok) {
+      throw err;
+    }
+    return data;
   }
   /**
    * Check if a resource exists by ID
    * @returns {Promise<boolean>} True if resource exists, false otherwise
    */
   async exists(id) {
+    await this.executeHooks("beforeExists", { id });
     const key = this.getResourceKey(id);
     const [ok, err] = await tryFn(() => this.client.headObject(key));
+    await this.executeHooks("afterExists", { id, exists: ok });
     return ok;
   }
   /**
@@ -20071,7 +20471,7 @@ ${errorDetails}`,
     }
     const preProcessedData = await this.executeHooks("beforeUpdate", lodashEs.cloneDeep(mergedData));
     const completeData = { ...originalData, ...preProcessedData, id };
-    const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData));
+    const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData), { includeId: true });
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
@@ -20244,12 +20644,17 @@ ${errorDetails}`,
     if (!fields || typeof fields !== "object") {
       throw new Error("fields must be a non-empty object");
     }
+    await this.executeHooks("beforePatch", { id, fields, options });
     const behavior = this.behavior;
     const hasNestedFields = Object.keys(fields).some((key) => key.includes("."));
+    let result;
     if ((behavior === "enforce-limits" || behavior === "truncate-data") && !hasNestedFields) {
-      return await this._patchViaCopyObject(id, fields, options);
+      result = await this._patchViaCopyObject(id, fields, options);
+    } else {
+      result = await this.update(id, fields, options);
     }
-    return await this.update(id, fields, options);
+    const finalResult = await this.executeHooks("afterPatch", result);
+    return finalResult;
   }
   /**
    * Internal helper: Optimized patch using HeadObject + CopyObject
@@ -20349,6 +20754,7 @@ ${errorDetails}`,
     if (!fullData || typeof fullData !== "object") {
       throw new Error("fullData must be a non-empty object");
     }
+    await this.executeHooks("beforeReplace", { id, fullData, options });
     const { partition, partitionValues } = options;
     const dataClone = lodashEs.cloneDeep(fullData);
     const attributesWithDefaults = this.applyDefaults(dataClone);
@@ -20363,7 +20769,7 @@ ${errorDetails}`,
       errors,
       isValid,
       data: validated
-    } = await this.validate(completeData);
+    } = await this.validate(completeData, { includeId: true });
     if (!isValid) {
       const errorMsg = errors && errors.length && errors[0].message ? errors[0].message : "Replace failed";
       throw new InvalidResourceItem({
@@ -20436,7 +20842,8 @@ ${errorDetails}`,
         await this.handlePartitionReferenceUpdates({}, replacedObject);
       }
     }
-    return replacedObject;
+    const finalResult = await this.executeHooks("afterReplace", replacedObject);
+    return finalResult;
   }
   /**
    * Update with conditional check (If-Match ETag)
@@ -20494,7 +20901,7 @@ ${errorDetails}`,
     }
     const preProcessedData = await this.executeHooks("beforeUpdate", lodashEs.cloneDeep(mergedData));
     const completeData = { ...originalData, ...preProcessedData, id };
-    const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData));
+    const { isValid, errors, data } = await this.validate(lodashEs.cloneDeep(completeData), { includeId: true });
     if (!isValid) {
       return {
         success: false,
@@ -20715,6 +21122,7 @@ ${errorDetails}`,
    * });
    */
   async count({ partition = null, partitionValues = {} } = {}) {
+    await this.executeHooks("beforeCount", { partition, partitionValues });
     let prefix;
     if (partition && Object.keys(partitionValues).length > 0) {
       const partitionDef = this.config.partitions[partition];
@@ -20739,6 +21147,7 @@ ${errorDetails}`,
       prefix = `resource=${this.name}/data`;
     }
     const count = await this.client.count({ prefix });
+    await this.executeHooks("afterCount", { count, partition, partitionValues });
     this.emit("count", count);
     return count;
   }
@@ -20774,6 +21183,7 @@ ${errorDetails}`,
    * const results = await resource.deleteMany(deletedIds);
       */
   async deleteMany(ids) {
+    await this.executeHooks("beforeDeleteMany", { ids });
     const packages = lodashEs.chunk(
       ids.map((id) => this.getResourceKey(id)),
       1e3
@@ -20795,6 +21205,7 @@ ${errorDetails}`,
       });
       return response;
     });
+    await this.executeHooks("afterDeleteMany", { ids, results });
     this.emit("deleteMany", ids.length);
     return results;
   }
@@ -20916,6 +21327,7 @@ ${errorDetails}`,
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+    await this.executeHooks("beforeList", { partition, partitionValues, limit, offset });
     const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
@@ -20925,7 +21337,8 @@ ${errorDetails}`,
     if (!ok) {
       return this.handleListError(err, { partition, partitionValues });
     }
-    return result;
+    const finalResult = await this.executeHooks("afterList", result);
+    return finalResult;
   }
   async listMain({ limit, offset = 0 }) {
     const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
@@ -21068,6 +21481,7 @@ ${errorDetails}`,
    * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
       */
   async getMany(ids) {
+    await this.executeHooks("beforeGetMany", { ids });
     const { results, errors } = await promisePool.PromisePool.for(ids).withConcurrency(this.client.parallelism).handleError(async (error, id) => {
       this.emit("error", error, content);
       this.observers.map((x) => x.emit("error", this.name, error, content));
@@ -21088,8 +21502,9 @@ ${errorDetails}`,
       }
       throw err;
     });
+    const finalResults = await this.executeHooks("afterGetMany", results);
     this.emit("getMany", ids.length);
-    return results;
+    return finalResults;
   }
   /**
    * Get all resources (equivalent to list() without pagination)
@@ -21336,21 +21751,6 @@ ${errorDetails}`,
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {
-    if (version === this.version) {
-      return this.schema;
-    }
-    const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
-      name: this.name,
-      attributes: this.attributes,
-      passphrase: this.passphrase,
-      version,
-      options: {
-        ...this.config,
-        autoDecrypt: true,
-        autoEncrypt: true
-      }
-    })));
-    if (ok) return compatibleSchema;
     return this.schema;
   }
   /**
@@ -21446,6 +21846,7 @@ ${errorDetails}`,
    * );
    */
   async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
+    await this.executeHooks("beforeQuery", { filter, limit, offset, partition, partitionValues });
     if (Object.keys(filter).length === 0) {
       return await this.list({ partition, partitionValues, limit, offset });
     }
@@ -21473,7 +21874,8 @@ ${errorDetails}`,
         break;
       }
     }
-    return results.slice(0, limit);
+    const finalResults = results.slice(0, limit);
+    return await this.executeHooks("afterQuery", finalResults);
   }
   /**
    * Handle partition reference updates with change detection
@@ -21553,7 +21955,7 @@ ${errorDetails}`,
     }
   }
   /**
-   * Update partition objects to keep them in sync (legacy method for backward compatibility)
+   * Update partition objects to keep them in sync
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
@@ -21939,7 +22341,32 @@ function validateResourceConfig(config) {
     if (typeof config.hooks !== "object" || Array.isArray(config.hooks)) {
       errors.push("Resource 'hooks' must be an object");
     } else {
-      const validHookEvents = ["beforeInsert", "afterInsert", "beforeUpdate", "afterUpdate", "beforeDelete", "afterDelete"];
+      const validHookEvents = [
+        "beforeInsert",
+        "afterInsert",
+        "beforeUpdate",
+        "afterUpdate",
+        "beforeDelete",
+        "afterDelete",
+        "beforeGet",
+        "afterGet",
+        "beforeList",
+        "afterList",
+        "beforeQuery",
+        "afterQuery",
+        "beforeExists",
+        "afterExists",
+        "beforeCount",
+        "afterCount",
+        "beforePatch",
+        "afterPatch",
+        "beforeReplace",
+        "afterReplace",
+        "beforeGetMany",
+        "afterGetMany",
+        "beforeDeleteMany",
+        "afterDeleteMany"
+      ];
       for (const [event, hooksArr] of Object.entries(config.hooks)) {
         if (!validHookEvents.includes(event)) {
           errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(", ")}`);
@@ -21990,14 +22417,32 @@ class Database extends EventEmitter {
       const [ok, err, version] = tryFn(() => true ? "12.1.0" : "latest");
       return ok ? version : "latest";
     })();
-    this.resources = {};
+    this._resourcesMap = {};
+    this.resources = new Proxy(this._resourcesMap, {
+      get: (target, prop) => {
+        if (typeof prop === "symbol" || prop === "constructor" || prop === "toJSON") {
+          return target[prop];
+        }
+        if (target[prop]) {
+          return target[prop];
+        }
+        return void 0;
+      },
+      // Support Object.keys(), Object.entries(), etc.
+      ownKeys: (target) => {
+        return Object.keys(target);
+      },
+      getOwnPropertyDescriptor: (target, prop) => {
+        return Object.getOwnPropertyDescriptor(target, prop);
+      }
+    });
     this.savedMetadata = null;
     this.options = options;
     this.verbose = options.verbose || false;
     this.parallelism = parseInt(options.parallelism + "") || 10;
-    this.plugins = options.plugins || [];
-    this.pluginRegistry = {};
     this.pluginList = options.plugins || [];
+    this.pluginRegistry = {};
+    this.plugins = this.pluginRegistry;
     this.cache = options.cache;
     this.passphrase = options.passphrase || "secret";
     this.versioningEnabled = options.versioningEnabled || false;
@@ -22103,7 +22548,7 @@ class Database extends EventEmitter {
         } else {
           restoredIdSize = versionData.idSize || 22;
         }
-        this.resources[name] = new Resource({
+        this._resourcesMap[name] = new Resource({
           name,
           client: this.client,
           database: this,
@@ -22172,7 +22617,7 @@ class Database extends EventEmitter {
       }
     }
     for (const [name, savedResource] of Object.entries(savedMetadata.resources || {})) {
-      if (!this.resources[name]) {
+      if (!this._resourcesMap[name]) {
         const currentVersion = savedResource.currentVersion || "v1";
         const versionData = savedResource.versions?.[currentVersion];
         changes.push({
@@ -22684,7 +23129,7 @@ class Database extends EventEmitter {
    * @returns {boolean} True if resource exists, false otherwise
    */
   resourceExists(name) {
-    return !!this.resources[name];
+    return !!this._resourcesMap[name];
   }
   /**
    * Check if a resource exists with the same definition hash
@@ -22692,14 +23137,13 @@ class Database extends EventEmitter {
    * @param {string} config.name - Resource name
    * @param {Object} config.attributes - Resource attributes
    * @param {string} [config.behavior] - Resource behavior
-   * @param {Object} [config.options] - Resource options (deprecated, use root level parameters)
    * @returns {Object} Result with exists and hash information
    */
-  resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", partitions = {}, options = {} }) {
-    if (!this.resources[name]) {
+  resourceExistsWithSameHash({ name, attributes, behavior = "user-managed", partitions = {} }) {
+    if (!this._resourcesMap[name]) {
       return { exists: false, sameHash: false, hash: null };
     }
-    const existingResource = this.resources[name];
+    const existingResource = this._resourcesMap[name];
     const existingHash = this.generateDefinitionHash(existingResource.export());
     const mockResource = new Resource({
       name,
@@ -22709,8 +23153,7 @@ class Database extends EventEmitter {
       client: this.client,
       version: existingResource.version,
       passphrase: this.passphrase,
-      versioningEnabled: this.versioningEnabled,
-      ...options
+      versioningEnabled: this.versioningEnabled
     });
     const newHash = this.generateDefinitionHash(mockResource.export());
     return {
@@ -22738,12 +23181,49 @@ class Database extends EventEmitter {
    * @param {string} [config.createdBy='user'] - Who created this resource ('user', 'plugin', or plugin name)
    * @returns {Promise<Resource>} The created or updated resource
    */
-  async createResource({ name, attributes, behavior = "user-managed", hooks, ...config }) {
-    if (this.resources[name]) {
-      const existingResource = this.resources[name];
+  /**
+   * Normalize partitions config from array or object format
+   * @param {Array|Object} partitions - Partitions config
+   * @param {Object} attributes - Resource attributes
+   * @returns {Object} Normalized partitions object
+   * @private
+   */
+  _normalizePartitions(partitions, attributes) {
+    if (!Array.isArray(partitions)) {
+      return partitions || {};
+    }
+    const normalized = {};
+    for (const fieldName of partitions) {
+      if (typeof fieldName !== "string") {
+        throw new Error(`Partition field must be a string, got ${typeof fieldName}`);
+      }
+      if (!attributes[fieldName]) {
+        throw new Error(`Partition field '${fieldName}' not found in attributes`);
+      }
+      const partitionName = `by${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
+      const fieldDef = attributes[fieldName];
+      let fieldType = "string";
+      if (typeof fieldDef === "string") {
+        fieldType = fieldDef.split("|")[0].trim();
+      } else if (typeof fieldDef === "object" && fieldDef.type) {
+        fieldType = fieldDef.type;
+      }
+      normalized[partitionName] = {
+        fields: {
+          [fieldName]: fieldType
+        }
+      };
+    }
+    return normalized;
+  }
+  async createResource({ name, attributes, behavior = "user-managed", hooks, middlewares, ...config }) {
+    const normalizedPartitions = this._normalizePartitions(config.partitions, attributes);
+    if (this._resourcesMap[name]) {
+      const existingResource = this._resourcesMap[name];
       Object.assign(existingResource.config, {
         cache: this.cache,
-        ...config
+        ...config,
+        partitions: normalizedPartitions
       });
       if (behavior) {
         existingResource.behavior = behavior;
@@ -22760,6 +23240,9 @@ class Database extends EventEmitter {
             }
           }
         }
+      }
+      if (middlewares) {
+        this._applyMiddlewares(existingResource, middlewares);
       }
       const newHash = this.generateDefinitionHash(existingResource.export(), existingResource.behavior);
       const existingMetadata2 = this.savedMetadata?.resources?.[name];
@@ -22784,7 +23267,7 @@ class Database extends EventEmitter {
       observers: [this],
       cache: config.cache !== void 0 ? config.cache : this.cache,
       timestamps: config.timestamps !== void 0 ? config.timestamps : false,
-      partitions: config.partitions || {},
+      partitions: normalizedPartitions,
       paranoid: config.paranoid !== void 0 ? config.paranoid : true,
       allNestedObjectsOptional: config.allNestedObjectsOptional !== void 0 ? config.allNestedObjectsOptional : true,
       autoDecrypt: config.autoDecrypt !== void 0 ? config.autoDecrypt : true,
@@ -22800,16 +23283,96 @@ class Database extends EventEmitter {
       createdBy: config.createdBy || "user"
     });
     resource.database = this;
-    this.resources[name] = resource;
+    this._resourcesMap[name] = resource;
+    if (middlewares) {
+      this._applyMiddlewares(resource, middlewares);
+    }
     await this.uploadMetadataFile();
     this.emit("s3db.resourceCreated", name);
     return resource;
   }
-  resource(name) {
-    if (!this.resources[name]) {
-      return Promise.reject(`resource ${name} does not exist`);
+  /**
+   * Apply middlewares to a resource
+   * @param {Resource} resource - Resource instance
+   * @param {Array|Object} middlewares - Middlewares config
+   * @private
+   */
+  _applyMiddlewares(resource, middlewares) {
+    if (Array.isArray(middlewares)) {
+      const methods = resource._middlewareMethods || [
+        "get",
+        "list",
+        "listIds",
+        "getAll",
+        "count",
+        "page",
+        "insert",
+        "update",
+        "delete",
+        "deleteMany",
+        "exists",
+        "getMany",
+        "content",
+        "hasContent",
+        "query",
+        "getFromPartition",
+        "setContent",
+        "deleteContent",
+        "replace",
+        "patch"
+      ];
+      for (const method of methods) {
+        for (const middleware of middlewares) {
+          if (typeof middleware === "function") {
+            resource.useMiddleware(method, middleware);
+          }
+        }
+      }
+      return;
     }
-    return this.resources[name];
+    if (typeof middlewares === "object" && middlewares !== null) {
+      for (const [method, fns] of Object.entries(middlewares)) {
+        if (method === "*") {
+          const methods = resource._middlewareMethods || [
+            "get",
+            "list",
+            "listIds",
+            "getAll",
+            "count",
+            "page",
+            "insert",
+            "update",
+            "delete",
+            "deleteMany",
+            "exists",
+            "getMany",
+            "content",
+            "hasContent",
+            "query",
+            "getFromPartition",
+            "setContent",
+            "deleteContent",
+            "replace",
+            "patch"
+          ];
+          const middlewareArray = Array.isArray(fns) ? fns : [fns];
+          for (const targetMethod of methods) {
+            for (const middleware of middlewareArray) {
+              if (typeof middleware === "function") {
+                resource.useMiddleware(targetMethod, middleware);
+              }
+            }
+          }
+        } else {
+          const middlewareArray = Array.isArray(fns) ? fns : [fns];
+          for (const middleware of middlewareArray) {
+            if (typeof middleware === "function") {
+              resource.useMiddleware(method, middleware);
+            }
+          }
+        }
+      }
+    }
   }
   /**
    * List all resource names
@@ -22824,14 +23387,14 @@ class Database extends EventEmitter {
    * @returns {Resource} Resource instance
    */
   async getResource(name) {
-    if (!this.resources[name]) {
+    if (!this._resourcesMap[name]) {
       throw new ResourceNotFound({
         bucket: this.client.config.bucket,
         resourceName: name,
         id: name
       });
     }
-    return this.resources[name];
+    return this._resourcesMap[name];
   }
   /**
    * Get database configuration
@@ -22884,7 +23447,7 @@ class Database extends EventEmitter {
             }
           });
         }
-        Object.keys(this.resources).forEach((k) => delete this.resources[k]);
+        Object.keys(this.resources).forEach((k) => delete this._resourcesMap[k]);
       }
       if (this.client && typeof this.client.removeAllListeners === "function") {
         this.client.removeAllListeners();
@@ -24628,14 +25191,6 @@ class ReplicatorPlugin extends Plugin {
   }
   async start() {
   }
-  async stop() {
-    for (const replicator of this.replicators || []) {
-      if (replicator && typeof replicator.cleanup === "function") {
-        await replicator.cleanup();
-      }
-    }
-    this.removeDatabaseHooks();
-  }
   installDatabaseHooks() {
     this._afterCreateResourceHook = (resource) => {
       if (resource.name !== (this.config.replicatorLogResource || "plg_replicator_logs")) {
@@ -24965,20 +25520,20 @@ class ReplicatorPlugin extends Plugin {
     }
     this.emit("replicator.sync.completed", { replicatorId, stats: this.stats });
   }
-  async cleanup() {
+  async stop() {
     const [ok, error] = await tryFn(async () => {
       if (this.replicators && this.replicators.length > 0) {
         const cleanupPromises = this.replicators.map(async (replicator) => {
           const [replicatorOk, replicatorError] = await tryFn(async () => {
-            if (replicator && typeof replicator.cleanup === "function") {
-              await replicator.cleanup();
+            if (replicator && typeof replicator.stop === "function") {
+              await replicator.stop();
             }
           });
           if (!replicatorOk) {
             if (this.config.verbose) {
-              console.warn(`[ReplicatorPlugin] Failed to cleanup replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
+              console.warn(`[ReplicatorPlugin] Failed to stop replicator ${replicator.name || replicator.id}: ${replicatorError.message}`);
             }
-            this.emit("replicator_cleanup_error", {
+            this.emit("replicator_stop_error", {
               replicator: replicator.name || replicator.id || "unknown",
               driver: replicator.driver || "unknown",
               error: replicatorError.message
@@ -24987,6 +25542,7 @@ class ReplicatorPlugin extends Plugin {
         });
         await Promise.allSettled(cleanupPromises);
       }
+      this.removeDatabaseHooks();
       if (this.database && this.database.resources) {
         for (const resourceName of this.eventListenersInstalled) {
           const resource = this.database.resources[resourceName];
@@ -25006,9 +25562,9 @@ class ReplicatorPlugin extends Plugin {
     });
     if (!ok) {
       if (this.config.verbose) {
-        console.warn(`[ReplicatorPlugin] Failed to cleanup plugin: ${error.message}`);
+        console.warn(`[ReplicatorPlugin] Failed to stop plugin: ${error.message}`);
       }
-      this.emit("replicator_plugin_cleanup_error", {
+      this.emit("replicator_plugin_stop_error", {
         error: error.message
       });
     }
@@ -25828,7 +26384,7 @@ class SchedulerPlugin extends Plugin {
   }
   async _persistJobExecution(jobName, executionId, startTime, endTime, duration, status, result, error, retryCount) {
     const [ok, err] = await tryFn(
-      () => this.database.resource(this.config.jobHistoryResource).insert({
+      () => this.database.resources[this.config.jobHistoryResource].insert({
         id: executionId,
         jobName,
         status,
@@ -25969,7 +26525,7 @@ class SchedulerPlugin extends Plugin {
       queryParams.status = status;
     }
     const [ok, err, history] = await tryFn(
-      () => this.database.resource(this.config.jobHistoryResource).query(queryParams)
+      () => this.database.resources[this.config.jobHistoryResource].query(queryParams)
     );
     if (!ok) {
       if (this.config.verbose) {
@@ -26108,9 +26664,6 @@ class SchedulerPlugin extends Plugin {
     if (this._isTestEnvironment()) {
       this.activeJobs.clear();
     }
-  }
-  async cleanup() {
-    await this.stop();
     this.jobs.clear();
     this.statistics.clear();
     this.activeJobs.clear();
@@ -26359,7 +26912,7 @@ class StateMachinePlugin extends Plugin {
       let lastLogErr;
       for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
         const [ok, err] = await tryFn(
-          () => this.database.resource(this.config.transitionLogResource).insert({
+          () => this.database.resources[this.config.transitionLogResource].insert({
             id: transitionId,
             machineId,
             entityId,
@@ -26395,11 +26948,11 @@ class StateMachinePlugin extends Plugin {
         updatedAt: now
       };
       const [updateOk] = await tryFn(
-        () => this.database.resource(this.config.stateResource).update(stateId, stateData)
+        () => this.database.resources[this.config.stateResource].update(stateId, stateData)
       );
       if (!updateOk) {
         const [insertOk, insertErr] = await tryFn(
-          () => this.database.resource(this.config.stateResource).insert({ id: stateId, ...stateData })
+          () => this.database.resources[this.config.stateResource].insert({ id: stateId, ...stateData })
         );
         if (!insertOk && this.config.verbose) {
           console.warn(`[StateMachinePlugin] Failed to upsert state:`, insertErr.message);
@@ -26462,7 +27015,7 @@ class StateMachinePlugin extends Plugin {
     if (this.config.persistTransitions) {
       const stateId = `${machineId}_${entityId}`;
       const [ok, err, stateRecord] = await tryFn(
-        () => this.database.resource(this.config.stateResource).get(stateId)
+        () => this.database.resources[this.config.stateResource].get(stateId)
       );
       if (ok && stateRecord) {
         machine.currentStates.set(entityId, stateRecord.currentState);
@@ -26505,7 +27058,7 @@ class StateMachinePlugin extends Plugin {
     }
     const { limit = 50, offset = 0 } = options;
     const [ok, err, transitions] = await tryFn(
-      () => this.database.resource(this.config.transitionLogResource).query({
+      () => this.database.resources[this.config.transitionLogResource].query({
         machineId,
         entityId
       }, {
@@ -26547,7 +27100,7 @@ class StateMachinePlugin extends Plugin {
       const now = (/* @__PURE__ */ new Date()).toISOString();
       const stateId = `${machineId}_${entityId}`;
       const [ok, err] = await tryFn(
-        () => this.database.resource(this.config.stateResource).insert({
+        () => this.database.resources[this.config.stateResource].insert({
           id: stateId,
           machineId,
           entityId,
@@ -26636,9 +27189,6 @@ class StateMachinePlugin extends Plugin {
   }
   async stop() {
     this.machines.clear();
-  }
-  async cleanup() {
-    await this.stop();
     this.removeAllListeners();
   }
 }
@@ -26653,7 +27203,7 @@ class TfStateError extends Error {
 }
 class InvalidStateFileError extends TfStateError {
   constructor(filePath, reason, context = {}) {
-    super(`Invalid Terraform state file "${filePath}": ${reason}`, context);
+    super(`Invalid Tfstate file "${filePath}": ${reason}`, context);
     this.name = "InvalidStateFileError";
     this.filePath = filePath;
     this.reason = reason;
@@ -26662,7 +27212,7 @@ class InvalidStateFileError extends TfStateError {
 class UnsupportedStateVersionError extends TfStateError {
   constructor(version, supportedVersions, context = {}) {
     super(
-      `Terraform state version ${version} is not supported. Supported versions: ${supportedVersions.join(", ")}`,
+      `Tfstate version ${version} is not supported. Supported versions: ${supportedVersions.join(", ")}`,
       context
     );
     this.name = "UnsupportedStateVersionError";
@@ -26672,7 +27222,7 @@ class UnsupportedStateVersionError extends TfStateError {
 }
 class StateFileNotFoundError extends TfStateError {
   constructor(filePath, context = {}) {
-    super(`Terraform state file not found: ${filePath}`, context);
+    super(`Tfstate file not found: ${filePath}`, context);
     this.name = "StateFileNotFoundError";
     this.filePath = filePath;
   }
@@ -34895,42 +35445,23 @@ class FilesystemTfStateDriver extends TfStateDriver {
 class TfStatePlugin extends Plugin {
   constructor(config = {}) {
     super(config);
-    const isNewFormat = config.driver !== void 0;
-    if (isNewFormat) {
-      this.driverType = config.driver || "s3";
-      this.driverConfig = config.config || {};
-      const resources = config.resources || {};
-      this.resourceName = resources.resources || "plg_tfstate_resources";
-      this.stateFilesName = resources.stateFiles || "plg_tfstate_state_files";
-      this.diffsName = resources.diffs || "plg_tfstate_state_diffs";
-      const monitor = config.monitor || {};
-      this.monitorEnabled = monitor.enabled || false;
-      this.monitorCron = monitor.cron || "*/5 * * * *";
-      const diffs = config.diffs || {};
-      this.trackDiffs = diffs.enabled !== void 0 ? diffs.enabled : true;
-      this.diffsLookback = diffs.lookback || 10;
-      this.asyncPartitions = config.asyncPartitions !== void 0 ? config.asyncPartitions : true;
-      this.autoSync = false;
-      this.watchPaths = [];
-      this.filters = config.filters || {};
-      this.verbose = config.verbose || false;
-    } else {
-      this.driverType = null;
-      this.driverConfig = {};
-      this.resourceName = config.resourceName || "plg_tfstate_resources";
-      this.stateFilesName = config.stateFilesName || "plg_tfstate_state_files";
-      this.diffsName = config.diffsName || config.stateHistoryName || "plg_tfstate_state_diffs";
-      this.stateHistoryName = this.diffsName;
-      this.autoSync = config.autoSync || false;
-      this.watchPaths = Array.isArray(config.watchPaths) ? config.watchPaths : [];
-      this.filters = config.filters || {};
-      this.trackDiffs = config.trackDiffs !== void 0 ? config.trackDiffs : true;
-      this.diffsLookback = 10;
-      this.asyncPartitions = config.asyncPartitions !== void 0 ? config.asyncPartitions : true;
-      this.verbose = config.verbose || false;
-      this.monitorEnabled = false;
-      this.monitorCron = "*/5 * * * *";
-    }
+    this.driverType = config.driver || null;
+    this.driverConfig = config.config || {};
+    const resources = config.resources || {};
+    this.resourceName = resources.resources || config.resourceName || "plg_tfstate_resources";
+    this.stateFilesName = resources.stateFiles || config.stateFilesName || "plg_tfstate_state_files";
+    this.diffsName = resources.diffs || config.diffsName || "plg_tfstate_state_diffs";
+    const monitor = config.monitor || {};
+    this.monitorEnabled = monitor.enabled || false;
+    this.monitorCron = monitor.cron || "*/5 * * * *";
+    const diffs = config.diffs || {};
+    this.trackDiffs = diffs.enabled !== void 0 ? diffs.enabled : config.trackDiffs !== void 0 ? config.trackDiffs : true;
+    this.diffsLookback = diffs.lookback || 10;
+    this.asyncPartitions = config.asyncPartitions !== void 0 ? config.asyncPartitions : true;
+    this.autoSync = config.autoSync || false;
+    this.watchPaths = config.watchPaths || [];
+    this.filters = config.filters || {};
+    this.verbose = config.verbose || false;
     this.supportedVersions = [3, 4];
     this.driver = null;
     this.resource = null;
@@ -34980,7 +35511,7 @@ class TfStatePlugin extends Plugin {
       name: this.lineagesName,
       attributes: {
         id: "string|required",
-        // = lineage UUID from Terraform state
+        // = lineage UUID from Tfstate
         latestSerial: "number",
         // Track latest for quick access
         latestStateId: "string",
@@ -35693,7 +36224,7 @@ class TfStatePlugin extends Plugin {
     return result;
   }
   /**
-   * Read and parse Terraform state file
+   * Read and parse Tfstate file
    * @private
    */
   async _readStateFile(filePath) {
@@ -35730,7 +36261,7 @@ class TfStatePlugin extends Plugin {
     }
   }
   /**
-   * Validate Terraform state version
+   * Validate Tfstate version
    * @private
    */
   _validateStateVersion(state) {
@@ -35743,7 +36274,7 @@ class TfStatePlugin extends Plugin {
     }
   }
   /**
-   * Extract resources from Terraform state
+   * Extract resources from Tfstate
    * @private
    */
   async _extractResources(state, filePath, stateFileId, lineageId) {
@@ -36310,14 +36841,14 @@ class TfStatePlugin extends Plugin {
     }
   }
   /**
-   * Export resources to Terraform state format
+   * Export resources to Tfstate format
    * @param {Object} options - Export options
    * @param {number} options.serial - Specific serial to export (default: latest)
    * @param {string[]} options.resourceTypes - Filter by resource types
    * @param {string} options.terraformVersion - Terraform version for output (default: '1.5.0')
    * @param {string} options.lineage - State lineage (default: auto-generated)
    * @param {Object} options.outputs - Terraform outputs to include
-   * @returns {Promise<Object>} Terraform state object
+   * @returns {Promise<Object>} Tfstate object
    *
    * @example
    * // Export latest state
@@ -37667,6 +38198,533 @@ class VectorPlugin extends Plugin {
   }
 }
 
+function mapFieldTypeToTypeScript(fieldType) {
+  const baseType = fieldType.split("|")[0].trim();
+  const typeMap = {
+    "string": "string",
+    "number": "number",
+    "integer": "number",
+    "boolean": "boolean",
+    "array": "any[]",
+    "object": "Record<string, any>",
+    "json": "Record<string, any>",
+    "secret": "string",
+    "email": "string",
+    "url": "string",
+    "date": "string",
+    // ISO date string
+    "datetime": "string",
+    // ISO datetime string
+    "ip4": "string",
+    "ip6": "string"
+  };
+  if (baseType.startsWith("embedding:")) {
+    const dimensions = parseInt(baseType.split(":")[1]);
+    return `number[] /* ${dimensions} dimensions */`;
+  }
+  return typeMap[baseType] || "any";
+}
+function isFieldRequired(fieldDef) {
+  if (typeof fieldDef === "string") {
+    return fieldDef.includes("|required");
+  }
+  if (typeof fieldDef === "object" && fieldDef.required) {
+    return true;
+  }
+  return false;
+}
+function generateResourceInterface(resourceName, attributes, timestamps = false) {
+  const interfaceName = toPascalCase(resourceName);
+  const lines = [];
+  lines.push(`export interface ${interfaceName} {`);
+  lines.push(`  /** Resource ID (auto-generated) */`);
+  lines.push(`  id: string;`);
+  lines.push("");
+  for (const [fieldName, fieldDef] of Object.entries(attributes)) {
+    const required = isFieldRequired(fieldDef);
+    const optional = required ? "" : "?";
+    let tsType;
+    if (typeof fieldDef === "string") {
+      tsType = mapFieldTypeToTypeScript(fieldDef);
+    } else if (typeof fieldDef === "object" && fieldDef.type) {
+      tsType = mapFieldTypeToTypeScript(fieldDef.type);
+      if (fieldDef.type === "object" && fieldDef.props) {
+        tsType = "{\n";
+        for (const [propName, propDef] of Object.entries(fieldDef.props)) {
+          const propType = typeof propDef === "string" ? mapFieldTypeToTypeScript(propDef) : mapFieldTypeToTypeScript(propDef.type);
+          const propRequired = isFieldRequired(propDef);
+          tsType += `    ${propName}${propRequired ? "" : "?"}: ${propType};
+`;
+        }
+        tsType += "  }";
+      }
+      if (fieldDef.type === "array" && fieldDef.items) {
+        const itemType = mapFieldTypeToTypeScript(fieldDef.items);
+        tsType = `Array<${itemType}>`;
+      }
+    } else {
+      tsType = "any";
+    }
+    if (fieldDef.description) {
+      lines.push(`  /** ${fieldDef.description} */`);
+    }
+    lines.push(`  ${fieldName}${optional}: ${tsType};`);
+  }
+  if (timestamps) {
+    lines.push("");
+    lines.push(`  /** Creation timestamp (ISO 8601) */`);
+    lines.push(`  createdAt: string;`);
+    lines.push(`  /** Last update timestamp (ISO 8601) */`);
+    lines.push(`  updatedAt: string;`);
+  }
+  lines.push("}");
+  lines.push("");
+  return lines.join("\n");
+}
+function toPascalCase(str) {
+  return str.split(/[_-]/).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
+}
+async function generateTypes(database, options = {}) {
+  const {
+    outputPath = "./types/database.d.ts",
+    moduleName = "s3db.js",
+    includeResource = true
+  } = options;
+  const lines = [];
+  lines.push("/**");
+  lines.push(" * Auto-generated TypeScript definitions for s3db.js resources");
+  lines.push(" * Generated at: " + (/* @__PURE__ */ new Date()).toISOString());
+  lines.push(" * DO NOT EDIT - This file is auto-generated");
+  lines.push(" */");
+  lines.push("");
+  if (includeResource) {
+    lines.push(`import { Resource, Database } from '${moduleName}';`);
+    lines.push("");
+  }
+  const resourceInterfaces = [];
+  for (const [name, resource] of Object.entries(database.resources)) {
+    const attributes = resource.config?.attributes || resource.attributes || {};
+    const timestamps = resource.config?.timestamps || false;
+    const interfaceDef = generateResourceInterface(name, attributes, timestamps);
+    lines.push(interfaceDef);
+    resourceInterfaces.push({
+      name,
+      interfaceName: toPascalCase(name),
+      resource
+    });
+  }
+  lines.push("/**");
+  lines.push(" * Typed resource map for property access");
+  lines.push(" * @example");
+  lines.push(" * const users = db.resources.users; // Type-safe!");
+  lines.push(' * const user = await users.get("id"); // Autocomplete works!');
+  lines.push(" */");
+  lines.push("export interface ResourceMap {");
+  for (const { name, interfaceName } of resourceInterfaces) {
+    lines.push(`  /** ${interfaceName} resource */`);
+    if (includeResource) {
+      lines.push(`  ${name}: Resource<${interfaceName}>;`);
+    } else {
+      lines.push(`  ${name}: any;`);
+    }
+  }
+  lines.push("}");
+  lines.push("");
+  if (includeResource) {
+    lines.push("/**");
+    lines.push(" * Extended Database class with typed resources");
+    lines.push(" */");
+    lines.push("declare module 's3db.js' {");
+    lines.push("  interface Database {");
+    lines.push("    resources: ResourceMap;");
+    lines.push("  }");
+    lines.push("");
+    lines.push("  interface Resource<T = any> {");
+    lines.push("    get(id: string): Promise<T>;");
+    lines.push("    getOrNull(id: string): Promise<T | null>;");
+    lines.push("    getOrThrow(id: string): Promise<T>;");
+    lines.push("    insert(data: Partial<T>): Promise<T>;");
+    lines.push("    update(id: string, data: Partial<T>): Promise<T>;");
+    lines.push("    patch(id: string, data: Partial<T>): Promise<T>;");
+    lines.push("    replace(id: string, data: Partial<T>): Promise<T>;");
+    lines.push("    delete(id: string): Promise<void>;");
+    lines.push("    list(options?: any): Promise<T[]>;");
+    lines.push("    query(filters: Partial<T>, options?: any): Promise<T[]>;");
+    lines.push("    validate(data: Partial<T>, options?: any): Promise<{ valid: boolean; errors: any[]; data: T | null }>;");
+    lines.push("  }");
+    lines.push("}");
+  }
+  const content = lines.join("\n");
+  if (outputPath) {
+    await promises.mkdir(path$1.dirname(outputPath), { recursive: true });
+    await promises.writeFile(outputPath, content, "utf-8");
+  }
+  return content;
+}
+async function printTypes(database, options = {}) {
+  const types = await generateTypes(database, { ...options, outputPath: null });
+  console.log(types);
+  return types;
+}
+
+class Factory {
+  /**
+   * Global sequence counter
+   * @private
+   */
+  static _sequences = /* @__PURE__ */ new Map();
+  /**
+   * Registered factories
+   * @private
+   */
+  static _factories = /* @__PURE__ */ new Map();
+  /**
+   * Database instance (set globally)
+   * @private
+   */
+  static _database = null;
+  /**
+   * Create a new factory definition
+   * @param {string} resourceName - Resource name
+   * @param {Object|Function} definition - Field definitions or function
+   * @param {Object} options - Factory options
+   * @returns {Factory} Factory instance
+   */
+  static define(resourceName, definition, options = {}) {
+    const factory = new Factory(resourceName, definition, options);
+    Factory._factories.set(resourceName, factory);
+    return factory;
+  }
+  /**
+   * Set global database instance
+   * @param {Database} database - s3db.js Database instance
+   */
+  static setDatabase(database) {
+    Factory._database = database;
+  }
+  /**
+   * Get factory by resource name
+   * @param {string} resourceName - Resource name
+   * @returns {Factory} Factory instance
+   */
+  static get(resourceName) {
+    return Factory._factories.get(resourceName);
+  }
+  /**
+   * Reset all sequences
+   */
+  static resetSequences() {
+    Factory._sequences.clear();
+  }
+  /**
+   * Reset all factories
+   */
+  static reset() {
+    Factory._sequences.clear();
+    Factory._factories.clear();
+    Factory._database = null;
+  }
+  /**
+   * Constructor
+   * @param {string} resourceName - Resource name
+   * @param {Object|Function} definition - Field definitions
+   * @param {Object} options - Factory options
+   */
+  constructor(resourceName, definition, options = {}) {
+    this.resourceName = resourceName;
+    this.definition = definition;
+    this.options = options;
+    this.traits = /* @__PURE__ */ new Map();
+    this.afterCreateCallbacks = [];
+    this.beforeCreateCallbacks = [];
+  }
+  /**
+   * Get next sequence number
+   * @param {string} name - Sequence name (default: factory name)
+   * @returns {number} Next sequence number
+   */
+  sequence(name = this.resourceName) {
+    const current = Factory._sequences.get(name) || 0;
+    const next = current + 1;
+    Factory._sequences.set(name, next);
+    return next;
+  }
+  /**
+   * Define a trait (state variation)
+   * @param {string} name - Trait name
+   * @param {Object|Function} attributes - Trait attributes
+   * @returns {Factory} This factory (for chaining)
+   */
+  trait(name, attributes) {
+    this.traits.set(name, attributes);
+    return this;
+  }
+  /**
+   * Register after create callback
+   * @param {Function} callback - Callback function
+   * @returns {Factory} This factory (for chaining)
+   */
+  afterCreate(callback) {
+    this.afterCreateCallbacks.push(callback);
+    return this;
+  }
+  /**
+   * Register before create callback
+   * @param {Function} callback - Callback function
+   * @returns {Factory} This factory (for chaining)
+   */
+  beforeCreate(callback) {
+    this.beforeCreateCallbacks.push(callback);
+    return this;
+  }
+  /**
+   * Build attributes without creating in database
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Build options
+   * @returns {Promise<Object>} Built attributes
+   */
+  async build(overrides = {}, options = {}) {
+    const { traits = [] } = options;
+    const seq = this.sequence();
+    let attributes = typeof this.definition === "function" ? await this.definition({ seq, factory: this }) : { ...this.definition };
+    for (const traitName of traits) {
+      const trait = this.traits.get(traitName);
+      if (!trait) {
+        throw new Error(`Trait '${traitName}' not found in factory '${this.resourceName}'`);
+      }
+      const traitAttrs = typeof trait === "function" ? await trait({ seq, factory: this }) : trait;
+      attributes = { ...attributes, ...traitAttrs };
+    }
+    attributes = { ...attributes, ...overrides };
+    for (const [key, value] of Object.entries(attributes)) {
+      if (typeof value === "function") {
+        attributes[key] = await value({ seq, factory: this });
+      }
+    }
+    return attributes;
+  }
+  /**
+   * Create resource in database
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Create options
+   * @returns {Promise<Object>} Created resource
+   */
+  async create(overrides = {}, options = {}) {
+    const { database = Factory._database } = options;
+    if (!database) {
+      throw new Error("Database not set. Use Factory.setDatabase(db) or pass database option");
+    }
+    let attributes = await this.build(overrides, options);
+    for (const callback of this.beforeCreateCallbacks) {
+      attributes = await callback(attributes) || attributes;
+    }
+    const resource = database.resources[this.resourceName];
+    if (!resource) {
+      throw new Error(`Resource '${this.resourceName}' not found in database`);
+    }
+    let created = await resource.insert(attributes);
+    for (const callback of this.afterCreateCallbacks) {
+      created = await callback(created, { database }) || created;
+    }
+    return created;
+  }
+  /**
+   * Create multiple resources
+   * @param {number} count - Number of resources to create
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Create options
+   * @returns {Promise<Object[]>} Created resources
+   */
+  async createMany(count, overrides = {}, options = {}) {
+    const resources = [];
+    for (let i = 0; i < count; i++) {
+      const resource = await this.create(overrides, options);
+      resources.push(resource);
+    }
+    return resources;
+  }
+  /**
+   * Build multiple resources without creating
+   * @param {number} count - Number of resources to build
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Build options
+   * @returns {Promise<Object[]>} Built resources
+   */
+  async buildMany(count, overrides = {}, options = {}) {
+    const resources = [];
+    for (let i = 0; i < count; i++) {
+      const resource = await this.build(overrides, options);
+      resources.push(resource);
+    }
+    return resources;
+  }
+  /**
+   * Create with specific traits
+   * @param {string|string[]} traits - Trait name(s)
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Create options
+   * @returns {Promise<Object>} Created resource
+   */
+  async createWithTraits(traits, overrides = {}, options = {}) {
+    const traitArray = Array.isArray(traits) ? traits : [traits];
+    return this.create(overrides, { ...options, traits: traitArray });
+  }
+  /**
+   * Build with specific traits
+   * @param {string|string[]} traits - Trait name(s)
+   * @param {Object} overrides - Override attributes
+   * @param {Object} options - Build options
+   * @returns {Promise<Object>} Built resource
+   */
+  async buildWithTraits(traits, overrides = {}, options = {}) {
+    const traitArray = Array.isArray(traits) ? traits : [traits];
+    return this.build(overrides, { ...options, traits: traitArray });
+  }
+}
+
+class Seeder {
+  /**
+   * Constructor
+   * @param {Database} database - s3db.js Database instance
+   * @param {Object} options - Seeder options
+   */
+  constructor(database, options = {}) {
+    this.database = database;
+    this.options = options;
+    this.verbose = options.verbose !== false;
+  }
+  /**
+   * Log message (if verbose)
+   * @param {string} message - Message to log
+   * @private
+   */
+  log(message) {
+    if (this.verbose) {
+      console.log(`[Seeder] ${message}`);
+    }
+  }
+  /**
+   * Seed resources using factories
+   * @param {Object} specs - Seed specifications { resourceName: count }
+   * @returns {Promise<Object>} Created resources by resource name
+   *
+   * @example
+   * const created = await seeder.seed({
+   *   users: 10,
+   *   posts: 50
+   * });
+   */
+  async seed(specs) {
+    const created = {};
+    for (const [resourceName, count] of Object.entries(specs)) {
+      this.log(`Seeding ${count} ${resourceName}...`);
+      const factory = Factory.get(resourceName);
+      if (!factory) {
+        throw new Error(`Factory for '${resourceName}' not found. Define it with Factory.define()`);
+      }
+      created[resourceName] = await factory.createMany(count, {}, { database: this.database });
+      this.log(`\u2705 Created ${count} ${resourceName}`);
+    }
+    return created;
+  }
+  /**
+   * Seed with custom callback
+   * @param {Function} callback - Seeding callback
+   * @returns {Promise<any>} Result of callback
+   *
+   * @example
+   * await seeder.call(async (db) => {
+   *   const user = await UserFactory.create();
+   *   const posts = await PostFactory.createMany(5, { userId: user.id });
+   *   return { user, posts };
+   * });
+   */
+  async call(callback) {
+    this.log("Running custom seeder...");
+    const result = await callback(this.database);
+    this.log("\u2705 Custom seeder completed");
+    return result;
+  }
+  /**
+   * Truncate resources (delete all data)
+   * @param {string[]} resourceNames - Resource names to truncate
+   * @returns {Promise<void>}
+   *
+   * @example
+   * await seeder.truncate(['users', 'posts']);
+   */
+  async truncate(resourceNames) {
+    for (const resourceName of resourceNames) {
+      this.log(`Truncating ${resourceName}...`);
+      const resource = this.database.resources[resourceName];
+      if (!resource) {
+        this.log(`\u26A0\uFE0F  Resource '${resourceName}' not found, skipping`);
+        continue;
+      }
+      const ids = await resource.listIds();
+      if (ids.length > 0) {
+        await resource.deleteMany(ids);
+        this.log(`\u2705 Deleted ${ids.length} ${resourceName}`);
+      } else {
+        this.log(`\u2705 ${resourceName} already empty`);
+      }
+    }
+  }
+  /**
+   * Truncate all resources
+   * @returns {Promise<void>}
+   */
+  async truncateAll() {
+    const resourceNames = Object.keys(this.database.resources);
+    await this.truncate(resourceNames);
+  }
+  /**
+   * Run multiple seeders in order
+   * @param {Function[]} seeders - Array of seeder functions
+   * @returns {Promise<Object[]>} Results of each seeder
+   *
+   * @example
+   * await seeder.run([
+   *   async (db) => await UserFactory.createMany(10),
+   *   async (db) => await PostFactory.createMany(50)
+   * ]);
+   */
+  async run(seeders) {
+    const results = [];
+    for (const seederFn of seeders) {
+      this.log(`Running seeder ${seederFn.name || "anonymous"}...`);
+      const result = await seederFn(this.database);
+      results.push(result);
+      this.log(`\u2705 Completed ${seederFn.name || "anonymous"}`);
+    }
+    return results;
+  }
+  /**
+   * Seed and return specific resources
+   * @param {Object} specs - Seed specifications
+   * @returns {Promise<Object>} Created resources
+   *
+   * @example
+   * const { users, posts } = await seeder.seedAndReturn({
+   *   users: 5,
+   *   posts: 10
+   * });
+   */
+  async seedAndReturn(specs) {
+    return await this.seed(specs);
+  }
+  /**
+   * Reset database (truncate all and reset sequences)
+   * @returns {Promise<void>}
+   */
+  async reset() {
+    this.log("Resetting database...");
+    await this.truncateAll();
+    Factory.resetSequences();
+    this.log("\u2705 Database reset complete");
+  }
+}
+
 function sanitizeLabel(value) {
   if (typeof value !== "string") {
     value = String(value);
@@ -38068,6 +39126,7 @@ exports.DynamoDBReplicator = DynamoDBReplicator;
 exports.EncryptionError = EncryptionError;
 exports.ErrorMap = ErrorMap;
 exports.EventualConsistencyPlugin = EventualConsistencyPlugin;
+exports.Factory = Factory;
 exports.FilesystemBackupDriver = FilesystemBackupDriver;
 exports.FilesystemCache = FilesystemCache;
 exports.FullTextPlugin = FullTextPlugin;
@@ -38113,6 +39172,7 @@ exports.S3dbReplicator = S3dbReplicator;
 exports.SchedulerPlugin = SchedulerPlugin;
 exports.Schema = Schema;
 exports.SchemaError = SchemaError;
+exports.Seeder = Seeder;
 exports.SqsConsumer = SqsConsumer;
 exports.SqsReplicator = SqsReplicator;
 exports.StateMachinePlugin = StateMachinePlugin;
@@ -38131,8 +39191,6 @@ exports.calculateEffectiveLimit = calculateEffectiveLimit;
 exports.calculateSystemOverhead = calculateSystemOverhead;
 exports.calculateTotalSize = calculateTotalSize;
 exports.calculateUTF8Bytes = calculateUTF8Bytes;
-exports.clearUTF8Cache = clearUTF8Cache;
-exports.clearUTF8Memo = clearUTF8Memo;
 exports.clearUTF8Memory = clearUTF8Memory;
 exports.createBackupDriver = createBackupDriver;
 exports.createConsumer = createConsumer;
@@ -38148,12 +39206,14 @@ exports.encodeDecimal = encodeDecimal;
 exports.encodeFixedPoint = encodeFixedPoint;
 exports.encodeFixedPointBatch = encodeFixedPointBatch;
 exports.encrypt = encrypt;
+exports.generateTypes = generateTypes;
 exports.getBehavior = getBehavior;
 exports.getSizeBreakdown = getSizeBreakdown;
 exports.idGenerator = idGenerator;
 exports.mapAwsError = mapAwsError;
 exports.md5 = md5;
 exports.passwordGenerator = passwordGenerator;
+exports.printTypes = printTypes;
 exports.sha256 = sha256;
 exports.streamToString = streamToString;
 exports.transformValue = transformValue;

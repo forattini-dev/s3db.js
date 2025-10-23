@@ -41,7 +41,7 @@ describe("SchedulerPlugin", () => {
       expect(plugin.jobs.size).toBe(1);
       expect(plugin.jobs.has('test_job')).toBe(true);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should create job history resource when persistJobs is true", async () => {
@@ -60,7 +60,7 @@ describe("SchedulerPlugin", () => {
 
       expect(database.resources.plg_job_executions).toBeDefined();
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should throw error when no jobs are defined", async () => {
@@ -114,7 +114,7 @@ describe("SchedulerPlugin", () => {
       expect(lastContext.jobName).toBe('manual_job');
       expect(lastContext.executionId).toContain('manual_job');
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it.skip("should prevent concurrent manual execution of the same job", async () => {
@@ -148,7 +148,7 @@ describe("SchedulerPlugin", () => {
       await promise1;
       expect(executionCount).toBe(1);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should handle job errors and retries", async () => {
@@ -183,7 +183,7 @@ describe("SchedulerPlugin", () => {
       expect(status.statistics.totalRuns).toBe(1);
       expect(status.statistics.totalSuccesses).toBe(1);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should fail after max retries", async () => {
@@ -214,7 +214,7 @@ describe("SchedulerPlugin", () => {
       const status = plugin.getJobStatus('always_failing_job');
       expect(status.statistics.totalErrors).toBe(1);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
   });
 
@@ -250,7 +250,7 @@ describe("SchedulerPlugin", () => {
       const status2 = plugin.getJobStatus('toggleable_job');
       expect(status2.enabled).toBe(true);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should get job status", async () => {
@@ -277,7 +277,7 @@ describe("SchedulerPlugin", () => {
       expect(status.statistics).toBeDefined();
       expect(status.statistics.totalRuns).toBe(0);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should get all jobs status", async () => {
@@ -303,7 +303,7 @@ describe("SchedulerPlugin", () => {
       expect(allStatus[0].name).toBe('job1');
       expect(allStatus[1].name).toBe('job2');
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should add job at runtime", async () => {
@@ -336,7 +336,7 @@ describe("SchedulerPlugin", () => {
       await plugin.runJob('runtime_job');
       expect(executionCount).toBe(1);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should remove job", async () => {
@@ -360,7 +360,7 @@ describe("SchedulerPlugin", () => {
       // Trying to run removed job should fail
       await expect(plugin.runJob('removable_job')).rejects.toThrow('not found');
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
   });
 
@@ -390,7 +390,7 @@ describe("SchedulerPlugin", () => {
       expect(history[0].result).toBeDefined();
       expect(history[0].result.result).toBe('test data');
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
 
     it("should filter history by status", async () => {
@@ -435,7 +435,7 @@ describe("SchedulerPlugin", () => {
       const limitedHistory = await plugin.getJobHistory('multi_exec_job', { limit: 2 });
       expect(limitedHistory.length).toBe(2);
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
   });
 
@@ -486,8 +486,8 @@ describe("SchedulerPlugin", () => {
       // Only one should have executed (the other was blocked by lock)
       expect(executionCount).toBe(1);
 
-      await plugin1.cleanup();
-      await plugin2.cleanup();
+      await plugin1.stop();
+      await plugin2.stop();
     });
   });
 
@@ -545,7 +545,7 @@ describe("SchedulerPlugin", () => {
       expect(hooks.errors).toHaveLength(1);
       expect(hooks.errors[0].error).toBe('Test error');
 
-      await plugin.cleanup();
+      await plugin.stop();
     });
   });
 });

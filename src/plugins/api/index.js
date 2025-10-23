@@ -56,7 +56,6 @@ export class ApiPlugin extends Plugin {
       host: options.host || '0.0.0.0',
       verbose: options.verbose || false,
 
-      // API Documentation (supports both new and legacy formats)
       docs: {
         enabled: options.docs?.enabled !== false && options.docsEnabled !== false, // Enable by default
         ui: options.docs?.ui || 'redoc', // 'swagger' or 'redoc' (redoc is prettier!)

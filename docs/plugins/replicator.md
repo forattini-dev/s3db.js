@@ -524,7 +524,7 @@ db.on('replicator:success', ({ resource, destination }) => {
 });
 
 // View persisted logs
-const logs = await db.resource('replicator_log');
+const logs = await db.resources.replicator_log;
 const errors = await logs.query({ status: 'error' });
 console.log(`${errors.length} replication errors`);
 ```
@@ -618,7 +618,7 @@ new ReplicatorPlugin({
 
 // Health check endpoint
 app.get('/health/replication', async (req, res) => {
-  const logs = await db.resource('replicator_log');
+  const logs = await db.resources.replicator_log;
   const recentErrors = await logs.query({
     status: 'error',
     timestamp: { $gte: Date.now() - 3600000 }  // Last hour
@@ -703,7 +703,7 @@ const s3db = new S3db({
 await s3db.connect();
 
 // Data is automatically replicated with detailed error reporting
-const users = s3db.resource('users');
+const users = s3db.resources.users;
 await users.insert({ name: 'John', email: 'john@example.com' });
 // This insert is automatically replicated to the backup database
 ```
@@ -2055,7 +2055,7 @@ replicatorPlugin.on('replicator_error', async (data) => {
 
   if (attempts >= 3) {
     // Move to dead letter queue
-    await database.resource('replication_dlq').insert({
+    await database.resources.replication_dlq.insert({
       id: `dlq_${Date.now()}_${data.recordId}`,
       resource: data.resourceName,
       operation: data.operation,
@@ -2273,7 +2273,7 @@ R: Verifique:
 **P: Como reprocessar replicações falhadas?**
 R: Se `persistReplicatorLog: true`, consulte os logs e republique manualmente:
 ```javascript
-const failedLogs = await database.resource('replicator_logs').query({
+const failedLogs = await database.resources.replicator_logs.query({
   where: { status: 'error' }
 });
 ```

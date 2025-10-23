@@ -154,7 +154,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource._geoConfig.precision).toBe(5); // Default
 
       consoleLogSpy.mockRestore();
@@ -206,7 +206,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource.attributes.geohash).toBeDefined();
       expect(resource.attributes._geohash).toBeDefined();
     });
@@ -234,7 +234,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource.attributes.geohash).toBeUndefined();
       expect(resource.attributes._geohash).toBeDefined(); // Always added
     });
@@ -264,7 +264,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource.config.partitions).toBeDefined();
       expect(resource.config.partitions.byGeohash).toBeDefined();
       expect(resource.config.partitions.byGeohash.fields._geohash).toBe('string');
@@ -296,7 +296,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource.config.partitions?.byGeohash).toBeUndefined();
     });
 
@@ -333,7 +333,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       expect(resource.config.partitions.byGeohash).toBeDefined();
     });
   });
@@ -362,7 +362,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       const record = await resource.insert({
         name: 'Store 1',
         latitude: -23.5505,
@@ -397,7 +397,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       const record = await resource.insert({
         name: 'Store 1',
         latitude: -23.5505,
@@ -436,7 +436,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       const record = await resource.insert({
         name: 'Store Without Location'
       });
@@ -645,7 +645,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Insert stores in São Paulo area
       await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
@@ -690,7 +690,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Insert stores
       await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
@@ -736,7 +736,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await expect(resource.findNearby({ radius: 10 })).rejects.toThrow(
         'lat and lon are required'
@@ -766,7 +766,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
       await resource.insert({ name: 'Store No Location' }); // No coordinates
@@ -803,7 +803,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Insert multiple stores
       for (let i = 0; i < 5; i++) {
@@ -849,7 +849,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await resource.insert({ name: 'Inside 1', latitude: -23.5505, longitude: -46.6333 });
       await resource.insert({ name: 'Inside 2', latitude: -23.5555, longitude: -46.6383 });
@@ -892,7 +892,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await resource.insert({ name: 'Inside', latitude: -23.5505, longitude: -46.6333 });
 
@@ -938,7 +938,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await expect(resource.findInBounds({ north: 1, south: 0 })).rejects.toThrow(
         'north, south, east, west are required'
@@ -968,7 +968,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await resource.insert({ name: 'Inside', latitude: -23.5505, longitude: -46.6333 });
       await resource.insert({ name: 'No Location' });
@@ -1005,7 +1005,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       for (let i = 0; i < 5; i++) {
         await resource.insert({
@@ -1050,7 +1050,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       const store1 = await resource.insert({
         name: 'Store 1',
@@ -1095,7 +1095,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       const store1 = await resource.insert({
         name: 'Store 1',
@@ -1130,7 +1130,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       const store1 = await resource.insert({
         name: 'Store 1',
@@ -1173,7 +1173,7 @@ describe('GeoPlugin', () => {
         }
       });
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Should have geo capabilities
       expect(resource._geoConfig).toBeDefined();
@@ -1203,7 +1203,7 @@ describe('GeoPlugin', () => {
           },
           restaurants: {
             latField: 'lat',
-            lonField: 'lng',
+            lonField: 'lon',
             precision: 6
           }
         }
@@ -1340,7 +1340,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Should have created 4 partitions
       expect(resource.config.partitions.byGeohashZoom4).toBeDefined();
@@ -1380,7 +1380,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
       const record = await resource.insert({
         name: 'Store 1',
         latitude: -23.5505,
@@ -1459,7 +1459,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Insert stores
       await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
@@ -1510,7 +1510,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
 
@@ -1558,7 +1558,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Insert test data
       for (let i = 0; i < 10; i++) {
@@ -1630,7 +1630,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Should have added zoom fields
       expect(resource.attributes._geohash_zoom4).toBeDefined();
@@ -1663,7 +1663,7 @@ describe('GeoPlugin', () => {
 
       await database.usePlugin(plugin);
 
-      const resource = database.resource('stores');
+      const resource = database.resources.stores;
 
       // Store original partition count
       const originalPartitionCount = Object.keys(resource.config.partitions).length;

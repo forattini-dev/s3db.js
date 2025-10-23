@@ -158,7 +158,7 @@ async function main() {
   // Check dead letter queue
   if (stats.dead > 0) {
     console.log('\n=== Dead Letter Queue ===');
-    const deadLetters = await db.resource('failed_emails').list();
+    const deadLetters = await db.resources.failed_emails.list();
     console.log(`Found ${deadLetters.length} failed messages:`);
 
     for (const dl of deadLetters) {

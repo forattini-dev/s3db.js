@@ -307,8 +307,6 @@ export const SchemaActions = {
       return decodeFixedPointBatch(str, precision);
     }
 
-    // Fallback: Legacy format with individual prefixes (^val,^val,^val)
-    // This maintains backwards compatibility with data encoded before batch optimization
     const items = [];
     let current = '';
     let i = 0;

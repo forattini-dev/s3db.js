@@ -17,7 +17,7 @@ async function main() {
     });
   }
 
-  const total = await s3db.resource("leads").count();
+  const total = await s3db.resources.leads.count();
 
   console.log(`reading ${total} leads.`);
   console.log(`parallelism of ${ENV.PARALLELISM} requests.\n`);
@@ -65,8 +65,8 @@ async function main() {
     options
   );
 
-  const readStream = s3db.resource("leads").readable();
-  const writeStream = s3db.resource("copy-leads").writable();
+  const readStream = s3db.resources.leads.readable();
+  const writeStream = s3db.resources.copy-leads.writable();
 
   console.time("copying-data");
   s3db.client.on("request", () => requestsBar.tick());

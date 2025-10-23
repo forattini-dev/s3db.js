@@ -185,14 +185,55 @@ export class Resource extends AsyncEventEmitter {
       createdBy,
     };
 
-    // Initialize hooks system
+    // Initialize hooks system - expanded to cover ALL methods
     this.hooks = {
+      // Insert hooks
       beforeInsert: [],
       afterInsert: [],
+
+      // Update hooks
       beforeUpdate: [],
       afterUpdate: [],
+
+      // Delete hooks
       beforeDelete: [],
-      afterDelete: []
+      afterDelete: [],
+
+      // Get hooks
+      beforeGet: [],
+      afterGet: [],
+
+      // List hooks
+      beforeList: [],
+      afterList: [],
+
+      // Query hooks
+      beforeQuery: [],
+      afterQuery: [],
+
+      // Patch hooks
+      beforePatch: [],
+      afterPatch: [],
+
+      // Replace hooks
+      beforeReplace: [],
+      afterReplace: [],
+
+      // Exists hooks
+      beforeExists: [],
+      afterExists: [],
+
+      // Count hooks
+      beforeCount: [],
+      afterCount: [],
+
+      // GetMany hooks
+      beforeGetMany: [],
+      afterGetMany: [],
+
+      // DeleteMany hooks
+      beforeDeleteMany: [],
+      afterDeleteMany: []
     };
 
     // Store attributes
@@ -283,20 +324,6 @@ export class Resource extends AsyncEventEmitter {
     }
     // For number generators or default size, return the actual idSize
     return idSize;
-  }
-
-  /**
-   * Get resource options (for backward compatibility with tests)
-   */
-  get options() {
-    return {
-      timestamps: this.config.timestamps,
-      partitions: this.config.partitions || {},
-      cache: this.config.cache,
-      autoDecrypt: this.config.autoDecrypt,
-      paranoid: this.config.paranoid,
-      allNestedObjectsOptional: this.config.allNestedObjectsOptional
-    };
   }
 
   export() {
@@ -458,23 +485,82 @@ export class Resource extends AsyncEventEmitter {
     });
   }
 
-  async validate(data) {
+  /**
+   * Validate data against resource schema without saving
+   * @param {Object} data - Data to validate
+   * @param {Object} options - Validation options
+   * @param {boolean} options.throwOnError - Throw error if validation fails (default: false)
+   * @param {boolean} options.includeId - Include ID validation (default: false)
+   * @param {boolean} options.mutateOriginal - Allow mutation of original data (default: false)
+   * @returns {Promise<{valid: boolean, isValid: boolean, errors: Array, data: Object, original: Object}>} Validation result
+   * @example
+   * // Validate before insert
+   * const result = await resource.validate({
+   *   name: 'John Doe',
+   *   email: 'invalid-email' // Will fail email validation
+   * });
+   *
+   * if (!result.valid) {
+   *   console.log('Validation errors:', result.errors);
+   *   // [{ field: 'email', message: '...', ... }]
+   * }
+   *
+   * // Throw on error
+   * try {
+   *   await resource.validate({ email: 'bad' }, { throwOnError: true });
+   * } catch (err) {
+   *   console.log('Validation failed:', err.message);
+   * }
+   */
+  async validate(data, options = {}) {
+    const {
+      throwOnError = false,
+      includeId = false,
+      mutateOriginal = false
+    } = options;
+
+    // Clone data to avoid mutation (unless mutateOriginal is true)
+    const dataToValidate = mutateOriginal ? data : cloneDeep(data);
+
+    // If includeId is false, remove id from validation
+    if (!includeId && dataToValidate.id) {
+      delete dataToValidate.id;
+    }
+
     const result = {
       original: cloneDeep(data),
       isValid: false,
       errors: [],
+      data: dataToValidate
     };
 
-    const check = await this.schema.validate(data, { mutateOriginal: false });
+    try {
+      const check = await this.schema.validate(dataToValidate, { mutateOriginal });
 
-    if (check === true) {
-      result.isValid = true;
-    } else {
-      result.errors = check;
+      if (check === true) {
+        result.isValid = true;
+      } else {
+        result.errors = Array.isArray(check) ? check : [check];
+        result.isValid = false;
+
+        if (throwOnError) {
+          const error = new Error('Validation failed');
+          error.validationErrors = result.errors;
+          error.invalidData = data;
+          throw error;
+        }
+      }
+    } catch (err) {
+      // If schema.validate threw, and we're not in throwOnError mode, catch and return result
+      if (!throwOnError) {
+        result.errors = [{ message: err.message, error: err }];
+        result.isValid = false;
+      } else {
+        throw err;
+      }
     }
 
-    result.data = data;
-    return result
+    return result;
   }
 
   /**
@@ -798,7 +884,7 @@ export class Resource extends AsyncEventEmitter {
     const exists = await this.exists(id);
     if (exists) throw new Error(`Resource with id '${id}' already exists`);
     const keyDebug = this.getResourceKey(id || '(auto)');
-    if (this.options.timestamps) {
+    if (this.config.timestamps) {
       attributes.createdAt = new Date().toISOString();
       attributes.updatedAt = new Date().toISOString();
     }
@@ -806,7 +892,10 @@ export class Resource extends AsyncEventEmitter {
     // Aplica defaults antes de tudo
     const attributesWithDefaults = this.applyDefaults(attributes);
     // Reconstruct the complete data for validation
-    const completeData = { id, ...attributesWithDefaults };
+    // Only include id if it's defined (not undefined)
+    const completeData = id !== undefined
+      ? { id, ...attributesWithDefaults }
+      : { ...attributesWithDefaults };
 
     // Execute beforeInsert hooks
     const preProcessedData = await this.executeHooks('beforeInsert', completeData);
@@ -822,7 +911,7 @@ export class Resource extends AsyncEventEmitter {
       errors,
       isValid,
       data: validated,
-    } = await this.validate(preProcessedData);
+    } = await this.validate(preProcessedData, { includeId: true });
 
     if (!isValid) {
       const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Insert failed';
@@ -958,7 +1047,10 @@ export class Resource extends AsyncEventEmitter {
   async get(id) {
     if (isObject(id)) throw new Error(`id cannot be an object`);
     if (isEmpty(id)) throw new Error('id cannot be empty');
-    
+
+    // Execute beforeGet hooks
+    await this.executeHooks('beforeGet', { id });
+
     const key = this.getResourceKey(id);
     // LOG: start of get
     // eslint-disable-next-line no-console
@@ -1032,9 +1124,71 @@ export class Resource extends AsyncEventEmitter {
       data = await this.applyVersionMapping(data, objectVersion, this.version);
     }
 
+    // Execute afterGet hooks
+    data = await this.executeHooks('afterGet', data);
+
     this.emit("get", data);
     const value = data;
     return value;
+  }
+
+  /**
+   * Retrieve a resource object by ID, or return null if not found
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object|null>} The resource object or null if not found
+   * @example
+   * const user = await resource.getOrNull('user-123');
+   * if (user) {
+   *   console.log('Found user:', user.name);
+   * } else {
+   *   console.log('User not found');
+   * }
+   */
+  async getOrNull(id) {
+    const [ok, err, data] = await tryFn(() => this.get(id));
+
+    // Check if error is NoSuchKey (resource doesn't exist)
+    if (!ok && err && (err.name === 'NoSuchKey' || err.message?.includes('NoSuchKey'))) {
+      return null;
+    }
+
+    // Re-throw other errors (permission denied, network issues, etc.)
+    if (!ok) {
+      throw err;
+    }
+
+    return data;
+  }
+
+  /**
+   * Retrieve a resource object by ID, or throw ResourceNotFoundError if not found
+   * @param {string} id - Resource ID
+   * @returns {Promise<Object>} The resource object
+   * @throws {ResourceError} If resource does not exist
+   * @example
+   * // Throws error if user doesn't exist (no need for null check)
+   * const user = await resource.getOrThrow('user-123');
+   * console.log('User name:', user.name); // Safe to access
+   */
+  async getOrThrow(id) {
+    const [ok, err, data] = await tryFn(() => this.get(id));
+
+    // Check if error is NoSuchKey (resource doesn't exist)
+    if (!ok && err && (err.name === 'NoSuchKey' || err.message?.includes('NoSuchKey'))) {
+      throw new ResourceError(`Resource '${this.name}' with id '${id}' not found`, {
+        resourceName: this.name,
+        operation: 'getOrThrow',
+        id,
+        code: 'RESOURCE_NOT_FOUND'
+      });
+    }
+
+    // Re-throw other errors (permission denied, network issues, etc.)
+    if (!ok) {
+      throw err;
+    }
+
+    return data;
   }
 
   /**
@@ -1042,8 +1196,15 @@ export class Resource extends AsyncEventEmitter {
    * @returns {Promise<boolean>} True if resource exists, false otherwise
    */
   async exists(id) {
+    // Execute beforeExists hooks
+    await this.executeHooks('beforeExists', { id });
+
     const key = this.getResourceKey(id);
     const [ok, err] = await tryFn(() => this.client.headObject(key));
+
+    // Execute afterExists hooks
+    await this.executeHooks('afterExists', { id, exists: ok });
+
     return ok;
   }
 
@@ -1102,7 +1263,7 @@ export class Resource extends AsyncEventEmitter {
     }
     const preProcessedData = await this.executeHooks('beforeUpdate', cloneDeep(mergedData));
     const completeData = { ...originalData, ...preProcessedData, id };
-    const { isValid, errors, data } = await this.validate(cloneDeep(completeData));
+    const { isValid, errors, data } = await this.validate(cloneDeep(completeData), { includeId: true });
     if (!isValid) {
       throw new InvalidResourceItem({
         bucket: this.client.config.bucket,
@@ -1288,20 +1449,30 @@ export class Resource extends AsyncEventEmitter {
       throw new Error('fields must be a non-empty object');
     }
 
+    // Execute beforePatch hooks
+    await this.executeHooks('beforePatch', { id, fields, options });
+
     const behavior = this.behavior;
 
     // Check if fields contain dot notation (nested fields)
     const hasNestedFields = Object.keys(fields).some(key => key.includes('.'));
 
+    let result;
+
     // ✅ Optimization: HEAD + COPY for metadata-only behaviors WITHOUT nested fields
     if ((behavior === 'enforce-limits' || behavior === 'truncate-data') && !hasNestedFields) {
-      return await this._patchViaCopyObject(id, fields, options);
+      result = await this._patchViaCopyObject(id, fields, options);
+    } else {
+      // ⚠️ Fallback: GET + merge + PUT for:
+      // - Behaviors with body storage
+      // - Nested field updates (need full object merge)
+      result = await this.update(id, fields, options);
     }
 
-    // ⚠️ Fallback: GET + merge + PUT for:
-    // - Behaviors with body storage
-    // - Nested field updates (need full object merge)
-    return await this.update(id, fields, options);
+    // Execute afterPatch hooks
+    const finalResult = await this.executeHooks('afterPatch', result);
+
+    return finalResult;
   }
 
   /**
@@ -1433,6 +1604,9 @@ export class Resource extends AsyncEventEmitter {
       throw new Error('fullData must be a non-empty object');
     }
 
+    // Execute beforeReplace hooks
+    await this.executeHooks('beforeReplace', { id, fullData, options });
+
     const { partition, partitionValues } = options;
 
     // Clone data to avoid mutations
@@ -1458,7 +1632,7 @@ export class Resource extends AsyncEventEmitter {
       errors,
       isValid,
       data: validated,
-    } = await this.validate(completeData);
+    } = await this.validate(completeData, { includeId: true });
 
     if (!isValid) {
       const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Replace failed';
@@ -1556,7 +1730,10 @@ export class Resource extends AsyncEventEmitter {
       }
     }
 
-    return replacedObject;
+    // Execute afterReplace hooks
+    const finalResult = await this.executeHooks('afterReplace', replacedObject);
+
+    return finalResult;
   }
 
   /**
@@ -1628,7 +1805,7 @@ export class Resource extends AsyncEventEmitter {
     const completeData = { ...originalData, ...preProcessedData, id };
 
     // Validate
-    const { isValid, errors, data } = await this.validate(cloneDeep(completeData));
+    const { isValid, errors, data } = await this.validate(cloneDeep(completeData), { includeId: true });
     if (!isValid) {
       return {
         success: false,
@@ -1893,6 +2070,9 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async count({ partition = null, partitionValues = {} } = {}) {
+    // Execute beforeCount hooks
+    await this.executeHooks('beforeCount', { partition, partitionValues });
+
     let prefix;
 
     if (partition && Object.keys(partitionValues).length > 0) {
@@ -1924,6 +2104,10 @@ export class Resource extends AsyncEventEmitter {
     }
 
     const count = await this.client.count({ prefix });
+
+    // Execute afterCount hooks
+    await this.executeHooks('afterCount', { count, partition, partitionValues });
+
     this.emit("count", count);
     return count;
   }
@@ -1965,6 +2149,9 @@ export class Resource extends AsyncEventEmitter {
    * const results = await resource.deleteMany(deletedIds);
       */
   async deleteMany(ids) {
+    // Execute beforeDeleteMany hooks
+    await this.executeHooks('beforeDeleteMany', { ids });
+
     const packages = chunk(
       ids.map((id) => this.getResourceKey(id)),
       1000
@@ -1995,6 +2182,9 @@ export class Resource extends AsyncEventEmitter {
 
         return response;
       });
+
+    // Execute afterDeleteMany hooks
+    await this.executeHooks('afterDeleteMany', { ids, results });
 
     this.emit("deleteMany", ids.length);
     return results;
@@ -2137,6 +2327,9 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+    // Execute beforeList hooks
+    await this.executeHooks('beforeList', { partition, partitionValues, limit, offset });
+
     const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
         return await this.listMain({ limit, offset });
@@ -2146,7 +2339,10 @@ export class Resource extends AsyncEventEmitter {
     if (!ok) {
       return this.handleListError(err, { partition, partitionValues });
     }
-    return result;
+
+    // Execute afterList hooks
+    const finalResult = await this.executeHooks('afterList', result);
+    return finalResult;
   }
 
   async listMain({ limit, offset = 0 }) {
@@ -2314,6 +2510,9 @@ export class Resource extends AsyncEventEmitter {
    * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
       */
   async getMany(ids) {
+    // Execute beforeGetMany hooks
+    await this.executeHooks('beforeGetMany', { ids });
+
     const { results, errors } = await PromisePool.for(ids)
       .withConcurrency(this.client.parallelism)
       .handleError(async (error, id) => {
@@ -2338,8 +2537,11 @@ export class Resource extends AsyncEventEmitter {
         throw err;
       });
 
+    // Execute afterGetMany hooks
+    const finalResults = await this.executeHooks('afterGetMany', results);
+
     this.emit("getMany", ids.length);
-    return results;
+    return finalResults;
   }
 
   /**
@@ -2604,25 +2806,6 @@ export class Resource extends AsyncEventEmitter {
    * @returns {Object} Schema object for the version
    */
   async getSchemaForVersion(version) {
-    // If version is the same as current, return current schema
-    if (version === this.version) {
-      return this.schema;
-    }
-    // For different versions, try to create a compatible schema
-    // This is especially important for v0 objects that might have different encryption
-    const [ok, err, compatibleSchema] = await tryFn(() => Promise.resolve(new Schema({
-      name: this.name,
-      attributes: this.attributes,
-      passphrase: this.passphrase,
-      version: version,
-      options: {
-        ...this.config,
-        autoDecrypt: true,
-        autoEncrypt: true
-      }
-    })));
-    if (ok) return compatibleSchema;
-    // console.warn(`Failed to create compatible schema for version ${version}, using current schema:`, err.message);
     return this.schema;
   }
 
@@ -2732,6 +2915,9 @@ export class Resource extends AsyncEventEmitter {
    * );
    */
   async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
+    // Execute beforeQuery hooks
+    await this.executeHooks('beforeQuery', { filter, limit, offset, partition, partitionValues });
+
     if (Object.keys(filter).length === 0) {
       // No filter, just return paginated results
       return await this.list({ partition, partitionValues, limit, offset });
@@ -2772,7 +2958,10 @@ export class Resource extends AsyncEventEmitter {
     }
 
     // Return only up to the requested limit
-    return results.slice(0, limit);
+    const finalResults = results.slice(0, limit);
+
+    // Execute afterQuery hooks
+    return await this.executeHooks('afterQuery', finalResults);
   }
 
   /**
@@ -2891,7 +3080,7 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
-   * Update partition objects to keep them in sync (legacy method for backward compatibility)
+   * Update partition objects to keep them in sync
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
@@ -3347,7 +3536,20 @@ function validateResourceConfig(config) {
     if (typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
       errors.push("Resource 'hooks' must be an object");
     } else {
-      const validHookEvents = ['beforeInsert', 'afterInsert', 'beforeUpdate', 'afterUpdate', 'beforeDelete', 'afterDelete'];
+      const validHookEvents = [
+        'beforeInsert', 'afterInsert',
+        'beforeUpdate', 'afterUpdate',
+        'beforeDelete', 'afterDelete',
+        'beforeGet', 'afterGet',
+        'beforeList', 'afterList',
+        'beforeQuery', 'afterQuery',
+        'beforeExists', 'afterExists',
+        'beforeCount', 'afterCount',
+        'beforePatch', 'afterPatch',
+        'beforeReplace', 'afterReplace',
+        'beforeGetMany', 'afterGetMany',
+        'beforeDeleteMany', 'afterDeleteMany'
+      ];
       for (const [event, hooksArr] of Object.entries(config.hooks)) {
         if (!validHookEvents.includes(event)) {
           errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(', ')}`);
