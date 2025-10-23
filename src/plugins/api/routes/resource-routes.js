@@ -299,6 +299,91 @@ export function createResourceRoutes(resource, version, config = {}) {
   return app;
 }
 
+/**
+ * Create relational routes for a resource relation
+ * @param {Object} sourceResource - Source s3db.js Resource instance
+ * @param {string} relationName - Name of the relation (e.g., 'posts', 'profile')
+ * @param {Object} relationConfig - Relation configuration from RelationPlugin
+ * @param {string} version - Resource version (e.g., 'v1')
+ * @returns {Hono} Hono app with relational routes
+ */
+export function createRelationalRoutes(sourceResource, relationName, relationConfig, version) {
+  const app = new Hono();
+  const resourceName = sourceResource.name;
+  const relatedResourceName = relationConfig.resource;
+
+  // GET /{version}/{resource}/:id/{relation}
+  // Examples: GET /v1/users/user123/posts, GET /v1/users/user123/profile
+  app.get('/:id', asyncHandler(async (c) => {
+    const id = c.req.param('id');
+    const query = c.req.query();
+
+    // Check if source resource exists
+    const source = await sourceResource.get(id);
+    if (!source) {
+      const response = formatter.notFound(resourceName, id);
+      return c.json(response, response._status);
+    }
+
+    // Use RelationPlugin's include feature to load the relation
+    const result = await sourceResource.get(id, {
+      include: [relationName]
+    });
+
+    const relatedData = result[relationName];
+
+    // Check if relation exists
+    if (!relatedData) {
+      // Return appropriate response based on relation type
+      if (relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany') {
+        // For *-to-many relations, return empty array
+        const response = formatter.list([], {
+          total: 0,
+          page: 1,
+          pageSize: 100,
+          pageCount: 0
+        });
+        return c.json(response, response._status);
+      } else {
+        // For *-to-one relations, return 404
+        const response = formatter.notFound(relatedResourceName, 'related resource');
+        return c.json(response, response._status);
+      }
+    }
+
+    // Return appropriate format based on relation type
+    if (relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany') {
+      // For *-to-many, return list format
+      const items = Array.isArray(relatedData) ? relatedData : [relatedData];
+      const limit = parseInt(query.limit) || 100;
+      const offset = parseInt(query.offset) || 0;
+
+      // Apply pagination
+      const paginatedItems = items.slice(offset, offset + limit);
+
+      const response = formatter.list(paginatedItems, {
+        total: items.length,
+        page: Math.floor(offset / limit) + 1,
+        pageSize: limit,
+        pageCount: Math.ceil(items.length / limit)
+      });
+
+      // Set pagination headers
+      c.header('X-Total-Count', items.length.toString());
+      c.header('X-Page-Count', Math.ceil(items.length / limit).toString());
+
+      return c.json(response, response._status);
+    } else {
+      // For *-to-one, return single resource format
+      const response = formatter.success(relatedData);
+      return c.json(response, response._status);
+    }
+  }));
+
+  return app;
+}
+
 export default {
-  createResourceRoutes
+  createResourceRoutes,
+  createRelationalRoutes
 };

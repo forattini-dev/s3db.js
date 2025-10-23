@@ -29,7 +29,7 @@
 | **[🎯 Vector](./vector.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector.md) |
 | **[⏳ TTL](./ttl.md)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl.md) |
 | **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
-| **[🏗️ Terraform State](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
+| **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
 
 **💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
 
@@ -500,7 +500,7 @@ s3db.js uses a **lightweight core** approach - plugin-specific dependencies are 
 | SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
-| Terraform State Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
+| Tfstate Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
 
 ### Installation Example
 

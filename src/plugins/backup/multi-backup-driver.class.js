@@ -22,7 +22,6 @@ export default class MultiBackupDriver extends BaseBackupDriver {
       destinations: [],
       strategy: 'all', // 'all', 'any', 'priority'
       concurrency: 3,
-      requireAll: true, // For backward compatibility
       ...config
     });
 

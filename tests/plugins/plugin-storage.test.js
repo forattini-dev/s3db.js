@@ -98,7 +98,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         active: true
       };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -111,7 +111,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         field: 'value'
       };
 
-      await storage.put(key, data, { behavior: 'body-only' });
+      await storage.set(key, data, { behavior: 'body-only' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -137,7 +137,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         }
       };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -152,7 +152,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         value: null
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -164,7 +164,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         value: undefined
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       // undefined is converted to null in JSON
       expect(retrieved.value).toBeUndefined();
@@ -174,7 +174,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const key = storage.getPluginKey(null, 'empty-object');
       const data = {};
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -185,7 +185,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         items: []
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -197,7 +197,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         deleted: false
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -211,7 +211,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         zero: 0
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -224,7 +224,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         multiline: 'Line1\nLine2\nLine3'
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -243,7 +243,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         }
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -254,7 +254,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         items: [1, 'string', true, null, { nested: 'object' }, [1, 2, 3]]
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -263,7 +263,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const key = storage.getPluginKey(null, 'custom-content-type');
       const data = { test: 'data' };
 
-      await storage.put(key, data, { contentType: 'application/custom+json' });
+      await storage.set(key, data, { contentType: 'application/custom+json' });
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -274,7 +274,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const key = storage.getPluginKey(null, 'metadata-only');
       const data = { small: 'data' };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
     });
@@ -299,7 +299,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         config: { nested: 'value' }
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved.config).toEqual({ nested: 'value' });
     });
@@ -310,7 +310,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         items: [1, 2, 3]
       };
 
-      await storage.put(key, data);
+      await storage.set(key, data);
       const retrieved = await storage.get(key);
       expect(retrieved.items).toEqual([1, 2, 3]);
     });
@@ -380,9 +380,9 @@ describe('PluginStorage - Exhaustive Tests', () => {
   describe('list', () => {
     beforeEach(async () => {
       // Create some test data
-      await storage.put(storage.getPluginKey(null, 'config/general'), { test: 1 });
-      await storage.put(storage.getPluginKey(null, 'config/advanced'), { test: 2 });
-      await storage.put(storage.getPluginKey(null, 'cache/item-1'), { test: 3 });
+      await storage.set(storage.getPluginKey(null, 'config/general'), { test: 1 });
+      await storage.set(storage.getPluginKey(null, 'config/advanced'), { test: 2 });
+      await storage.set(storage.getPluginKey(null, 'cache/item-1'), { test: 3 });
     });
 
     test('should list all plugin keys', async () => {
@@ -427,10 +427,10 @@ describe('PluginStorage - Exhaustive Tests', () => {
   describe('listForResource', () => {
     beforeEach(async () => {
       // Create resource-scoped data
-      await storage.put(storage.getPluginKey('users', 'cache', 'user-1'), { test: 1 });
-      await storage.put(storage.getPluginKey('users', 'cache', 'user-2'), { test: 2 });
-      await storage.put(storage.getPluginKey('users', 'stats', 'daily'), { test: 3 });
-      await storage.put(storage.getPluginKey('products', 'cache', 'prod-1'), { test: 4 });
+      await storage.set(storage.getPluginKey('users', 'cache', 'user-1'), { test: 1 });
+      await storage.set(storage.getPluginKey('users', 'cache', 'user-2'), { test: 2 });
+      await storage.set(storage.getPluginKey('users', 'stats', 'daily'), { test: 3 });
+      await storage.set(storage.getPluginKey('products', 'cache', 'prod-1'), { test: 4 });
     });
 
     test('should list all keys for a resource', async () => {
@@ -480,7 +480,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
   describe('delete', () => {
     test('should delete a single key', async () => {
       const key = storage.getPluginKey(null, 'to-delete');
-      await storage.put(key, { test: 1 });
+      await storage.set(key, { test: 1 });
 
       // Verify it exists
       let data = await storage.get(key);
@@ -503,10 +503,10 @@ describe('PluginStorage - Exhaustive Tests', () => {
   describe('deleteAll', () => {
     beforeEach(async () => {
       // Create test data
-      await storage.put(storage.getPluginKey(null, 'global-1'), { test: 1 });
-      await storage.put(storage.getPluginKey(null, 'global-2'), { test: 2 });
-      await storage.put(storage.getPluginKey('users', 'cache', 'user-1'), { test: 3 });
-      await storage.put(storage.getPluginKey('products', 'cache', 'prod-1'), { test: 4 });
+      await storage.set(storage.getPluginKey(null, 'global-1'), { test: 1 });
+      await storage.set(storage.getPluginKey(null, 'global-2'), { test: 2 });
+      await storage.set(storage.getPluginKey('users', 'cache', 'user-1'), { test: 3 });
+      await storage.set(storage.getPluginKey('products', 'cache', 'prod-1'), { test: 4 });
     });
 
     test('should delete all plugin data', async () => {
@@ -546,7 +546,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
     });
   });
 
-  describe('batchPut', () => {
+  describe('batchSet', () => {
     test('should save multiple items', async () => {
       const items = [
         { key: storage.getPluginKey(null, 'batch-1'), data: { value: 1 } },
@@ -554,7 +554,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         { key: storage.getPluginKey(null, 'batch-3'), data: { value: 3 } }
       ];
 
-      const results = await storage.batchPut(items);
+      const results = await storage.batchSet(items);
 
       expect(results.length).toBe(3);
       expect(results.every(r => r.ok)).toBe(true);
@@ -570,14 +570,14 @@ describe('PluginStorage - Exhaustive Tests', () => {
         { key: storage.getPluginKey(null, 'batch-body-only'), data: { value: 2 }, options: { behavior: 'body-only' } }
       ];
 
-      const results = await storage.batchPut(items);
+      const results = await storage.batchSet(items);
 
       expect(results.length).toBe(2);
       expect(results.every(r => r.ok)).toBe(true);
     });
 
     test('should handle empty batch', async () => {
-      const results = await storage.batchPut([]);
+      const results = await storage.batchSet([]);
       expect(results.length).toBe(0);
     });
 
@@ -588,7 +588,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         { key: storage.getPluginKey(null, 'batch-good-2'), data: { value: 2 } }
       ];
 
-      const results = await storage.batchPut(items);
+      const results = await storage.batchSet(items);
 
       expect(results.length).toBe(3);
       expect(results[0].ok).toBe(true);
@@ -600,8 +600,8 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
   describe('batchGet', () => {
     beforeEach(async () => {
-      await storage.put(storage.getPluginKey(null, 'get-1'), { value: 1 });
-      await storage.put(storage.getPluginKey(null, 'get-2'), { value: 2 });
+      await storage.set(storage.getPluginKey(null, 'get-1'), { value: 1 });
+      await storage.set(storage.getPluginKey(null, 'get-2'), { value: 2 });
     });
 
     test('should retrieve multiple items', async () => {
@@ -645,7 +645,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const key = storage.getPluginKey(null, 'small-overflow');
       const data = { small: 'value' };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -658,7 +658,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         small: 'value'
       };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -672,7 +672,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         small: 'z'
       };
 
-      await storage.put(key, data, { behavior: 'body-overflow' });
+      await storage.set(key, data, { behavior: 'body-overflow' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -687,7 +687,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         field2: 'value2'
       };
 
-      await storage.put(key, data, { behavior: 'body-only' });
+      await storage.set(key, data, { behavior: 'body-only' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -699,7 +699,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         large: 'x'.repeat(10000)
       };
 
-      await storage.put(key, data, { behavior: 'body-only' });
+      await storage.set(key, data, { behavior: 'body-only' });
 
       const retrieved = await storage.get(key);
       expect(retrieved).toEqual(data);
@@ -716,7 +716,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       };
 
       await expect(
-        storage.put(key, largeData, { behavior: 'enforce-limits' })
+        storage.set(key, largeData, { behavior: 'enforce-limits' })
       ).rejects.toThrow('exceeds metadata limit');
     });
 
@@ -728,7 +728,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       };
 
       await expect(
-        storage.put(key, smallData, { behavior: 'enforce-limits' })
+        storage.set(key, smallData, { behavior: 'enforce-limits' })
       ).resolves.not.toThrow();
 
       const retrieved = await storage.get(key);
@@ -742,7 +742,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const data = { test: 'data' };
 
       await expect(
-        storage.put(key, data, { behavior: 'invalid-behavior' })
+        storage.set(key, data, { behavior: 'invalid-behavior' })
       ).rejects.toThrow('Unknown behavior: invalid-behavior');
     });
   });
@@ -757,7 +757,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
         async onInstall() {
           const storage = this.getStorage();
-          await storage.put(
+          await storage.set(
             storage.getPluginKey(null, 'config'),
             { initialized: true }
           );
@@ -787,7 +787,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
         async onInstall() {
           const storage = this.getStorage();
-          await storage.put(
+          await storage.set(
             storage.getPluginKey(null, 'data'),
             { plugin: 'one' }
           );
@@ -801,7 +801,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
         async onInstall() {
           const storage = this.getStorage();
-          await storage.put(
+          await storage.set(
             storage.getPluginKey(null, 'data'),
             { plugin: 'two' }
           );
@@ -839,12 +839,12 @@ describe('PluginStorage - Exhaustive Tests', () => {
           const storage = this.getStorage();
 
           // Cache data for different resources
-          await storage.put(
+          await storage.set(
             storage.getPluginKey('users', 'cache', 'user-1'),
             { name: 'Alice', cached: true }
           );
 
-          await storage.put(
+          await storage.set(
             storage.getPluginKey('products', 'cache', 'prod-1'),
             { title: 'Product 1', cached: true }
           );
@@ -882,7 +882,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       ];
 
       for (const txn of transactions) {
-        await storage.put(
+        await storage.set(
           storage.getPluginKey(resourceName, field, 'transactions', `id=${txn.id}`),
           txn,
           { behavior: 'body-overflow' }
@@ -910,7 +910,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       ];
 
       for (const record of cachedRecords) {
-        await storage.put(
+        await storage.set(
           storage.getPluginKey(resourceName, 'cache', record.id),
           record,
           { behavior: 'body-only' }
@@ -944,7 +944,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
         }
       };
 
-      await storage.put(
+      await storage.set(
         storage.getPluginKey(null, 'config'),
         config,
         { behavior: 'body-overflow' }
@@ -958,7 +958,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
 
       // Update config
       config.interval = 10000;
-      await storage.put(
+      await storage.set(
         storage.getPluginKey(null, 'config'),
         config,
         { behavior: 'body-overflow' }
@@ -982,7 +982,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       ];
 
       for (const data of analytics) {
-        await storage.put(
+        await storage.set(
           storage.getPluginKey(resourceName, field, 'analytics', data.cohort),
           data,
           { behavior: 'body-overflow' }
@@ -1013,7 +1013,7 @@ describe('PluginStorage - Exhaustive Tests', () => {
       const badStorage = new PluginStorage(badClient, 'test');
 
       await expect(
-        badStorage.put('test-key', { data: 'test' })
+        badStorage.set('test-key', { data: 'test' })
       ).rejects.toThrow(/Failed to save plugin data/);
     });
 

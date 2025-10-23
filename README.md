@@ -186,6 +186,147 @@ console.log(`Total users: ${allUsers.length}`);
 
 **That's it!** You now have a fully functional document database running on AWS S3. 🎉
 
+### 5. Add plugins for a better experience (Optional)
+
+Enhance your database with powerful plugins for production-ready features:
+
+```javascript
+import { S3db, TTLPlugin, RelationPlugin, ReplicatorPlugin, CachePlugin } from "s3db.js";
+
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  plugins: [
+    // Auto-cleanup expired records (no cron jobs needed!)
+    new TTLPlugin({
+      resources: {
+        sessions: { ttl: 86400, onExpire: 'soft-delete' }  // 24h
+      }
+    }),
+
+    // ORM-like relationships with 10-100x faster queries
+    new RelationPlugin({
+      relations: {
+        users: {
+          posts: { type: 'hasMany', resource: 'posts', foreignKey: 'userId' }
+        }
+      }
+    }),
+
+    // Real-time replication to BigQuery, PostgreSQL, etc.
+    new ReplicatorPlugin({
+      replicators: [{
+        driver: 'bigquery',
+        config: { projectId: 'my-project', datasetId: 'analytics' },
+        resources: { users: 'users_table', posts: 'posts_table' }
+      }]
+    }),
+
+    // Cache frequently accessed data (memory, S3, or filesystem)
+    new CachePlugin({
+      driver: 'memory',
+      ttl: 300000  // 5 minutes
+    })
+  ]
+});
+```
+
+**Learn more** about available plugins and their features in the [Plugin Documentation](docs/plugins/README.md).
+
+---
+
+## 📘 TypeScript Support
+
+s3db.js includes comprehensive TypeScript definitions out of the box. Get full type safety, autocomplete, and IntelliSense support in your IDE!
+
+### Basic Usage (Automatic Types)
+
+```typescript
+import { Database, DatabaseConfig, Resource } from 's3db.js';
+
+// Type-safe configuration
+const config: DatabaseConfig = {
+  connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
+  verbose: true,
+  parallelism: 10,
+  cache: { enabled: true, ttl: 3600 }
+};
+
+const db = new Database(config);
+
+// TypeScript knows all methods and options!
+await db.createResource({
+  name: 'users',
+  attributes: {
+    name: 'string|required',
+    email: 'string|required|email',
+    age: 'number|min:0'
+  }
+});
+
+// Full autocomplete for all operations
+const users: Resource<any> = db.resources.users;
+const user = await users.insert({ name: 'Alice', email: 'alice@example.com', age: 28 });
+```
+
+### Advanced: Generate Resource Types
+
+For even better type safety, auto-generate TypeScript interfaces from your resources:
+
+```typescript
+import { generateTypes } from 's3db.js/typescript-generator';
+
+// Generate types after creating resources
+await generateTypes(db, { outputPath: './types/database.d.ts' });
+```
+
+This creates type-safe interfaces:
+
+```typescript
+// types/database.d.ts (auto-generated)
+export interface Users {
+  id: string;
+  name: string;
+  email: string;
+  age: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ResourceMap {
+  users: Resource<Users>;
+  posts: Resource<Posts>;
+}
+
+declare module 's3db.js' {
+  interface Database {
+    resources: ResourceMap;
+  }
+}
+```
+
+Now get full autocomplete for your specific fields:
+
+```typescript
+import { Users } from './types/database';
+
+const user = await db.resources.users.get('id');
+// user is typed as Users - full autocomplete!
+
+user.name   // ✅ Autocomplete works
+user.email  // ✅ Autocomplete works
+user.emai   // ❌ Compile error - typo detected!
+```
+
+### Benefits
+
+- ✅ **Full Type Safety** - Catch errors at compile time
+- ✅ **IDE Autocomplete** - IntelliSense for all methods and properties
+- ✅ **Refactoring Support** - Rename fields safely across your codebase
+- ✅ **Documentation** - Hover tooltips show method signatures
+- ✅ **Type Inference** - TypeScript infers return types automatically
+
+See the complete example in [`docs/examples/typescript-usage-example.ts`](docs/examples/typescript-usage-example.ts).
+
 ---
 
 ## 💾 Installation
@@ -236,96 +377,12 @@ DATABASE_NAME=myapp
 Then initialize s3db.js:
 
 ```javascript
-import { S3db } from "s3db.js";
 import dotenv from "dotenv";
-
 dotenv.config();
 
+import { S3db } from "s3db.js";
 const s3db = new S3db({
   connectionString: `s3://${process.env.AWS_ACCESS_KEY_ID}:${process.env.AWS_SECRET_ACCESS_KEY}@${process.env.AWS_BUCKET}/databases/${process.env.DATABASE_NAME}`
-});
-```
-
-### 🧪 Development & Testing
-
-For local development, all plugin dependencies are already included as **devDependencies** - just run:
-
-```bash
-pnpm install  # Installs everything including plugin dependencies
-```
-
-This automatically installs all plugin dependencies so you can:
-- ✅ Run the full test suite (`pnpm test`)
-- ✅ Test all plugins without errors
-- ✅ Verify compatibility with all integrations
-
-**For end users:** They only install what they need via `peerDependencies`. The package manager automatically checks version compatibility.
-
-**For CI/CD:** Just `pnpm install` - no extra steps needed!
-
----
-
-### ⚡ HTTP Client Configuration
-
-s3db.js includes optimized HTTP client settings by default for excellent S3 performance. You can customize these settings based on your specific needs:
-
-#### Default Configuration (Optimized)
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  // Default HTTP client options (optimized for most applications):
-  httpClientOptions: {
-    keepAlive: true,         // Enable connection reuse
-    keepAliveMsecs: 1000,    // Keep connections alive for 1 second
-    maxSockets: 50,          // Maximum 50 concurrent connections
-    maxFreeSockets: 10,      // Keep 10 free connections in pool
-    timeout: 60000           // 60 second timeout
-  }
-});
-```
-
-#### Custom Configurations
-
-**High Concurrency (Recommended for APIs):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 1000,
-    maxSockets: 100,         // Higher concurrency
-    maxFreeSockets: 20,      // More free connections
-    timeout: 60000
-  }
-});
-```
-
-**Aggressive Performance (High-throughput applications):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 5000,    // Longer keep-alive
-    maxSockets: 200,         // High concurrency
-    maxFreeSockets: 50,      // Large connection pool
-    timeout: 120000          // 2 minute timeout
-  }
-});
-```
-
-**Conservative (Resource-constrained environments):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 500,     // Shorter keep-alive
-    maxSockets: 10,          // Lower concurrency
-    maxFreeSockets: 2,       // Smaller pool
-    timeout: 15000           // 15 second timeout
-  }
 });
 ```
 
@@ -482,7 +539,7 @@ Use bulk operations for better performance with large datasets:
 
 ```javascript
 // ✅ Efficient bulk operations
-const users = await s3db.resource('users');
+const users = s3db.resources.users;
 
 // Bulk insert - much faster than individual inserts
 const newUsers = await users.insertMany([
@@ -571,98 +628,6 @@ readableStream.on("end", () => console.log("✅ Export completed"));
 const writableStream = await users.writable();
 importData.forEach(userData => writableStream.write(userData));
 writableStream.end();
-```
-
-### 🔧 Troubleshooting
-
-#### HTTP Client Performance Issues
-
-If you're experiencing slow performance or connection issues:
-
-**1. Check your HTTP client configuration:**
-```javascript
-// Verify current settings
-console.log('HTTP Client Options:', s3db.client.httpClientOptions);
-```
-
-**2. Adjust for your use case:**
-```javascript
-// For high-concurrency applications
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    maxSockets: 100,         // Increase for more concurrency
-    maxFreeSockets: 20,      // More free connections
-    timeout: 60000
-  }
-});
-
-// For resource-constrained environments
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    maxSockets: 10,          // Reduce for lower memory usage
-    maxFreeSockets: 2,       // Smaller pool
-    timeout: 15000           // Shorter timeout
-  }
-});
-```
-
-**3. Use bulk operations for better performance:**
-```javascript
-// ❌ Slow: Individual operations
-for (const item of items) {
-  await users.insert(item);
-}
-
-// ✅ Fast: Bulk operations
-await users.insertMany(items);
-```
-
-#### Best Practices for HTTP Configuration
-
-**For Web Applications:**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 1000,
-    maxSockets: 50,          // Good balance for web traffic
-    maxFreeSockets: 10,
-    timeout: 60000
-  }
-});
-```
-
-**For Data Processing Pipelines:**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 5000,    // Longer keep-alive for batch processing
-    maxSockets: 200,         // High concurrency for bulk operations
-    maxFreeSockets: 50,
-    timeout: 120000          // Longer timeout for large operations
-  }
-});
-```
-
-**For Serverless Functions:**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 500,     // Shorter keep-alive for serverless
-    maxSockets: 10,          // Lower concurrency for resource constraints
-    maxFreeSockets: 2,
-    timeout: 15000           // Shorter timeout for serverless limits
-  }
-});
 ```
 
 ### 🔄 Resource Versioning System
@@ -822,21 +787,6 @@ await users.insert({ name: "John", email: "john@example.com" });
 // ✅ Data cached, costs tracked, indexed for search, metrics recorded, replicated, and audited
 ```
 
-#### Available Plugins
-
-- **💾 [Cache Plugin](./docs/plugins/cache.md)** - Intelligent caching (memory/S3) for performance
-- **💰 [Costs Plugin](./docs/plugins/costs.md)** - Real-time AWS S3 cost tracking
-- **🔍 [FullText Plugin](./docs/plugins/fulltext.md)** - Advanced search with automatic indexing
-- **📊 [Metrics Plugin](./docs/plugins/metrics.md)** - Performance monitoring and analytics
-- **🔄 [Replicator Plugin](./docs/plugins/replicator.md)** - Multi-target replication (S3DB, SQS, BigQuery, PostgreSQL)
-- **📝 [Audit Plugin](./docs/plugins/audit.md)** - Comprehensive audit logging for compliance
-- **📬 [Queue Consumer Plugin](./docs/plugins/queue-consumer.md)** - Message consumption from SQS/RabbitMQ
-- **🔒 [S3Queue Plugin](./docs/plugins/s3-queue.md)** - Distributed queue processing with zero race conditions
-- **📈 [Eventual Consistency Plugin](./docs/plugins/eventual-consistency.md)** - Transactional counters with pre-computed analytics (15 functions for time-series data)
-- **📅 [Scheduler Plugin](./docs/plugins/scheduler.md)** - Task scheduling and automation
-- **🔄 [State Machine Plugin](./docs/plugins/state-machine.md)** - State management and transitions
-- **💾 [Backup Plugin](./docs/plugins/backup.md)** - Backup and restore functionality
-
 **📖 For complete plugin documentation and overview:**
 **[📋 Plugin Documentation Index](./docs/plugins/README.md)**
 
@@ -862,7 +812,7 @@ s3db.js uses a **lightweight core** approach - plugin-specific dependencies are 
 | SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
-| Terraform State Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
+| Tfstate Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
 
 **Example Error:**
 
@@ -2107,7 +2057,7 @@ await dbHealthCheck({ includeOrphanedPartitions: true })
 |--------|-------------|---------|
 | `connect()` | Connect to database | `await s3db.connect()` |
 | `createResource(config)` | Create new resource | `await s3db.createResource({...})` |
-| `resource(name)` | Get resource reference | `const users = s3db.resource("users")` |
+| `resources.{name}` | Get resource reference | `const users = s3db.resources.users` |
 | `resourceExists(name)` | Check if resource exists | `s3db.resourceExists("users")` |
 
 ### ⚙️ Configuration Options
@@ -2261,3 +2211,69 @@ All benchmarks include:
 - ✅ **Use cases** - When to apply each optimization
 
 **[📋 Complete Benchmark Index](./docs/benchmarks/README.md)**
+
+---
+
+## ⚡ HTTP Client Configuration
+
+s3db.js includes optimized HTTP client settings by default for excellent S3 performance. You can customize these settings based on your specific needs:
+
+### Default Configuration (Optimized)
+
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  // Default HTTP client options (optimized for most applications):
+  httpClientOptions: {
+    keepAlive: true,         // Enable connection reuse
+    keepAliveMsecs: 1000,    // Keep connections alive for 1 second
+    maxSockets: 50,          // Maximum 50 concurrent connections
+    maxFreeSockets: 10,      // Keep 10 free connections in pool
+    timeout: 60000           // 60 second timeout
+  }
+});
+```
+
+### Custom Configurations
+
+**High Concurrency (Recommended for APIs):**
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  httpClientOptions: {
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    maxSockets: 100,         // Higher concurrency
+    maxFreeSockets: 20,      // More free connections
+    timeout: 60000
+  }
+});
+```
+
+**Aggressive Performance (High-throughput applications):**
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  httpClientOptions: {
+    keepAlive: true,
+    keepAliveMsecs: 5000,    // Longer keep-alive
+    maxSockets: 200,         // High concurrency
+    maxFreeSockets: 50,      // Large connection pool
+    timeout: 120000          // 2 minute timeout
+  }
+});
+```
+
+**Conservative (Resource-constrained environments):**
+```javascript
+const s3db = new S3db({
+  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
+  httpClientOptions: {
+    keepAlive: true,
+    keepAliveMsecs: 500,     // Shorter keep-alive
+    maxSockets: 10,          // Lower concurrency
+    maxFreeSockets: 2,       // Smaller pool
+    timeout: 15000           // 15 second timeout
+  }
+});
+```

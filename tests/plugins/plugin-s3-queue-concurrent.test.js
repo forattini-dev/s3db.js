@@ -128,7 +128,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
       plugin2.startProcessing(async (task) => {
         // Get original record to use same handler signature
-        const record = await database.resource('tasks').get(task.originalId || task.id);
+        const record = await database.resources.tasks.get(task.originalId || task.id);
         worker2Processed.push(record.name);
         await new Promise(resolve => setTimeout(resolve, 30));
         return { worker: 2 };

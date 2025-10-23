@@ -370,35 +370,36 @@ describe('Smart Encoding - Exhaustive Tests', () => {
     });
   });
 
-  describe('Backwards Compatibility', () => {
-    test('should decode legacy base64 without prefix', () => {
-      // These are base64 encoded strings without our prefix
-      const legacyEncoded = [
-        { encoded: 'Sm9zw6k=', decoded: 'José' },
-        { encoded: 'YcOnw6Nv', decoded: 'ação' },  // Corrected base64
-        { encoded: '8J+agA==', decoded: '🚀' },
-        { encoded: '5Lit5paH', decoded: '中文' },
-      ];
-
-      legacyEncoded.forEach(({ encoded, decoded }) => {
-        const result = metadataDecode(encoded);
-        expect(result).toBe(decoded);
-      });
-    });
-
-    test('should not misinterpret regular strings as base64', () => {
-      const notBase64 = [
-        'TEST', 
-        'user123',
-        'AbCdEf',
-        'hello',
-        '12345',
-      ];
-
-      notBase64.forEach(str => {
-        const result = metadataDecode(str);
-        expect(result).toBe(str); // Should return as-is
-      });
-    });
-  });
+  // v13: Backwards compatibility removed - legacy base64 without prefix no longer supported
+  // describe('Backwards Compatibility', () => {
+  //   test('should decode legacy base64 without prefix', () => {
+  //     // These are base64 encoded strings without our prefix
+  //     const legacyEncoded = [
+  //       { encoded: 'Sm9zw6k=', decoded: 'José' },
+  //       { encoded: 'YcOnw6Nv', decoded: 'ação' },  // Corrected base64
+  //       { encoded: '8J+agA==', decoded: '🚀' },
+  //       { encoded: '5Lit5paH', decoded: '中文' },
+  //     ];
+  //
+  //     legacyEncoded.forEach(({ encoded, decoded }) => {
+  //       const result = metadataDecode(encoded);
+  //       expect(result).toBe(decoded);
+  //     });
+  //   });
+  //
+  //   test('should not misinterpret regular strings as base64', () => {
+  //     const notBase64 = [
+  //       'TEST',
+  //       'user123',
+  //       'AbCdEf',
+  //       'hello',
+  //       '12345',
+  //     ];
+  //
+  //     notBase64.forEach(str => {
+  //       const result = metadataDecode(str);
+  //       expect(result).toBe(str); // Should return as-is
+  //     });
+  //   });
+  // });
 });

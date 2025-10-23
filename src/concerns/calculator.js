@@ -66,10 +66,6 @@ export function clearUTF8Memory() {
   utf8BytesMemory.clear();
 }
 
-// Aliases for backward compatibility
-export const clearUTF8Memo = clearUTF8Memory;
-export const clearUTF8Cache = clearUTF8Memory;
-
 /**
  * Calculates the size in bytes of attribute names (mapped to digits)
  * @param {Object} mappedObject - The object returned by schema.mapper()

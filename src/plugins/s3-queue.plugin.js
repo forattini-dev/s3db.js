@@ -42,22 +42,22 @@ import { idGenerator } from "../concerns/id.js";
  * === Usage ===
  *
  * // Enqueue a message
- * await db.resource('emails').enqueue({
+ * await db.resources.emails.enqueue({
  *   to: 'user@example.com',
  *   subject: 'Hello',
  *   body: 'World'
  * });
  *
  * // Start processing (if not auto-started)
- * await db.resource('emails').startProcessing(async (email) => {
+ * await db.resources.emails.startProcessing(async (email) => {
  *   await sendEmail(email);
  * }, { concurrency: 10 });
  *
  * // Stop processing
- * await db.resource('emails').stopProcessing();
+ * await db.resources.emails.stopProcessing();
  *
  * // Get queue statistics
- * const stats = await db.resource('emails').queueStats();
+ * const stats = await db.resources.emails.queueStats();
  * // { total: 100, pending: 50, processing: 20, completed: 25, failed: 5, dead: 0 }
  */
 export class S3QueuePlugin extends Plugin {

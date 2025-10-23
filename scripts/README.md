@@ -18,7 +18,7 @@ No extra steps needed! This includes:
 - `@aws-sdk/client-sqs` - For SQS replicator/consumer
 - `@google-cloud/bigquery` - For BigQuery replicator
 - `amqplib` - For RabbitMQ consumer
-- `node-cron` - For Terraform State Plugin auto-sync
+- `node-cron` - For Tfstate Plugin auto-sync
 - `pg` - For PostgreSQL replicator
 
 ### For End Users
