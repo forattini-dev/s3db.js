@@ -24,7 +24,7 @@ export default {
     },
     // ES Modules for modern Node.js and bundlers (import)
     {
-      format: 'es', 
+      format: 'es',
       file: 'dist/s3db.es.js',
       inlineDynamicImports: true,
       exports: 'named',

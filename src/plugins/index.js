@@ -3,7 +3,8 @@ export * from './plugin.obj.js'
 export { default as Plugin } from './plugin.class.js'
 
 // plugins:
-export * from './api/index.js'
+// ApiPlugin is exported separately to avoid bundling hono dependencies
+export { ApiPlugin } from './api/index.js'
 export * from './audit.plugin.js'
 export * from './backup.plugin.js'
 export * from './cache.plugin.js'
