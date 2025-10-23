@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 
 import Database from '#src/database.class.js';
 import { CostsPlugin } from '#src/plugins/costs.plugin.js';
@@ -7,11 +7,16 @@ import { createDatabaseForTest, createClientForTest } from '#tests/config.js';
 describe('Costs Plugin', () => {
   let database;
   let client;
+  let costsPlugin;
 
   beforeEach(async () => {
     database = createDatabaseForTest('suite=plugins/costs');
     await database.connect();
     client = database.client;
+
+    costsPlugin = new CostsPlugin();
+    await costsPlugin.install(database);
+    await costsPlugin.start();
   });
 
   afterEach(async () => {
@@ -22,18 +27,12 @@ describe('Costs Plugin', () => {
 
   describe('Setup and Initialization', () => {
     test('should setup costs tracking on database', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-
       expect(client.costs).toBeDefined();
       expect(typeof client.costs.total).toBe('number');
       expect(typeof client.costs.requests).toBe('object');
     });
 
     test('should initialize costs structure correctly', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-
       expect(client.costs.total).toBe(0);
       expect(client.costs.requests.total).toBe(0);
       expect(client.costs.requests.counts).toEqual({
@@ -48,24 +47,17 @@ describe('Costs Plugin', () => {
       });
     });
 
-    test('should handle multiple setup calls gracefully', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-      
-      // Second setup should not break
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
+    test('should handle multiple plugin installations gracefully', async () => {
+      // Install another instance
+      const costsPlugin2 = new CostsPlugin();
+      await costsPlugin2.install(database);
+      await costsPlugin2.start();
 
       expect(client.costs).toBeDefined();
     });
   });
 
   describe('Cost Tracking', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should track PUT operation costs', async () => {
       const initialCost = client.costs.total;
       const initialPutRequests = client.costs.requests.counts.put;
@@ -211,11 +203,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Cost Calculation Accuracy', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should calculate costs based on AWS S3 pricing', async () => {
       // AWS S3 pricing (approximate for testing)
       // PUT/COPY/POST/LIST requests: $0.0005 per 1,000 requests
@@ -267,11 +254,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Error Handling', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should handle failed operations gracefully', async () => {
       const initialCost = client.costs.total;
       const initialRequests = client.costs.requests.total;
@@ -309,18 +291,15 @@ describe('Costs Plugin', () => {
 
     test('should handle invalid client gracefully', async () => {
       const invalidDatabase = { client: null };
-      
+      const invalidPlugin = new CostsPlugin();
+      invalidPlugin.database = invalidDatabase;
+
       // Should not throw
-      await expect(CostsPlugin.setup.call(CostsPlugin, invalidDatabase)).resolves.toBeUndefined();
+      await expect(invalidPlugin.onInstall()).resolves.toBeUndefined();
     });
   });
 
   describe('Cost Reset and Management', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should maintain cost history across operations', async () => {
       await client.putObject({
         key: 'test-costs-history-1.txt',
@@ -343,9 +322,11 @@ describe('Costs Plugin', () => {
       const client2 = createClientForTest(`suite=plugins/costs-client2`);
 
       const database2 = new Database({ client: client2 });
+      await database2.connect();
 
-      await CostsPlugin.setup.call(CostsPlugin, database2);
-      await CostsPlugin.start.call(CostsPlugin);
+      const costsPlugin2 = new CostsPlugin();
+      await costsPlugin2.install(database2);
+      await costsPlugin2.start();
 
       await client2.putObject({
         key: 'test-costs-client2.txt',
@@ -363,11 +344,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Performance Impact', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should have minimal performance impact on operations', async () => {
       const startTime = Date.now();
 
@@ -411,9 +387,6 @@ describe('Costs Plugin', () => {
     let users;
 
     beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-
       users = await database.createResource({
         name: 'users',
         attributes: {
@@ -498,11 +471,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Cost Reporting', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should provide detailed cost breakdown', async () => {
       await client.putObject({
         key: 'test-costs-breakdown.txt',
@@ -535,11 +503,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Storage Tracking', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should initialize storage tracking structure', () => {
       expect(client.costs.storage).toBeDefined();
       expect(client.costs.storage.totalBytes).toBe(0);
@@ -571,7 +534,7 @@ describe('Costs Plugin', () => {
 
     test('should calculate storage cost for first tier', async () => {
       // Simulate 1GB of storage
-      CostsPlugin.trackStorage.call(CostsPlugin, 1024 * 1024 * 1024);
+      costsPlugin.trackStorage(1024 * 1024 * 1024);
 
       expect(client.costs.storage.totalGB).toBeCloseTo(1, 2);
       expect(client.costs.storage.subtotal).toBeCloseTo(0.023, 6); // $0.023 per GB
@@ -580,11 +543,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Data Transfer Tracking', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should initialize data transfer tracking structure', () => {
       expect(client.costs.dataTransfer).toBeDefined();
       expect(client.costs.dataTransfer.inBytes).toBe(0);
@@ -620,7 +578,7 @@ describe('Costs Plugin', () => {
 
     test('should calculate data transfer OUT cost for first tier', async () => {
       // Simulate 1GB download
-      CostsPlugin.trackDataTransferOut.call(CostsPlugin, 1024 * 1024 * 1024);
+      costsPlugin.trackDataTransferOut(1024 * 1024 * 1024);
 
       expect(client.costs.dataTransfer.outGB).toBeCloseTo(1, 2);
       expect(client.costs.dataTransfer.subtotal).toBeCloseTo(0.09, 6); // $0.09 per GB
@@ -630,13 +588,10 @@ describe('Costs Plugin', () => {
 
   describe('Free Tier Support', () => {
     test('should NOT apply free tier by default', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-
-      expect(CostsPlugin.options.considerFreeTier).toBe(false);
+      expect(costsPlugin.config.considerFreeTier).toBe(false);
 
       // Simulate 50GB download (within free tier)
-      CostsPlugin.trackDataTransferOut.call(CostsPlugin, 50 * 1024 * 1024 * 1024);
+      costsPlugin.trackDataTransferOut(50 * 1024 * 1024 * 1024);
 
       // Should still be charged (free tier not considered)
       expect(client.costs.dataTransfer.subtotal).toBeGreaterThan(0);
@@ -644,38 +599,49 @@ describe('Costs Plugin', () => {
     });
 
     test('should apply free tier when enabled', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database, { considerFreeTier: true });
-      await CostsPlugin.start.call(CostsPlugin);
+      // Create new database with plugin configured for free tier
+      const database2 = createDatabaseForTest('suite=plugins/costs-freetier');
+      await database2.connect();
+      const client2 = database2.client;
 
-      expect(CostsPlugin.options.considerFreeTier).toBe(true);
+      const costsPlugin2 = new CostsPlugin({ considerFreeTier: true });
+      await costsPlugin2.install(database2);
+      await costsPlugin2.start();
+
+      expect(costsPlugin2.config.considerFreeTier).toBe(true);
 
       // Simulate 50GB download (within 100GB free tier)
-      CostsPlugin.trackDataTransferOut.call(CostsPlugin, 50 * 1024 * 1024 * 1024);
+      costsPlugin2.trackDataTransferOut(50 * 1024 * 1024 * 1024);
 
       // Should not be charged (within free tier)
-      expect(client.costs.dataTransfer.subtotal).toBe(0);
-      expect(client.costs.dataTransfer.freeTierUsed).toBeCloseTo(50, 2);
+      expect(client2.costs.dataTransfer.subtotal).toBe(0);
+      expect(client2.costs.dataTransfer.freeTierUsed).toBeCloseTo(50, 2);
+
+      await database2.disconnect();
     });
 
     test('should charge for data transfer beyond free tier', async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database, { considerFreeTier: true });
-      await CostsPlugin.start.call(CostsPlugin);
+      // Create new database with plugin configured for free tier
+      const database2 = createDatabaseForTest('suite=plugins/costs-freetier2');
+      await database2.connect();
+      const client2 = database2.client;
+
+      const costsPlugin2 = new CostsPlugin({ considerFreeTier: true });
+      await costsPlugin2.install(database2);
+      await costsPlugin2.start();
 
       // Simulate 150GB download (100GB free + 50GB charged)
-      CostsPlugin.trackDataTransferOut.call(CostsPlugin, 150 * 1024 * 1024 * 1024);
+      costsPlugin2.trackDataTransferOut(150 * 1024 * 1024 * 1024);
 
       // Should charge for 50GB beyond free tier
-      expect(client.costs.dataTransfer.freeTierUsed).toBeCloseTo(100, 2);
-      expect(client.costs.dataTransfer.subtotal).toBeCloseTo(50 * 0.09, 2); // 50GB * $0.09
+      expect(client2.costs.dataTransfer.freeTierUsed).toBeCloseTo(100, 2);
+      expect(client2.costs.dataTransfer.subtotal).toBeCloseTo(50 * 0.09, 2); // 50GB * $0.09
+
+      await database2.disconnect();
     });
   });
 
   describe('Total Cost Calculation', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should calculate total cost from all sources', async () => {
       // Simulate some requests
       await client.putObject({
@@ -685,8 +651,8 @@ describe('Costs Plugin', () => {
       });
 
       // Simulate storage and data transfer
-      CostsPlugin.trackStorage.call(CostsPlugin, 1024 * 1024 * 1024); // 1GB
-      CostsPlugin.trackDataTransferOut.call(CostsPlugin, 1024 * 1024 * 1024); // 1GB
+      costsPlugin.trackStorage(1024 * 1024 * 1024); // 1GB
+      costsPlugin.trackDataTransferOut(1024 * 1024 * 1024); // 1GB
 
       const expectedTotal =
         client.costs.requests.subtotal +
@@ -711,11 +677,6 @@ describe('Costs Plugin', () => {
   });
 
   describe('Backward Compatibility', () => {
-    beforeEach(async () => {
-      await CostsPlugin.setup.call(CostsPlugin, database);
-      await CostsPlugin.start.call(CostsPlugin);
-    });
-
     test('should maintain old prices structure', () => {
       expect(client.costs.requests.prices).toBeDefined();
       expect(client.costs.requests.prices.put).toBe(0.005 / 1000);
