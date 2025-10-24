@@ -412,6 +412,50 @@ When operating on >1000 records without a partition, VectorPlugin emits a warnin
 
 **Zero configuration required!** The partition is created and maintained automatically.
 
+#### Technical Details: Plugin Attributes
+
+The `_hasEmbedding` tracking field is created using S3DB's **plugin attribute isolation system**, which ensures plugin-created attributes never interfere with your user-defined schema.
+
+**How It Works:**
+- Plugin attributes use a separate mapping namespace with `p`-prefixed IDs (`p0`, `p1`, `p2`...)
+- User attributes remain in the standard namespace (`0`, `1`, `2`...)
+- Adding/removing plugins **never affects** your existing data or field IDs
+- Prevents data corruption when plugins are installed/uninstalled
+
+**Example:**
+```javascript
+// Your resource schema (user-defined attributes)
+const books = await db.createResource({
+  name: 'books',
+  attributes: {
+    id: 'string|required',      // Maps to: 0
+    title: 'string|required',   // Maps to: 1
+    embedding: 'embedding:1536' // Maps to: 2
+  }
+});
+
+// VectorPlugin automatically adds tracking attribute
+// _hasEmbedding field uses plugin namespace (maps to: p0)
+// ✅ Your fields (0, 1, 2) remain stable forever!
+```
+
+**Why This Matters:**
+
+Without plugin attribute isolation, adding VectorPlugin could shift your field IDs:
+```javascript
+// ❌ WITHOUT ISOLATION (old behavior):
+// Before plugin: { id: '0', title: '1', embedding: '2' }
+// After plugin:  { _hasEmbedding: '0', id: '1', title: '2', embedding: '3' }
+// Result: Historical data corruption! 🔥
+
+// ✅ WITH ISOLATION (new behavior):
+// Before plugin: { id: '0', title: '1', embedding: '2' }
+// After plugin:  { id: '0', title: '1', embedding: '2', _hasEmbedding: 'p0' }
+// Result: Perfect data stability! ✨
+```
+
+**Learn More:** See the [Plugin Attributes section](./README.md#plugin-attributes-isolation-system) in the Plugin Development Guide for complete details on the plugin attribute isolation system.
+
 ### Distance Metrics
 
 Choose the right metric for your use case:
