@@ -36879,6 +36879,7 @@ class VectorPlugin extends Plugin {
    *
    * Detects large vector fields and warns if proper behavior is not set.
    * Can optionally auto-fix by setting body-overflow behavior.
+   * Auto-creates partitions for optional embedding fields to enable O(1) filtering.
    */
   validateVectorStorage() {
     for (const resource of Object.values(this.database.resources)) {
@@ -36915,7 +36916,216 @@ class VectorPlugin extends Plugin {
           }
         }
       }
+      this.setupEmbeddingPartitions(resource, vectorFields);
     }
+  }
+  /**
+   * Setup automatic partitions for optional embedding fields
+   *
+   * Creates a partition that separates records with embeddings from those without.
+   * This enables O(1) filtering instead of O(n) full scans when searching/clustering.
+   *
+   * @param {Resource} resource - Resource instance
+   * @param {Array} vectorFields - Detected vector fields with metadata
+   */
+  setupEmbeddingPartitions(resource, vectorFields) {
+    if (!resource.config) return;
+    for (const vectorField of vectorFields) {
+      const isOptional = this.isFieldOptional(resource.schema.attributes, vectorField.name);
+      if (!isOptional) continue;
+      const partitionName = `byHas${this.capitalize(vectorField.name.replace(/\./g, "_"))}`;
+      const trackingFieldName = `_has${this.capitalize(vectorField.name.replace(/\./g, "_"))}`;
+      if (resource.config.partitions && resource.config.partitions[partitionName]) {
+        this.emit("vector:partition-exists", {
+          resource: resource.name,
+          vectorField: vectorField.name,
+          partition: partitionName,
+          timestamp: Date.now()
+        });
+        continue;
+      }
+      if (!resource.config.partitions) {
+        resource.config.partitions = {};
+      }
+      resource.config.partitions[partitionName] = {
+        fields: {
+          [trackingFieldName]: "boolean"
+        }
+      };
+      if (!resource.schema.attributes[trackingFieldName]) {
+        resource.schema.attributes[trackingFieldName] = {
+          type: "boolean",
+          optional: true,
+          default: false
+        };
+      }
+      this.emit("vector:partition-created", {
+        resource: resource.name,
+        vectorField: vectorField.name,
+        partition: partitionName,
+        trackingField: trackingFieldName,
+        timestamp: Date.now()
+      });
+      console.log(`\u2705 VectorPlugin: Created partition '${partitionName}' for optional embedding field '${vectorField.name}' in resource '${resource.name}'`);
+      this.installEmbeddingHooks(resource, vectorField.name, trackingFieldName);
+    }
+  }
+  /**
+   * Check if a field is optional in the schema
+   *
+   * @param {Object} attributes - Resource attributes
+   * @param {string} fieldPath - Field path (supports dot notation)
+   * @returns {boolean} True if field is optional
+   */
+  isFieldOptional(attributes, fieldPath) {
+    const parts = fieldPath.split(".");
+    let current = attributes;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const attr = current[part];
+      if (!attr) return true;
+      if (typeof attr === "string") {
+        const flags = attr.split("|");
+        if (flags.includes("required")) return false;
+        if (flags.includes("optional") || flags.some((f) => f.startsWith("optional:"))) return true;
+        return !flags.includes("required");
+      }
+      if (typeof attr === "object") {
+        if (i === parts.length - 1) {
+          if (attr.optional === true) return true;
+          if (attr.optional === false) return false;
+          return attr.optional !== false;
+        }
+        if (attr.type === "object" && attr.props) {
+          current = attr.props;
+        } else {
+          return true;
+        }
+      }
+    }
+    return true;
+  }
+  /**
+   * Capitalize first letter of string
+   *
+   * @param {string} str - Input string
+   * @returns {string} Capitalized string
+   */
+  capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+  /**
+   * Install hooks to maintain embedding partition tracking field
+   *
+   * @param {Resource} resource - Resource instance
+   * @param {string} vectorField - Vector field name
+   * @param {string} trackingField - Tracking field name
+   */
+  installEmbeddingHooks(resource, vectorField, trackingField) {
+    resource.registerHook("beforeInsert", async (data) => {
+      const hasVector = this.hasVectorValue(data, vectorField);
+      this.setNestedValue(data, trackingField, hasVector);
+      return data;
+    });
+    resource.registerHook("beforeUpdate", async (id, updates) => {
+      if (vectorField in updates || this.hasNestedKey(updates, vectorField)) {
+        const hasVector = this.hasVectorValue(updates, vectorField);
+        this.setNestedValue(updates, trackingField, hasVector);
+      }
+      return updates;
+    });
+    this.emit("vector:hooks-installed", {
+      resource: resource.name,
+      vectorField,
+      trackingField,
+      hooks: ["beforeInsert", "beforeUpdate"],
+      timestamp: Date.now()
+    });
+  }
+  /**
+   * Check if data has a valid vector value for the given field
+   *
+   * @param {Object} data - Data object
+   * @param {string} fieldPath - Field path (supports dot notation)
+   * @returns {boolean} True if vector exists and is valid
+   */
+  hasVectorValue(data, fieldPath) {
+    const value = this.getNestedValue(data, fieldPath);
+    return value != null && Array.isArray(value) && value.length > 0;
+  }
+  /**
+   * Check if object has a nested key
+   *
+   * @param {Object} obj - Object to check
+   * @param {string} path - Dot-notation path
+   * @returns {boolean} True if key exists
+   */
+  hasNestedKey(obj, path) {
+    const parts = path.split(".");
+    let current = obj;
+    for (const part of parts) {
+      if (current == null || typeof current !== "object") return false;
+      if (!(part in current)) return false;
+      current = current[part];
+    }
+    return true;
+  }
+  /**
+   * Get nested value from object using dot notation
+   *
+   * @param {Object} obj - Object to traverse
+   * @param {string} path - Dot-notation path
+   * @returns {*} Value at path or undefined
+   */
+  getNestedValue(obj, path) {
+    const parts = path.split(".");
+    let current = obj;
+    for (const part of parts) {
+      if (current == null || typeof current !== "object") return void 0;
+      current = current[part];
+    }
+    return current;
+  }
+  /**
+   * Set nested value in object using dot notation
+   *
+   * @param {Object} obj - Object to modify
+   * @param {string} path - Dot-notation path
+   * @param {*} value - Value to set
+   */
+  setNestedValue(obj, path, value) {
+    const parts = path.split(".");
+    let current = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      if (!(part in current) || typeof current[part] !== "object") {
+        current[part] = {};
+      }
+      current = current[part];
+    }
+    current[parts[parts.length - 1]] = value;
+  }
+  /**
+   * Get auto-created embedding partition for a vector field
+   *
+   * Returns partition configuration if an auto-partition exists for the given vector field.
+   * Auto-partitions enable O(1) filtering to only records with embeddings.
+   *
+   * @param {Resource} resource - Resource instance
+   * @param {string} vectorField - Vector field name
+   * @returns {Object|null} Partition config or null
+   */
+  getAutoEmbeddingPartition(resource, vectorField) {
+    if (!resource.config) return null;
+    const partitionName = `byHas${this.capitalize(vectorField.replace(/\./g, "_"))}`;
+    const trackingFieldName = `_has${this.capitalize(vectorField.replace(/\./g, "_"))}`;
+    if (resource.config.partitions && resource.config.partitions[partitionName]) {
+      return {
+        partitionName,
+        partitionValues: { [trackingFieldName]: true }
+      };
+    }
+    return null;
   }
   /**
    * Auto-detect vector field from resource schema
@@ -37054,11 +37264,12 @@ class VectorPlugin extends Plugin {
       } else if (!vectorField) {
         vectorField = "vector";
       }
-      const {
+      let {
         limit = 10,
         distanceMetric = this.config.distanceMetric,
         threshold = null,
-        partition = null
+        partition = null,
+        partitionValues = null
       } = options;
       const distanceFn = this.distanceFunctions[distanceMetric];
       if (!distanceFn) {
@@ -37074,31 +37285,61 @@ class VectorPlugin extends Plugin {
         });
         throw error;
       }
+      if (!partition) {
+        const autoPartition = this.getAutoEmbeddingPartition(resource, vectorField);
+        if (autoPartition) {
+          partition = autoPartition.partitionName;
+          partitionValues = autoPartition.partitionValues;
+          this._emitEvent("vector:auto-partition-used", {
+            resource: resource.name,
+            vectorField,
+            partition,
+            partitionValues,
+            timestamp: Date.now()
+          });
+        }
+      }
       this._emitEvent("vector:search-start", {
         resource: resource.name,
         vectorField,
         limit,
         distanceMetric,
         partition,
+        partitionValues,
         threshold,
         queryDimensions: queryVector.length,
         timestamp: startTime
       });
       try {
         let allRecords;
-        if (partition) {
+        if (partition && partitionValues) {
           this._emitEvent("vector:partition-filter", {
             resource: resource.name,
             partition,
+            partitionValues,
             timestamp: Date.now()
           });
-          allRecords = await resource.list({ partition, partitionValues: partition });
+          allRecords = await resource.list({ partition, partitionValues });
         } else {
-          allRecords = await resource.getAll();
+          allRecords = resource.getAll ? await resource.getAll() : await resource.list();
         }
         const totalRecords = allRecords.length;
         let processedRecords = 0;
         let dimensionMismatches = 0;
+        if (!partition && totalRecords > 1e3) {
+          const warning = {
+            resource: resource.name,
+            operation: "vectorSearch",
+            totalRecords,
+            vectorField,
+            recommendation: "Use partitions to filter data before vector search for better performance"
+          };
+          this._emitEvent("vector:performance-warning", warning);
+          console.warn(`\u26A0\uFE0F  VectorPlugin: Performing vectorSearch on ${totalRecords} records without partition filter`);
+          console.warn(`   Resource: '${resource.name}'`);
+          console.warn(`   Recommendation: Use partition parameter to reduce search space`);
+          console.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
+        }
         const results = allRecords.filter((record) => record[vectorField] && Array.isArray(record[vectorField])).map((record, index) => {
           try {
             const distance = distanceFn(queryVector, record[vectorField]);
@@ -37182,10 +37423,11 @@ class VectorPlugin extends Plugin {
       } else if (!vectorField) {
         vectorField = "vector";
       }
-      const {
+      let {
         k = 5,
         distanceMetric = this.config.distanceMetric,
         partition = null,
+        partitionValues = null,
         ...kmeansOptions
       } = options;
       const distanceFn = this.distanceFunctions[distanceMetric];
@@ -37202,30 +37444,62 @@ class VectorPlugin extends Plugin {
         });
         throw error;
       }
+      if (!partition) {
+        const autoPartition = this.getAutoEmbeddingPartition(resource, vectorField);
+        if (autoPartition) {
+          partition = autoPartition.partitionName;
+          partitionValues = autoPartition.partitionValues;
+          this._emitEvent("vector:auto-partition-used", {
+            resource: resource.name,
+            vectorField,
+            partition,
+            partitionValues,
+            timestamp: Date.now()
+          });
+        }
+      }
       this._emitEvent("vector:cluster-start", {
         resource: resource.name,
         vectorField,
         k,
         distanceMetric,
         partition,
+        partitionValues,
         maxIterations: kmeansOptions.maxIterations || 100,
         timestamp: startTime
       });
       try {
         let allRecords;
-        if (partition) {
+        if (partition && partitionValues) {
           this._emitEvent("vector:partition-filter", {
             resource: resource.name,
             partition,
+            partitionValues,
             timestamp: Date.now()
           });
-          allRecords = await resource.list({ partition, partitionValues: partition });
+          allRecords = await resource.list({ partition, partitionValues });
         } else {
-          allRecords = await resource.getAll();
+          allRecords = resource.getAll ? await resource.getAll() : await resource.list();
         }
         const recordsWithVectors = allRecords.filter(
           (record) => record[vectorField] && Array.isArray(record[vectorField])
         );
+        if (!partition && allRecords.length > 1e3) {
+          const warning = {
+            resource: resource.name,
+            operation: "cluster",
+            totalRecords: allRecords.length,
+            recordsWithVectors: recordsWithVectors.length,
+            vectorField,
+            recommendation: "Use partitions to filter data before clustering for better performance"
+          };
+          this._emitEvent("vector:performance-warning", warning);
+          console.warn(`\u26A0\uFE0F  VectorPlugin: Performing clustering on ${allRecords.length} records without partition filter`);
+          console.warn(`   Resource: '${resource.name}'`);
+          console.warn(`   Records with vectors: ${recordsWithVectors.length}`);
+          console.warn(`   Recommendation: Use partition parameter to reduce clustering space`);
+          console.warn(`   Example: resource.cluster({ k: 5, partition: 'byCategory', partitionValues: { category: 'books' } })`);
+        }
         if (recordsWithVectors.length === 0) {
           const error = new VectorError("No vectors found in resource", {
             operation: "cluster",
