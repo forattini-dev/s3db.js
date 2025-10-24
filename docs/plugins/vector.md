@@ -218,6 +218,200 @@ The plugin will **automatically warn** you if vectors are too large without prop
 
 ## Core Concepts
 
+### 🎯 Partition Support (NEW!)
+
+**VectorPlugin now supports automatic partitioning for optional embedding fields**, enabling **O(1) filtered searches** instead of O(n) full scans.
+
+#### Auto-Partition for Optional Embeddings
+
+When you have a resource where the embedding field is optional (not all records have embeddings), VectorPlugin automatically creates a partition to separate records with embeddings from those without.
+
+**Performance Impact:**
+- **Before:** Scans ALL records (e.g., 100k books) then filters in memory
+- **After:** Scans ONLY records with embeddings (e.g., 5k books) using O(1) partition lookup
+- **Result:** 95% reduction in records processed! 🚀
+
+**Example:**
+```javascript
+// Create resource with optional embedding
+const books = await db.createResource({
+  name: 'books',
+  attributes: {
+    id: 'string|required',
+    title: 'string|required',
+    category: 'string|required',
+    embedding: 'embedding:1536'  // ← OPTIONAL (no |required flag)
+  },
+  behavior: 'body-overflow',
+  partitions: {
+    byCategory: {
+      fields: { category: 'string' }
+    }
+  }
+});
+
+// ✨ VectorPlugin automatically creates:
+// - Partition: `byHasEmbedding`
+// - Tracking field: `_hasEmbedding` (boolean)
+// - Hooks to maintain synchronization automatically
+
+// ✅ Auto-uses embedding partition (searches only 5k books with embeddings)
+const results = await books.vectorSearch(queryVector, {
+  limit: 10
+  // No partition specified → uses byHasEmbedding automatically
+});
+
+// ✅ Custom partition (searches only sci-fi books with embeddings)
+const sciFiResults = await books.vectorSearch(queryVector, {
+  limit: 10,
+  partition: 'byCategory',
+  partitionValues: { category: 'sci-fi' }
+});
+```
+
+#### Combined Partitions
+
+You can **combine** the auto-created embedding partition with your custom partitions for even more precise filtering.
+
+**Example 1: Category + Has Embedding**
+
+If you want to search only books that:
+- Have embeddings populated **AND**
+- Belong to a specific category
+
+Create a **combined partition**:
+
+```javascript
+const books = await db.createResource({
+  name: 'books',
+  attributes: {
+    id: 'string|required',
+    title: 'string|required',
+    category: 'string|required',
+    embedding: 'embedding:1536'  // Optional
+  },
+  behavior: 'body-overflow',
+  partitions: {
+    // Custom partition: category
+    byCategory: {
+      fields: { category: 'string' }
+    },
+
+    // ✨ Combined partition: category + has embedding
+    byCategoryWithEmbedding: {
+      fields: {
+        category: 'string',
+        _hasEmbedding: 'boolean'  // Auto-maintained by VectorPlugin
+      }
+    }
+  }
+});
+
+// Search only sci-fi books that have embeddings
+const results = await books.vectorSearch(queryVector, {
+  limit: 10,
+  partition: 'byCategoryWithEmbedding',
+  partitionValues: {
+    category: 'sci-fi',
+    _hasEmbedding: true
+  }
+});
+
+// Cluster only fantasy books that have embeddings
+const clusters = await books.cluster({
+  k: 5,
+  partition: 'byCategoryWithEmbedding',
+  partitionValues: {
+    category: 'fantasy',
+    _hasEmbedding: true
+  }
+});
+```
+
+**Example 2: Multiple Criteria Partitions**
+
+```javascript
+const products = await db.createResource({
+  name: 'products',
+  attributes: {
+    id: 'string|required',
+    name: 'string|required',
+    category: 'string|required',
+    price: 'number|required',
+    priceRange: 'string|required',  // 'budget', 'mid', 'premium'
+    inStock: 'boolean|required',
+    embedding: 'embedding:1536'  // Optional
+  },
+  behavior: 'body-overflow',
+  partitions: {
+    // Single field partitions
+    byCategory: {
+      fields: { category: 'string' }
+    },
+
+    // Combined: category + price range + has embedding
+    byCategoryPriceWithEmbedding: {
+      fields: {
+        category: 'string',
+        priceRange: 'string',
+        _hasEmbedding: 'boolean'
+      }
+    },
+
+    // Combined: in stock + has embedding (for live product search)
+    byInStockWithEmbedding: {
+      fields: {
+        inStock: 'boolean',
+        _hasEmbedding: 'boolean'
+      }
+    }
+  }
+});
+
+// Search premium electronics that have embeddings
+const premiumElectronics = await products.vectorSearch(queryVector, {
+  limit: 10,
+  partition: 'byCategoryPriceWithEmbedding',
+  partitionValues: {
+    category: 'electronics',
+    priceRange: 'premium',
+    _hasEmbedding: true
+  }
+});
+
+// Search only in-stock products with embeddings
+const inStockResults = await products.vectorSearch(queryVector, {
+  limit: 10,
+  partition: 'byInStockWithEmbedding',
+  partitionValues: {
+    inStock: true,
+    _hasEmbedding: true
+  }
+});
+```
+
+#### Performance Warning
+
+When operating on >1000 records without a partition, VectorPlugin emits a warning:
+
+```
+⚠️  VectorPlugin: Performing vectorSearch on 100000 records without partition filter
+   Resource: 'books'
+   Recommendation: Use partition parameter to reduce search space
+   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'sci-fi' } })
+```
+
+**Best Practice:** Always use partitions for large datasets (>1000 records) to optimize performance.
+
+#### How Auto-Partition Works
+
+1. **Detection:** VectorPlugin detects optional embedding fields during `validateVectorStorage()`
+2. **Creation:** Automatically creates partition `byHasEmbedding` with tracking field `_hasEmbedding`
+3. **Maintenance:** Installs hooks (`beforeInsert`, `beforeUpdate`) to keep `_hasEmbedding` synchronized
+4. **Usage:** `vectorSearch()` and `cluster()` auto-use the partition when no custom partition is specified
+
+**Zero configuration required!** The partition is created and maintained automatically.
+
 ### Distance Metrics
 
 Choose the right metric for your use case:
@@ -1251,7 +1445,7 @@ Added to all resources after plugin installation:
 
 #### `vectorSearch(queryVector, options)`
 
-Find K-nearest neighbors.
+Find K-nearest neighbors with optional partition filtering.
 
 **Parameters**:
 - `queryVector` (number[]): Vector to search for
@@ -1260,20 +1454,42 @@ Find K-nearest neighbors.
   - `limit` (number): Max results to return (default: `10`)
   - `distanceMetric` (string): Distance function (default: plugin config)
   - `threshold` (number): Only return distances <= threshold (optional)
-  - `partition` (string): Partition name for filtered search (optional)
-  - `partitionValues` (object): Partition values (optional)
+  - **`partition` (string): Partition name for filtered search (optional)**
+  - **`partitionValues` (object): Partition field values to filter by (optional)**
 
 **Returns**: Array of `{ record, distance }` sorted by distance (ascending)
 
+**Partition Behavior:**
+- **No partition specified:** Auto-uses `byHasEmbedding` partition if available (searches only records with embeddings)
+- **Custom partition specified:** Uses your partition for filtered search (e.g., only sci-fi books)
+- **Combined partition:** Can filter by multiple criteria (e.g., category + has embedding)
+
 ```javascript
-// With auto-detect (recommended when using embedding:XXX notation)
+// ✅ Auto-uses embedding partition (searches only records with embeddings)
 const results = await resource.vectorSearch([0.1, 0.2, ...], {
   limit: 10,
   distanceMetric: 'cosine',
   threshold: 0.5
 });
 
-// Or specify explicitly
+// ✅ Custom partition (searches only sci-fi books)
+const results = await resource.vectorSearch([0.1, 0.2, ...], {
+  limit: 10,
+  partition: 'byCategory',
+  partitionValues: { category: 'sci-fi' }
+});
+
+// ✅ Combined partition (sci-fi books with embeddings)
+const results = await resource.vectorSearch([0.1, 0.2, ...], {
+  limit: 10,
+  partition: 'byCategoryWithEmbedding',
+  partitionValues: {
+    category: 'sci-fi',
+    _hasEmbedding: true
+  }
+});
+
+// Specify vectorField explicitly (if not using auto-detect)
 const results = await resource.vectorSearch([0.1, 0.2, ...], {
   vectorField: 'embedding',
   limit: 10,
@@ -1283,7 +1499,7 @@ const results = await resource.vectorSearch([0.1, 0.2, ...], {
 
 #### `cluster(options)`
 
-Perform k-means clustering.
+Perform k-means clustering with optional partition filtering.
 
 **Parameters**:
 - `options` (object):
@@ -1292,7 +1508,8 @@ Perform k-means clustering.
   - `distanceMetric` (string): Distance function (default: plugin config)
   - `maxIterations` (number): Max iterations (default: `100`)
   - `tolerance` (number): Convergence tolerance (default: `0.0001`)
-  - `partition` (string): Cluster within partition (optional)
+  - **`partition` (string): Partition name to cluster within (optional)**
+  - **`partitionValues` (object): Partition field values to filter by (optional)**
 
 **Returns**: Object with:
 - `clusters` (array[]): Array of cluster arrays (records)
@@ -1301,15 +1518,37 @@ Perform k-means clustering.
 - `iterations` (number): Number of iterations run
 - `converged` (boolean): Whether algorithm converged
 
+**Partition Behavior:**
+- **No partition specified:** Auto-uses `byHasEmbedding` partition if available (clusters only records with embeddings)
+- **Custom partition specified:** Clusters within your partition (e.g., only sci-fi books)
+- **Combined partition:** Can cluster by multiple criteria (e.g., category + has embedding)
+
 ```javascript
-// With auto-detect (recommended when using embedding:XXX notation)
+// ✅ Auto-uses embedding partition (clusters only records with embeddings)
 const result = await resource.cluster({
   k: 5,
   distanceMetric: 'euclidean',
   maxIterations: 100
 });
 
-// Or specify explicitly
+// ✅ Custom partition (cluster only sci-fi books)
+const result = await resource.cluster({
+  k: 3,
+  partition: 'byCategory',
+  partitionValues: { category: 'sci-fi' }
+});
+
+// ✅ Combined partition (cluster fantasy books with embeddings)
+const result = await resource.cluster({
+  k: 4,
+  partition: 'byCategoryWithEmbedding',
+  partitionValues: {
+    category: 'fantasy',
+    _hasEmbedding: true
+  }
+});
+
+// Specify vectorField explicitly (if not using auto-detect)
 const result = await resource.cluster({
   k: 5,
   vectorField: 'embedding',
