@@ -97,22 +97,12 @@
 - [✨ Key Features](#-key-features)
 - [🚀 Quick Start](#-quick-start)
 - [💾 Installation](#-installation)
-- [🎯 Core Concepts](#-core-concepts)
-- [⚡ Advanced Features](#-advanced-features)
-- [🔄 Resource Versioning System](#-resource-versioning-system)
-- [🆔 Custom ID Generation](#-custom-id-generation)
-- [🔌 Plugin System](#-plugin-system)
-- [🔄 Replicator System](#-replicator-system)
-- [🎛️ Resource Behaviors](#️-resource-behaviors)
-- [🔄 Advanced Streaming API](#-advanced-streaming-api)
-- [📁 Binary Content Management](#-binary-content-management)
-- [🗂️ Advanced Partitioning](#️-advanced-partitioning)
-- [🎣 Advanced Hooks System](#-advanced-hooks-system)
-- [🧩 Resource Middlewares](#-resource-middlewares)
-- [🎧 Event Listeners Configuration](#-event-listeners-configuration)
-- [🤖 MCP Server](#-mcp-server)
-- [🔧 Troubleshooting](#-troubleshooting)
-- [📖 API Reference](#-api-reference)
+- [🗄️ Database](#️-database)
+- [📋 Resources](#-resources)
+- [🔌 Plugins](#-plugins)
+- [🤖 MCP & Integrations](#-mcp--integrations)
+- [🔧 CLI](#-cli)
+- [📖 Documentation](#-documentation)
 
 ---
 
@@ -234,11 +224,45 @@ const s3db = new S3db({
 
 ---
 
-## 📘 TypeScript Support
+## 💾 Installation
+
+### Package Manager
+
+```bash
+# npm
+npm install s3db.js
+# pnpm
+pnpm add s3db.js
+# yarn
+yarn add s3db.js
+```
+
+### 📦 Optional Dependencies
+
+Some features require additional dependencies to be installed manually:
+
+#### Replicator Dependencies
+
+If you plan to use the replicator system with external services, install the corresponding dependencies:
+
+```bash
+# For SQS replicator (AWS SQS queues)
+npm install @aws-sdk/client-sqs
+
+# For BigQuery replicator (Google BigQuery)
+npm install @google-cloud/bigquery
+
+# For PostgreSQL replicator (PostgreSQL databases)
+npm install pg
+```
+
+**Why manual installation?** These are marked as `peerDependencies` to keep the main package lightweight. Only install what you need!
+
+### 📘 TypeScript Support
 
 s3db.js includes comprehensive TypeScript definitions out of the box. Get full type safety, autocomplete, and IntelliSense support in your IDE!
 
-### Basic Usage (Automatic Types)
+#### Basic Usage (Automatic Types)
 
 ```typescript
 import { Database, DatabaseConfig, Resource } from 's3db.js';
@@ -268,7 +292,7 @@ const users: Resource<any> = db.resources.users;
 const user = await users.insert({ name: 'Alice', email: 'alice@example.com', age: 28 });
 ```
 
-### Advanced: Generate Resource Types
+#### Advanced: Generate Resource Types
 
 For even better type safety, auto-generate TypeScript interfaces from your resources:
 
@@ -279,117 +303,55 @@ import { generateTypes } from 's3db.js/typescript-generator';
 await generateTypes(db, { outputPath: './types/database.d.ts' });
 ```
 
-This creates type-safe interfaces:
-
-```typescript
-// types/database.d.ts (auto-generated)
-export interface Users {
-  id: string;
-  name: string;
-  email: string;
-  age: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ResourceMap {
-  users: Resource<Users>;
-  posts: Resource<Posts>;
-}
-
-declare module 's3db.js' {
-  interface Database {
-    resources: ResourceMap;
-  }
-}
-```
-
-Now get full autocomplete for your specific fields:
-
-```typescript
-import { Users } from './types/database';
-
-const user = await db.resources.users.get('id');
-// user is typed as Users - full autocomplete!
-
-user.name   // ✅ Autocomplete works
-user.email  // ✅ Autocomplete works
-user.emai   // ❌ Compile error - typo detected!
-```
-
-### Benefits
-
-- ✅ **Full Type Safety** - Catch errors at compile time
-- ✅ **IDE Autocomplete** - IntelliSense for all methods and properties
-- ✅ **Refactoring Support** - Rename fields safely across your codebase
-- ✅ **Documentation** - Hover tooltips show method signatures
-- ✅ **Type Inference** - TypeScript infers return types automatically
-
 See the complete example in [`docs/examples/typescript-usage-example.ts`](docs/examples/typescript-usage-example.ts).
 
 ---
 
-## 💾 Installation
+## 🗄️ Database
 
-### Package Manager
+A Database is a logical container for your resources, stored in a specific S3 bucket path. The database manages resource metadata, connections, and provides the core interface for all operations.
 
-```bash
-# npm
-npm install s3db.js
-# pnpm
-pnpm add s3db.js
-# yarn
-yarn add s3db.js
-```
+### Configuration Parameters
 
-### 📦 Optional Dependencies
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `connectionString` | `string` | **required** | S3 connection string (see formats below) |
+| `httpClientOptions` | `object` | optimized | HTTP client configuration for S3 requests |
+| `verbose` | `boolean` | `false` | Enable verbose logging for debugging |
+| `parallelism` | `number` | `10` | Concurrent operations for bulk operations |
+| `versioningEnabled` | `boolean` | `false` | Enable automatic resource versioning |
+| `passphrase` | `string` | `'secret'` | Default passphrase for field encryption |
+| `plugins` | `array` | `[]` | Array of plugin instances to extend functionality |
 
-Some features require additional dependencies to be installed manually:
+### Connection Strings
 
-#### replicator Dependencies
-
-If you plan to use the replicator system with external services, install the corresponding dependencies:
-
-```bash
-# For SQS replicator (AWS SQS queues)
-npm install @aws-sdk/client-sqs
-
-# For BigQuery replicator (Google BigQuery)
-npm install @google-cloud/bigquery
-
-# For PostgreSQL replicator (PostgreSQL databases)
-npm install pg
-```
-
-**Why manual installation?** These are marked as `peerDependencies` to keep the main package lightweight. Only install what you need!
-
-### Environment Setup
-
-Create a `.env` file with your AWS credentials:
-
-```env
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_BUCKET=your_bucket_name
-DATABASE_NAME=myapp
-```
-
-Then initialize s3db.js:
+s3db.js supports multiple connection string formats for different S3 providers:
 
 ```javascript
-import dotenv from "dotenv";
-dotenv.config();
+// AWS S3 (with credentials)
+"s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp?region=us-east-1"
 
-import { S3db } from "s3db.js";
-const s3db = new S3db({
-  connectionString: `s3://${process.env.AWS_ACCESS_KEY_ID}:${process.env.AWS_SECRET_ACCESS_KEY}@${process.env.AWS_BUCKET}/databases/${process.env.DATABASE_NAME}`
-});
+// AWS S3 (IAM role - recommended for production)
+"s3://BUCKET_NAME/databases/myapp?region=us-east-1"
+
+// MinIO (self-hosted)
+"http://minioadmin:minioadmin@localhost:9000/bucket/databases/myapp"
+
+// Digital Ocean Spaces
+"https://SPACES_KEY:SPACES_SECRET@nyc3.digitaloceanspaces.com/SPACE_NAME/databases/myapp"
+
+// LocalStack (local testing)
+"http://test:test@localhost:4566/mybucket/databases/myapp"
+
+// Backblaze B2
+"https://KEY_ID:APPLICATION_KEY@s3.us-west-002.backblazeb2.com/BUCKET/databases/myapp"
+
+// Cloudflare R2
+"https://ACCESS_KEY:SECRET_KEY@ACCOUNT_ID.r2.cloudflarestorage.com/BUCKET/databases/myapp"
 ```
 
-### Authentication Methods
-
 <details>
-<summary><strong>🔑 Multiple authentication options</strong></summary>
+<summary><strong>🔑 Complete authentication examples</strong></summary>
 
 #### 1. Access Keys (Development)
 ```javascript
@@ -412,1868 +374,1152 @@ const s3db = new S3db({
 const s3db = new S3db({
   connectionString: "http://minioadmin:minioadmin@localhost:9000/mybucket/databases/myapp"
 });
-
-// MinIO on custom server
-const s3db = new S3db({
-  connectionString: "http://ACCESS_KEY:SECRET_KEY@minio.example.com:9000/BUCKET_NAME/databases/myapp"
-});
 ```
 
 #### 4. Digital Ocean Spaces (SaaS)
 ```javascript
-// Digital Ocean Spaces (NYC3 datacenter) - uses https:// as it's a public service
+// Digital Ocean Spaces (NYC3 datacenter)
 const s3db = new S3db({
   connectionString: "https://SPACES_KEY:SPACES_SECRET@nyc3.digitaloceanspaces.com/SPACE_NAME/databases/myapp"
-});
-
-// Other regions available: sfo3, ams3, sgp1, fra1, syd1
-const s3db = new S3db({
-  connectionString: "https://SPACES_KEY:SPACES_SECRET@sgp1.digitaloceanspaces.com/SPACE_NAME/databases/myapp"
-});
-```
-
-#### 5. LocalStack (Local AWS testing)
-```javascript
-// LocalStack for local development/testing (http:// with port 4566)
-const s3db = new S3db({
-  connectionString: "http://test:test@localhost:4566/mybucket/databases/myapp"
-});
-
-// LocalStack in Docker container
-const s3db = new S3db({
-  connectionString: "http://test:test@localstack:4566/mybucket/databases/myapp"
-});
-```
-
-#### 6. Other S3-Compatible Services
-```javascript
-// Backblaze B2 (SaaS - uses https://)
-const s3db = new S3db({
-  connectionString: "https://KEY_ID:APPLICATION_KEY@s3.us-west-002.backblazeb2.com/BUCKET_NAME/databases/myapp"
-});
-
-// Wasabi (SaaS - uses https://)
-const s3db = new S3db({
-  connectionString: "https://ACCESS_KEY:SECRET_KEY@s3.wasabisys.com/BUCKET_NAME/databases/myapp"
-});
-
-// Cloudflare R2 (SaaS - uses https://)
-const s3db = new S3db({
-  connectionString: "https://ACCESS_KEY:SECRET_KEY@ACCOUNT_ID.r2.cloudflarestorage.com/BUCKET_NAME/databases/myapp"
-});
-
-// Self-hosted Ceph with S3 gateway (http:// with custom port)
-const s3db = new S3db({
-  connectionString: "http://ACCESS_KEY:SECRET_KEY@ceph.internal:7480/BUCKET_NAME/databases/myapp"
 });
 ```
 
 </details>
 
----
+### S3 Bucket Structure
 
-## 🎯 Core Concepts
+When you create a database, s3db.js organizes your data in a structured way within your S3 bucket:
 
-### 🗄️ Database
-A logical container for your resources, stored in a specific S3 prefix.
-
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
-});
+```
+bucket-name/
+└── databases/
+    └── myapp/                                  # Database root (from connection string)
+        ├── s3db.json                           # Database metadata & resource definitions
+        │
+        ├── resource=users/                     # Resource: users
+        │   ├── data/
+        │   │   ├── id=user-123                 # Document (metadata in S3 metadata, optional body)
+        │   │   └── id=user-456
+        │   └── partition=byRegion/             # Partition: byRegion
+        │       ├── region=US/
+        │       │   ├── id=user-123             # Partition reference
+        │       │   └── id=user-789
+        │       └── region=EU/
+        │           └── id=user-456
+        │
+        ├── resource=posts/                     # Resource: posts
+        │   └── data/
+        │       ├── id=post-abc
+        │       └── id=post-def
+        │
+        ├── resource=sessions/                  # Resource: sessions (with TTL)
+        │   └── data/
+        │       ├── id=session-xyz
+        │       └── id=session-qwe
+        │
+        ├── plugin=cache/                       # Plugin: CachePlugin (global data)
+        │   ├── config                          # Plugin configuration
+        │   └── locks/
+        │       └── cache-cleanup               # Distributed lock
+        │
+        └── resource=wallets/                   # Resource: wallets
+            ├── data/
+            │   └── id=wallet-123
+            └── plugin=eventual-consistency/    # Plugin: scoped to resource
+                ├── balance/
+                │   └── transactions/
+                │       └── id=txn-123          # Plugin-specific data
+                └── locks/
+                    └── balance-sync            # Resource-scoped lock
 ```
 
-### 📋 Resources (Collections)
-Resources define the structure of your documents, similar to tables in traditional databases.
+**Key Path Patterns:**
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| **Metadata** | `s3db.json` | Database schema, resources, versions |
+| **Document** | `resource={name}/data/id={id}` | `resource=users/data/id=user-123` |
+| **Partition** | `resource={name}/partition={partition}/{field}={value}/id={id}` | `resource=users/partition=byRegion/region=US/id=user-123` |
+| **Plugin (global)** | `plugin={slug}/{path}` | `plugin=cache/config` |
+| **Plugin (resource)** | `resource={name}/plugin={slug}/{path}` | `resource=wallets/plugin=eventual-consistency/balance/transactions/id=txn-123` |
+| **Lock (global)** | `plugin={slug}/locks/{lockName}` | `plugin=ttl/locks/cleanup` |
+| **Lock (resource)** | `resource={name}/plugin={slug}/locks/{lockName}` | `resource=wallets/plugin=eventual-consistency/locks/balance-sync` |
+
+**Storage Layers:**
+
+1. **Documents** - User data stored in resources
+   - Metadata: Stored in S3 object metadata (up to 2KB)
+   - Body: Large content stored in S3 object body (unlimited)
+
+2. **Partitions** - Organized references for O(1) queries
+   - Hierarchical paths with field values
+   - References point to main document
+
+3. **Plugin Storage** - Plugin-specific data
+   - **Global**: `plugin={slug}/...` - Shared config, caches, locks
+   - **Resource-scoped**: `resource={name}/plugin={slug}/...` - Per-resource data
+   - Supports same behaviors as resources (body-overflow, body-only, etc.)
+   - 3-5x faster than creating full resources
+   - Examples: EventualConsistency transactions, TTL expiration queues, Cache entries, Audit logs
+
+**Why This Structure?**
+
+- ✅ **Flat hierarchy** - No deep nesting, better S3 performance
+- ✅ **Self-documenting** - Path tells you what data it contains
+- ✅ **Partition-friendly** - O(1) lookups via S3 prefix queries
+- ✅ **Plugin isolation** - Each plugin has its own namespace
+- ✅ **Consistent naming** - `resource=`, `partition=`, `plugin=`, `id=` prefixes
+
+### Creating a Database
 
 ```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string|min:2|max:100",
-    email: "email|unique",
-    age: "number|integer|positive",
-    isActive: "boolean",
-    profile: {
-      bio: "string|optional",
-      avatar: "url|optional"
-    },
-    tags: "array|items:string|unique",
-    password: "secret"
-  },
-  timestamps: true,
-  behavior: "user-managed",
-  partitions: {
-    byRegion: { fields: { region: "string" } }
+import { S3db } from 's3db.js';
+
+// Simple connection
+const db = new S3db({
+  connectionString: 's3://ACCESS_KEY:SECRET@bucket/databases/myapp'
+});
+
+await db.connect();
+
+// With plugins and options
+const db = new S3db({
+  connectionString: 's3://bucket/databases/myapp',
+  verbose: true,
+  parallelism: 20,
+  versioningEnabled: true,
+  plugins: [
+    new CachePlugin({ ttl: 300000 }),
+    new MetricsPlugin()
+  ],
+  httpClientOptions: {
+    keepAlive: true,
+    maxSockets: 100,
+    timeout: 60000
+  }
+});
+
+await db.connect();
+```
+
+### Database Methods
+
+| Method | Description |
+|--------|-------------|
+| `connect()` | Initialize database connection and load metadata |
+| `createResource(config)` | Create or update a resource |
+| `getResource(name, options?)` | Get existing resource instance |
+| `resourceExists(name)` | Check if resource exists |
+| `resources.{name}` | Access resource by property |
+| `uploadMetadataFile()` | Save metadata changes to S3 |
+
+### HTTP Client Configuration
+
+Customize HTTP performance for your workload:
+
+```javascript
+const db = new S3db({
+  connectionString: '...',
+  httpClientOptions: {
+    keepAlive: true,          // Enable connection reuse
+    keepAliveMsecs: 1000,     // Keep connections alive for 1s
+    maxSockets: 50,           // Max 50 concurrent connections
+    maxFreeSockets: 10,       // Keep 10 free connections in pool
+    timeout: 60000            // 60 second timeout
   }
 });
 ```
 
-### 🔍 Schema Validation
-Built-in validation using [@icebob/fastest-validator](https://github.com/icebob/fastest-validator) with comprehensive rule support and excellent performance.
+**Presets:**
+
+<details>
+<summary><strong>High Concurrency (APIs)</strong></summary>
+
+```javascript
+httpClientOptions: {
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 100,         // Higher concurrency
+  maxFreeSockets: 20,      // More free connections
+  timeout: 60000
+}
+```
+</details>
+
+<details>
+<summary><strong>Aggressive Performance (High-throughput)</strong></summary>
+
+```javascript
+httpClientOptions: {
+  keepAlive: true,
+  keepAliveMsecs: 5000,    // Longer keep-alive
+  maxSockets: 200,         // High concurrency
+  maxFreeSockets: 50,      // Large connection pool
+  timeout: 120000          // 2 minute timeout
+}
+```
+</details>
+
+**Complete documentation**: See above for all Database configuration options
 
 ---
 
-## ⚡ Advanced Features
+## 📋 Resources
 
-### 🚀 Performance Optimization
+Resources are the core abstraction in s3db.js - they define your data structure, validation rules, and behavior. Think of them as tables in traditional databases, but with much more flexibility and features.
 
-s3db.js uses advanced encoding techniques to minimize S3 metadata usage and maximize performance:
+### TL;DR
 
-#### Metadata Encoding Optimizations
+Resources provide:
+- ✅ **Schema validation** with 30+ field types
+- ✅ **5 behavior strategies** for handling 2KB S3 metadata limit
+- ✅ **Partitioning** for O(1) queries vs O(n) scans
+- ✅ **Hooks & middlewares** for custom logic
+- ✅ **Events** for real-time notifications
+- ✅ **Versioning** for schema evolution
+- ✅ **Encryption** for sensitive fields
+- ✅ **Streaming** for large datasets
 
-| Optimization | Space Saved | Example |
-|-------------|-------------|---------|
-| **ISO Timestamps** | 67% | `2024-01-15T10:30:00Z` → `ism8LiNFkz90` |
-| **UUIDs** | 33% | `550e8400-e29b-41d4-a716-446655440000` → `uVQ6EAOKbQdShbkRmRUQAAA==` |
-| **Dictionary Values** | 95% | `active` → `da` |
-| **Hex Strings** | 33% | MD5/SHA hashes compressed with base64 |
-| **Large Numbers** | 40-46% | Unix timestamps with base62 encoding |
-| **UTF-8 Memory Cache** | 2-3x faster | Cached byte calculations |
+**Quick example:**
+```javascript
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'email|required|unique',
+    password: 'secret|required',
+    age: 'number|min:18|max:120'
+  },
+  behavior: 'enforce-limits',
+  timestamps: true,
+  partitions: {
+    byAge: { fields: { age: 'number' } }
+  }
+});
 
-Total metadata savings: **40-50%** on typical datasets.
+await users.insert({ email: 'john@example.com', password: 'secret123', age: 25 });
+```
 
-#### Bulk Operations Performance
+### Schema & Field Types
 
-Use bulk operations for better performance with large datasets:
+Define your data structure with powerful validation:
+
+#### Basic Types
+
+| Type | Example | Validation Rules |
+|------|---------|------------------|
+| `string` | `"name: 'string\|required'"` | `min`, `max`, `length`, `pattern`, `enum` |
+| `number` | `"age: 'number\|min:0'"` | `min`, `max`, `integer`, `positive`, `negative` |
+| `boolean` | `"isActive: 'boolean'"` | `true`, `false` |
+| `email` | `"email: 'email\|required'"` | RFC 5322 validation |
+| `url` | `"website: 'url'"` | Valid URL format |
+| `date` | `"createdAt: 'date'"` | ISO 8601 dates |
+| `array` | `"tags: 'array\|items:string'"` | `items`, `min`, `max`, `unique` |
+| `object` | `"profile: { type: 'object', props: {...} }"` | Nested validation |
+
+#### Advanced Types (with encoding)
+
+| Type | Savings | Example |
+|------|---------|---------|
+| `secret` | Encrypted | `"password: 'secret\|required'"` - AES-256-GCM |
+| `embedding:N` | 77% | `"vector: 'embedding:1536'"` - Fixed-point Base62 |
+| `ip4` | 47% | `"ipAddress: 'ip4'"` - Binary Base64 |
+| `ip6` | 44% | `"ipv6: 'ip6'"` - Binary Base64 |
+
+**Encoding optimizations:**
+- ISO timestamps → Unix Base62 (67% savings)
+- UUIDs → Binary Base64 (33% savings)
+- Dictionary values → Single bytes (95% savings)
+
+#### Schema Examples
 
 ```javascript
-// ✅ Efficient bulk operations
-const users = s3db.resources.users;
+// Simple schema
+{
+  name: 'string|required|min:2|max:100',
+  email: 'email|required|unique',
+  age: 'number|integer|min:0|max:150'
+}
 
-// Bulk insert - much faster than individual inserts
-const newUsers = await users.insertMany([
+// Nested objects
+{
+  name: 'string|required',
+  profile: {
+    type: 'object',
+    props: {
+      bio: 'string|max:500',
+      avatar: 'url|optional',
+      social: {
+        type: 'object',
+        props: {
+          twitter: 'string|optional',
+          github: 'string|optional'
+        }
+      }
+    }
+  }
+}
+
+// Arrays with validation
+{
+  name: 'string|required',
+  tags: 'array|items:string|min:1|max:10|unique',
+  scores: 'array|items:number|min:0|max:100'
+}
+
+// Encrypted fields
+{
+  email: 'email|required',
+  password: 'secret|required',
+  apiKey: 'secret|required'
+}
+```
+
+### Behaviors (Handling 2KB Metadata Limit)
+
+S3 metadata has a 2KB limit. Behaviors define how to handle data that exceeds this:
+
+| Behavior | Enforcement | Data Loss | Use Case |
+|----------|-------------|-----------|----------|
+| `user-managed` | None | Possible | Dev/Test - warnings only |
+| `enforce-limits` | Strict | No | Production - throws errors |
+| `truncate-data` | Truncates | Yes | Content management - smart truncation |
+| `body-overflow` | Splits | No | Mixed data - metadata + body |
+| `body-only` | Unlimited | No | Large docs - everything in body |
+
+```javascript
+// Enforce limits (recommended for production)
+const users = await db.createResource({
+  name: 'users',
+  behavior: 'enforce-limits',
+  attributes: { name: 'string', bio: 'string' }
+});
+
+// Body overflow for large content
+const blogs = await db.createResource({
+  name: 'blogs',
+  behavior: 'body-overflow',
+  attributes: { title: 'string', content: 'string' }
+});
+
+// Body-only for documents
+const documents = await db.createResource({
+  name: 'documents',
+  behavior: 'body-only',
+  attributes: { title: 'string', content: 'string', metadata: 'object' }
+});
+```
+
+### Resource Methods
+
+#### CRUD Operations
+
+```javascript
+// Create
+const user = await users.insert({ name: 'John', email: 'john@example.com' });
+
+// Read
+const user = await users.get('user-123');
+const all = await users.list({ limit: 10, offset: 0 });
+const filtered = await users.query({ isActive: true });
+
+// Update (3 methods with different performance)
+await users.update(id, { name: 'Jane' });      // GET+PUT merge (baseline)
+await users.patch(id, { name: 'Jane' });       // HEAD+COPY (40-60% faster*)
+await users.replace(id, fullObject);           // PUT only (30-40% faster)
+// *patch() uses HEAD+COPY for metadata-only behaviors
+
+// Delete
+await users.delete('user-123');
+```
+
+#### Bulk Operations
+
+```javascript
+// Bulk insert
+await users.insertMany([
   { name: 'User 1', email: 'user1@example.com' },
-  { name: 'User 2', email: 'user2@example.com' },
-  // ... hundreds more
+  { name: 'User 2', email: 'user2@example.com' }
 ]);
 
-// Bulk delete - efficient removal
-await users.deleteMany(['user-1', 'user-2', 'user-3']);
+// Bulk get
+const data = await users.getMany(['user-1', 'user-2', 'user-3']);
 
-// Bulk get - retrieve multiple items efficiently
-const userData = await users.getMany(['user-1', 'user-2', 'user-3']);
+// Bulk delete
+await users.deleteMany(['user-1', 'user-2']);
 ```
 
-#### Performance Benchmarks
+### Partitions (O(1) Queries)
 
-Based on real-world testing with optimized HTTP client settings:
-
-| Operation | Performance | Use Case |
-|-----------|-------------|----------|
-| **Single Insert** | ~15ms | Individual records |
-| **Bulk Insert (1000 items)** | ~3.5ms/item | Large datasets |
-| **Single Get** | ~10ms | Individual retrieval |
-| **Bulk Get (100 items)** | ~8ms/item | Batch retrieval |
-| **List with Pagination** | ~50ms/page | Efficient browsing |
-| **Partition Queries** | ~20ms | Organized data access |
-
-### 📦 Partitions
-
-Organize data efficiently with partitions for faster queries:
+Organize data for fast queries without scanning:
 
 ```javascript
-const analytics = await s3db.createResource({
-  name: "analytics",
+const analytics = await db.createResource({
+  name: 'analytics',
   attributes: {
-    userId: "string",
-    event: "string",
-    timestamp: "date"
+    userId: 'string',
+    event: 'string',
+    timestamp: 'date',
+    region: 'string'
   },
   partitions: {
-    byDate: { fields: { timestamp: "date|maxlength:10" } },
-    byUserAndDate: { fields: { userId: "string", timestamp: "date|maxlength:10" } }
-  }
-});
-
-// Query by partition for better performance
-const todayEvents = await analytics.list({
-  partition: "byDate",
-  partitionValues: { timestamp: "2024-01-15" }
-});
-```
-
-### 🎣 Hooks System
-
-Add custom logic with pre/post operation hooks:
-
-```javascript
-const products = await s3db.createResource({
-  name: "products",
-  attributes: { name: "string", price: "number" },
-  hooks: {
-    beforeInsert: [async (data) => {
-      data.sku = `${data.category.toUpperCase()}-${Date.now()}`;
-      return data;
-    }],
-    afterInsert: [async (data) => {
-      console.log(`📦 Product ${data.name} created`);
-    }]
-  }
-});
-```
-
-### 🔄 Streaming API
-
-Handle large datasets efficiently:
-
-```javascript
-// Export to CSV
-const readableStream = await users.readable();
-const records = [];
-readableStream.on("data", (user) => records.push(user));
-readableStream.on("end", () => console.log("✅ Export completed"));
-
-// Bulk import
-const writableStream = await users.writable();
-importData.forEach(userData => writableStream.write(userData));
-writableStream.end();
-```
-
-### 🔄 Resource Versioning System
-
-Automatically manages schema evolution and data migration:
-
-```javascript
-// Enable versioning
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  versioningEnabled: true
-});
-
-// Create versioned resource
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string|required",
-    email: "string|required"
-  },
-  versioningEnabled: true
-});
-
-// Insert in version 0
-const user1 = await users.insert({
-  name: "John Doe",
-  email: "john@example.com"
-});
-
-// Update schema - creates version 1
-const updatedUsers = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string|required",
-    email: "string|required",
-    age: "number|optional"
-  },
-  versioningEnabled: true
-});
-
-// Automatic migration
-const migratedUser = await updatedUsers.get(user1.id);
-console.log(migratedUser._v); // "1" - automatically migrated
-
-// Query by version
-const version0Users = await users.list({
-  partition: "byVersion",
-  partitionValues: { _v: "0" }
-});
-```
-
-### 🆔 Custom ID Generation
-
-Flexible ID generation strategies:
-
-```javascript
-// Custom size IDs
-const shortUsers = await s3db.createResource({
-  name: "short-users",
-  attributes: { name: "string|required" },
-  idSize: 8 // Generate 8-character IDs
-});
-
-// UUID support
-import { v4 as uuidv4 } from 'uuid';
-const uuidUsers = await s3db.createResource({
-  name: "uuid-users",
-  attributes: { name: "string|required" },
-  idGenerator: uuidv4
-});
-
-// UUID v1 (time-based)
-const timeUsers = await s3db.createResource({
-  name: "time-users",
-  attributes: { name: "string|required" },
-  idGenerator: uuidv1
-});
-
-// Custom ID function
-const timestampUsers = await s3db.createResource({
-  name: "timestamp-users",
-  attributes: { name: "string|required" },
-  idGenerator: () => `user_${Date.now()}`
-});
-```
-
-#### 📏 **Intelligent Data Compression**
-
-s3db.js automatically compresses numeric data using **Base62 encoding** to maximize your S3 metadata space (2KB limit):
-
-| Data Type | Original | Compressed | Space Saved |
-|-----------|----------|------------|-------------|
-| `10000` | `10000` (5 digits) | `2Bi` (3 digits) | **40%** |
-| `123456789` | `123456789` (9 digits) | `8m0Kx` (5 digits) | **44%** |
-| Large arrays | `[1,2,3,999999]` (13 chars) | `1,2,3,hBxM` (9 chars) | **31%** |
-
-**Performance Benefits:**
-- ⚡ **5x faster** encoding for large numbers vs Base36
-- 🗜️ **41% compression** for typical numeric data  
-- 🚀 **Space efficient** - more data fits in S3 metadata
-- 🔄 **Automatic** - no configuration required
-
-### 🔌 Plugin System
-
-Extend s3db.js with powerful plugins for caching, monitoring, replication, search, and more:
-
-> **📦 Important:** Some plugins require additional dependencies. The s3db.js core package is lightweight (~500KB) and **does not include** plugin-specific dependencies. Install only what you need:
->
-> ```bash
-> # For PostgreSQL replication
-> pnpm add pg
->
-> # For BigQuery replication
-> pnpm add @google-cloud/bigquery
->
-> # For SQS replication/consumption
-> pnpm add @aws-sdk/client-sqs
->
-> # For RabbitMQ consumption
-> pnpm add amqplib
-> ```
->
-> s3db.js will automatically validate dependencies at runtime and provide clear error messages with install commands if something is missing. See [Plugin Dependencies](#plugin-dependencies) for details.
-
-```javascript
-import {
-  CachePlugin,
-  CostsPlugin,
-  FullTextPlugin,
-  MetricsPlugin,
-  ReplicatorPlugin,
-  AuditPlugin
-} from 's3db.js';
-
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  plugins: [
-    new CachePlugin(),                        // 💾 Intelligent caching
-    CostsPlugin,                              // 💰 Cost tracking
-    new FullTextPlugin({ fields: ['name'] }), // 🔍 Full-text search
-    new MetricsPlugin(),                      // 📊 Performance monitoring
-    new ReplicatorPlugin({                    // 🔄 Data replication
-      replicators: [{
-        driver: 's3db',
-        resources: ['users'],
-        config: { connectionString: "s3://backup-bucket/backup" }
-      }]
-    }),
-    new AuditPlugin()                         // 📝 Audit logging
-  ]
-});
-
-await s3db.connect();
-
-// All plugins work together seamlessly
-await users.insert({ name: "John", email: "john@example.com" });
-// ✅ Data cached, costs tracked, indexed for search, metrics recorded, replicated, and audited
-```
-
-**📖 For complete plugin documentation and overview:**
-**[📋 Plugin Documentation Index](./docs/plugins/README.md)**
-
----
-
-#### Plugin Dependencies
-
-s3db.js uses a **lightweight core** approach - plugin-specific dependencies are **not bundled** with the main package. This keeps the core package small (~500KB) and lets you install only what you need.
-
-**How it works:**
-
-1. **Automatic Validation** - When you use a plugin, s3db.js validates its dependencies at runtime
-2. **Clear Error Messages** - If a dependency is missing, you get a helpful error with install commands
-3. **Version Checking** - Ensures installed packages meet minimum version requirements
-4. **Optional Dependencies** - All plugin dependencies are marked as `peerDependencies` (optional)
-
-**Dependency Matrix:**
-
-| Plugin | Required Package | Version | Install Command |
-|--------|-----------------|---------|-----------------|
-| PostgreSQL Replicator | `pg` | `^8.0.0` | `pnpm add pg` |
-| BigQuery Replicator | `@google-cloud/bigquery` | `^7.0.0` | `pnpm add @google-cloud/bigquery` |
-| SQS Replicator | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
-| SQS Consumer | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
-| RabbitMQ Consumer | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
-| Tfstate Plugin | `node-cron` | `^4.0.0` | `pnpm add node-cron` |
-
-**Example Error:**
-
-```bash
-Error: PostgreSQL Replicator - Missing dependencies detected!
-
-❌ Missing dependency: pg
-   Description: PostgreSQL client for Node.js
-   Required: ^8.0.0
-   Install: pnpm add pg
-
-Quick fix - Run all install commands:
-  pnpm add pg
-```
-
-**Checking Dependencies Programmatically:**
-
-```javascript
-import { getPluginDependencyReport } from 's3db.js/plugins/concerns/plugin-dependencies';
-
-// Get a full report of all plugin dependencies
-const report = await getPluginDependencyReport();
-console.log(report);
-```
-
-**Example:** See `docs/examples/e46-plugin-dependency-validation.js` for complete examples of dependency validation.
-
----
-
-### 🎛️ Resource Behaviors
-
-Choose the right behavior strategy for your use case:
-
-#### Behavior Comparison
-
-| Behavior         | Enforcement | Data Loss | Event Emission | Use Case                |
-|------------------|-------------|-----------|----------------|-------------------------|
-| `user-managed`   | None        | Possible  | Warns          | Dev/Test/Advanced users |
-| `enforce-limits` | Strict      | No        | Throws         | Production              |
-| `truncate-data`  | Truncates   | Yes       | Warns          | Content Mgmt            |
-| `body-overflow`  | Truncates/Splits | Yes   | Warns          | Large objects           |
-| `body-only`      | Unlimited   | No        | No             | Large JSON/Logs         |
-
-#### User Managed Behavior (Default)
-
-The `user-managed` behavior is the default for s3db resources. It provides no automatic enforcement of S3 metadata or body size limits, and does not modify or truncate data. Instead, it emits warnings via the `exceedsLimit` event when S3 metadata limits are exceeded, but allows all operations to proceed.
-
-**Purpose & Use Cases:**
-- For development, testing, or advanced users who want full control over resource metadata and body size.
-- Useful when you want to handle S3 metadata limits yourself, or implement custom logic for warnings.
-- Not recommended for production unless you have custom enforcement or validation in place.
-
-**How It Works:**
-- Emits an `exceedsLimit` event (with details) when a resource's metadata size exceeds the S3 2KB limit.
-- Does NOT block, truncate, or modify data—operations always proceed.
-- No automatic enforcement of any limits; user is responsible for handling warnings and data integrity.
-
-**Event Emission:**
-- Event: `exceedsLimit`
-- Payload:
-  - `operation`: 'insert' | 'update' | 'upsert'
-  - `id` (for update/upsert): resource id
-  - `totalSize`: total metadata size in bytes
-  - `limit`: S3 metadata limit (2048 bytes)
-  - `excess`: number of bytes over the limit
-  - `data`: the offending data object
-
-```javascript
-// Flexible behavior - warns but doesn't block
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", bio: "string" },
-  behavior: "user-managed" // Default
-});
-
-// Listen for limit warnings
-users.on('exceedsLimit', (data) => {
-  console.warn(`Data exceeds 2KB limit by ${data.excess} bytes`, data);
-});
-
-// Operation continues despite warning
-await users.insert({
-  name: "John",
-  bio: "A".repeat(3000) // > 2KB
-});
-```
-
-**Best Practices & Warnings:**
-- Exceeding S3 metadata limits will cause silent data loss or errors at the storage layer.
-- Use this behavior only if you have custom logic to handle warnings and enforce limits.
-- For production, prefer `enforce-limits` or `truncate-data` to avoid data loss.
-
-**Migration Tips:**
-- To migrate to a stricter behavior, change the resource's behavior to `enforce-limits` or `truncate-data`.
-- Review emitted warnings to identify resources at risk of exceeding S3 limits.
-
-#### Enforce Limits Behavior
-
-```javascript
-// Strict validation - throws error if limit exceeded
-const settings = await s3db.createResource({
-  name: "settings",
-  attributes: { key: "string", value: "string" },
-  behavior: "enforce-limits"
-});
-
-// Throws error if data > 2KB
-await settings.insert({
-  key: "large_setting",
-  value: "A".repeat(3000) // Throws: "S3 metadata size exceeds 2KB limit"
-});
-```
-
-#### Data Truncate Behavior
-
-```javascript
-// Smart truncation - preserves structure, truncates content
-const summaries = await s3db.createResource({
-  name: "summaries",
-  attributes: {
-    title: "string",
-    description: "string",
-    content: "string"
-  },
-  behavior: "truncate-data"
-});
-
-// Automatically truncates to fit within 2KB
-const result = await summaries.insert({
-  title: "Short Title",
-  description: "A".repeat(1000),
-  content: "B".repeat(2000) // Will be truncated with "..."
-});
-
-// Retrieved data shows truncation
-const retrieved = await summaries.get(result.id);
-console.log(retrieved.content); // "B...B..." (truncated)
-```
-
-#### Body Overflow Behavior
-
-```javascript
-// Preserve all data by using S3 object body
-const blogs = await s3db.createResource({
-  name: "blogs",
-  attributes: {
-    title: "string",
-    content: "string", // Can be very large
-    author: "string"
-  },
-  behavior: "body-overflow"
-});
-
-// Large content is automatically split between metadata and body
-const blog = await blogs.insert({
-  title: "My Blog Post",
-  content: "A".repeat(5000), // Large content
-  author: "John Doe"
-});
-
-// All data is preserved and accessible
-const retrieved = await blogs.get(blog.id);
-console.log(retrieved.content.length); // 5000 (full content preserved)
-console.log(retrieved._hasContent); // true (indicates body usage)
-```
-
-#### Body Only Behavior
-
-```javascript
-// Store all data in S3 object body as JSON, keeping only version in metadata
-const documents = await s3db.createResource({
-  name: "documents",
-  attributes: {
-    title: "string",
-    content: "string", // Can be extremely large
-    metadata: "object"
-  },
-  behavior: "body-only"
-});
-
-// Store large documents without any size limits
-const document = await documents.insert({
-  title: "Large Document",
-  content: "A".repeat(100000), // 100KB content
-  metadata: {
-    author: "John Doe",
-    tags: ["large", "document"],
-    version: "1.0"
-  }
-});
-
-// All data is stored in the S3 object body
-const retrieved = await documents.get(document.id);
-console.log(retrieved.content.length); // 100000 (full content preserved)
-console.log(retrieved.metadata.author); // "John Doe"
-console.log(retrieved._hasContent); // true (indicates body usage)
-
-// Perfect for storing large JSON documents, logs, or any large content
-const logEntry = await documents.insert({
-  title: "Application Log",
-  content: JSON.stringify({
-    timestamp: new Date().toISOString(),
-    level: "INFO",
-    message: "Application started",
-    details: {
-      // ... large log details
+    // Single field
+    byEvent: { fields: { event: 'string' } },
+
+    // Multiple fields (composite)
+    byEventAndRegion: {
+      fields: {
+        event: 'string',
+        region: 'string'
+      }
+    },
+
+    // Nested field
+    byUserCountry: {
+      fields: {
+        'profile.country': 'string'
+      }
     }
-  }),
-  metadata: { source: "api-server", environment: "production" }
+  },
+
+  // Async partitions for 70-100% faster writes
+  asyncPartitions: true
+});
+
+// Query by partition (O(1))
+const usEvents = await analytics.list({
+  partition: 'byEventAndRegion',
+  partitionValues: { event: 'click', region: 'US' }
 });
 ```
 
-### 🔄 Advanced Streaming API
-
-Handle large datasets efficiently with advanced streaming capabilities:
-
-#### Readable Streams
+**Automatic timestamp partitions:**
 
 ```javascript
-// Configure streaming with custom batch size and concurrency
+const events = await db.createResource({
+  name: 'events',
+  attributes: { name: 'string', data: 'object' },
+  timestamps: true  // Auto-creates byCreatedDate and byUpdatedDate partitions
+});
+
+const todayEvents = await events.list({
+  partition: 'byCreatedDate',
+  partitionValues: { createdAt: '2024-01-15' }
+});
+```
+
+### Hooks (Lifecycle Functions)
+
+Add custom logic before/after operations:
+
+```javascript
+const products = await db.createResource({
+  name: 'products',
+  attributes: { name: 'string', price: 'number', sku: 'string' },
+  hooks: {
+    // Before operations
+    beforeInsert: [
+      async (data) => {
+        data.sku = `PROD-${Date.now()}`;
+        return data;
+      }
+    ],
+    beforeUpdate: [
+      async (data) => {
+        data.updatedAt = new Date().toISOString();
+        return data;
+      }
+    ],
+
+    // After operations
+    afterInsert: [
+      async (data) => {
+        console.log(`Product ${data.name} created with SKU ${data.sku}`);
+      }
+    ],
+    afterDelete: [
+      async (data) => {
+        await notifyWarehouse(data.sku);
+      }
+    ]
+  }
+});
+```
+
+**Available hooks:**
+- `beforeInsert`, `afterInsert`
+- `beforeUpdate`, `afterUpdate`
+- `beforeDelete`, `afterDelete`
+- `beforeGet`, `afterGet`
+- `beforeList`, `afterList`
+
+### Middlewares (Method Wrappers)
+
+Intercept and transform method calls:
+
+```javascript
+// Authentication middleware
+users.useMiddleware('insert', async (ctx, next) => {
+  if (!ctx.args[0].userId) {
+    throw new Error('Authentication required');
+  }
+  return await next();
+});
+
+// Logging middleware
+users.useMiddleware('update', async (ctx, next) => {
+  const start = Date.now();
+  const result = await next();
+  console.log(`Update took ${Date.now() - start}ms`);
+  return result;
+});
+
+// Validation middleware
+users.useMiddleware('insert', async (ctx, next) => {
+  ctx.args[0].name = ctx.args[0].name.toUpperCase();
+  return await next();
+});
+```
+
+**Supported methods:**
+`get`, `list`, `insert`, `update`, `delete`, `deleteMany`, `exists`, `getMany`, `count`, `page`, `listIds`, `getAll`
+
+### Events (Real-time Notifications)
+
+Listen to resource operations:
+
+```javascript
+const users = await db.createResource({
+  name: 'users',
+  attributes: { name: 'string', email: 'string' },
+
+  // Declarative event listeners
+  events: {
+    insert: (event) => {
+      console.log('User created:', event.id, event.name);
+    },
+
+    update: [
+      (event) => console.log('Update detected:', event.id),
+      (event) => {
+        if (event.$before.email !== event.$after.email) {
+          console.log('Email changed!');
+        }
+      }
+    ],
+
+    delete: (event) => {
+      console.log('User deleted:', event.id);
+    }
+  }
+});
+
+// Programmatic listeners
+users.on('insert', (event) => {
+  sendWelcomeEmail(event.email);
+});
+```
+
+**Available events:**
+`insert`, `update`, `delete`, `insertMany`, `deleteMany`, `list`, `count`, `get`, `getMany`
+
+### Streaming API
+
+Process large datasets efficiently:
+
+```javascript
+// Readable stream
 const readableStream = await users.readable({
-  batchSize: 50,      // Process 50 items per batch
-  concurrency: 10     // 10 concurrent operations
+  batchSize: 50,
+  concurrency: 10
 });
 
-// Process data as it streams
 readableStream.on('data', (user) => {
-  console.log(`Processing user: ${user.name}`);
-  // Process each user individually
-});
-
-readableStream.on('error', (error) => {
-  console.error('Stream error:', error);
+  console.log('Processing:', user.name);
 });
 
 readableStream.on('end', () => {
   console.log('Stream completed');
 });
 
-// Pause and resume streaming
-readableStream.pause();
-setTimeout(() => readableStream.resume(), 1000);
-```
-
-#### Writable Streams
-
-```javascript
-// Configure writable stream for bulk operations
+// Writable stream
 const writableStream = await users.writable({
-  batchSize: 25,      // Write 25 items per batch
-  concurrency: 5      // 5 concurrent writes
+  batchSize: 25,
+  concurrency: 5
 });
 
-// Write data to stream
-const userData = [
-  { name: 'User 1', email: 'user1@example.com' },
-  { name: 'User 2', email: 'user2@example.com' },
-  // ... thousands more
-];
-
-userData.forEach(user => {
-  writableStream.write(user);
-});
-
-// End stream and wait for completion
-writableStream.on('finish', () => {
-  console.log('All users written successfully');
-});
-
-writableStream.on('error', (error) => {
-  console.error('Write error:', error);
-});
-
+userData.forEach(user => writableStream.write(user));
 writableStream.end();
 ```
 
-#### Stream Error Handling
+### Complete Resource Example
+
+A complex, production-ready resource showing all capabilities:
 
 ```javascript
-// Handle errors gracefully in streams
-const stream = await users.readable();
+const orders = await db.createResource({
+  name: 'orders',
 
-stream.on('error', (error, item) => {
-  console.error(`Error processing item:`, error);
-  console.log('Problematic item:', item);
-  // Continue processing other items
-});
-
-// Custom error handling for specific operations
-stream.on('data', async (user) => {
-  try {
-    await processUser(user);
-  } catch (error) {
-    console.error(`Failed to process user ${user.id}:`, error);
-  }
-});
-```
-
-### 📁 Binary Content Management
-
-Store and manage binary content alongside your metadata:
-
-#### Set Binary Content
-
-```javascript
-import fs from 'fs';
-
-// Set image content for user profile
-const imageBuffer = fs.readFileSync('profile.jpg');
-await users.setContent({
-  id: 'user-123',
-  buffer: imageBuffer,
-  contentType: 'image/jpeg'
-});
-
-// Set document content
-const documentBuffer = fs.readFileSync('document.pdf');
-await users.setContent({
-  id: 'user-123',
-  buffer: documentBuffer,
-  contentType: 'application/pdf'
-});
-
-// Set text content
-await users.setContent({
-  id: 'user-123',
-  buffer: 'Hello World',
-  contentType: 'text/plain'
-});
-```
-
-#### Retrieve Binary Content
-
-```javascript
-// Get binary content
-const content = await users.content('user-123');
-
-if (content.buffer) {
-  console.log('Content type:', content.contentType);
-  console.log('Content size:', content.buffer.length);
-  
-  // Save to file
-  fs.writeFileSync('downloaded.jpg', content.buffer);
-} else {
-  console.log('No content found');
-}
-```
-
-#### Content Management
-
-```javascript
-// Check if content exists
-const hasContent = await users.hasContent('user-123');
-console.log('Has content:', hasContent);
-
-// Delete content but preserve metadata
-await users.deleteContent('user-123');
-// User metadata remains, but binary content is removed
-```
-
-### 🗂️ Advanced Partitioning
-
-Organize data efficiently with complex partitioning strategies:
-
-#### Composite Partitions
-
-```javascript
-// Partition with multiple fields
-const analytics = await s3db.createResource({
-  name: "analytics",
+  // Schema with all features
   attributes: {
-    userId: "string",
-    event: "string",
-    timestamp: "date",
-    region: "string",
-    device: "string"
-  },
-  partitions: {
-    // Single field partition
-    byEvent: { fields: { event: "string" } },
-    
-    // Two field partition
-    byEventAndRegion: { 
-      fields: { 
-        event: "string",
-        region: "string" 
-      } 
-    },
-    
-    // Three field partition
-    byEventRegionDevice: {
-      fields: {
-        event: "string",
-        region: "string", 
-        device: "string"
-      }
-    }
-  }
-});
-```
+    // Basic fields
+    orderId: 'string|required|unique',
+    userId: 'string|required',
+    status: 'string|required|enum:pending,processing,completed,cancelled',
+    total: 'number|required|min:0',
 
-#### Nested Field Partitions
+    // Encrypted sensitive data
+    paymentToken: 'secret|required',
 
-```javascript
-// Partition by nested object fields
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string",
-    profile: {
-      country: "string",
-      city: "string",
-      preferences: {
-        theme: "string"
-      }
-    }
-  },
-  partitions: {
-    byCountry: { fields: { "profile.country": "string" } },
-    byCity: { fields: { "profile.city": "string" } },
-    byTheme: { fields: { "profile.preferences.theme": "string" } }
-  }
-});
-
-// Query by nested field
-const usUsers = await users.list({
-  partition: "byCountry",
-  partitionValues: { "profile.country": "US" }
-});
-
-// Note: The system automatically manages partition references internally
-// Users should use standard list() method with partition parameters
-```
-
-#### Automatic Timestamp Partitions
-
-```javascript
-// Enable automatic timestamp partitions
-const events = await s3db.createResource({
-  name: "events",
-  attributes: {
-    name: "string",
-    data: "object"
-  },
-  timestamps: true // Automatically adds byCreatedDate and byUpdatedDate
-});
-
-// Query by creation date
-const todayEvents = await events.list({
-  partition: "byCreatedDate",
-  partitionValues: { createdAt: "2024-01-15" }
-});
-
-// Query by update date
-const recentlyUpdated = await events.list({
-  partition: "byUpdatedDate", 
-  partitionValues: { updatedAt: "2024-01-15" }
-});
-```
-
-#### Partition Validation
-
-```javascript
-// Partitions are automatically validated against attributes
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string",
-    email: "string",
-    status: "string"
-  },
-  partitions: {
-    byStatus: { fields: { status: "string" } }, // ✅ Valid
-    byEmail: { fields: { email: "string" } }    // ✅ Valid
-    // byInvalid: { fields: { invalid: "string" } } // ❌ Would throw error
-  }
-});
-```
-
-### 🎣 Advanced Hooks System
-
-Extend functionality with comprehensive hook system:
-
-#### Hook Execution Order
-
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" },
-  hooks: {
-    beforeInsert: [
-      async (data) => {
-        console.log('1. Before-insert hook 1');
-        data.timestamp = new Date().toISOString();
-        return data;
-      },
-      async (data) => {
-        console.log('2. Before-insert hook 2');
-        data.processed = true;
-        return data;
-      }
-    ],
-    afterInsert: [
-      async (data) => {
-        console.log('3. After-insert hook 1');
-        await sendWelcomeEmail(data.email);
-      },
-      async (data) => {
-        console.log('4. After-insert hook 2');
-        await updateAnalytics(data);
-      }
-    ]
-  }
-});
-
-// Execution order: beforeInsert hooks → insert → afterInsert hooks
-```
-
-#### Version-Specific Hooks
-
-```javascript
-// Hooks that respond to version changes
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" },
-  versioningEnabled: true,
-  hooks: {
-    beforeInsert: [
-      async (data) => {
-        // Access resource context
-        console.log('Current version:', this.version);
-        return data;
-      }
-    ]
-  }
-});
-
-// Listen for version updates
-users.on('versionUpdated', ({ oldVersion, newVersion }) => {
-  console.log(`Resource updated from ${oldVersion} to ${newVersion}`);
-});
-```
-
-#### Error Handling in Hooks
-
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" },
-      hooks: {
-      beforeInsert: [
-        async (data) => {
-          try {
-            // Validate external service
-            await validateEmail(data.email);
-            return data;
-          } catch (error) {
-            // Transform error or add context
-            throw new Error(`Email validation failed: ${error.message}`);
+    // Nested objects
+    customer: {
+      type: 'object',
+      props: {
+        name: 'string|required',
+        email: 'email|required',
+        phone: 'string|optional',
+        address: {
+          type: 'object',
+          props: {
+            street: 'string|required',
+            city: 'string|required',
+            country: 'string|required|length:2',
+            zipCode: 'string|required'
           }
         }
-      ],
-    afterInsert: [
-      async (data) => {
-        try {
-          await sendWelcomeEmail(data.email);
-        } catch (error) {
-          // Log but don't fail the operation
-          console.error('Failed to send welcome email:', error);
-        }
       }
-    ]
-  }
-});
-```
+    },
 
-#### Hook Context and Binding
+    // Arrays
+    items: 'array|items:object|min:1',
+    tags: 'array|items:string|unique|optional',
 
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" },
+    // Special types
+    ipAddress: 'ip4',
+    userAgent: 'string|max:500',
+
+    // Embeddings for AI/ML
+    orderEmbedding: 'embedding:384'
+  },
+
+  // Behavior for large orders
+  behavior: 'body-overflow',
+
+  // Automatic timestamps
+  timestamps: true,
+
+  // Versioning for schema evolution
+  versioningEnabled: true,
+
+  // Custom ID generation
+  idGenerator: () => `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+
+  // Partitions for efficient queries
+  partitions: {
+    byStatus: { fields: { status: 'string' } },
+    byUser: { fields: { userId: 'string' } },
+    byCountry: { fields: { 'customer.address.country': 'string' } },
+    byUserAndStatus: {
+      fields: {
+        userId: 'string',
+        status: 'string'
+      }
+    }
+  },
+
+  // Async partitions for faster writes
+  asyncPartitions: true,
+
+  // Hooks for business logic
   hooks: {
     beforeInsert: [
       async function(data) {
-        // 'this' is bound to the resource instance
-        console.log('Resource name:', this.name);
-        console.log('Resource version:', this.version);
-        
-        // Access resource methods
-        const exists = await this.exists(data.id);
-        if (exists) {
-          throw new Error('User already exists');
-        }
-        
+        // Validate stock availability
+        const available = await this.validateStock(data.items);
+        if (!available) throw new Error('Insufficient stock');
+
+        // Calculate total
+        data.total = data.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+        return data;
+      },
+      async (data) => {
+        // Add metadata
+        data.processedAt = new Date().toISOString();
         return data;
       }
+    ],
+
+    afterInsert: [
+      async (data) => {
+        // Send confirmation email
+        await sendOrderConfirmation(data.customer.email, data.orderId);
+      },
+      async (data) => {
+        // Update inventory
+        await updateInventory(data.items);
+      }
+    ],
+
+    beforeUpdate: [
+      async function(data) {
+        // Prevent status rollback
+        if (data.status === 'cancelled' && this.previousStatus === 'completed') {
+          throw new Error('Cannot cancel completed order');
+        }
+        return data;
+      }
+    ],
+
+    afterUpdate: [
+      async (data) => {
+        // Notify customer of status change
+        if (data.$before.status !== data.$after.status) {
+          await notifyStatusChange(data.customer.email, data.status);
+        }
+      }
     ]
-  }
-});
-```
-
-### 🧩 Resource Middlewares
-
-The Resource class supports a powerful middleware system, similar to Express/Koa, allowing you to intercept, modify, or extend the behavior of core methods like `insert`, `get`, `update`, `delete`, `list`, and more.
-
-**Supported methods for middleware:**
-- `get`
-- `list`
-- `listIds`
-- `getAll`
-- `count`
-- `page`
-- `insert`
-- `update`
-- `delete`
-- `deleteMany`
-- `exists`
-- `getMany`
-
-#### Middleware Signature
-```js
-async function middleware(ctx, next) {
-  // ctx.resource: Resource instance
-  // ctx.args: arguments array (for the method)
-  // ctx.method: method name (e.g., 'insert')
-  // next(): calls the next middleware or the original method
-}
-```
-
-#### Example: Logging Middleware for Insert
-```js
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" }
-});
-
-users.useMiddleware('insert', async (ctx, next) => {
-  console.log('Before insert:', ctx.args[0]);
-  // You can modify ctx.args if needed
-  ctx.args[0].name = ctx.args[0].name.toUpperCase();
-  const result = await next();
-  console.log('After insert:', result);
-  return result;
-});
-
-await users.insert({ name: "john", email: "john@example.com" });
-// Output:
-// Before insert: { name: 'john', email: 'john@example.com' }
-// After insert: { id: '...', name: 'JOHN', email: 'john@example.com', ... }
-```
-
-#### Example: Validation or Metrics Middleware
-```js
-users.useMiddleware('update', async (ctx, next) => {
-  if (!ctx.args[1].email) throw new Error('Email is required for update!');
-  const start = Date.now();
-  const result = await next();
-  const duration = Date.now() - start;
-  console.log(`Update took ${duration}ms`);
-  return result;
-});
-```
-
-#### 🔒 Complete Example: Authentication & Audit Middleware
-
-Here's a practical example showing how to implement authentication and audit logging with middleware:
-
-```js
-import { S3db } from 's3db.js';
-
-// Create database and resources
-const database = new S3db({ connectionString: 's3://my-bucket/my-app' });
-await database.connect();
-
-const orders = await database.createResource({
-  name: 'orders',
-  attributes: {
-    id: 'string|required',
-    customerId: 'string|required', 
-    amount: 'number|required',
-    status: 'string|required'
-  }
-});
-
-// Authentication middleware - runs on all operations
-['insert', 'update', 'delete', 'get'].forEach(method => {
-  orders.useMiddleware(method, async (ctx, next) => {
-    // Extract user from context (e.g., from JWT token)
-    const user = ctx.user || ctx.args.find(arg => arg?.userId);
-    
-    if (!user || !user.userId) {
-      throw new Error(`Authentication required for ${method} operation`);
-    }
-    
-    // Add user info to context for other middlewares
-    ctx.authenticatedUser = user;
-    
-    return await next();
-  });
-});
-
-// Audit logging middleware - tracks all changes
-['insert', 'update', 'delete'].forEach(method => {
-  orders.useMiddleware(method, async (ctx, next) => {
-    const startTime = Date.now();
-    const user = ctx.authenticatedUser;
-    
-    try {
-      const result = await next();
-      
-      // Log successful operation
-      console.log(`[AUDIT] ${method.toUpperCase()}`, {
-        resource: 'orders',
-        userId: user.userId,
-        method,
-        args: ctx.args,
-        duration: Date.now() - startTime,
-        timestamp: new Date().toISOString(),
-        success: true
-      });
-      
-      return result;
-    } catch (error) {
-      // Log failed operation
-      console.log(`[AUDIT] ${method.toUpperCase()} FAILED`, {
-        resource: 'orders',
-        userId: user.userId,
-        method,
-        error: error.message,
-        duration: Date.now() - startTime,
-        timestamp: new Date().toISOString(),
-        success: false
-      });
-      
-      throw error;
-    }
-  });
-});
-
-// Permission middleware for sensitive operations
-orders.useMiddleware('delete', async (ctx, next) => {
-  const user = ctx.authenticatedUser;
-  
-  if (user.role !== 'admin') {
-    throw new Error('Only admins can delete orders');
-  }
-  
-  return await next();
-});
-
-// Usage examples
-try {
-  // This will require authentication and log the operation
-  const order = await orders.insert(
-    { 
-      id: 'order-123',
-      customerId: 'cust-456', 
-      amount: 99.99, 
-      status: 'pending' 
-    },
-    { user: { userId: 'user-789', role: 'customer' } }
-  );
-  
-  // This will fail - only admins can delete
-  await orders.delete('order-123', { 
-    user: { userId: 'user-789', role: 'customer' } 
-  });
-  
-} catch (error) {
-  console.error('Operation failed:', error.message);
-}
-
-/*
-Expected output:
-[AUDIT] INSERT {
-  resource: 'orders',
-  userId: 'user-789', 
-  method: 'insert',
-  args: [{ id: 'order-123', customerId: 'cust-456', amount: 99.99, status: 'pending' }],
-  duration: 245,
-  timestamp: '2024-01-15T10:30:45.123Z',
-  success: true
-}
-
-Operation failed: Only admins can delete orders
-[AUDIT] DELETE FAILED {
-  resource: 'orders',
-  userId: 'user-789',
-  method: 'delete', 
-  error: 'Only admins can delete orders',
-  duration: 12,
-  timestamp: '2024-01-15T10:30:45.456Z',
-  success: false
-}
-*/
-```
-
-**Key Benefits of This Approach:**
-- 🔐 **Centralized Authentication**: One middleware handles auth for all operations
-- 📊 **Comprehensive Auditing**: All operations are logged with timing and user info  
-- 🛡️ **Granular Permissions**: Different rules for different operations
-- ⚡ **Performance Tracking**: Built-in timing for operation monitoring
-- 🔧 **Easy to Maintain**: Add/remove middlewares without changing business logic
-
-- **Chaining:** You can add multiple middlewares for the same method; they run in registration order.
-- **Control:** You can short-circuit the chain by not calling `next()`, or modify arguments/results as needed.
-
-This system is ideal for cross-cutting concerns like logging, access control, custom validation, metrics, or request shaping.
-
----
-
-### 🧩 Hooks vs Middlewares: Differences, Usage, and Coexistence
-
-s3db.js supports **both hooks and middlewares** for resources. They are complementary tools for customizing and extending resource behavior.
-
-#### **What are Hooks?**
-- Hooks are functions that run **before or after** specific operations (e.g., `beforeInsert`, `afterUpdate`).
-- They are ideal for **side effects**: logging, notifications, analytics, validation, etc.
-- Hooks **cannot block or replace** the original operation—they can only observe or modify the data passed to them.
-- Hooks are registered with `addHook(hookName, fn)` or via the `hooks` config.
-
-> **📝 Note:** Don't confuse hooks with **events**. Hooks are lifecycle functions (`beforeInsert`, `afterUpdate`, etc.) while events are actual EventEmitter events (`exceedsLimit`, `truncate`, `overflow`) that you listen to with `.on(eventName, handler)`.
-
-**Example:**
-```js
-users.addHook('afterInsert', async (data) => {
-  await sendWelcomeEmail(data.email);
-  return data;
-});
-```
-
-#### **What are Middlewares?**
-- Middlewares are functions that **wrap** the entire method call (like Express/Koa middlewares).
-- They can **intercept, modify, block, or replace** the operation.
-- Middlewares can transform arguments, short-circuit the call, or modify the result.
-- Middlewares are registered with `useMiddleware(method, fn)`.
-
-**Example:**
-```js
-users.useMiddleware('insert', async (ctx, next) => {
-  if (!ctx.args[0].email) throw new Error('Email required');
-  ctx.args[0].name = ctx.args[0].name.toUpperCase();
-  const result = await next();
-  return result;
-});
-```
-
-#### **Key Differences**
-| Feature         | Hooks                        | Middlewares                  |
-|----------------|------------------------------|------------------------------|
-| Placement      | Before/after operation       | Wraps the entire method      |
-| Control        | Cannot block/replace op      | Can block/replace op         |
-| Use case       | Side effects, logging, etc.  | Access control, transform    |
-| Registration   | `addHook(hookName, fn)`      | `useMiddleware(method, fn)`  |
-| Data access    | Receives data only           | Full context (args, method)  |
-| Chaining       | Runs in order, always passes | Runs in order, can short-circuit |
-
-#### **How They Work Together**
-Hooks and middlewares can be used **together** on the same resource and method. The order of execution is:
-
-1. **Middlewares** (before the operation)
-2. **Hooks** (`beforeX`)
-3. **Original operation**
-4. **Hooks** (`afterX`)
-5. **Middlewares** (after the operation, as the call stack unwinds)
-
-**Example: Using Both**
-```js
-// Middleware: transforms input and checks permissions
-users.useMiddleware('insert', async (ctx, next) => {
-  if (!userHasPermission(ctx.args[0])) throw new Error('Unauthorized');
-  ctx.args[0].name = ctx.args[0].name.toUpperCase();
-  const result = await next();
-  return result;
-});
-
-// Hook: sends notification after insert
-users.addHook('afterInsert', async (data) => {
-  await sendWelcomeEmail(data.email);
-  return data;
-});
-
-await users.insert({ name: 'john', email: 'john@example.com' });
-// Output:
-// Middleware runs (transforms/checks)
-// Hook runs (sends email)
-```
-
-#### **When to Use Each**
-- Use **hooks** for: logging, analytics, notifications, validation, side effects.
-- Use **middlewares** for: access control, input/output transformation, caching, rate limiting, blocking or replacing operations.
-- Use **both** for advanced scenarios: e.g., middleware for access control + hook for analytics.
-
-#### **Best Practices**
-- Hooks are lightweight and ideal for observing or reacting to events.
-
----
-
-### 🎧 Event Listeners Configuration
-
-s3db.js resources extend Node.js EventEmitter, providing a powerful event system for real-time monitoring and notifications. **By default, events are emitted asynchronously** for better performance, but you can configure synchronous events when needed.
-
-#### **Async vs Sync Events**
-
-```javascript
-// Async events (default) - Non-blocking, better performance
-const asyncResource = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string", email: "string" },
-  asyncEvents: true // Optional, this is the default
-});
-
-// Sync events - Blocking, useful for testing or critical operations
-const syncResource = await s3db.createResource({
-  name: "critical_ops",
-  attributes: { name: "string", value: "number" },
-  asyncEvents: false // Events will block until listeners complete
-});
-
-// Runtime mode change
-asyncResource.setAsyncMode(false); // Switch to sync mode
-syncResource.setAsyncMode(true);   // Switch to async mode
-```
-
-**When to use each mode:**
-- **Async (default)**: Best for production, logging, analytics, non-critical operations
-- **Sync**: Testing, critical validations, operations that must complete before continuing
-
-You can configure event listeners in **two ways**: programmatically using `.on()` or declaratively in the resource configuration.
-
-#### **Programmatic Event Listeners**
-Traditional EventEmitter pattern using `.on()`, `.once()`, or `.off()`:
-
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string|required",
-    email: "string|required"
-  }
-});
-
-// Single event listener
-users.on('insert', (event) => {
-  console.log('User created:', event.name);
-});
-
-// Multiple listeners for the same event
-users.on('update', (event) => {
-  console.log('Update detected:', event.id);
-});
-
-users.on('update', (event) => {
-  if (event.$before.email !== event.$after.email) {
-    console.log('Email changed!');
-  }
-});
-```
-
-#### **Declarative Event Listeners**
-Configure event listeners directly in the resource configuration for cleaner, more maintainable code:
-
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: {
-    name: "string|required",
-    email: "string|required"
   },
+
+  // Events for monitoring
   events: {
-    // Single event listener
     insert: (event) => {
-      console.log('📝 User created:', {
-        id: event.id,
-        name: event.name,
-        timestamp: new Date().toISOString()
-      });
+      console.log(`Order ${event.orderId} created - Total: $${event.total}`);
+      metrics.increment('orders.created');
     },
 
-    // Multiple event listeners (array)
     update: [
       (event) => {
-        console.log('⚠️ Update detected for user:', event.id);
-      },
-      (event) => {
-        const changes = [];
-        if (event.$before.name !== event.$after.name) {
-          changes.push(`name: ${event.$before.name} → ${event.$after.name}`);
-        }
-        if (event.$before.email !== event.$after.email) {
-          changes.push(`email: ${event.$before.email} → ${event.$after.email}`);
-        }
-        if (changes.length > 0) {
-          console.log('📝 Changes:', changes.join(', '));
+        if (event.$before.status !== event.$after.status) {
+          console.log(`Order ${event.orderId}: ${event.$before.status} → ${event.$after.status}`);
+          metrics.increment(`orders.status.${event.$after.status}`);
         }
       }
     ],
 
-    // Bulk operation listeners
-    deleteMany: (count) => {
-      console.log(`🗑️ Bulk delete: ${count} users deleted`);
-    },
-
-    // Performance and monitoring
-    list: (result) => {
-      console.log(`📋 Listed ${result.count} users, ${result.errors} errors`);
+    delete: (event) => {
+      console.warn(`Order ${event.orderId} deleted`);
+      metrics.increment('orders.deleted');
     }
   }
 });
-```
 
-#### **Available Events**
-
-| Event | Description | Data Passed |
-|-------|-------------|-------------|
-| `insert` | Single record inserted | Complete object with all fields |
-| `update` | Single record updated | Object with `$before` and `$after` states |
-| `delete` | Single record deleted | Object data before deletion |
-| `insertMany` | Bulk insert completed | Number of records inserted |
-| `deleteMany` | Bulk delete completed | Number of records deleted |
-| `list` | List operation completed | Result object with count and errors |
-| `count` | Count operation completed | Total count number |
-| `get` | Single record retrieved | Complete object data |
-| `getMany` | Multiple records retrieved | Count of records |
-
-#### **Event Data Structure**
-
-**Insert/Get Events:**
-```javascript
-{
-  id: 'user-123',
-  name: 'John Doe',
-  email: 'john@example.com',
-  createdAt: '2023-12-01T10:00:00.000Z',
-  // ... all other fields
-}
-```
-
-**Update Events:**
-```javascript
-{
-  id: 'user-123',
-  name: 'John Updated',
-  email: 'john.new@example.com',
-  $before: {
-    name: 'John Doe',
-    email: 'john@example.com',
-    // ... previous state
-  },
-  $after: {
-    name: 'John Updated',
-    email: 'john.new@example.com',
-    // ... current state
-  }
-}
-```
-
-#### **Combining Both Approaches**
-You can use both declarative and programmatic event listeners together:
-
-```javascript
-const users = await s3db.createResource({
-  name: "users",
-  attributes: { name: "string|required" },
-  events: {
-    insert: (event) => console.log('Config listener:', event.name)
-  }
+// Add middlewares for cross-cutting concerns
+orders.useMiddleware('insert', async (ctx, next) => {
+  // Rate limiting
+  await checkRateLimit(ctx.args[0].userId);
+  return await next();
 });
 
-// Add additional programmatic listeners
-users.on('insert', (event) => {
-  console.log('Programmatic listener:', event.name);
+orders.useMiddleware('update', async (ctx, next) => {
+  // Audit logging
+  const start = Date.now();
+  const result = await next();
+  await auditLog.write({
+    action: 'order.update',
+    orderId: ctx.args[0],
+    duration: Date.now() - start,
+    timestamp: new Date()
+  });
+  return result;
 });
-
-await users.insert({ name: 'John' });
-// Output:
-// Config listener: John
-// Programmatic listener: John
 ```
 
-#### **Best Practices for Event Listeners**
-- **Declarative for core functionality**: Use the `events` config for essential listeners
-- **Programmatic for conditional/dynamic**: Use `.on()` for listeners that might change at runtime
-- **Error handling**: Listeners should handle their own errors to avoid breaking operations
-- **Performance**: Keep listeners lightweight; async events (default) ensure non-blocking operations
-- **Testing**: Use `asyncEvents: false` in tests when you need predictable synchronous behavior
-- **Debugging**: Event listeners are excellent for debugging and monitoring
-- Middlewares are powerful and ideal for controlling or transforming operations.
-- You can safely combine both for maximum flexibility.
+**Complete documentation**: [**docs/resources.md**](./docs/resources.md)
 
 ---
 
-## 🤖 MCP Server
+## 🔌 Plugins
 
-S3DB includes a powerful **Model Context Protocol (MCP) server** that enables AI assistants like Claude to interact with your S3DB databases. The MCP server provides **28 specialized tools** for database operations, debugging, monitoring, and data management.
+Extend s3db.js with powerful plugins for caching, monitoring, replication, relationships, and more.
 
-### ⚡ Quick Start with npx
+### Available Plugins
 
-**For Claude CLI** (one command setup):
+| Plugin | Description | Dependencies |
+|--------|-------------|--------------|
+| [**CachePlugin**](./docs/plugins/cache.md) | Memory/S3/filesystem caching with compression | None |
+| [**CostsPlugin**](./docs/plugins/costs.md) | AWS cost tracking and optimization | None |
+| [**MetricsPlugin**](./docs/plugins/metrics.md) | Performance monitoring and Prometheus export | None |
+| [**AuditPlugin**](./docs/plugins/audit.md) | Complete audit trail for all operations | None |
+| [**TTLPlugin**](./docs/plugins/ttl.md) | Auto-cleanup expired records (O(1) partition-based) | None |
+| [**RelationPlugin**](./docs/plugins/relation.md) | ORM-like relationships (10-100x faster queries) | None |
+| [**ReplicatorPlugin**](./docs/plugins/replicator.md) | Real-time replication to BigQuery, PostgreSQL, SQS | `pg`, `@google-cloud/bigquery`, `@aws-sdk/client-sqs` |
+| [**FullTextPlugin**](./docs/plugins/fulltext.md) | Full-text search with indexing | None |
+| [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) | Eventually consistent counters and analytics | None |
+| [**GeoPlugin**](./docs/plugins/geo.md) | Geospatial queries and distance calculations | None |
+
+### Plugin Installation
+
 ```bash
+# Core plugins (no dependencies)
+# Included in s3db.js package
+
+# External dependencies (install only what you need)
+pnpm add pg                      # PostgreSQL replication
+pnpm add @google-cloud/bigquery  # BigQuery replication
+pnpm add @aws-sdk/client-sqs     # SQS replication/consumption
+```
+
+### Quick Example
+
+```javascript
+import { S3db, CachePlugin, MetricsPlugin, TTLPlugin } from 's3db.js';
+
+const db = new S3db({
+  connectionString: 's3://bucket/databases/myapp',
+  plugins: [
+    // Cache frequently accessed data
+    new CachePlugin({
+      driver: 'memory',
+      ttl: 300000,  // 5 minutes
+      config: {
+        maxMemoryPercent: 0.1,  // 10% of system memory
+        enableCompression: true
+      }
+    }),
+
+    // Track performance metrics
+    new MetricsPlugin({
+      enablePrometheus: true,
+      port: 9090
+    }),
+
+    // Auto-cleanup expired sessions
+    new TTLPlugin({
+      resources: {
+        sessions: { ttl: 86400, onExpire: 'soft-delete' }  // 24h
+      }
+    })
+  ]
+});
+```
+
+### Creating Custom Plugins
+
+Simple plugin example:
+
+```javascript
+import { Plugin } from 's3db.js';
+
+export class MyPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.name = 'MyPlugin';
+  }
+
+  async initialize(database) {
+    console.log('Plugin initialized!');
+
+    // Wrap methods
+    this.wrapMethod('Resource', 'insert', async (original, resource, args) => {
+      console.log(`Inserting into ${resource.name}`);
+      const result = await original(...args);
+      console.log(`Inserted: ${result.id}`);
+      return result;
+    });
+  }
+}
+```
+
+**Complete documentation**: [**docs/plugins/README.md**](./docs/plugins/README.md)
+
+---
+
+## 🤖 MCP & Integrations
+
+### Model Context Protocol (MCP) Server
+
+S3DB includes a powerful MCP server with **28 specialized tools** for database operations, debugging, and monitoring.
+
+#### Quick Start
+
+```bash
+# Claude CLI (one command)
 claude mcp add s3db \
   --transport stdio \
   -- npx -y s3db.js s3db-mcp --transport=stdio
-```
 
-**For Claude Desktop** - Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "s3db": {
-      "command": "npx",
-      "args": ["-y", "s3db.js", "s3db-mcp", "--transport=sse"],
-      "env": {
-        "S3DB_CONNECTION_STRING": "s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp",
-        "S3DB_CACHE_ENABLED": "true",
-        "S3DB_COSTS_ENABLED": "true"
-      }
-    }
-  }
-}
-```
-
-**Standalone Server:**
-```bash
-# Start HTTP server
+# Standalone HTTP server
 npx s3db.js s3db-mcp --transport=sse
 ```
 
-📖 **Complete setup guides:**
-- [NPX Setup Guide](./mcp/NPX_SETUP.md) - Use with `npx` (recommended)
-- [Claude CLI Setup](./mcp/CLAUDE_CLI_SETUP.md) - Detailed configuration
+#### Features
 
-### Available Tools
+- ✅ **28 tools** - CRUD, debugging, partitions, bulk ops, export/import, monitoring
+- ✅ **Multiple transports** - SSE for web, stdio for CLI
+- ✅ **Auto-optimization** - Cache and cost tracking enabled by default
+- ✅ **Partition-aware** - Intelligent caching with partition support
 
-The MCP server provides 28 tools organized into 7 categories:
+#### Tool Categories
 
-#### 🔌 **Connection Management** (3 tools)
-- `dbConnect` - Connect with cache and costs tracking
-- `dbDisconnect` - Graceful disconnection
-- `dbStatus` - Check connection status
+1. **Connection** (3) - `dbConnect`, `dbDisconnect`, `dbStatus`
+2. **Debugging** (5) - `dbInspectResource`, `dbGetMetadata`, `resourceValidate`, `dbHealthCheck`, `resourceGetRaw`
+3. **Query** (2) - `resourceQuery`, `resourceSearch`
+4. **Partitions** (4) - `resourceListPartitions`, `dbFindOrphanedPartitions`, etc.
+5. **Bulk Ops** (3) - `resourceUpdateMany`, `resourceBulkUpsert`, `resourceDeleteAll`
+6. **Export/Import** (3) - `resourceExport`, `resourceImport`, `dbBackupMetadata`
+7. **Monitoring** (4) - `dbGetStats`, `resourceGetStats`, `cacheGetStats`, `dbClearCache`
 
-#### 🔍 **Debugging Tools** (5 tools)
-- `dbInspectResource` - Deep resource inspection
-- `dbGetMetadata` - View raw metadata.json
-- `resourceValidate` - Validate data against schema
-- `dbHealthCheck` - Comprehensive health check
-- `resourceGetRaw` - View raw S3 object data
+**Complete documentation**: [**docs/mcp.md**](./docs/mcp.md)
 
-#### 📊 **Query & Filtering** (2 tools)
-- `resourceQuery` - Complex queries with filters
-- `resourceSearch` - Full-text search
+### Integrations
 
-#### 🔧 **Partition Management** (4 tools)
-- `resourceListPartitions` - List all partitions
-- `resourceListPartitionValues` - Get partition values
-- `dbFindOrphanedPartitions` - Detect orphaned partitions
-- `dbRemoveOrphanedPartitions` - Clean up orphaned partitions
+s3db.js integrates seamlessly with:
 
-#### 🚀 **Bulk Operations** (3 tools)
-- `resourceUpdateMany` - Update with filters
-- `resourceBulkUpsert` - Bulk upsert operations
-- `resourceDeleteAll` - Delete all documents
+- **BigQuery** - Real-time data replication via ReplicatorPlugin
+- **PostgreSQL** - Sync to traditional databases via ReplicatorPlugin
+- **AWS SQS** - Event streaming and message queues
+- **RabbitMQ** - Message queue integration
+- **Prometheus** - Metrics export via MetricsPlugin
+- **Vector Databases** - Embedding field type with 77% compression
 
-#### 💾 **Export/Import** (3 tools)
-- `resourceExport` - Export to JSON/CSV/NDJSON
-- `resourceImport` - Import from JSON/NDJSON
-- `dbBackupMetadata` - Create metadata backups
+---
 
-#### 📈 **Monitoring** (4 tools)
-- `dbGetStats` - Database statistics
-- `resourceGetStats` - Resource-specific stats
-- `cacheGetStats` - Cache performance metrics
-- `dbClearCache` - Clear cache
+## 🔧 CLI
 
-Plus **standard CRUD operations**: insert, get, update, delete, list, count, and more.
+s3db.js includes a powerful CLI for database management and operations.
 
-### Features
+### Installation
 
-- ✅ **Automatic Performance**: Cache and cost tracking enabled by default
-- ✅ **Multiple Transports**: SSE for web clients, stdio for CLI
-- ✅ **Partition-Aware**: Intelligent caching with partition support
-- ✅ **Debugging**: Comprehensive tools for troubleshooting
-- ✅ **Bulk Operations**: Efficient batch processing
-- ✅ **Export/Import**: Data migration and backup
+```bash
+# Global
+npm install -g s3db.js
 
-### Full Documentation
+# Project
+npm install s3db.js
+npx s3db [command]
+```
 
-**Complete MCP documentation**: [**docs/mcp.md**](./docs/mcp.md)
+### Commands
 
-Includes:
-- Tool reference with all 28 tools
-- Configuration examples (AWS, MinIO, DigitalOcean)
-- Docker deployment guides
-- Performance optimization
-- Troubleshooting
-- Security best practices
+```bash
+# List resources
+s3db list
 
-### Example Usage
+# Query resources
+s3db query users
+s3db query users --filter '{"status":"active"}'
 
-```javascript
-// Connect to database
-await dbConnect({
-  connectionString: "s3://bucket/databases/app",
-  enableCache: true,
-  enableCosts: true
-})
+# Insert records
+s3db insert users --data '{"name":"John","email":"john@example.com"}'
 
-// Inspect resource
-await dbInspectResource({ resourceName: "users" })
+# Update records
+s3db update users user-123 --data '{"age":31}'
 
-// Query with filters
-await resourceQuery({
-  resourceName: "users",
-  filters: { status: "active", age: { $gt: 18 } }
-})
+# Delete records
+s3db delete users user-123
 
-// Export data
-await resourceExport({
-  resourceName: "users",
-  format: "csv",
-  filters: { status: "active" }
-})
+# Export data
+s3db export users --format json > users.json
+s3db export users --format csv > users.csv
 
-// Check health
-await dbHealthCheck({ includeOrphanedPartitions: true })
+# Import data
+s3db import users < users.json
+
+# Stats
+s3db stats
+s3db stats users
+
+# MCP Server
+s3db s3db-mcp --transport=stdio
+s3db s3db-mcp --transport=sse --port=17500
+```
+
+### Environment Variables
+
+```bash
+S3DB_CONNECTION_STRING=s3://bucket/databases/myapp
+S3DB_CACHE_ENABLED=true
+S3DB_COSTS_ENABLED=true
+S3DB_VERBOSE=false
 ```
 
 ---
 
-## 📖 API Reference
+## 📖 Documentation
 
-### 📚 Core Classes Documentation
+### Core Documentation
 
-- **[Client Class](./docs/client.md)** - Low-level S3 operations, HTTP client configuration, and advanced object management
-- **[Database Class](./docs/database.md)** - High-level database interface (coming soon)
-- **[Resource Class](./docs/resource.md)** - Resource operations and methods (coming soon)
+- [**Resources (Complete Guide)**](./docs/resources.md) - Everything about resources, schemas, behaviors, partitions, hooks, middlewares, events
+- [**Client Class**](./docs/client.md) - Low-level S3 operations and HTTP configuration
+- [**Schema Validation**](./docs/schema.md) - Comprehensive schema validation and field types
+- [**Plugins Overview**](./docs/plugins/README.md) - All available plugins and how to create custom ones
 
-### 🔌 Database Operations
+### Plugin Documentation
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| `connect()` | Connect to database | `await s3db.connect()` |
-| `createResource(config)` | Create new resource | `await s3db.createResource({...})` |
-| `resources.{name}` | Get resource reference | `const users = s3db.resources.users` |
-| `resourceExists(name)` | Check if resource exists | `s3db.resourceExists("users")` |
+- [Cache Plugin](./docs/plugins/cache.md)
+- [Costs Plugin](./docs/plugins/costs.md)
+- [Metrics Plugin](./docs/plugins/metrics.md)
+- [Audit Plugin](./docs/plugins/audit.md)
+- [TTL Plugin](./docs/plugins/ttl.md)
+- [Relation Plugin](./docs/plugins/relation.md)
+- [Replicator Plugin](./docs/plugins/replicator.md)
 
-### ⚙️ Configuration Options
+### MCP & Integrations
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `connectionString` | string | required | S3 connection string |
-| `httpClientOptions` | object | optimized | HTTP client configuration |
-| `verbose` | boolean | false | Enable verbose logging |
-| `parallelism` | number | 10 | Concurrent operations |
-| `versioningEnabled` | boolean | false | Enable resource versioning |
+- [MCP Server Guide](./docs/mcp.md) - Complete MCP documentation with all 28 tools
+- [NPX Setup Guide](./mcp/NPX_SETUP.md) - Use MCP with npx
+- [Claude CLI Setup](./mcp/CLAUDE_CLI_SETUP.md) - Detailed Claude CLI configuration
 
-#### HTTP Client Options
+### Benchmarks & Performance
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `keepAlive` | boolean | true | Enable connection reuse |
-| `keepAliveMsecs` | number | 1000 | Keep-alive duration (ms) |
-| `maxSockets` | number | 50 | Maximum concurrent connections |
-| `maxFreeSockets` | number | 10 | Free connections in pool |
-| `timeout` | number | 60000 | Request timeout (ms) |
+- [Benchmark Index](./docs/benchmarks/README.md)
+- [Base62 Encoding](./docs/benchmarks/base62.md)
+- [All Types Encoding](./docs/benchmarks/all-types-encoding.md)
+- [String Encoding Optimizations](./docs/benchmarks/STRING-ENCODING-OPTIMIZATIONS.md)
+- [EventualConsistency Plugin](./docs/benchmarks/eventual-consistency.md)
+- [Partitions Matrix](./docs/benchmarks/partitions.md)
+- [Vector Clustering](./docs/benchmarks/vector-clustering.md)
 
-### 📝 Resource Operations
+### Examples
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| `insert(data)` | Create document | `await users.insert({name: "John"})` |
-| `get(id)` | Retrieve document | `await users.get("user-123")` |
-| `update(id, data)` | Update document | `await users.update("user-123", {age: 31})` |
-| `upsert(id, data)` | Insert or update | `await users.upsert("user-123", {...})` |
-| `delete(id)` | Delete document | `await users.delete("user-123")` |
-| `exists(id)` | Check existence | `await users.exists("user-123")` |
-| `setContent({id, buffer, contentType})` | Set binary content | `await users.setContent({id: "123", buffer: imageBuffer})` |
-| `content(id)` | Get binary content | `await users.content("user-123")` |
-| `hasContent(id)` | Check if has content | `await users.hasContent("user-123")` |
-| `deleteContent(id)` | Remove content | `await users.deleteContent("user-123")` |
+Browse [**60+ examples**](./docs/examples/) covering:
+- Basic CRUD (e01-e07)
+- Advanced features (e08-e17)
+- Plugins (e18-e33)
+- Vectors & RAG (e41-e43)
+- Testing patterns (e38-e40, e64-e65)
 
-### 📊 Query Operations
+### API Reference
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| `list(options?)` | List documents with pagination & partitions | `await users.list({limit: 10, offset: 0})` |
-| `listIds(options?)` | List document IDs | `await users.listIds()` |
-| `count(options?)` | Count documents | `await users.count()` |
-| `page(options)` | Paginate results | `await users.page({offset: 0, size: 10})` |
-| `query(filter, options?)` | Filter documents | `await users.query({isActive: true})` |
+| Resource | Link |
+|----------|------|
+| Resource API | [docs/resources.md](./docs/resources.md) |
+| Client API | [docs/client.md](./docs/client.md) |
+| Schema Validation | [docs/schema.md](./docs/schema.md) |
+| Plugin API | [docs/plugins/README.md](./docs/plugins/README.md) |
 
-#### 📋 List vs GetAll - When to Use Each
+---
 
-**`list(options?)`** - Advanced listing with full control:
+## 🔧 Troubleshooting
+
+Common issues and solutions:
+
+<details>
+<summary><strong>Connection Issues</strong></summary>
+
+**Problem:** Cannot connect to S3 bucket
+
+**Solutions:**
+1. Verify credentials in connection string
+2. Check IAM permissions (s3:ListBucket, s3:GetObject, s3:PutObject)
+3. Ensure bucket exists
+4. Check network connectivity
+
 ```javascript
-// Simple listing (equivalent to getAll)
-const allUsers = await users.list();
-
-// With pagination
-const first10 = await users.list({ limit: 10, offset: 0 });
-
-// With partitions
-const usUsers = await users.list({ 
-  partition: "byCountry", 
-  partitionValues: { "profile.country": "US" } 
+// Enable verbose logging
+const db = new S3db({
+  connectionString: '...',
+  verbose: true
 });
 ```
+</details>
 
-**`getAll()`** - Simple listing for all documents:
+<details>
+<summary><strong>Metadata Size Exceeded</strong></summary>
+
+**Problem:** Error: "S3 metadata size exceeds 2KB limit"
+
+**Solutions:**
+1. Change behavior to `body-overflow` or `body-only`
+2. Reduce field sizes or use truncation
+3. Move large content to separate fields
+
 ```javascript
-// Get all documents (no options, no pagination)
-const allUsers = await users.getAll();
-console.log(`Total users: ${allUsers.length}`);
+const resource = await db.createResource({
+  name: 'blogs',
+  behavior: 'body-overflow',  // Automatically handle overflow
+  attributes: { title: 'string', content: 'string' }
+});
 ```
+</details>
 
-**Choose `getAll()` when:**
-- ✅ You want all documents without pagination
-- ✅ You don't need partition filtering
-- ✅ You prefer simplicity over flexibility
+<details>
+<summary><strong>Performance Issues</strong></summary>
 
-**Choose `list()` when:**
-- ✅ You need pagination control
-- ✅ You want to filter by partitions
-- ✅ You need more control over the query
+**Problem:** Slow queries or operations
 
-### 🚀 Bulk Operations
+**Solutions:**
+1. Use partitions for frequently queried fields
+2. Enable caching with CachePlugin
+3. Increase HTTP client concurrency
+4. Use bulk operations instead of loops
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| `insertMany(docs)` | Insert multiple | `await users.insertMany([{...}, {...}])` |
-| `getMany(ids)` | Get multiple | `await users.getMany(["id1", "id2"])` |
-| `deleteMany(ids)` | Delete multiple | `await users.deleteMany(["id1", "id2"])` |
-| `getAll()` | Get all documents | `await users.getAll()` |
-| `deleteAll()` | Delete all documents | `await users.deleteAll()` |
+```javascript
+// Add partitions
+const resource = await db.createResource({
+  name: 'analytics',
+  attributes: { event: 'string', region: 'string' },
+  partitions: {
+    byEvent: { fields: { event: 'string' } }
+  },
+  asyncPartitions: true  // 70-100% faster writes
+});
 
-### 🔄 Streaming Operations
+// Enable caching
+const db = new S3db({
+  connectionString: '...',
+  plugins: [new CachePlugin({ ttl: 300000 })]
+});
+```
+</details>
 
-| Method | Description | Example |
-|--------|-------------|---------|
-| `readable(options?)` | Create readable stream | `await users.readable()` |
-| `writable(options?)` | Create writable stream | `await users.writable()` |
+<details>
+<summary><strong>Orphaned Partitions</strong></summary>
+
+**Problem:** Partition references deleted field
+
+**Solutions:**
+
+```javascript
+const resource = await db.getResource('users', { strictValidation: false });
+const orphaned = resource.findOrphanedPartitions();
+console.log('Orphaned:', orphaned);
+
+// Remove them
+resource.removeOrphanedPartitions();
+await db.uploadMetadataFile();
+```
+</details>
 
 ---
 
 ## 📊 Performance Benchmarks
 
-> **⚠️ Important**: All benchmark results documented below were generated using **Node.js v22.6.0**. Performance results may vary with different Node.js versions.
+> **⚠️ Important**: All benchmark results documented were generated using **Node.js v22.6.0**. Performance may vary with different Node.js versions.
 
-s3db.js includes comprehensive benchmarks demonstrating real-world performance optimizations. Key areas tested:
+s3db.js includes comprehensive benchmarks demonstrating real-world performance optimizations:
 
-### 🎯 Data Encoding & Compression
-
-**[Base62 Encoding](./docs/benchmarks/base62.md)** - Number compression for S3 metadata
-- **40-46% space savings** for large numbers
-- **5x faster encoding** vs Base36
-- **Real-world impact**: More data fits in 2KB S3 metadata limit
-
-**[Advanced Encoding](./docs/benchmarks/advanced-encoding.md)** - Multi-technique compression
-- **67% savings** on ISO timestamps (Unix Base62)
-- **33% savings** on UUIDs (Binary Base64)
-- **95% savings** on common values (Dictionary encoding)
-- **Overall**: 40-50% metadata reduction on typical datasets
-
-**[Smart Encoding](./docs/benchmarks/smart-encoding.md)** - Intelligent encoding selection
-- **Automatic type detection** and optimal encoding selection
-- **2-3x faster** UTF-8 byte calculations with caching
-
-**[IP Address Encoding](./docs/benchmarks/ip-encoding.md)** - IPv4/IPv6 binary compression
-- **13.5% average savings** for IPv4 addresses (up to 47% for longer IPs)
-- **38.5% savings** for full-length IPv6 addresses
-- **2.7M+ ops/s** for IPv4 encoding, **595K+ ops/s** for IPv6
-- **Ideal for metadata-constrained storage** (S3 2KB limit)
-
-### 🔌 Plugin Performance
-
-**[EventualConsistency Plugin](./docs/benchmarks/eventual-consistency.md)** - Transaction processing & analytics
-- **70-100% faster writes** with async partitions
-- **Parallel analytics updates** for high-throughput scenarios
-- **O(1) partition queries** vs O(n) full scans
-
-### 🗂️ Partitioning Performance
-
-**[Partitions Matrix Benchmark](./docs/benchmarks/partitions.md)** - Performance testing across partition configurations
-- **Test matrix**: 0-10 partitions × 1-10 attributes (110 combinations)
-- **Measurements**: Create, insert, query (partition & full scan)
-- **Insights**: Find optimal partition configuration for your use case
-- Run with: `pnpm run benchmark:partitions`
-
-### 📖 Benchmark Documentation
-
-All benchmarks include:
-- ✅ **TL;DR summary** - Quick results and recommendations
-- ✅ **Code examples** - Runnable benchmark scripts
-- ✅ **Performance metrics** - Real numbers with explanations
-- ✅ **Use cases** - When to apply each optimization
+- [**Base62 Encoding**](./docs/benchmarks/base62.md) - 40-46% space savings, 5x faster than Base36
+- [**All Types Encoding**](./docs/benchmarks/all-types-encoding.md) - Comprehensive encoding across all field types
+- [**String Encoding Optimizations**](./docs/benchmarks/STRING-ENCODING-OPTIMIZATIONS.md) - 2-3x faster UTF-8 calculations
+- [**EventualConsistency Plugin**](./docs/benchmarks/eventual-consistency.md) - 70-100% faster writes
+- [**Partitions Matrix**](./docs/benchmarks/partitions.md) - Test 110 combinations to find optimal config
+- [**Vector Clustering**](./docs/benchmarks/vector-clustering.md) - Vector similarity and clustering performance
 
 **[📋 Complete Benchmark Index](./docs/benchmarks/README.md)**
 
 ---
 
-## ⚡ HTTP Client Configuration
+## 🤝 Contributing
 
-s3db.js includes optimized HTTP client settings by default for excellent S3 performance. You can customize these settings based on your specific needs:
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
-### Default Configuration (Optimized)
+---
 
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  // Default HTTP client options (optimized for most applications):
-  httpClientOptions: {
-    keepAlive: true,         // Enable connection reuse
-    keepAliveMsecs: 1000,    // Keep connections alive for 1 second
-    maxSockets: 50,          // Maximum 50 concurrent connections
-    maxFreeSockets: 10,      // Keep 10 free connections in pool
-    timeout: 60000           // 60 second timeout
-  }
-});
-```
+## 📄 License
 
-### Custom Configurations
+This project is licensed under the [Unlicense](LICENSE) - see the LICENSE file for details.
 
-**High Concurrency (Recommended for APIs):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 1000,
-    maxSockets: 100,         // Higher concurrency
-    maxFreeSockets: 20,      // More free connections
-    timeout: 60000
-  }
-});
-```
+---
 
-**Aggressive Performance (High-throughput applications):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 5000,    // Longer keep-alive
-    maxSockets: 200,         // High concurrency
-    maxFreeSockets: 50,      // Large connection pool
-    timeout: 120000          // 2 minute timeout
-  }
-});
-```
+## 🙏 Acknowledgments
 
-**Conservative (Resource-constrained environments):**
-```javascript
-const s3db = new S3db({
-  connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
-  httpClientOptions: {
-    keepAlive: true,
-    keepAliveMsecs: 500,     // Shorter keep-alive
-    maxSockets: 10,          // Lower concurrency
-    maxFreeSockets: 2,       // Smaller pool
-    timeout: 15000           // 15 second timeout
-  }
-});
-```
+- Built with [AWS SDK for JavaScript](https://aws.amazon.com/sdk-for-javascript/)
+- Validation powered by [@icebob/fastest-validator](https://github.com/icebob/fastest-validator)
+- ID generation using [nanoid](https://github.com/ai/nanoid)
+
+---
+
+<p align="center">
+  Made with ❤️ by the s3db.js community
+</p>
