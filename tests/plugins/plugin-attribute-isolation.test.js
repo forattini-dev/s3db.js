@@ -39,16 +39,16 @@ describe('Plugin Attribute Isolation', () => {
   });
 
   describe('Plugin Attribute Mapping', () => {
-    it('should map plugin attributes to p-prefixed IDs (p0, p1, p2)', async () => {
+    it('should map plugin attributes to stable hash-based IDs', async () => {
       // Add plugin attributes
       users.addPluginAttribute('_hasEmbedding', { type: 'boolean', optional: true }, 'VectorPlugin');
       users.addPluginAttribute('clusterId', { type: 'string', optional: true }, 'VectorPlugin');
       users.addPluginAttribute('clusterVersion', { type: 'string', optional: true }, 'VectorPlugin');
 
-      // Check plugin mapping
-      expect(users.schema.pluginMap['_hasEmbedding']).toBe('p0');
-      expect(users.schema.pluginMap['clusterId']).toBe('p1');
-      expect(users.schema.pluginMap['clusterVersion']).toBe('p2');
+      // Check plugin mapping uses stable hashes
+      expect(users.schema.pluginMap['_hasEmbedding']).toBe('p_69e330'); // hash('VectorPlugin:_hasEmbedding')
+      expect(users.schema.pluginMap['clusterId']).toBe('p_11f6cf'); // hash('VectorPlugin:clusterId')
+      expect(users.schema.pluginMap['clusterVersion']).toBe('p_3e2280'); // hash('VectorPlugin:clusterVersion')
 
       // Check that user attributes are NOT in plugin map
       expect(users.schema.pluginMap['name']).toBeUndefined();
@@ -98,8 +98,8 @@ describe('Plugin Attribute Isolation', () => {
       expect(mapped['2']).toBe('john@test.com'); // email
       expect(mapped['3']).toBeDefined();  // age (base62 encoded)
 
-      // Plugin field should use p-prefixed ID
-      expect(mapped['p0']).toBe('1'); // _tracking (boolean encoded as '1')
+      // Plugin field should use stable hash ID
+      expect(mapped['p_7773fe']).toBe('1'); // _tracking (boolean encoded as '1', hash of 'TestPlugin:_tracking')
     });
   });
 
@@ -182,17 +182,60 @@ describe('Plugin Attribute Isolation', () => {
       users.addPluginAttribute('_auditLog', 'string|optional', 'AuditPlugin');
       users.addPluginAttribute('_auditTimestamp', 'number|optional', 'AuditPlugin');
 
-      // All should have p-prefixed mappings
-      expect(users.schema.pluginMap['_vectorTracking']).toBe('p0');
-      expect(users.schema.pluginMap['_vectorCluster']).toBe('p1');
-      expect(users.schema.pluginMap['_auditLog']).toBe('p2');
-      expect(users.schema.pluginMap['_auditTimestamp']).toBe('p3');
+      // All should have stable hash-based mappings
+      expect(users.schema.pluginMap['_vectorTracking']).toBe('p_d15571');   // hash('VectorPlugin:_vectorTracking')
+      expect(users.schema.pluginMap['_vectorCluster']).toBe('p_88c2bc');    // hash('VectorPlugin:_vectorCluster')
+      expect(users.schema.pluginMap['_auditLog']).toBe('p_95b740');         // hash('AuditPlugin:_auditLog')
+      expect(users.schema.pluginMap['_auditTimestamp']).toBe('p_97ad38');   // hash('AuditPlugin:_auditTimestamp')
 
       // User mapping should remain untouched
       expect(users.schema.map['id']).toBe('0');
       expect(users.schema.map['name']).toBe('1');
       expect(users.schema.map['email']).toBe('2');
       expect(users.schema.map['age']).toBe('3');
+    });
+
+    it('should maintain stable IDs when plugins are removed (critical test)', async () => {
+      // This test demonstrates the CRITICAL fix: plugin attribute IDs don't change
+      // when other plugins are removed, preventing data corruption
+
+      users.addPluginAttribute('_field1', 'string|optional', 'Plugin1');
+      users.addPluginAttribute('_field2', 'string|optional', 'Plugin2');
+      users.addPluginAttribute('_field3', 'string|optional', 'Plugin3');
+
+      // Capture initial mappings
+      const initialMap = {
+        field1: users.schema.pluginMap['_field1'],  // p_8b3373
+        field2: users.schema.pluginMap['_field2'],  // p_9d9d28
+        field3: users.schema.pluginMap['_field3']   // p_8429fa
+      };
+
+      // Insert data with all three fields
+      await users.insert({
+        id: 'user1',
+        name: 'Test',
+        email: 'test@test.com',
+        age: 30,
+        _field1: 'value1',
+        _field2: 'value2',
+        _field3: 'value3'
+      });
+
+      // ✅ CRITICAL: Remove Plugin2 (middle plugin)
+      users.removePluginAttribute('_field2', 'Plugin2');
+
+      // ✅ CRITICAL: Plugin1 and Plugin3 IDs must NOT change!
+      expect(users.schema.pluginMap['_field1']).toBe(initialMap.field1); // Still p_8b3373
+      expect(users.schema.pluginMap['_field3']).toBe(initialMap.field3); // Still p_8429fa
+
+      // User data should still be accessible
+      const user = await users.get('user1');
+      expect(user.name).toBe('Test');
+      expect(user._field1).toBe('value1'); // ✅ Still works!
+      expect(user._field3).toBe('value3'); // ✅ Still works!
+
+      // _field2 won't decode anymore (plugin removed), but NO DATA CORRUPTION occurred
+      // because Plugin1 and Plugin3 kept their stable hash IDs
     });
 
     it('should allow removing one plugin without affecting another', async () => {
@@ -260,18 +303,18 @@ describe('Plugin Attribute Isolation', () => {
       // Export schema
       const exported = users.schema.export();
 
-      // Verify plugin map is included
+      // Verify plugin map is included with stable hashes
       expect(exported.pluginMap).toBeDefined();
-      expect(exported.pluginMap['_tracking']).toBe('p0');
-      expect(exported.pluginMap['_status']).toBe('p1');
+      expect(exported.pluginMap['_tracking']).toBe('p_7773fe'); // hash('TestPlugin:_tracking')
+      expect(exported.pluginMap['_status']).toBe('p_cb717f'); // hash('TestPlugin:_status')
 
       // Import schema
       const { Schema } = await import('../../src/schema.class.js');
       const importedSchema = Schema.import(exported);
 
-      // Verify plugin mapping is restored
-      expect(importedSchema.pluginMap['_tracking']).toBe('p0');
-      expect(importedSchema.pluginMap['_status']).toBe('p1');
+      // Verify plugin mapping is restored with same hashes
+      expect(importedSchema.pluginMap['_tracking']).toBe('p_7773fe');
+      expect(importedSchema.pluginMap['_status']).toBe('p_cb717f');
 
       // Verify user mapping is intact
       expect(importedSchema.map['id']).toBe('0');
