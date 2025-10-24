@@ -1,4 +1,5 @@
 import { flatten, unflatten } from "flat";
+import { createHash } from "crypto";
 
 import {
   set,
@@ -37,19 +38,50 @@ function generateBase62Mapping(keys) {
 }
 
 /**
- * Generate plugin attribute mapping with 'p' prefix
- * Plugin attributes use reserved namespace (p0, p1, p2, ...) to avoid conflicts with user attributes
- * @param {string[]} keys - Array of plugin attribute keys
- * @returns {Object} Mapping object with 'p' prefixed base62 keys
+ * Generate stable hash for plugin attribute ID
+ * Uses plugin name + attribute name to create deterministic, stable IDs
+ * This ensures IDs don't change when other plugins are added/removed
+ *
+ * @param {string} pluginName - Name of the plugin
+ * @param {string} attributeName - Name of the attribute
+ * @returns {string} Stable hash ID like 'p_a3f9c2'
  */
-function generatePluginMapping(keys) {
+function generatePluginAttributeHash(pluginName, attributeName) {
+  const input = `${pluginName}:${attributeName}`;
+  const hash = createHash('sha256').update(input).digest('hex');
+  // Use first 6 characters for compact representation
+  return 'p_' + hash.substring(0, 6);
+}
+
+/**
+ * Generate plugin attribute mapping with stable hash-based IDs
+ * Each plugin attribute gets a unique, stable ID based on plugin name + attribute name
+ * IDs don't change when other plugins are added/removed, preventing data corruption
+ *
+ * @param {Array<{key: string, pluginName: string}>} attributes - Array of plugin attributes with metadata
+ * @returns {Object} Mapping object with stable hash-based keys
+ */
+function generatePluginMapping(attributes) {
   const mapping = {};
   const reversedMapping = {};
-  keys.forEach((key, index) => {
-    const pluginKey = 'p' + toBase62(index); // p0, p1, p2, ...
-    mapping[key] = pluginKey;
-    reversedMapping[pluginKey] = key;
-  });
+  const usedHashes = new Set();
+
+  for (const { key, pluginName } of attributes) {
+    let hash = generatePluginAttributeHash(pluginName, key);
+
+    // Handle collisions by appending counter
+    let counter = 1;
+    let finalHash = hash;
+    while (usedHashes.has(finalHash)) {
+      finalHash = `${hash}_${counter}`;
+      counter++;
+    }
+
+    usedHashes.add(finalHash);
+    mapping[key] = finalHash;
+    reversedMapping[finalHash] = key;
+  }
+
   return { mapping, reversedMapping };
 }
 
@@ -524,15 +556,16 @@ export class Schema {
 
       // Separate user attributes from plugin attributes
       const userKeys = [];
-      const pluginKeys = [];
+      const pluginAttributes = []; // Array of {key, pluginName}
 
       for (const key of allKeys) {
         const attrDef = this.getAttributeDefinition(key);
         // Check if it's a plugin attribute (object with __plugin__ OR string with metadata)
         if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
-          pluginKeys.push(key);
+          pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
         } else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
-          pluginKeys.push(key);
+          const pluginName = this._pluginAttributeMetadata[key].__plugin__;
+          pluginAttributes.push({ key, pluginName });
         } else {
           userKeys.push(key);
         }
@@ -543,8 +576,8 @@ export class Schema {
       this.map = mapping;
       this.reversedMap = reversedMapping;
 
-      // Generate plugin mapping with 'p' prefix
-      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginKeys);
+      // Generate plugin mapping with stable hash-based IDs
+      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginAttributes);
       this.pluginMap = pMapping;
       this.reversedPluginMap = pReversedMapping;
     }
@@ -1154,20 +1187,21 @@ export class Schema {
     const allKeys = [...new Set([...leafKeys, ...objectKeys])];
 
     // Extract only plugin attributes
-    const pluginKeys = [];
+    const pluginAttributes = []; // Array of {key, pluginName}
     for (const key of allKeys) {
       const attrDef = this.getAttributeDefinition(key);
       // Check if it's a plugin attribute (object with __plugin__ OR string with metadata)
       if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
-        pluginKeys.push(key);
+        pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
       } else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
         // String definition with plugin metadata
-        pluginKeys.push(key);
+        const pluginName = this._pluginAttributeMetadata[key].__plugin__;
+        pluginAttributes.push({ key, pluginName });
       }
     }
 
-    // Regenerate plugin mapping
-    const { mapping, reversedMapping } = generatePluginMapping(pluginKeys);
+    // Regenerate plugin mapping with stable hash-based IDs
+    const { mapping, reversedMapping } = generatePluginMapping(pluginAttributes);
     this.pluginMap = mapping;
     this.reversedPluginMap = reversedMapping;
   }
