@@ -339,4 +339,198 @@ describe('Plugin Attribute Isolation', () => {
       // ✅ NO DATA CORRUPTION! User fields decoded correctly throughout plugin lifecycle
     });
   });
+
+  // TODO: Graceful degradation for orphaned attributes (work in progress)
+  describe.skip('Orphaned Attributes (Graceful Degradation)', () => {
+    it('should keep orphaned attributes functional after plugin removal', async () => {
+      // Add plugin attribute
+      users.addPluginAttribute('_status', 'string|optional', 'TestPlugin');
+
+      // Insert data with plugin field
+      await users.insert({
+        id: 'u1',
+        name: 'John',
+        email: 'john@test.com',
+        age: 30,
+        _status: 'active'
+      });
+
+      // Verify data exists
+      let user = await users.get('u1');
+      expect(user._status).toBe('active');
+
+      // Remove plugin attribute (marks as orphaned)
+      const removed = users.removePluginAttribute('_status', 'TestPlugin');
+      expect(removed).toBe(true);
+
+      // ✅ CRITICAL: Data should still be accessible!
+      user = await users.get('u1');
+      expect(user.name).toBe('John');
+      expect(user.email).toBe('john@test.com');
+      expect(user._status).toBe('active'); // ✅ Still works!
+    });
+
+    it('should mark attribute as orphaned and track metadata', async () => {
+      users.addPluginAttribute('_tracking', 'boolean|optional', 'AnalyticsPlugin');
+
+      // Remove it
+      users.removePluginAttribute('_tracking', 'AnalyticsPlugin');
+
+      // Check if it's orphaned
+      const isOrphaned = users.isOrphanedAttribute('_tracking');
+      expect(isOrphaned).toBe(true);
+
+      // Get orphaned attributes list
+      const orphaned = users.getOrphanedAttributes();
+      expect(orphaned.length).toBe(1);
+      expect(orphaned[0].name).toBe('_tracking');
+      expect(orphaned[0].orphanedFrom).toBe('AnalyticsPlugin');
+    });
+
+    it('should allow plugin to reclaim orphaned attribute on reinstall', async () => {
+      // Install plugin, add attribute
+      users.addPluginAttribute('_hasEmbedding', 'boolean|optional', 'VectorPlugin');
+
+      // Insert data
+      await users.insert({
+        id: 'u1',
+        name: 'Alice',
+        email: 'alice@test.com',
+        age: 25,
+        _hasEmbedding: true
+      });
+
+      // Uninstall plugin (orphan attribute)
+      users.removePluginAttribute('_hasEmbedding', 'VectorPlugin');
+      expect(users.isOrphanedAttribute('_hasEmbedding')).toBe(true);
+
+      // Reinstall plugin (auto-reclaim)
+      users.addPluginAttribute('_hasEmbedding', 'boolean|optional', 'VectorPlugin');
+
+      // Should no longer be orphaned
+      expect(users.isOrphanedAttribute('_hasEmbedding')).toBe(false);
+
+      // Data should still work
+      const user = await users.get('u1');
+      expect(user._hasEmbedding).toBe(true);
+      expect(user.name).toBe('Alice');
+    });
+
+    it('should prevent different plugin from reclaiming orphaned attribute', async () => {
+      users.addPluginAttribute('_field1', 'string|optional', 'Plugin1');
+      users.removePluginAttribute('_field1', 'Plugin1');
+
+      // Plugin2 tries to add the orphaned attribute
+      expect(() => {
+        users.addPluginAttribute('_field1', 'string|optional', 'Plugin2');
+      }).toThrow(`orphaned from plugin 'Plugin1', not 'Plugin2'`);
+    });
+
+    it('should allow writing to orphaned attributes', async () => {
+      users.addPluginAttribute('_counter', 'number|optional', 'MetricsPlugin');
+
+      await users.insert({
+        id: 'u1',
+        name: 'Bob',
+        email: 'bob@test.com',
+        age: 35,
+        _counter: 10
+      });
+
+      // Orphan the attribute
+      users.removePluginAttribute('_counter', 'MetricsPlugin');
+
+      // ✅ Should still be able to update it!
+      await users.update('u1', { _counter: 20 });
+
+      const user = await users.get('u1');
+      expect(user._counter).toBe(20);
+      expect(user.name).toBe('Bob'); // User data intact
+    });
+
+    it('should preserve orphaned attributes in schema export/import', async () => {
+      users.addPluginAttribute('_version', 'number|optional', 'VersionPlugin');
+
+      await users.insert({
+        id: 'u1',
+        name: 'Carol',
+        email: 'carol@test.com',
+        age: 28,
+        _version: 1
+      });
+
+      // Orphan it
+      users.removePluginAttribute('_version', 'VersionPlugin');
+
+      // Export schema
+      const exported = users.schema.export();
+
+      // Check orphaned metadata is included
+      expect(exported._pluginAttributeMetadata['_version'].__orphaned__).toBe(true);
+      expect(exported._pluginAttributeMetadata['_version'].__orphanedFrom__).toBe('VersionPlugin');
+
+      // Import schema
+      const { Schema } = await import('../../src/schema.class.js');
+      const importedSchema = Schema.import(exported);
+
+      // Orphaned attribute should still be in pluginMap
+      expect(importedSchema.pluginMap['_version']).toBeDefined();
+      expect(importedSchema._pluginAttributeMetadata['_version'].__orphaned__).toBe(true);
+    });
+
+    it('should emit events for orphan/reclaim operations', async () => {
+      const events = [];
+
+      database.on('plugin-attribute-orphaned', (data) => events.push({ type: 'orphaned', data }));
+      database.on('plugin-attribute-reclaimed', (data) => events.push({ type: 'reclaimed', data }));
+      database.on('plugin-attribute-auto-reclaimed', (data) => events.push({ type: 'auto-reclaimed', data }));
+
+      // Add and orphan
+      users.addPluginAttribute('_test', 'string|optional', 'TestPlugin');
+      users.removePluginAttribute('_test', 'TestPlugin');
+
+      expect(events[0].type).toBe('orphaned');
+      expect(events[0].data.attribute).toBe('_test');
+      expect(events[0].data.plugin).toBe('TestPlugin');
+
+      // Auto-reclaim
+      users.addPluginAttribute('_test', 'string|optional', 'TestPlugin');
+
+      expect(events[1].type).toBe('auto-reclaimed');
+      expect(events[1].data.attribute).toBe('_test');
+      expect(events[1].data.plugin).toBe('TestPlugin');
+    });
+
+    it('should handle multiple orphaned attributes from different plugins', async () => {
+      users.addPluginAttribute('_field1', 'string|optional', 'Plugin1');
+      users.addPluginAttribute('_field2', 'boolean|optional', 'Plugin2');
+      users.addPluginAttribute('_field3', 'number|optional', 'Plugin3');
+
+      await users.insert({
+        id: 'u1',
+        name: 'Dave',
+        email: 'dave@test.com',
+        age: 40,
+        _field1: 'value1',
+        _field2: true,
+        _field3: 42
+      });
+
+      // Orphan all of them
+      users.removePluginAttribute('_field1', 'Plugin1');
+      users.removePluginAttribute('_field2', 'Plugin2');
+      users.removePluginAttribute('_field3', 'Plugin3');
+
+      // All should be orphaned
+      const orphaned = users.getOrphanedAttributes();
+      expect(orphaned.length).toBe(3);
+
+      // All should still work!
+      const user = await users.get('u1');
+      expect(user._field1).toBe('value1');
+      expect(user._field2).toBe(true);
+      expect(user._field3).toBe(42);
+      expect(user.name).toBe('Dave'); // User data intact
+    });
+  });
 });
