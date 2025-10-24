@@ -767,10 +767,11 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
 
       const results = await searchMethod([1, 0, 0], {
-        partition: 'byCategory'
+        partition: 'byCategory',
+        partitionValues: { category: 'tech' }
       });
 
-      expect(mockResource.list).toHaveBeenCalledWith({ partition: 'byCategory', partitionValues: 'byCategory' });
+      expect(mockResource.list).toHaveBeenCalledWith({ partition: 'byCategory', partitionValues: { category: 'tech' } });
       expect(results).toHaveLength(2);
       expect(results[0].record.id).toBe('1');
     });
@@ -800,10 +801,11 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
       const result = await clusterMethod({
         k: 2,
-        partition: 'byRegion'
+        partition: 'byRegion',
+        partitionValues: { region: 'US' }
       });
 
-      expect(mockResource.list).toHaveBeenCalledWith({ partition: 'byRegion', partitionValues: 'byRegion' });
+      expect(mockResource.list).toHaveBeenCalledWith({ partition: 'byRegion', partitionValues: { region: 'US' } });
       expect(result.clusters).toHaveLength(2);
     });
   });
