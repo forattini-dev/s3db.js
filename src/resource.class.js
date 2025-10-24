@@ -7,6 +7,7 @@ import { PromisePool } from "@supercharge/promise-pool";
 import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
 
 import Schema from "./schema.class.js";
+import { ValidatorManager } from "./validator.class.js";
 import { streamToString } from "./stream/index.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
@@ -423,6 +424,164 @@ export class Resource extends AsyncEventEmitter {
     this.applyConfiguration();
 
     return { oldAttributes, newAttributes };
+  }
+
+  /**
+   * Add a plugin-created attribute to the resource schema
+   * This ensures plugin attributes don't interfere with user-defined attributes
+   * by using a separate mapping namespace (p0, p1, p2, ...)
+   *
+   * @param {string} name - Attribute name (e.g., '_hasEmbedding', 'clusterId')
+   * @param {Object|string} definition - Attribute definition
+   * @param {string} pluginName - Name of plugin adding the attribute
+   * @returns {void}
+   *
+   * @example
+   * // VectorPlugin adding tracking field
+   * resource.addPluginAttribute('_hasEmbedding', {
+   *   type: 'boolean',
+   *   optional: true,
+   *   default: false
+   * }, 'VectorPlugin');
+   *
+   * // Shorthand notation
+   * resource.addPluginAttribute('clusterId', 'string|optional', 'VectorPlugin');
+   */
+  addPluginAttribute(name, definition, pluginName) {
+    if (!pluginName) {
+      throw new ResourceError(
+        'Plugin name is required when adding plugin attributes',
+        { resource: this.name, attribute: name }
+      );
+    }
+
+    // If attribute already exists and is not a plugin attribute, throw error
+    const existingDef = this.schema.getAttributeDefinition(name);
+    if (existingDef && (!existingDef.__plugin__ || existingDef.__plugin__ !== pluginName)) {
+      throw new ResourceError(
+        `Attribute '${name}' already exists and is not from plugin '${pluginName}'`,
+        { resource: this.name, attribute: name, plugin: pluginName }
+      );
+    }
+
+    // Use the definition as-is (string or object)
+    // The schema preprocessor will handle string notation validation
+    let defObject = definition;
+    if (typeof definition === 'object' && definition !== null) {
+      // Clone to avoid mutation
+      defObject = { ...definition };
+    }
+
+    // Mark as plugin-created with metadata
+    // For string definitions, we need to preserve them but track plugin ownership separately
+    if (typeof defObject === 'object' && defObject !== null) {
+      defObject.__plugin__ = pluginName;
+      defObject.__pluginCreated__ = Date.now();
+    }
+
+    // Add to schema attributes
+    // Store original definition (string or object) as the validator expects
+    this.schema.attributes[name] = defObject;
+
+    // Also update resource.attributes to keep them in sync
+    this.attributes[name] = defObject;
+
+    // For string definitions, add metadata separately
+    if (typeof defObject === 'string') {
+      // Create a marker object to track plugin ownership in a parallel structure
+      if (!this.schema._pluginAttributeMetadata) {
+        this.schema._pluginAttributeMetadata = {};
+      }
+      this.schema._pluginAttributeMetadata[name] = {
+        __plugin__: pluginName,
+        __pluginCreated__: Date.now()
+      };
+    }
+
+    // Regenerate plugin mapping only (not user mapping)
+    this.schema.regeneratePluginMapping();
+
+    // Regenerate hooks for the new attribute
+    if (this.schema.options.generateAutoHooks) {
+      this.schema.generateAutoHooks();
+    }
+
+    // Recompile validator to include new attribute
+    const processedAttributes = this.schema.preprocessAttributesForValidation(this.schema.attributes);
+    this.schema.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+      { $$async: true, $$strict: false },
+      processedAttributes
+    ));
+
+    // Emit event
+    if (this.database) {
+      this.database.emit('plugin-attribute-added', {
+        resource: this.name,
+        attribute: name,
+        plugin: pluginName,
+        definition: defObject
+      });
+    }
+  }
+
+  /**
+   * Remove a plugin-created attribute from the resource schema
+   * Called when a plugin is uninstalled or no longer needs the attribute
+   *
+   * @param {string} name - Attribute name to remove
+   * @param {string} [pluginName] - Optional plugin name for safety check
+   * @returns {boolean} True if attribute was removed, false if not found
+   *
+   * @example
+   * resource.removePluginAttribute('_hasEmbedding', 'VectorPlugin');
+   */
+  removePluginAttribute(name, pluginName = null) {
+    const attrDef = this.schema.getAttributeDefinition(name);
+
+    // Check metadata for string definitions
+    const metadata = this.schema._pluginAttributeMetadata?.[name];
+    const isPluginAttr = (typeof attrDef === 'object' && attrDef?.__plugin__) || metadata;
+
+    // Check if attribute exists and is a plugin attribute
+    if (!attrDef || !isPluginAttr) {
+      return false;
+    }
+
+    // Get plugin name from either object or metadata
+    const actualPlugin = attrDef?.__plugin__ || metadata?.__plugin__;
+
+    // Safety check: if pluginName provided, ensure it matches
+    if (pluginName && actualPlugin !== pluginName) {
+      throw new ResourceError(
+        `Attribute '${name}' belongs to plugin '${actualPlugin}', not '${pluginName}'`,
+        { resource: this.name, attribute: name, actualPlugin, requestedPlugin: pluginName }
+      );
+    }
+
+    // Remove from schema
+    delete this.schema.attributes[name];
+
+    // Also remove from resource.attributes to keep them in sync
+    delete this.attributes[name];
+
+    // Remove metadata if it exists
+    if (this.schema._pluginAttributeMetadata?.[name]) {
+      delete this.schema._pluginAttributeMetadata[name];
+    }
+
+    // Regenerate plugin mapping
+    this.schema.regeneratePluginMapping();
+
+    // Emit event
+    if (this.database) {
+      this.database.emit('plugin-attribute-removed', {
+        resource: this.name,
+        attribute: name,
+        plugin: actualPlugin
+      });
+    }
+
+    return true;
   }
 
   /**

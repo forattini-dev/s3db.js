@@ -248,6 +248,258 @@ class MyPlugin extends Plugin {
 
     // Remove event listeners
     this.removeAllListeners();
+  }
+}
+```
+
+---
+
+### 🏷️ Plugin Attributes: Isolation System
+
+**IMPORTANT**: When your plugin needs to add custom attributes to user resources, use the **Plugin Attribute API** to prevent data corruption and maintain compatibility.
+
+#### Why Plugin Attribute Isolation?
+
+s3db.js uses field name mapping for optimization (converts field names to compact IDs like `0`, `1`, `2`...). Without isolation:
+
+```javascript
+// ❌ BAD: Direct attribute addition (old way)
+resource.schema.attributes['_hasEmbedding'] = { type: 'boolean', optional: true };
+
+// Problem: If user has fields [name, email], they become:
+// { name: '0', email: '1' }
+
+// After plugin adds _hasEmbedding, ALL field IDs shift:
+// { _hasEmbedding: '0', name: '1', email: '2' }  ← BREAKS HISTORICAL DATA!
+```
+
+**The Solution**: Plugin attributes use a **reserved namespace** (`p0`, `p1`, `p2`...) that's completely separate from user attributes:
+
+```javascript
+// ✅ GOOD: Use Plugin Attribute API (new way)
+resource.addPluginAttribute('_hasEmbedding', {
+  type: 'boolean',
+  optional: true
+}, 'VectorPlugin');
+
+// User fields stay stable:     { name: '0', email: '1' }
+// Plugin fields isolated:       { _hasEmbedding: 'p0' }
+// ✅ No conflicts, no data loss!
+```
+
+#### When to Use Plugin Attributes
+
+Use `addPluginAttribute()` when:
+- ✅ Your plugin needs to track state per record (e.g., `_hasEmbedding`, `_indexed`)
+- ✅ You're adding boolean flags, timestamps, or metadata to user records
+- ✅ The attribute is optional and specific to your plugin's functionality
+
+**Do NOT use plugin attributes for:**
+- ❌ Plugin configuration (use PluginStorage instead)
+- ❌ Internal plugin state (use PluginStorage or class properties)
+- ❌ Cross-record data (create a separate resource with `createdBy: 'YourPlugin'`)
+
+#### Adding Plugin Attributes
+
+**During `onInstall()`** (recommended - before any records exist):
+
+```javascript
+class MyVectorPlugin extends Plugin {
+  async onInstall() {
+    // Loop through all resources that need vector support
+    for (const [resourceName, vectorFields] of this.config.resources) {
+      const resource = this.database.resources[resourceName];
+
+      if (!resource) continue; // Resource will be handled later via hooks
+
+      // Add tracking field for each vector field
+      for (const field of vectorFields) {
+        const trackingField = `_has${this.capitalize(field.name)}`;
+
+        // ✅ Use addPluginAttribute() API
+        resource.addPluginAttribute(trackingField, {
+          type: 'boolean',
+          optional: true,
+          default: false
+        }, 'MyVectorPlugin');  // Always pass your plugin name!
+      }
+    }
+  }
+}
+```
+
+**API Signature**:
+```typescript
+resource.addPluginAttribute(
+  name: string,              // Attribute name (e.g., '_hasEmbedding')
+  definition: string|object, // Schema definition ('boolean|optional' or { type: 'boolean', optional: true })
+  pluginName: string         // Your plugin name (REQUIRED for isolation)
+)
+```
+
+#### Removing Plugin Attributes
+
+When your plugin is uninstalled:
+
+```javascript
+async onUninstall(options = {}) {
+  // Remove plugin attributes from all resources
+  for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+    // Check if resource has your plugin attributes
+    if (resource.schema.attributes['_hasEmbedding']) {
+      resource.removePluginAttribute('_hasEmbedding', 'MyVectorPlugin');
+    }
+  }
+}
+```
+
+#### Best Practices: Naming Conventions
+
+**Use prefixes to organize plugin attributes** and avoid conflicts:
+
+| Plugin Type | Prefix | Example Fields | Notes |
+|-------------|--------|----------------|-------|
+| **Tracking/State** | `_<plugin>_` | `_vector_indexed`, `_ttl_expiresAt` | Plugin-specific tracking |
+| **Boolean Flags** | `_has` / `_is` | `_hasEmbedding`, `_isProcessed` | Clear boolean indicators |
+| **Timestamps** | `_<plugin>At` | `_indexedAt`, `_consolidatedAt` | When plugin action occurred |
+| **Counters** | `_<plugin>Count` | `_vectorSearchCount`, `_cacheHits` | Plugin metrics |
+| **IDs/References** | `_<plugin>Id` | `_clusterId`, `_cacheKey` | Plugin-managed identifiers |
+
+**Examples from Official Plugins**:
+
+```javascript
+// VectorPlugin
+resource.addPluginAttribute('_hasEmbedding', { type: 'boolean', optional: true }, 'VectorPlugin');
+resource.addPluginAttribute('_vector_clusterId', 'string|optional', 'VectorPlugin');
+resource.addPluginAttribute('_vector_clusterVersion', 'string|optional', 'VectorPlugin');
+
+// TTLPlugin
+resource.addPluginAttribute('_ttl_expiresAt', { type: 'number', optional: true }, 'TTLPlugin');
+resource.addPluginAttribute('_ttl_cohort', 'string|optional', 'TTLPlugin');
+
+// AuditPlugin (doesn't add attributes - uses separate resource instead)
+// ✅ GOOD: Creates plg_audit resource with createdBy: 'AuditPlugin'
+```
+
+#### When NOT to Add Attributes
+
+Some plugins don't need to add attributes at all:
+
+**Use Separate Resources Instead** (with `createdBy: 'YourPlugin'`):
+```javascript
+// ✅ GOOD: Audit logs, metrics, and analytics
+await database.createResource({
+  name: 'plg_audit_logs',
+  attributes: { /* ... */ },
+  createdBy: 'AuditPlugin'  // Marks resource as plugin-owned
+});
+
+// ✅ GOOD: Plugin configuration
+const storage = this.getStorage();
+await storage.put('config', { enabled: true });
+```
+
+**Why separate resources are better for:**
+- 📊 **Analytics/Metrics**: One-to-many relationships (many audit logs per record)
+- ⚙️ **Configuration**: Plugin settings that aren't record-specific
+- 🔐 **Sensitive Data**: Isolation from user data
+- 🗄️ **Large Datasets**: Better performance than bloating user records
+
+#### Error Handling
+
+The Plugin Attribute API includes safety checks:
+
+```javascript
+// ❌ Error: Trying to override user attribute
+resource.addPluginAttribute('email', 'string|optional', 'MyPlugin');
+// Throws: "Attribute 'email' already exists and is not from plugin 'MyPlugin'"
+
+// ❌ Error: Missing plugin name
+resource.addPluginAttribute('_myField', 'string|optional');
+// Throws: "Plugin name is required when adding plugin attributes"
+
+// ❌ Error: Removing attribute from wrong plugin
+resource.removePluginAttribute('_hasEmbedding', 'WrongPlugin');
+// Throws: "Attribute '_hasEmbedding' belongs to plugin 'VectorPlugin', not 'WrongPlugin'"
+```
+
+#### Migration Guide
+
+If you have existing plugins adding attributes directly:
+
+```javascript
+// ❌ OLD WAY (before s3db.js v13)
+if (!resource.schema.attributes['_myField']) {
+  resource.schema.attributes['_myField'] = { type: 'boolean', optional: true };
+}
+
+// ✅ NEW WAY (s3db.js v13+)
+resource.addPluginAttribute('_myField', {
+  type: 'boolean',
+  optional: true
+}, 'MyPlugin');
+```
+
+**Migration Steps:**
+1. Replace direct `schema.attributes[x] = ...` with `addPluginAttribute()`
+2. Add `pluginName` parameter (required)
+3. Update `onUninstall()` to call `removePluginAttribute()`
+4. Test with existing data to ensure compatibility
+
+#### Complete Example
+
+```javascript
+import { Plugin } from 's3db.js';
+
+class IndexingPlugin extends Plugin {
+  constructor(options = {}) {
+    super(options);
+    this.name = 'IndexingPlugin';
+  }
+
+  async onInstall() {
+    for (const resource of Object.values(this.database.resources)) {
+      // Add tracking attributes
+      resource.addPluginAttribute('_index_status', {
+        type: 'string',
+        optional: true,
+        enum: ['pending', 'indexed', 'failed']
+      }, 'IndexingPlugin');
+
+      resource.addPluginAttribute('_index_indexedAt', {
+        type: 'number',
+        optional: true
+      }, 'IndexingPlugin');
+
+      resource.addPluginAttribute('_index_version', {
+        type: 'string',
+        optional: true
+      }, 'IndexingPlugin');
+
+      // Install hooks to auto-update status
+      resource.addHook('afterInsert', async ({ item }) => {
+        await resource.update(item.id, { _index_status: 'pending' });
+      });
+    }
+  }
+
+  async onUninstall() {
+    for (const resource of Object.values(this.database.resources)) {
+      // Clean up attributes
+      resource.removePluginAttribute('_index_status', 'IndexingPlugin');
+      resource.removePluginAttribute('_index_indexedAt', 'IndexingPlugin');
+      resource.removePluginAttribute('_index_version', 'IndexingPlugin');
+    }
+  }
+}
+```
+
+---
+
+### 📦 PluginStorage: Persistent State Management
+
+Every plugin has access to **PluginStorage** - a namespaced key-value store in S3 specifically for plugin data.
+    this.removeAllListeners();
 
     console.log(`${this.name} uninstalled successfully`);
   }
