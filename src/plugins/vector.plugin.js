@@ -183,13 +183,13 @@ export class VectorPlugin extends Plugin {
         }
       };
 
-      // Add tracking field to schema if not present
+      // Add tracking field to schema if not present using plugin API
       if (!resource.schema.attributes[trackingFieldName]) {
-        resource.schema.attributes[trackingFieldName] = {
+        resource.addPluginAttribute(trackingFieldName, {
           type: 'boolean',
           optional: true,
           default: false
-        };
+        }, 'VectorPlugin');
       }
 
       // Emit event
