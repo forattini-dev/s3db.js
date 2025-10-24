@@ -16510,6 +16510,16 @@ function generateBase62Mapping(keys) {
   });
   return { mapping, reversedMapping };
 }
+function generatePluginMapping(keys) {
+  const mapping = {};
+  const reversedMapping = {};
+  keys.forEach((key, index) => {
+    const pluginKey = "p" + encode(index);
+    mapping[key] = pluginKey;
+    reversedMapping[pluginKey] = key;
+  });
+  return { mapping, reversedMapping };
+}
 const SchemaActions = {
   trim: (value) => value == null ? value : value.trim(),
   encrypt: async (value, { passphrase }) => {
@@ -16900,6 +16910,7 @@ class Schema {
   constructor(args) {
     const {
       map,
+      pluginMap,
       name,
       attributes,
       passphrase,
@@ -16912,6 +16923,7 @@ class Schema {
     this.passphrase = passphrase ?? "secret";
     this.options = merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
+    this._pluginAttributeMetadata = {};
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
     this.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
       { $$async: true, $$strict: false },
@@ -16926,9 +16938,32 @@ class Schema {
       const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
       const objectKeys = this.extractObjectKeys(this.attributes);
       const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
+      const userKeys = [];
+      const pluginKeys = [];
+      for (const key of allKeys) {
+        const attrDef = this.getAttributeDefinition(key);
+        if (typeof attrDef === "object" && attrDef !== null && attrDef.__plugin__) {
+          pluginKeys.push(key);
+        } else if (typeof attrDef === "string" && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
+          pluginKeys.push(key);
+        } else {
+          userKeys.push(key);
+        }
+      }
+      const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
+      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginKeys);
+      this.pluginMap = pMapping;
+      this.reversedPluginMap = pReversedMapping;
+    }
+    if (!isEmpty(pluginMap)) {
+      this.pluginMap = pluginMap;
+      this.reversedPluginMap = invert(pluginMap);
+    }
+    if (!this.pluginMap) {
+      this.pluginMap = {};
+      this.reversedPluginMap = {};
     }
   }
   defaultOptions() {
@@ -17157,6 +17192,8 @@ class Schema {
   static import(data) {
     let {
       map,
+      pluginMap,
+      _pluginAttributeMetadata,
       name,
       options,
       version,
@@ -17167,11 +17204,15 @@ class Schema {
     attributes = attrs;
     const schema = new Schema({
       map,
+      pluginMap: pluginMap || {},
       name,
       options,
       version,
       attributes
     });
+    if (_pluginAttributeMetadata) {
+      schema._pluginAttributeMetadata = _pluginAttributeMetadata;
+    }
     return schema;
   }
   /**
@@ -17209,7 +17250,9 @@ class Schema {
       name: this.name,
       options: this.options,
       attributes: this._exportAttributes(this.attributes),
-      map: this.map
+      map: this.map,
+      pluginMap: this.pluginMap || {},
+      _pluginAttributeMetadata: this._pluginAttributeMetadata || {}
     };
     return data;
   }
@@ -17262,7 +17305,7 @@ class Schema {
     const flattenedObj = flatten(obj, { safe: true });
     const rest = { "_v": this.version + "" };
     for (const [key, value] of Object.entries(flattenedObj)) {
-      const mappedKey = this.map[key] || key;
+      const mappedKey = this.pluginMap[key] || this.map[key] || key;
       const attrDef = this.getAttributeDefinition(key);
       if (typeof value === "number" && typeof attrDef === "string" && attrDef.includes("number")) {
         rest[mappedKey] = encode(value);
@@ -17290,7 +17333,10 @@ class Schema {
     const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
     const rest = {};
     for (const [key, value] of Object.entries(obj)) {
-      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+      let originalKey = this.reversedPluginMap[key] || reversedMap[key] || key;
+      if (!originalKey) {
+        originalKey = key;
+      }
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
       const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
@@ -17356,6 +17402,29 @@ class Schema {
       def = def[part];
     }
     return def;
+  }
+  /**
+   * Regenerate plugin attribute mapping
+   * Called when plugin attributes are added or removed
+   * @returns {void}
+   */
+  regeneratePluginMapping() {
+    const flatAttrs = flatten(this.attributes, { safe: true });
+    const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
+    const objectKeys = this.extractObjectKeys(this.attributes);
+    const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
+    const pluginKeys = [];
+    for (const key of allKeys) {
+      const attrDef = this.getAttributeDefinition(key);
+      if (typeof attrDef === "object" && attrDef !== null && attrDef.__plugin__) {
+        pluginKeys.push(key);
+      } else if (typeof attrDef === "string" && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
+        pluginKeys.push(key);
+      }
+    }
+    const { mapping, reversedMapping } = generatePluginMapping(pluginKeys);
+    this.pluginMap = mapping;
+    this.reversedPluginMap = reversedMapping;
   }
   /**
    * Preprocess attributes to convert nested objects into validator-compatible format
@@ -18423,6 +18492,118 @@ ${errorDetails}`,
     this.attributes = newAttributes;
     this.applyConfiguration();
     return { oldAttributes, newAttributes };
+  }
+  /**
+   * Add a plugin-created attribute to the resource schema
+   * This ensures plugin attributes don't interfere with user-defined attributes
+   * by using a separate mapping namespace (p0, p1, p2, ...)
+   *
+   * @param {string} name - Attribute name (e.g., '_hasEmbedding', 'clusterId')
+   * @param {Object|string} definition - Attribute definition
+   * @param {string} pluginName - Name of plugin adding the attribute
+   * @returns {void}
+   *
+   * @example
+   * // VectorPlugin adding tracking field
+   * resource.addPluginAttribute('_hasEmbedding', {
+   *   type: 'boolean',
+   *   optional: true,
+   *   default: false
+   * }, 'VectorPlugin');
+   *
+   * // Shorthand notation
+   * resource.addPluginAttribute('clusterId', 'string|optional', 'VectorPlugin');
+   */
+  addPluginAttribute(name, definition, pluginName) {
+    if (!pluginName) {
+      throw new ResourceError(
+        "Plugin name is required when adding plugin attributes",
+        { resource: this.name, attribute: name }
+      );
+    }
+    const existingDef = this.schema.getAttributeDefinition(name);
+    if (existingDef && (!existingDef.__plugin__ || existingDef.__plugin__ !== pluginName)) {
+      throw new ResourceError(
+        `Attribute '${name}' already exists and is not from plugin '${pluginName}'`,
+        { resource: this.name, attribute: name, plugin: pluginName }
+      );
+    }
+    let defObject = definition;
+    if (typeof definition === "object" && definition !== null) {
+      defObject = { ...definition };
+    }
+    if (typeof defObject === "object" && defObject !== null) {
+      defObject.__plugin__ = pluginName;
+      defObject.__pluginCreated__ = Date.now();
+    }
+    this.schema.attributes[name] = defObject;
+    this.attributes[name] = defObject;
+    if (typeof defObject === "string") {
+      if (!this.schema._pluginAttributeMetadata) {
+        this.schema._pluginAttributeMetadata = {};
+      }
+      this.schema._pluginAttributeMetadata[name] = {
+        __plugin__: pluginName,
+        __pluginCreated__: Date.now()
+      };
+    }
+    this.schema.regeneratePluginMapping();
+    if (this.schema.options.generateAutoHooks) {
+      this.schema.generateAutoHooks();
+    }
+    const processedAttributes = this.schema.preprocessAttributesForValidation(this.schema.attributes);
+    this.schema.validator = new ValidatorManager({ autoEncrypt: false }).compile(merge(
+      { $$async: true, $$strict: false },
+      processedAttributes
+    ));
+    if (this.database) {
+      this.database.emit("plugin-attribute-added", {
+        resource: this.name,
+        attribute: name,
+        plugin: pluginName,
+        definition: defObject
+      });
+    }
+  }
+  /**
+   * Remove a plugin-created attribute from the resource schema
+   * Called when a plugin is uninstalled or no longer needs the attribute
+   *
+   * @param {string} name - Attribute name to remove
+   * @param {string} [pluginName] - Optional plugin name for safety check
+   * @returns {boolean} True if attribute was removed, false if not found
+   *
+   * @example
+   * resource.removePluginAttribute('_hasEmbedding', 'VectorPlugin');
+   */
+  removePluginAttribute(name, pluginName = null) {
+    const attrDef = this.schema.getAttributeDefinition(name);
+    const metadata = this.schema._pluginAttributeMetadata?.[name];
+    const isPluginAttr = typeof attrDef === "object" && attrDef?.__plugin__ || metadata;
+    if (!attrDef || !isPluginAttr) {
+      return false;
+    }
+    const actualPlugin = attrDef?.__plugin__ || metadata?.__plugin__;
+    if (pluginName && actualPlugin !== pluginName) {
+      throw new ResourceError(
+        `Attribute '${name}' belongs to plugin '${actualPlugin}', not '${pluginName}'`,
+        { resource: this.name, attribute: name, actualPlugin, requestedPlugin: pluginName }
+      );
+    }
+    delete this.schema.attributes[name];
+    delete this.attributes[name];
+    if (this.schema._pluginAttributeMetadata?.[name]) {
+      delete this.schema._pluginAttributeMetadata[name];
+    }
+    this.schema.regeneratePluginMapping();
+    if (this.database) {
+      this.database.emit("plugin-attribute-removed", {
+        resource: this.name,
+        attribute: name,
+        plugin: actualPlugin
+      });
+    }
+    return true;
   }
   /**
    * Add a hook function for a specific event
@@ -36930,11 +37111,11 @@ class VectorPlugin extends Plugin {
         }
       };
       if (!resource.schema.attributes[trackingFieldName]) {
-        resource.schema.attributes[trackingFieldName] = {
+        resource.addPluginAttribute(trackingFieldName, {
           type: "boolean",
           optional: true,
           default: false
-        };
+        }, "VectorPlugin");
       }
       this.emit("vector:partition-created", {
         resource: resource.name,

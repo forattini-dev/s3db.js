@@ -36,6 +36,23 @@ function generateBase62Mapping(keys) {
   return { mapping, reversedMapping };
 }
 
+/**
+ * Generate plugin attribute mapping with 'p' prefix
+ * Plugin attributes use reserved namespace (p0, p1, p2, ...) to avoid conflicts with user attributes
+ * @param {string[]} keys - Array of plugin attribute keys
+ * @returns {Object} Mapping object with 'p' prefixed base62 keys
+ */
+function generatePluginMapping(keys) {
+  const mapping = {};
+  const reversedMapping = {};
+  keys.forEach((key, index) => {
+    const pluginKey = 'p' + toBase62(index); // p0, p1, p2, ...
+    mapping[key] = pluginKey;
+    reversedMapping[pluginKey] = key;
+  });
+  return { mapping, reversedMapping };
+}
+
 export const SchemaActions = {
   trim: (value) => value == null ? value : value.trim(),
 
@@ -463,6 +480,7 @@ export class Schema {
   constructor(args) {
     const {
       map,
+      pluginMap,
       name,
       attributes,
       passphrase,
@@ -476,6 +494,9 @@ export class Schema {
     this.passphrase = passphrase ?? "secret";
     this.options = merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
+
+    // Initialize plugin attribute metadata tracking
+    this._pluginAttributeMetadata = {};
 
     // Preprocess attributes to handle nested objects for validator compilation
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
@@ -494,19 +515,50 @@ export class Schema {
     else {
       const flatAttrs = flatten(this.attributes, { safe: true });
       const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
-      
+
       // Also include parent object keys for objects that can be empty
       const objectKeys = this.extractObjectKeys(this.attributes);
-      
+
       // Combine leaf keys and object keys, removing duplicates
       const allKeys = [...new Set([...leafKeys, ...objectKeys])];
-      
-      // Generate base62 mapping instead of sequential numbers
-      const { mapping, reversedMapping } = generateBase62Mapping(allKeys);
+
+      // Separate user attributes from plugin attributes
+      const userKeys = [];
+      const pluginKeys = [];
+
+      for (const key of allKeys) {
+        const attrDef = this.getAttributeDefinition(key);
+        // Check if it's a plugin attribute (object with __plugin__ OR string with metadata)
+        if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
+          pluginKeys.push(key);
+        } else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
+          pluginKeys.push(key);
+        } else {
+          userKeys.push(key);
+        }
+      }
+
+      // Generate base62 mapping for user attributes
+      const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
-      
 
+      // Generate plugin mapping with 'p' prefix
+      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginKeys);
+      this.pluginMap = pMapping;
+      this.reversedPluginMap = pReversedMapping;
+    }
+
+    // If pluginMap was provided, use it
+    if (!isEmpty(pluginMap)) {
+      this.pluginMap = pluginMap;
+      this.reversedPluginMap = invert(pluginMap);
+    }
+
+    // Initialize plugin maps if not set
+    if (!this.pluginMap) {
+      this.pluginMap = {};
+      this.reversedPluginMap = {};
     }
   }
 
@@ -839,6 +891,8 @@ export class Schema {
   static import(data) {
     let {
       map,
+      pluginMap,
+      _pluginAttributeMetadata,
       name,
       options,
       version,
@@ -852,11 +906,18 @@ export class Schema {
 
     const schema = new Schema({
       map,
+      pluginMap: pluginMap || {},
       name,
       options,
       version,
       attributes
     });
+
+    // Restore plugin metadata for string definitions
+    if (_pluginAttributeMetadata) {
+      schema._pluginAttributeMetadata = _pluginAttributeMetadata;
+    }
+
     return schema;
   }
 
@@ -898,6 +959,8 @@ export class Schema {
       options: this.options,
       attributes: this._exportAttributes(this.attributes),
       map: this.map,
+      pluginMap: this.pluginMap || {},
+      _pluginAttributeMetadata: this._pluginAttributeMetadata || {}
     };
     return data;
   }
@@ -957,7 +1020,8 @@ export class Schema {
     const flattenedObj = flatten(obj, { safe: true });
     const rest = { '_v': this.version + '' };
     for (const [key, value] of Object.entries(flattenedObj)) {
-      const mappedKey = this.map[key] || key;
+      // Try plugin map first, then user map, then use original key
+      const mappedKey = this.pluginMap[key] || this.map[key] || key;
       // Always map numbers to base36
       const attrDef = this.getAttributeDefinition(key);
       if (typeof value === 'number' && typeof attrDef === 'string' && attrDef.includes('number')) {
@@ -987,7 +1051,14 @@ export class Schema {
     const reversedMap = mapOverride ? invert(mapOverride) : this.reversedMap;
     const rest = {};
     for (const [key, value] of Object.entries(obj)) {
-      const originalKey = reversedMap && reversedMap[key] ? reversedMap[key] : key;
+      // Try plugin reversed map first, then user reversed map, then use original key
+      let originalKey = this.reversedPluginMap[key] || reversedMap[key] || key;
+
+      // If key not found in either map, use original key
+      if (!originalKey) {
+        originalKey = key;
+      }
+
       let parsedValue = value;
       const attrDef = this.getAttributeDefinition(originalKey);
       const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
@@ -1065,6 +1136,40 @@ export class Schema {
       def = def[part];
     }
     return def;
+  }
+
+  /**
+   * Regenerate plugin attribute mapping
+   * Called when plugin attributes are added or removed
+   * @returns {void}
+   */
+  regeneratePluginMapping() {
+    const flatAttrs = flatten(this.attributes, { safe: true });
+    const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
+
+    // Also include parent object keys for objects that can be empty
+    const objectKeys = this.extractObjectKeys(this.attributes);
+
+    // Combine leaf keys and object keys, removing duplicates
+    const allKeys = [...new Set([...leafKeys, ...objectKeys])];
+
+    // Extract only plugin attributes
+    const pluginKeys = [];
+    for (const key of allKeys) {
+      const attrDef = this.getAttributeDefinition(key);
+      // Check if it's a plugin attribute (object with __plugin__ OR string with metadata)
+      if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
+        pluginKeys.push(key);
+      } else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
+        // String definition with plugin metadata
+        pluginKeys.push(key);
+      }
+    }
+
+    // Regenerate plugin mapping
+    const { mapping, reversedMapping } = generatePluginMapping(pluginKeys);
+    this.pluginMap = mapping;
+    this.reversedPluginMap = reversedMapping;
   }
 
   /**
