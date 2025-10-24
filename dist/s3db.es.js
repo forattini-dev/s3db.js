@@ -16510,14 +16510,27 @@ function generateBase62Mapping(keys) {
   });
   return { mapping, reversedMapping };
 }
-function generatePluginMapping(keys) {
+function generatePluginAttributeHash(pluginName, attributeName) {
+  const input = `${pluginName}:${attributeName}`;
+  const hash = createHash("sha256").update(input).digest("hex");
+  return "p_" + hash.substring(0, 6);
+}
+function generatePluginMapping(attributes) {
   const mapping = {};
   const reversedMapping = {};
-  keys.forEach((key, index) => {
-    const pluginKey = "p" + encode(index);
-    mapping[key] = pluginKey;
-    reversedMapping[pluginKey] = key;
-  });
+  const usedHashes = /* @__PURE__ */ new Set();
+  for (const { key, pluginName } of attributes) {
+    let hash = generatePluginAttributeHash(pluginName, key);
+    let counter = 1;
+    let finalHash = hash;
+    while (usedHashes.has(finalHash)) {
+      finalHash = `${hash}_${counter}`;
+      counter++;
+    }
+    usedHashes.add(finalHash);
+    mapping[key] = finalHash;
+    reversedMapping[finalHash] = key;
+  }
   return { mapping, reversedMapping };
 }
 const SchemaActions = {
@@ -16939,13 +16952,14 @@ class Schema {
       const objectKeys = this.extractObjectKeys(this.attributes);
       const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
       const userKeys = [];
-      const pluginKeys = [];
+      const pluginAttributes = [];
       for (const key of allKeys) {
         const attrDef = this.getAttributeDefinition(key);
         if (typeof attrDef === "object" && attrDef !== null && attrDef.__plugin__) {
-          pluginKeys.push(key);
+          pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
         } else if (typeof attrDef === "string" && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
-          pluginKeys.push(key);
+          const pluginName = this._pluginAttributeMetadata[key].__plugin__;
+          pluginAttributes.push({ key, pluginName });
         } else {
           userKeys.push(key);
         }
@@ -16953,7 +16967,7 @@ class Schema {
       const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
       this.map = mapping;
       this.reversedMap = reversedMapping;
-      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginKeys);
+      const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginAttributes);
       this.pluginMap = pMapping;
       this.reversedPluginMap = pReversedMapping;
     }
@@ -17413,16 +17427,17 @@ class Schema {
     const leafKeys = Object.keys(flatAttrs).filter((k) => !k.includes("$$"));
     const objectKeys = this.extractObjectKeys(this.attributes);
     const allKeys = [.../* @__PURE__ */ new Set([...leafKeys, ...objectKeys])];
-    const pluginKeys = [];
+    const pluginAttributes = [];
     for (const key of allKeys) {
       const attrDef = this.getAttributeDefinition(key);
       if (typeof attrDef === "object" && attrDef !== null && attrDef.__plugin__) {
-        pluginKeys.push(key);
+        pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
       } else if (typeof attrDef === "string" && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
-        pluginKeys.push(key);
+        const pluginName = this._pluginAttributeMetadata[key].__plugin__;
+        pluginAttributes.push({ key, pluginName });
       }
     }
-    const { mapping, reversedMapping } = generatePluginMapping(pluginKeys);
+    const { mapping, reversedMapping } = generatePluginMapping(pluginAttributes);
     this.pluginMap = mapping;
     this.reversedPluginMap = reversedMapping;
   }
