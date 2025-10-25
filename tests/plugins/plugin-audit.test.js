@@ -990,7 +990,7 @@ describe('Audit Plugin', () => {
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const updateData = { id: userId, name: 'John Smith', age: 31 };
       const beforeData = { id: userId, name: 'John Doe', age: 30 };
-      const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'update');
+      const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'updated');
       if (updateCall) { await updateCall[1](updateData, beforeData); }
       expect(mockAuditResource.insert).toHaveBeenCalled();
       const updateCallArgs = mockAuditResource.insert.mock.calls[0][0];
@@ -1002,7 +1002,7 @@ describe('Audit Plugin', () => {
       const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), get: jest.fn().mockResolvedValue({ id: userId, name: 'John Doe', age: 30 }), deleteMany: jest.fn().mockResolvedValue([]) });
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const deleteData = { id: userId, name: 'John Doe', age: 30 };
-      const deleteCall = mockResource.on.mock.calls.find(call => call[0] === 'delete');
+      const deleteCall = mockResource.on.mock.calls.find(call => call[0] === 'deleted');
       if (deleteCall) { await deleteCall[1](deleteData); }
       expect(mockAuditResource.insert).toHaveBeenCalled();
       const deleteCallArgs = mockAuditResource.insert.mock.calls[0][0];
@@ -1037,7 +1037,7 @@ describe('Audit Plugin', () => {
       mockedAuditPlugin.installEventListenersForResource(mockResource);
       const updateData = { id: userId, name: 'John Doe', department: 'IT', region: 'SP' };
       const beforeData = { id: userId, name: 'John Doe', department: 'IT', region: 'SP' };
-      const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'update');
+      const updateCall = mockResource.on.mock.calls.find(call => call[0] === 'updated');
       if (updateCall) { await updateCall[1](updateData, beforeData); }
       expect(mockAuditResource.insert).toHaveBeenCalled();
       const updateCallArgs = mockAuditResource.insert.mock.calls[0][0];
@@ -1061,7 +1061,7 @@ describe('Audit Plugin', () => {
       mockPlugin.auditResource = mockAuditResource;
       const mockResource = createMockResource({ name: 'test_users', config: { partitions: {} }, on: jest.fn(), emit: jest.fn(), deleteMany: jest.fn().mockResolvedValue([]) });
       mockPlugin.installEventListenersForResource(mockResource);
-      const insertCall = mockResource.on.mock.calls.find(call => call[0] === 'insert');
+      const insertCall = mockResource.on.mock.calls.find(call => call[0] === 'inserted');
       if (insertCall) { await insertCall[1](largeData); }
       expect(mockAuditResource.insert).toHaveBeenCalled();
       const callArgs = mockAuditResource.insert.mock.calls[0][0];
