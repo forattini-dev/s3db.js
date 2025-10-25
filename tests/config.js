@@ -9,9 +9,10 @@ import {
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
 
-import Client from '#src/client.class.js';
+import { S3Client } from '#src/clients/s3-client.class.js';
 import Database from '#src/database.class.js';
 import { idGenerator } from '#src/concerns/id.js';
+import { MemoryClient } from '#src/clients/memory-client.class.js';
 
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -27,7 +28,7 @@ export function createClientForTest(testName, options = {}) {
     options.connectionString = process.env.BUCKET_CONNECTION_STRING + `/${s3Prefix(testName)}`;
   }
 
-  return new Client(options);
+  return new S3Client(options);
 };
 
 export function createDatabaseForTest(testName, options = {}) {
@@ -109,9 +110,40 @@ export async function createTemporaryPathForTest (prefix = 's3db-test') {
   const random = Math.random().toString(36).substring(2, 8);
   const uniqueId = `${timestamp}-${random}`;
   const tempPath = path.join('/tmp', `${prefix}-${uniqueId}`);
-  
+
   // Criar o diretório se não existir
   await fs.mkdir(tempPath, { recursive: true });
-  
+
   return tempPath;
+}
+
+/**
+ * Create a memory-based Database for ultra-fast testing
+ * No S3, LocalStack, or Docker required!
+ *
+ * @param {string} testName - Unique test identifier
+ * @param {object} options - Additional Database options
+ * @param {boolean} options.enforceLimits - Enforce S3 limits (2KB metadata)
+ * @param {string} options.persistPath - Optional path to persist snapshots
+ * @returns {Database} Database instance using MemoryClient
+ */
+export function createMemoryDatabaseForTest(testName, options = {}) {
+  if (!isString(testName)) {
+    throw new Error('testName must be a string');
+  }
+
+  const memoryClient = new MemoryClient({
+    bucket: `test-${testName}`,
+    keyPrefix: s3Prefix(testName),
+    enforceLimits: options.enforceLimits || false,
+    persistPath: options.persistPath,
+    verbose: options.verbose || false
+  });
+
+  const database = new Database({
+    client: memoryClient,
+    ...options
+  });
+
+  return database;
 }
