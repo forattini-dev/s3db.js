@@ -191,6 +191,9 @@ export class StateMachinePlugin extends Plugin {
       });
     }
 
+    // Attach state machines to resources for direct API access
+    await this._attachStateMachinesToResources();
+
     // Setup trigger system if enabled
     await this._setupTriggers();
 
@@ -1245,6 +1248,71 @@ export class StateMachinePlugin extends Plugin {
 
       if (this.config.verbose) {
         console.log(`[StateMachinePlugin] Listening to plugin event '${eventName}' for trigger '${triggerName}'`);
+      }
+    }
+  }
+
+  /**
+   * Attach state machine instances to their associated resources
+   * This enables the resource API: resource.state(id, event)
+   * @private
+   */
+  async _attachStateMachinesToResources() {
+    for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
+      const resourceConfig = machineConfig.config || machineConfig;
+
+      // Skip if no resource is specified
+      if (!resourceConfig.resource) {
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Machine '${machineName}' has no resource configured, skipping attachment`);
+        }
+        continue;
+      }
+
+      // Get the resource instance
+      let resource;
+      if (typeof resourceConfig.resource === 'string') {
+        // Resource specified as name
+        resource = this.database.resources[resourceConfig.resource];
+        if (!resource) {
+          console.warn(
+            `[StateMachinePlugin] Resource '${resourceConfig.resource}' not found for machine '${machineName}'. ` +
+            `Resource API will not be available.`
+          );
+          continue;
+        }
+      } else {
+        // Resource specified as instance
+        resource = resourceConfig.resource;
+      }
+
+      // Create a machine proxy that delegates to this plugin
+      const machineProxy = {
+        send: async (id, event, eventData) => {
+          return this.send(machineName, id, event, eventData);
+        },
+        getState: async (id) => {
+          return this.getState(machineName, id);
+        },
+        canTransition: async (id, event) => {
+          return this.canTransition(machineName, id, event);
+        },
+        getValidEvents: async (id) => {
+          return this.getValidEvents(machineName, id);
+        },
+        initializeEntity: async (id, context) => {
+          return this.initializeEntity(machineName, id, context);
+        },
+        getTransitionHistory: async (id, options) => {
+          return this.getTransitionHistory(machineName, id, options);
+        }
+      };
+
+      // Attach the proxy to the resource
+      resource._attachStateMachine(machineProxy);
+
+      if (this.config.verbose) {
+        console.log(`[StateMachinePlugin] Attached machine '${machineName}' to resource '${resource.name}'`);
       }
     }
   }

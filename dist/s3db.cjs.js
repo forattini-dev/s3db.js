@@ -23939,7 +23939,7 @@ ${errorDetails}`,
       data = await this.applyVersionMapping(data, objectVersion, this.version);
     }
     data = await this.executeHooks("afterGet", data);
-    this._emitWithDeprecation("get", "fetched", data, data.id);
+    this._emitStandardized("get", "fetched", data, data.id);
     const value = data;
     return value;
   }
@@ -24649,7 +24649,7 @@ ${errorDetails}`,
     await this.executeHooks("beforeDelete", objectData);
     const key = this.getResourceKey(id);
     const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-    this._emitWithDeprecation("delete", "deleted", {
+    this._emitStandardized("delete", "deleted", {
       ...objectData,
       $before: { ...objectData },
       $after: null
@@ -24777,7 +24777,7 @@ ${errorDetails}`,
     }
     const count = await this.client.count({ prefix });
     await this.executeHooks("afterCount", { count, partition, partitionValues });
-    this._emitWithDeprecation("count", "counted", count);
+    this._emitStandardized("count", "counted", count);
     return count;
   }
   /**
@@ -24800,7 +24800,7 @@ ${errorDetails}`,
       const result = await this.insert(attributes);
       return result;
     });
-    this._emitWithDeprecation("insertMany", "inserted-many", objects.length);
+    this._emitStandardized("insertMany", "inserted-many", objects.length);
     return results;
   }
   /**
@@ -24835,7 +24835,7 @@ ${errorDetails}`,
       return response;
     });
     await this.executeHooks("afterDeleteMany", { ids, results });
-    this._emitWithDeprecation("deleteMany", "deleted-many", ids.length);
+    this._emitStandardized("deleteMany", "deleted-many", ids.length);
     return results;
   }
   async deleteAll() {
@@ -24844,7 +24844,7 @@ ${errorDetails}`,
     }
     const prefix = `resource=${this.name}/data`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    this._emitWithDeprecation("deleteAll", "deleted-all", {
+    this._emitStandardized("deleteAll", "deleted-all", {
       version: this.version,
       prefix,
       deletedCount
@@ -24861,7 +24861,7 @@ ${errorDetails}`,
     }
     const prefix = `resource=${this.name}`;
     const deletedCount = await this.client.deleteAll({ prefix });
-    this._emitWithDeprecation("deleteAllData", "deleted-all-data", {
+    this._emitStandardized("deleteAllData", "deleted-all-data", {
       resource: this.name,
       prefix,
       deletedCount
@@ -24931,7 +24931,7 @@ ${errorDetails}`,
       const idPart = parts.find((part) => part.startsWith("id="));
       return idPart ? idPart.replace("id=", "") : null;
     }).filter(Boolean);
-    this._emitWithDeprecation("listIds", "listed-ids", ids.length);
+    this._emitStandardized("listIds", "listed-ids", ids.length);
     return ids;
   }
   /**
@@ -24973,12 +24973,12 @@ ${errorDetails}`,
     const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
     if (!ok) throw err;
     const results = await this.processListResults(ids, "main");
-    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
+    this._emitStandardized("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
     if (!this.config.partitions?.[partition]) {
-      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 0 });
+      this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
@@ -24988,7 +24988,7 @@ ${errorDetails}`,
     const ids = this.extractIdsFromKeys(keys).slice(offset);
     const filteredIds = limit ? ids.slice(0, limit) : ids;
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: results.length, errors: 0 });
+    this._emitStandardized("list", "listed", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
   /**
@@ -25033,7 +25033,7 @@ ${errorDetails}`,
       }
       return this.handleResourceError(err, id, context);
     });
-    this._emitWithDeprecation("list", "listed", { count: results.length, errors: 0 });
+    this._emitStandardized("list", "listed", { count: results.length, errors: 0 });
     return results;
   }
   /**
@@ -25096,10 +25096,10 @@ ${errorDetails}`,
    */
   handleListError(error, { partition, partitionValues }) {
     if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
+      this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
       return [];
     }
-    this._emitWithDeprecation("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
+    this._emitStandardized("list", "listed", { partition, partitionValues, count: 0, errors: 1 });
     return [];
   }
   /**
@@ -25132,7 +25132,7 @@ ${errorDetails}`,
       throw err;
     });
     const finalResults = await this.executeHooks("afterGetMany", results);
-    this._emitWithDeprecation("getMany", "fetched-many", ids.length);
+    this._emitStandardized("getMany", "fetched-many", ids.length);
     return finalResults;
   }
   /**
@@ -25218,7 +25218,7 @@ ${errorDetails}`,
           hasTotalItems: totalItems !== null
         }
       };
-      this._emitWithDeprecation("page", "paginated", result2);
+      this._emitStandardized("page", "paginated", result2);
       return result2;
     });
     if (ok) return result;
@@ -25288,7 +25288,7 @@ ${errorDetails}`,
       contentType
     }));
     if (!ok2) throw err2;
-    this._emitWithDeprecation("setContent", "content-set", { id, contentType, contentLength: buffer.length }, id);
+    this._emitStandardized("setContent", "content-set", { id, contentType, contentLength: buffer.length }, id);
     return updatedData;
   }
   /**
@@ -25317,7 +25317,7 @@ ${errorDetails}`,
     }
     const buffer = Buffer.from(await response.Body.transformToByteArray());
     const contentType = response.ContentType || null;
-    this._emitWithDeprecation("content", "content-fetched", { id, contentLength: buffer.length, contentType }, id);
+    this._emitStandardized("content", "content-fetched", { id, contentLength: buffer.length, contentType }, id);
     return {
       buffer,
       contentType
@@ -25349,7 +25349,7 @@ ${errorDetails}`,
       metadata: existingMetadata
     }));
     if (!ok2) throw err2;
-    this._emitWithDeprecation("deleteContent", "content-deleted", id, id);
+    this._emitStandardized("deleteContent", "content-deleted", id, id);
     return response;
   }
   /**
@@ -25661,7 +25661,7 @@ ${errorDetails}`,
     const data = await this.get(id);
     data._partition = partitionName;
     data._partitionValues = partitionValues;
-    this._emitWithDeprecation("getFromPartition", "partition-fetched", data, data.id);
+    this._emitStandardized("getFromPartition", "partition-fetched", data, data.id);
     return data;
   }
   /**
@@ -25909,6 +25909,123 @@ ${errorDetails}`,
       }
     }
     return out;
+  }
+  // ============================================================================
+  // STATE MACHINE METHODS
+  // ============================================================================
+  /**
+   * Send an event to trigger a state transition
+   * @param {string} id - Entity ID
+   * @param {string} event - Event name
+   * @param {Object} [eventData] - Event data
+   * @returns {Promise<Object>} Transition result
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * await orders.state('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
+   */
+  async state(id, event, eventData) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.send(id, event, eventData);
+  }
+  /**
+   * Get current state of an entity
+   * @param {string} id - Entity ID
+   * @returns {Promise<string>} Current state
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * const currentState = await orders.getState('order-123');
+   */
+  async getState(id) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.getState(id);
+  }
+  /**
+   * Check if a transition is valid
+   * @param {string} id - Entity ID
+   * @param {string} event - Event name
+   * @returns {Promise<boolean>} True if transition is valid
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * const canConfirm = await orders.canTransition('order-123', 'CONFIRM');
+   */
+  async canTransition(id, event) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.canTransition(id, event);
+  }
+  /**
+   * Get all valid events for the current state
+   * @param {string} id - Entity ID
+   * @returns {Promise<Array<string>>} Array of valid event names
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * const events = await orders.getValidEvents('order-123');
+   * // Returns: ['SHIP', 'CANCEL']
+   */
+  async getValidEvents(id) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.getValidEvents(id);
+  }
+  /**
+   * Initialize entity with initial state
+   * @param {string} id - Entity ID
+   * @param {Object} [context] - Initial context data
+   * @returns {Promise<void>}
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * await orders.initializeState('order-456', { customerId: 'user-123' });
+   */
+  async initializeState(id, context) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.initializeEntity(id, context);
+  }
+  /**
+   * Get transition history for an entity
+   * @param {string} id - Entity ID
+   * @param {Object} [options] - Query options
+   * @param {number} [options.limit=100] - Maximum number of transitions
+   * @param {Date} [options.fromDate] - Filter from date
+   * @param {Date} [options.toDate] - Filter to date
+   * @returns {Promise<Array<Object>>} Transition history
+   * @throws {Error} If no state machine is configured for this resource
+   * @example
+   * const history = await orders.getStateHistory('order-123', { limit: 50 });
+   */
+  async getStateHistory(id, options) {
+    if (!this._stateMachine) {
+      throw new Error(
+        `No state machine configured for resource '${this.name}'. Ensure StateMachinePlugin is installed and configured for this resource.`
+      );
+    }
+    return this._stateMachine.getTransitionHistory(id, options);
+  }
+  /**
+   * Internal method to attach state machine instance
+   * This is called by StateMachinePlugin during initialization
+   * @private
+   * @param {Object} stateMachine - State machine instance
+   */
+  _attachStateMachine(stateMachine) {
+    this._stateMachine = stateMachine;
   }
 }
 function validateResourceConfig(config) {
@@ -30620,6 +30737,7 @@ class StateMachinePlugin extends Plugin {
         // entityId -> currentState
       });
     }
+    await this._attachStateMachinesToResources();
     await this._setupTriggers();
     this.emit("db:plugin:initialized", { machines: Array.from(this.machines.keys()) });
   }
@@ -31458,6 +31576,58 @@ class StateMachinePlugin extends Plugin {
       this.on(eventName, eventHandler);
       if (this.config.verbose) {
         console.log(`[StateMachinePlugin] Listening to plugin event '${eventName}' for trigger '${triggerName}'`);
+      }
+    }
+  }
+  /**
+   * Attach state machine instances to their associated resources
+   * This enables the resource API: resource.state(id, event)
+   * @private
+   */
+  async _attachStateMachinesToResources() {
+    for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
+      const resourceConfig = machineConfig.config || machineConfig;
+      if (!resourceConfig.resource) {
+        if (this.config.verbose) {
+          console.log(`[StateMachinePlugin] Machine '${machineName}' has no resource configured, skipping attachment`);
+        }
+        continue;
+      }
+      let resource;
+      if (typeof resourceConfig.resource === "string") {
+        resource = this.database.resources[resourceConfig.resource];
+        if (!resource) {
+          console.warn(
+            `[StateMachinePlugin] Resource '${resourceConfig.resource}' not found for machine '${machineName}'. Resource API will not be available.`
+          );
+          continue;
+        }
+      } else {
+        resource = resourceConfig.resource;
+      }
+      const machineProxy = {
+        send: async (id, event, eventData) => {
+          return this.send(machineName, id, event, eventData);
+        },
+        getState: async (id) => {
+          return this.getState(machineName, id);
+        },
+        canTransition: async (id, event) => {
+          return this.canTransition(machineName, id, event);
+        },
+        getValidEvents: async (id) => {
+          return this.getValidEvents(machineName, id);
+        },
+        initializeEntity: async (id, context) => {
+          return this.initializeEntity(machineName, id, context);
+        },
+        getTransitionHistory: async (id, options) => {
+          return this.getTransitionHistory(machineName, id, options);
+        }
+      };
+      resource._attachStateMachine(machineProxy);
+      if (this.config.verbose) {
+        console.log(`[StateMachinePlugin] Attached machine '${machineName}' to resource '${resource.name}'`);
       }
     }
   }
