@@ -709,4 +709,177 @@ describe('MLPlugin', () => {
       expect(Math.abs(predB - expectedB)).toBeLessThan(2);
     });
   });
+
+  describe('Data Transformations', () => {
+    let transformResource;
+    let transformPlugin;
+
+    beforeAll(async () => {
+      // Create resource
+      transformResource = await db.createResource({
+        name: 'test_transforms',
+        attributes: {
+          value: 'number|required',
+          category: 'string|required',
+          result: 'number|required'
+        }
+      });
+
+      // Insert data with outliers
+      const validData = [
+        { value: 10, category: 'A', result: 100 },
+        { value: 20, category: 'A', result: 400 },
+        { value: 30, category: 'A', result: 900 },
+        { value: 40, category: 'A', result: 1600 },
+        { value: 50, category: 'A', result: 2500 },
+        { value: 15, category: 'B', result: 225 },
+        { value: 25, category: 'B', result: 625 },
+        { value: 35, category: 'B', result: 1225 },
+        { value: 45, category: 'B', result: 2025 },
+        { value: 55, category: 'B', result: 3025 }
+      ];
+
+      // Add outliers
+      const outliers = [
+        { value: -10, category: 'A', result: 100 }, // Invalid negative value
+        { value: 1000, category: 'A', result: 100 }, // Extreme outlier
+        { value: 0, category: 'B', result: -50 } // Invalid negative result
+      ];
+
+      for (const record of [...validData, ...outliers]) {
+        await transformResource.insert(record);
+      }
+
+      // Create plugin with filter and map
+      transformPlugin = new MLPlugin({
+        models: {
+          // Model without transformations
+          noTransform: {
+            type: 'regression',
+            resource: 'test_transforms',
+            features: ['value'],
+            target: 'result',
+            autoTrain: false,
+            modelConfig: {
+              epochs: 30,
+              batchSize: 4
+            }
+          },
+
+          // Model with filter only
+          withFilter: {
+            type: 'regression',
+            resource: 'test_transforms',
+            features: ['value'],
+            target: 'result',
+            filter: (record) => {
+              // Remove outliers and invalid data
+              return record.value > 0 && record.value < 100 && record.result >= 0;
+            },
+            autoTrain: false,
+            modelConfig: {
+              epochs: 30,
+              batchSize: 4
+            }
+          },
+
+          // Model with map only
+          withMap: {
+            type: 'regression',
+            resource: 'test_transforms',
+            features: ['valueSquared'],
+            target: 'result',
+            map: (record) => {
+              return {
+                ...record,
+                valueSquared: record.value * record.value
+              };
+            },
+            autoTrain: false,
+            modelConfig: {
+              epochs: 30,
+              batchSize: 4
+            }
+          },
+
+          // Model with both filter and map
+          withBoth: {
+            type: 'regression',
+            resource: 'test_transforms',
+            features: ['valueSquared'],
+            target: 'result',
+            filter: (record) => {
+              return record.value > 0 && record.value < 100 && record.result >= 0;
+            },
+            map: (record) => {
+              return {
+                ...record,
+                valueSquared: record.value * record.value
+              };
+            },
+            autoTrain: false,
+            modelConfig: {
+              epochs: 30,
+              batchSize: 4
+            }
+          }
+        },
+        verbose: false
+      });
+
+      await db.install(transformPlugin);
+    });
+
+    it('should train model without transformations', async () => {
+      const result = await transformPlugin.train('noTransform');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(13); // All data (10 valid + 3 outliers)
+      expect(result.loss).toBeDefined();
+    });
+
+    it('should filter out invalid records', async () => {
+      const result = await transformPlugin.train('withFilter');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(10); // Only valid data (outliers removed)
+      expect(result.loss).toBeDefined();
+    });
+
+    it('should apply map transformation', async () => {
+      const result = await transformPlugin.train('withMap');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(13); // All data
+      expect(result.loss).toBeDefined();
+    });
+
+    it('should apply both filter and map', async () => {
+      const result = await transformPlugin.train('withBoth');
+
+      expect(result).toBeDefined();
+      expect(result.samples).toBe(10); // Filtered data with transformations
+      expect(result.loss).toBeDefined();
+    });
+
+    it('should make accurate predictions with transformed data', async () => {
+      await transformPlugin.train('withBoth');
+
+      // Test: value = 60, result should be close to 3600
+      const input = { valueSquared: 60 * 60 };
+      const { prediction } = await transformPlugin.predict('withBoth', input);
+
+      // Should be close to 3600
+      expect(prediction).toBeGreaterThan(3000);
+      expect(prediction).toBeLessThan(4000);
+    });
+
+    it('should improve model quality with filtering', async () => {
+      const noFilterResult = await transformPlugin.train('noTransform');
+      const filteredResult = await transformPlugin.train('withFilter');
+
+      // Filtered model should have lower loss (better quality)
+      expect(filteredResult.loss).toBeLessThan(noFilterResult.loss * 1.5); // Allow some margin
+    });
+  });
 });

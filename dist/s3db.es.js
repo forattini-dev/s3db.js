@@ -2544,6 +2544,18 @@ const PLUGIN_DEPENDENCIES = {
         npmUrl: "https://www.npmjs.com/package/@hono/swagger-ui"
       }
     }
+  },
+  "ml-plugin": {
+    name: "ML Plugin",
+    docsUrl: "https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/ml-plugin.md",
+    dependencies: {
+      "@tensorflow/tfjs-node": {
+        version: "^4.0.0",
+        description: "TensorFlow.js for Node.js with native bindings",
+        installCommand: "pnpm add @tensorflow/tfjs-node",
+        npmUrl: "https://www.npmjs.com/package/@tensorflow/tfjs-node"
+      }
+    }
   }
 };
 function isVersionCompatible(actual, required) {
@@ -15237,7 +15249,7 @@ class MLPlugin extends Plugin {
       enableVersioning: options.enableVersioning !== false
       // Default true
     };
-    requirePluginDependency("@tensorflow/tfjs-node", "MLPlugin");
+    requirePluginDependency("ml-plugin");
     this.models = {};
     this.modelVersions = /* @__PURE__ */ new Map();
     this.modelCache = /* @__PURE__ */ new Map();
@@ -15625,6 +15637,22 @@ class MLPlugin extends Plugin {
           );
         }
         data = allData;
+      }
+      if (modelConfig.filter && typeof modelConfig.filter === "function") {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Applying custom filter function...`);
+        }
+        const originalLength = data.length;
+        data = data.filter(modelConfig.filter);
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Filter reduced dataset from ${originalLength} to ${data.length} samples`);
+        }
+      }
+      if (modelConfig.map && typeof modelConfig.map === "function") {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Applying custom map function...`);
+        }
+        data = data.map(modelConfig.map);
       }
       if (!data || data.length < this.config.minTrainingSamples) {
         throw new TrainingError(

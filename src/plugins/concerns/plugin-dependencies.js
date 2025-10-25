@@ -109,6 +109,18 @@ export const PLUGIN_DEPENDENCIES = {
         npmUrl: 'https://www.npmjs.com/package/@hono/swagger-ui'
       }
     }
+  },
+  'ml-plugin': {
+    name: 'ML Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/ml-plugin.md',
+    dependencies: {
+      '@tensorflow/tfjs-node': {
+        version: '^4.0.0',
+        description: 'TensorFlow.js for Node.js with native bindings',
+        installCommand: 'pnpm add @tensorflow/tfjs-node',
+        npmUrl: 'https://www.npmjs.com/package/@tensorflow/tfjs-node'
+      }
+    }
   }
 };
 
