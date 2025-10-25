@@ -827,7 +827,11 @@ export class MLPlugin extends Plugin {
   async _initializeVersioning(modelName) {
     try {
       const storage = this.getStorage();
-      const [ok, err, versionInfo] = await tryFn(() => storage.get(`version_${modelName}`));
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const [ok, err, versionInfo] = await tryFn(() =>
+        storage.get(storage.getPluginKey(resourceName, 'metadata', modelName, 'versions'))
+      );
 
       if (ok && versionInfo) {
         // Load existing version info
@@ -873,6 +877,8 @@ export class MLPlugin extends Plugin {
   async _updateVersionInfo(modelName, version) {
     try {
       const storage = this.getStorage();
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
       const versionInfo = this.modelVersions.get(modelName) || { currentVersion: 1, latestVersion: 0 };
 
       versionInfo.latestVersion = Math.max(versionInfo.latestVersion, version);
@@ -880,12 +886,16 @@ export class MLPlugin extends Plugin {
 
       this.modelVersions.set(modelName, versionInfo);
 
-      await storage.patch(`version_${modelName}`, {
-        modelName,
-        currentVersion: versionInfo.currentVersion,
-        latestVersion: versionInfo.latestVersion,
-        updatedAt: new Date().toISOString()
-      });
+      await storage.set(
+        storage.getPluginKey(resourceName, 'metadata', modelName, 'versions'),
+        {
+          modelName,
+          currentVersion: versionInfo.currentVersion,
+          latestVersion: versionInfo.latestVersion,
+          updatedAt: new Date().toISOString()
+        },
+        { behavior: 'body-overflow' }
+      );
 
       if (this.config.verbose) {
         console.log(`[MLPlugin] Updated version info for "${modelName}": current=v${versionInfo.currentVersion}, latest=v${versionInfo.latestVersion}`);
@@ -902,6 +912,8 @@ export class MLPlugin extends Plugin {
   async _saveModel(modelName) {
     try {
       const storage = this.getStorage();
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
       const exportedModel = await this.models[modelName].export();
 
       if (!exportedModel) {
@@ -918,45 +930,57 @@ export class MLPlugin extends Plugin {
         const version = this._getNextVersion(modelName);
         const modelStats = this.models[modelName].getStats();
 
-        // Save versioned model
-        await storage.patch(`model_${modelName}_v${version}`, {
-          modelName,
-          version,
-          type: 'model',
-          data: JSON.stringify(exportedModel),
-          metrics: JSON.stringify({
-            loss: modelStats.loss,
-            accuracy: modelStats.accuracy,
-            samples: modelStats.samples
-          }),
-          savedAt: new Date().toISOString()
-        });
+        // Save versioned model binary to S3 body
+        await storage.set(
+          storage.getPluginKey(resourceName, 'models', modelName, `v${version}`),
+          {
+            modelName,
+            version,
+            type: 'model',
+            modelData: exportedModel, // TensorFlow.js model object (will go to body)
+            metrics: {
+              loss: modelStats.loss,
+              accuracy: modelStats.accuracy,
+              samples: modelStats.samples
+            },
+            savedAt: new Date().toISOString()
+          },
+          { behavior: 'body-only' } // Large binary data goes to S3 body
+        );
 
         // Update version info
         await this._updateVersionInfo(modelName, version);
 
         // Save active reference (points to current version)
-        await storage.patch(`model_${modelName}_active`, {
-          modelName,
-          version,
-          type: 'reference',
-          updatedAt: new Date().toISOString()
-        });
+        await storage.set(
+          storage.getPluginKey(resourceName, 'metadata', modelName, 'active'),
+          {
+            modelName,
+            version,
+            type: 'reference',
+            updatedAt: new Date().toISOString()
+          },
+          { behavior: 'body-overflow' } // Small metadata
+        );
 
         if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved model "${modelName}" v${version} to plugin storage (S3)`);
+          console.log(`[MLPlugin] Saved model "${modelName}" v${version} to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`);
         }
       } else {
         // Save without versioning (legacy behavior)
-        await storage.patch(`model_${modelName}`, {
-          modelName,
-          type: 'model',
-          data: JSON.stringify(exportedModel),
-          savedAt: new Date().toISOString()
-        });
+        await storage.set(
+          storage.getPluginKey(resourceName, 'models', modelName, 'latest'),
+          {
+            modelName,
+            type: 'model',
+            modelData: exportedModel,
+            savedAt: new Date().toISOString()
+          },
+          { behavior: 'body-only' }
+        );
 
         if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved model "${modelName}" to plugin storage (S3)`);
+          console.log(`[MLPlugin] Saved model "${modelName}" to S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`);
         }
       }
     } catch (error) {
@@ -965,7 +989,7 @@ export class MLPlugin extends Plugin {
   }
 
   /**
-   * Save intermediate training data to plugin storage (incremental)
+   * Save intermediate training data to plugin storage (incremental - only new samples)
    * @private
    */
   async _saveTrainingData(modelName, rawData) {
@@ -973,76 +997,117 @@ export class MLPlugin extends Plugin {
       const storage = this.getStorage();
       const model = this.models[modelName];
       const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
       const modelStats = model.getStats();
       const enableVersioning = this.config.enableVersioning;
 
       // Extract features and target from raw data
-      const trainingEntry = {
-        version: enableVersioning ? this.modelVersions.get(modelName)?.latestVersion || 1 : undefined,
-        samples: rawData.length,
-        features: modelConfig.features,
-        target: modelConfig.target,
-        data: rawData.map(item => {
-          const features = {};
-          modelConfig.features.forEach(feature => {
-            features[feature] = item[feature];
-          });
-          return {
-            features,
-            target: item[modelConfig.target]
-          };
-        }),
-        metrics: {
-          loss: modelStats.loss,
-          accuracy: modelStats.accuracy,
-          r2: modelStats.r2
-        },
-        trainedAt: new Date().toISOString()
-      };
+      const processedData = rawData.map(item => {
+        const features = {};
+        modelConfig.features.forEach(feature => {
+          features[feature] = item[feature];
+        });
+        return {
+          id: item.id || `${Date.now()}_${Math.random()}`, // Use record ID or generate
+          features,
+          target: item[modelConfig.target]
+        };
+      });
 
       if (enableVersioning) {
-        // Incremental: Load existing history and append
-        const [ok, err, existing] = await tryFn(() => storage.get(`training_history_${modelName}`));
+        const version = this._getNextVersion(modelName);
+
+        // Load existing history to calculate incremental data
+        const [ok, err, existing] = await tryFn(() =>
+          storage.get(storage.getPluginKey(resourceName, 'training', 'history', modelName))
+        );
 
         let history = [];
+        let previousSampleIds = new Set();
+
         if (ok && existing && existing.history) {
-          try {
-            history = JSON.parse(existing.history);
-          } catch (e) {
-            history = [];
-          }
+          history = existing.history;
+          // Collect all IDs from previous versions
+          history.forEach(entry => {
+            if (entry.sampleIds) {
+              entry.sampleIds.forEach(id => previousSampleIds.add(id));
+            }
+          });
         }
 
-        // Append new entry
-        history.push(trainingEntry);
+        // Detect new samples (not in previous versions)
+        const currentSampleIds = new Set(processedData.map(d => d.id));
+        const newSamples = processedData.filter(d => !previousSampleIds.has(d.id));
+        const newSampleIds = newSamples.map(d => d.id);
 
-        // Save updated history
-        await storage.patch(`training_history_${modelName}`, {
-          modelName,
-          type: 'training_history',
-          totalTrainings: history.length,
-          latestVersion: trainingEntry.version,
-          history: JSON.stringify(history),
-          updatedAt: new Date().toISOString()
-        });
+        // Save only NEW samples to S3 body (incremental)
+        if (newSamples.length > 0) {
+          await storage.set(
+            storage.getPluginKey(resourceName, 'training', 'data', modelName, `v${version}`),
+            {
+              modelName,
+              version,
+              samples: newSamples, // Only new samples
+              features: modelConfig.features,
+              target: modelConfig.target,
+              savedAt: new Date().toISOString()
+            },
+            { behavior: 'body-only' } // Dataset goes to S3 body
+          );
+        }
+
+        // Append metadata to history (no full dataset duplication)
+        const historyEntry = {
+          version,
+          totalSamples: processedData.length, // Total cumulative
+          newSamples: newSamples.length, // Only new in this version
+          sampleIds: Array.from(currentSampleIds), // All IDs for this version
+          newSampleIds, // IDs of new samples
+          storageKey: newSamples.length > 0 ? `training/data/${modelName}/v${version}` : null,
+          metrics: {
+            loss: modelStats.loss,
+            accuracy: modelStats.accuracy,
+            r2: modelStats.r2
+          },
+          trainedAt: new Date().toISOString()
+        };
+
+        history.push(historyEntry);
+
+        // Save updated history (metadata only, no full datasets)
+        await storage.set(
+          storage.getPluginKey(resourceName, 'training', 'history', modelName),
+          {
+            modelName,
+            type: 'training_history',
+            totalTrainings: history.length,
+            latestVersion: version,
+            history, // Array of metadata entries (not full data)
+            updatedAt: new Date().toISOString()
+          },
+          { behavior: 'body-overflow' } // History metadata
+        );
 
         if (this.config.verbose) {
-          console.log(`[MLPlugin] Appended training data for "${modelName}" v${trainingEntry.version} (${trainingEntry.samples} samples, total: ${history.length} trainings)`);
+          console.log(`[MLPlugin] Saved training data for "${modelName}" v${version}: ${newSamples.length} new samples (total: ${processedData.length}, storage: resource=${resourceName}/plugin=ml/training/data/${modelName}/v${version})`);
         }
       } else {
         // Legacy: Replace training data (non-incremental)
-        await storage.patch(`training_data_${modelName}`, {
-          modelName,
-          type: 'training_data',
-          samples: trainingEntry.samples,
-          features: JSON.stringify(trainingEntry.features),
-          target: trainingEntry.target,
-          data: JSON.stringify(trainingEntry.data),
-          savedAt: trainingEntry.trainedAt
-        });
+        await storage.set(
+          storage.getPluginKey(resourceName, 'training', 'data', modelName, 'latest'),
+          {
+            modelName,
+            type: 'training_data',
+            samples: processedData,
+            features: modelConfig.features,
+            target: modelConfig.target,
+            savedAt: new Date().toISOString()
+          },
+          { behavior: 'body-only' }
+        );
 
         if (this.config.verbose) {
-          console.log(`[MLPlugin] Saved training data for "${modelName}" (${trainingEntry.samples} samples) to plugin storage (S3)`);
+          console.log(`[MLPlugin] Saved training data for "${modelName}" (${processedData.length} samples) to S3 (resource=${resourceName}/plugin=ml/training/data/${modelName}/latest)`);
         }
       }
     } catch (error) {
@@ -1057,23 +1122,28 @@ export class MLPlugin extends Plugin {
   async _loadModel(modelName) {
     try {
       const storage = this.getStorage();
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
       const enableVersioning = this.config.enableVersioning;
 
       if (enableVersioning) {
-        // Load active version
-        const [okRef, errRef, activeRef] = await tryFn(() => storage.get(`model_${modelName}_active`));
+        // Load active version reference
+        const [okRef, errRef, activeRef] = await tryFn(() =>
+          storage.get(storage.getPluginKey(resourceName, 'metadata', modelName, 'active'))
+        );
 
         if (okRef && activeRef && activeRef.version) {
           // Load the active version
           const version = activeRef.version;
-          const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
+          const [ok, err, versionData] = await tryFn(() =>
+            storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${version}`))
+          );
 
-          if (ok && versionData) {
-            const modelData = JSON.parse(versionData.data);
-            await this.models[modelName].import(modelData);
+          if (ok && versionData && versionData.modelData) {
+            await this.models[modelName].import(versionData.modelData);
 
             if (this.config.verbose) {
-              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (active) from plugin storage (S3)`);
+              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (active) from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/v${version})`);
             }
             return;
           }
@@ -1083,14 +1153,15 @@ export class MLPlugin extends Plugin {
         const versionInfo = this.modelVersions.get(modelName);
         if (versionInfo && versionInfo.latestVersion > 0) {
           const version = versionInfo.latestVersion;
-          const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
+          const [ok, err, versionData] = await tryFn(() =>
+            storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${version}`))
+          );
 
-          if (ok && versionData) {
-            const modelData = JSON.parse(versionData.data);
-            await this.models[modelName].import(modelData);
+          if (ok && versionData && versionData.modelData) {
+            await this.models[modelName].import(versionData.modelData);
 
             if (this.config.verbose) {
-              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (latest) from plugin storage (S3)`);
+              console.log(`[MLPlugin] Loaded model "${modelName}" v${version} (latest) from S3`);
             }
             return;
           }
@@ -1101,20 +1172,21 @@ export class MLPlugin extends Plugin {
         }
       } else {
         // Legacy: Load non-versioned model
-        const [ok, err, record] = await tryFn(() => storage.get(`model_${modelName}`));
+        const [ok, err, record] = await tryFn(() =>
+          storage.get(storage.getPluginKey(resourceName, 'models', modelName, 'latest'))
+        );
 
-        if (!ok || !record) {
+        if (!ok || !record || !record.modelData) {
           if (this.config.verbose) {
             console.log(`[MLPlugin] No saved model found for "${modelName}"`);
           }
           return;
         }
 
-        const modelData = JSON.parse(record.data);
-        await this.models[modelName].import(modelData);
+        await this.models[modelName].import(record.modelData);
 
         if (this.config.verbose) {
-          console.log(`[MLPlugin] Loaded model "${modelName}" from plugin storage (S3)`);
+          console.log(`[MLPlugin] Loaded model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/latest)`);
         }
       }
     } catch (error) {
@@ -1123,29 +1195,82 @@ export class MLPlugin extends Plugin {
   }
 
   /**
-   * Load training data from plugin storage
+   * Load training data from plugin storage (reconstructs specific version from incremental data)
    * @param {string} modelName - Model name
+   * @param {number} version - Version number (optional, defaults to latest)
    * @returns {Object|null} Training data or null if not found
    */
-  async getTrainingData(modelName) {
+  async getTrainingData(modelName, version = null) {
     try {
       const storage = this.getStorage();
-      const [ok, err, record] = await tryFn(() => storage.get(`training_data_${modelName}`));
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const enableVersioning = this.config.enableVersioning;
 
-      if (!ok || !record) {
+      if (!enableVersioning) {
+        // Legacy: Load non-versioned training data
+        const [ok, err, record] = await tryFn(() =>
+          storage.get(storage.getPluginKey(resourceName, 'training', 'data', modelName, 'latest'))
+        );
+
+        if (!ok || !record) {
+          if (this.config.verbose) {
+            console.log(`[MLPlugin] No saved training data found for "${modelName}"`);
+          }
+          return null;
+        }
+
+        return {
+          modelName: record.modelName,
+          samples: record.samples,
+          features: record.features,
+          target: record.target,
+          data: record.samples,
+          savedAt: record.savedAt
+        };
+      }
+
+      // Versioned: Reconstruct dataset from incremental versions
+      const [okHistory, errHistory, historyData] = await tryFn(() =>
+        storage.get(storage.getPluginKey(resourceName, 'training', 'history', modelName))
+      );
+
+      if (!okHistory || !historyData || !historyData.history) {
         if (this.config.verbose) {
-          console.log(`[MLPlugin] No saved training data found for "${modelName}"`);
+          console.log(`[MLPlugin] No training history found for "${modelName}"`);
         }
         return null;
       }
 
+      const targetVersion = version || historyData.latestVersion;
+      const reconstructedSamples = [];
+
+      // Load and combine all versions up to target version
+      for (const entry of historyData.history) {
+        if (entry.version > targetVersion) break;
+
+        if (entry.storageKey && entry.newSamples > 0) {
+          const [ok, err, versionData] = await tryFn(() =>
+            storage.get(storage.getPluginKey(resourceName, 'training', 'data', modelName, `v${entry.version}`))
+          );
+
+          if (ok && versionData && versionData.samples) {
+            reconstructedSamples.push(...versionData.samples);
+          }
+        }
+      }
+
+      const targetEntry = historyData.history.find(e => e.version === targetVersion);
+
       return {
-        modelName: record.modelName,
-        samples: record.samples,
-        features: JSON.parse(record.features),
-        target: record.target,
-        data: JSON.parse(record.data),
-        savedAt: record.savedAt
+        modelName,
+        version: targetVersion,
+        samples: reconstructedSamples,
+        totalSamples: reconstructedSamples.length,
+        features: modelConfig.features,
+        target: modelConfig.target,
+        metrics: targetEntry?.metrics,
+        savedAt: targetEntry?.trainedAt
       };
     } catch (error) {
       console.error(`[MLPlugin] Failed to load training data for "${modelName}":`, error.message);
@@ -1154,16 +1279,35 @@ export class MLPlugin extends Plugin {
   }
 
   /**
-   * Delete model from plugin storage
+   * Delete model from plugin storage (all versions)
    * @private
    */
   async _deleteModel(modelName) {
     try {
       const storage = this.getStorage();
-      await storage.delete(`model_${modelName}`);
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const enableVersioning = this.config.enableVersioning;
+
+      if (enableVersioning) {
+        // Delete all versions
+        const versionInfo = this.modelVersions.get(modelName);
+        if (versionInfo && versionInfo.latestVersion > 0) {
+          for (let v = 1; v <= versionInfo.latestVersion; v++) {
+            await storage.delete(storage.getPluginKey(resourceName, 'models', modelName, `v${v}`));
+          }
+        }
+
+        // Delete metadata
+        await storage.delete(storage.getPluginKey(resourceName, 'metadata', modelName, 'active'));
+        await storage.delete(storage.getPluginKey(resourceName, 'metadata', modelName, 'versions'));
+      } else {
+        // Delete non-versioned model
+        await storage.delete(storage.getPluginKey(resourceName, 'models', modelName, 'latest'));
+      }
 
       if (this.config.verbose) {
-        console.log(`[MLPlugin] Deleted model "${modelName}" from plugin storage`);
+        console.log(`[MLPlugin] Deleted model "${modelName}" from S3 (resource=${resourceName}/plugin=ml/models/${modelName}/)`);
       }
     } catch (error) {
       // Ignore errors (model might not exist)
@@ -1174,16 +1318,39 @@ export class MLPlugin extends Plugin {
   }
 
   /**
-   * Delete training data from plugin storage
+   * Delete training data from plugin storage (all versions)
    * @private
    */
   async _deleteTrainingData(modelName) {
     try {
       const storage = this.getStorage();
-      await storage.delete(`training_data_${modelName}`);
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const enableVersioning = this.config.enableVersioning;
+
+      if (enableVersioning) {
+        // Delete all version data
+        const [ok, err, historyData] = await tryFn(() =>
+          storage.get(storage.getPluginKey(resourceName, 'training', 'history', modelName))
+        );
+
+        if (ok && historyData && historyData.history) {
+          for (const entry of historyData.history) {
+            if (entry.storageKey) {
+              await storage.delete(storage.getPluginKey(resourceName, 'training', 'data', modelName, `v${entry.version}`));
+            }
+          }
+        }
+
+        // Delete history
+        await storage.delete(storage.getPluginKey(resourceName, 'training', 'history', modelName));
+      } else {
+        // Delete non-versioned training data
+        await storage.delete(storage.getPluginKey(resourceName, 'training', 'data', modelName, 'latest'));
+      }
 
       if (this.config.verbose) {
-        console.log(`[MLPlugin] Deleted training data for "${modelName}" from plugin storage`);
+        console.log(`[MLPlugin] Deleted training data for "${modelName}" from S3 (resource=${resourceName}/plugin=ml/training/)`);
       }
     } catch (error) {
       // Ignore errors (training data might not exist)
@@ -1205,20 +1372,21 @@ export class MLPlugin extends Plugin {
 
     try {
       const storage = this.getStorage();
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
       const versionInfo = this.modelVersions.get(modelName) || { latestVersion: 0 };
       const versions = [];
 
       // Load each version
       for (let v = 1; v <= versionInfo.latestVersion; v++) {
-        const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${v}`));
+        const [ok, err, versionData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${v}`)));
 
         if (ok && versionData) {
-          const metrics = versionData.metrics ? JSON.parse(versionData.metrics) : {};
           versions.push({
             version: v,
             savedAt: versionData.savedAt,
             isCurrent: v === versionInfo.currentVersion,
-            metrics
+            metrics: versionData.metrics
           });
         }
       }
@@ -1246,14 +1414,19 @@ export class MLPlugin extends Plugin {
 
     try {
       const storage = this.getStorage();
-      const [ok, err, versionData] = await tryFn(() => storage.get(`model_${modelName}_v${version}`));
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const [ok, err, versionData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${version}`)));
 
       if (!ok || !versionData) {
         throw new MLError(`Version ${version} not found for model "${modelName}"`, { modelName, version });
       }
 
-      const modelData = JSON.parse(versionData.data);
-      await this.models[modelName].import(modelData);
+      if (!versionData.modelData) {
+        throw new MLError(`Model data not found in version ${version}`, { modelName, version });
+      }
+
+      await this.models[modelName].import(versionData.modelData);
 
       // Update current version in memory (don't save to storage yet)
       const versionInfo = this.modelVersions.get(modelName);
@@ -1287,6 +1460,9 @@ export class MLPlugin extends Plugin {
       throw new MLError('Versioning is not enabled', { modelName });
     }
 
+    const modelConfig = this.config.models[modelName];
+    const resourceName = modelConfig.resource;
+
     // Load the version into the model
     await this.loadModelVersion(modelName, version);
 
@@ -1295,7 +1471,7 @@ export class MLPlugin extends Plugin {
 
     // Update active reference
     const storage = this.getStorage();
-    await storage.patch(`model_${modelName}_active`, {
+    await storage.set(storage.getPluginKey(resourceName, 'metadata', modelName, 'active'), {
       modelName,
       version,
       type: 'reference',
@@ -1322,7 +1498,9 @@ export class MLPlugin extends Plugin {
 
     try {
       const storage = this.getStorage();
-      const [ok, err, historyData] = await tryFn(() => storage.get(`training_history_${modelName}`));
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
+      const [ok, err, historyData] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, 'training', 'history', modelName)));
 
       if (!ok || !historyData) {
         return null;
@@ -1355,9 +1533,11 @@ export class MLPlugin extends Plugin {
 
     try {
       const storage = this.getStorage();
+      const modelConfig = this.config.models[modelName];
+      const resourceName = modelConfig.resource;
 
-      const [ok1, err1, v1Data] = await tryFn(() => storage.get(`model_${modelName}_v${version1}`));
-      const [ok2, err2, v2Data] = await tryFn(() => storage.get(`model_${modelName}_v${version2}`));
+      const [ok1, err1, v1Data] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${version1}`)));
+      const [ok2, err2, v2Data] = await tryFn(() => storage.get(storage.getPluginKey(resourceName, 'models', modelName, `v${version2}`)));
 
       if (!ok1 || !v1Data) {
         throw new MLError(`Version ${version1} not found`, { modelName, version: version1 });
