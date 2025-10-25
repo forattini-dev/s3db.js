@@ -9119,7 +9119,6 @@ class CostsPlugin extends Plugin {
   async onStart() {
     if (this.client) {
       this.client.on("cl:response", (name, response, input) => this.addRequest(name, this.map[name], response, input));
-      this.client.on("cl:request", (name, input) => this.addRequest(name, this.map[name], {}, input));
     }
   }
   addRequest(name, method, response = {}, input = {}) {
