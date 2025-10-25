@@ -473,15 +473,15 @@ const ttlPlugin = new TTLPlugin({
 });
 
 // Monitor cleanup events
-ttlPlugin.on('recordExpired', ({ resource, recordId, strategy }) => {
+ttlPlugin.on('plg:ttl:record-expired', ({ resource, recordId, strategy }) => {
   console.log(`Record ${recordId} expired in ${resource} using ${strategy}`);
 });
 
-ttlPlugin.on('scanCompleted', ({ totalExpired, totalProcessed, duration }) => {
+ttlPlugin.on('plg:ttl:scan-completed', ({ totalExpired, totalProcessed, duration }) => {
   console.log(`Scan completed: ${totalExpired} expired, ${totalProcessed} processed in ${duration}ms`);
 });
 
-ttlPlugin.on('cleanupError', ({ resource, error }) => {
+ttlPlugin.on('plg:ttl:cleanup-error', ({ resource, error }) => {
   console.error(`Cleanup error in ${resource}:`, error);
 });
 ```
@@ -553,43 +553,43 @@ console.log(result);
 
 The TTL Plugin emits several events for monitoring:
 
-### `installed`
+### `db:plugin:installed`
 
 Emitted when plugin is installed.
 
 ```javascript
-ttlPlugin.on('installed', ({ plugin, resources }) => {
+ttlPlugin.on('db:plugin:installed', ({ plugin, resources }) => {
   console.log(`${plugin} installed with resources:`, resources);
 });
 ```
 
-### `recordExpired`
+### `plg:ttl:record-expired`
 
 Emitted for each expired record processed.
 
 ```javascript
-ttlPlugin.on('recordExpired', ({ resource, record }) => {
+ttlPlugin.on('plg:ttl:record-expired', ({ resource, record }) => {
   console.log(`Record ${record.id} expired in ${resource}`);
 });
 ```
 
-### `scanCompleted`
+### `plg:ttl:scan-completed`
 
 Emitted after completing a granularity scan.
 
 ```javascript
-ttlPlugin.on('scanCompleted', ({ granularity, duration, cohorts }) => {
+ttlPlugin.on('plg:ttl:scan-completed', ({ granularity, duration, cohorts }) => {
   console.log(`${granularity} scan completed in ${duration}ms`);
   console.log(`Checked cohorts:`, cohorts);
 });
 ```
 
-### `cleanupError`
+### `plg:ttl:cleanup-error`
 
 Emitted when cleanup fails.
 
 ```javascript
-ttlPlugin.on('cleanupError', ({ granularity, error }) => {
+ttlPlugin.on('plg:ttl:cleanup-error', ({ granularity, error }) => {
   console.error(`Error in ${granularity} cleanup:`, error);
 });
 ```
@@ -653,12 +653,12 @@ ttlPlugin.on('cleanupError', ({ granularity, error }) => {
 
 ```javascript
 // ✅ Good: Monitor for issues
-ttlPlugin.on('cleanupError', ({ granularity, error }) => {
+ttlPlugin.on('plg:ttl:cleanup-error', ({ granularity, error }) => {
   logger.error(`TTL cleanup failed for ${granularity}:`, error);
   alerting.send(`TTL Plugin Error: ${granularity}`);
 });
 
-ttlPlugin.on('scanCompleted', ({ granularity, duration, cohorts }) => {
+ttlPlugin.on('plg:ttl:scan-completed', ({ granularity, duration, cohorts }) => {
   logger.info(`${granularity} scan: ${duration}ms, cohorts: ${cohorts.join(', ')}`);
 });
 ```
@@ -687,7 +687,7 @@ const ttlPlugin = new TTLPlugin({
 
 ### Q: What happens if cleanup fails mid-scan?
 
-Errors are caught per-record. The scan continues and emits `cleanupError` events. Statistics track total errors. The plugin is resilient to individual failures.
+Errors are caught per-record. The scan continues and emits `plg:ttl:cleanup-error` events. Statistics track total errors. The plugin is resilient to individual failures.
 
 ### Q: Can I change TTL config without restarting?
 

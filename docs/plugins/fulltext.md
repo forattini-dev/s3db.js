@@ -716,9 +716,9 @@ const results = await cachedSearch.searchWithCache('articles', 'machine learning
 console.log('From cache:', results.fromCache);
 
 // Invalidate cache when data changes
-articles.on('insert', () => cachedSearch.invalidateSearchCache('articles'));
-articles.on('update', () => cachedSearch.invalidateSearchCache('articles'));
-articles.on('delete', () => cachedSearch.invalidateSearchCache('articles'));
+articles.on('inserted', () => cachedSearch.invalidateSearchCache('articles'));
+articles.on('updated', () => cachedSearch.invalidateSearchCache('articles'));
+articles.on('deleted', () => cachedSearch.invalidateSearchCache('articles'));
 ```
 
 ### Search Analytics and Insights

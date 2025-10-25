@@ -251,7 +251,7 @@ The SchedulerPlugin automatically creates internal resources:
 | Resource | Purpose | Structure |
 |----------|---------|-----------|
 | `scheduler_job_locks` | Distributed locking for multi-instance safety | `{ id, jobName, lockedAt, instanceId }` |
-| `job_executions` | Job execution history (when `persistJobs: true`) | Partitioned by job name and status for fast queries |
+| `plg:scheduler:job-executions` | Job execution history (when `persistJobs: true`) | Partitioned by job name and status for fast queries |
 
 > **Automatic Management**: These resources are created automatically when the plugin starts. The lock resource ensures jobs run exactly once across multiple instances, and the history resource tracks all executions with partition-based indexing for optimal query performance.
 
@@ -268,7 +268,7 @@ The SchedulerPlugin automatically creates internal resources:
 | `jobs` | object | `{}` | Job definitions |
 | `maxConcurrentJobs` | number | `5` | Maximum concurrent job execution |
 | `persistJobs` | boolean | `true` | Store job history in database |
-| `historyResource` | string | `'job_history'` | Resource name for job execution history |
+| `historyResource` | string | `'plg:scheduler:job-history'` | Resource name for job execution history |
 | `cleanupInterval` | number | `86400000` | Interval to cleanup old job history (24h) |
 | `historyRetention` | number | `2592000000` | How long to keep job history (30 days) |
 
@@ -641,19 +641,19 @@ class JobManager {
   }
   
   setupEventHandlers() {
-    this.scheduler.on('job_started', (data) => {
+    this.scheduler.on('plg:scheduler:job-started', (data) => {
       console.log(`🚀 Job started: ${data.jobName} at ${data.startTime}`);
     });
     
-    this.scheduler.on('job_completed', (data) => {
+    this.scheduler.on('plg:scheduler:job-completed', (data) => {
       console.log(`✅ Job completed: ${data.jobName} in ${data.duration}ms`);
     });
     
-    this.scheduler.on('job_failed', (data) => {
+    this.scheduler.on('plg:scheduler:job-failed', (data) => {
       console.error(`❌ Job failed: ${data.jobName} - ${data.error}`);
     });
     
-    this.scheduler.on('job_retry', (data) => {
+    this.scheduler.on('plg:scheduler:job-retry', (data) => {
       console.warn(`🔄 Job retry: ${data.jobName} (attempt ${data.attempt})`);
     });
   }
@@ -852,19 +852,19 @@ action: async (database, context) => {
 
 ```javascript
 // Job lifecycle events
-scheduler.on('job_started', (data) => {
+scheduler.on('plg:scheduler:job-started', (data) => {
   console.log(`Job ${data.jobName} started`);
 });
 
-scheduler.on('job_completed', (data) => {
+scheduler.on('plg:scheduler:job-completed', (data) => {
   console.log(`Job ${data.jobName} completed in ${data.duration}ms`);
 });
 
-scheduler.on('job_failed', (data) => {
+scheduler.on('plg:scheduler:job-failed', (data) => {
   console.error(`Job ${data.jobName} failed: ${data.error}`);
 });
 
-scheduler.on('job_retry', (data) => {
+scheduler.on('plg:scheduler:job-retry', (data) => {
   console.log(`Job ${data.jobName} retry attempt ${data.attempt}`);
 });
 
@@ -947,7 +947,7 @@ class JobChainManager {
         // Subsequent jobs run when previous completes
         const prevJob = jobs[index - 1];
         
-        this.scheduler.on('job_completed', async (data) => {
+        this.scheduler.on('plg:scheduler:job-completed', async (data) => {
           if (data.jobName === prevJob.name) {
             console.log(`Running dependent job: ${job.name}`);
             await this.scheduler.runJob(job.name);
@@ -1220,15 +1220,15 @@ class GracefulScheduler {
   }
   
   setupShutdownHandlers() {
-    this.scheduler.on('job_started', (data) => {
+    this.scheduler.on('plg:scheduler:job-started', (data) => {
       this.runningJobs.add(data.jobName);
     });
     
-    this.scheduler.on('job_completed', (data) => {
+    this.scheduler.on('plg:scheduler:job-completed', (data) => {
       this.runningJobs.delete(data.jobName);
     });
     
-    this.scheduler.on('job_failed', (data) => {
+    this.scheduler.on('plg:scheduler:job-failed', (data) => {
       this.runningJobs.delete(data.jobName);
     });
     
@@ -1394,7 +1394,7 @@ new SchedulerPlugin({
 })
 
 // Monitor job failures
-schedulerPlugin.on('job_failed', (data) => {
+schedulerPlugin.on('plg:scheduler:job-failed', (data) => {
   console.error(`Job failed: ${data.jobName}`, data.error);
 
   // Alert on repeated failures
@@ -1428,7 +1428,7 @@ new SchedulerPlugin({
 })
 
 // Monitor timeouts
-schedulerPlugin.on('job_timeout', (data) => {
+schedulerPlugin.on('plg:scheduler:job-timeout', (data) => {
   console.warn(`Job ${data.jobName} timed out after ${data.timeout}ms`);
 
   // Increase timeout for this job
@@ -1483,7 +1483,7 @@ new SchedulerPlugin({
 })
 
 // Monitor retries
-schedulerPlugin.on('job_retry', (data) => {
+schedulerPlugin.on('plg:scheduler:job-retry', (data) => {
   console.log(`Retrying ${data.jobName} (attempt ${data.attempt})`);
 });
 ```
@@ -1495,7 +1495,7 @@ Disable failing jobs automatically:
 const failureCounts = new Map();
 const MAX_FAILURES = 5;
 
-schedulerPlugin.on('job_failed', async (data) => {
+schedulerPlugin.on('plg:scheduler:job-failed', async (data) => {
   const count = (failureCounts.get(data.jobName) || 0) + 1;
   failureCounts.set(data.jobName, count);
 
@@ -1512,7 +1512,7 @@ schedulerPlugin.on('job_failed', async (data) => {
 });
 
 // Reset counter on success
-schedulerPlugin.on('job_completed', (data) => {
+schedulerPlugin.on('plg:scheduler:job-completed', (data) => {
   failureCounts.delete(data.jobName);
 });
 ```
@@ -1524,7 +1524,7 @@ schedulerPlugin.on('job_completed', (data) => {
 **Recovery**:
 ```javascript
 // Monitor lock failures
-schedulerPlugin.on('job_lock_failed', (data) => {
+schedulerPlugin.on('plg:scheduler:job-lock_failed', (data) => {
   console.log(`Could not acquire lock for ${data.jobName} - already running on another instance`);
 });
 

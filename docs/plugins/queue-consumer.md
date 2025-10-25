@@ -79,7 +79,7 @@ console.log('Queue consumer started! Listening for messages...');
 // Step 5: Monitor processing
 queueConsumerPlugin.on('messageProcessed', (event) => {
   console.log('Processed:', event);
-  // { operation: 'insert', resource: 'users', recordId: 'user-1', duration: 145 }
+  // { operation: 'inserted', resource: 'users', recordId: 'user-1', duration: 145 }
 });
 
 queueConsumerPlugin.on('messageError', (error) => {
@@ -234,7 +234,7 @@ Expected message structure:
 ```javascript
 {
   resource: 'users',           // Target resource name
-  action: 'insert',           // Operation: insert, update, delete
+  action: 'inserted',           // Operation: insert, update, delete
   data: {                     // Data payload
     name: 'John Doe',
     email: 'john@example.com'
@@ -675,7 +675,7 @@ plugin.on('consumer_disconnected', (data) => {
           }
           
           // Validate required fields
-          if (message.action === 'insert' && !message.data.email) {
+          if (message.action === 'inserted' && !message.data.email) {
             throw new Error('Email is required for user creation');
           }
           
@@ -984,7 +984,7 @@ new QueueConsumerPlugin({
 ### Operações
 
 **P: Quais actions são suportadas?**
-R: `insert`, `update`, `delete`, `upsert` (dependendo do driver).
+R: `inserted`, `updated`, `deleted`, `upsert` (dependendo do driver).
 
 **P: Como transformar mensagens antes de processar?**
 R: Use middleware ou Lambda/function antes da fila. O plugin processa mensagens diretamente no formato esperado.

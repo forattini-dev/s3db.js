@@ -1395,7 +1395,7 @@ actions: {
 }
 
 // Monitor action failures
-stateMachinePlugin.on('action_error', (data) => {
+stateMachinePlugin.on('plg:state-machine:action-error', (data) => {
   console.error(`Action ${data.actionName} failed:`, data.error);
   sendAlert({
     title: `State Machine Action Failed`,
