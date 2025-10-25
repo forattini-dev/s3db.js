@@ -15240,6 +15240,7 @@ class MLPlugin extends Plugin {
     requirePluginDependency("@tensorflow/tfjs-node", "MLPlugin");
     this.models = {};
     this.modelVersions = /* @__PURE__ */ new Map();
+    this.modelCache = /* @__PURE__ */ new Map();
     this.training = /* @__PURE__ */ new Map();
     this.insertCounters = /* @__PURE__ */ new Map();
     this.intervals = [];
@@ -15263,6 +15264,8 @@ class MLPlugin extends Plugin {
     for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
       await this._initializeModel(modelName, modelConfig);
     }
+    this._buildModelCache();
+    this._injectResourceMethods();
     for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
       if (modelConfig.autoTrain) {
         this._setupAutoTraining(modelName, modelConfig);
@@ -15324,6 +15327,128 @@ class MLPlugin extends Plugin {
         console.log("[MLPlugin] Purged all model data and training data");
       }
     }
+  }
+  /**
+   * Build model cache for fast lookup
+   * @private
+   */
+  _buildModelCache() {
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      const cacheKey = `${modelConfig.resource}_${modelConfig.target}`;
+      this.modelCache.set(cacheKey, modelName);
+      if (this.config.verbose) {
+        console.log(`[MLPlugin] Cached model "${modelName}" for ${modelConfig.resource}.predict(..., '${modelConfig.target}')`);
+      }
+    }
+  }
+  /**
+   * Inject ML methods into Resource instances
+   * @private
+   */
+  _injectResourceMethods() {
+    if (!this.database._mlPlugin) {
+      this.database._mlPlugin = this;
+    }
+    if (!this.database.Resource.prototype.predict) {
+      this.database.Resource.prototype.predict = async function(input, targetAttribute) {
+        const mlPlugin = this.database._mlPlugin;
+        if (!mlPlugin) {
+          throw new Error("MLPlugin not installed");
+        }
+        return await mlPlugin._resourcePredict(this.name, input, targetAttribute);
+      };
+    }
+    if (!this.database.Resource.prototype.trainModel) {
+      this.database.Resource.prototype.trainModel = async function(targetAttribute, options = {}) {
+        const mlPlugin = this.database._mlPlugin;
+        if (!mlPlugin) {
+          throw new Error("MLPlugin not installed");
+        }
+        return await mlPlugin._resourceTrainModel(this.name, targetAttribute, options);
+      };
+    }
+    if (!this.database.Resource.prototype.listModels) {
+      this.database.Resource.prototype.listModels = function() {
+        const mlPlugin = this.database._mlPlugin;
+        if (!mlPlugin) {
+          throw new Error("MLPlugin not installed");
+        }
+        return mlPlugin._resourceListModels(this.name);
+      };
+    }
+    if (this.config.verbose) {
+      console.log("[MLPlugin] Injected ML methods into Resource prototype");
+    }
+  }
+  /**
+   * Find model for a resource and target attribute
+   * @private
+   */
+  _findModelForResource(resourceName, targetAttribute) {
+    const cacheKey = `${resourceName}_${targetAttribute}`;
+    if (this.modelCache.has(cacheKey)) {
+      return this.modelCache.get(cacheKey);
+    }
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      if (modelConfig.resource === resourceName && modelConfig.target === targetAttribute) {
+        this.modelCache.set(cacheKey, modelName);
+        return modelName;
+      }
+    }
+    return null;
+  }
+  /**
+   * Resource predict implementation
+   * @private
+   */
+  async _resourcePredict(resourceName, input, targetAttribute) {
+    const modelName = this._findModelForResource(resourceName, targetAttribute);
+    if (!modelName) {
+      throw new ModelNotFoundError(
+        `No model found for resource "${resourceName}" with target "${targetAttribute}"`,
+        { resourceName, targetAttribute, availableModels: Object.keys(this.models) }
+      );
+    }
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Resource prediction: ${resourceName}.predict(..., '${targetAttribute}') -> model "${modelName}"`);
+    }
+    return await this.predict(modelName, input);
+  }
+  /**
+   * Resource trainModel implementation
+   * @private
+   */
+  async _resourceTrainModel(resourceName, targetAttribute, options = {}) {
+    const modelName = this._findModelForResource(resourceName, targetAttribute);
+    if (!modelName) {
+      throw new ModelNotFoundError(
+        `No model found for resource "${resourceName}" with target "${targetAttribute}"`,
+        { resourceName, targetAttribute, availableModels: Object.keys(this.models) }
+      );
+    }
+    if (this.config.verbose) {
+      console.log(`[MLPlugin] Resource training: ${resourceName}.trainModel('${targetAttribute}') -> model "${modelName}"`);
+    }
+    return await this.train(modelName, options);
+  }
+  /**
+   * List models for a resource
+   * @private
+   */
+  _resourceListModels(resourceName) {
+    const models = [];
+    for (const [modelName, modelConfig] of Object.entries(this.config.models)) {
+      if (modelConfig.resource === resourceName) {
+        models.push({
+          name: modelName,
+          type: modelConfig.type,
+          target: modelConfig.target,
+          features: modelConfig.features,
+          isTrained: this.models[modelName]?.isTrained || false
+        });
+      }
+    }
+    return models;
   }
   /**
    * Validate model configuration
