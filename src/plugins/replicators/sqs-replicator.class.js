@@ -214,7 +214,7 @@ class SqsReplicator extends BaseReplicator {
         });
         const result = await this.sqsClient.send(command);
         results.push({ queueUrl, messageId: result.MessageId });
-        this.emit('replicated', {
+        this.emit('plg:replicator:replicated', {
           replicator: this.name,
           resource,
           operation,
@@ -230,7 +230,7 @@ class SqsReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[SqsReplicator] Replication failed for ${resource}: ${err.message}`);
     }
-    this.emit('replicator_error', {
+    this.emit('plg:replicator:error', {
       replicator: this.name,
       resource,
       operation,

@@ -619,7 +619,7 @@ describe('Database Metadata and File Operations', () => {
       contentType: 'application/json'
     });
 
-    expect(emitSpy).toHaveBeenCalledWith('metadataUploaded', expect.any(Object));
+    expect(emitSpy).toHaveBeenCalledWith('db:metadata-uploaded', expect.any(Object));
 
     const uploadedBody = JSON.parse(uploadSpy.mock.calls[0][0].body);
     expect(uploadedBody.version).toBe('1');

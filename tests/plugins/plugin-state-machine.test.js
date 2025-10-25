@@ -241,10 +241,10 @@ describe('StateMachinePlugin', () => {
 
     it('should emit entity_initialized event', async () => {
       const initSpy = jest.fn();
-      plugin.on('entity_initialized', initSpy);
-      
+      plugin.on('plg:state-machine:entity-initialized', initSpy);
+
       await plugin.initializeEntity('order_processing', 'order1');
-      
+
       expect(initSpy).toHaveBeenCalledWith({
         machineId: 'order_processing',
         entityId: 'order1',
@@ -297,10 +297,10 @@ describe('StateMachinePlugin', () => {
 
     it('should emit transition event', async () => {
       const transitionSpy = jest.fn();
-      plugin.on('transition', transitionSpy);
-      
+      plugin.on('plg:state-machine:transition', transitionSpy);
+
       await plugin.send('order_processing', 'order1', 'CONFIRM', { test: 'data' });
-      
+
       expect(transitionSpy).toHaveBeenCalledWith({
         machineId: 'order_processing',
         entityId: 'order1',
@@ -406,7 +406,7 @@ describe('StateMachinePlugin', () => {
         verbose: false
       });
       
-      errorPlugin.on('action_error', errorSpy);
+      errorPlugin.on('plg:state-machine:action-error', errorSpy);
       
       const testDb = createDatabaseForTest('suite=plugins/state-machine-error');
       

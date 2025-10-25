@@ -452,7 +452,7 @@ class PostgresReplicator extends BaseReplicator {
         console.warn(`[PostgresReplicator] Replication completed with errors for ${resourceName}:`, errors);
       }
       
-      this.emit('replicated', {
+      this.emit('plg:replicator:replicated', {
         replicator: this.name,
         resourceName,
         operation,
@@ -473,7 +473,7 @@ class PostgresReplicator extends BaseReplicator {
     if (this.config.verbose) {
       console.warn(`[PostgresReplicator] Replication failed for ${resourceName}: ${err.message}`);
     }
-    this.emit('replicator_error', {
+    this.emit('plg:replicator:error', {
       replicator: this.name,
       resourceName,
       operation,
