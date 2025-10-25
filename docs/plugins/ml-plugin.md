@@ -11,6 +11,10 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Storage Architecture](#storage-architecture)
+  - [S3 Key Hierarchy](#s3-key-hierarchy)
+  - [Incremental Training Data](#incremental-training-data)
+  - [Storage Behaviors](#storage-behaviors)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
@@ -24,6 +28,8 @@
 - [Prediction](#prediction)
 - [Evaluation](#evaluation)
 - [Persistence](#persistence)
+- [Data Transformations](#data-transformations)
+- [Version Management](#version-management)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Performance](#performance)
@@ -88,6 +94,185 @@ The **MLPlugin** transforms s3db.js into a complete machine learning platform, a
                    │    (S3/MinIO)   │
                    └─────────────────┘
 ```
+
+---
+
+## Storage Architecture
+
+The MLPlugin uses **PluginStorage** to save models and training data to S3/MinIO with an optimized hierarchical structure and true incremental storage.
+
+### S3 Key Hierarchy
+
+All ML data is stored under a resource-scoped plugin namespace:
+
+```
+resource=${resourceName}/plugin=ml/
+├── models/
+│   └── ${modelName}/
+│       ├── v1              # TensorFlow.js model binary (body-only)
+│       ├── v2
+│       └── v3
+│
+├── metadata/
+│   └── ${modelName}/
+│       ├── active          # Active version reference
+│       └── versions        # Version tracking metadata
+│
+└── training/
+    ├── data/
+    │   └── ${modelName}/
+    │       ├── v1          # Training samples for v1 (body-only)
+    │       ├── v2          # NEW samples only for v2
+    │       └── v3          # NEW samples only for v3
+    │
+    └── history/
+        └── ${modelName}    # Training history index
+```
+
+**Example Keys:**
+```
+resource=products/plugin=ml/models/pricingModel/v1
+resource=products/plugin=ml/models/pricingModel/v2
+resource=products/plugin=ml/metadata/pricingModel/active
+resource=products/plugin=ml/metadata/pricingModel/versions
+resource=products/plugin=ml/training/data/pricingModel/v1
+resource=products/plugin=ml/training/history/pricingModel
+```
+
+### Incremental Training Data
+
+**Problem Solved:** Traditional approaches duplicate training data across versions, wasting storage.
+
+**Our Solution:** True incremental storage that saves only NEW samples per version.
+
+#### How It Works
+
+```javascript
+// Training progression:
+Train v1: 100 samples → Save 100 NEW samples to v1
+Train v2: 200 samples → Save 100 NEW samples to v2 (not all 200!)
+Train v3: 300 samples → Save 100 NEW samples to v3 (not all 300!)
+```
+
+#### Storage Comparison
+
+**Traditional Approach (Duplicated):**
+```
+v1: [sample1, sample2, ..., sample100]           → 100 samples
+v2: [sample1, sample2, ..., sample200]           → 200 samples (includes v1)
+v3: [sample1, sample2, ..., sample300]           → 300 samples (includes v1+v2)
+──────────────────────────────────────────────────────────────
+Total Stored: 600 samples (200% duplication!)
+```
+
+**MLPlugin Incremental Approach:**
+```
+v1: [sample1, sample2, ..., sample100]           → 100 NEW samples
+v2: [sample101, sample102, ..., sample200]       → 100 NEW samples only
+v3: [sample201, sample202, ..., sample300]       → 100 NEW samples only
+──────────────────────────────────────────────────────────────
+Total Stored: 300 samples (0% duplication!)
+Storage Savings: 50%+
+```
+
+#### Sample Deduplication
+
+The plugin tracks sample IDs to detect duplicates:
+
+```javascript
+// Each training detects what's new:
+_saveTrainingData() {
+  1. Load training history
+  2. Extract all previous sample IDs → Set
+  3. Filter current data to find NEW samples
+  4. Save ONLY new samples to S3
+  5. Update history index with metadata
+}
+```
+
+#### Version Reconstruction
+
+Any historical version can be reconstructed on-demand:
+
+```javascript
+// Reconstruct v3 dataset:
+const data = await mlPlugin.getTrainingData('pricingModel', 3);
+
+// Internally combines:
+v1 samples (100) + v2 samples (100) + v3 samples (100) = 300 total samples
+```
+
+### Storage Behaviors
+
+The MLPlugin uses different storage behaviors for optimal performance:
+
+#### Model Storage: `body-only`
+
+**Why:** TensorFlow.js models are large binary objects that exceed S3's 2KB metadata limit.
+
+```javascript
+// Models saved with behavior: 'body-only'
+await storage.set(
+  storage.getPluginKey(resourceName, 'models', modelName, 'v1'),
+  {
+    modelName,
+    version: 1,
+    modelData: exportedModel,  // Large TensorFlow.js object
+    metrics: { loss: 0.05, accuracy: 0.95 }
+  },
+  { behavior: 'body-only' }  // Everything goes to S3 body
+);
+```
+
+**Result:** Model binary stored in S3 object body, no metadata limit issues.
+
+#### Training Data: `body-only`
+
+**Why:** Training datasets can be large (hundreds/thousands of samples).
+
+```javascript
+// Training data saved with behavior: 'body-only'
+await storage.set(
+  storage.getPluginKey(resourceName, 'training', 'data', modelName, 'v1'),
+  {
+    modelName,
+    version: 1,
+    samples: newSamples,  // Array of samples
+    features: ['cost', 'margin'],
+    target: 'price'
+  },
+  { behavior: 'body-only' }
+);
+```
+
+#### Metadata: `body-overflow`
+
+**Why:** Metadata is small and benefits from fast metadata-only reads.
+
+```javascript
+// Version tracking with behavior: 'body-overflow'
+await storage.set(
+  storage.getPluginKey(resourceName, 'metadata', modelName, 'versions'),
+  {
+    modelName,
+    currentVersion: 3,
+    latestVersion: 3,
+    updatedAt: '2024-01-15T10:00:00Z'
+  },
+  { behavior: 'body-overflow' }  // Try metadata first, overflow to body
+);
+```
+
+### Storage Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| **50%+ Storage Reduction** | Incremental storage eliminates data duplication |
+| **No 2KB Limit Issues** | Models and datasets stored in S3 body |
+| **Fast Metadata Reads** | Small metadata accessed without downloading full objects |
+| **Version Efficiency** | Each version stores only its delta |
+| **Organized Hierarchy** | Clear S3 key structure for management and debugging |
+| **Lifecycle Compatible** | Works with S3 lifecycle policies for archiving |
 
 ---
 
@@ -991,7 +1176,7 @@ await mlPlugin.train('pricePredictor');
 
 **Storage Location:**
 ```
-s3://bucket/databases/myapp/.plugin-ml/model_pricePredictor
+resource=products/plugin=ml/models/pricePredictor/v1
 ```
 
 **Disable saving:**
@@ -1032,7 +1217,7 @@ await mlPlugin.train('pricePredictor');
 
 **Storage Location:**
 ```
-s3://bucket/databases/myapp/.plugin-ml/training_data_pricePredictor
+resource=products/plugin=ml/training/data/pricePredictor/v1
 ```
 
 **What's saved:**
@@ -1176,6 +1361,508 @@ await mlPlugin.train('furniturePricing');    // Only furniture data
 - Uses `listPartition()` for O(1) lookups vs O(n) scans
 - No need to filter data manually
 - Automatic partition-based data fetching
+
+---
+
+## Data Transformations
+
+Custom `filter()` and `map()` functions allow fine-grained preprocessing before training.
+
+### Filter Function
+
+Remove invalid records, outliers, or unwanted data before training:
+
+```javascript
+const mlPlugin = new MLPlugin({
+  models: {
+    housingPrices: {
+      type: 'regression',
+      resource: 'properties',
+      features: ['bedrooms', 'sqft', 'age'],
+      target: 'price',
+
+      // Remove outliers and invalid data
+      filter: (record) => {
+        // Price validation
+        if (record.price <= 0 || record.price > 10000000) return false;
+
+        // Size validation
+        if (record.sqft < 300 || record.sqft > 10000) return false;
+
+        // Bedroom validation
+        if (record.bedrooms < 1 || record.bedrooms > 10) return false;
+
+        // Age validation
+        if (record.age < 0 || record.age > 200) return false;
+
+        return true;  // Keep this record
+      }
+    }
+  }
+});
+```
+
+**Processing Pipeline:**
+```
+1. Fetch data (all or partition)
+2. Apply filter() → Remove invalid records
+3. Apply map() (if defined)
+4. Validate minimum samples
+5. Train model
+```
+
+**Benefits:**
+- 🎯 **Better Model Quality** - Remove bad data that skews predictions
+- 📊 **Accurate Metrics** - Training metrics reflect clean data only
+- 🚀 **Faster Training** - Smaller datasets train faster
+- 🔍 **Debugging** - Identify data quality issues early
+
+**Example Output:**
+```
+[MLPlugin] Applying custom filter function...
+[MLPlugin] Filter reduced dataset from 150 to 125 samples
+[MLPlugin] Training "housingPrices" with 125 samples...
+```
+
+### Map Function
+
+Transform features before training (normalization, encoding, feature engineering):
+
+```javascript
+const mlPlugin = new MLPlugin({
+  models: {
+    housingPrices: {
+      type: 'regression',
+      resource: 'properties',
+      features: [
+        'bedrooms',
+        'logSqft',          // Transformed feature
+        'ageScore',         // Engineered feature
+        'conditionScore',   // Encoded categorical
+        'amenitiesScore'    // Composite feature
+      ],
+      target: 'pricePerSqft',  // Transformed target
+
+      // Feature engineering
+      map: (record) => ({
+        ...record,
+
+        // Log transformation (normalize skewed data)
+        logSqft: Math.log(record.sqft),
+
+        // Age score (inverse - newer is better)
+        ageScore: Math.max(0, 50 - record.age) / 50,
+
+        // Categorical to numeric
+        conditionScore: {
+          'excellent': 1.0,
+          'good': 0.7,
+          'fair': 0.4,
+          'poor': 0.1
+        }[record.condition] || 0.5,
+
+        // Composite feature
+        amenitiesScore:
+          (record.hasGarage ? 0.5 : 0) +
+          (record.hasPool ? 0.5 : 0),
+
+        // Transform target
+        pricePerSqft: record.price / record.sqft
+      })
+    }
+  }
+});
+```
+
+**Common Transformations:**
+
+| Transformation | Use Case | Example |
+|----------------|----------|---------|
+| **Log Scale** | Normalize skewed distributions | `Math.log(value)` |
+| **Normalization** | Scale to 0-1 range | `(value - min) / (max - min)` |
+| **Standardization** | Mean=0, StdDev=1 | `(value - mean) / stdDev` |
+| **Categorical Encoding** | Convert text to numbers | `{low: 0, med: 0.5, high: 1}[value]` |
+| **Polynomial Features** | Capture non-linear patterns | `value * value` |
+| **Binning** | Discretize continuous values | `Math.floor(value / 10) * 10` |
+
+### Combined Filter + Map
+
+Use both for complete preprocessing:
+
+```javascript
+{
+  housingPrices: {
+    // ... config ...
+
+    // Step 1: Remove outliers
+    filter: (record) => {
+      return record.price > 0 &&
+             record.price < 5000000 &&
+             record.sqft >= 500;
+    },
+
+    // Step 2: Transform features
+    map: (record) => ({
+      ...record,
+      logPrice: Math.log(record.price),
+      logSqft: Math.log(record.sqft),
+      pricePerSqft: record.price / record.sqft
+    })
+  }
+}
+```
+
+### Prediction Consistency
+
+**IMPORTANT:** Apply the **same transformations** to prediction inputs:
+
+```javascript
+// Training used map() transformation
+const mlPlugin = new MLPlugin({
+  models: {
+    model: {
+      features: ['logSqft', 'ageScore'],
+      target: 'pricePerSqft',
+      map: (r) => ({
+        ...r,
+        logSqft: Math.log(r.sqft),
+        ageScore: (50 - r.age) / 50
+      })
+    }
+  }
+});
+
+await mlPlugin.train('model');
+
+// ✅ CORRECT: Apply same transformations to prediction input
+const testHouse = { sqft: 1500, age: 10 };
+const transformedInput = {
+  logSqft: Math.log(testHouse.sqft),
+  ageScore: (50 - testHouse.age) / 50
+};
+const prediction = await mlPlugin.predict('model', transformedInput);
+
+// ❌ WRONG: Using raw values without transformation
+const badPrediction = await mlPlugin.predict('model', { sqft: 1500, age: 10 });
+// This will give nonsensical results!
+```
+
+### Best Practices
+
+1. **Document Transformations**
+   ```javascript
+   // Good: Clear documentation
+   map: (record) => ({
+     ...record,
+     // Normalize square footage using log scale
+     // Reason: Property sizes are right-skewed
+     logSqft: Math.log(record.sqft)
+   })
+   ```
+
+2. **Test With/Without**
+   ```javascript
+   // Compare model quality with and without transformations
+   const baseline = await mlPlugin.train('noTransform');
+   const enhanced = await mlPlugin.train('withTransforms');
+
+   console.log('Improvement:', enhanced.r2Score - baseline.r2Score);
+   ```
+
+3. **Handle Edge Cases**
+   ```javascript
+   map: (record) => ({
+     ...record,
+     // Prevent log(0) errors
+     logPrice: Math.log(Math.max(record.price, 1)),
+     // Handle missing values
+     ageScore: record.age != null ? (50 - record.age) / 50 : 0
+   })
+   ```
+
+4. **Keep Transformations Pure**
+   ```javascript
+   // ✅ GOOD: Returns new object
+   map: (record) => ({ ...record, transformed: value })
+
+   // ❌ BAD: Mutates original
+   map: (record) => { record.new = value; return record; }
+   ```
+
+---
+
+## Version Management
+
+Track, compare, and manage multiple versions of trained models with automatic versioning.
+
+### Automatic Versioning
+
+Each training automatically creates a new version:
+
+```javascript
+const mlPlugin = new MLPlugin({
+  enableVersioning: true,  // Default: true
+  models: {
+    pricingModel: { /* config */ }
+  }
+});
+
+// Each training creates a new version
+await mlPlugin.train('pricingModel');  // Creates v1
+await mlPlugin.train('pricingModel');  // Creates v2
+await mlPlugin.train('pricingModel');  // Creates v3
+```
+
+**Storage Structure:**
+```
+resource=products/plugin=ml/
+├── models/pricingModel/
+│   ├── v1          # First training
+│   ├── v2          # Second training
+│   └── v3          # Third training (active)
+├── metadata/pricingModel/
+│   ├── active      # Points to v3
+│   └── versions    # currentVersion: 3, latestVersion: 3
+└── training/
+    ├── data/pricingModel/
+    │   ├── v1      # Training data for v1
+    │   ├── v2      # NEW data for v2
+    │   └── v3      # NEW data for v3
+    └── history/pricingModel  # Complete history
+```
+
+### List All Versions
+
+View all versions with metrics:
+
+```javascript
+const versions = await mlPlugin.listModelVersions('pricingModel');
+
+console.log(versions);
+// [
+//   {
+//     version: 1,
+//     savedAt: '2024-01-01T10:00:00Z',
+//     isCurrent: false,
+//     metrics: { loss: 0.15, accuracy: 0.85, samples: 100 }
+//   },
+//   {
+//     version: 2,
+//     savedAt: '2024-01-02T10:00:00Z',
+//     isCurrent: false,
+//     metrics: { loss: 0.10, accuracy: 0.90, samples: 200 }
+//   },
+//   {
+//     version: 3,
+//     savedAt: '2024-01-03T10:00:00Z',
+//     isCurrent: true,  // Active version
+//     metrics: { loss: 0.05, accuracy: 0.95, samples: 300 }
+//   }
+// ]
+```
+
+### Load Specific Version
+
+Load any historical version:
+
+```javascript
+// Load v2 (overwrites current model in memory)
+await mlPlugin.loadModelVersion('pricingModel', 2);
+
+// Make predictions with v2
+const prediction = await mlPlugin.predict('pricingModel', input);
+```
+
+**Note:** This doesn't change the active version in storage, only in memory.
+
+### Set Active Version
+
+Change which version is used for predictions globally:
+
+```javascript
+// Set v2 as active (saved to S3)
+await mlPlugin.setActiveVersion('pricingModel', 2);
+
+// All predictions now use v2
+const prediction = await mlPlugin.predict('pricingModel', input);
+
+// Set back to v3
+await mlPlugin.setActiveVersion('pricingModel', 3);
+```
+
+**Persistence:** Active version is saved to S3 and persists across restarts.
+
+### Compare Versions
+
+Compare metrics between any two versions:
+
+```javascript
+const comparison = await mlPlugin.compareVersions('pricingModel', 1, 3);
+
+console.log(comparison);
+// {
+//   version1: {
+//     version: 1,
+//     metrics: { loss: 0.15, accuracy: 0.85, samples: 100 }
+//   },
+//   version2: {
+//     version: 3,
+//     metrics: { loss: 0.05, accuracy: 0.95, samples: 300 }
+//   },
+//   improvement: {
+//     loss: 'improved',        // Lower is better
+//     accuracy: 'improved',    // Higher is better
+//     samples: 'increased'     // More training data
+//   }
+// }
+```
+
+### Rollback Version
+
+Quickly rollback to a previous version if new model performs poorly:
+
+```javascript
+// Train v4 with experimental features
+await mlPlugin.train('pricingModel');  // v4
+
+// v4 performs poorly - rollback to v3
+await mlPlugin.rollbackVersion('pricingModel', 3);
+// or rollback to previous version (v3):
+await mlPlugin.rollbackVersion('pricingModel');
+
+console.log('Rolled back to v3');
+```
+
+**What happens:**
+1. Loads v3 model into memory
+2. Updates version info (currentVersion = 3)
+3. Updates active reference in S3
+4. All predictions now use v3
+5. v4 is NOT deleted (still available)
+
+### Training History
+
+Get complete training history with all versions:
+
+```javascript
+const history = await mlPlugin.getTrainingHistory('pricingModel');
+
+console.log(history);
+// {
+//   modelName: 'pricingModel',
+//   totalTrainings: 3,
+//   latestVersion: 3,
+//   history: [
+//     {
+//       version: 1,
+//       totalSamples: 100,
+//       newSamples: 100,
+//       sampleIds: ['id1', 'id2', ...],
+//       metrics: { loss: 0.15, r2: 0.85 },
+//       trainedAt: '2024-01-01T10:00:00Z'
+//     },
+//     {
+//       version: 2,
+//       totalSamples: 200,
+//       newSamples: 100,  // Only 100 NEW samples added
+//       sampleIds: ['id1', 'id2', ..., 'id101', ...],
+//       metrics: { loss: 0.10, r2: 0.90 },
+//       trainedAt: '2024-01-02T10:00:00Z'
+//     },
+//     {
+//       version: 3,
+//       totalSamples: 300,
+//       newSamples: 100,  // Only 100 NEW samples added
+//       sampleIds: ['id1', ..., 'id201', ...],
+//       metrics: { loss: 0.05, r2: 0.95 },
+//       trainedAt: '2024-01-03T10:00:00Z'
+//     }
+//   ]
+// }
+```
+
+### Reconstruct Training Data
+
+Reconstruct the complete training dataset for any version:
+
+```javascript
+// Get training data for v3 (reconstructs from v1+v2+v3)
+const data = await mlPlugin.getTrainingData('pricingModel', 3);
+
+console.log(data);
+// {
+//   modelName: 'pricingModel',
+//   version: 3,
+//   samples: [...300 samples...],  // v1 + v2 + v3 combined
+//   totalSamples: 300,
+//   features: ['cost', 'margin', 'demand'],
+//   target: 'price',
+//   metrics: { loss: 0.05, r2: 0.95 },
+//   savedAt: '2024-01-03T10:00:00Z'
+// }
+
+// Get training data for v2 only (v1+v2)
+const dataV2 = await mlPlugin.getTrainingData('pricingModel', 2);
+console.log(dataV2.totalSamples);  // 200
+```
+
+### Version Management Workflow
+
+**Typical workflow:**
+
+```javascript
+// 1. Initial training
+await mlPlugin.train('model');  // v1
+
+// 2. Add more data and retrain
+// (Add 100 more records to database)
+await mlPlugin.train('model');  // v2
+
+// 3. Compare versions
+const comparison = await mlPlugin.compareVersions('model', 1, 2);
+if (comparison.improvement.loss === 'improved') {
+  console.log('v2 is better!');
+}
+
+// 4. Production deployment
+await mlPlugin.setActiveVersion('model', 2);
+
+// 5. Later: experimental training
+// (Add experimental features via map())
+await mlPlugin.train('model');  // v3
+
+// 6. v3 performs poorly - rollback
+await mlPlugin.rollbackVersion('model', 2);
+
+// 7. Audit/debug: check training history
+const history = await mlPlugin.getTrainingHistory('model');
+const v3Data = await mlPlugin.getTrainingData('model', 3);
+```
+
+### Disable Versioning
+
+Turn off versioning (not recommended for production):
+
+```javascript
+const mlPlugin = new MLPlugin({
+  enableVersioning: false,
+  models: {
+    model: { /* config */ }
+  }
+});
+
+// Each training overwrites the previous model
+await mlPlugin.train('model');  // Saves to 'latest'
+await mlPlugin.train('model');  // Overwrites 'latest'
+```
+
+**Limitations without versioning:**
+- ❌ No version history
+- ❌ Can't rollback
+- ❌ Can't compare versions
+- ❌ No incremental training data
+- ✅ Simpler storage structure
+- ✅ Less S3 storage used
 
 ---
 
@@ -1910,7 +2597,7 @@ A: Currently one target per model. Train multiple models for multiple targets.
 ### Persistence
 
 **Q: Where are models saved?**
-A: In S3 via PluginStorage at `.plugin-ml/model_{modelName}`.
+A: In S3 via PluginStorage at `resource=${resourceName}/plugin=ml/models/${modelName}/v${version}`.
 
 **Q: Are models automatically loaded?**
 A: Yes, on `db.start()`.
