@@ -1022,32 +1022,20 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
-   * Emit events with backward compatibility support
-   * Emits both new standardized events and old deprecated events
+   * Emit standardized events with optional ID-specific variant
    *
    * @private
-   * @param {string} oldEvent - Old event name (deprecated)
-   * @param {string} newEvent - New standardized event name
+   * @param {string} event - Event name
    * @param {Object} payload - Event payload
    * @param {string} [id] - Optional ID for ID-specific events
    */
-  _emitWithDeprecation(oldEvent, newEvent, payload, id = null) {
-    // Emit new standardized event
-    this.emit(newEvent, payload);
+  _emitStandardized(event, payload, id = null) {
+    // Emit standardized event
+    this.emit(event, payload);
 
     // Emit ID-specific event if ID provided
     if (id) {
-      this.emit(`${newEvent}:${id}`, payload);
-    }
-
-    // Emit old event with deprecation warning if anyone is listening
-    if (this.listenerCount(oldEvent) > 0) {
-      console.warn(
-        `[s3db.js] Event "${oldEvent}" is deprecated and will be removed in v14.0.0. ` +
-        `Use "${newEvent}" instead.` +
-        (id ? ` ID-specific events are also available: "${newEvent}:${id}"` : '')
-      );
-      this.emit(oldEvent, payload);
+      this.emit(`${event}:${id}`, payload);
     }
   }
 
@@ -1230,14 +1218,14 @@ export class Resource extends AsyncEventEmitter {
       }
 
       // Emit insert event with standardized naming
-      this._emitWithDeprecation('insert', 'inserted', finalResult, finalResult?.id || insertedObject?.id);
+      this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
       return finalResult;
     } else {
       // Sync mode: execute all hooks including partition creation
       const finalResult = await this.executeHooks('afterInsert', insertedObject);
 
       // Emit insert event with standardized naming
-      this._emitWithDeprecation('insert', 'inserted', finalResult, finalResult?.id || insertedObject?.id);
+      this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
 
       // Return the final object
       return finalResult;
@@ -1617,7 +1605,7 @@ export class Resource extends AsyncEventEmitter {
         finalResult = await hook(finalResult);
       }
 
-      this._emitWithDeprecation('update', 'updated', {
+      this._emitStandardized('updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -1626,7 +1614,7 @@ export class Resource extends AsyncEventEmitter {
     } else {
       // Sync mode: execute all hooks including partition updates
       const finalResult = await this.executeHooks('afterUpdate', updatedData);
-      this._emitWithDeprecation('update', 'updated', {
+      this._emitStandardized('updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -2155,7 +2143,7 @@ export class Resource extends AsyncEventEmitter {
         finalResult = await hook(finalResult);
       }
 
-      this._emitWithDeprecation('update', 'updated', {
+      this._emitStandardized('updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }
@@ -2171,7 +2159,7 @@ export class Resource extends AsyncEventEmitter {
       await this.handlePartitionReferenceUpdates(oldData, newData);
       const finalResult = await this.executeHooks('afterUpdate', updatedData);
 
-      this._emitWithDeprecation('update', 'updated', {
+      this._emitStandardized('updated', {
         ...updatedData,
         $before: { ...originalData },
         $after: { ...finalResult }

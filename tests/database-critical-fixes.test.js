@@ -330,7 +330,7 @@ describe('Database Critical Fixes', () => {
       // Track lifecycle events
       const lifecycle = [];
 
-      database.on('connected', () => lifecycle.push('connected'));
+      database.on('db:connected', () => lifecycle.push('db:connected'));
       database.on('disconnected', () => lifecycle.push('disconnected'));
       database.on('hookError', ({ event }) => lifecycle.push(`hookError:${event}`));
 
@@ -346,7 +346,7 @@ describe('Database Critical Fixes', () => {
 
       await database.disconnect();
 
-      expect(lifecycle).toEqual(['connected', 'hookError:resourceCreated', 'disconnected']);
+      expect(lifecycle).toEqual(['db:connected', 'hookError:resourceCreated', 'disconnected']);
       expect(database._exitListener).toBeNull();
       expect(database._exitListenerRegistered).toBe(false);
       expect(database.listenerCount('disconnected')).toBe(0);

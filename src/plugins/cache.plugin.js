@@ -434,7 +434,7 @@ export class CachePlugin extends Plugin {
         const [ok, err] = await this.clearCacheWithRetry(resource.cache, specificKey);
 
         if (!ok) {
-          this.emit('cache_clear_error', {
+          this.emit('plg:cache:clear-error', {
             resource: resource.name,
             method,
             id: data.id,
@@ -456,7 +456,7 @@ export class CachePlugin extends Plugin {
             const [ok, err] = await this.clearCacheWithRetry(resource.cache, partitionKeyPrefix);
 
             if (!ok) {
-              this.emit('cache_clear_error', {
+              this.emit('plg:cache:clear-error', {
                 resource: resource.name,
                 partition: partitionName,
                 error: err.message
@@ -475,7 +475,7 @@ export class CachePlugin extends Plugin {
     const [ok, err] = await this.clearCacheWithRetry(resource.cache, keyPrefix);
 
     if (!ok) {
-      this.emit('cache_clear_error', {
+      this.emit('plg:cache:clear-error', {
         resource: resource.name,
         type: 'broad',
         error: err.message

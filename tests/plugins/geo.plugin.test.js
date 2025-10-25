@@ -69,7 +69,7 @@ describe('GeoPlugin', () => {
       });
 
       let installedEvent = null;
-      plugin.on('installed', (data) => {
+      plugin.on('db:plugin:installed', (data) => {
         installedEvent = data;
       });
 
@@ -1277,7 +1277,7 @@ describe('GeoPlugin', () => {
       });
 
       let uninstalledEvent = null;
-      plugin.on('uninstalled', (data) => {
+      plugin.on('db:plugin:uninstalled', (data) => {
         uninstalledEvent = data;
       });
 

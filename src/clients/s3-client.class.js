@@ -100,7 +100,7 @@ export class S3Client extends EventEmitter {
   }
 
   async sendCommand(command) {
-    this.emit("command.request", command.constructor.name, command.input);
+    this.emit("cl:request", command.constructor.name, command.input);
     const [ok, err, response] = await tryFn(() => this.client.send(command));
     if (!ok) {
       const bucket = this.config.bucket;
@@ -112,7 +112,7 @@ export class S3Client extends EventEmitter {
         commandInput: command.input,
       });
     }
-    this.emit("command.response", command.constructor.name, response, command.input);
+    this.emit("cl:response", command.constructor.name, response, command.input);
     return response;
   }
 
@@ -146,7 +146,7 @@ export class S3Client extends EventEmitter {
     if (ifMatch !== undefined) options.IfMatch = ifMatch
 
     const [ok, err, response] = await tryFn(() => this.sendCommand(new PutObjectCommand(options)));
-    this.emit('putObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
+    this.emit('cl:PutObject', err || response, { key, metadata, contentType, body, contentEncoding, contentLength });
 
     if (!ok) {
       throw mapAwsError(err, {
@@ -182,7 +182,7 @@ export class S3Client extends EventEmitter {
       return res;
     });
 
-    this.emit('getObject', err || response, { key });
+    this.emit('cl:GetObject', err || response, { key });
 
     if (!ok) {
       throw mapAwsError(err, {
@@ -218,7 +218,7 @@ export class S3Client extends EventEmitter {
       return res;
     });
 
-    this.emit('headObject', err || response, { key });
+    this.emit('cl:HeadObject', err || response, { key });
 
     if (!ok) {
       throw mapAwsError(err, {
@@ -261,7 +261,7 @@ export class S3Client extends EventEmitter {
     }
 
     const [ok, err, response] = await tryFn(() => this.sendCommand(new CopyObjectCommand(options)));
-    this.emit('copyObject', err || response, { from, to, metadataDirective });
+    this.emit('cl:CopyObject', err || response, { from, to, metadataDirective });
 
     if (!ok) {
       throw mapAwsError(err, {
@@ -291,7 +291,7 @@ export class S3Client extends EventEmitter {
     };
 
     const [ok, err, response] = await tryFn(() => this.sendCommand(new DeleteObjectCommand(options)));
-    this.emit('deleteObject', err || response, { key });
+    this.emit('cl:DeleteObject', err || response, { key });
 
     if (!ok) {
       throw mapAwsError(err, {
@@ -346,7 +346,7 @@ export class S3Client extends EventEmitter {
       notFound: errors,
     }
 
-    this.emit("deleteObjects", report, keys);
+    this.emit("cl:DeleteObjects", report, keys);
     return report;
   }
 
@@ -382,7 +382,7 @@ export class S3Client extends EventEmitter {
         const deletedCount = deleteResponse.Deleted ? deleteResponse.Deleted.length : 0;
         totalDeleted += deletedCount;
 
-        this.emit("deleteAll", {
+        this.emit("cl:DeleteAll", {
           prefix,
           batch: deletedCount,
           total: totalDeleted
@@ -392,7 +392,7 @@ export class S3Client extends EventEmitter {
       continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined;
     } while (continuationToken);
 
-    this.emit("deleteAllComplete", {
+    this.emit("cl:DeleteAllComplete", {
       prefix,
       totalDeleted
     });
@@ -428,7 +428,7 @@ export class S3Client extends EventEmitter {
     if (!ok) {
       throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
-      this.emit("listObjects", response, options);
+      this.emit("cl:ListObjects", response, options);
       return response;
   }
 
@@ -446,7 +446,7 @@ export class S3Client extends EventEmitter {
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
-    this.emit("count", count, { prefix });
+    this.emit("cl:Count", count, { prefix });
     return count;
   }
 
@@ -471,7 +471,7 @@ export class S3Client extends EventEmitter {
         .map((x) => x.replace(this.config.keyPrefix, ""))
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
-    this.emit("getAllKeys", keys, { prefix });
+    this.emit("cl:GetAllKeys", keys, { prefix });
     return keys;
   }
 
@@ -506,7 +506,7 @@ export class S3Client extends EventEmitter {
         break;
       }
     }
-    this.emit("getContinuationTokenAfterOffset", continuationToken || null, params);
+    this.emit("cl:GetContinuationTokenAfterOffset", continuationToken || null, params);
     return continuationToken || null;
   }
 
@@ -525,7 +525,7 @@ export class S3Client extends EventEmitter {
         offset,
       });
       if (!continuationToken) {
-        this.emit("getKeysPage", [], params);
+        this.emit("cl:GetKeysPage", [], params);
         return [];
       }
     }
@@ -550,7 +550,7 @@ export class S3Client extends EventEmitter {
         .map((x) => x.replace(this.config.keyPrefix, ""))
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
-    this.emit("getKeysPage", keys, params);
+    this.emit("cl:GetKeysPage", keys, params);
     return keys;
   }
 
@@ -572,7 +572,7 @@ export class S3Client extends EventEmitter {
         }
         return to;
       });
-    this.emit("moveAllObjects", { results, errors }, { prefixFrom, prefixTo });
+    this.emit("cl:MoveAllObjects", { results, errors }, { prefixFrom, prefixTo });
     if (errors.length > 0) {
       throw new UnknownError("Some objects could not be moved", {
         bucket: this.config.bucket,

@@ -47,7 +47,7 @@ export class VectorPlugin extends Plugin {
   }
 
   async onInstall() {
-    this.emit('installed', { plugin: 'VectorPlugin' });
+    this.emit('db:plugin:installed', { plugin: 'VectorPlugin' });
 
     // Validate vector storage for all resources
     this.validateVectorStorage();
@@ -57,11 +57,11 @@ export class VectorPlugin extends Plugin {
   }
 
   async onStart() {
-    this.emit('started', { plugin: 'VectorPlugin' });
+    this.emit('db:plugin:started', { plugin: 'VectorPlugin' });
   }
 
   async onStop() {
-    this.emit('stopped', { plugin: 'VectorPlugin' });
+    this.emit('db:plugin:stopped', { plugin: 'VectorPlugin' });
   }
 
   async onUninstall(options) {
@@ -78,7 +78,7 @@ export class VectorPlugin extends Plugin {
       delete resource.distance;
     }
 
-    this.emit('uninstalled', { plugin: 'VectorPlugin' });
+    this.emit('db:plugin:uninstalled', { plugin: 'VectorPlugin' });
   }
 
   /**
@@ -114,12 +114,12 @@ export class VectorPlugin extends Plugin {
             recommendation: 'body-overflow'
           };
 
-          this.emit('vector:storage-warning', warning);
+          this.emit('plg:vector:storage-warning', warning);
 
           // Auto-fix if configured
           if (this.config.autoFixBehavior) {
             resource.behavior = 'body-overflow';
-            this.emit('vector:behavior-fixed', {
+            this.emit('plg:vector:behavior-fixed', {
               resource: resource.name,
               newBehavior: 'body-overflow'
             });
@@ -163,7 +163,7 @@ export class VectorPlugin extends Plugin {
 
       // Check if partition already exists
       if (resource.config.partitions && resource.config.partitions[partitionName]) {
-        this.emit('vector:partition-exists', {
+        this.emit('plg:vector:partition-exists', {
           resource: resource.name,
           vectorField: vectorField.name,
           partition: partitionName,
@@ -193,7 +193,7 @@ export class VectorPlugin extends Plugin {
       }
 
       // Emit event
-      this.emit('vector:partition-created', {
+      this.emit('plg:vector:partition-created', {
         resource: resource.name,
         vectorField: vectorField.name,
         partition: partitionName,
@@ -296,7 +296,7 @@ export class VectorPlugin extends Plugin {
       return updates;
     });
 
-    this.emit('vector:hooks-installed', {
+    this.emit('plg:vector:hooks-installed', {
       resource: resource.name,
       vectorField,
       trackingField,
@@ -429,7 +429,7 @@ export class VectorPlugin extends Plugin {
 
     // Emit event if field detected
     if (vectorField && this.config.emitEvents) {
-      this.emit('vector:field-detected', {
+      this.emit('plg:vector:field-detected', {
         resource: resource.name,
         vectorField,
         timestamp: Date.now()

@@ -209,7 +209,7 @@ describe('SchedulerPlugin', () => {
         }
       });
       
-      newPlugin.on('initialized', initSpy);
+      newPlugin.on('db:plugin:initialized', initSpy);
       
       const newDb = createDatabaseForTest('suite=plugins/scheduler-init');
       
@@ -385,8 +385,8 @@ describe('SchedulerPlugin', () => {
       const startSpy = jest.fn();
       const completeSpy = jest.fn();
       
-      plugin.on('job_start', startSpy);
-      plugin.on('job_complete', completeSpy);
+      plugin.on('plg:scheduler:job-start', startSpy);
+      plugin.on('plg:scheduler:job-complete', completeSpy);
       
       await plugin.runJob('test_job');
       
@@ -554,7 +554,7 @@ describe('SchedulerPlugin', () => {
       expect(plugin.jobs.get('disabled_job').enabled).toBe(false);
       
       const enableSpy = jest.fn();
-      plugin.on('job_enabled', enableSpy);
+      plugin.on('plg:scheduler:job-enabled', enableSpy);
       
       plugin.enableJob('disabled_job');
       
@@ -567,7 +567,7 @@ describe('SchedulerPlugin', () => {
       expect(plugin.jobs.get('test_job').enabled).toBe(true);
       
       const disableSpy = jest.fn();
-      plugin.on('job_disabled', disableSpy);
+      plugin.on('plg:scheduler:job-disabled', disableSpy);
       
       plugin.disableJob('test_job');
       
@@ -805,7 +805,7 @@ describe('SchedulerPlugin', () => {
 
     it('should add new job at runtime', () => {
       const addSpy = jest.fn();
-      plugin.on('job_added', addSpy);
+      plugin.on('plg:scheduler:job-added', addSpy);
       
       plugin.addJob('runtime_job', {
         schedule: '@hourly',
@@ -845,7 +845,7 @@ describe('SchedulerPlugin', () => {
 
     it('should remove existing job', () => {
       const removeSpy = jest.fn();
-      plugin.on('job_removed', removeSpy);
+      plugin.on('plg:scheduler:job-removed', removeSpy);
       
       plugin.removeJob('test_job');
       

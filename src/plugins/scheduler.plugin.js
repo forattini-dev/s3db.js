@@ -272,7 +272,7 @@ export class SchedulerPlugin extends Plugin {
     // Start scheduling
     await this._startScheduling();
     
-    this.emit('initialized', { jobs: this.jobs.size });
+    this.emit('db:plugin:initialized', { jobs: this.jobs.size });
   }
 
 
@@ -450,7 +450,7 @@ export class SchedulerPlugin extends Plugin {
         await this._executeHook(this.config.onJobStart, jobName, context);
       }
 
-      this.emit('job_start', { jobName, executionId, startTime });
+      this.emit('plg:scheduler:job-start', { jobName, executionId, startTime });
 
       let attempt = 0;
       let lastError = null;
@@ -547,7 +547,7 @@ export class SchedulerPlugin extends Plugin {
         await this._executeHook(this.config.onJobError, jobName, lastError, attempt);
       }
 
-      this.emit('job_complete', {
+      this.emit('plg:scheduler:job-complete', {
         jobName,
         executionId,
         status,
@@ -649,7 +649,7 @@ export class SchedulerPlugin extends Plugin {
     job.enabled = true;
     this._scheduleNextExecution(jobName);
 
-    this.emit('job_enabled', { jobName });
+    this.emit('plg:scheduler:job-enabled', { jobName });
   }
 
   /**
@@ -675,7 +675,7 @@ export class SchedulerPlugin extends Plugin {
       this.timers.delete(jobName);
     }
     
-    this.emit('job_disabled', { jobName });
+    this.emit('plg:scheduler:job-disabled', { jobName });
   }
 
   /**
@@ -837,7 +837,7 @@ export class SchedulerPlugin extends Plugin {
       this._scheduleNextExecution(jobName);
     }
     
-    this.emit('job_added', { jobName });
+    this.emit('plg:scheduler:job-added', { jobName });
   }
 
   /**
@@ -866,7 +866,7 @@ export class SchedulerPlugin extends Plugin {
     this.statistics.delete(jobName);
     this.activeJobs.delete(jobName);
     
-    this.emit('job_removed', { jobName });
+    this.emit('plg:scheduler:job-removed', { jobName });
   }
 
   /**

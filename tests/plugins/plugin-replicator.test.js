@@ -500,7 +500,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.processReplicatorEvent('insert', 'users', '1', { id: '1', name: 'Test' });
 
-    expect(replicatedSpy).toHaveBeenCalledWith('replicated', expect.objectContaining({
+    expect(replicatedSpy).toHaveBeenCalledWith('plg:replicator:replicated', expect.objectContaining({
       replicator: 'test-replicator',
       resourceName: 'users',
       operation: 'insert',
@@ -531,7 +531,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     const results = await plugin.processReplicatorEvent('insert', 'users', '1', { id: '1' });
 
-    expect(errorSpy).toHaveBeenCalledWith('replicator_error', expect.objectContaining({
+    expect(errorSpy).toHaveBeenCalledWith('plg:replicator:error', expect.objectContaining({
       replicator: 'test-replicator',
       resourceName: 'users',
       operation: 'insert'
@@ -580,7 +580,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.logReplicator({ resource: 'users', operation: 'insert' });
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator.log.failed', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:log-failed', expect.objectContaining({
       error: 'replicator log resource not found'
     }));
   });
@@ -622,7 +622,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.stop();
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator_stop_error', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:stop-error', expect.objectContaining({
       replicator: 'test-replicator',
       error: 'Stop failed'
     }));
@@ -820,7 +820,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.logError(mockReplicator, 'users', 'insert', '123', { id: '123' }, error);
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator_log_error', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:log-error', expect.objectContaining({
       replicator: 'test-replicator',
       resourceName: 'users',
       logError: 'Insert failed'
@@ -870,7 +870,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
     await plugin.processReplicatorItem(item);
 
     expect(mockReplicator.replicate).toHaveBeenCalledWith('users', 'insert', { id: '1', name: 'Test' }, '1', undefined);
-    expect(eventSpy).toHaveBeenCalledWith('replicated', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:replicated', expect.objectContaining({
       replicator: 'test-replicator',
       success: true
     }));
@@ -904,7 +904,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.processReplicatorItem(item);
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator_error', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:error', expect.objectContaining({
       replicator: 'test-replicator',
       error: 'Replication failed'
     }));
@@ -935,7 +935,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
       data: { id: '1' }
     });
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator.log.failed', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:log-failed', expect.objectContaining({
       error: expect.any(Error)
     }));
   });
@@ -955,7 +955,7 @@ describe('ReplicatorPlugin - error handling and edge cases', () => {
 
     await plugin.updateReplicatorLog('log-1', { status: 'failed' });
 
-    expect(eventSpy).toHaveBeenCalledWith('replicator.updateLog.failed', expect.objectContaining({
+    expect(eventSpy).toHaveBeenCalledWith('plg:replicator:update-log-failed', expect.objectContaining({
       error: 'Update failed',
       logId: 'log-1'
     }));
