@@ -16,6 +16,9 @@ const ONE_HOUR_MS = 3600000;
 const ONE_DAY_MS = 86400000;
 const ONE_WEEK_MS = 604800000;
 
+// Conversion factor
+const SECONDS_TO_MS = 1000;
+
 /**
  * TTLPlugin - Time-To-Live Auto-Cleanup System v2
  *
@@ -59,27 +62,27 @@ const ONE_WEEK_MS = 604800000;
 // Granularity configurations
 const GRANULARITIES = {
   minute: {
-    threshold: 3600,        // TTL < 1 hour
-    interval: 10000,        // Check every 10 seconds
-    cohortsToCheck: 3,      // Check last 3 minutes
+    threshold: ONE_HOUR_SEC,      // TTL < 1 hour
+    interval: TEN_SECONDS_MS,     // Check every 10 seconds
+    cohortsToCheck: 3,            // Check last 3 minutes
     cohortFormat: (date) => date.toISOString().substring(0, 16)  // '2024-10-25T14:30'
   },
   hour: {
-    threshold: 86400,       // TTL < 24 hours
-    interval: 600000,       // Check every 10 minutes
-    cohortsToCheck: 2,      // Check last 2 hours
+    threshold: ONE_DAY_SEC,       // TTL < 24 hours
+    interval: TEN_MINUTES_MS,     // Check every 10 minutes
+    cohortsToCheck: 2,            // Check last 2 hours
     cohortFormat: (date) => date.toISOString().substring(0, 13)  // '2024-10-25T14'
   },
   day: {
-    threshold: 2592000,     // TTL < 30 days
-    interval: 3600000,      // Check every 1 hour
-    cohortsToCheck: 2,      // Check last 2 days
+    threshold: THIRTY_DAYS_SEC,   // TTL < 30 days
+    interval: ONE_HOUR_MS,        // Check every 1 hour
+    cohortsToCheck: 2,            // Check last 2 days
     cohortFormat: (date) => date.toISOString().substring(0, 10)  // '2024-10-25'
   },
   week: {
-    threshold: Infinity,    // TTL >= 30 days
-    interval: 86400000,     // Check every 24 hours
-    cohortsToCheck: 2,      // Check last 2 weeks
+    threshold: Infinity,          // TTL >= 30 days
+    interval: ONE_DAY_MS,         // Check every 24 hours
+    cohortsToCheck: 2,            // Check last 2 weeks
     cohortFormat: (date) => {
       const year = date.getUTCFullYear();
       const week = getWeekNumber(date);
@@ -96,7 +99,7 @@ function getWeekNumber(date) {
   const dayNum = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return Math.ceil((((d - yearStart) / ONE_DAY_MS) + 1) / 7);
 }
 
 /**
@@ -123,16 +126,16 @@ function getExpiredCohorts(granularity, count) {
 
     switch(granularity) {
       case 'minute':
-        checkDate = new Date(now.getTime() - (i * 60000));
+        checkDate = new Date(now.getTime() - (i * ONE_MINUTE_MS));
         break;
       case 'hour':
-        checkDate = new Date(now.getTime() - (i * 3600000));
+        checkDate = new Date(now.getTime() - (i * ONE_HOUR_MS));
         break;
       case 'day':
-        checkDate = new Date(now.getTime() - (i * 86400000));
+        checkDate = new Date(now.getTime() - (i * ONE_DAY_MS));
         break;
       case 'week':
-        checkDate = new Date(now.getTime() - (i * 604800000));
+        checkDate = new Date(now.getTime() - (i * ONE_WEEK_MS));
         break;
     }
 
@@ -354,7 +357,7 @@ export class TTLPlugin extends Plugin {
       // Calculate expiration timestamp
       const baseTimestamp = typeof baseTime === 'number' ? baseTime : new Date(baseTime).getTime();
       const expiresAt = config.ttl
-        ? new Date(baseTimestamp + config.ttl * 1000)
+        ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS)
         : new Date(baseTimestamp);
 
       // Calculate cohort
