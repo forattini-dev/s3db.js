@@ -30,18 +30,22 @@ npx esbuild bin/s3db-cli-standalone.js \
   --outfile=build-binaries/s3db.cjs \
   --format=cjs \
   --minify-whitespace \
-  --packages=bundle
+  --packages=bundle \
+  --external:@planetscale/database \
+  --external:@libsql/client
 
 # Bundle s3db-mcp server
 echo -e "${YELLOW}📦 Bundling s3db-mcp server with all dependencies...${NC}"
-npx esbuild mcp/server-standalone.js \
+npx esbuild mcp/entrypoint.js \
   --bundle \
   --platform=node \
   --target=node18 \
   --outfile=build-binaries/s3db-mcp.cjs \
   --format=cjs \
   --minify-whitespace \
-  --packages=bundle
+  --packages=bundle \
+  --external:@planetscale/database \
+  --external:@libsql/client
 
 # Create binaries with pkg
 echo -e "${YELLOW}🏗️  Creating standalone executables...${NC}"
