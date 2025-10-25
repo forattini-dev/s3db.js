@@ -459,6 +459,112 @@ export class MemoryClient extends EventEmitter {
   }
 
   /**
+   * Count total objects under a prefix
+   */
+  async count({ prefix = '' } = {}) {
+    const keys = await this.getAllKeys({ prefix });
+    const count = keys.length;
+    this.emit('count', count, { prefix });
+    return count;
+  }
+
+  /**
+   * Delete all objects under a prefix
+   */
+  async deleteAll({ prefix = '' } = {}) {
+    const keys = await this.getAllKeys({ prefix });
+    let totalDeleted = 0;
+
+    if (keys.length > 0) {
+      const result = await this.deleteObjects(keys);
+      totalDeleted = result.Deleted.length;
+
+      this.emit('deleteAll', {
+        prefix,
+        batch: totalDeleted,
+        total: totalDeleted
+      });
+    }
+
+    this.emit('deleteAllComplete', {
+      prefix,
+      totalDeleted
+    });
+
+    return totalDeleted;
+  }
+
+  /**
+   * Get continuation token after skipping offset items
+   */
+  async getContinuationTokenAfterOffset({ prefix = '', offset = 1000 } = {}) {
+    if (offset === 0) return null;
+
+    const keys = await this.getAllKeys({ prefix });
+
+    // If offset is beyond available keys, return null
+    if (offset >= keys.length) {
+      this.emit('getContinuationTokenAfterOffset', null, { prefix, offset });
+      return null;
+    }
+
+    // Return the key at offset position as continuation token
+    const token = keys[offset];
+    this.emit('getContinuationTokenAfterOffset', token, { prefix, offset });
+    return token;
+  }
+
+  /**
+   * Move an object from one key to another
+   */
+  async moveObject({ from, to }) {
+    await this.copyObject({ from, to, metadataDirective: 'COPY' });
+    await this.deleteObject(from);
+  }
+
+  /**
+   * Move all objects from one prefix to another
+   */
+  async moveAllObjects({ prefixFrom, prefixTo }) {
+    const keys = await this.getAllKeys({ prefix: prefixFrom });
+    const results = [];
+    const errors = [];
+
+    for (const key of keys) {
+      try {
+        const to = key.replace(prefixFrom, prefixTo);
+        await this.moveObject({ from: key, to });
+        results.push(to);
+      } catch (error) {
+        errors.push({
+          message: error.message,
+          raw: error,
+          key
+        });
+      }
+    }
+
+    this.emit('moveAllObjects', { results, errors }, { prefixFrom, prefixTo });
+
+    if (errors.length > 0) {
+      const error = new Error('Some objects could not be moved');
+      error.context = {
+        bucket: this.bucket,
+        operation: 'moveAllObjects',
+        prefixFrom,
+        prefixTo,
+        totalKeys: keys.length,
+        failedCount: errors.length,
+        successCount: results.length,
+        errors
+      };
+      throw error;
+    }
+
+    return results;
+  }
+
+  /**
    * Create a snapshot of current storage state
    */
   snapshot() {
