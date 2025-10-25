@@ -4,9 +4,6 @@
  * Manages HTTP server lifecycle and routing
  */
 
-import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
-import { swaggerUI } from '@hono/swagger-ui';
 import { createResourceRoutes, createRelationalRoutes } from './routes/resource-routes.js';
 import { errorHandler } from './utils/error-handler.js';
 import * as formatter from './utils/response-formatter.js';
@@ -46,17 +43,18 @@ export class ApiServer {
       }
     };
 
-    this.app = new Hono();
+    this.app = null; // Will be initialized in start() with dynamic import
     this.server = null;
     this.isRunning = false;
     this.openAPISpec = null;
+    this.initialized = false;
 
     // Detect if RelationPlugin is installed
     this.relationsPlugin = this.options.database?.plugins?.relation ||
                           this.options.database?.plugins?.RelationPlugin ||
                           null;
 
-    this._setupRoutes();
+    // Routes will be setup in start() after dynamic import
   }
 
   /**
@@ -170,7 +168,7 @@ export class ApiServer {
 
       // API Documentation UI endpoint
       if (this.options.docsUI === 'swagger') {
-        this.app.get('/docs', swaggerUI({
+        this.app.get('/docs', this.swaggerUI({
           url: '/openapi.json'
         }));
       } else {
@@ -254,7 +252,7 @@ export class ApiServer {
         methods: config.methods,
         customMiddleware: config.customMiddleware || [],
         enableValidation: config.validation !== false
-      });
+      }, this.Hono);
 
       // Mount resource routes
       this.app.route(`/${version}/${name}`, resourceApp);
@@ -317,7 +315,8 @@ export class ApiServer {
           resource,
           relationName,
           relationConfig,
-          version
+          version,
+          this.Hono
         );
 
         // Mount relational routes at /{version}/{resource}/:id/{relation}
@@ -343,11 +342,32 @@ export class ApiServer {
       return;
     }
 
+    // Dynamic import of Hono dependencies (peer dependencies)
+    // This ensures hono is only loaded when server actually starts
+    if (!this.initialized) {
+      const { Hono } = await import('hono');
+      const { serve } = await import('@hono/node-server');
+      const { swaggerUI } = await import('@hono/swagger-ui');
+
+      // Store for use in _setupRoutes
+      this.Hono = Hono;
+      this.serve = serve;
+      this.swaggerUI = swaggerUI;
+
+      // Initialize app
+      this.app = new Hono();
+
+      // Setup all routes
+      this._setupRoutes();
+
+      this.initialized = true;
+    }
+
     const { port, host } = this.options;
 
     return new Promise((resolve, reject) => {
       try {
-        this.server = serve({
+        this.server = this.serve({
           fetch: this.app.fetch,
           port,
           hostname: host

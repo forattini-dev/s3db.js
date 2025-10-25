@@ -4,7 +4,6 @@
  * Automatically generates REST endpoints for each resource
  */
 
-import { Hono } from 'hono';
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 
@@ -51,9 +50,10 @@ function parseCustomRoute(routeDef) {
  * @param {Object} resource - s3db.js Resource instance
  * @param {string} version - Resource version (e.g., 'v1', 'v1')
  * @param {Object} config - Route configuration
+ * @param {Function} Hono - Hono constructor (passed from server.js)
  * @returns {Hono} Hono app with resource routes
  */
-export function createResourceRoutes(resource, version, config = {}) {
+export function createResourceRoutes(resource, version, config = {}, Hono) {
   const app = new Hono();
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
@@ -385,7 +385,7 @@ export function createResourceRoutes(resource, version, config = {}) {
  * @param {string} version - Resource version (e.g., 'v1')
  * @returns {Hono} Hono app with relational routes
  */
-export function createRelationalRoutes(sourceResource, relationName, relationConfig, version) {
+export function createRelationalRoutes(sourceResource, relationName, relationConfig, version, Hono) {
   const app = new Hono();
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;

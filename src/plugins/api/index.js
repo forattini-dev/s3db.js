@@ -35,6 +35,7 @@
 import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
+import { ApiServer } from './server.js';
 
 /**
  * API Plugin class
@@ -459,11 +460,6 @@ export class ApiPlugin extends Plugin {
     if (this.config.verbose) {
       console.log('[API Plugin] Starting server...');
     }
-
-    // Dynamic import with path manipulation to prevent Rollup from inlining
-    // This ensures hono is only loaded when ApiPlugin is actually used
-    const serverPath = './server' + '.js';
-    const { ApiServer } = await import(/* @vite-ignore */ serverPath);
 
     // Create server instance
     this.server = new ApiServer({
