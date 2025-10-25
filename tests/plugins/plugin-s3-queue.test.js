@@ -118,7 +118,7 @@ describe('S3QueuePlugin', () => {
 
     test('should emit enqueued event', async () => {
       const eventPromise = new Promise((resolve) => {
-        plugin.once('message.enqueued', resolve);
+        plugin.once('plg:s3-queue:message-enqueued', resolve);
       });
 
       await resource.enqueue({ to: 'user@example.com', subject: 'Test', body: 'Body' });
@@ -192,7 +192,7 @@ describe('S3QueuePlugin', () => {
     test('should emit completed event', async () => {
       const events = [];
 
-      plugin.on('message.completed', (event) => {
+      plugin.on('plg:s3-queue:message-completed', (event) => {
         events.push(event);
       });
 
@@ -289,7 +289,7 @@ describe('S3QueuePlugin', () => {
       const retryEvents = [];
       let attempts = 0;
 
-      plugin.on('message.retry', (event) => {
+      plugin.on('plg:s3-queue:message-retry', (event) => {
         retryEvents.push(event);
       });
 

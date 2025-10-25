@@ -195,7 +195,7 @@ export class S3QueuePlugin extends Plugin {
 
       await plugin.queueResource.insert(queueEntry);
 
-      plugin.emit('message.enqueued', { id: record.id, queueId: queueEntry.id });
+      plugin.emit('plg:s3-queue:message-enqueued', { id: record.id, queueId: queueEntry.id });
 
       return record;
     };
