@@ -88,7 +88,14 @@ export async function handleInsert({ resource, data, mappedData, originalData })
       data: originalData || data
     });
     // If data exceeds limit, store in body
-    return { mappedData: { _v: mappedData._v }, body: JSON.stringify(mappedData) };
+    const metadataOnly = { _v: mappedData._v };
+
+    // Store pluginMap for backwards compatibility when plugins are added/removed
+    if (resource.schema?.pluginMap && Object.keys(resource.schema.pluginMap).length > 0) {
+      metadataOnly._pluginMap = JSON.stringify(resource.schema.pluginMap);
+    }
+
+    return { mappedData: metadataOnly, body: JSON.stringify(mappedData) };
   }
   
   // If data fits in metadata, store only in metadata

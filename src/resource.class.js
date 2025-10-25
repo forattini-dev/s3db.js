@@ -3443,11 +3443,17 @@ export class Resource extends AsyncEventEmitter {
     unmappedMetadata = ok ? unmapped : metadata;
     // Helper function to filter out internal S3DB fields
     // Preserve geo-related fields (_geohash, _geohash_zoom*) for GeoPlugin
+    // Preserve plugin attributes (fields in _pluginAttributes)
     const filterInternalFields = (obj) => {
       if (!obj || typeof obj !== 'object') return obj;
       const filtered = {};
+      const pluginAttrNames = this.schema._pluginAttributes
+        ? Object.values(this.schema._pluginAttributes).flat()
+        : [];
+
       for (const [key, value] of Object.entries(obj)) {
-        if (!key.startsWith('_') || key === '_geohash' || key.startsWith('_geohash_zoom')) {
+        // Keep field if it doesn't start with _, or if it's a special field, or if it's a plugin attribute
+        if (!key.startsWith('_') || key === '_geohash' || key.startsWith('_geohash_zoom') || pluginAttrNames.includes(key)) {
           filtered[key] = value;
         }
       }
@@ -3474,7 +3480,19 @@ export class Resource extends AsyncEventEmitter {
       if (hasOverflow && body) {
         const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
         if (okBody) {
-          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+          // Extract pluginMap for backwards compatibility when plugins are added/removed
+          let pluginMapFromMeta = null;
+          // S3 metadata keys are case-insensitive and stored as lowercase
+          if (metadata && metadata._pluginmap) {
+            const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(() =>
+              Promise.resolve(typeof metadata._pluginmap === 'string' ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
+            );
+            pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+          }
+
+          const [okUnmap, errUnmap, unmappedBody] = await tryFn(() =>
+            this.schema.unmapper(parsedBody, undefined, pluginMapFromMeta)
+          );
           bodyData = okUnmap ? unmappedBody : {};
         }
       }
@@ -3489,11 +3507,21 @@ export class Resource extends AsyncEventEmitter {
     if (behavior === 'body-only') {
       const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(body ? JSON.parse(body) : {}));
       let mapFromMeta = this.schema.map;
+      let pluginMapFromMeta = null;
+
       if (metadata && metadata._map) {
         const [okMap, errMap, parsedMap] = await tryFn(() => Promise.resolve(typeof metadata._map === 'string' ? JSON.parse(metadata._map) : metadata._map));
         mapFromMeta = okMap ? parsedMap : this.schema.map;
       }
-      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta));
+
+      // S3 metadata keys are case-insensitive and stored as lowercase
+      // So _pluginMap becomes _pluginmap
+      if (metadata && metadata._pluginmap) {
+        const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(() => Promise.resolve(typeof metadata._pluginmap === 'string' ? JSON.parse(metadata._pluginmap) : metadata._pluginmap));
+        pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+      }
+
+      const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody, mapFromMeta, pluginMapFromMeta));
       const result = okUnmap ? { ...unmappedBody, id } : { id };
       Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
       return result;
@@ -3503,7 +3531,19 @@ export class Resource extends AsyncEventEmitter {
     if (behavior === 'user-managed' && body && body.trim() !== '') {
       const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
       if (okBody) {
-        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody));
+        // Extract pluginMap for backwards compatibility when plugins are added/removed
+        let pluginMapFromMeta = null;
+        // S3 metadata keys are case-insensitive and stored as lowercase
+        if (metadata && metadata._pluginmap) {
+          const [okPluginMap, errPluginMap, parsedPluginMap] = await tryFn(() =>
+            Promise.resolve(typeof metadata._pluginmap === 'string' ? JSON.parse(metadata._pluginmap) : metadata._pluginmap)
+          );
+          pluginMapFromMeta = okPluginMap ? parsedPluginMap : null;
+        }
+
+        const [okUnmap, errUnmap, unmappedBody] = await tryFn(() =>
+          this.schema.unmapper(parsedBody, undefined, pluginMapFromMeta)
+        );
         const bodyData = okUnmap ? unmappedBody : {};
         const merged = { ...bodyData, ...unmappedMetadata, id };
         Object.keys(merged).forEach(k => { merged[k] = fixValue(merged[k]); });

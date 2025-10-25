@@ -183,7 +183,15 @@ class PlanetScaleReplicator extends BaseReplicator {
         continue;
       }
 
-      const attributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+      const allAttributes = resource.config.versions[resource.config.currentVersion]?.attributes || {};
+
+      // Filter out plugin attributes - they are internal and should not be replicated
+      const pluginAttrNames = resource.schema?._pluginAttributes
+        ? Object.values(resource.schema._pluginAttributes).flat()
+        : [];
+      const attributes = Object.fromEntries(
+        Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
+      );
 
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
