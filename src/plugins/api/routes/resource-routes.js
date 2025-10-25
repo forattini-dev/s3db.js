@@ -9,6 +9,44 @@ import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 
 /**
+ * Parse custom route definition (e.g., "GET /healthcheck" or "async POST /custom")
+ * @param {string} routeDef - Route definition string
+ * @returns {Object} Parsed route { method, path, isAsync }
+ */
+function parseCustomRoute(routeDef) {
+  // Remove "async" prefix if present
+  let def = routeDef.trim();
+  const isAsync = def.startsWith('async ');
+
+  if (isAsync) {
+    def = def.substring(6).trim(); // Remove "async "
+  }
+
+  // Split by space (e.g., "GET /path" -> ["GET", "/path"])
+  const parts = def.split(/\s+/);
+
+  if (parts.length < 2) {
+    throw new Error(`Invalid route definition: "${routeDef}". Expected format: "METHOD /path" or "async METHOD /path"`);
+  }
+
+  const method = parts[0].toUpperCase();
+  const path = parts.slice(1).join(' ').trim(); // Join remaining parts in case path has spaces (unlikely but possible)
+
+  // Validate HTTP method
+  const validMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+  if (!validMethods.includes(method)) {
+    throw new Error(`Invalid HTTP method: "${method}". Must be one of: ${validMethods.join(', ')}`);
+  }
+
+  // Validate path starts with /
+  if (!path.startsWith('/')) {
+    throw new Error(`Invalid route path: "${path}". Path must start with "/"`);
+  }
+
+  return { method, path, isAsync };
+}
+
+/**
  * Create routes for a resource
  * @param {Object} resource - s3db.js Resource instance
  * @param {string} version - Resource version (e.g., 'v1', 'v1')
@@ -30,6 +68,46 @@ export function createResourceRoutes(resource, version, config = {}) {
   customMiddleware.forEach(middleware => {
     app.use('*', middleware);
   });
+
+  // Register custom routes from resource.config.api (if defined)
+  if (resource.config?.api && typeof resource.config.api === 'object') {
+    for (const [routeDef, handler] of Object.entries(resource.config.api)) {
+      try {
+        const { method, path } = parseCustomRoute(routeDef);
+
+        if (typeof handler !== 'function') {
+          throw new Error(`Handler for route "${routeDef}" must be a function`);
+        }
+
+        // Register the custom route
+        // The handler receives the full Hono context
+        app.on(method, path, asyncHandler(async (c) => {
+          // Call user's handler with Hono context
+          const result = await handler(c, { resource, database: resource.database });
+
+          // If handler already returned a response, use it
+          if (result && result.constructor && result.constructor.name === 'Response') {
+            return result;
+          }
+
+          // If handler returned data, wrap in success formatter
+          if (result !== undefined && result !== null) {
+            return c.json(formatter.success(result));
+          }
+
+          // If no return value, return 204 No Content
+          return c.json(formatter.noContent(), 204);
+        }));
+
+        if (config.verbose || resource.database?.verbose) {
+          console.log(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
+        }
+      } catch (error) {
+        console.error(`[API Plugin] Error registering custom route "${routeDef}" for ${resourceName}:`, error.message);
+        throw error;
+      }
+    }
+  }
 
   // LIST - GET /{version}/{resource}
   if (methods.includes('GET')) {
