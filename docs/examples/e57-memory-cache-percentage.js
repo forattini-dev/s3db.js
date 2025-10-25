@@ -11,7 +11,7 @@
  */
 
 import { Database } from '../src/database.class.js';
-import CachePlugin from '../src/plugins/cache.plugin.js';
+import { CachePlugin } from '../src/plugins/cache.plugin.js';
 import os from 'node:os';
 
 async function main() {

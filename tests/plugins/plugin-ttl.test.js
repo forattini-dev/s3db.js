@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest, sleep } from '../config.js';
-import TTLPlugin from '../../src/plugins/ttl.plugin.js';
+import { TTLPlugin } from '../../src/plugins/ttl.plugin.js';
 
 describe('TTLPlugin v2 - Configuration and Validation', () => {
   test('should create TTL plugin with valid config', () => {

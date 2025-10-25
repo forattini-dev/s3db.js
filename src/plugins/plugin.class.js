@@ -281,5 +281,3 @@ export class Plugin extends EventEmitter {
     this.emit("plugin.afterUninstall", new Date());
   }
 }
-
-export default Plugin;

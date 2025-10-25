@@ -9,10 +9,10 @@ const TOTAL = 100
 async function main() {
   const fake = Fakerator();
 
-  const s3db = await setupDatabase();
-  
-  // Add costs plugin
-  s3db.use(CostsPlugin);
+  // Setup database with CostsPlugin to track operations
+  const s3db = await setupDatabase({
+    plugins: [new CostsPlugin()]
+  });
 
   console.log(`creating ${TOTAL} leads.`);
   console.log(`parallelism of ${s3db.config.parallelism || 10} requests.\n`);

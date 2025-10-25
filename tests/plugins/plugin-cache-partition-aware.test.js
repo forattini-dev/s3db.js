@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
-import CachePlugin from '../../src/plugins/cache.plugin.js';
+import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { PartitionAwareFilesystemCache } from '../../src/plugins/cache/index.js';
 
 describe('Cache Plugin - PartitionAwareFilesystemCache - Basic Tests', () => {

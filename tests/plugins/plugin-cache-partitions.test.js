@@ -2,7 +2,7 @@ import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } fr
 import { mkdir, rm as rmdir } from 'fs/promises';
 import { join } from 'path';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
-import CachePlugin from '../../src/plugins/cache.plugin.js';
+import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 
 describe('Cache Plugin - Partition Integration - Basic Tests', () => {
   let db;

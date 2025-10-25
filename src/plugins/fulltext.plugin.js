@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { FulltextError } from "./fulltext.errors.js";
 
@@ -554,6 +554,4 @@ export class FullTextPlugin extends Plugin {
     // Save changes
     await this.saveIndexes();
   }
-}
-
-export default FullTextPlugin; 
+} 

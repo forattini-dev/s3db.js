@@ -6,7 +6,7 @@
  */
 
 import { Database } from '../src/database.class.js';
-import CachePlugin from '../src/plugins/cache.plugin.js';
+import { CachePlugin } from '../src/plugins/cache.plugin.js';
 
 async function main() {
   // Create database instance

@@ -1,4 +1,4 @@
-import QueueConsumerPlugin from '#src/plugins/queue-consumer.plugin.js';
+import { QueueConsumerPlugin } from '#src/plugins/queue-consumer.plugin.js';
 
 import {
   createDatabaseForTest,

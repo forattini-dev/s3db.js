@@ -29,30 +29,7 @@ async function sendEmail(email) {
 }
 
 async function main() {
-  // Create database instance
-  const db = new Database({
-    connection: process.env.S3DB_CONNECTION || 's3://minioadmin:minioadmin@localhost:9000/s3db-transactions-example'
-  });
-
-  await db.connect();
-  console.log('Connected to S3DB\n');
-
-  // Create email resource
-  const emails = await db.createResource({
-    name: 'emails',
-    attributes: {
-      id: 'string|required',
-      to: 'string|required',
-      subject: 'string|required',
-      body: 'string',
-      priority: 'string|default:normal'
-    },
-    timestamps: true
-  });
-
-  console.log('✅ Created emails resource\n');
-
-  // Setup S3QueuePlugin
+  // Setup S3QueuePlugin configuration
   const transactionsPlugin = new S3QueuePlugin({
     resource: 'emails',
     visibilityTimeout: 30000,        // 30 seconds
@@ -86,7 +63,28 @@ async function main() {
     }
   });
 
-  db.use(transactionsPlugin);
+  // Setup database with plugin
+  const db = new Database({
+    connectionString: process.env.S3DB_CONNECTION || 's3://minioadmin:minioadmin@localhost:9000/s3db-queue-example',
+    plugins: [transactionsPlugin]
+  });
+
+  await db.connect();
+  console.log('Connected to S3DB\n');
+
+  // Create emails resource
+  const emails = await db.createResource({
+    name: 'emails',
+    attributes: {
+      id: 'string|required',
+      to: 'string|required|email',
+      subject: 'string|required',
+      body: 'string'
+    },
+    timestamps: true
+  });
+
+  console.log('✅ Created emails resource');
   console.log('✅ S3QueuePlugin configured\n');
 
   // Listen to events

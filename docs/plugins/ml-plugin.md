@@ -40,6 +40,8 @@ The **MLPlugin** transforms s3db.js into a complete machine learning platform, a
 - ✅ Use 4 different model types (regression, classification, time series, neural networks)
 - ✅ Automatically train models on schedule or after data updates
 - ✅ Persist trained models in S3 with automatic loading
+- ✅ **NEW:** Train on specific data partitions for specialized models
+- ✅ **NEW:** Save intermediate training data for debugging/auditing
 - ✅ Make predictions with confidence scores
 - ✅ Evaluate model performance with industry-standard metrics
 
@@ -50,6 +52,8 @@ The **MLPlugin** transforms s3db.js into a complete machine learning platform, a
 | **4 Model Types** | Regression, Classification, Time Series (LSTM), Custom Neural Networks |
 | **Auto-Training** | Train on interval or after N inserts |
 | **Persistence** | Models saved to S3 automatically |
+| **Partition Filtering** | **NEW v13.0.0:** Train models on specific data subsets |
+| **Training Data Storage** | **NEW v13.0.0:** Save intermediate training data to S3 |
 | **Evaluation** | R², Confusion Matrix, MAPE, and more |
 | **TensorFlow.js** | Production-ready ML powered by Google |
 | **Zero Config** | Works out of the box with sensible defaults |
@@ -621,7 +625,11 @@ new MLPlugin({
 
   // Global settings
   verbose: false,              // Enable logging
-  minTrainingSamples: 10       // Minimum samples required
+  minTrainingSamples: 10,      // Minimum samples required
+
+  // Persistence settings (NEW in v13.0.0)
+  saveModel: true,             // Save trained models to S3 (default: true)
+  saveTrainingData: false      // Save intermediate training data to S3 (default: false)
 })
 ```
 
@@ -638,10 +646,20 @@ All models share these common options:
     features: ['x', 'y'],       // Input features
     target: 'z',                // Output target
 
+    // Partition filtering (NEW in v13.0.0)
+    partition: {
+      name: 'byCategory',       // Partition name
+      values: { category: 'A' } // Partition values to filter
+    },
+
     // Auto-training
     autoTrain: false,           // Enable auto-training
     trainInterval: 3600000,     // Train every hour (ms)
     trainAfterInserts: 100,     // Train after N inserts
+
+    // Persistence (NEW in v13.0.0)
+    saveModel: true,            // Override global saveModel setting
+    saveTrainingData: true,     // Override global saveTrainingData setting
 
     // Training configuration
     modelConfig: {
@@ -936,19 +954,104 @@ console.log(`MAPE = ${mape.toFixed(2)}%`);
 
 ## Persistence
 
-### Automatic Persistence
+### Automatic Model Persistence (NEW in v13.0.0)
 
-Models are **automatically saved** to S3 after training:
+Models are **automatically saved** to S3 after training when `saveModel: true`:
 
 ```javascript
-await mlPlugin.train('modelName');
-// Model automatically saved to S3 via PluginStorage
+const mlPlugin = new MLPlugin({
+  saveModel: true,  // Default: true
+  models: {
+    pricePredictor: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'margin'],
+      target: 'price'
+    }
+  }
+});
+
+await mlPlugin.train('pricePredictor');
+// ✅ Model automatically saved to S3 via PluginStorage
 ```
 
 **Storage Location:**
 ```
-s3://bucket/databases/myapp/.plugin-ml/model_modelName
+s3://bucket/databases/myapp/.plugin-ml/model_pricePredictor
 ```
+
+**Disable saving:**
+```javascript
+// Globally
+new MLPlugin({ saveModel: false })
+
+// Per-model override
+{
+  pricePredictor: {
+    saveModel: false  // This model won't be saved
+  }
+}
+```
+
+### Training Data Persistence (NEW in v13.0.0)
+
+Save intermediate training data (prepared dataset) to S3 for debugging/auditing:
+
+```javascript
+const mlPlugin = new MLPlugin({
+  saveTrainingData: true,  // Default: false
+  models: {
+    pricePredictor: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'margin'],
+      target: 'price',
+      saveTrainingData: true  // Override global setting
+    }
+  }
+});
+
+await mlPlugin.train('pricePredictor');
+// ✅ Model saved to S3
+// ✅ Training data saved to S3
+```
+
+**Storage Location:**
+```
+s3://bucket/databases/myapp/.plugin-ml/training_data_pricePredictor
+```
+
+**What's saved:**
+- Number of samples
+- Feature names
+- Target name
+- Raw training data (features + target per sample)
+- Timestamp
+
+**Load saved training data:**
+```javascript
+const trainingData = await mlPlugin.getTrainingData('pricePredictor');
+
+console.log(trainingData);
+// {
+//   modelName: 'pricePredictor',
+//   samples: 1000,
+//   features: ['cost', 'margin'],
+//   target: 'price',
+//   data: [
+//     { features: { cost: 100, margin: 0.3 }, target: 150 },
+//     { features: { cost: 200, margin: 0.4 }, target: 320 },
+//     ...
+//   ],
+//   savedAt: '2025-01-15T10:30:00.000Z'
+// }
+```
+
+**Use Cases:**
+- 🐛 Debug training data issues
+- 📊 Audit what data was used for training
+- 🔄 Reproduce training results
+- 📈 Analyze data distributions
 
 ### Automatic Loading
 
@@ -997,6 +1100,69 @@ Models can be:
 - ✅ Version controlled
 - ✅ Shared between environments
 
+### Partition Filtering (NEW in v13.0.0)
+
+Train models on specific subsets of your data using partitions:
+
+```javascript
+// Create resource with partitions
+const products = await db.createResource({
+  name: 'products',
+  attributes: {
+    category: 'string|required',
+    cost: 'number|required',
+    margin: 'number|required',
+    price: 'number|required'
+  },
+  partitions: {
+    byCategory: {
+      fields: { category: 'string' }
+    }
+  }
+});
+
+// Train separate models for each category
+const mlPlugin = new MLPlugin({
+  models: {
+    electronicsPricing: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'margin'],
+      target: 'price',
+      partition: {
+        name: 'byCategory',
+        values: { category: 'electronics' }
+      }
+    },
+    furniturePricing: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'margin'],
+      target: 'price',
+      partition: {
+        name: 'byCategory',
+        values: { category: 'furniture' }
+      }
+    }
+  }
+});
+
+// Each model trains on its partition only
+await mlPlugin.train('electronicsPricing');  // Only electronics data
+await mlPlugin.train('furniturePricing');    // Only furniture data
+```
+
+**Benefits:**
+- 🎯 Train specialized models for different data segments
+- 🚀 Faster training with smaller datasets
+- 📊 Better accuracy for domain-specific patterns
+- 🔄 Independent model updates per category
+
+**Performance:**
+- Uses `listPartition()` for O(1) lookups vs O(n) scans
+- No need to filter data manually
+- Automatic partition-based data fetching
+
 ---
 
 ## API Reference
@@ -1016,7 +1182,9 @@ new MLPlugin(options)
     modelName: { /* model config */ }
   },
   verbose: false,
-  minTrainingSamples: 10
+  minTrainingSamples: 10,
+  saveModel: true,           // NEW in v13.0.0: Save trained models to S3
+  saveTrainingData: false    // NEW in v13.0.0: Save training data to S3
 }
 ```
 
@@ -1105,6 +1273,29 @@ Import model from JSON.
 
 ```javascript
 await mlPlugin.importModel('modelName', data);
+```
+
+##### `getTrainingData(modelName)` (NEW in v13.0.0)
+
+Load saved training data from S3.
+
+```javascript
+const trainingData = await mlPlugin.getTrainingData('modelName');
+```
+
+**Returns:**
+```javascript
+{
+  modelName: string,
+  samples: number,
+  features: string[],
+  target: string,
+  data: Array<{
+    features: object,
+    target: any
+  }>,
+  savedAt: string
+} | null  // null if no training data was saved
 ```
 
 ### Model Classes
@@ -1238,6 +1429,49 @@ Predicted revenue for next 7 days:
 
 MAPE: 8.34%
 Interpretation: Excellent forecast accuracy
+```
+
+### Example 4: Partition Filtering & Model Persistence (NEW in v13.0.0)
+
+**File:** [docs/examples/e71-ml-plugin-partitions.js](../examples/e71-ml-plugin-partitions.js)
+
+Demonstrates training category-specific models using partition filtering, automatic model persistence to S3, and saving training data for debugging.
+
+**Run:**
+```bash
+node docs/examples/e71-ml-plugin-partitions.js
+```
+
+**Output:**
+```
+[1/4] Training Electronics Model (partition: electronics)...
+✅ Electronics Model trained:
+   - R² Score: 0.9523
+   - Samples: 10
+   - Model saved to S3: Yes
+   - Training data saved to S3: Yes
+
+[2/4] Training Furniture Model (partition: furniture)...
+✅ Furniture Model trained:
+   - R² Score: 0.9401
+   - Samples: 10
+
+📊 Electronics Training Data (from S3):
+   - Samples: 10
+   - Features: cost, margin, demand
+   - Target: price
+   - Saved At: 2025-01-15T10:30:00.000Z
+   - First 3 samples:
+     [1] Features: {"cost":500,"margin":0.3,"demand":100}, Target: 750
+     [2] Features: {"cost":300,"margin":0.4,"demand":150}, Target: 500
+     [3] Features: {"cost":250,"margin":0.35,"demand":120}, Target: 400
+
+📝 Key Takeaways:
+   1. Use partition filtering to train models on specific data subsets
+   2. Models are automatically saved to S3 with saveModel: true
+   3. Training data can be saved for debugging/auditing with saveTrainingData: true
+   4. Each model can override global saveModel/saveTrainingData settings
+   5. Use getTrainingData() to load previously saved training datasets
 ```
 
 ---

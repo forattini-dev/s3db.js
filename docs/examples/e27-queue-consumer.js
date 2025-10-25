@@ -1,6 +1,6 @@
 import Database from '../src/database.class.js';
 import Client from '../src/client.class.js';
-import QueueConsumerPlugin from '../src/plugins/queue-consumer.plugin.js';
+import { QueueConsumerPlugin } from '../src/plugins/queue-consumer.plugin.js';
 
 // Educational example: simulates SQS queue consumption
 async function main() {
@@ -66,7 +66,7 @@ async function main() {
 }
 
 // --- Example: SQS Consumer ---
-import QueueConsumerPlugin from '../src/plugins/queue-consumer.plugin.js';
+import { QueueConsumerPlugin } from '../src/plugins/queue-consumer.plugin.js';
 
 const sqsPlugin = new QueueConsumerPlugin({
   driver: 'sqs',

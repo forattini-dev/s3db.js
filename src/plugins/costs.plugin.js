@@ -299,5 +299,3 @@ export class CostsPlugin extends Plugin {
     }
   }
 }
-
-export default CostsPlugin;

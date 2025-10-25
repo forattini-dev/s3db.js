@@ -139,5 +139,3 @@ export class QueueConsumerPlugin extends Plugin {
   _handleError(err, raw, resourceName) {
   }
 }
-
-export default QueueConsumerPlugin;

@@ -1,4 +1,4 @@
-import Plugin from "./plugin.class.js";
+import { Plugin } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 
 /**
@@ -868,5 +868,3 @@ export class GeoPlugin extends Plugin {
     await super.uninstall();
   }
 }
-
-export default GeoPlugin;

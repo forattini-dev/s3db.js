@@ -4,7 +4,7 @@
  * @module eventual-consistency
  */
 
-import Plugin from "../plugin.class.js";
+import { Plugin } from "../plugin.class.js";
 import { createConfig, validateResourcesConfig, logConfigWarnings, logInitialization } from "./config.js";
 import { detectTimezone, getCohortInfo, createFieldHandler } from "./utils.js";
 import { createPartitionConfig } from "./partitions.js";
@@ -733,5 +733,3 @@ export class EventualConsistencyPlugin extends Plugin {
     return diagnostics;
   }
 }
-
-export default EventualConsistencyPlugin;
