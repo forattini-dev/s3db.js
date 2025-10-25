@@ -72,10 +72,7 @@ export class MLPlugin extends Plugin {
     };
 
     // Validate TensorFlow.js dependency
-    requirePluginDependency('@tensorflow/tfjs-node', 'MLPlugin', {
-      installCommand: 'pnpm add @tensorflow/tfjs-node',
-      reason: 'Required for machine learning model training and inference'
-    });
+    requirePluginDependency('ml-plugin');
 
     // Model instances
     this.models = {};
@@ -589,6 +586,29 @@ export class MLPlugin extends Plugin {
         }
 
         data = allData;
+      }
+
+      // Apply custom filter function if provided
+      if (modelConfig.filter && typeof modelConfig.filter === 'function') {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Applying custom filter function...`);
+        }
+
+        const originalLength = data.length;
+        data = data.filter(modelConfig.filter);
+
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Filter reduced dataset from ${originalLength} to ${data.length} samples`);
+        }
+      }
+
+      // Apply custom map function if provided
+      if (modelConfig.map && typeof modelConfig.map === 'function') {
+        if (this.config.verbose) {
+          console.log(`[MLPlugin] Applying custom map function...`);
+        }
+
+        data = data.map(modelConfig.map);
       }
 
       if (!data || data.length < this.config.minTrainingSamples) {
