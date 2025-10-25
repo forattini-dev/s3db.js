@@ -8,6 +8,52 @@
 
 ---
 
+## TL;DR
+
+**Machine Learning directly on S3 data with TensorFlow.js**
+
+```javascript
+// 1. Install
+pnpm add @tensorflow/tfjs-node
+
+// 2. Configure models
+const mlPlugin = new MLPlugin({
+  models: {
+    pricePredictor: {
+      type: 'regression',
+      resource: 'products',
+      features: ['cost', 'demand'],
+      target: 'price',
+      autoTrain: true
+    }
+  }
+});
+
+// 3. Install & start
+await db.install(mlPlugin);
+await db.start();
+
+// 4. Predict
+const { prediction } = await mlPlugin.predict('pricePredictor', { cost: 150, demand: 400 });
+```
+
+**Key Features:**
+- 🤖 **4 Model Types**: Regression, Classification, Time Series (LSTM), Custom Neural Networks
+- 💾 **Auto-Persistence**: Models saved to S3 with versioning (50%+ storage reduction via incremental deltas)
+- 🎯 **Data Preprocessing**: `filter()` and `map()` functions for outlier removal and feature engineering
+- 📊 **Version Management**: Compare, rollback, and audit training history across versions
+- 🚀 **Auto-Training**: Schedule-based or trigger after N inserts
+- 🔍 **Partition Filtering**: Train specialized models on data subsets (O(1) lookups)
+- ⚡ **Performance**: 1-10ms predictions, batch support, GPU acceleration
+
+**What's New in v13.0.0:**
+- ✨ True incremental storage (only saves NEW training samples per version)
+- ✨ Data transformations with `filter()` and `map()` functions
+- ✨ Complete version management API (list, compare, rollback)
+- ✨ Training history with sample-level tracking
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)
