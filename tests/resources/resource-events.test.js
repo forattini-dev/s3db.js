@@ -879,7 +879,7 @@ describe('Resource Events - Always Emit Complete Content', () => {
       });
 
       // Add manual listener after resource creation
-      resource.on('rs:inserted', manualListener);
+      resource.on('inserted', manualListener);
 
       await resource.insert({
         id: 'test-manual',
