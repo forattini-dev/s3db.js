@@ -27,12 +27,17 @@ import {
  * @param {string} schemaSync.onMismatch - Action on schema mismatch: 'error' | 'warn' | 'ignore' (default: 'error')
  * @param {boolean} schemaSync.autoCreateTable - Auto-create table if not exists (default: true)
  * @param {boolean} schemaSync.autoCreateColumns - Auto-add missing columns (default: true, only with strategy: 'alter')
+ * @param {string} mutability - Global mutability mode: 'append-only' | 'mutable' | 'immutable' (default: 'append-only')
+ *   - 'append-only': Updates/deletes become inserts with _operation_type and _operation_timestamp (most performant, no streaming buffer issues)
+ *   - 'mutable': Traditional UPDATE/DELETE queries with streaming buffer retry logic
+ *   - 'immutable': Full audit trail with _operation_type, _operation_timestamp, _is_deleted, _version fields
  *
  * @example
  * new BigqueryReplicator({
  *   projectId: 'my-gcp-project',
  *   datasetId: 'analytics',
  *   credentials: JSON.parse(Buffer.from(GOOGLE_CREDENTIALS, 'base64').toString()),
+ *   mutability: 'append-only', // Global default
  *   schemaSync: {
  *     enabled: true,
  *     strategy: 'alter',
@@ -41,6 +46,7 @@ import {
  * }, {
  *   users: {
  *     table: 'users_table',
+ *     mutability: 'immutable', // Override for audit trail
  *     transform: (data) => ({ ...data, ip: data.ip || 'unknown' })
  *   },
  *   orders: 'orders_table'
@@ -58,6 +64,10 @@ class BigqueryReplicator extends BaseReplicator {
     this.location = config.location || 'US';
     this.logTable = config.logTable;
 
+    // Mutability configuration
+    this.mutability = config.mutability || 'append-only';
+    this._validateMutability(this.mutability);
+
     // Schema sync configuration
     this.schemaSync = {
       enabled: config.schemaSync?.enabled || false,
@@ -69,6 +79,16 @@ class BigqueryReplicator extends BaseReplicator {
 
     // Parse resources configuration
     this.resources = this.parseResourcesConfig(resources);
+
+    // Version tracking for immutable mode
+    this.versionCounters = new Map();
+  }
+
+  _validateMutability(mutability) {
+    const validModes = ['append-only', 'mutable', 'immutable'];
+    if (!validModes.includes(mutability)) {
+      throw new Error(`Invalid mutability mode: ${mutability}. Must be one of: ${validModes.join(', ')}`);
+    }
   }
 
   parseResourcesConfig(resources) {
@@ -80,26 +100,33 @@ class BigqueryReplicator extends BaseReplicator {
         parsed[resourceName] = [{
           table: config,
           actions: ['insert'],
-          transform: null
+          transform: null,
+          mutability: this.mutability
         }];
       } else if (Array.isArray(config)) {
         // Array form: multiple table mappings
         parsed[resourceName] = config.map(item => {
           if (typeof item === 'string') {
-            return { table: item, actions: ['insert'], transform: null };
+            return { table: item, actions: ['insert'], transform: null, mutability: this.mutability };
           }
+          const itemMutability = item.mutability || this.mutability;
+          this._validateMutability(itemMutability);
           return {
             table: item.table,
             actions: item.actions || ['insert'],
-            transform: item.transform || null
+            transform: item.transform || null,
+            mutability: itemMutability
           };
         });
       } else if (typeof config === 'object') {
         // Single object form
+        const configMutability = config.mutability || this.mutability;
+        this._validateMutability(configMutability);
         parsed[resourceName] = [{
           table: config.table,
           actions: config.actions || ['insert'],
-          transform: config.transform || null
+          transform: config.transform || null,
+          mutability: configMutability
         }];
       }
     }
@@ -198,9 +225,10 @@ class BigqueryReplicator extends BaseReplicator {
 
       for (const tableConfig of tableConfigs) {
         const tableName = tableConfig.table;
+        const mutability = tableConfig.mutability;
 
         const [okSync, errSync] = await tryFn(async () => {
-          await this.syncTableSchema(tableName, attributes);
+          await this.syncTableSchema(tableName, attributes, mutability);
         });
 
         if (!okSync) {
@@ -224,7 +252,7 @@ class BigqueryReplicator extends BaseReplicator {
   /**
    * Sync a single table schema in BigQuery
    */
-  async syncTableSchema(tableName, attributes) {
+  async syncTableSchema(tableName, attributes, mutability = 'append-only') {
     const dataset = this.bigqueryClient.dataset(this.datasetId);
     const table = dataset.table(tableName);
 
@@ -240,11 +268,11 @@ class BigqueryReplicator extends BaseReplicator {
         throw new Error(`Table ${tableName} does not exist (validate-only mode)`);
       }
 
-      // Create table with schema
-      const schema = generateBigQuerySchema(attributes);
+      // Create table with schema (including tracking fields based on mutability)
+      const schema = generateBigQuerySchema(attributes, mutability);
 
       if (this.config.verbose) {
-        console.log(`[BigQueryReplicator] Creating table ${tableName} with schema:`, schema);
+        console.log(`[BigQueryReplicator] Creating table ${tableName} with schema (mutability: ${mutability}):`, schema);
       }
 
       await dataset.createTable(tableName, { schema });
@@ -252,7 +280,8 @@ class BigqueryReplicator extends BaseReplicator {
       this.emit('table_created', {
         replicator: this.name,
         tableName,
-        attributes: Object.keys(attributes)
+        attributes: Object.keys(attributes),
+        mutability
       });
 
       return;
@@ -265,13 +294,14 @@ class BigqueryReplicator extends BaseReplicator {
       }
 
       await table.delete();
-      const schema = generateBigQuerySchema(attributes);
+      const schema = generateBigQuerySchema(attributes, mutability);
       await dataset.createTable(tableName, { schema });
 
       this.emit('table_recreated', {
         replicator: this.name,
         tableName,
-        attributes: Object.keys(attributes)
+        attributes: Object.keys(attributes),
+        mutability
       });
 
       return;
@@ -279,7 +309,7 @@ class BigqueryReplicator extends BaseReplicator {
 
     if (this.schemaSync.strategy === 'alter' && this.schemaSync.autoCreateColumns) {
       const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
-      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema, mutability);
 
       if (newFields.length > 0) {
         if (this.config.verbose) {
@@ -306,7 +336,7 @@ class BigqueryReplicator extends BaseReplicator {
 
     if (this.schemaSync.strategy === 'validate-only') {
       const existingSchema = await getBigQueryTableSchema(this.bigqueryClient, this.datasetId, tableName);
-      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema);
+      const newFields = generateBigQuerySchemaUpdate(attributes, existingSchema, mutability);
 
       if (newFields.length > 0) {
         throw new Error(`Table ${tableName} schema mismatch. Missing columns: ${newFields.length}`);
@@ -333,7 +363,8 @@ class BigqueryReplicator extends BaseReplicator {
       .filter(tableConfig => tableConfig.actions.includes(operation))
       .map(tableConfig => ({
         table: tableConfig.table,
-        transform: tableConfig.transform
+        transform: tableConfig.transform,
+        mutability: tableConfig.mutability
       }));
   }
 
@@ -362,6 +393,39 @@ class BigqueryReplicator extends BaseReplicator {
     return cleanData;
   }
 
+  /**
+   * Add tracking fields for append-only and immutable modes
+   * @private
+   */
+  _addTrackingFields(data, operation, mutability, id) {
+    const tracked = { ...data };
+
+    // Add operation tracking for append-only and immutable modes
+    if (mutability === 'append-only' || mutability === 'immutable') {
+      tracked._operation_type = operation;
+      tracked._operation_timestamp = new Date().toISOString();
+    }
+
+    // Add additional fields for immutable mode
+    if (mutability === 'immutable') {
+      tracked._is_deleted = operation === 'delete';
+      tracked._version = this._getNextVersion(id);
+    }
+
+    return tracked;
+  }
+
+  /**
+   * Get next version number for immutable mode
+   * @private
+   */
+  _getNextVersion(id) {
+    const current = this.versionCounters.get(id) || 0;
+    const next = current + 1;
+    this.versionCounters.set(id, next);
+    return next;
+  }
+
   async replicate(resourceName, operation, data, id, beforeData = null) {
 
     if (!this.enabled || !this.shouldReplicateResource(resourceName)) {
@@ -387,10 +451,23 @@ class BigqueryReplicator extends BaseReplicator {
       for (const tableConfig of tableConfigs) {
         const [okTable, errTable] = await tryFn(async () => {
           const table = dataset.table(tableConfig.table);
+          const mutability = tableConfig.mutability;
           let job;
 
-          if (operation === 'insert') {
-            const transformedData = this.applyTransform(data, tableConfig.transform);
+          // For append-only and immutable modes, convert update/delete to insert
+          const shouldConvertToInsert =
+            (mutability === 'append-only' || mutability === 'immutable') &&
+            (operation === 'update' || operation === 'delete');
+
+          if (operation === 'insert' || shouldConvertToInsert) {
+            // Apply transform first
+            let transformedData = this.applyTransform(data, tableConfig.transform);
+
+            // Add tracking fields if needed
+            if (shouldConvertToInsert) {
+              transformedData = this._addTrackingFields(transformedData, operation, mutability, id);
+            }
+
             try {
               job = await table.insert([transformedData]);
             } catch (error) {
@@ -403,7 +480,8 @@ class BigqueryReplicator extends BaseReplicator {
               }
               throw error;
             }
-          } else if (operation === 'update') {
+          } else if (operation === 'update' && mutability === 'mutable') {
+            // Traditional UPDATE for mutable mode
             const transformedData = this.applyTransform(data, tableConfig.transform);
             const keys = Object.keys(transformedData).filter(k => k !== 'id');
             const setClause = keys.map(k => `${k} = @${k}`).join(', ');
@@ -455,7 +533,8 @@ class BigqueryReplicator extends BaseReplicator {
             }
 
             if (!job) throw lastError;
-          } else if (operation === 'delete') {
+          } else if (operation === 'delete' && mutability === 'mutable') {
+            // Traditional DELETE for mutable mode
             const query = `DELETE FROM \`${this.projectId}.${this.datasetId}.${tableConfig.table}\` WHERE id = @id`;
             try {
               const [deleteJob] = await this.bigqueryClient.createQueryJob({
@@ -614,7 +693,8 @@ class BigqueryReplicator extends BaseReplicator {
       datasetId: this.datasetId,
       resources: this.resources,
       logTable: this.logTable,
-      schemaSync: this.schemaSync
+      schemaSync: this.schemaSync,
+      mutability: this.mutability
     };
   }
 }

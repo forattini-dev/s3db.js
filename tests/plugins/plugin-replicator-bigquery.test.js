@@ -48,7 +48,7 @@ describe('BigQuery Replicator Tests', () => {
       replicator = new BigqueryReplicator({
         projectId: 'test-project',
         datasetId: 'test_dataset'
-      }, { 
+      }, {
         users: 'users_table',
         orders: 'orders_table'
       });
@@ -56,12 +56,14 @@ describe('BigQuery Replicator Tests', () => {
       expect(replicator.resources.users).toEqual([{
         table: 'users_table',
         actions: ['insert'],
-        transform: null
+        transform: null,
+        mutability: 'append-only'
       }]);
       expect(replicator.resources.orders).toEqual([{
-        table: 'orders_table', 
+        table: 'orders_table',
         actions: ['insert'],
-        transform: null
+        transform: null,
+        mutability: 'append-only'
       }]);
     });
 
@@ -79,7 +81,8 @@ describe('BigQuery Replicator Tests', () => {
       expect(replicator.resources.users).toEqual([{
         table: 'users_table',
         actions: ['insert', 'update', 'delete'],
-        transform: null
+        transform: null,
+        mutability: 'append-only'
       }]);
     });
   });
@@ -134,7 +137,7 @@ describe('BigQuery Replicator Tests', () => {
   describe('Transform Function Tests', () => {
     test('should parse and store transform function', () => {
       const transformFn = (data) => ({ ...data, ip: data.ip || 'unknown' });
-      
+
       replicator = new BigqueryReplicator({
         projectId: 'test-project',
         datasetId: 'test_dataset'
@@ -149,7 +152,8 @@ describe('BigQuery Replicator Tests', () => {
       expect(replicator.resources.users).toEqual([{
         table: 'users_table',
         actions: ['insert', 'update'],
-        transform: transformFn
+        transform: transformFn,
+        mutability: 'append-only'
       }]);
     });
 
@@ -202,6 +206,179 @@ describe('BigQuery Replicator Tests', () => {
       expect(replicator.name).toBe('BigqueryReplicator');
       expect(typeof replicator.initialize).toBe('function');
       expect(typeof replicator.cleanup).toBe('function');
+    });
+  });
+
+  describe('Mutability Mode Tests', () => {
+    test('should default to append-only mutability mode', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset'
+      }, { users: 'users_table' });
+
+      expect(replicator.mutability).toBe('append-only');
+    });
+
+    test('should accept valid mutability modes', () => {
+      const modes = ['append-only', 'mutable', 'immutable'];
+
+      modes.forEach(mode => {
+        const testReplicator = new BigqueryReplicator({
+          projectId: 'test-project',
+          datasetId: 'test_dataset',
+          mutability: mode
+        }, { users: 'users_table' });
+
+        expect(testReplicator.mutability).toBe(mode);
+      });
+    });
+
+    test('should throw error for invalid mutability mode', () => {
+      expect(() => {
+        new BigqueryReplicator({
+          projectId: 'test-project',
+          datasetId: 'test_dataset',
+          mutability: 'invalid-mode'
+        }, { users: 'users_table' });
+      }).toThrow('Invalid mutability mode: invalid-mode');
+    });
+
+    test('should propagate global mutability to resources', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'immutable'
+      }, {
+        users: 'users_table',
+        orders: { table: 'orders_table' }
+      });
+
+      expect(replicator.resources.users[0].mutability).toBe('immutable');
+      expect(replicator.resources.orders[0].mutability).toBe('immutable');
+    });
+
+    test('should allow per-resource mutability override', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'append-only'
+      }, {
+        users: {
+          table: 'users_table',
+          mutability: 'immutable'
+        },
+        orders: 'orders_table'
+      });
+
+      expect(replicator.resources.users[0].mutability).toBe('immutable');
+      expect(replicator.resources.orders[0].mutability).toBe('append-only');
+    });
+
+    test('should validate per-resource mutability mode', () => {
+      expect(() => {
+        new BigqueryReplicator({
+          projectId: 'test-project',
+          datasetId: 'test_dataset'
+        }, {
+          users: {
+            table: 'users_table',
+            mutability: 'invalid'
+          }
+        });
+      }).toThrow('Invalid mutability mode: invalid');
+    });
+
+    test('should include mutability in getTablesForResource', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'append-only'
+      }, {
+        users: {
+          table: 'users_table',
+          actions: ['insert', 'update'],
+          mutability: 'immutable'
+        }
+      });
+
+      const tables = replicator.getTablesForResource('users', 'insert');
+      expect(tables).toEqual([{
+        table: 'users_table',
+        transform: null,
+        mutability: 'immutable'
+      }]);
+    });
+
+    test('should add tracking fields for append-only mode', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'append-only'
+      }, { users: 'users_table' });
+
+      const data = { id: 'user1', name: 'John' };
+      const tracked = replicator._addTrackingFields(data, 'update', 'append-only', 'user1');
+
+      expect(tracked).toHaveProperty('_operation_type', 'update');
+      expect(tracked).toHaveProperty('_operation_timestamp');
+      expect(tracked).not.toHaveProperty('_is_deleted');
+      expect(tracked).not.toHaveProperty('_version');
+    });
+
+    test('should add tracking fields for immutable mode', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'immutable'
+      }, { users: 'users_table' });
+
+      const data = { id: 'user1', name: 'John' };
+      const tracked = replicator._addTrackingFields(data, 'delete', 'immutable', 'user1');
+
+      expect(tracked).toHaveProperty('_operation_type', 'delete');
+      expect(tracked).toHaveProperty('_operation_timestamp');
+      expect(tracked).toHaveProperty('_is_deleted', true);
+      expect(tracked).toHaveProperty('_version', 1);
+    });
+
+    test('should not add tracking fields for mutable mode', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'mutable'
+      }, { users: 'users_table' });
+
+      const data = { id: 'user1', name: 'John' };
+      const tracked = replicator._addTrackingFields(data, 'update', 'mutable', 'user1');
+
+      expect(tracked).not.toHaveProperty('_operation_type');
+      expect(tracked).not.toHaveProperty('_operation_timestamp');
+      expect(tracked).not.toHaveProperty('_is_deleted');
+      expect(tracked).not.toHaveProperty('_version');
+    });
+
+    test('should increment version counter for immutable mode', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'immutable'
+      }, { users: 'users_table' });
+
+      const id = 'user1';
+      expect(replicator._getNextVersion(id)).toBe(1);
+      expect(replicator._getNextVersion(id)).toBe(2);
+      expect(replicator._getNextVersion(id)).toBe(3);
+    });
+
+    test('should include mutability in getStatus', () => {
+      replicator = new BigqueryReplicator({
+        projectId: 'test-project',
+        datasetId: 'test_dataset',
+        mutability: 'immutable'
+      }, { users: 'users_table' });
+
+      const status = replicator.getStatus();
+      expect(status.mutability).toBe('immutable');
     });
   });
 }); 
