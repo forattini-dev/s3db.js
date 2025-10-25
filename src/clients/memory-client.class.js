@@ -640,41 +640,58 @@ export class MemoryClient extends EventEmitter {
     for (const [resourceName, keys] of resourceMap.entries()) {
       const records = [];
 
-      for (const key of keys) {
-        const obj = await this.getObject(key);
+      // Get resource from database if available (for proper field decoding)
+      const resource = database && database.resources && database.resources[resourceName];
 
+      for (const key of keys) {
         // Extract id from key (e.g., resource=products/id=pr1 -> pr1)
         const idMatch = key.match(/\/id=([^/]+)/);
         const recordId = idMatch ? idMatch[1] : null;
 
-        // Reconstruct record from metadata and body
-        const record = { ...obj.Metadata };
+        let record;
 
-        // Include id in record if extracted from key
-        if (recordId && !record.id) {
-          record.id = recordId;
+        // If resource is available, use its get() method for proper field name decoding
+        if (resource && recordId) {
+          try {
+            record = await resource.get(recordId);
+          } catch (err) {
+            // Fallback to manual reconstruction if get() fails
+            console.warn(`Failed to get record ${recordId} from resource ${resourceName}, using fallback`);
+            record = null;
+          }
         }
 
-        // If body exists, parse it
-        if (obj.Body) {
-          const chunks = [];
-          for await (const chunk of obj.Body) {
-            chunks.push(chunk);
-          }
-          const bodyBuffer = Buffer.concat(chunks);
+        // Fallback: manually reconstruct from metadata and body
+        if (!record) {
+          const obj = await this.getObject(key);
+          record = { ...obj.Metadata };
 
-          // Try to parse as JSON if it looks like JSON
-          const bodyStr = bodyBuffer.toString('utf-8');
-          if (bodyStr.startsWith('{') || bodyStr.startsWith('[')) {
-            try {
-              const bodyData = JSON.parse(bodyStr);
-              Object.assign(record, bodyData);
-            } catch {
-              // If not JSON, store as _body field
+          // Include id in record if extracted from key
+          if (recordId && !record.id) {
+            record.id = recordId;
+          }
+
+          // If body exists, parse it
+          if (obj.Body) {
+            const chunks = [];
+            for await (const chunk of obj.Body) {
+              chunks.push(chunk);
+            }
+            const bodyBuffer = Buffer.concat(chunks);
+
+            // Try to parse as JSON if it looks like JSON
+            const bodyStr = bodyBuffer.toString('utf-8');
+            if (bodyStr.startsWith('{') || bodyStr.startsWith('[')) {
+              try {
+                const bodyData = JSON.parse(bodyStr);
+                Object.assign(record, bodyData);
+              } catch {
+                // If not JSON, store as _body field
+                record._body = bodyStr;
+              }
+            } else if (bodyStr) {
               record._body = bodyStr;
             }
-          } else if (bodyStr) {
-            record._body = bodyStr;
           }
         }
 

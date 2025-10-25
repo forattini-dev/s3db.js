@@ -14,7 +14,12 @@ export class Database extends EventEmitter {
   constructor(options) {
     super();
 
-    this.id = idGenerator(7)
+    // Generate database ID with fallback for reliability
+    this.id = (() => {
+      const [ok, err, id] = tryFn(() => idGenerator(7));
+      return ok && id ? id : `db-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    })();
+
     this.version = "1";
     // Version is injected during build, fallback to "latest" for development
     this.s3dbVersion = (() => {
@@ -64,6 +69,7 @@ export class Database extends EventEmitter {
     this.versioningEnabled = options.versioningEnabled || false;
     this.persistHooks = options.persistHooks || false; // New configuration for hook persistence
     this.strictValidation = options.strictValidation !== false; // Enable strict validation by default
+    this.strictHooks = options.strictHooks || false; // Throw on first hook error instead of continuing
 
     // Initialize hooks system
     this._initHooks();
@@ -110,21 +116,32 @@ export class Database extends EventEmitter {
     this.bucket = this.client.bucket;
     this.keyPrefix = this.client.keyPrefix;
 
-    // Add process exit listener for cleanup
-    if (!this._exitListenerRegistered) {
+    // Register exit listener for cleanup
+    this._registerExitListener();
+  }
+
+  /**
+   * Register process exit listener for automatic cleanup
+   * @private
+   */
+  _registerExitListener() {
+    if (!this._exitListenerRegistered && typeof process !== 'undefined') {
       this._exitListenerRegistered = true;
-      if (typeof process !== 'undefined') {
-        process.on('exit', async () => {
-          if (this.isConnected()) {
-            // Silently ignore errors on exit
-            await tryFn(() => this.disconnect());
-          }
-        });
-      }
+      // Store listener reference for cleanup
+      this._exitListener = async () => {
+        if (this.isConnected()) {
+          // Silently ignore errors on exit
+          await tryFn(() => this.disconnect());
+        }
+      };
+      process.on('exit', this._exitListener);
     }
   }
-  
+
   async connect() {
+    // Re-register exit listener if it was cleaned up
+    this._registerExitListener();
+
     await this.startPlugins();
 
     let metadata = null;
@@ -1271,15 +1288,24 @@ export class Database extends EventEmitter {
         this.client.removeAllListeners();
       }
 
-      // 4. Remove all listeners from the database itself
+      // 4. Emit disconnected event BEFORE removing database listeners (race condition fix)
+      // This ensures listeners can actually receive the event
+      await this.emit('disconnected', new Date());
+
+      // 5. Remove all listeners from the database itself
       this.removeAllListeners();
 
-      // 5. Clear saved metadata and plugin lists
+      // 6. Cleanup process exit listener (memory leak fix)
+      if (this._exitListener && typeof process !== 'undefined') {
+        process.off('exit', this._exitListener);
+        this._exitListener = null;
+        this._exitListenerRegistered = false;
+      }
+
+      // 7. Clear saved metadata and plugin lists
       this.savedMetadata = null;
       this.plugins = {};
       this.pluginList = [];
-
-      this.emit('disconnected', new Date());
     });
   }
 
@@ -1400,8 +1426,17 @@ export class Database extends EventEmitter {
     for (const hook of hooks) {
       const [ok, error] = await tryFn(() => hook({ database: this, ...context }));
       if (!ok) {
-        // Emit error but don't stop hook execution
+        // Emit error event
         this.emit('hookError', { event, error, context });
+
+        // In strict mode, throw on first error instead of continuing
+        if (this.strictHooks) {
+          throw new DatabaseError(`Hook execution failed for event '${event}': ${error.message}`, {
+            event,
+            originalError: error,
+            context
+          });
+        }
       }
     }
   }
